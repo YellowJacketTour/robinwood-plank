@@ -51,8 +51,10 @@ export async function GET(req: Request) {
       totalSupply: index?.totalSupply ?? null,
       scanned: index?.scanned ?? 0,
       // Trait sets are only served once COMPLETE — a partial set would let the
-      // UI build a bid whose snapshot under-covers the trait.
-      traits: complete && index ? index.traits : null,
+      // Browse facets may now consume partial sets; bid construction must not.
+      // Partial verified sets are safe for browse facets. Criteria-order POST
+      // still requires a complete index and re-resolves the snapshot itself.
+      traits: index ? index.traits : null,
       rankings,
     });
   } catch (err) {

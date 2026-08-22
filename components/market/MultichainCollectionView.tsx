@@ -904,16 +904,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openOffer = useCallback(
     async (listing: Listing) => {
       setOfferError(null);
-      const who = await requireAccount();
-      if (!who) return;
       setOfferAmountEth("");
       setOfferTarget(listing);
     },
-    [requireAccount]
+    []
   );
 
   const confirmOffer = useCallback(async () => {
-    if (!offerTarget || !account) return;
+    if (!offerTarget) return;
+    if (!account) { await requireAccount(); return; }
     if (!isSolana && !collection?.contractAddress) return;
     setOfferError(null);
     try {
@@ -953,7 +952,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setOfferBusy(false);
       setStatus(null);
     }
-  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers]);
+  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers, requireAccount]);
 
   const handleAcceptOffer = useCallback(
     async (offer: ForeignOffer) => {
@@ -1052,15 +1051,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     async (listing: Listing) => {
       setError(null);
       if (!isCrossChainBuyable(listing)) return;
-      const who = await requireAccount();
-      if (!who) return;
       setBuyTarget(listing);
     },
-    [requireAccount]
+    []
   );
 
   const confirmBuy = useCallback(async () => {
     if (!buyTarget) return;
+    if (!account) { await requireAccount(); return; }
     setError(null);
     try {
       setBuyBusy(true);
@@ -1094,7 +1092,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setBuyBusy(false);
       setStatus(null);
     }
-  }, [buyTarget, load, loadOwned]);
+  }, [buyTarget, load, loadOwned, account, requireAccount]);
 
   // AND-combined active trait clauses, derived from selectedTraits --
   // shared by the client-side grid filter and the server-side sweep call.
@@ -1258,8 +1256,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
-    const who = await requireAccount();
-    if (!who) return;
     // Preview from the trait-filtered set when a filter is active, so what
     // the confirm modal shows matches what the real sweep (below, via
     // fetchForeignTraitFilteredListings) will actually pull.
@@ -1291,10 +1287,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return;
     }
     setSweepPreview(cheapest);
-  }, [listings, filteredListings, traitClauses, sweepCount, requireAccount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
+  }, [listings, filteredListings, traitClauses, sweepCount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;
+    if (!account) { await requireAccount(); return; }
     setError(null);
     setSweepStatuses(null);
     try {
@@ -1348,12 +1345,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSweepBusy(false);
       setStatus(null);
     }
-  }, [sweepPreview, chainSlug, collectionSlug, isSolana, isBitcoin, traitClauses, load, loadOwned]);
+  }, [sweepPreview, chainSlug, collectionSlug, isSolana, isBitcoin, traitClauses, load, loadOwned, account, requireAccount]);
 
   const openCombinedPreview = useCallback(async () => {
     setCombinedError(null);
-    const who = await requireAccount();
-    if (!who) return;
     const budget = Number(combinedBudgetEth);
     if (!(budget > 0)) {
       setCombinedError("Enter a budget greater than 0.");
@@ -1386,10 +1381,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return;
     }
     setCombinedPreview({ affordable, remainder });
-  }, [combinedBudgetEth, listings, filteredListings, traitClauses, isNonEvm, requireAccount]);
+  }, [combinedBudgetEth, listings, filteredListings, traitClauses, isNonEvm]);
 
   const confirmCombined = useCallback(async () => {
     if (!combinedPreview) return;
+    if (!account) { await requireAccount(); return; }
     const { affordable, remainder } = combinedPreview;
     setCombinedError(null);
     setCombinedStatuses(null);
@@ -1486,7 +1482,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setCombinedBusy(false);
       setStatus(null);
     }
-  }, [combinedPreview, isSolana, isBitcoin, chainSlug, collectionSlug, collection, account, traitClauses, load, loadOwned, loadOffers]);
+  }, [combinedPreview, isSolana, isBitcoin, chainSlug, collectionSlug, collection, account, traitClauses, load, loadOwned, loadOffers, requireAccount]);
 
   const toggleSendSelection = useCallback((tokenId: string) => {
     setSelectedForSend((prev) => {
@@ -1500,8 +1496,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openSendConfirm = useCallback(
     async (tokenIds: string[]) => {
       setError(null);
-      const who = await requireAccount();
-      if (!who) return;
       setSendTarget(tokenIds);
       setSendRecipient("");
       setSendFeeQuote(null);
@@ -1528,11 +1522,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setSendFeeError(e instanceof Error ? e.message : "Could not estimate the send fee.");
       }
     },
-    [chainSlug, isNonEvm, requireAccount]
+    [chainSlug, isNonEvm]
   );
 
   const confirmSend = useCallback(async () => {
-    if (!sendTarget || !account) return;
+    if (!sendTarget) return;
+    if (!account) { await requireAccount(); return; }
     if (!isNonEvm && !collection?.contractAddress) return;
     setError(null);
     try {
@@ -1581,7 +1576,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSendBusy(false);
       setStatus(null);
     }
-  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, isNonEvm, isSolana, isBitcoin, loadOwned]);
+  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, isNonEvm, isSolana, isBitcoin, loadOwned, requireAccount]);
 
   const tokenOffers = useMemo(() => offers.filter((o) => o.acceptable && o.tokenId), [offers]);
   const collectionWideOffers = useMemo(() => offers.filter((o) => !o.acceptable), [offers]);
@@ -1961,6 +1956,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         );
                       })}
                   </div>
+                </fieldset>
+              )}
+              {(!traitCounts || Object.keys(traitCounts).length === 0) && (
+                <fieldset>
+                  <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">Traits</legend>
+                  <p className="rounded-md border border-line bg-wood-950/60 px-2.5 py-2 text-[0.65rem] leading-relaxed text-foreground/50" role="status">
+                    {!traitIndex || traitIndex.building || !traitIndex.complete
+                      ? `Indexing verified traits${traitIndex?.scanned ? ` · ${traitIndex.scanned.toLocaleString()}${traitIndex.totalSupply ? ` / ${traitIndex.totalSupply.toLocaleString()}` : ""}` : ""}…`
+                      : "No verified trait metadata is available for this collection yet."}
+                  </p>
                 </fieldset>
               )}
 
