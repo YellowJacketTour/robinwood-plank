@@ -282,6 +282,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [offers, setOffers] = useState<ForeignOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
   const [activity, setActivity] = useState<ForeignActivityEvent[]>([]);
+  const [historyCoverage, setHistoryCoverage] = useState<{ source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
 
   // MY LISTINGS -- own active listings in this collection. See
@@ -652,13 +653,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // Sale/transfer history is inherently append-only for anything already
       // recorded -- a long swr window is correct, the only "freshness" that
       // matters is whether a NEW event has landed.
-      const data = await swrJson<{ events: ForeignActivityEvent[] }>(
-        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=25`,
+      const data = await swrJson<{ events: ForeignActivityEvent[]; coverage?: { source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } }>(
+        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=500`,
         { ttlMs: 30_000, swrMs: 300_000, session: true }
       );
       setActivity(data.events ?? []);
+      setHistoryCoverage(data.coverage ?? null);
     } catch {
       setActivity([]);
+      setHistoryCoverage(null);
     } finally {
       setActivityLoading(false);
     }
@@ -2077,6 +2080,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 tokenId: listing.tokenId,
               }))}
               sales={saleEvents}
+              historyCoverage={historyCoverage}
             />
           ) : (
           <>

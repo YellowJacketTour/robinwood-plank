@@ -10,6 +10,7 @@ import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
+import CurrencyIcon from "@/components/market/CurrencyIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
@@ -293,11 +294,7 @@ function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null 
 function FloorCurrencyMark({ collection }: { collection: TrackedCollection }) {
   const symbol = normalizeAssetSymbol(collection.floorPriceCurrency);
   if (symbol && symbol !== chainNativeAsset(collection.chainSlug)) {
-    return (
-      <span className="rounded bg-foreground/10 px-1 py-0.5 font-sans text-[0.55rem] font-black text-cream-muted" title={`Floor denominated in ${symbol}`}>
-        {symbol}
-      </span>
-    );
+    return <CurrencyIcon symbol={symbol} size={14} className="shrink-0" />;
   }
   return <ChainIcon chainSlug={collection.chainSlug} size={14} className="shrink-0" />;
 }
@@ -484,10 +481,12 @@ function hasMarketEvidence(c: TrackedCollection): boolean {
 /** ETH-like grades need a book or volume, not floor+JPEG alone. */
 function hasGradeEvidence(c: TrackedCollection): boolean {
   if (c.isNativeHome) return true;
-  if (c.listedCount != null && c.listedCount > 0) return true;
-  if (c.volume24hWei && c.volume24hWei !== "0") return true;
-  if (c.sales24h != null && c.sales24h > 0) return true;
-  return false;
+  // A sale history is not executable liquidity. With no live ask and no
+  // redeemable vault, a buyer cannot enter and a holder cannot exit through
+  // this interface; awarding a B/A grade there rewards unverifiable headline
+  // velocity over an actually tradeable market and is easy to game with wash
+  // fills. Historical activity remains visible, but cannot create a grade.
+  return (c.listedCount != null && c.listedCount > 0) || Boolean(c.isVaultBacked);
 }
 
 function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
@@ -645,7 +644,7 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
               <p className="mb-2 text-[0.6rem] text-foreground/35">
                 {letter
                   ? `${thresholdLabel} points needed for ${letter}. Not a wash-trade or stolen-art score.`
-                  : "No letter until this collection has a real floor, listed count, 24h volume, or 24h sales. Transfer activity and a JPEG are not a market grade. Not wash-trade or stolen-art detection."}
+                  : "No letter until this collection has executable liquidity: a live listing or a redeemable on-chain vault. Sales history, transfer activity, a floor claim, and artwork alone cannot create a market grade. Not wash-trade or stolen-art detection."}
               </p>
               <ul className="space-y-1">
                 {breakdown.parts.map((p) => (

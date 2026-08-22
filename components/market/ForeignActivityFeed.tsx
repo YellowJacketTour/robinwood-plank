@@ -23,6 +23,9 @@ export type ForeignActivityEvent = {
   tokenId: string | null;
   tokenName: string | null;
   imageUrl?: string | null;
+  blockNumber?: string | null;
+  logIndex?: number | null;
+  evidenceSource?: string | null;
 };
 
 const KIND_STYLE: Record<string, string> = {

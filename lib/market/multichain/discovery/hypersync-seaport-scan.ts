@@ -130,7 +130,12 @@ async function scanChainForFillsInternal(
       : mode === "forward-from-genesis"
         ? 0
         : Math.max(0, height - CHUNK_BLOCKS);
-  const toBlock = Math.min(height, fromBlock + CHUNK_BLOCKS);
+  // A genesis run is log-budget bounded rather than block-window bounded.
+  // HyperSync paginates this sparse, address/topic-filtered query, so letting
+  // it seek to the current height avoids spending hundreds of cron ticks on
+  // empty pre-deployment block ranges. The hard MAX_LOGS_PER_RUN guard still
+  // caps actual free-tier consumption and the durable cursor resumes exactly.
+  const toBlock = mode === "forward-from-genesis" ? height : Math.min(height, fromBlock + CHUNK_BLOCKS);
 
   if (fromBlock >= toBlock) {
     return { chainSlug, fromBlock, toBlock: fromBlock, logsScanned: 0, fillsWritten: 0 };
@@ -204,8 +209,11 @@ async function scanChainForFillsInternal(
       }
 
       const nextBlock = res.nextBlock;
-      await writeCursor(cursorKey, Math.min(nextBlock, toBlock) - 1 >= fromBlock ? nextBlock : toBlock);
-      lastSucceededBlock = nextBlock;
+      // nextBlock is an exclusive resume position. Persisting nextBlock itself
+      // and then resuming at cursor + 1 skipped one whole block per page.
+      const completedThrough = Math.max(fromBlock, Math.min(nextBlock, toBlock) - 1);
+      await writeCursor(cursorKey, completedThrough);
+      lastSucceededBlock = completedThrough;
       if (nextBlock >= toBlock || totalLogs >= MAX_LOGS_PER_RUN) break;
       query = { ...query, fromBlock: nextBlock };
     }

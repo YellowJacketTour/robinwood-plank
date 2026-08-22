@@ -610,6 +610,24 @@ async function main(): Promise<void> {
       .join("; ");
   });
 
+  // Separate genesis cursor for the same canonical fill ledger. The live
+  // cursor above protects freshness; this lane closes the older-history gap
+  // continuously without ever moving that live cursor backwards. HyperSync
+  // seeks across empty pre-deployment ranges and is capped by matched logs,
+  // so chains progress by useful evidence rather than 50k empty blocks/tick.
+  await step("seaport-fills-backfill", async () => {
+    const { scanChainForFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-seaport-scan");
+    const { EVM_CHAIN_ID } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const parts: string[] = [];
+    for (const chainSlug of Object.keys(EVM_CHAIN_ID)) {
+      const result = await scanChainForFillsGenesisBackfillViaHypersync(chainSlug);
+      parts.push(result.error
+        ? `${chainSlug}: ERR(${result.error.slice(0, 60)})`
+        : `${chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`);
+    }
+    return parts.join("; ");
+  });
+
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
   // v4 EVM API (the one real candidate for a free cross-EVM ranking
   // endpoint) has been confirmed live 2026-08-17, multiple retests, as
@@ -689,6 +707,34 @@ async function main(): Promise<void> {
       totalUpdated += r.updated;
     }
     return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
+  });
+
+  // RobinWood's native Marketplank floor is built from executable orders,
+  // not inferred from purchases. Record it every refresh so the API can
+  // produce a real 24h comparison once both endpoints exist.
+  await step("robinwood-floor-observation", async () => {
+    const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
+    const { getListings } = await import("../lib/market/orders-store");
+    const { recordFloorObservation } = await import("../lib/market/multichain/store");
+    const bySlug = await getListings("robinwood").catch(() => []);
+    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
+    const listings = bySlug.length >= byContract.length ? bySlug : byContract;
+    const floor = listings.reduce<bigint | null>((minimum, listing) => {
+      try {
+        const price = BigInt(listing.priceWei);
+        return minimum == null || price < minimum ? price : minimum;
+      } catch {
+        return minimum;
+      }
+    }, null);
+    await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
+      priceAtomic: floor?.toString() ?? null,
+      currency: "ETH",
+      marketplace: "marketplank",
+      listedCount: listings.length,
+      source: "native-executable-order-book",
+    });
+    return floor == null ? "no executable native floor" : `${listings.length} listings; floor ${floor}`;
   });
 
   // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,

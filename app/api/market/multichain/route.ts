@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
@@ -108,6 +108,11 @@ export async function GET(req: Request) {
       ? nativeSales?.volume24hWei ?? null
       : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
+    const nativeFloorChange = await getObservedFloorChange24h(
+      "robinhood",
+      NFT_CONTRACT_ADDRESS,
+      "marketplank"
+    ).catch(() => null);
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
     try {
@@ -146,7 +151,8 @@ export async function GET(req: Request) {
       volume30dWei: null as string | null,
       sales30d: null as number | null,
       holderCount: nativeHolders,
-      floorChangePct: null as number | null,
+      floorChangePct: nativeFloorChange?.changePct ?? null,
+      floorChangeEvidence: nativeFloorChange,
       isNativeHome: true,
     };
 
@@ -210,6 +216,7 @@ export async function GET(req: Request) {
             : c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
               ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
               : null,
+        floorChangeEvidence: null,
         isNativeHome: false,
       }));
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));

@@ -398,6 +398,112 @@ export async function updateCollectionFloorOnly(
        sync_error = NULL`,
     [id, floor.floorPriceWei, floor.floorPriceCurrency, floor.floorPriceMarketplace]
   );
+  await recordFloorObservation(chainSlug, contractAddress, {
+    priceAtomic: floor.floorPriceWei,
+    currency: floor.floorPriceCurrency,
+    marketplace: floor.floorPriceMarketplace,
+    listedCount: null,
+    source: "collection-floor-adapter",
+  });
+}
+
+export type FloorChangeObservation = {
+  currentPriceAtomic: string;
+  comparisonPriceAtomic: string;
+  currentObservedAt: string;
+  comparisonObservedAt: string;
+  changePct: number;
+};
+
+/** Persist an exact executable floor without confusing it with a sale price. */
+export async function recordFloorObservation(
+  chainSlug: string,
+  contractAddress: string,
+  observation: {
+    priceAtomic: string | null;
+    currency: string | null;
+    marketplace: string | null;
+    listedCount: number | null;
+    source: string;
+  }
+): Promise<void> {
+  const price = nonzeroWei(observation.priceAtomic);
+  if (!price || !observation.currency || !observation.marketplace) return;
+  await postgresQuery(
+    `INSERT INTO plank_collection_floor_observations
+       (collection_id, price_atomic, currency, marketplace, listed_count, source)
+     SELECT id, $3, $4, $5, $6, $7
+     FROM plank_multichain_collections
+     WHERE chain_slug = $1 AND contract_address = $2
+     ON CONFLICT (collection_id, marketplace, observation_bucket) DO UPDATE SET
+       price_atomic = EXCLUDED.price_atomic,
+       currency = EXCLUDED.currency,
+       listed_count = EXCLUDED.listed_count,
+       source = EXCLUDED.source,
+       observed_at = NOW()`,
+    [
+      chainSlug,
+      normalizeContractAddress(chainSlug, contractAddress),
+      price,
+      observation.currency,
+      observation.marketplace,
+      observation.listedCount,
+      observation.source,
+    ]
+  );
+}
+
+/**
+ * Compare the latest observation with the closest observation at or before
+ * 24h ago. Returns null until the system has genuinely observed both ends.
+ */
+export async function getObservedFloorChange24h(
+  chainSlug: string,
+  contractAddress: string,
+  marketplace?: string
+): Promise<FloorChangeObservation | null> {
+  const result = await postgresQuery<{
+    current_price: string;
+    comparison_price: string;
+    current_at: string;
+    comparison_at: string;
+  }>(
+    `WITH target AS (
+       SELECT id FROM plank_multichain_collections
+       WHERE chain_slug = $1 AND contract_address = $2
+     ), current_floor AS (
+       SELECT price_atomic, observed_at
+       FROM plank_collection_floor_observations
+       WHERE collection_id = (SELECT id FROM target)
+         AND ($3::text IS NULL OR marketplace = $3)
+       ORDER BY observed_at DESC LIMIT 1
+     ), comparison_floor AS (
+       SELECT price_atomic, observed_at
+       FROM plank_collection_floor_observations
+       WHERE collection_id = (SELECT id FROM target)
+         AND ($3::text IS NULL OR marketplace = $3)
+         AND observed_at <= NOW() - INTERVAL '24 hours'
+       ORDER BY observed_at DESC LIMIT 1
+     )
+     SELECT c.price_atomic::text AS current_price,
+            p.price_atomic::text AS comparison_price,
+            c.observed_at::text AS current_at,
+            p.observed_at::text AS comparison_at
+     FROM current_floor c CROSS JOIN comparison_floor p`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress), marketplace ?? null]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const current = BigInt(row.current_price);
+  const comparison = BigInt(row.comparison_price);
+  if (comparison <= 0n) return null;
+  return {
+    currentPriceAtomic: row.current_price,
+    comparisonPriceAtomic: row.comparison_price,
+    currentObservedAt: row.current_at,
+    comparisonObservedAt: row.comparison_at,
+    changePct: (Number(current - comparison) / Number(comparison)) * 100,
+  };
 }
 
 /** Write a real listed-count and/or total-supply without clobbering the other, or floor. 0 is a real count (nothing listed), null means skip that column. */
