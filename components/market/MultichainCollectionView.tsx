@@ -2070,6 +2070,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               indexed={catalogMeta?.projectedCount ?? tokens.length}
               rarityCovered={rarityMap.size}
               rarityTiers={countTiers(rarityMap)}
+              artUrls={[collection?.image, ...tokens.map((token) => token.imageUrl)].filter((url): url is string => Boolean(url))}
               listings={listings.map((listing) => ({
                 priceWei: listing.priceWei,
                 maker: listing.maker,
