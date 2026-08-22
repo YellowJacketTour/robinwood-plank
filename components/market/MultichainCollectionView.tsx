@@ -1921,11 +1921,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([traitType, values], index) => {
                         const selected = selectedTraits[traitType] ?? "";
-                        const sortedValues = Object.entries(values).sort(([, ca], [, cb]) => ca - cb);
+                        const sortedValues = Object.entries(values).sort(([, ca], [, cb]) => cb - ca);
                         return (
                           <details
                             key={traitType}
-                            open={openTraitGroups[traitType] ?? (index < 2 || Boolean(selected))}
+                            open={openTraitGroups[traitType] ?? (index === 0 || Boolean(selected))}
                             onToggle={(event) => {
                               const open = event.currentTarget.open;
                               setOpenTraitGroups((prev) => prev[traitType] === open ? prev : { ...prev, [traitType]: open });
@@ -1940,14 +1940,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                             </summary>
                             <div className="max-h-52 overflow-y-auto border-t border-line p-1">
                               {sortedValues.map(([value, count]) => (
-                                <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10">
+                                <label key={value} title={`${traitType}: ${value} · ${count.toLocaleString()} items`} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10">
                                   <input
                                     type="checkbox"
                                     checked={selected === value}
                                     onChange={() => setSelectedTraits((prev) => ({ ...prev, [traitType]: selected === value ? "" : value }))}
                                     className="accent-gold-500"
                                   />
-                                  <span className="min-w-0 flex-1 break-words">{value}</span>
+                                  <span className="min-w-0 flex-1 truncate">{value}</span>
                                   <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">{count}</span>
                                 </label>
                               ))}
