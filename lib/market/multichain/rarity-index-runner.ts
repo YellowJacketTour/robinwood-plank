@@ -83,7 +83,8 @@ export async function advanceEvmCollectionMembership(
     if (!response.ok) throw new Error(`OpenSea ${response.status} enumerating ${contractAddress}`);
     const body = await response.json() as {
       nfts?: Array<{ identifier: string; name?: string | null; image_url?: string | null;
-        display_image_url?: string | null; traits?: Array<{ trait_type?: string; value?: string | number | null }> }>;
+        display_image_url?: string | null; animation_url?: string | null;
+        traits?: Array<{ trait_type?: string; value?: string | number | null }> }>;
       next?: string | null;
     };
     const nfts = body.nfts ?? [];
@@ -93,6 +94,7 @@ export async function advanceEvmCollectionMembership(
       tokens: nfts.map((nft) => ({
         tokenId: nft.identifier, name: nft.name ?? null,
         imageUrl: nft.display_image_url || nft.image_url || null,
+        animationUrl: nft.animation_url ?? null,
         traits: (nft.traits ?? []).flatMap((trait) => trait.trait_type && trait.value != null
           ? [{ traitType: trait.trait_type, value: String(trait.value) }] : []),
       })),

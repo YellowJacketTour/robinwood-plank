@@ -207,16 +207,33 @@ export type NftMetadata = {
   name?: string;
   description?: string;
   image?: string;
+  animation_url?: string;
+  animationUrl?: string;
+  media_type?: string;
   attributes?: NftAttribute[];
 };
+
+/** A browser-playable original URL for focused video/audio-backed NFT art. */
+export function resolveOriginalMediaUrl(uri: string | null | undefined): string {
+  if (!uri || isPoisonedUrlString(uri)) return "";
+  if (uri.startsWith("data:") || uri.startsWith("blob:")) return uri;
+  if (uri.startsWith("/api/ipfs/image?")) {
+    const query = new URLSearchParams(uri.split("?", 2)[1] ?? "");
+    return query.get("uri") ?? "";
+  }
+  if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+  return rawGatewayUrl(uri, IPFS_GATEWAYS[0]);
+}
 
 function isUsableMetadata(data: NftMetadata | null | undefined): data is NftMetadata {
   if (!data || typeof data !== "object") return false;
   const image = typeof data.image === "string" ? data.image.trim() : "";
+  const animation = typeof (data.animation_url ?? data.animationUrl) === "string"
+    ? (data.animation_url ?? data.animationUrl)!.trim() : "";
   const attrs = Array.isArray(data.attributes) ? data.attributes : [];
   const name = typeof data.name === "string" ? data.name.trim() : "";
   // Need at least image or traits — bare name is not enough
-  return Boolean(image || attrs.length > 0 || name);
+  return Boolean(image || animation || attrs.length > 0 || name);
 }
 
 async function fetchJsonFromUrl(

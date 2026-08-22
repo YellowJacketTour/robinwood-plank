@@ -2,6 +2,7 @@ import { hasPostgresConfig, postgresQuery, withPostgresTransaction } from "@/lib
 
 export type ProjectedCollectionToken = {
   tokenId: string; name: string | null; imageUrl: string | null;
+  animationUrl: string | null; mediaType: string | null;
   traits: Array<{ traitType: string; value: string }>;
   rarityScore: number | null; rarityRank: number | null;
   rarityPercentile: number | null; rarityTier: string | null;
@@ -13,6 +14,7 @@ export type CollectionTokenProjection = {
 };
 export type CollectionTokenProjectionPage = {
   tokens: Array<{ tokenId: string; name?: string | null; imageUrl?: string | null;
+    animationUrl?: string | null; mediaType?: string | null;
     traits?: Array<{ traitType: string; value: string }>;
     rarityScore?: number | null; rarityRank?: number | null;
     rarityPercentile?: number | null; rarityTier?: string | null }>;
@@ -20,6 +22,7 @@ export type CollectionTokenProjectionPage = {
   preservePartial?: boolean;
 };
 type TokenRow = { token_id: string; name: string | null; image_url: string | null;
+  animation_url: string | null; media_type: string | null;
   traits: unknown;
   rarity_score: number | null; rarity_rank: number | null;
   rarity_percentile: number | null; rarity_tier: string | null };
@@ -72,12 +75,13 @@ export async function readCollectionTokenProjection(input: {
       : "CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END ASC NULLS LAST, token_id ASC";
   params.push(limit + 1);
   const rows = await postgresQuery<TokenRow>(
-    `SELECT token_id, name, image_url, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier
+    `SELECT token_id, name, image_url, animation_url, media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier
      FROM plank_collection_tokens WHERE ${where} ORDER BY ${order} LIMIT $${params.length}`, params);
   const page = rows.rows.slice(0, limit);
   const meta = state.rows[0];
   return {
     tokens: page.map((row) => ({ tokenId: row.token_id, name: row.name, imageUrl: row.image_url,
+      animationUrl: row.animation_url, mediaType: row.media_type,
       traits: normalizeTraits(row.traits),
       rarityScore: row.rarity_score, rarityRank: row.rarity_rank,
       rarityPercentile: row.rarity_percentile, rarityTier: row.rarity_tier })),
@@ -103,12 +107,14 @@ export async function upsertCollectionTokenProjection(
       if (!token.tokenId.trim()) continue;
       await client.query(
         `INSERT INTO plank_collection_tokens (
-           chain_slug, collection_slug, token_id, name, image_url, traits, rarity_score, rarity_rank,
+           chain_slug, collection_slug, token_id, name, image_url, animation_url, media_type, traits, rarity_score, rarity_rank,
            rarity_percentile, rarity_tier, provenance, source_observed_at, projected_at
-         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,NOW())
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,NOW())
          ON CONFLICT (chain_slug, collection_slug, token_id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, plank_collection_tokens.name),
            image_url = COALESCE(EXCLUDED.image_url, plank_collection_tokens.image_url),
+           animation_url = COALESCE(EXCLUDED.animation_url, plank_collection_tokens.animation_url),
+           media_type = COALESCE(EXCLUDED.media_type, plank_collection_tokens.media_type),
            traits = CASE WHEN EXCLUDED.traits = '[]'::jsonb THEN plank_collection_tokens.traits ELSE EXCLUDED.traits END,
            rarity_score = COALESCE(EXCLUDED.rarity_score, plank_collection_tokens.rarity_score),
            rarity_rank = COALESCE(EXCLUDED.rarity_rank, plank_collection_tokens.rarity_rank),
@@ -118,6 +124,7 @@ export async function upsertCollectionTokenProjection(
            source_observed_at = GREATEST(plank_collection_tokens.source_observed_at, EXCLUDED.source_observed_at),
            projected_at = NOW()`,
         [chainSlug, collectionSlug, token.tokenId, token.name ?? null, token.imageUrl ?? null,
+          token.animationUrl ?? null, token.mediaType ?? null,
           JSON.stringify(normalizeTraits(token.traits)),
           token.rarityScore ?? null, token.rarityRank ?? null, token.rarityPercentile ?? null,
           token.rarityTier ?? null, provenance, page.sourceObservedAt]);

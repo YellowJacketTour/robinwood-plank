@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import type { Listing } from "@/lib/market/types";
-import { withOriginalMedia } from "@/lib/ipfs";
+import NftFocusedMedia from "@/components/market/NftFocusedMedia";
 import { formatTokenAmount } from "@/lib/trade";
 import type { SolanaListingVerification } from "@/app/api/market/multichain/solana-verify-listing/route";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -123,7 +122,8 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
         </div>
 
         <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-wood-900">
-          <Image src={withOriginalMedia(listing.imageUrl)} alt={`${collectionName} #${listing.tokenId}`} fill sizes="400px" className="object-contain" unoptimized />
+          <NftFocusedMedia imageUrl={listing.imageUrl} animationUrl={listing.animationUrl}
+            mediaType={listing.mediaType} alt={`${collectionName} #${listing.tokenId}`} />
         </div>
 
         {rarity && (

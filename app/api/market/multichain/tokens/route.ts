@@ -17,6 +17,8 @@ export type CollectionToken = {
   tokenId: string;
   name: string | null;
   imageUrl: string | null;
+  animationUrl?: string | null;
+  mediaType?: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -234,7 +236,11 @@ function mapUniSatItems(list: UniSatItem[]): CollectionToken[] {
     .map((i) => ({
       tokenId: i.inscriptionId!,
       name: i.collectionItemName ?? i.name ?? null,
-      imageUrl: `https://ordinals.com/content/${i.inscriptionId}`,
+      imageUrl: /^image\//i.test(i.contentType ?? "")
+        ? `https://ordinals.com/content/${i.inscriptionId}` : null,
+      animationUrl: /^(video|audio)\//i.test(i.contentType ?? "")
+        ? `https://ordinals.com/content/${i.inscriptionId}` : null,
+      mediaType: i.contentType ?? null,
     }));
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 import { ExternalLink, X } from "lucide-react";
 import { formatTokenAmount, parseTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
@@ -16,7 +15,7 @@ import {
   type MarketCollection,
 } from "@/lib/market/types";
 import { sendNft, validateRecipient } from "@/lib/market/transfer";
-import { withOriginalMedia } from "@/lib/ipfs";
+import NftFocusedMedia from "@/components/market/NftFocusedMedia";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import EthUsdValue from "@/components/market/EthUsdValue";
@@ -252,13 +251,11 @@ export default function ItemDetail({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="grid sm:grid-cols-2">
             <div className="relative mx-auto aspect-square w-full max-w-[360px] bg-wood-950 sm:max-w-none">
-              <Image
-                src={withOriginalMedia(detail?.image || listing?.imageUrl) || collection.image}
+              <NftFocusedMedia
+                imageUrl={detail?.image || listing?.imageUrl || collection.image}
+                animationUrl={listing?.animationUrl}
+                mediaType={listing?.mediaType}
                 alt={detail?.rarity?.name ?? `${collection.name} #${tokenId}`}
-                fill
-                sizes="(min-width: 640px) 40vw, 100vw"
-                className="object-contain p-3"
-                unoptimized
               />
               {detail?.rarity && (
                 <span

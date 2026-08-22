@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { withImageWidth, withOriginalMedia } from "../../lib/ipfs";
+import { resolveOriginalMediaUrl, withImageWidth, withOriginalMedia } from "../../lib/ipfs";
 
 // Real, confirmed live 2026-08-19: Alchemy's own openSeaMetadata pass-
 // through returns the literal 4-character string "null" for some
@@ -46,4 +46,13 @@ test("withOriginalMedia removes poster sizing for a focused animated detail", ()
   );
   assert.equal(withOriginalMedia("null"), "");
   assert.equal(withOriginalMedia("https://cdn.example/art.gif"), "https://cdn.example/art.gif");
+});
+
+test("resolveOriginalMediaUrl preserves HTTP motion and unwraps a same-origin poster proxy", () => {
+  assert.equal(resolveOriginalMediaUrl("ipfs://bafy/video.mp4"), "https://gateway.pinata.cloud/ipfs/bafy/video.mp4");
+  assert.equal(
+    resolveOriginalMediaUrl("/api/ipfs/image?uri=https%3A%2F%2Farweave.net%2Ftx&w=512&cv=3"),
+    "https://arweave.net/tx"
+  );
+  assert.equal(resolveOriginalMediaUrl("undefined"), "");
 });

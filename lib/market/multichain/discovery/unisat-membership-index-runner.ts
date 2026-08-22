@@ -20,6 +20,7 @@ type UniSatItem = {
   inscriptionId?: string;
   name?: string | null;
   collectionItemName?: string | null;
+  contentType?: string | null;
   attributes?: Array<{ trait_type?: string; value?: string | number | null }> | null;
 };
 
@@ -65,7 +66,11 @@ export async function advanceBitcoinCollectionMembership(collectionId: string) {
       tokens: page.items.flatMap((item) => item.inscriptionId ? [{
         tokenId: item.inscriptionId,
         name: item.collectionItemName ?? item.name ?? null,
-        imageUrl: `https://ordinals.com/content/${item.inscriptionId}`,
+        imageUrl: /^image\//i.test(item.contentType ?? "")
+          ? `https://ordinals.com/content/${item.inscriptionId}` : null,
+        animationUrl: /^(video|audio)\//i.test(item.contentType ?? "")
+          ? `https://ordinals.com/content/${item.inscriptionId}` : null,
+        mediaType: item.contentType ?? null,
         traits: (item.attributes ?? []).flatMap((trait) =>
           trait.trait_type && trait.value != null
             ? [{ traitType: trait.trait_type, value: String(trait.value) }]

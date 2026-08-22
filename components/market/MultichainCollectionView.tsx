@@ -147,7 +147,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
-  const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null;
+    animationUrl?: string | null; mediaType?: string | null }>>([]);
   const [catalogBuilding, setCatalogBuilding] = useState(false);
   const surface = collectionSurface(chainSlug);
   const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
@@ -350,7 +351,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       sort,
     });
     if (tierFilter) qs.set("tier", tierFilter);
-    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }>; building?: boolean }>(
+    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
+      animationUrl?: string | null; mediaType?: string | null }>; building?: boolean }>(
       `/api/market/multichain/tokens?${qs.toString()}`,
       { ttlMs: 8_000, swrMs: 45_000, session: true }
     )
@@ -855,9 +857,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   }, [collectionSlug, chainSlug, isSolana, isBitcoin]);
 
   const browseAsListing = useCallback(
-    (tokenId: string, imageUrl?: string | null, name?: string | null): Listing => {
+    (tokenId: string, imageUrl?: string | null, name?: string | null,
+      animationUrl?: string | null, mediaType?: string | null): Listing => {
       const live = listings.find((l) => l.tokenId === tokenId);
-      if (live) return live;
+      if (live) return { ...live, animationUrl: animationUrl ?? live.animationUrl,
+        mediaType: mediaType ?? live.mediaType };
       return {
         id: `browse:${chainSlug}:${tokenId}`,
         collectionSlug,
@@ -867,6 +871,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         expiresAt: new Date(0).toISOString(),
         kind: "fixed",
         imageUrl: imageUrl ?? undefined,
+        animationUrl: animationUrl ?? undefined,
+        mediaType: mediaType ?? undefined,
         foreignChainSlug: chainSlug,
       };
     },
@@ -876,7 +882,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openDetails = useCallback(
     (tokenId: string) => {
       const token = tokens.find((t) => t.tokenId === tokenId);
-      setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name));
+      setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name,
+        token?.animationUrl, token?.mediaType));
     },
     [tokens, browseAsListing]
   );
@@ -1155,7 +1162,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const browseItems = useMemo(() => {
     if (bookFilter === "listed") {
-      return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null, imageUrl: listing.imageUrl ?? null, listing }));
+      return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null,
+        imageUrl: listing.imageUrl ?? null, animationUrl: listing.animationUrl ?? null,
+        mediaType: listing.mediaType ?? null, listing }));
     }
     const q = searchQuery.trim().toLowerCase();
     const fromTokens = tokens
@@ -1171,6 +1180,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       .map((t) => ({
       tokenId: t.tokenId,
       name: t.name,
+      animationUrl: t.animationUrl,
+      mediaType: t.mediaType,
       imageUrl:
         t.imageUrl ||
         catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, t.tokenId)[0] ||
@@ -2167,7 +2178,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         {(foreignOfferCurrency(chainSlug) || isSolana) && (
                           <button
                             type="button"
-                            onClick={() => void openOffer(browseAsListing(item.tokenId, item.imageUrl, item.name))}
+                          onClick={() => void openOffer(browseAsListing(item.tokenId, item.imageUrl, item.name,
+                            item.animationUrl, item.mediaType))}
                             className="min-h-8 flex-1 rounded-md border border-line px-2 text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
                           >
                             Offer

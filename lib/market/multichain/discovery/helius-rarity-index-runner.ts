@@ -54,12 +54,19 @@ type HeliusGroupedAsset = {
   id: string;
   content?: {
     links?: { image?: string | null };
+    files?: Array<{ uri?: string | null; mime?: string | null }>;
     metadata?: {
       name?: string | null;
       attributes?: Array<{ trait_type?: string; value?: string | number | null }>;
     };
   };
 };
+
+function motionFile(asset: HeliusGroupedAsset): { animationUrl: string | null; mediaType: string | null } {
+  const file = asset.content?.files?.find((entry) =>
+    typeof entry.uri === "string" && /^(video|model)\//i.test(entry.mime ?? ""));
+  return { animationUrl: file?.uri ?? null, mediaType: file?.mime ?? null };
+}
 
 function assetsToItems(assets: HeliusGroupedAsset[]): GenericRarityInput[] {
   return assets.map((asset) => ({
@@ -176,6 +183,7 @@ export async function advanceSolanaCollectionMembership(collectionAddress: strin
         tokenId: asset.id,
         name: asset.content?.metadata?.name ?? null,
         imageUrl: asset.content?.links?.image ?? null,
+        ...motionFile(asset),
         traits: assetsToItems([asset])[0]?.traits ?? [],
       })),
       expectedCount: expected,

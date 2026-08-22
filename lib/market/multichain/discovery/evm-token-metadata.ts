@@ -7,6 +7,8 @@ const ERC1155_URI = "0x0e89341c";
 export type ResolvedEvmTokenMetadata = {
   name: string | null;
   imageUrl: string | null;
+  animationUrl: string | null;
+  mediaType: string | null;
   traits: Array<{ traitType: string; value: string }>;
 };
 
@@ -60,8 +62,11 @@ export async function resolveEvmTokenMetadata(input: {
       ? [{ traitType, value: String(value) }] : [];
   });
   const image = typeof metadata.image === "string" ? metadata.image.trim() : "";
+  const animation = typeof (metadata.animation_url ?? metadata.animationUrl) === "string"
+    ? (metadata.animation_url ?? metadata.animationUrl)!.trim() : "";
   const name = typeof metadata.name === "string" ? metadata.name.trim() : "";
-  return { name: name || null, imageUrl: image ? resolveIpfsUrl(image) : null, traits };
+  return { name: name || null, imageUrl: image ? resolveIpfsUrl(image) : null,
+    animationUrl: animation || null, mediaType: metadata.media_type?.trim() || null, traits };
 }
 
 /** Provider enrichment fallback for contracts whose metadata is not exposed
@@ -75,7 +80,8 @@ export async function resolveOpenSeaTokenMetadata(input: {
     signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`OpenSea ${response.status} enriching token ${input.tokenId}`);
   const body = await response.json() as { nft?: { name?: string | null; image_url?: string | null;
-    display_image_url?: string | null; traits?: Array<{ trait_type?: string | null; value?: unknown }> } };
+    display_image_url?: string | null; animation_url?: string | null; metadata_url?: string | null;
+    traits?: Array<{ trait_type?: string | null; value?: unknown }> } };
   const nft = body.nft;
   if (!nft) return null;
   const traits = (nft.traits ?? []).flatMap((trait) => {
@@ -85,5 +91,6 @@ export async function resolveOpenSeaTokenMetadata(input: {
       ? [{ traitType, value: String(value) }] : [];
   });
   const image = nft.display_image_url || nft.image_url || null;
-  return { name: nft.name?.trim() || null, imageUrl: image, traits };
+  return { name: nft.name?.trim() || null, imageUrl: image,
+    animationUrl: nft.animation_url?.trim() || null, mediaType: null, traits };
 }

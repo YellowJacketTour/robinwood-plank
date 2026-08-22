@@ -94,6 +94,9 @@ export type Listing = {
    * fails.
    */
   imageUrl?: string;
+  /** Original focused motion asset; grids always use imageUrl as a poster. */
+  animationUrl?: string;
+  mediaType?: string;
   /**
    * Which marketplace holds this order.
    *
