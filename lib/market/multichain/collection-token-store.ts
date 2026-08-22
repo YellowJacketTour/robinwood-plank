@@ -234,6 +234,53 @@ export async function readProjectedTraitIndex(chainSlug: string, collectionSlug:
 
 export type TokenMetadataWork = { collectionSlug: string; tokenId: string };
 
+export type GlobalTokenSearchHit = ProjectedCollectionToken & {
+  chainSlug: string;
+  collectionSlug: string;
+};
+
+/**
+ * Searches the shared token projection, never an upstream provider. Exact
+ * token ids rank first, then names and ids by prefix. The bounded result set
+ * makes this safe for the global market while the projection grows to many
+ * millions of rows; empty queries are intentionally rejected by the route.
+ */
+export async function searchProjectedTokens(input: {
+  query: string;
+  chainSlugs?: string[];
+  limit?: number;
+}): Promise<GlobalTokenSearchHit[]> {
+  const query = input.query.trim();
+  if (!query) return [];
+  const limit = Math.min(Math.max(Math.trunc(input.limit ?? 40), 1), 60);
+  const chains = [...new Set((input.chainSlugs ?? []).map((v) => v.trim()).filter(Boolean))];
+  const params: unknown[] = [query, `${query}%`];
+  let chainWhere = "";
+  if (chains.length) {
+    params.push(chains);
+    chainWhere = `AND chain_slug = ANY($${params.length}::text[])`;
+  }
+  params.push(limit);
+  const result = await postgresQuery<TokenRow & { chain_slug: string; collection_slug: string }>(
+    `SELECT chain_slug, collection_slug, token_id, name, image_url, animation_url,
+       media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier
+     FROM plank_collection_tokens
+     WHERE (token_id = $1 OR token_id ILIKE $2 OR lower(name) LIKE lower($2)) ${chainWhere}
+     ORDER BY CASE WHEN token_id = $1 THEN 0 WHEN token_id ILIKE $2 THEN 1 ELSE 2 END,
+       projected_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+  return result.rows.map((row) => ({
+    chainSlug: row.chain_slug, collectionSlug: row.collection_slug,
+    tokenId: row.token_id, name: row.name, imageUrl: row.image_url,
+    animationUrl: row.animation_url, mediaType: row.media_type,
+    traits: normalizeTraits(row.traits), rarityScore: row.rarity_score,
+    rarityRank: row.rarity_rank, rarityPercentile: row.rarity_percentile,
+    rarityTier: row.rarity_tier,
+  }));
+}
+
 export async function readTokenMetadataWork(chainSlug: string, limit: number): Promise<TokenMetadataWork[]> {
   const bounded = Math.min(Math.max(Math.trunc(limit), 1), 25);
   const result = await postgresQuery<{ collection_slug: string; token_id: string }>(

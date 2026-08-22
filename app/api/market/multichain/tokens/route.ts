@@ -63,6 +63,17 @@ export async function GET(req: NextRequest) {
             }).catch(() => {});
           }
         }
+        if (projected.partial && isBitcoinChainSlug(chainSlug)) {
+          const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+          await enqueueDataJob({
+            jobKey: `demand:membership:${chainSlug}:${collectionSlug}`,
+            kind: `mesh-lane:${chainSlug}`,
+            source: "unisat-membership",
+            chainSlug,
+            subject: collectionSlug,
+            priority: 90,
+          }).catch(() => {});
+        }
         return NextResponse.json({ ...projected, building: projected.partial }, {
           headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
         });
@@ -81,6 +92,17 @@ export async function GET(req: NextRequest) {
         source,
         chainSlug,
         subject: contractAddress,
+        priority: 90,
+      }).catch(() => {});
+    }
+    if (isBitcoinChainSlug(chainSlug)) {
+      const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+      await enqueueDataJob({
+        jobKey: `demand:membership:${chainSlug}:${collectionSlug}`,
+        kind: `mesh-lane:${chainSlug}`,
+        source: "unisat-membership",
+        chainSlug,
+        subject: collectionSlug,
         priority: 90,
       }).catch(() => {});
     }

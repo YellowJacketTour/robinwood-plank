@@ -113,6 +113,10 @@ export async function getMultiAssetUsdPrices(): Promise<MultiAssetPrices> {
 /** Normalizes a floorPriceCurrency string (which may be "WETH"/"WSOL"/"WBTC" etc.) to the plain symbol ASSET_IDS is keyed by. */
 export function normalizeAssetSymbol(currency: string | null | undefined): string | null {
   if (!currency) return null;
-  const upper = currency.toUpperCase().replace(/^W/, ""); // WETH -> ETH, WSOL -> SOL, WBTC -> BTC
+  const raw = currency.toUpperCase().trim();
+  // Polygon providers still disagree on the post-migration ticker. Treat
+  // legacy MATIC/WMATIC as POL so otherwise-valid native prices receive the
+  // same independently fetched USD quote as newer provider responses.
+  const upper = raw === "MATIC" || raw === "WMATIC" ? "POL" : raw.replace(/^W/, "");
   return upper in ASSET_IDS ? upper : null;
 }

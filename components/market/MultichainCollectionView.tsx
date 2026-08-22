@@ -2228,7 +2228,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 onClick={() => setTokenLimit((n) => Math.min(surface.catalogCap, n + surface.catalogPageSize))}
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
-                Load more of this collection
+                Load more
+                {catalogMeta?.projectedCount ? ` · ${tokens.length.toLocaleString()} of ${catalogMeta.projectedCount.toLocaleString()} indexed shown` : ""}
               </button>
             </div>
           )}

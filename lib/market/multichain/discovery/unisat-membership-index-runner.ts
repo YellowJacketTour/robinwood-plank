@@ -9,9 +9,12 @@ import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@
 import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 import {
   readCollectionMembershipCursor,
+  readProjectedRarityInputs,
   upsertCollectionTokenProjection,
   writeCollectionMembershipCursor,
 } from "@/lib/market/multichain/collection-token-store";
+import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
+import { replaceForeignRarity } from "@/lib/market/multichain/foreign-rarity-store";
 
 const PAGE_SIZE = 100;
 const SOURCE = "unisat-collection-items";
@@ -86,6 +89,32 @@ export async function advanceBitcoinCollectionMembership(collectionId: string) {
       cursor: complete ? null : String(next), expectedCount: expected, complete,
       sourceObservedAt: observedAt,
     });
+    // Recompute from the merged membership projection, not the much smaller
+    // marketplace-activity sample. This makes traits discovered on ordinary
+    // (never-listed) inscriptions immediately useful, while remaining honest
+    // about partial coverage until both membership and trait metadata cover
+    // the full collection.
+    const projected = await readProjectedRarityInputs("bitcoin-mainnet", collectionId);
+    const withTraits = projected.filter((item) => item.traits.length > 0);
+    if (withTraits.length > 0) {
+      const rarityComplete = complete && withTraits.length === projected.length;
+      const snapshot = { ...computeGenericRaritySnapshot(withTraits), partial: !rarityComplete };
+      const traitIndex: Record<string, Record<string, string[]>> = {};
+      for (const item of withTraits) for (const trait of item.traits) {
+        traitIndex[trait.traitType] ??= {};
+        traitIndex[trait.traitType][trait.value] ??= [];
+        traitIndex[trait.traitType][trait.value].push(item.tokenId);
+      }
+      await replaceForeignRarity("bitcoin-mainnet", collectionId, snapshot, traitIndex);
+      await upsertCollectionTokenProjection("bitcoin-mainnet", collectionId, {
+        tokens: [...snapshot.byTokenId.values()].map((token) => ({
+          tokenId: token.tokenId, name: token.name, rarityScore: token.score,
+          rarityRank: token.rank, rarityPercentile: token.percentile, rarityTier: token.tier,
+        })),
+        expectedCount: expected, partial: !rarityComplete,
+        provenance: [SOURCE, "bespoke-information-content-rarity"], sourceObservedAt: observedAt,
+      });
+    }
     return { collectionId, itemsObserved: page.items.length, nextStart: next, expectedCount: expected, complete };
   } catch (error) {
     await writeCollectionMembershipCursor({

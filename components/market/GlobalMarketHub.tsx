@@ -138,6 +138,16 @@ type TrackedCollection = {
   isNativeHome?: boolean;
 };
 
+type GlobalTokenHit = {
+  chainSlug: string;
+  collectionSlug: string;
+  tokenId: string;
+  name: string | null;
+  imageUrl: string | null;
+  rarityRank: number | null;
+  rarityTier: string | null;
+};
+
 /** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
 function windowVolumeWei(c: TrackedCollection, window: "24h" | "7d" | "30d"): string | null {
   if (window === "7d") return c.volume7dWei;
@@ -738,6 +748,8 @@ export default function GlobalMarketHub() {
   // stale scroll position deep into a different result set.
   const GRID_PAGE_SIZE = 60;
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
+  const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
+  const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -921,6 +933,10 @@ export default function GlobalMarketHub() {
       // Chain badges are registry coverage counters, not hydrated-row
       // counters. A newly discovered address must be visible in the total
       // immediately even while its name/art/stats cells are still pending.
+      // RobinWood's native home row has its own dedicated card above this
+      // registry and is not a discovered collection row; counting it here
+      // made the badge exactly one higher than the traversable chain roster.
+      if (isHomeRow(c)) continue;
       if (isSpamCollectionTitle(c.name)) continue;
       seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
     }
@@ -974,6 +990,31 @@ export default function GlobalMarketHub() {
     if (!q) return ranked;
     return ranked.filter((c) => (c.name ?? "").toLowerCase().includes(q));
   }, [ranked, search]);
+
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2) {
+      setTokenHits([]);
+      setTokenSearchLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setTokenSearchLoading(true);
+      const qs = new URLSearchParams({ q: query });
+      if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
+      try {
+        const response = await fetch(`/api/market/multichain/token-search?${qs}`, { signal: controller.signal });
+        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[] } : null;
+        if (!controller.signal.aborted) setTokenHits(body?.tokens ?? []);
+      } catch {
+        if (!controller.signal.aborted) setTokenHits([]);
+      } finally {
+        if (!controller.signal.aborted) setTokenSearchLoading(false);
+      }
+    }, 220);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [search, chainFilter]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
@@ -1838,7 +1879,7 @@ export default function GlobalMarketHub() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search collection name…"
+          placeholder="Search collections or pieces…"
           className="min-h-10 flex-1 min-w-[10rem] rounded-md border border-line bg-background px-3 text-sm text-foreground placeholder:text-foreground/30 transition-colors focus:border-gold-400/60"
         />
         {/* The grid has no table header to click, unlike the rankings table above -- same shared sortColumn/sortDir state, just a dropdown since there's no header row here. */}
@@ -1883,6 +1924,42 @@ export default function GlobalMarketHub() {
         </aside>
 
         <div className="min-w-0 flex-1">
+          {search.trim().length >= 2 && (tokenSearchLoading || tokenHits.length > 0) && (
+            <section className="mb-4 space-y-2" aria-label="Matching pieces">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Pieces across chains</h3>
+                <span className="text-[0.65rem] text-foreground/45">
+                  {tokenSearchLoading ? "Searching indexed pieces…" : `${tokenHits.length} matches`}
+                </span>
+              </div>
+              {tokenHits.length > 0 && (
+                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+                  {tokenHits.slice(0, 12).map((token) => (
+                    <li key={`${token.chainSlug}:${token.collectionSlug}:${token.tokenId}`}>
+                      <Link
+                        href={`/market/multichain/${encodeURIComponent(token.chainSlug)}/${encodeURIComponent(token.collectionSlug)}?q=${encodeURIComponent(token.tokenId)}&show=all`}
+                        className="dense-card group flex h-full flex-col overflow-hidden p-0 hover:border-line-strong"
+                      >
+                        <div className="relative aspect-square bg-wood-900">
+                          <CollectionThumb src={token.imageUrl} alt={token.name || `Token ${token.tokenId}`} width={512} variant="tile" />
+                          <span className="card-overlay absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60">
+                            <ChainIcon chainSlug={token.chainSlug} size={15} />
+                          </span>
+                        </div>
+                        <div className="min-w-0 p-2">
+                          <p className="truncate text-xs font-bold text-foreground">{token.name || `#${token.tokenId}`}</p>
+                          <p className="truncate text-[0.6rem] text-foreground/45">
+                            {chainDisplayName(token.chainSlug)} · #{token.tokenId}
+                            {token.rarityRank ? ` · rank ${token.rarityRank}` : ""}
+                          </p>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {filtered.length === 0 ? (
             <EmptyState
               title="No collections match"
