@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 2000);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 12000);
   const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
   const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
   const tier = searchParams.get("tier");

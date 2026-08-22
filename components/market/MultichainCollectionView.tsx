@@ -148,7 +148,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null;
-    animationUrl?: string | null; mediaType?: string | null }>>([]);
+    animationUrl?: string | null; mediaType?: string | null;
+    traits?: Array<{ traitType: string; value: string }> }>>([]);
   const [catalogBuilding, setCatalogBuilding] = useState(false);
   const surface = collectionSurface(chainSlug);
   const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
@@ -352,7 +353,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     });
     if (tierFilter) qs.set("tier", tierFilter);
     return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
-      animationUrl?: string | null; mediaType?: string | null }>; building?: boolean }>(
+      animationUrl?: string | null; mediaType?: string | null;
+      traits?: Array<{ traitType: string; value: string }> }>; building?: boolean }>(
       `/api/market/multichain/tokens?${qs.toString()}`,
       { ttlMs: 8_000, swrMs: 45_000, session: true }
     )
@@ -1170,6 +1172,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const fromTokens = tokens
       .filter((t) => {
         if (q && !t.tokenId.toLowerCase().includes(q) && !(t.name ?? "").toLowerCase().includes(q)) return false;
+        if (traitClauses.length > 0) {
+          const has = (traitType: string, value: string) =>
+            (t.traits ?? []).some((trait) => trait.traitType === traitType && trait.value === value);
+          if (!traitClauses.every((clause) => has(clause.traitType, clause.value))) return false;
+        }
         const tierFilter = activeTiers.length > 0 ? activeTiers : activeTier !== "all" ? [activeTier] : [];
         if (tierFilter.length > 0) {
           const r = rarityFor(t.tokenId);
@@ -1218,7 +1225,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       });
     }
     return rows;
-  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, traitClauses, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),

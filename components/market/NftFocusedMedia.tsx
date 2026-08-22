@@ -27,8 +27,8 @@ export default function NftFocusedMedia({
   className?: string;
 }) {
   const [motionAllowed, setMotionAllowed] = useState(false);
-  const [playingFrame, setPlayingFrame] = useState(false);
-  const [videoFailed, setVideoFailed] = useState(false);
+  const [readyUrl, setReadyUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -38,7 +38,8 @@ export default function NftFocusedMedia({
   }, []);
 
   const original = resolveOriginalMediaUrl(animationUrl);
-  const playVideo = motionAllowed && !videoFailed && Boolean(original) && isVideo(original, mediaType);
+  const playVideo = motionAllowed && failedUrl !== original && Boolean(original) && isVideo(original, mediaType);
+  const playingFrame = readyUrl === original;
   const poster = withImageWidth(imageUrl, 1024) || withOriginalMedia(imageUrl);
 
   return (
@@ -56,8 +57,8 @@ export default function NftFocusedMedia({
           playsInline
           preload="auto"
           aria-label={alt}
-          onCanPlay={() => setPlayingFrame(true)}
-          onError={() => setVideoFailed(true)}
+          onCanPlayThrough={() => setReadyUrl(original)}
+          onError={() => setFailedUrl(original)}
           className={`absolute inset-0 h-full w-full bg-wood-950 object-contain transition-opacity duration-150 ${playingFrame ? "opacity-100" : "opacity-0"}`}
         />
       ) : null}

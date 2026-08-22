@@ -45,7 +45,10 @@ export async function readCollectionTokenProjection(input: {
   chainSlug: string; collectionSlug: string; limit: number; cursor?: string | null;
   sort?: "id" | "rank" | "rank-desc"; tier?: string | null;
 }): Promise<CollectionTokenProjection | null> {
-  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 200);
+  // The browser still grows this incrementally (400/800 rows per explicit
+  // load), but do not silently truncate a requested projected catalog at
+  // 200. That made a healthy, fully materialized DB look incomplete.
+  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 12000);
   const cursorTokenId = decodeTokenCursor(input.cursor);
   const sort = input.sort ?? "id";
   const tier = input.tier?.trim() || null;

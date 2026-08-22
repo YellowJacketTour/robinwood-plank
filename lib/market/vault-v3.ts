@@ -198,6 +198,20 @@ export function quoteBuy(ethIn: bigint, s: V3Snapshot): bigint {
   return (inNet * s.shareReserve) / (s.ethReserve + inNet);
 }
 
+/** Smallest ETH input whose fee-adjusted constant-product quote returns at
+ * least `sharesOut`. Used to buy only a redemption's wallet shortfall. */
+export function quoteEthForExactShares(sharesOut: bigint, s: V3Snapshot): bigint | null {
+  if (sharesOut <= BigInt(0)) return BigInt(0);
+  if (s.ethReserve <= BigInt(0) || s.shareReserve <= sharesOut) return null;
+  const feeDenominator = BPS - BigInt(s.swapFeeBps);
+  if (feeDenominator <= BigInt(0)) return null;
+  const ceilDiv = (n: bigint, d: bigint) => (n + d - BigInt(1)) / d;
+  const netIn = ceilDiv(sharesOut * s.ethReserve, s.shareReserve - sharesOut);
+  let grossIn = ceilDiv(netIn * BPS, feeDenominator);
+  for (let i = 0; i < 4 && quoteBuy(grossIn, s) < sharesOut; i++) grossIn += BigInt(1);
+  return quoteBuy(grossIn, s) >= sharesOut ? grossIn : null;
+}
+
 export function quoteSell(sharesIn: bigint, s: V3Snapshot): bigint {
   if (s.shareReserve === BigInt(0) || s.ethReserve === BigInt(0)) return BigInt(0);
   const inNet = (sharesIn * (BPS - BigInt(s.swapFeeBps))) / BPS;
@@ -239,9 +253,9 @@ async function send(account: string, data: string, valueWei?: bigint, addr?: str
   return hash;
 }
 
-export async function v3Buy(account: string, ethWei: bigint, s: V3Snapshot, slipBps = 100): Promise<string> {
+export async function v3Buy(account: string, ethWei: bigint, s: V3Snapshot, slipBps = 100, addr?: string | null): Promise<string> {
   const minOut = applySlip(quoteBuy(ethWei, s), slipBps);
-  return send(account, V3.encodeFunctionData("buyShares", [minOut]), ethWei);
+  return send(account, V3.encodeFunctionData("buyShares", [minOut]), ethWei, addr);
 }
 
 export async function v3Sell(account: string, sharesWei: bigint, s: V3Snapshot, slipBps = 100): Promise<string> {
