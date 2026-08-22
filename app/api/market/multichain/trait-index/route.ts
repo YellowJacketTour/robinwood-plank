@@ -52,7 +52,10 @@ export async function GET(req: NextRequest) {
         collection: collectionSlug,
         complete: effectiveTraits !== null && !effectivePartial,
         partial: effectivePartial,
-        building: effectiveTraits === null,
+        // Partial traits are a live work-in-progress, not a completed index.
+        // The collection view uses this signal to keep refreshing until the
+        // durable membership cursor closes and full-population rarity exists.
+        building: effectivePartial,
         totalSupply: projected?.expectedCount ?? (sampleSize || null),
         scanned,
         traits: effectiveTraits,

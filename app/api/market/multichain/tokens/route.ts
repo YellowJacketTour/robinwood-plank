@@ -44,7 +44,26 @@ export async function GET(req: NextRequest) {
         chainSlug, collectionSlug, limit, cursor, sort, tier,
       }).catch(() => null);
       if (projected && projected.tokens.length > 0) {
-        return NextResponse.json(projected, {
+        // A partial projection is useful enough to render, but it is not a
+        // terminal cache hit. Renew the demand job whenever somebody is
+        // actively viewing it so the mesh keeps walking the provider cursor
+        // instead of rotating away after the first 50-token page.
+        if (projected.partial && /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)) {
+          const eligible = isRobinhoodChainSlug(chainSlug) || Boolean(foreignChainByChainSlug(chainSlug)?.openSeaChain);
+          if (eligible) {
+            const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+            const source = isRobinhoodChainSlug(chainSlug) ? "robinhood-membership" : "opensea-membership";
+            await enqueueDataJob({
+              jobKey: `demand:membership:${chainSlug}:${collectionSlug.toLowerCase()}`,
+              kind: `mesh-lane:${chainSlug}`,
+              source,
+              chainSlug,
+              subject: collectionSlug.toLowerCase(),
+              priority: 90,
+            }).catch(() => {});
+          }
+        }
+        return NextResponse.json({ ...projected, building: projected.partial }, {
           headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
         });
       }
