@@ -9,7 +9,7 @@
  * brief cache) to N assets in one shared cache, rather than several
  * near-duplicate modules.
  *
- * POL, BNB, AVAX ids verified live against CoinGecko's /simple/price and
+ * POL, BNB, AVAX, USDC, and USDT ids verified against CoinGecko's /simple/price and
  * Coinbase's /v2/prices/*-USD/spot 2026-08-19. Note CoinGecko has TWO
  * separate coins for Polygon's token: "matic-network" (the old, now-frozen
  * MATIC coin -- symbol "matic") and "polygon-ecosystem-token" (the real
@@ -40,6 +40,8 @@ const ASSET_IDS: Record<string, { coingecko: string; coinbase: string }> = {
   POL: { coingecko: "polygon-ecosystem-token", coinbase: "POL-USD" },
   BNB: { coingecko: "binancecoin", coinbase: "BNB-USD" },
   AVAX: { coingecko: "avalanche-2", coinbase: "AVAX-USD" },
+  USDC: { coingecko: "usd-coin", coinbase: "USDC-USD" },
+  USDT: { coingecko: "tether", coinbase: "USDT-USD" },
 };
 
 export type MultiAssetPrices = Record<string, { usd: number | null; source: string }>;

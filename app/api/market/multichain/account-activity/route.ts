@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { publicError, rateLimit } from "@/lib/security";
+import { activityValue } from "@/lib/market/activity-value";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,7 +22,7 @@ type OpenSeaEvent = {
   event_timestamp: number;
   transaction: string | null;
   chain?: string | null;
-  payment?: { quantity: string; symbol: string } | null;
+  payment?: { quantity: string; token_address?: string; decimals?: number; symbol: string } | null;
   seller?: string | null;
   buyer?: string | null;
   from_address?: string | null;
@@ -54,19 +55,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `OpenSea ${res.status}` }, { status: 502 });
     }
     const data = (await res.json()) as { asset_events?: OpenSeaEvent[] };
-    const events = (data.asset_events ?? []).map((e) => ({
+    const events = await Promise.all((data.asset_events ?? []).map(async (e) => ({
       type: e.event_type,
       timestamp: new Date(e.event_timestamp * 1000).toISOString(),
       transaction: e.transaction,
       chain: e.chain ?? null,
       priceWei: e.payment?.quantity ?? null,
-      priceSymbol: e.payment?.symbol ?? null,
+      ...(await activityValue({
+        atomic: e.payment?.quantity,
+        decimals: e.payment?.decimals,
+        symbol: e.payment?.symbol,
+        tokenAddress: e.payment?.token_address,
+        chain: e.chain,
+      })),
       from: e.seller ?? e.from_address ?? null,
       to: e.buyer ?? e.to_address ?? null,
       collection: e.nft?.collection ?? null,
       tokenId: e.nft?.identifier ?? null,
       tokenName: e.nft?.name ?? null,
-    }));
+    })));
     return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to load your multichain activity");

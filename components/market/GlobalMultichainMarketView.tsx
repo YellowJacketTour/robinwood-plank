@@ -22,6 +22,8 @@ type AccountEvent = {
   chain: string | null;
   priceWei: string | null;
   priceSymbol: string | null;
+  priceAmount?: string | null;
+  priceUsd?: number | null;
   collection: string | null;
   tokenId: string | null;
 };
@@ -221,7 +223,8 @@ export default function GlobalMultichainMarketView() {
                     <span className="text-foreground">
                       <span className="font-bold capitalize">{e.type}</span> {e.collection ?? ""}
                       {e.tokenId ? ` #${e.tokenId}` : ""}
-                      {e.priceWei ? ` — ${formatTokenAmount(e.priceWei, 18, 4)} ${e.priceSymbol ?? "ETH"}` : ""}
+                      {e.priceWei ? ` — ${e.priceAmount ?? "?"} ${e.priceSymbol ?? "unknown"}` : ""}
+                      {e.priceUsd != null ? ` (≈ $${e.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })})` : ""}
                     </span>
                     <span className="text-foreground/40">{e.chain ? chainDisplayName(e.chain) : ""}</span>
                   </li>

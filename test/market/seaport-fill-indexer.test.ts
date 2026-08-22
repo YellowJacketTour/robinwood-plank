@@ -83,6 +83,7 @@ test("decodes a real ABI-encoded listing fill (NFT offer, native consideration)"
   assert.equal(decoded!.tokenId, "1106");
   assert.equal(decoded!.currencyToken, null); // native, not ERC-20
   assert.equal(decoded!.priceWei, "1000000000000000000");
+  assert.deepEqual(decoded!.paymentLegs, [{ token: null, amountAtomic: "1000000000000000000" }]);
 });
 
 test("decodes an ERC-20 (WETH bid) fill correctly, capturing the currency token", () => {
@@ -101,6 +102,7 @@ test("decodes an ERC-20 (WETH bid) fill correctly, capturing the currency token"
   assert.equal(decoded!.tokenId, "42");
   assert.equal(decoded!.currencyToken, WETH.toLowerCase());
   assert.equal(decoded!.priceWei, "500000000000000000");
+  assert.deepEqual(decoded!.paymentLegs, [{ token: WETH.toLowerCase(), amountAtomic: "500000000000000000" }]);
 });
 
 test("a fill with no NFT item at all still decodes, with null nftContract/tokenId", () => {
@@ -205,6 +207,10 @@ test("H3: a fee 'paid' in a self-minted token is NOT counted as marketplace reve
   assert.ok(d);
   assert.equal(d!.currencyToken, null, "native ETH is dominant");
   assert.equal(d!.marketplaceFeeWei, "0", "off-currency fee leg earns nothing");
+  assert.deepEqual(d!.paymentLegs, [
+    { token: null, amountAtomic: "1000000" },
+    { token: SCAM.toLowerCase(), amountAtomic: "999999999999999999999" },
+  ]);
 });
 
 test("H2: a self-wash trade paying us no fee earns zero score", () => {

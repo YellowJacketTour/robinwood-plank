@@ -271,6 +271,27 @@ function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null 
   );
 }
 
+function FloorCurrencyMark({ collection }: { collection: TrackedCollection }) {
+  const symbol = normalizeAssetSymbol(collection.floorPriceCurrency);
+  if (symbol && symbol !== chainNativeAsset(collection.chainSlug)) {
+    return (
+      <span className="rounded bg-foreground/10 px-1 py-0.5 font-sans text-[0.55rem] font-black text-cream-muted" title={`Floor denominated in ${symbol}`}>
+        {symbol}
+      </span>
+    );
+  }
+  return <ChainIcon chainSlug={collection.chainSlug} size={14} className="shrink-0" />;
+}
+
+function chainNativeAsset(chainSlug: string): string {
+  if (chainSlug === "polygon-mainnet") return "POL";
+  if (chainSlug === "bnb-mainnet") return "BNB";
+  if (chainSlug === "avax-mainnet") return "AVAX";
+  if (chainSlug === "solana-mainnet") return "SOL";
+  if (chainSlug === "bitcoin-mainnet") return "BTC";
+  return "ETH";
+}
+
 function shortCollectionId(address: string): string {
   if (address.length <= 14) return address;
   if (address.startsWith("0x")) return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -1407,7 +1428,7 @@ export default function GlobalMarketHub() {
                         {formatCompactNative(hero.volume24hWei!).display}
                         <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
                         {(() => {
-                          const usd = toUsd(hero.volume24hWei, hero.floorPriceCurrency);
+                          const usd = toUsd(hero.volume24hWei, chainNativeAsset(hero.chainSlug));
                           return usd != null ? <span className="text-white/50">{formatUsdCompact(usd)}</span> : null;
                         })()}
                       </span>
@@ -1698,7 +1719,7 @@ export default function GlobalMarketHub() {
                                 return usd != null ? formatUsdCompact(usd) : null;
                               })()}
                             />
-                            <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
+                            <FloorCurrencyMark collection={c} />
                           </span>
                         ) : (
                           <span className="text-foreground/40">—</span>
@@ -1715,7 +1736,7 @@ export default function GlobalMarketHub() {
                         {(() => {
                           const vol = windowVolumeWei(c, rankingsWindow);
                           if (!vol || vol === "0") return <span title={emptyCellReason(c, "volume")}>—</span>;
-                          const usd = toUsd(vol, c.floorPriceCurrency);
+                          const usd = toUsd(vol, chainNativeAsset(c.chainSlug));
                           return (
                             <span className="inline-flex items-center justify-end gap-1">
                               <NativeAmount wei={vol} usdLabel={usd != null ? formatUsdCompact(usd) : null} />

@@ -150,6 +150,8 @@ export type DecodedFill = {
   tokenId: string | null;
   currencyToken: string | null;
   priceWei: string | null;
+  /** Every monetary leg, grouped by its actual token. Never sum these raw amounts across currencies. */
+  paymentLegs: Array<{ token: string | null; amountAtomic: string }>;
   /**
    * Native/ERC-20 value that provably reached MARKET_FEE_RECIPIENT in this
    * exact fill, in the same currency as priceWei. This -- not priceWei --
@@ -306,6 +308,10 @@ export function decodeOrderFulfilled(topics: string[], data: string): DecodedFil
     tokenId: subjectNft ? subjectNft.identifier.toString() : null,
     currencyToken: priceCurrency,
     priceWei: payingItems.length > 0 ? priceTotal.toString() : null,
+    paymentLegs: [...totalsByCurrency.entries()].map(([token, amount]) => ({
+      token,
+      amountAtomic: amount.toString(),
+    })),
     marketplaceFeeWei: marketplaceFee.toString(),
     shape,
   };
@@ -512,8 +518,8 @@ export async function writeFills(
     // one yet, never fabricated as "now."
     const result = await postgresQuery(
       `INSERT INTO plank_seaport_fills
-         (chain_slug, tx_hash, log_index, block_number, block_timestamp, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape)
-       VALUES ($1, $2, $3, $4, to_timestamp($14), $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13)
+         (chain_slug, tx_hash, log_index, block_number, block_timestamp, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape, payment_legs)
+       VALUES ($1, $2, $3, $4, to_timestamp($14), $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13, $15::jsonb)
        ON CONFLICT (chain_slug, tx_hash, log_index) DO NOTHING`,
       [
         r.chainSlug,
@@ -530,6 +536,7 @@ export async function writeFills(
         r.fill.marketplaceFeeWei,
         r.fill.shape,
         r.blockTimestamp ?? null,
+        JSON.stringify(r.fill.paymentLegs),
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;

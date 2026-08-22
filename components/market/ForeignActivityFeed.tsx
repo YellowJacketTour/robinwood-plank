@@ -6,7 +6,6 @@ import { shortAddress } from "@/lib/trade";
 import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import ScrollBox from "@/components/market/ScrollBox";
-import EthUsdValue from "@/components/market/EthUsdValue";
 import { withImageWidth } from "@/lib/ipfs";
 import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
@@ -16,6 +15,9 @@ export type ForeignActivityEvent = {
   transaction: string | null;
   priceWei: string | null;
   priceSymbol: string | null;
+  priceDecimals?: number | null;
+  priceAmount?: string | null;
+  priceUsd?: number | null;
   from: string | null;
   to: string | null;
   tokenId: string | null;
@@ -143,9 +145,13 @@ export default function ForeignActivityFeed({ events, loading, chainSlug, rarity
                   {event.priceWei ? (
                     <>
                       <span className="block">
-                        {(Number(event.priceWei) / 1e18).toFixed(4)} {event.priceSymbol ?? "ETH"}
+                        {event.priceAmount ?? "?"} {event.priceSymbol ?? "unknown"}
                       </span>
-                      <EthUsdValue wei={event.priceWei} className="block text-[0.6rem] font-normal text-foreground/50" />
+                      {event.priceUsd != null && (
+                        <span className="block text-[0.6rem] font-normal text-foreground/50">
+                          ≈ ${event.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </>
                   ) : (
                     "—"

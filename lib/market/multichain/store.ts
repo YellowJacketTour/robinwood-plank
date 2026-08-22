@@ -330,6 +330,12 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
      WHERE chain_slug = $1
        AND nft_contract IS NOT NULL
        AND price_wei IS NOT NULL
+       -- Snapshot volume_24h_wei is denominated in the chain's native
+       -- 18-decimal unit. ERC-20 atomic values (often 6 decimals) cannot
+       -- be added to it. Those remain durably preserved in payment_legs
+       -- for USD-normalized aggregation; excluding them here is honest
+       -- and prevents corrupt headline volume until that projection runs.
+       AND currency_token IS NULL
        AND block_timestamp > NOW() - INTERVAL '24 hours'
      GROUP BY LOWER(nft_contract)`,
     [chainSlug]

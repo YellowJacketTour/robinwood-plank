@@ -19,6 +19,7 @@ import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-l
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { activityValue } from "@/lib/market/activity-value";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -167,18 +168,22 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
       }
       const raw = (await res.json()) as MeActivity[];
-      const events = raw.map((a) => ({
+      const events = await Promise.all(raw.map(async (a) => ({
         type: a.type === "buyNow" ? "sale" : a.type,
         timestamp: a.blockTime ? new Date(a.blockTime * 1000).toISOString() : null,
         transaction: a.signature,
         priceWei: a.price != null ? (BigInt(Math.round(a.price * 1_000_000_000)) * BigInt(1_000_000_000)).toString() : null,
-        priceSymbol: a.price != null ? "SOL" : null,
+        ...(await activityValue({
+          atomic: a.price != null ? String(Math.round(a.price * 1_000_000_000)) : null,
+          decimals: 9,
+          symbol: a.price != null ? "SOL" : null,
+        })),
         from: a.seller ?? null,
         to: a.buyer ?? null,
         tokenId: a.tokenMint ?? null,
         tokenName: null,
         imageUrl: null,
-      }));
+      })));
       return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       return publicError(error, "Failed to load Solana activity");
@@ -223,18 +228,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `OpenSea ${res.status}` }, { status: 502 });
     }
     const data = (await res.json()) as { asset_events?: OpenSeaEvent[] };
-    const events = (data.asset_events ?? []).map((e) => ({
+    const events = await Promise.all((data.asset_events ?? []).map(async (e) => ({
       type: e.event_type,
       timestamp: new Date(e.event_timestamp * 1000).toISOString(),
       transaction: e.transaction,
       priceWei: e.payment?.quantity ?? null,
-      priceSymbol: e.payment?.symbol ?? null,
+      ...(await activityValue({
+        atomic: e.payment?.quantity,
+        decimals: e.payment?.decimals,
+        symbol: e.payment?.symbol,
+        tokenAddress: e.payment?.token_address,
+        chain: chainSlug,
+      })),
       from: e.seller ?? e.from_address ?? null,
       to: e.buyer ?? e.to_address ?? null,
       tokenId: e.nft?.identifier ?? null,
       tokenName: e.nft?.name ?? null,
       imageUrl: e.nft?.image_url ?? null,
-    }));
+    })));
     return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to load multichain activity");

@@ -18,6 +18,8 @@ test("normalizeAssetSymbol maps wrapped-token symbols to their plain asset", () 
   assert.equal(normalizeAssetSymbol("WBNB"), "BNB");
   assert.equal(normalizeAssetSymbol("AVAX"), "AVAX");
   assert.equal(normalizeAssetSymbol("WAVAX"), "AVAX");
+  assert.equal(normalizeAssetSymbol("USDC"), "USDC");
+  assert.equal(normalizeAssetSymbol("USDT"), "USDT");
 });
 
 test("normalizeAssetSymbol returns null for a currency this app has no price feed for -- never guesses", () => {
@@ -27,9 +29,9 @@ test("normalizeAssetSymbol returns null for a currency this app has no price fee
   assert.equal(normalizeAssetSymbol(""), null);
 });
 
-test("getMultiAssetUsdPrices resolves real (never throws) for exactly the five tracked assets, each with a usd|null + source", async () => {
+test("getMultiAssetUsdPrices resolves every supported quote currency without throwing", async () => {
   const prices = await getMultiAssetUsdPrices();
-  for (const symbol of ["ETH", "SOL", "BTC", "POL", "BNB", "AVAX"]) {
+  for (const symbol of ["ETH", "SOL", "BTC", "POL", "BNB", "AVAX", "USDC", "USDT"]) {
     assert.ok(symbol in prices, `expected ${symbol} in prices`);
     const entry = prices[symbol];
     assert.ok(entry.usd === null || (typeof entry.usd === "number" && entry.usd > 0));
