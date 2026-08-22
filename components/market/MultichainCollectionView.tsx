@@ -151,6 +151,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     animationUrl?: string | null; mediaType?: string | null;
     traits?: Array<{ traitType: string; value: string }> }>>([]);
   const [catalogBuilding, setCatalogBuilding] = useState(false);
+  const [catalogMeta, setCatalogMeta] = useState<{
+    projectedCount: number;
+    expectedCount: number | null;
+    partial: boolean;
+  } | null>(null);
   const surface = collectionSurface(chainSlug);
   const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
@@ -354,13 +359,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (tierFilter) qs.set("tier", tierFilter);
     return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
       animationUrl?: string | null; mediaType?: string | null;
-      traits?: Array<{ traitType: string; value: string }> }>; building?: boolean }>(
+      traits?: Array<{ traitType: string; value: string }> }>;
+      building?: boolean; projectedCount?: number; expectedCount?: number | null; partial?: boolean }>(
       `/api/market/multichain/tokens?${qs.toString()}`,
       { ttlMs: 8_000, swrMs: 45_000, session: true }
     )
       .then((tok) => {
         setTokens(tok.tokens ?? []);
         setCatalogBuilding(Boolean(tok.building));
+        setCatalogMeta(typeof tok.projectedCount === "number" ? {
+          projectedCount: tok.projectedCount,
+          expectedCount: tok.expectedCount ?? null,
+          partial: Boolean(tok.partial),
+        } : null);
       })
       .catch(() => {
         setTokens([]);
@@ -1650,7 +1661,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <p className="text-xs text-foreground/50">
             {supplyStats?.listedCount != null
               ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? " · UniSat book delayed" : ""}`
-              : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}`}
+              : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}${catalogMeta?.partial ? ` · ${catalogMeta.projectedCount.toLocaleString()} indexed so far` : ""}`}
           </p>
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
             {collection.contractAddress}
@@ -1671,7 +1682,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Items</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {supplyStats?.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"}
+            {supplyStats?.totalSupply != null
+              ? supplyStats.totalSupply.toLocaleString()
+              : catalogMeta
+                ? `${catalogMeta.projectedCount.toLocaleString()}${catalogMeta.partial ? "+" : ""}`
+                : "—"}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
@@ -1797,7 +1812,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           summary={
             bookFilter === "listed"
               ? `${filteredListings.length} on the market`
-              : `${browseItems.length} items`
+              : catalogMeta && catalogMeta.projectedCount > browseItems.length
+                ? `${browseItems.length.toLocaleString()} loaded · ${catalogMeta.projectedCount.toLocaleString()} indexed${catalogMeta.partial ? " and syncing" : ""}`
+                : `${browseItems.length.toLocaleString()} items${catalogMeta?.partial ? " · syncing" : ""}`
           }
           lead={
             listings.length > 0 ? (
