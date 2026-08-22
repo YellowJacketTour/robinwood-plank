@@ -12,15 +12,28 @@ import type { HardhatUserConfig } from "hardhat/config";
 const config = defineConfig({
   plugins: [hardhatToolboxMochaEthers],
   solidity: {
-    version: "0.8.24",
-    settings: {
-      optimizer: { enabled: true, runs: 200 },
-      // Pinned to OpenZeppelin 4.x specifically to avoid Cancun-only opcodes
-      // (mcopy) that OZ 5.x's Bytes.sol uses unconditionally — Robinhood
-      // Chain's latest block has no excessBlobGas field, so Cancun support
-      // is unconfirmed. Paris is the conservative, broadly-supported target.
-      evmVersion: "paris",
-    },
+    compilers: [
+      {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          // Required by PlankCrashV2.sol -- its Config-struct constructor
+          // and large Round struct (view-returned by currentRound()) hit
+          // a real "stack too deep" error under the legacy codegen;
+          // viaIR is the standard, compiler-recommended fix. Applies to
+          // every file except the override below, so the full test suite
+          // was re-run after enabling this, not just the new contract's
+          // own tests, to confirm no other contract regressed.
+          viaIR: true,
+          // Pinned to OpenZeppelin 4.x specifically to avoid Cancun-only
+          // opcodes (mcopy) that OZ 5.x's Bytes.sol uses unconditionally
+          // -- Robinhood Chain's latest block has no excessBlobGas field,
+          // so Cancun support is unconfirmed. Paris is the conservative,
+          // broadly-supported target.
+          evmVersion: "paris",
+        },
+      },
+    ],
   },
   paths: {
     sources: "./contracts",
@@ -68,9 +81,31 @@ const config = defineConfig({
     },
   },
   networks: {
-    // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
-    // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
-    // frontend can be exercised without touching mainnet.
+    // The in-process EDR node that `npx hardhat node` serves (the default
+    // network name for that task is "node"). allowBlocksWithSameTimestamp
+    // is the real fix for a genuine local-dev bug: with fast interval
+    // mining (evm_setIntervalMining(100), used by the crash sim setup so
+    // the multiplier climbs at a watchable pace), block.timestamp is
+    // whole-seconds and must strictly increase -- so WITHOUT this flag the
+    // node bumps the timestamp +1s per 100ms block, racing chain-time to
+    // ~10x real time. That made the betting countdown (anchored to
+    // block.timestamp) skip ~10 numbers a second and compressed the whole
+    // round, which read as "launch/timer broken." Allowing multiple blocks
+    // to share a timestamp lets the clock track real wall-time while blocks
+    // still mine fast -- exactly the mainnet condition (Arbitrum/Orbit has
+    // sub-second blocks with second-resolution timestamps). Empirically
+    // verified: chain-time tracks 1.0x real with this set, ~9.5x without.
+    node: {
+      type: "edr-simulated",
+      chainId: 31337,
+      allowBlocksWithSameTimestamp: true,
+      mining: { auto: false, interval: 100 },
+    },
+
+    // LOCAL ONLY. `npx hardhat node` serves the "node" network above on
+    // 127.0.0.1:8545 (chainId 31337); scripts connect to it over http via
+    // this `localhost` entry so the frontend can be exercised without
+    // touching mainnet.
     localhost: { type: "http", url: "http://127.0.0.1:8545", chainId: 31337 },
 
     // Robinhood networks appear ONLY when their RPC URL + DEPLOYER_PK are both

@@ -1,0 +1,238 @@
+/**
+ * Generalized counterpart to lib/rarity.ts's computeRaritySnapshot —
+ * same −log2 information-content kernel, competition rank, dual percentile.
+ * Adaptive trait schema: official tier trait (Background-like) when present;
+ * spam trait types excluded. Never invents missing traits.
+ */
+import { informationContent, tierFromBackground, tierFromPercentile, type RarityTier } from "@/lib/rarity";
+
+export type GenericRarityInput = {
+  tokenId: string;
+  name: string | null;
+  traits: Array<{ traitType: string; value: string }>;
+};
+
+export type GenericTokenRarity = {
+  tokenId: string;
+  name: string;
+  score: number;
+  rank: number;
+  percentile: number;
+  tier: RarityTier;
+  imageUrl?: string | null;
+};
+
+export type GenericRaritySnapshot = {
+  sampleSize: number;
+  byTokenId: Map<string, GenericTokenRarity>;
+  officialTierTrait: string | null;
+  scoredTraitTypes: string[];
+  partial?: boolean;
+};
+
+function traitKey(traitType: string, value: string): string {
+  return `${traitType}\0${value}`;
+}
+
+function normType(t: string): string {
+  return t.toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+const TIER_TYPE_HINTS = ["background", "tier", "rarity", "rank", "class", "edition"] as const;
+const JUNK_TYPE = /^(tokenid|id|editionnumber|serial|number|#)$/i;
+
+/** Longest-first official-tier trait (RobinWood Background pattern). */
+/** RobinWood-style labels only — not substring "rare" inside unrelated values. */
+export function isStrictOfficialTierValue(value: string): boolean {
+  const s = value.toLowerCase().replace(/[\s_-]+/g, "");
+  return /^(mythic|legendary|epic|raregraded|rare|uncommon|common)$/.test(s);
+}
+
+export function detectOfficialTierTrait(items: GenericRarityInput[]): string | null {
+  const types = new Set<string>();
+  for (const item of items) for (const t of item.traits) types.add(t.traitType);
+  const ranked = [...types]
+    .filter((t) => TIER_TYPE_HINTS.some((h) => normType(t).includes(h)))
+    .sort((a, b) => b.length - a.length || a.localeCompare(b));
+  const n = items.length;
+  if (n === 0) return null;
+  for (const type of ranked) {
+    const values = items.map((i) => i.traits.find((t) => t.traitType === type)?.value).filter((v): v is string => Boolean(v));
+    if (values.length < n * 0.4) continue;
+    const unique = [...new Set(values)];
+    const mapped = unique.filter((v) => isStrictOfficialTierValue(v));
+    if (mapped.length >= 2 && mapped.length / unique.length >= 0.5) return type;
+  }
+  return null;
+}
+
+/** ID-like / sequential traits that would drown information content. */
+export function isSpamTraitType(type: string, items: GenericRarityInput[]): boolean {
+  const n = items.length;
+  if (n === 0) return false;
+  const values = items.map((i) => i.traits.find((t) => t.traitType === type)?.value).filter((v): v is string => v != null && v !== "");
+  if (values.length === 0) return false;
+  const unique = new Set(values);
+  if (JUNK_TYPE.test(normType(type)) && unique.size > n * 0.8) return true;
+  if (values.length / n > 0.99 && unique.size / values.length > 0.95) return true;
+  if (unique.size > Math.min(500, Math.max(2, n / 2))) return true;
+  return false;
+}
+
+export function scoredTraitTypes(items: GenericRarityInput[]): string[] {
+  const types = new Set<string>();
+  for (const item of items) for (const t of item.traits) types.add(t.traitType);
+  return [...types].filter((t) => !isSpamTraitType(t, items)).sort((a, b) => a.localeCompare(b));
+}
+
+export function computeGenericRaritySnapshot(items: GenericRarityInput[]): GenericRaritySnapshot {
+  const sampleSize = items.length;
+  if (sampleSize === 0) {
+    return { sampleSize: 0, byTokenId: new Map(), officialTierTrait: null, scoredTraitTypes: [] };
+  }
+
+  const officialTierTrait = detectOfficialTierTrait(items);
+  const keepTypes = new Set(scoredTraitTypes(items));
+
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    for (const t of item.traits) {
+      if (!keepTypes.has(t.traitType)) continue;
+      const key = traitKey(t.traitType, t.value);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+
+  const rawScores = items.map((item) => {
+    const scored = item.traits.filter((t) => keepTypes.has(t.traitType));
+    const score = scored.reduce((sum, t) => {
+      const count = counts.get(traitKey(t.traitType, t.value)) ?? 1;
+      return sum + informationContent(count / sampleSize);
+    }, 0);
+    const officialValue = officialTierTrait ? item.traits.find((t) => t.traitType === officialTierTrait)?.value : null;
+    return {
+      tokenId: item.tokenId,
+      name: item.name ?? `#${item.tokenId}`,
+      score,
+      officialValue: officialValue ?? null,
+    };
+  });
+
+  rawScores.sort((a, b) => b.score - a.score || a.tokenId.localeCompare(b.tokenId));
+  const scoresAsc = [...rawScores].map((r) => r.score).sort((a, b) => a - b);
+
+  function countStrictlyBelow(score: number): number {
+    let lo = 0;
+    let hi = scoresAsc.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (scoresAsc[mid] < score) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  const byTokenId = new Map<string, GenericTokenRarity>();
+  let i = 0;
+  while (i < rawScores.length) {
+    const score = rawScores[i].score;
+    let j = i + 1;
+    while (j < rawScores.length && rawScores[j].score === score) j += 1;
+    const rank = i + 1;
+    const scorePercentile = sampleSize > 0 ? (countStrictlyBelow(score) / sampleSize) * 100 : 0;
+    const tieSize = j - i;
+    const largeTie = tieSize > Math.max(4, sampleSize * 0.15);
+    for (let k = i; k < j; k += 1) {
+      const row = rawScores[k];
+      const groupPositionPct =
+        sampleSize > 1 ? ((sampleSize - 1 - k) / (sampleSize - 1)) * 100 : 100;
+      // A giant tie used to inherit the FIRST row's 100th-percentile → every
+      // Milady painted Legendary. Large ties use score percentile only.
+      const pos = largeTie ? scorePercentile : Math.max(scorePercentile, groupPositionPct);
+      const percentile = row.score <= 0 ? scorePercentile : pos;
+      const fromOfficial = row.officialValue
+        ? isStrictOfficialTierValue(row.officialValue)
+          ? tierFromBackground(row.officialValue)
+          : null
+        : null;
+      const tier = fromOfficial ?? (row.score <= 0 ? "Common" : tierFromPercentile(pos));
+      byTokenId.set(row.tokenId, {
+        tokenId: row.tokenId,
+        name: row.name,
+        score: row.score,
+        rank,
+        percentile,
+        tier,
+      });
+    }
+    i = j;
+  }
+
+  return { sampleSize, byTokenId, officialTierTrait, scoredTraitTypes: [...keepTypes] };
+}
+
+function findIndexValues(
+  traitIndex: Record<string, Record<string, string[]>>,
+  traitType: string
+): Record<string, string[]> | undefined {
+  if (traitIndex[traitType]) return traitIndex[traitType];
+  const needle = traitType.toLowerCase();
+  const hit = Object.entries(traitIndex).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
+function findIndexIds(values: Record<string, string[]>, value: string): string[] | undefined {
+  if (values[value]) return values[value];
+  const needle = value.toLowerCase();
+  const hit = Object.entries(values).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
+/** Score any piece that has traits against an already-built collection trait index. */
+export function scoreTokenAgainstTraitIndex(input: {
+  tokenId: string;
+  name?: string | null;
+  traits: Array<{ traitType: string; value: string }>;
+  traitIndex: Record<string, Record<string, string[]>>;
+  sampleSize: number;
+  knownScoresAsc: number[];
+}): GenericTokenRarity {
+  const n = Math.max(1, input.sampleSize);
+  let score = 0;
+  let officialValue: string | null = null;
+  for (const t of input.traits) {
+    const cat = findIndexValues(input.traitIndex, t.traitType);
+    if (!cat) continue;
+    const ids = findIndexIds(cat, t.value);
+    const count = ids?.length ?? 0;
+    if (count <= 0) continue;
+    score += informationContent(Math.min(1, count / n));
+    if (!officialValue && /background|tier|rarity|rank|class|edition/i.test(t.traitType.replace(/[\s_-]+/g, ""))) {
+      officialValue = t.value;
+    }
+  }
+  const scoresAsc = input.knownScoresAsc;
+  let lo = 0;
+  let hi = scoresAsc.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (scoresAsc[mid] < score) lo = mid + 1;
+    else hi = mid;
+  }
+  const below = lo;
+  let ge = lo;
+  while (ge < scoresAsc.length && scoresAsc[ge] === score) ge += 1;
+  const above = scoresAsc.length - ge;
+  const rank = above + 1;
+  const percentile = input.sampleSize > 0 ? (below / input.sampleSize) * 100 : 0;
+  const fromOfficial = officialValue ? tierFromBackground(officialValue) : null;
+  const tier = fromOfficial ?? (score <= 0 ? "Common" : tierFromPercentile(percentile));
+  return {
+    tokenId: input.tokenId,
+    name: input.name ?? `#${input.tokenId}`,
+    score,
+    rank,
+    percentile,
+    tier,
+  };
+}

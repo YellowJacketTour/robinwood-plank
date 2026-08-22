@@ -79,7 +79,20 @@ jobs:
   green-gate:
     # No deploy of any kind unless the operator has armed the gate.
     if: vars.V3_DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    # Scoped, non-ambient label -- flagged live 2026-08-20 by an automated
+    # security review after the plain "self-hosted" label first shipped
+    # here: that label is a shared, ambient tag ANY workflow with
+    # runs-on: self-hosted can match, on ANY repo the runner is registered
+    # to. If dependency-health.yml or inmotion.yml (both pull_request-
+    # triggered, the exact ones this repo deliberately keeps off this
+    # machine -- see inmotion.yml's own runs-on lines) were ever pointed at
+    # the bare label too, by mistake or by someone "fixing" the billing
+    # block without this context, an untrusted fork PR's job would land on
+    # this same physical machine. Register the runner with this exact
+    # custom label (in addition to the default "self-hosted" one GitHub
+    # always adds) so only workflows that explicitly opt into it can ever
+    # be scheduled here.
+    runs-on: [self-hosted, robinwood-trusted-dispatch]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -96,7 +109,7 @@ jobs:
     if: >-
       vars.V3_DEPLOY_ENABLED == 'true' &&
       (inputs.network == 'robinhood-testnet' || inputs.confirmation == 'DEPLOY_V3_MAINNET')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, robinwood-trusted-dispatch]
     # A GitHub Environment lets you require a human reviewer before the mainnet
     # deploy job runs — configure required reviewers on 'v3-mainnet' for a second
     # pair of eyes. Testnet uses its own, ungated environment.

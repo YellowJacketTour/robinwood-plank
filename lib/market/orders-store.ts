@@ -120,19 +120,24 @@ type PostgresOrderRow<T> = { payload: T };
 
 async function postgresReadOrders<T>(
   kind: "listing" | "offer",
-  collectionSlug?: string
+  collectionSlug?: string,
+  chainSlug?: string
 ): Promise<T[]> {
   const values: unknown[] = [kind];
-  let collectionClause = "";
+  const clauses: string[] = [];
   if (collectionSlug) {
     values.push(collectionSlug);
-    collectionClause = "AND collection_slug = $2";
+    clauses.push(`AND collection_slug = $${values.length}`);
+  }
+  if (chainSlug) {
+    values.push(chainSlug);
+    clauses.push(`AND chain_slug = $${values.length}`);
   }
   const result = await postgresQuery<PostgresOrderRow<T>>(
     `SELECT payload
        FROM market_orders
       WHERE order_kind = $1
-        ${collectionClause}
+        ${clauses.join(" ")}
         AND expires_at > NOW()
       ORDER BY created_at DESC`,
     values
@@ -144,11 +149,25 @@ async function postgresPutOrder(
   kind: "listing" | "offer",
   value: StoredListing | StoredOffer
 ): Promise<void> {
+  // Resolves to Robinhood Chain (4663) when chainSlug is absent, matching
+  // market_orders' own DEFAULT 'robinhood'/4663 -- every existing
+  // Robinhood-only caller (which never sets chainSlug) writes exactly what
+  // it always has.
+  const chainSlug = value.chainSlug ?? "robinhood";
+  let chainId = 4663;
+  if (value.chainSlug) {
+    // Lazy import: orders-store.ts is imported by client-bundled code paths
+    // (see this file's own header + native-order/route.ts's comment) that
+    // must never pull in foreign-chain-registry.ts's own dependency chain
+    // unless a foreign-chain write is actually happening.
+    const { foreignChainByChainSlug } = await import("@/lib/market/multichain/trading/foreign-chain-registry");
+    chainId = foreignChainByChainSlug(value.chainSlug)?.chainId ?? chainId;
+  }
   await postgresQuery(
     `INSERT INTO market_orders
        (id, order_kind, collection_slug, maker, token_id, price_wei,
-        payload, expires_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::jsonb, $8, NOW())
+        payload, expires_at, updated_at, chain_slug, chain_id)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::jsonb, $8, NOW(), $9, $10)
      ON CONFLICT (id) DO UPDATE
        SET payload = EXCLUDED.payload,
            expires_at = EXCLUDED.expires_at,
@@ -162,6 +181,8 @@ async function postgresPutOrder(
       value.priceWei,
       JSON.stringify(value),
       value.expiresAt,
+      chainSlug,
+      chainId,
     ]
   );
 }
@@ -196,23 +217,29 @@ function liveValues<T extends { expiresAt: string }>(rec: Record<string, T>): T[
 // --- Public API --------------------------------------------------------
 
 export async function getListings(
-  collectionSlug?: string
+  collectionSlug?: string,
+  chainSlug?: string
 ): Promise<Array<Listing & { rawOrder: unknown }>> {
   if (hasPostgres()) {
-    return postgresReadOrders<StoredListing>("listing", collectionSlug);
+    return postgresReadOrders<StoredListing>("listing", collectionSlug, chainSlug);
   }
-  const all = liveValues(await readListings());
-  return collectionSlug ? all.filter((l) => l.collectionSlug === collectionSlug) : all;
+  let all = liveValues(await readListings());
+  if (collectionSlug) all = all.filter((l) => l.collectionSlug === collectionSlug);
+  if (chainSlug) all = all.filter((l) => (l.chainSlug ?? "robinhood") === chainSlug);
+  return all;
 }
 
 export async function getOffers(
-  collectionSlug?: string
+  collectionSlug?: string,
+  chainSlug?: string
 ): Promise<Array<Offer & { rawOrder: unknown }>> {
   if (hasPostgres()) {
-    return postgresReadOrders<StoredOffer>("offer", collectionSlug);
+    return postgresReadOrders<StoredOffer>("offer", collectionSlug, chainSlug);
   }
-  const all = liveValues(await readOffers());
-  return collectionSlug ? all.filter((o) => o.collectionSlug === collectionSlug) : all;
+  let all = liveValues(await readOffers());
+  if (collectionSlug) all = all.filter((o) => o.collectionSlug === collectionSlug);
+  if (chainSlug) all = all.filter((o) => (o.chainSlug ?? "robinhood") === chainSlug);
+  return all;
 }
 
 /** Total live orders across both books — used to cap storage growth. */

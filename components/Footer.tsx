@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { CHAIN, CONTRACT_ADDRESS, SOCIAL_LINKS } from "@/lib/constants";
+import {
+  CHAIN,
+  CONTRACT_ADDRESS,
+  SOCIAL_LINKS,
+} from "@/lib/constants";
 
 const SOCIALS = [
   {
@@ -32,6 +36,7 @@ const EXPLORE_LINKS = [
   { href: "/launch", label: "Launch" },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
+  { href: "/plankspace", label: "PlankSpace" },
   { href: "/learn", label: "Learn" },
   { href: "/floorboards", label: "Under the floorboards" },
   { href: "/migrate", label: "Migrate" },
@@ -91,12 +96,24 @@ export default function Footer() {
             <ul className="mt-2 grid grid-cols-2 gap-x-3 sm:grid-cols-3">
               {EXPLORE_LINKS.map((link) => (
                 <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
-                  >
-                    {link.label}
-                  </Link>
+                  {"external" in link && link.external ? (
+                    <a
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${link.label} (opens in a new tab)`}
+                      className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                    >
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link
+                      href={link.href}
+                      className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                    >
+                      {link.label}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

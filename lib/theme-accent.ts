@@ -63,6 +63,44 @@ export function applyAccentTheme(theme: AccentTheme, root: HTMLElement = documen
   root.style.setProperty("--accent-l-300", `${theme.l300}%`);
 }
 
+export const MELT_STORAGE_KEY = "plank:theme:melt-v1";
+
+export type MeltPrefs = {
+  /** Opal / oil-slick background. False = solid (default). */
+  on: boolean;
+  /** 0 = full technicolor; 1 = clustered on the current accent hue. */
+  bias: number;
+};
+
+export const DEFAULT_MELT: MeltPrefs = { on: false, bias: 0.35 };
+
+export function applyMeltPrefs(prefs: MeltPrefs, root: HTMLElement = document.documentElement): void {
+  const bias = Math.min(1, Math.max(0, prefs.bias));
+  root.dataset.melt = prefs.on ? "1" : "0";
+  root.style.setProperty("--melt-bias", String(bias));
+}
+
+export function loadSavedMelt(): MeltPrefs | null {
+  try {
+    const raw = window.localStorage.getItem(MELT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MeltPrefs>;
+    if (typeof parsed.on !== "boolean") return null;
+    const bias = typeof parsed.bias === "number" && Number.isFinite(parsed.bias) ? Math.min(1, Math.max(0, parsed.bias)) : DEFAULT_MELT.bias;
+    return { on: parsed.on, bias };
+  } catch {
+    return null;
+  }
+}
+
+export function saveMelt(prefs: MeltPrefs): void {
+  try {
+    window.localStorage.setItem(MELT_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // session-only if storage is blocked
+  }
+}
+
 export function loadSavedAccent(): AccentTheme | null {
   try {
     const raw = window.localStorage.getItem(ACCENT_STORAGE_KEY);
@@ -147,4 +185,6 @@ export function saveAccentForAddress(address: string, theme: AccentTheme): void 
  */
 export const ACCENT_BOOTSTRAP_SCRIPT = `(function(){try{var raw=localStorage.getItem(${JSON.stringify(
   ACCENT_STORAGE_KEY
-)});if(!raw)return;var t=JSON.parse(raw);if(typeof t.h!=="number")return;var r=document.documentElement.style;r.setProperty("--accent-h",String(t.h));r.setProperty("--accent-s",t.s+"%");r.setProperty("--accent-l-600",t.l600+"%");r.setProperty("--accent-l-500",t.l500+"%");r.setProperty("--accent-l-400",t.l400+"%");r.setProperty("--accent-l-300",t.l300+"%");}catch(e){}})();`;
+)});if(raw){var t=JSON.parse(raw);if(typeof t.h==="number"){var r=document.documentElement.style;r.setProperty("--accent-h",String(t.h));r.setProperty("--accent-s",t.s+"%");r.setProperty("--accent-l-600",t.l600+"%");r.setProperty("--accent-l-500",t.l500+"%");r.setProperty("--accent-l-400",t.l400+"%");r.setProperty("--accent-l-300",t.l300+"%");}}var mraw=localStorage.getItem(${JSON.stringify(
+  MELT_STORAGE_KEY
+)});if(mraw){var m=JSON.parse(mraw);if(m&&m.on){document.documentElement.dataset.melt="1";var b=typeof m.bias==="number"?Math.min(1,Math.max(0,m.bias)):0.35;document.documentElement.style.setProperty("--melt-bias",String(b));}}}catch(e){}})();`;

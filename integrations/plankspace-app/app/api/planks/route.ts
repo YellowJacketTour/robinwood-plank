@@ -1,0 +1,11 @@
+import { eq } from "drizzle-orm";
+/* eslint-disable prefer-const */
+import { getDb } from "../../../db";
+import { profiles } from "../../../db/schema";
+const CONTRACT="0x327ceaaedbbcf55f40d6f1abc71bd9bc8adcb156";
+type Scout={id?:string;image_url?:string|null;metadata?:{name?:string;image?:string;image_url?:string}|null;token?:{address_hash?:string;name?:string}};
+const media=(v?:string|null)=>v?.startsWith("ipfs://")?`https://ipfs.io/ipfs/${v.slice(7)}`:v||null;
+export async function GET(request:Request){
+ const handle=(new URL(request.url).searchParams.get("handle")||"").toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,24);if(!handle)return Response.json({items:[],error:"Profile required"},{status:400});
+ try{const [profile]=await getDb().select({wallet:profiles.wallet,status:profiles.moderationStatus}).from(profiles).where(eq(profiles.handle,handle)).limit(1);if(!profile||profile.status!=="approved")return Response.json({items:[]},{status:404});const bases=["https://robinhoodchain.blockscout.com/api/v2", "https://api.blockscout.com/4663/api/v2"];let all:Scout[]=[];for(const base of bases){try{let url=`${base}/addresses/${profile.wallet}/nft?type=ERC-721%2CERC-1155`;for(let page=0;page<4&&url;page++){const res=await fetch(url,{headers:{accept:"application/json","user-agent":"PlankSpace/1.0"},signal:AbortSignal.timeout(10000)});if(!res.ok)throw new Error(`upstream ${res.status}`);const data=await res.json() as {items?:Scout[];next_page_params?:Record<string,string|number>};all.push(...(data.items||[]));const n=data.next_page_params;url=n?`${base}/addresses/${profile.wallet}/nft?type=ERC-721%2CERC-1155&${new URLSearchParams(Object.entries(n).map(([k,v])=>[k,String(v)])).toString()}`:""}if(all.length)break}catch{continue}}if(!all.length)throw new Error();const items=all.filter(i=>i.token?.address_hash?.toLowerCase()===CONTRACT).map(i=>({id:i.id||"?",name:i.metadata?.name||`RobinWood #${i.id||"?"}`,image:media(i.image_url||i.metadata?.image_url||i.metadata?.image),collection:i.token?.name||"RobinWoods"}));return Response.json({items},{headers:{"cache-control":"public, max-age=300, stale-while-revalidate=3600"}})}catch{return Response.json({items:[],error:"The Robinhood Chain indexers did not answer. Retry shortly."},{status:503,headers:{"retry-after":"30"}})}
+}

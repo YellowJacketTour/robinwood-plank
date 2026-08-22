@@ -25,7 +25,9 @@ import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
 import EventCountdown from "@/components/market/EventCountdown";
+import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import CollectionStats from "@/components/market/CollectionStats";
+import { ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
@@ -50,12 +52,15 @@ import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import EthUsdValue from "@/components/market/EthUsdValue";
 import {
+  isCrossChainBuyable,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
+  venueLabel,
   type Listing,
   type MarketTab,
   type Offer,
 } from "@/lib/market/types";
+import { chainDisplayName, FOREIGN_FEE_BPS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import dynamic from "next/dynamic";
 
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
@@ -229,7 +234,7 @@ function readUrlState(): { tab: MarketTab | null; item: string | null } {
 }
 
 /** RobinWood's fixed supply — shown as "Items" in the stats strip. */
-const TOTAL_SUPPLY = 1542;
+const TOTAL_SUPPLY = ROBINWOOD_TOTAL_SUPPLY;
 
 type WithOrder<T> = T & { rawOrder: unknown };
 
@@ -298,6 +303,21 @@ export default function MarketView() {
     listing: WithOrder<Listing>;
     verifiedPriceWei: string;
   } | null>(null);
+  /**
+   * Separate from buyTarget on purpose: a cross-chain listing's price comes
+   * from OpenSea's own consideration data, never from
+   * lib/market/order-validation.ts's validateListingOrder (which assumes a
+   * Robinhood-Chain-shaped order and would reject or misread a foreign
+   * one). Keeping this state and its confirm flow distinct means the native
+   * path in handleBuy/confirmBuy is never touched by this addition.
+   */
+  const [foreignBuyTarget, setForeignBuyTarget] = useState<{
+    listing: Listing;
+    priceWei: string;
+    feeBps: number;
+    chainLabel: string;
+  } | null>(null);
+  const [foreignBuyBusy, setForeignBuyBusy] = useState(false);
   const [acceptTarget, setAcceptTarget] = useState<{
     offer: WithOrder<Listing>;
     /** Seller NET proceeds in WETH wei, re-derived from the signed order. */
@@ -553,6 +573,22 @@ export default function MarketView() {
       }
       const who = await requireAccount();
       if (!who) return;
+      if (isCrossChainBuyable(listing)) {
+        // Branch out BEFORE any Robinhood-Chain-specific derivation below --
+        // validateListingOrder assumes a Robinhood-Chain order shape and
+        // would misread or reject a foreign one. Price shown here is the
+        // listing's own summary data; the REAL, fresh, fulfillable price is
+        // re-derived from fetchListingFulfillmentData at confirm time (see
+        // confirmForeignBuy), same "never trust cached order data" rule
+        // foreign-fulfill.ts's own header documents.
+        setForeignBuyTarget({
+          listing,
+          priceWei: listing.priceWei,
+          feeBps: FOREIGN_FEE_BPS,
+          chainLabel: `${chainDisplayName(listing.foreignChainSlug!)} via ${venueLabel(listing)}`,
+        });
+        return;
+      }
       try {
         const full = listings.find((l) => l.id === listing.id);
         if (!full) throw new Error("Listing no longer available.");
@@ -604,6 +640,41 @@ export default function MarketView() {
       setStatus(null);
     }
   }, [buyTarget, account, refresh]);
+
+  /**
+   * Foreign-chain counterpart to confirmBuy. Deliberately does not touch
+   * loadSeaport/fulfillOrder (the Robinhood-Chain native path) at all --
+   * routes through foreign-fulfill.ts's buyForeignListingNow, which
+   * re-fetches a genuinely fresh, fulfillable signed order from OpenSea
+   * with the connected wallet's own address immediately before building
+   * the transaction (see that module's header for why cached order data is
+   * never trusted), switches the wallet to the target chain if needed, and
+   * calls MarketplankForeignFeeRouter directly.
+   */
+  const confirmForeignBuy = useCallback(async () => {
+    if (!foreignBuyTarget || !account) return;
+    setError(null);
+    try {
+      setForeignBuyBusy(true);
+      setStatus("Confirm in wallet…");
+      const { buyForeignListingNow } = await import(
+        "@/lib/market/multichain/trading/foreign-fulfill"
+      );
+      await buyForeignListingNow({
+        chainSlug: foreignBuyTarget.listing.foreignChainSlug!,
+        orderHash: foreignBuyTarget.listing.foreignOrderHash!,
+      });
+      setForeignBuyTarget(null);
+      setStatus("Purchase confirmed.");
+      await refresh();
+    } catch (e) {
+      console.error("Cross-chain buy failed:", e);
+      setError(e instanceof Error ? e.message : "Cross-chain purchase failed.");
+    } finally {
+      setForeignBuyBusy(false);
+      setStatus(null);
+    }
+  }, [foreignBuyTarget, account, refresh]);
 
   /**
    * Opens the sweep checkout. The plan arrives already validated (planSweep
@@ -1151,6 +1222,22 @@ export default function MarketView() {
         />
       )}
 
+      {foreignBuyTarget && COLLECTION && (
+        <BuyConfirm
+          listing={foreignBuyTarget.listing}
+          collection={COLLECTION}
+          verifiedPriceWei={foreignBuyTarget.priceWei}
+          busy={foreignBuyBusy}
+          error={error}
+          onConfirm={confirmForeignBuy}
+          onCancel={() => {
+            setError(null);
+            setForeignBuyTarget(null);
+          }}
+          crossChain={{ chainLabel: foreignBuyTarget.chainLabel, feeBps: foreignBuyTarget.feeBps }}
+        />
+      )}
+
       {/* Every tab below stays mounted once first visited instead of
           unmounting on switch — a tab you've already opened snaps back
           instantly (its data, images, and any live connections are still
@@ -1166,6 +1253,13 @@ export default function MarketView() {
               labelled={false}
             >
               <div className="space-y-3">
+                {/* Quiet link, not a headline -- same precedent as
+                    /floorboards' own footer/hint-only entry point
+                    (docs/surface-contracts.md). The fixed six-tab rail
+                    cannot gain a seventh tab for this, so the global
+                    multichain market gets a small text link here instead
+                    of new tab-rail real estate. */}
+                <MarketBreadcrumb variant="native" />
                 <EventCountdown />
                 {COLLECTION && (
                   <CollectionStats

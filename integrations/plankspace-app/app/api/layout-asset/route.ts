@@ -1,0 +1,2 @@
+import {env} from "cloudflare:workers";
+export async function GET(request:Request){const key=new URL(request.url).searchParams.get("key")||"";if(!/^layout-assets\/[0-9a-zx]{42}\/[a-f0-9]{24}$/.test(key))return new Response("Not found",{status:404});const object=await (env as typeof env&{BUCKET:R2Bucket}).BUCKET.get(key);if(!object)return new Response("Not found",{status:404});return new Response(object.body,{headers:{"content-type":object.httpMetadata?.contentType||"image/webp","cache-control":"public,max-age=31536000,immutable","x-content-type-options":"nosniff"}})}

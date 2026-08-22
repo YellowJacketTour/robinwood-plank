@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
+import { Uncial_Antiqua, Nunito_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import PlankBackground from "@/components/PlankBackground";
 import WoodAmpProvider from "@/components/woodamp/WoodAmpProvider";
@@ -25,6 +25,26 @@ const body = Nunito_Sans({
   subsets: ["latin"],
 });
 
+/**
+ * Trading-surface data typeface (design-direction preview, 2026-08-19 --
+ * see docs the artifact this branch implements). Real trader terminals
+ * (Axiom, Photon, Blur, Tensor -- verified live via research, not
+ * assumed) universally set price/volume/percentage data in a monospace
+ * face: tabular-nums alone keeps digit WIDTHS aligned in a proportional
+ * font, but only a true monospace keeps every GLYPH (currency symbols,
+ * arrows, the decimal point itself) on a fixed grid, which is what makes
+ * a scanning trader's eye track a column instead of re-parsing each row.
+ * Scoped narrowly: this is a THIRD variable alongside the existing
+ * --font-stencil (headings) and --font-body (prose/UI) -- it never
+ * replaces either, and nothing outside explicitly-opted-in trading-data
+ * cells should reference --font-data at all.
+ */
+const dataFont = JetBrains_Mono({
+  variable: "--font-data",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
 export const metadata: Metadata = rootMetadata;
 
 export const viewport: Viewport = {
@@ -44,7 +64,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${stencil.variable} ${body.variable} h-full antialiased`}
+      className={`${stencil.variable} ${body.variable} ${dataFont.variable} h-full antialiased`}
       // The accent-theme bootstrap script below intentionally sets a
       // `style` attribute on this element before hydration (same pattern
       // every dark-mode bootstrap script uses) -- React correctly notices

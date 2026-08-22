@@ -19,7 +19,10 @@ on:
 
 jobs:
   doctor:
-    runs-on: ubuntu-latest
+    # Scoped, non-ambient label -- see deploy-vault-v3.yml's own comment on
+    # why the bare "self-hosted" label is deliberately never used anywhere
+    # in this repo.
+    runs-on: [self-hosted, robinwood-trusted-dispatch]
     environment: inmotion-staging
     env:
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
@@ -92,3 +95,15 @@ jobs:
           echo "=== running app: which release is current"
           ls -la "$app_dir/current" 2>/dev/null | head -2 || echo "(no current symlink)"
           REMOTE
+
+      - name: Wipe the SSH key from this machine
+        # Flagged by an automated security review 2026-08-20: on a
+        # GitHub-hosted runner the whole VM is destroyed after the job, so
+        # this step wouldn't matter. On a self-hosted runner -- especially
+        # a personal machine, not a dedicated/ephemeral box -- $HOME/.ssh
+        # is real, persistent storage. Without this, INMOTION_SSH_KEY sits
+        # on disk in plaintext indefinitely after every run. if: always()
+        # so it still runs even if an earlier step failed.
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"

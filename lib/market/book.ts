@@ -7,8 +7,18 @@ import type { Listing, ListingVenue } from "@/lib/market/types";
 /**
  * Where a foreign row links to, per venue. Adding a marketplace means adding
  * a line here and nothing else in this file.
+ *
+ * Partial, not Record<ListingVenue, ...>: this map only ever needs to cover
+ * the venues that actually flow through THIS RobinWood-native merge path
+ * (readOpenSeaListings/readPulpListings, both scoped to RobinWood's own
+ * collection). magiceden/unisat listings never reach mergeBook -- they come
+ * from the separate multichain listings route
+ * (app/api/market/multichain/listings/route.ts), which already stamps its
+ * own externalUrl per row. The lookup below already fails soft with a
+ * warning for any venue with no entry, so a Partial here is honest about
+ * that, not a functional change.
  */
-const EXTERNAL_URL: Record<ListingVenue, (contract: string, tokenId: string) => string> = {
+const EXTERNAL_URL: Partial<Record<ListingVenue, (contract: string, tokenId: string) => string>> = {
   opensea: openSeaTokenUrl,
   pulp: pulpTokenUrl,
 };

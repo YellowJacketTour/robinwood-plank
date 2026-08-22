@@ -40,6 +40,11 @@ export async function GET(req: Request) {
       scoredCount: snapshot.scoredCount,
       tierCounts: snapshot.tierCounts,
       byTokenId,
+      // Rank-1-first token ids (up to 12), already computed by
+      // computeRaritySnapshot -- surfaced so a caller can show the single
+      // rarest real plank (e.g. GlobalMarketHub's home-chain card) without
+      // re-deriving rank from the full byTokenId map itself.
+      topRarest: snapshot.topRarest,
     };
     payloadCache = { at: Date.now(), body };
     return cachedPublicJson(body, "rarity", { headers: { "X-Rarity": "fresh" } });

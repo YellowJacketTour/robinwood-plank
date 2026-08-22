@@ -37,7 +37,7 @@ const securityHeaders = [
       // players (postMessage-controlled, no provider SDK script — so
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
-      "frame-src 'self' http://localhost:5173 http://127.0.0.1:5173 https://verify.walletconnect.org https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://spaceback-social.degenwaffle.chatgpt.site",
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://spaceback-social.degenwaffle.chatgpt.site",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
@@ -47,6 +47,43 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Arbitrary NFT CDNs (OpenSea seadn, Magic Eden, Ordinals, IPFS gateways).
+  // ListingCard also marks remote art unoptimized; this keep next/image from
+  // crashing the whole collection page when a fallback uses collection.image.
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**.seadn.io" },
+      { protocol: "https", hostname: "i.seadn.io" },
+      { protocol: "https", hostname: "i2c.seadn.io" },
+      { protocol: "https", hostname: "openseauserdata.com" },
+      { protocol: "https", hostname: "**.openseauserdata.com" },
+      { protocol: "https", hostname: "img.seadn.io" },
+      { protocol: "https", hostname: "**.magiceden.dev" },
+      { protocol: "https", hostname: "**.magiceden.io" },
+      { protocol: "https", hostname: "arweave.net" },
+      { protocol: "https", hostname: "**.arweave.net" },
+      { protocol: "https", hostname: "ipfs.io" },
+      { protocol: "https", hostname: "**.ipfs.io" },
+      { protocol: "https", hostname: "nftstorage.link" },
+      { protocol: "https", hostname: "**.nftstorage.link" },
+      { protocol: "https", hostname: "ordinals.com" },
+      { protocol: "https", hostname: "www.ordinals.com" },
+      { protocol: "https", hostname: "turbo.ordinalswallet.com" },
+      { protocol: "https", hostname: "media.ordinalswallet.com" },
+      { protocol: "https", hostname: "cdn.ordinalswallet.com" },
+      { protocol: "https", hostname: "static.unisat.io" },
+      { protocol: "https", hostname: "next-cdn.unisat.space" },
+      { protocol: "https", hostname: "we-assets.pinit.io" },
+      { protocol: "https", hostname: "coin-images.coingecko.com" },
+      { protocol: "https", hostname: "www.miladymaker.net" },
+      { protocol: "https", hostname: "miladymaker.net" },
+      { protocol: "https", hostname: "ord-mirror.magiceden.dev" },
+      { protocol: "https", hostname: "creator-hub-prod.s3.us-east-2.amazonaws.com" },
+      { protocol: "https", hostname: "**.alchemy.com" },
+      { protocol: "https", hostname: "**.cloudinary.com" },
+      { protocol: "https", hostname: "lh3.googleusercontent.com" },
+    ],
+  },
   // Dev-only: the dev server rejects cross-origin requests by default, which
   // blocks sharing a local preview through a tunnel. Has no effect on
   // production builds — it only widens which origins `next dev` will answer.
@@ -189,6 +226,20 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=10, s-maxage=30, stale-while-revalidate=120",
+          },
+        ],
+      },
+      // Precomputed by scripts/refresh-market-data.ts --multichain on the
+      // existing cron (lib/market/multichain/sync.ts), never live-fetched
+      // per request -- a 2-minute browser/CDN cache costs nothing and keeps
+      // this endpoint from ever becoming a per-visitor hit against Postgres,
+      // let alone the underlying rate-limited third-party NFT APIs.
+      {
+        source: "/api/market/multichain",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=120, s-maxage=300, stale-while-revalidate=600",
           },
         ],
       },

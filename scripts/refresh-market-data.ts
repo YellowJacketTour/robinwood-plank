@@ -74,15 +74,37 @@ const explicit = [
   "--token-registry",
   "--owners",
   "--events",
+  "--multichain",
+  "--discover-evm",
+  "--discover-hypersync",
+  "--discover-hypersync-backfill",
+  "--discover-bitcoin-collections",
+  "--discover-ordiscan-collections",
+  "--discover-solana-collections",
+  "--discover-robinhood",
+  "--discover-robinhood-opensea",
+  "--discover-opensea-bulk",
+  "--own-ranking",
+  "--scaffold-rarity",
 ].filter((t) => args.has(t));
 
-/** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
+/**
+ * Full runs include the expensive collection-wide rebuilds; incremental
+ * ones don't. scaffold-rarity is FULL-ONLY on purpose: own-ranking's
+ * per-tick promotion is a handful of metadata lookups, but scaffolding a
+ * newly-registered collection means paginating its ENTIRE token set
+ * (up to 100 pages, see rarity-index-runner.ts) -- real work that doesn't
+ * belong on a 2-minute incremental cadence. Its own freshness-skip
+ * (scaffold-all-collections.ts's --freshDays default) keeps a full run
+ * cheap on every tick after the first anyway -- most collections are
+ * already fresh and get skipped in one cheap read.
+ */
 const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -373,6 +395,328 @@ async function main(): Promise<void> {
     const { getCollectionIndex } = await import("../lib/market/collection-index");
     const index = await getCollectionIndex();
     return `${index.count}/${index.totalSupply} tokens`;
+  });
+
+  // Multi-chain collection index — completely independent of every step
+  // above (different tables, different upstream APIs, no Robinhood-chain
+  // dependency), so a failure here never blocks or is blocked by the rest
+  // of this run. See lib/market/multichain/ for the adapter architecture.
+  await step("multichain", async () => {
+    const { runMultichainSync } = await import("../lib/market/multichain/sync");
+    const run = await runMultichainSync();
+    return (
+      `${run.synced} synced, ${run.failed} failed, ${run.skipped} skipped` +
+      (run.errors.length > 0
+        ? ` — ${run.errors.slice(0, 5).map((e) => `${e.chainSlug}:${e.contractAddress.slice(0, 10)} (${e.error.slice(0, 60)})`).join("; ")}`
+        : "")
+    );
+  });
+
+  // Free, always-scanning EVM collection discovery -- watches raw chain
+  // activity instead of asking a ranking API (none exists for free as of
+  // 2026-08-17; see lib/market/multichain/discovery/evm-log-scan.ts's
+  // header). Runs AFTER multichain on purpose: any collection this
+  // discovers gets its first snapshot written immediately, so the very
+  // next --multichain tick has nothing new to catch up on.
+  await step("discover-evm", async () => {
+    const { runAllEvmDiscoveryScans } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllEvmDiscoveryScans();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // The fast path -- see lib/market/multichain/discovery/hypersync-evm-scan.ts's
+  // own header. Same candidate logic and cursor table as discover-evm above,
+  // just up to ~2000x faster per real Envio benchmarks, so real forward
+  // progress toward full chain history is actually achievable instead of
+  // permanently bottlenecked at 10 blocks/tick. No-ops with a clear error
+  // (not a crash) when ENVIO_API_TOKEN isn't set -- this is additive, not a
+  // replacement for discover-evm, which keeps running either way.
+  await step("discover-hypersync", async () => {
+    const { runAllHypersyncDiscoveryScans } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+    const runs = await runAllHypersyncDiscoveryScans();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata, ${r.logsScanned} logs)`
+    );
+    return parts.join("; ");
+  });
+
+  // Historical backfill -- see runHypersyncBackfillScan's own header for
+  // why this is a genuinely separate function from discover-hypersync
+  // above, not just "run it with different bounds": forward discovery can
+  // never reach anything before the moment it first started, so this
+  // covers [0, that starting point) instead, genesis-forward, gap-free by
+  // construction. Runs on every incremental tick (cheap once a chain
+  // reports done: true -- one no-op read per tick after that), not just
+  // --full, so real backfill progress accumulates continuously.
+  await step("discover-hypersync-backfill", async () => {
+    const { runHypersyncBackfillScan } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+    const { EVM_CHAIN_ID } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const parts: string[] = [];
+    for (const chainSlug of Object.keys(EVM_CHAIN_ID)) {
+      try {
+        const r = await runHypersyncBackfillScan({ chainSlug });
+        parts.push(
+          r.error
+            ? `${chainSlug}: ERR(${r.error.slice(0, 60)})`
+            : r.done
+              ? `${chainSlug}: DONE (full history covered)`
+              : `${chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata, ${r.logsScanned} logs)`
+        );
+      } catch (error) {
+        parts.push(`${chainSlug}: ERR(${(error instanceof Error ? error.message : String(error)).slice(0, 60)})`);
+      }
+    }
+    return parts.join("; ");
+  });
+
+  // Exhaustive Bitcoin Ordinals collection discovery -- see
+  // unisat-collection-list-scan.ts's own header for why this is the real
+  // answer (UniSat's own complete collection registry, ~2,625 real
+  // collections total, not the 500M+-event parent-child provenance walk
+  // that would otherwise be needed on a chain with no ERC-721-style
+  // contract concept). Bounded per tick (maxPages) same as every other
+  // discovery step; resumable via its own cursor, reports done: true once
+  // the real, reported total has been fully walked.
+  await step("discover-bitcoin-collections", async () => {
+    const { runUnisatCollectionListScan } = await import("../lib/market/multichain/discovery/unisat-collection-list-scan");
+    const r = await runUnisatCollectionListScan({ maxPages: full ? 30 : 10 });
+    return r.error
+      ? `ERR(${r.error.slice(0, 60)})`
+      : `start ${r.start}/${r.total}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedHiddenOrEmpty} hidden/empty)${r.done ? " — DONE, full catalog walked" : ""}`;
+  });
+
+  // Second real Bitcoin Ordinals collection-discovery source, alongside
+  // discover-bitcoin-collections above -- see ordiscan-collection-scan.ts's
+  // own header for why it's registered under its own "ordiscan-ordinals"
+  // adapter rather than merged into UniSat's rows (Ordiscan's slug and
+  // UniSat's collectionId are two different indexers' own identity
+  // strings for what may or may not be the same real-world collection).
+  await step("discover-ordiscan-collections", async () => {
+    const { runOrdiscanCollectionScan } = await import("../lib/market/multichain/discovery/ordiscan-collection-scan");
+    const r = await runOrdiscanCollectionScan({ maxPages: full ? 30 : 10 });
+    return `page ${r.page}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedEmpty} empty)${r.done ? " — DONE, full catalog walked" : ""}`;
+  });
+
+  // Exhaustive Solana collection discovery via Helius DAS -- see
+  // helius-collection-scan.ts's own header for the real, live-verified
+  // scope: covers Metaplex's newer Core standard exhaustively, NOT legacy
+  // (V1_NFT) collections, which stay on magiceden-solana.ts's ranked list
+  // (no clean collection-identity signal exists for those in a broad
+  // search, same class of problem already declined for Bitcoin's raw
+  // inscription walk rather than force a fragile heuristic).
+  await step("discover-solana-collections", async () => {
+    const { runHeliusCollectionScan } = await import("../lib/market/multichain/discovery/helius-collection-scan");
+    const r = await runHeliusCollectionScan({ maxPages: full ? 20 : 5 });
+    return r.error
+      ? `ERR(${r.error.slice(0, 60)})`
+      : `${r.pagesWalked} pages, +${r.registered} new${r.done ? " — DONE, full MplCore catalog walked" : ""}`;
+  });
+
+  // "Stage B" for the HOME chain itself -- see robinhood-chain-scan.ts's
+  // own header for why this can't reuse discover-evm's Alchemy-metadata
+  // validation (Robinhood Chain is a private Orbit L3 Alchemy doesn't
+  // list). Runs the same conservative CHUNK_BLOCKS window every tick,
+  // same cadence as every other discovery step.
+  await step("discover-robinhood", async () => {
+    const { runRobinhoodChainDiscoveryScan } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
+    const r = await runRobinhoodChainDiscoveryScan();
+    return `blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidatesSeen} candidates, ${r.skippedNotArt} not-art)`;
+  });
+
+  // Bulk Robinhood-Chain discovery via OpenSea's own chain-wide
+  // /collections?chain=robinhood list -- verified live 2026-08-18 to return
+  // real Robinhood-Chain collections OpenSea already indexes, far faster
+  // than discover-robinhood's raw eth_getLogs scan (see
+  // opensea-robinhood-scan.ts's own header). Runs after the raw scan so
+  // both paths' "already tracked" checks see each other's just-registered
+  // rows within the same tick.
+  await step("discover-robinhood-opensea", async () => {
+    const { runOpenSeaRobinhoodDiscoveryScan } = await import(
+      "../lib/market/multichain/discovery/opensea-robinhood-scan"
+    );
+    const r = await runOpenSeaRobinhoodDiscoveryScan();
+    if (r.error) return `ERR(${r.error.slice(0, 80)})`;
+    return `${r.pagesScanned} pages, ${r.entriesSeen} seen, +${r.registered} new (${r.skippedNotArt} not-art, ${r.skippedNotErc721} not-erc721, ${r.skippedAlreadyTracked} already-tracked)`;
+  });
+
+  // Same technique, generalized to the 7 real foreign EVM chains --
+  // OpenSea's bulk /collections?chain={slug} list enumerates real contract
+  // addresses far faster than discover-evm's 10-block-per-tick scanner
+  // (which registered ~300 collections total across 8 chains after 85+
+  // ticks this session). See opensea-bulk-scan.ts's own header for why
+  // this is safe to use for discovery (not ranking) despite OpenSea's list
+  // having no floor/volume fields -- every candidate still gets verified
+  // through the SAME alchemyNftAdapter.fetchSnapshot + isNotRealCollectibleArt
+  // gate discover-evm already trusts.
+  await step("discover-opensea-bulk", async () => {
+    const { runAllOpenSeaBulkScans } = await import("../lib/market/multichain/discovery/opensea-bulk-scan");
+    const runs = await runAllOpenSeaBulkScans();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.pagesScanned}p, +${r.registered} new (${r.entriesSeen} seen, ${r.skippedNotArt} not-art, ${r.skippedNoMetadata} no-meta, ${r.skippedAlreadyTracked} tracked)`
+      )
+      .join("; ");
+  });
+
+  // Self-hosted, on-chain Seaport OrderFulfilled fill index -- see
+  // migration 023_seaport_fill_index.sql and lib/market/multichain/
+  // seaport-fill-indexer.ts's own headers. Same backfill-and-live-sync-
+  // are-the-same-call property as the "events" step above (cursor per
+  // chain, forward-only from first run rather than a historical backfill
+  // -- documented scope decision, not a gap).
+  await step("seaport-fills", async () => {
+    const { scanAllChainsForFills } = await import("../lib/market/multichain/seaport-fill-indexer");
+    const runs = await scanAllChainsForFills();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.fromBlock}-${r.toBlock} +${r.fillsWritten}/${r.logsScanned}`
+      )
+      .join("; ");
+  });
+
+  // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
+  // v4 EVM API (the one real candidate for a free cross-EVM ranking
+  // endpoint) has been confirmed live 2026-08-17, multiple retests, as
+  // "503 no healthy upstream" -- a genuine outage, not a missing feature.
+  // Rather than block on it, this reads back what discover-evm's per-tick
+  // scans have been accumulating into plank_multichain_activity_stats
+  // (migration 015) all along: our OWN observed top-by-transfer-volume
+  // ranking, built for free from data already collected. Runs last so it
+  // benefits from this tick's own discover-evm activity write.
+  await step("own-ranking", async () => {
+    const { runAllOwnRankingPromotions } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllOwnRankingPromotions();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: ${r.ranked} ranked, +${r.registered} new (${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // Brings any collection own-ranking just registered (or any collection
+  // that's aged past its freshness window) up to full rarity/trait parity
+  // -- the "Marketplank feel" (tier badges, floors-by-rarity, trait
+  // filters, criteria bids) is otherwise stuck at zero for a collection
+  // until someone manually runs scripts/index-foreign-rarity.ts for it.
+  // Runs last so it benefits from this tick's own own-ranking promotions.
+  await step("scaffold-rarity", async () => {
+    const { scaffoldAllTrackedCollections } = await import("../lib/market/multichain/rarity-index-runner");
+    const result = await scaffoldAllTrackedCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity] ${line}`),
+    });
+    return `${result.evmInScope} EVM tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed; ${result.solanaSkipped} Solana routed to scaffold-rarity-solana below`;
+  });
+
+  // Solana's own real trait/rarity scaffold -- see
+  // helius-rarity-index-runner.ts's own header for why this is a
+  // DIFFERENT, real capability from the "Solana has no clean grouping
+  // signal" limitation documented for broad DISCOVERY (helius-collection-
+  // scan.ts): once a collection's address is already known (every row
+  // scaffold-rarity's own solanaSkipped count above represents), Helius's
+  // real grouping filter cleanly enumerates its real member NFTs with
+  // real trait attributes, regardless of legacy/pNFT vs. MplCore standard.
+  await step("scaffold-rarity-solana", async () => {
+    const { scaffoldAllTrackedSolanaCollections } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+    const result = await scaffoldAllTrackedSolanaCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity-solana] ${line}`),
+    });
+    return `${result.totalTracked} Solana tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed`;
+  });
+
+  // Bitcoin's own real trait/rarity scaffold -- see unisat-rarity-index-
+  // runner.ts's own header for the real source (UniSat's marketplace
+  // activity log, not a collection enumeration) and why it's ALWAYS
+  // partial coverage by construction, never a bug to chase to 100%.
+  await step("scaffold-rarity-bitcoin", async () => {
+    const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
+    const result = await scaffoldAllTrackedBitcoinCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity-bitcoin] ${line}`),
+    });
+    return `${result.totalTracked} Bitcoin tracked -> ${result.indexed} indexed (partial coverage), ${result.skippedFresh} fresh, ${result.failed} failed`;
+  });
+
+  // Real 24h volume/sales for every EVM chain, from this app's own
+  // first-party plank_seaport_fills index -- see
+  // updateEvmVolumeFromSeaportFills's own header (store.ts) for why this
+  // was a real, present, unused data asset before 2026-08-20. Covers
+  // Robinhood Chain's own community collections too, which have zero
+  // OpenSea presence and so had zero other possible source of this data.
+  await step("evm-fill-stats", async () => {
+    const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
+    const { ROBINHOOD_CHAIN_SLUG } = await import("../lib/market/multichain/trading/non-evm-chains");
+    const chains = [ROBINHOOD_CHAIN_SLUG, ...FOREIGN_CHAINS.map((c) => c.chainSlug)];
+    let totalUpdated = 0;
+    for (const chainSlug of chains) {
+      const r = await updateEvmVolumeFromSeaportFills(chainSlug);
+      totalUpdated += r.updated;
+    }
+    return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
+  });
+
+  // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,
+  // via CoinGecko's free public NFT API -- see coingecko-nft-stats.ts's
+  // own header for the live-verified source and the exact-slug-only
+  // matching discipline. Two separate steps (not one) so a failure on one
+  // chain never blocks the other, same isolation every other per-chain
+  // step in this file already has.
+  await step("coingecko-solana-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("solana-mainnet", full ? 100 : 20);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-bitcoin-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("bitcoin-mainnet", full ? 100 : 20);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  // BNB OpenSea list slugs 404 /stats (pancake-squad zeros). Exact-contract CG is the liquid book.
+  await step("coingecko-bnb-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("bnb-mainnet", full ? 80 : 15);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-avax-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("avax-mainnet", full ? 80 : 15);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-eth-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("eth-mainnet", full ? 40 : 10);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-polygon-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("polygon-mainnet", full ? 40 : 10);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-base-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("base-mainnet", full ? 30 : 8);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-arb-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("arb-mainnet", full ? 30 : 8);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-opt-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("opt-mainnet", full ? 30 : 8);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
   });
 
   const failed = results.filter((r) => !r.ok);
