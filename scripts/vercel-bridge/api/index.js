@@ -1,99 +1,77 @@
 export const config = { runtime: "edge" };
 
-const ORIGIN = "https://plank-love.garden-equity-field-0042.workers.dev";
-
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailers",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-  "content-length",
-]);
-
 /**
- * Bridge for phones still dialing cached Vercel IPs for plank.love.
- * Proxies the full Cloudflare Worker origin so the address bar stays plank.love.
- *
- * Must forward Next.js RSC / router headers or the client shows a soft 404
- * after first paint when JS hydrates against the wrong payload.
+ * Sticky mobile/wallet DNS still dials old Vercel IPs for plank.love.
+ * Many wallet WebViews break on cross-origin 302. Serve a tiny HTML
+ * handoff with meta-refresh + visible link instead.
  */
+const LIVE = "https://plank-love.garden-equity-field-0042.workers.dev";
+
+function escapeHtmlAttr(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export default async function handler(req) {
   const incoming = new URL(req.url);
-  const target = ORIGIN + incoming.pathname + incoming.search;
+  const dest = LIVE + incoming.pathname + incoming.search + (incoming.hash || "");
+  // dest is built from attacker-controlled path/query/hash. It's safe as a
+  // 302 Location header and inside JSON.stringify() for the JS redirect
+  // below, but the two places it's interpolated into raw HTML attributes
+  // (content="...", href="...") need HTML-attribute escaping or a crafted
+  // path/query containing a `"` or `>` could break out and inject markup.
+  const destAttr = escapeHtmlAttr(dest);
 
-  const headers = new Headers();
-  req.headers.forEach((value, key) => {
-    const k = key.toLowerCase();
-    if (HOP_BY_HOP.has(k)) return;
-    // Avoid leaking Vercel internal headers upstream
-    if (k.startsWith("x-vercel-")) return;
-    headers.set(key, value);
-  });
-  headers.set("x-plank-bridge", "1");
-  headers.set("x-forwarded-host", incoming.hostname);
-  headers.set("x-forwarded-proto", "https");
-
-  let upstream;
-  try {
-    upstream = await fetch(target, {
-      method: req.method,
-      headers,
-      redirect: "manual",
-      body:
-        req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-      // @ts-expect-error duplex needed for streaming body on some runtimes
-      duplex: "half",
-    });
-  } catch {
-    return new Response(
-      `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>plank.love</title>
-<body style="font-family:system-ui;padding:2rem;background:#14100b;color:#f8d98a">
-<h1>Temporary bridge error</h1>
-<p>Open the live Cloudflare host:</p>
-<p><a style="color:#f8d98a" href="https://plank-love.garden-equity-field-0042.workers.dev${incoming.pathname}">Continue to Marketplank</a></p>
-</body>`,
-      { status: 502, headers: { "content-type": "text/html; charset=utf-8" } }
+  // Prefer instant redirect for normal browsers
+  const ua = (req.headers.get("user-agent") || "").toLowerCase();
+  const isWalletish =
+    /metamask|trust|coinbase|rainbow|phantom|zerion|imtoken|tokenpocket|wallet|webview|fbav|instagram/i.test(
+      ua
     );
+
+  if (!isWalletish) {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: dest,
+        "Cache-Control": "no-store",
+        "X-Plank-Bridge": "302-to-cf-worker",
+      },
+    });
   }
 
-  // Absolute redirect to workers.dev → rewrite to same path on plank.love
-  if (upstream.status >= 300 && upstream.status < 400) {
-    const loc = upstream.headers.get("location");
-    if (loc) {
-      try {
-        const u = new URL(loc, ORIGIN);
-        if (
-          u.hostname.includes("workers.dev") ||
-          u.hostname.includes("plank.love")
-        ) {
-          const rewritten = incoming.origin + u.pathname + u.search + u.hash;
-          return Response.redirect(rewritten, upstream.status);
-        }
-      } catch {
-        /* fall through */
-      }
-    }
-  }
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta http-equiv="refresh" content="0;url=${destAttr}"/>
+  <title>Opening Marketplank…</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#14100b;color:#f8d98a;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;text-align:center}
+    a{color:#f8d98a;font-weight:700;font-size:1.15rem}
+    p{opacity:.8;max-width:22rem;line-height:1.45}
+  </style>
+  <script>location.replace(${JSON.stringify(dest)});</script>
+</head>
+<body>
+  <div>
+    <p>Loading Marketplank…</p>
+    <p><a href="${destAttr}">Tap here if it doesn’t open</a></p>
+  </div>
+</body>
+</html>`;
 
-  const out = new Headers();
-  upstream.headers.forEach((value, key) => {
-    const k = key.toLowerCase();
-    if (HOP_BY_HOP.has(k)) return;
-    if (k === "content-encoding") return;
-    out.set(key, value);
-  });
-  out.set("x-plank-bridged", "vercel-to-cf");
-  out.set("cache-control", "public, max-age=0, must-revalidate");
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: out,
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "X-Plank-Bridge": "html-handoff-to-cf-worker",
+    },
   });
 }

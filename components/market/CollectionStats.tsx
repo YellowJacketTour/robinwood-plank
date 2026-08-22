@@ -27,9 +27,21 @@ export default function CollectionStats({
 }: Props) {
   const [recordWei, setRecordWei] = useState<string | null>(null);
   const [volumeWei, setVolumeWei] = useState<string | null>(null);
+  const [holders, setHolders] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    swrJson<{ holders?: number | null }>("/api/market/holders", {
+      ttlMs: 60_000,
+      swrMs: 300_000,
+      session: true,
+    })
+      .then((data) => {
+        if (!cancelled && typeof data.holders === "number" && data.holders > 0) {
+          setHolders(data.holders);
+        }
+      })
+      .catch(() => {});
     swrJson<{
       highestWei?: string | null;
       highestPlatform?: string | null;
@@ -95,6 +107,10 @@ export default function CollectionStats({
         : String(listings.length),
     },
     {
+      label: "Holders",
+      value: holders != null ? holders.toLocaleString() : "…",
+    },
+    {
       label: "Best offer",
       value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} WETH`,
       wei: bestOfferWei,
@@ -112,7 +128,21 @@ export default function CollectionStats({
   ];
 
   return (
-    <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-6 sm:overflow-hidden">
+    <div className="space-y-2">
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[0.65rem] text-foreground/50">
+      <span title={collection.contractAddress}>{collection.contractAddress}</span>
+      {collection.slug === "robinwood" && (
+        <a
+          href="https://x.com/RobinWoodPlank"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-sans font-bold text-gold-300 hover:underline"
+        >
+          @RobinWoodPlank
+        </a>
+      )}
+    </p>
+    <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-7 sm:overflow-hidden">
       {stats.map((s) => (
         <div
           key={s.label}
@@ -123,11 +153,12 @@ export default function CollectionStats({
           </dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {s.value}
-            {s.wei && <EthUsdValue wei={s.wei} className="block font-sans text-[0.62rem] text-foreground/50" />}
+            {s.wei && <EthUsdValue wei={s.wei} className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90" />}
           </dd>
         </div>
       ))}
       <span className="sr-only">{collection.name} collection statistics</span>
     </dl>
+    </div>
   );
 }

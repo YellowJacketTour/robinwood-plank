@@ -1,6 +1,15 @@
 /** Shared shapes for Marketplank. See docs/marketplank/SPEC.md. */
 
-export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "my-nfts" | "positions";
+/**
+ * "sell" is a MultichainCollectionView.tsx-only addition (Marketplank-native
+ * listing on a foreign EVM chain) -- NOT added to lib/market/navigation.ts's
+ * shared MARKET_TABS array, which stays the canonical set every OTHER
+ * page (including Robinhood Chain's own native marketplace) uses
+ * unmodified. MultichainCollectionView.tsx builds its own local tabs array
+ * that conditionally appends "sell", so this new literal is additive to the
+ * type only.
+ */
+export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "my-nfts" | "positions" | "sell";
 
 export type CollectionTrustBadge = "lp-burned" | "ownership-renounced" | "verified";
 
@@ -37,13 +46,36 @@ export type MarketCollection = {
 /**
  * Marketplaces other than ours that we surface listings from. Absence of a
  * venue on a Listing means Marketplank; every member here is display-only.
+ *
+ * "magiceden" (Solana) and "unisat" (Bitcoin Ordinals) added additively --
+ * see lib/market/multichain/adapters/magiceden-solana-trade.ts and
+ * unisat-ordinals-trade.ts for why these two are per-venue, instruction/PSBT
+ * based flows rather than a portable signed Seaport order like every "opensea"
+ * row here. isCrossChainBuyable() below treats both the same as "opensea" for
+ * Buy-affordance purposes (foreignChainSlug + foreignOrderHash present),
+ * while foreign-fulfill.ts's buySolanaListingNow/buyBitcoinListingNow branch
+ * on the venue to build the right kind of transaction.
  */
-export type ListingVenue = "opensea" | "pulp";
+export type ListingVenue = "opensea" | "pulp" | "magiceden" | "unisat";
 
 export type Listing = {
   id: string;
   collectionSlug: string;
+  /**
+   * Which chain THIS Marketplank-native order lives on -- "robinhood" (or
+   * absent, same default the DB column carries) unless this is a
+   * Marketplank-native listing on one of the foreign EVM chains (see
+   * lib/market/multichain/trading/foreign-chain-registry.ts). Completely
+   * different from foreignChainSlug below: this field describes OUR OWN
+   * order (venue stays undefined, "ours" per that field's own doc comment),
+   * whereas foreignChainSlug marks a THIRD-PARTY (OpenSea/etc.) order. Never
+   * conflate the two -- isCrossChainBuyable/isForeignListing's "venue
+   * absent means ours" logic depends on them staying separate.
+   */
+  chainSlug?: string;
   tokenId: string;
+  /** Human metadata name when the venue sends one (ME `token.name`, OpenSea `nft.name`). Never a fabricated title. */
+  tokenName?: string;
   /** Wallet that placed this order — the seller for a listing. */
   maker: string;
   priceWei: string;
@@ -70,12 +102,24 @@ export type Listing = {
    * a foreign orderbook: the collection genuinely trades elsewhere too, and
    * hiding that would show buyers an incomplete market.
    *
-   * Foreign listings are never given a Buy button. OpenSea's orders reference
-   * a conduit we do not control and pay no creator royalty, and our own
-   * order-validation deliberately fails closed on a non-zero conduitKey.
-   * PulpMarket's public API is read-only and exposes no signature at all, so
-   * there is nothing to fulfil even in principle. They link out instead, so
-   * the venue that settles the trade is the venue the buyer chose.
+   * On Robinhood Chain, foreign listings are never given a Buy button: an
+   * OpenSea order there references a conduit our own order-validation
+   * deliberately fails closed on (a Robinhood-Chain-specific safety rail
+   * against treating a foreign order as equivalent to our own book), and
+   * PulpMarket's public API is read-only with no signature at all, so there
+   * is nothing to fulfil even in principle.
+   *
+   * On a FOREIGN chain (see foreignChainSlug below), a "venue: opensea"
+   * listing CAN be genuinely bought — via
+   * lib/market/multichain/trading/foreign-fulfill.ts and the deployed
+   * MarketplankForeignFeeRouter, which calls the real Seaport contract
+   * directly rather than treating the order as part of our own book. That
+   * order-validation conduitKey rail doesn't apply here: it exists to
+   * protect the integrity of OUR orderbook, and a foreign-chain trade never
+   * touches it. Creator royalty is whatever the real order's own
+   * consideration embeds (OpenSea's own enforcement), not something this
+   * app adds or removes. Check isCrossChainBuyable(), not this field alone,
+   * before rendering a Buy affordance.
    *
    * TEST FOR "FOREIGN" WITH isForeignListing(), NEVER `venue === "opensea"`.
    * Absence-means-ours plus a widening union is a trap: a comparison against
@@ -85,7 +129,61 @@ export type Listing = {
   venue?: ListingVenue;
   /** Where to send the buyer for a foreign listing. */
   externalUrl?: string;
+  /**
+   * Present only for a listing sourced from a chain other than Robinhood
+   * Chain — one of lib/market/multichain/trading/foreign-chain-registry.ts's
+   * FOREIGN_CHAINS chainSlugs. Undefined means this listing is either ours
+   * or a Robinhood-Chain-native foreign listing (Pulp/legacy OpenSea rows).
+   */
+  foreignChainSlug?: string;
+  /**
+   * The real order hash, needed to fetch a genuinely fulfillable signed
+   * order via fetchListingFulfillmentData() immediately before signing —
+   * never cached, since OpenSea's summary/display data (what populates the
+   * rest of this Listing) carries no usable signature. Present only when
+   * this specific listing is known to be safely re-fetchable that way.
+   */
+  foreignOrderHash?: string;
+  /**
+   * Real per-token traits, present only for a foreign listing (see
+   * app/api/market/multichain/listings/route.ts) -- resolved from the same
+   * OpenSea NFT-detail call already made for imageUrl, at no extra cost.
+   * Used by the Details view alongside foreignTraitCounts (fetched
+   * separately, collection-wide) to show a real "N% of the collection has
+   * this trait" signal -- NOT a full numeric rank, which would require
+   * fetching every token in the collection (see traits/route.ts's header).
+   */
+  traits?: Array<{ traitType: string; value: string }>;
+  /**
+   * Magic Eden M2 SellerTradeState leads from the collection listings
+   * payload — enough to derive the PDA and check the listing on-chain
+   * without a second /v2/tokens/:mint/listings round-trip.
+   */
+  solanaEscrow?: {
+    auctionHouse: string;
+    tokenAccount: string;
+    pdaAddress?: string;
+  };
 };
+
+/**
+ * True only for a foreign listing that can genuinely be bought in-app right
+ * now: sourced from OpenSea (the only venue with a proven fulfillment-data
+ * path — see foreign-orders.ts), tagged with the foreign chain it lives on,
+ * and carrying the order hash needed to re-fetch a real signature. Every
+ * other foreign listing (PulpMarket always; a Robinhood-Chain-native
+ * OpenSea row) stays View-only — see the Listing.venue doc comment for why
+ * those two cases are permanently different, not merely unimplemented.
+ */
+export function isCrossChainBuyable(
+  listing: Pick<Listing, "venue" | "foreignChainSlug" | "foreignOrderHash">
+): boolean {
+  return (
+    (listing.venue === "opensea" || listing.venue === "magiceden" || listing.venue === "unisat") &&
+    Boolean(listing.foreignChainSlug) &&
+    Boolean(listing.foreignOrderHash)
+  );
+}
 
 /**
  * True when this listing is held by a marketplace other than ours.
@@ -105,6 +203,8 @@ export function isForeignListing(listing: Pick<Listing, "venue">): boolean {
 export const VENUE_LABELS: Record<ListingVenue, string> = {
   opensea: "OpenSea",
   pulp: "PulpMarket",
+  magiceden: "Magic Eden",
+  unisat: "UniSat",
 };
 
 export const MARKETPLANK_VENUE_LABEL = "Marketplank";
@@ -139,6 +239,8 @@ export const MARKETPLANK_RELIST_MESSAGE =
 export type Offer = {
   id: string;
   collectionSlug: string;
+  /** Same field, same meaning, as Listing.chainSlug above. */
+  chainSlug?: string;
   /** Absent for collection-wide offers. */
   tokenId?: string;
   /** Present when the offer targets a set of traits rather than one token or the whole collection. */

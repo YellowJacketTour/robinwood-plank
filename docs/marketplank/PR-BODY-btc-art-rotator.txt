@@ -1,0 +1,21 @@
+For bullish0x and bots. Do not merge to master.
+
+## Problem
+Bitcoin hub still showed Art pending after UniSat 403. One vendor dying stopped the whole hydrate.
+
+## Live research (2026-08-20)
+- UniSat open-api: 403 exceeds rate limit
+- Ordiscan: 429 monthly 1000
+- Magic Eden v2 ord/btc: 403 Cloudflare
+- CoinGecko nfts/markets: 401 PRO only
+- CoinGecko nfts/{id} Demo: still 200 (v2 monthly KV 164k was a false jail from list-page counts)
+- turbo.ordinalswallet.com/collection/{exact-slug}: 200 name+icon, keyless. 404 = none.
+
+## Fix
+- bitcoin-art-rotator: skip jailed source, try next. OW -> CG -> UniSat. Persist jail in KV.
+- CG monthly v3 details-only (v2 retired as poisoned).
+- Per-source daily ceilings including ordinals-wallet and unisat-collections.
+- Proxy cdn/media/turbo.ordinalswallet.com.
+- First two local passes: 35/35 then 50/50 filled (OW 74, CG 11). Images 59 -> 150 and climbing.
+
+Fail closed. Exact slug only. Hub GET read-only. Alchemy off.

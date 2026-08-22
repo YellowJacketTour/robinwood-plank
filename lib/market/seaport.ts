@@ -1,11 +1,13 @@
 import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
-import type { Fee, InputCriteria } from "@opensea/seaport-js/lib/types";
+import type { Fee, InputCriteria, TipInputItem } from "@opensea/seaport-js/lib/types";
 import { BrowserProvider, Interface } from "ethers";
 import {
   CHAIN,
   MARKET_FEE_RECIPIENT,
   MARKET_OFFER_CURRENCY,
+  MARKETPLANK_SWAP_FEE_BPS,
+  MARKETPLANK_SWAP_FLAT_FEE_WEI,
   NATIVE_TOKEN_ADDRESS,
   SEAPORT_ADDRESS,
 } from "@/lib/constants";
@@ -28,11 +30,14 @@ import {
 } from "@/lib/market/royalty";
 import type { Eip1193Provider } from "@/lib/wallet";
 import {
+  ensureChain,
   ensureRobinhoodChain,
   getEthereumProvider,
+  sendForeignTransaction,
   sendTransaction,
   waitForTransaction,
 } from "@/lib/wallet";
+import { FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 /**
  * Marketplace fee for one order, as a Seaport `fees` entry. `feeBps` comes
@@ -220,10 +225,51 @@ export function wrapProviderWithApprovalSpoof(
  * fills pass one entry; sweepFloor may pass several, one per order). Every
  * other call, including the eventual broadcast, is completely unaffected.
  */
+/**
+ * Describes a target chain for the Marketplank-native foreign-chain listing
+ * feature. Every seaport.ts function below that touches a chain takes this
+ * as an OPTIONAL parameter, defaulting to Robinhood Chain when omitted --
+ * every existing call site (all Robinhood-chain-only today) needs zero
+ * changes. seaportAddress is expected to be FOREIGN_SEAPORT_ADDRESS
+ * (foreign-chain-registry.ts), which this file's own startup assertion
+ * (below) confirms matches Robinhood's SEAPORT_ADDRESS exactly -- the whole
+ * "no new contract deployment needed" premise rests on that equality being
+ * checked, not silently assumed.
+ */
+export type SeaportChain = {
+  chainSlug: string;
+  chainId: number;
+  chainName: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+  seaportAddress: string;
+};
+
+if (FOREIGN_SEAPORT_ADDRESS.toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) {
+  throw new Error(
+    "seaport.ts: FOREIGN_SEAPORT_ADDRESS no longer matches Robinhood Chain's SEAPORT_ADDRESS -- " +
+      "the Marketplank-native foreign-chain listing feature assumes these are the same canonical " +
+      "Seaport deployment on every chain. Re-verify live via eth_getCode on every FOREIGN_CHAINS " +
+      "entry before touching this assertion."
+  );
+}
+
 export async function getSeaport(
-  approvalSpoofs?: ApprovalSpoof | ApprovalSpoof[]
+  approvalSpoofs?: ApprovalSpoof | ApprovalSpoof[],
+  chain?: SeaportChain
 ): Promise<Seaport> {
-  await ensureRobinhoodChain();
+  if (chain) {
+    await ensureChain({
+      chainId: chain.chainId,
+      name: chain.chainName,
+      nativeCurrencySymbol: chain.nativeCurrencySymbol,
+      rpcUrl: chain.rpcUrl,
+      blockExplorerUrl: chain.blockExplorerUrl,
+    });
+  } else {
+    await ensureRobinhoodChain();
+  }
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
   const spoofs = approvalSpoofs
@@ -235,8 +281,8 @@ export async function getSeaport(
     spoofs.length > 0 ? wrapProviderWithApprovalSpoof(injected, spoofs) : injected;
 
   const provider = new BrowserProvider(effectiveProvider, {
-    chainId: CHAIN.id,
-    name: CHAIN.name,
+    chainId: chain ? chain.chainId : CHAIN.id,
+    name: chain ? chain.chainName : CHAIN.name,
   });
   const signer = await provider.getSigner();
   // seaport-js ships its own ethers type declarations; TS sees the ESM vs
@@ -244,7 +290,7 @@ export async function getSeaport(
   // different types (dual-package-hazard on the private class fields).
   // Runtime object is identical — cast is safe.
   return new Seaport(signer as unknown as ConstructorParameters<typeof Seaport>[0], {
-    overrides: { contractAddress: SEAPORT_ADDRESS },
+    overrides: { contractAddress: chain ? chain.seaportAddress : SEAPORT_ADDRESS },
   });
 }
 
@@ -271,8 +317,14 @@ type SeaportAction = {
  */
 async function executeActionsViaWallet(
   actions: SeaportAction[],
-  accountAddress: string
+  accountAddress: string,
+  chain?: SeaportChain,
+  /** The collection contract(s) this whole action sequence is for -- required when chain is given, see sendForeignTransaction/assertSafeForeignMarketDestination (a swap passes an array spanning multiple contracts; every other order type passes one). */
+  contractAddress?: string | string[]
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
+  if (chain && (!contractAddress || (Array.isArray(contractAddress) && contractAddress.length === 0))) {
+    throw new Error("executeActionsViaWallet: contractAddress is required for a foreign-chain action sequence.");
+  }
   const txHashes: string[] = [];
   let order: unknown | null = null;
 
@@ -289,13 +341,28 @@ async function executeActionsViaWallet(
     if (!tx.to || !tx.data) {
       throw new Error(`Seaport action "${action.type}" built an incomplete transaction.`);
     }
-    const hash = await sendTransaction({
-      to: tx.to,
-      from: accountAddress,
-      data: tx.data,
-      value: tx.value !== undefined && tx.value !== null ? tx.value.toString() : undefined,
-      kind: "market",
-    });
+    const value = tx.value !== undefined && tx.value !== null ? tx.value.toString() : undefined;
+    const hash = chain
+      ? await sendForeignTransaction({
+          to: tx.to,
+          from: accountAddress,
+          data: tx.data,
+          value,
+          chainSlug: chain.chainSlug,
+          chainId: chain.chainId,
+          chainName: chain.chainName,
+          nativeCurrencySymbol: chain.nativeCurrencySymbol,
+          rpcUrl: chain.rpcUrl,
+          blockExplorerUrl: chain.blockExplorerUrl,
+          contractAddress: contractAddress!,
+        })
+      : await sendTransaction({
+          to: tx.to,
+          from: accountAddress,
+          data: tx.data,
+          value,
+          kind: "market",
+        });
     await waitForTransaction(hash, { label: action.type === "approval" ? "Approval" : "Order" });
     txHashes.push(hash);
   }
@@ -327,8 +394,8 @@ export type ListInput = {
  * the approval is consumed by the transfer, leaving nothing dangling if the
  * user cancels at the signature prompt.
  */
-export async function buildListing(accountAddress: string, input: ListInput) {
-  const seaport = await getSeaport();
+export async function buildListing(accountAddress: string, input: ListInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
   const royalty = await royaltyFeeFor(
     input.offerTokenAddress,
@@ -360,8 +427,147 @@ export async function buildListing(accountAddress: string, input: ListInput) {
     /* exactApproval */ true
   );
 
-  const { order } = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.offerTokenAddress
+  );
   if (!order) throw new Error("Listing was not signed.");
+  return order;
+}
+
+export type BundleListInput = {
+  /** Same collection contract for every item -- see NativeBundleListForm.tsx's own header on why cross-collection bundles are out of scope. */
+  contractAddress: string;
+  offerTokenIds: string[];
+  /** Combined gross buyer payment for the whole bundle. */
+  considerationWei: string;
+  expiresAt: string;
+  feeBps: number;
+};
+
+/**
+ * Builds and signs a BUNDLE listing -- one Seaport order offering 2+
+ * ERC-721 items for a single combined native-ETH price. Deliberately no
+ * royalty parameter (unlike buildListing above): this is only ever called
+ * for a foreign-chain native bundle in this feature's current scope, where
+ * royalty is already 0 (see app/api/market/multichain/native-orders/route.ts's
+ * own header on why -- no real per-chain EIP-2981 data exists yet for a
+ * collection Marketplank doesn't curate). A per-item royalty read across a
+ * multi-token bundle would also be a materially different, unaudited model
+ * from royaltyFeeFor's single-token EIP-2981 probe -- not silently
+ * approximated here.
+ */
+export async function buildBundleListing(accountAddress: string, input: BundleListInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
+  const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+
+  const { actions } = await seaport.createOrder(
+    {
+      offer: input.offerTokenIds.map((tokenId) => ({
+        itemType: ItemType.ERC721,
+        token: input.contractAddress,
+        identifier: tokenId,
+      })),
+      consideration: [
+        {
+          amount: input.considerationWei,
+          token: NATIVE_TOKEN_ADDRESS,
+          recipient: accountAddress,
+        },
+      ],
+      fees: feesFor(input.feeBps),
+      endTime,
+    },
+    accountAddress,
+    /* exactApproval */ true
+  );
+
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.contractAddress
+  );
+  if (!order) throw new Error("Bundle listing was not signed.");
+  return order;
+}
+
+export type SwapItemInput = { contractAddress: string; tokenId: string };
+
+export type SwapOrderInput = {
+  /** What the maker is giving away -- 1+ specific owned NFTs, any contract(s). NFTs only -- see validateSwapOrder's own header on why a maker can never top up with native ETH (Seaport itself has no allowance mechanism for ETH; only a WETH/ERC-20 top-up on THIS side would be possible, and that's out of scope for v1). */
+  offerItems: SwapItemInput[];
+  /** What the maker wants back -- 1+ specific NFTs, any contract(s). */
+  considerationItems: SwapItemInput[];
+  /** Optional native-ETH top-up the maker wants back, on top of considerationItems -- paid by whoever fulfills, which is the only direction native ETH can actually move in a Seaport order. Default "0". */
+  considerationNativeWei?: string;
+  expiresAt: string;
+};
+
+/**
+ * Builds and signs a SWAP/OTC order -- see validateSwapOrder's own header
+ * for the full shape/fee-model reasoning this mirrors exactly (this
+ * function and that validator MUST stay in lock-step: whatever this
+ * constructs is exactly what that function must accept, or a maker's own
+ * signed order would be rejected by their own relay).
+ *
+ * Built manually (not via the `fees` convenience option buildListing/
+ * buildBundleListing use) because that option computes a percentage fee
+ * FROM the consideration total -- meaningless for a pure NFT-for-NFT swap
+ * with zero ETH, which instead needs a flat fee item added directly. Both
+ * cases are handled here as one explicit consideration item, never
+ * Seaport's automatic fee-scaling.
+ */
+export async function buildSwapOrder(accountAddress: string, input: SwapOrderInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
+  const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+
+  const considerationNativeWei = BigInt(input.considerationNativeWei ?? "0");
+  const feeWei =
+    considerationNativeWei > BigInt(0)
+      ? (considerationNativeWei * BigInt(MARKETPLANK_SWAP_FEE_BPS)) / BigInt(10_000)
+      : BigInt(MARKETPLANK_SWAP_FLAT_FEE_WEI);
+
+  const offer = input.offerItems.map((item) => ({
+    itemType: ItemType.ERC721 as const,
+    token: item.contractAddress,
+    identifier: item.tokenId,
+  }));
+
+  const consideration = [
+    ...input.considerationItems.map((item) => ({
+      itemType: ItemType.ERC721 as const,
+      token: item.contractAddress,
+      identifier: item.tokenId,
+      recipient: accountAddress,
+    })),
+    ...(considerationNativeWei > BigInt(0)
+      ? [{ token: NATIVE_TOKEN_ADDRESS, amount: considerationNativeWei.toString(), recipient: accountAddress }]
+      : []),
+    // Fee item -- always present, either as the percentage share of a real
+    // monetary leg or the flat anti-zero-revenue floor. See constants.ts's
+    // MARKETPLANK_SWAP_FEE_BPS/MARKETPLANK_SWAP_FLAT_FEE_WEI headers.
+    { token: NATIVE_TOKEN_ADDRESS, amount: feeWei.toString(), recipient: MARKET_FEE_RECIPIENT },
+  ];
+
+  const { actions } = await seaport.createOrder(
+    { offer, consideration, endTime },
+    accountAddress,
+    /* exactApproval */ true
+  );
+
+  const contractAddresses = [
+    ...new Set([...input.offerItems, ...input.considerationItems].map((i) => i.contractAddress.toLowerCase())),
+  ];
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    contractAddresses
+  );
+  if (!order) throw new Error("Swap was not signed.");
   return order;
 }
 
@@ -386,6 +592,8 @@ export type OfferInput = {
   /** EIP-2981 royalty config expected for this collection. */
   royaltyBps: number;
   royaltyRecipient: string;
+  /** Foreign-chain offers only — falls back to MARKET_OFFER_CURRENCY (Robinhood Chain's WETH) when omitted. Source from foreignOfferCurrency(chainSlug) for a foreign chain. */
+  offerCurrency?: string;
 };
 
 /**
@@ -408,7 +616,7 @@ export type OfferInput = {
  * exactApproval=true bounds the WETH allowance to this bid's amount instead
  * of the previous unlimited (2^256-1) approve.
  */
-export async function buildOffer(accountAddress: string, input: OfferInput) {
+export async function buildOffer(accountAddress: string, input: OfferInput, chain?: SeaportChain) {
   if (input.considerationTokenId && input.criteriaTokenIds) {
     throw new Error("An offer cannot be both single-token and trait-scoped.");
   }
@@ -440,7 +648,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
       "Collection-wide offers are temporarily disabled — bid on a specific token or a trait instead."
     );
   }
-  const seaport = await getSeaport();
+  const seaport = await getSeaport(undefined, chain);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
   const royaltyTokenId = input.considerationTokenId ?? input.criteriaTokenIds?.[0];
   if (input.royaltyBps > 0 && !royaltyTokenId) {
@@ -460,7 +668,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
       offer: [
         {
           amount: input.offerWei,
-          token: MARKET_OFFER_CURRENCY,
+          token: input.offerCurrency ?? MARKET_OFFER_CURRENCY,
         },
       ],
       consideration: [considerationItem],
@@ -471,7 +679,12 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
     /* exactApproval */ true
   );
 
-  const { order } = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.considerationTokenAddress
+  );
   if (!order) throw new Error("Offer was not signed.");
   return order;
 }
@@ -605,6 +818,36 @@ export async function computeApprovalSpoof(
  * eth_call simulation and the eventual send in executeActionsViaWallet — is
  * completely unaffected by the spoof and still runs against reality.
  */
+/**
+ * The ERC-721 collection contract an order actually moves -- checks the
+ * offer side first (fulfilling a listing: seller offered the NFT), then the
+ * consideration side (fulfilling an offer: bidder's consideration is the
+ * NFT), same scan order computeApprovalSpoof above already uses. Needed for
+ * a foreign-chain fulfillment's destination allowlist (see
+ * assertSafeForeignMarketDestination) -- Robinhood-chain fulfillment
+ * doesn't need this (its allowlist is the build-time MARKET_DESTINATIONS
+ * set, unrelated to which specific order is being fulfilled).
+ */
+/**
+ * Every DISTINCT ERC-721 contract across BOTH offer and consideration --
+ * erc721ContractOf's generalization for a SWAP order (see
+ * validateSwapOrder), which can span multiple contracts on either side.
+ * For every other order type (listing, offer, bundle -- all single-
+ * collection) this returns the same one-element result erc721ContractOf
+ * would, so using this everywhere in fulfillOrder is a safe, behavior-
+ * preserving generalization, not a special case to branch on.
+ */
+function erc721ContractsOf(order: FulfillableOrder): string[] {
+  const params = order.parameters;
+  const contracts = new Set<string>();
+  for (const item of [...params.offer, ...params.consideration]) {
+    if (Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA) {
+      contracts.add(item.token.toLowerCase());
+    }
+  }
+  return [...contracts];
+}
+
 export async function fulfillOrder(
   order: FulfillableOrder,
   accountAddress: string,
@@ -614,19 +857,80 @@ export async function fulfillOrder(
    * into the CriteriaResolver array of fulfillAdvancedOrder. Callers must
    * obtain it from assertAcceptableTraitOffer — never construct it ad hoc.
    */
-  considerationCriteria?: InputCriteria[]
+  considerationCriteria?: InputCriteria[],
+  chain?: SeaportChain,
+  /**
+   * Seaport's own native fulfiller-side fee mechanism -- an ADDITIONAL
+   * consideration item the FULFILLER (not the order's signer) supplies at
+   * fulfillment time, verified and paid out atomically by Seaport itself
+   * (contract-level `additionalRecipients` on fulfillBasicOrder, confirmed
+   * live against the real ABI this session -- not an SDK convenience with
+   * no protocol backing). ONLY ever passed by foreign-fulfill.ts's
+   * third-party-order buy/sweep paths -- NEVER by this app's own native
+   * listing/offer/bundle/swap fulfillment, which already has its fee
+   * baked into the order's own signed consideration and would double-
+   * charge if a tip were added on top. Omitted (undefined) is the correct,
+   * safe default for every native-order caller; do not add a default tip
+   * here.
+   */
+  tips?: TipInputItem[]
 ) {
   const approvalSpoof = await computeApprovalSpoof(order, accountAddress, considerationCriteria);
-  const seaport = await getSeaport(approvalSpoof ?? undefined);
+  const seaport = await getSeaport(approvalSpoof ?? undefined, chain);
   const { actions } = await seaport.fulfillOrder({
     order,
     accountAddress,
     ...(considerationCriteria ? { considerationCriteria } : {}),
+    ...(tips && tips.length > 0 ? { tips } : {}),
     // ERC-721: single-token approve, not setApprovalForAll; ERC-20: bounded
     // allowance, not 2^256-1.
     exactApproval: true,
   });
+  if (chain) {
+    const contractAddresses = erc721ContractsOf(order);
+    if (contractAddresses.length === 0) {
+      throw new Error("fulfillOrder: could not determine this order's collection contract(s) for the foreign-chain allowlist.");
+    }
+    return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddresses);
+  }
   return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+}
+
+/**
+ * Fulfills MULTIPLE independent orders in one transaction, each with its
+ * own optional tip -- the batch counterpart to fulfillOrder, built for
+ * foreign-fulfill.ts's sweep functions (single-collection and
+ * cross-collection). Reuses seaport-js's own fulfillOrders (the SAME
+ * fulfillOrderDetails[].tips mechanism fulfillOrder uses for a single
+ * order, confirmed live against the real ABI, just per-order here) rather
+ * than the previous MarketplankForeignFeeRouter.sweepBuy path, which
+ * never had a deployment to call.
+ */
+export async function fulfillOrdersBatch(
+  orders: { order: FulfillableOrder; tips?: TipInputItem[] }[],
+  accountAddress: string,
+  chain?: SeaportChain
+): Promise<{ txHashes: string[] }> {
+  if (orders.length === 0) throw new Error("fulfillOrdersBatch: at least one order is required.");
+  const seaport = await getSeaport(undefined, chain);
+  const { actions } = await seaport.fulfillOrders({
+    fulfillOrderDetails: orders.map((o) => ({
+      order: o.order,
+      ...(o.tips && o.tips.length > 0 ? { tips: o.tips } : {}),
+    })),
+    accountAddress,
+  });
+
+  if (chain) {
+    const contractAddresses = [...new Set(orders.flatMap((o) => erc721ContractsOf(o.order)))];
+    if (contractAddresses.length === 0) {
+      throw new Error("fulfillOrdersBatch: could not determine any order's collection contract(s) for the foreign-chain allowlist.");
+    }
+    const result = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddresses);
+    return { txHashes: result.txHashes };
+  }
+  const result = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  return { txHashes: result.txHashes };
 }
 
 /**

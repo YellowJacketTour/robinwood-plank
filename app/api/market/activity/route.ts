@@ -127,17 +127,44 @@ export async function GET(req: Request) {
   try {
     const events = await fetchActivity(limit, { full });
     if (events.length > 0) liveFallbackCache = { at: Date.now(), events };
+    if (events.length > 0) {
+      return cachedPublicJson({
+        events,
+        total: events.length,
+        limit,
+        offset,
+        nextOffset: null,
+        source: "live",
+        cached: false,
+        ledgerPending: true,
+      });
+    }
+    const { fetchCanonicalRobinwoodActivity } = await import("@/lib/market/canonical-robinwood");
+    const canonical = await fetchCanonicalRobinwoodActivity({
+      hostHeader: req.headers.get("host"),
+      full,
+    });
+    if (canonical && canonical.length > 0) {
+      return cachedPublicJson({
+        events: canonical,
+        total: canonical.length,
+        limit,
+        offset,
+        nextOffset: null,
+        source: "canonical-live",
+        cached: false,
+        ledgerPending: true,
+        note: "Local activity ledger is empty; feed is public plank.love activity (vault, sends, sales).",
+      });
+    }
     return cachedPublicJson({
-      events,
-      total: events.length,
+      events: [],
+      total: 0,
       limit,
       offset,
       nextOffset: null,
       source: "live",
       cached: false,
-      // Told plainly rather than implied: this response is a bounded live
-      // window, not the permanent history, so a consumer can tell the
-      // difference between "no older events" and "ledger not built yet".
       ledgerPending: true,
     });
   } catch (error) {

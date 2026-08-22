@@ -55,6 +55,17 @@ export type OwnerIndexSnapshot = {
   count: number;
 };
 
+/** Distinct wallets in an owner map — not token count (`snapshot.count`). */
+export function uniqueWalletCount(owners: Record<string, string> | undefined): number {
+  if (!owners) return 0;
+  const set = new Set<string>();
+  for (const raw of Object.values(owners)) {
+    const a = raw.toLowerCase();
+    if (a && a !== "0x0000000000000000000000000000000000000000") set.add(a);
+  }
+  return set.size;
+}
+
 type MemEntry = { at: number; snapshot: OwnerIndexSnapshot };
 const memCache = new Map<string, MemEntry>();
 

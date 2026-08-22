@@ -44,6 +44,20 @@ export function getCollection(slug: string): MarketCollection | undefined {
 }
 
 /**
+ * getCollectionAsync (the "Stage B"/auto-discovered-collection resolver)
+ * moved to lib/market/collections-server.ts, guarded by `server-only`.
+ * READ THAT FILE'S HEADER before adding it back here: this file is
+ * imported by lib/wallet.ts, a Client Component dependency, and
+ * getCollectionAsync's dynamic import of multichain/store.ts (which
+ * reaches Postgres via the `pg` package) broke the ENTIRE app's client
+ * bundle ("Module not found: Can't resolve 'dns'") the moment it lived
+ * in this file, even behind a dynamic import -- Next/Turbopack still
+ * resolves a same-file dynamic import's target into the browser build
+ * graph. Any server-only code that reaches Postgres/multichain/store
+ * belongs in collections-server.ts, never here.
+ */
+
+/**
  * Every vault address linked from a collection entry (lowercased). Combined
  * with the env-derived MARKET_VAULT_ADDRESSES at validation sites so a
  * per-collection vault is accepted the moment its collection entry ships —

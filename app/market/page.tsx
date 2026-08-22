@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
@@ -7,6 +8,7 @@ import { MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
+import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
 
 /**
  * Marketplank is a live application shell, not publish-once content. Keeping
@@ -28,8 +30,14 @@ export default async function MarketPage() {
   // stands. This is a server component on a force-dynamic route, so both
   // directions (kill switch AND enable) work without a deployment.
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
-  const marketEnabled =
+  const siteWideEnabled =
     flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  // Admin-only preview bypass (lib/market-preview-auth.ts) -- lets an
+  // authenticated admin browse the real marketplace while siteWideEnabled
+  // stays false for everyone else. Never widens access the other way: a
+  // false siteWideEnabled + no/invalid cookie still shows ComingSoonGate.
+  const previewCookie = (await cookies()).get(MARKET_PREVIEW_COOKIE_NAME)?.value;
+  const marketEnabled = siteWideEnabled || verifyPreviewCookieValue(previewCookie);
 
   return (
     <>

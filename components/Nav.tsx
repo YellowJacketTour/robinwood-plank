@@ -12,6 +12,7 @@ import {
   WoodAmpRailChip,
 } from "@/components/woodamp/WoodAmpChip";
 import ThemeAccentPicker from "@/components/ThemeAccentPicker";
+import MarketMenu from "@/components/market/MarketMenu";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -36,6 +37,10 @@ function isActive(link: (typeof NAV_LINKS)[number], pathname: string) {
     href.startsWith("/") &&
     (pathname === href || pathname.startsWith(`${href}/`))
   );
+}
+
+function isExternal(link: (typeof NAV_LINKS)[number]) {
+  return "external" in link && link.external;
 }
 
 /**
@@ -312,7 +317,7 @@ export default function Nav() {
                 // quiet dark-gold pill, no borders. The header's single gold
                 // action is Connect wallet on the right.
                 //
-                // Six items now share this rail (Memes added 2026-08) — the
+                // Seven items now share this rail (PlankSpace added 2026-08) — the
                 // lg breakpoint (1024px, the documented "no destination
                 // clipped" floor in DESIGN.md) stays at the tighter xs/px-2
                 // sizing; the larger px-3/text-sm treatment only kicks in at
@@ -321,6 +326,9 @@ export default function Nav() {
                   active ? "bg-gold-500/15 text-gold-300" : "text-foreground/75"
                 }`;
 
+                if (href === "/market") {
+                  return <MarketMenu key={link.href} className={className} active={active} />;
+                }
                 return (
                   <li key={link.href}>
                     {isRoute(href) ? (
@@ -333,7 +341,13 @@ export default function Nav() {
                         {label}
                       </Link>
                     ) : (
-                      <a href={href} className={className}>
+                      <a
+                        href={href}
+                        className={className}
+                        target={isExternal(link) ? "_blank" : undefined}
+                        rel={isExternal(link) ? "noopener noreferrer" : undefined}
+                        aria-label={isExternal(link) ? `${label} (opens in a new tab)` : undefined}
+                      >
                         {label}
                       </a>
                     )}
@@ -405,6 +419,17 @@ export default function Nav() {
                   active ? "bg-gold-500/10 text-gold-300" : "text-foreground/80"
                 }`;
 
+                if (href === "/market") {
+                  return (
+                    <MarketMenu
+                      key={link.href}
+                      className={className}
+                      active={active}
+                      variant="sheet"
+                      onNavigate={() => closeMenu()}
+                    />
+                  );
+                }
                 return (
                   <li key={link.href}>
                     {isRoute(href) ? (
@@ -422,6 +447,9 @@ export default function Nav() {
                     ) : (
                       <a
                         href={href}
+                        target={isExternal(link) ? "_blank" : undefined}
+                        rel={isExternal(link) ? "noopener noreferrer" : undefined}
+                        aria-label={isExternal(link) ? `${label} (opens in a new tab)` : undefined}
                         onClick={() => {
                           closeMenu();
                           if (href.startsWith("#")) {
