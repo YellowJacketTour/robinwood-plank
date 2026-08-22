@@ -145,7 +145,25 @@ export function withImageWidth(url: string | null | undefined, width: number): s
   // cv is a cache generation: responses are cached immutable for a year, so
   // when a resize bug ships broken bytes (cv=2 busted the SharedArrayBuffer
   // incident), bumping it re-keys every client cache at once.
-  return `${url}&w=${width}&cv=2`;
+  return `${url}&w=${width}&cv=3`;
+}
+
+/**
+ * Return the original media bytes for a single, focused artwork surface.
+ * Dense grids deliberately use `withImageWidth`, which turns animated files
+ * into a complete first-frame poster. Detail views use this helper so the one
+ * selected GIF/WebP may animate without making every off-screen card decode
+ * at once. Existing width/cache parameters are removed defensively because
+ * projected URLs can already contain a thumbnail variant.
+ */
+export function withOriginalMedia(url: string | null | undefined): string {
+  if (!url || isPoisonedUrlString(url)) return "";
+  if (!url.startsWith("/api/ipfs/image?")) return url;
+  const [path, rawQuery = ""] = url.split("?", 2);
+  const query = new URLSearchParams(rawQuery);
+  query.delete("w");
+  query.set("cv", "3");
+  return `${path}?${query.toString()}`;
 }
 
 export function ipfsGatewayCandidates(uri: string): string[] {

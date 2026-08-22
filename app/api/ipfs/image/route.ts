@@ -49,7 +49,9 @@ function resolveWidthTier(raw: string | null): number | null {
  * (e.g. the Cloudflare Worker runtime has no native binary), corrupt bytes,
  * unsupported format — returns null and the caller serves the original
  * bytes; a resize must never turn a working image into a 500.
- * GIFs are excluded upstream so animation survives.
+ * Animated inputs intentionally become a complete first-frame poster. Dense
+ * catalog surfaces must not download and decode dozens of full animations at
+ * once; the focused detail surface requests the original bytes without `w`.
  */
 async function tryResize(buf: ArrayBuffer, width: number): Promise<ArrayBuffer | null> {
   try {
@@ -223,10 +225,11 @@ export async function GET(req: Request) {
           continue;
         }
       }
-      // Width-tiered thumbnail: full-res art in a 200px grid cell was tens
-      // of MB per page. Skip GIFs (resizing drops animation) and fall back
-      // to the original bytes on any resize failure.
-      if (widthTier && (ct === "image/png" || ct === "image/jpeg" || ct === "image/webp")) {
+      // Width-tiered poster: full-res art in a 200px grid cell was tens of MB
+      // per page. GIF/WebP animation is flattened to its complete first frame
+      // here on purpose; only the selected detail view requests original
+      // motion. This bounds both transfer and concurrent browser decoders.
+      if (widthTier && (ct === "image/png" || ct === "image/jpeg" || ct === "image/webp" || ct === "image/gif")) {
         const resized = await tryResize(buf, widthTier);
         if (resized) return cachedBinary(resized, "image/webp", "immutable");
       }

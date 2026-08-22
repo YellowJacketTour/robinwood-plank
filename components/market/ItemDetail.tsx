@@ -16,7 +16,7 @@ import {
   type MarketCollection,
 } from "@/lib/market/types";
 import { sendNft, validateRecipient } from "@/lib/market/transfer";
-import { withImageWidth } from "@/lib/ipfs";
+import { withOriginalMedia } from "@/lib/ipfs";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import EthUsdValue from "@/components/market/EthUsdValue";
@@ -253,7 +253,7 @@ export default function ItemDetail({
           <div className="grid sm:grid-cols-2">
             <div className="relative mx-auto aspect-square w-full max-w-[360px] bg-wood-950 sm:max-w-none">
               <Image
-                src={withImageWidth(detail?.image || listing?.imageUrl, 1024) || collection.image}
+                src={withOriginalMedia(detail?.image || listing?.imageUrl) || collection.image}
                 alt={detail?.rarity?.name ?? `${collection.name} #${tokenId}`}
                 fill
                 sizes="(min-width: 640px) 40vw, 100vw"

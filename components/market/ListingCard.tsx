@@ -143,7 +143,7 @@ export default function ListingCard({
           alt={`${collection.name} ${displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name })}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
-          className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+          className={`object-contain transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
           unoptimized
           onLoad={() => setImageLoaded(true)}
         />
