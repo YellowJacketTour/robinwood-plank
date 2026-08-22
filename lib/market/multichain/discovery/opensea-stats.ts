@@ -24,7 +24,6 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { postgresQuery } from "@/lib/postgres";
 import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
-import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 
 const SOURCE = "opensea-stats";
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
@@ -72,7 +71,7 @@ export function sanitizeOpenSeaImageUrl(url: string | null | undefined): string 
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return preferHighestResImageUrl(trimmed) ?? trimmed;
+    return trimmed;
   } catch {
     return null;
   }
@@ -317,7 +316,10 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
        OR c.image_url IS NULL
        OR s.listed_count IS NULL
      )
-     ORDER BY (c.name IS NOT NULL AND c.name NOT ILIKE '0x%') DESC, c.id
+     -- Missing display metadata must outrank periodic refreshes of rows that
+     -- are already usable.  The old ordering did the reverse, so a large
+     -- catalog could permanently starve newly discovered contract shells.
+     ORDER BY (c.name IS NULL OR c.name ILIKE '0x%' OR c.image_url IS NULL) DESC, c.id
      LIMIT $3`,
     [chainSlug, afterId, Math.max(maxUpdates * 40, 200)]
   );

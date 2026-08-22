@@ -6,11 +6,22 @@
  * drifting apart. See migration 014_foreign_rarity.sql's header for why
  * this is a background job, never a live per-request compute.
  */
-import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
+import { postgresQuery } from "@/lib/postgres";
+import {
+  readCollectionMembershipCursor,
+  readProjectedRarityInputs,
+  upsertCollectionTokenProjection,
+  writeCollectionMembershipCursor,
+  readTokenMetadataWork,
+  writeTokenMetadataResult,
+} from "@/lib/market/multichain/collection-token-store";
+import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
+import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
 
 const PAGE_SIZE = 50;
 
@@ -43,6 +54,179 @@ export type IndexRunResult = {
   tokensIndexed: number;
   partial: boolean;
 };
+
+const OPENSEA_MEMBERSHIP_SOURCE = "opensea-nfts";
+
+/** Advance one OpenSea NFT page for a known EVM contract. The contract is
+ * the durable key used by routes; the OpenSea slug is retained as an alias. */
+export async function advanceEvmCollectionMembership(
+  chainSlug: string,
+  contractAddress: string,
+  openSeaChainOverride?: string
+) {
+  const chain = foreignChainByChainSlug(chainSlug);
+  const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
+  if (!openSeaChain) throw new Error(`${chainSlug} has no OpenSea NFT enumerator`);
+  const key = await getOpenSeaApiKey();
+  if (!key) throw new Error("No OpenSea API key available.");
+  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, key, openSeaChain);
+  if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress}`);
+  const checkpoint = await readCollectionMembershipCursor(chainSlug, contractAddress, OPENSEA_MEMBERSHIP_SOURCE);
+  const url = new URL(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}/nfts`);
+  url.searchParams.set("limit", String(PAGE_SIZE));
+  if (checkpoint?.cursor) url.searchParams.set("next", checkpoint.cursor);
+  const observedAt = new Date();
+  try {
+    const response = await fetch(url, {
+      headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`OpenSea ${response.status} enumerating ${contractAddress}`);
+    const body = await response.json() as {
+      nfts?: Array<{ identifier: string; name?: string | null; image_url?: string | null;
+        display_image_url?: string | null; traits?: Array<{ trait_type?: string; value?: string | number | null }> }>;
+      next?: string | null;
+    };
+    const nfts = body.nfts ?? [];
+    const next = body.next ?? null;
+    const complete = !next;
+    await upsertCollectionTokenProjection(chainSlug, contractAddress, {
+      tokens: nfts.map((nft) => ({
+        tokenId: nft.identifier, name: nft.name ?? null,
+        imageUrl: nft.display_image_url || nft.image_url || null,
+        traits: (nft.traits ?? []).flatMap((trait) => trait.trait_type && trait.value != null
+          ? [{ traitType: trait.trait_type, value: String(trait.value) }] : []),
+      })),
+      partial: !complete, provenance: [OPENSEA_MEMBERSHIP_SOURCE], sourceObservedAt: observedAt,
+    });
+    await writeCollectionMembershipCursor({ chainSlug, collectionSlug: contractAddress,
+      source: OPENSEA_MEMBERSHIP_SOURCE, cursor: next, complete, sourceObservedAt: observedAt });
+    if (complete) {
+      const items = await readProjectedRarityInputs(chainSlug, contractAddress);
+      const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };
+      const traitIndex: ForeignTraitIndex = {};
+      for (const item of items) for (const trait of item.traits) {
+        traitIndex[trait.traitType] ??= {};
+        traitIndex[trait.traitType][trait.value] ??= [];
+        traitIndex[trait.traitType][trait.value].push(item.tokenId);
+      }
+      await replaceForeignRarity(chainSlug, contractAddress, snapshot, traitIndex, [slug]);
+      await upsertCollectionTokenProjection(chainSlug, contractAddress, {
+        tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
+          name: token.name, rarityScore: token.score, rarityRank: token.rank,
+          rarityPercentile: token.percentile, rarityTier: token.tier })),
+        expectedCount: items.length, partial: false,
+        provenance: [OPENSEA_MEMBERSHIP_SOURCE, "bespoke-information-content-rarity"], sourceObservedAt: observedAt,
+      });
+    }
+    return { chainSlug, contractAddress, slug, itemsObserved: nfts.length, complete, nextCursor: next };
+  } catch (error) {
+    await writeCollectionMembershipCursor({ chainSlug, collectionSlug: contractAddress,
+      source: OPENSEA_MEMBERSHIP_SOURCE, cursor: checkpoint?.cursor ?? null, complete: false,
+      lastError: error instanceof Error ? error.message : String(error) }).catch(() => {});
+    throw error;
+  }
+}
+
+export async function advanceNextTrackedEvmMembership(chainSlug: string) {
+  const candidates = await postgresQuery<{ contract_address: string }>(
+    `SELECT c.contract_address FROM plank_multichain_collections c
+     LEFT JOIN plank_collection_membership_cursors m
+       ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
+     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+    [chainSlug, OPENSEA_MEMBERSHIP_SOURCE]);
+  const address = candidates.rows[0]?.contract_address;
+  return address ? advanceEvmCollectionMembership(chainSlug, address) : null;
+}
+
+export async function advanceNextRobinhoodMembership() {
+  const candidates = await postgresQuery<{ contract_address: string }>(
+    `SELECT c.contract_address FROM plank_multichain_collections c
+     LEFT JOIN plank_collection_membership_cursors m
+       ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
+     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+    ["robinhood", OPENSEA_MEMBERSHIP_SOURCE]);
+  const address = candidates.rows[0]?.contract_address;
+  return address ? advanceEvmCollectionMembership("robinhood", address, "robinhood") : null;
+}
+
+/** Enrich a tiny durable batch from first-party tokenURI metadata. Public
+ * requests never perform these RPC/IPFS calls. Missing metadata is recorded
+ * honestly; transient failures are retried after a bounded cooldown. */
+export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6) {
+  const chain = foreignChainByChainSlug(chainSlug);
+  const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
+  const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
+  if (!openSeaChain || !rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
+  const work = await readTokenMetadataWork(chainSlug, limit);
+  const openSeaKey = await getOpenSeaApiKey();
+  let complete = 0, empty = 0, retry = 0;
+  const errors: string[] = [];
+  for (const item of work) {
+    try {
+      const metadata = await resolveEvmTokenMetadata({ rpcUrls,
+        contractAddress: item.collectionSlug, tokenId: item.tokenId }).catch(async (onchainError) => {
+          if (!openSeaKey) throw onchainError;
+          return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain,
+            contractAddress: item.collectionSlug, tokenId: item.tokenId });
+        });
+      if (!metadata || (!metadata.name && !metadata.imageUrl && metadata.traits.length === 0)) {
+        await writeTokenMetadataResult({ chainSlug, ...item, state: "empty" });
+        empty += 1;
+        continue;
+      }
+      await upsertCollectionTokenProjection(chainSlug, item.collectionSlug, {
+        tokens: [{ tokenId: item.tokenId, ...metadata }], partial: true,
+        preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
+      });
+      await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+      complete += 1;
+    } catch (error) {
+      await writeTokenMetadataResult({ chainSlug, ...item, state: "retry",
+        error: error instanceof Error ? error.message : String(error) });
+      if (errors.length < 3) errors.push(error instanceof Error ? error.message : String(error));
+      retry += 1;
+    }
+  }
+  let rarityFinalized = 0;
+  for (const collectionSlug of new Set(work.map((item) => item.collectionSlug))) {
+    const state = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
+      `SELECT COUNT(*) FILTER (WHERE t.metadata_state IN ('pending','retry'))::text AS remaining,
+         COALESCE(bool_or(m.complete), FALSE) AS membership_complete
+       FROM plank_collection_tokens t
+       LEFT JOIN plank_collection_membership_cursors m
+         ON m.chain_slug = t.chain_slug AND lower(m.collection_slug) = lower(t.collection_slug)
+          AND m.source = $3
+       WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)`,
+      [chainSlug, collectionSlug, OPENSEA_MEMBERSHIP_SOURCE]);
+    if (Number(state.rows[0]?.remaining ?? 1) !== 0 || !state.rows[0]?.membership_complete) continue;
+    const items = await readProjectedRarityInputs(chainSlug, collectionSlug);
+    if (!items.length) continue;
+    const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };
+    const traitIndex: ForeignTraitIndex = {};
+    for (const item of items) for (const trait of item.traits) {
+      traitIndex[trait.traitType] ??= {};
+      traitIndex[trait.traitType][trait.value] ??= [];
+      traitIndex[trait.traitType][trait.value].push(item.tokenId);
+    }
+    const slug = openSeaKey ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaKey, openSeaChain).catch(() => null) : null;
+    await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, slug ? [slug] : []);
+    await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
+      tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
+        name: token.name, rarityScore: token.score, rarityRank: token.rank,
+        rarityPercentile: token.percentile, rarityTier: token.tier })),
+      expectedCount: items.length, partial: false,
+      provenance: ["bespoke-information-content-rarity"], sourceObservedAt: new Date(),
+    });
+    rarityFinalized += 1;
+  }
+  return { attempted: work.length, complete, empty, retry, rarityFinalized, errors };
+}
+
+export async function advanceRobinhoodTokenMetadata(limit = 6) {
+  return advanceEvmTokenMetadata("robinhood", limit);
+}
 
 export async function indexForeignCollectionRarity(chainSlug: string, collectionSlug: string): Promise<IndexRunResult> {
   const chain = foreignChainByChainSlug(chainSlug);
@@ -203,10 +387,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function resolveOpenSeaSlug(chainSlug: string, contractAddress: string, key: string): Promise<string | null> {
+async function resolveOpenSeaSlug(
+  chainSlug: string,
+  contractAddress: string,
+  key: string,
+  openSeaChainOverride?: string
+): Promise<string | null> {
   const chain = foreignChainByChainSlug(chainSlug);
-  if (!chain) return null;
-  const res = await fetch(`https://api.opensea.io/api/v2/chain/${chain.openSeaChain}/contract/${contractAddress}`, {
+  const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
+  if (!openSeaChain) return null;
+  const res = await fetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`, {
     headers: { "x-api-key": key, accept: "application/json" },
   });
   if (!res.ok) return null;
@@ -299,7 +489,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
   let indexed = 0;
   let skippedFresh = 0;
   let failed = 0;
-  let skippedNoOpenSea = noOpenSeaChain.length;
+  const skippedNoOpenSea = noOpenSeaChain.length;
   for (const c of noOpenSeaChain) {
     log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea orderbook for this chain`);
   }

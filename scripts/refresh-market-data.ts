@@ -84,6 +84,7 @@ const explicit = [
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
+  "--hydrate-opensea",
   "--own-ranking",
   "--scaffold-rarity",
 ].filter((t) => args.has(t));
@@ -103,8 +104,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -565,6 +566,19 @@ async function main(): Promise<void> {
           : `${r.chainSlug}: ${r.pagesScanned}p, +${r.registered} new (${r.entriesSeen} seen, ${r.skippedNotArt} not-art, ${r.skippedNoMetadata} no-meta, ${r.skippedAlreadyTracked} tracked)`
       )
       .join("; ");
+  });
+
+  // Discovery only creates identities. Keep a separate, tightly bounded
+  // hydration lane on every incremental tick so newly found EVM contracts
+  // acquire names, art, floors and market snapshots instead of remaining
+  // invisible hex shells forever. Each chain has its own durable cursor and
+  // failures remain isolated by runOpenSeaStatsSync's source breaker.
+  await step("hydrate-opensea", async () => {
+    const { runOpenSeaStatsSync } = await import("../lib/market/multichain/discovery/opensea-stats");
+    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
+    const runs = [];
+    for (const chain of FOREIGN_CHAINS) runs.push(await runOpenSeaStatsSync(chain.chainSlug, 3));
+    return runs.map((r) => `${r.chainSlug}: ${r.displayUpdated} display/${r.updated} stats`).join("; ");
   });
 
   // Self-hosted, on-chain Seaport OrderFulfilled fill index -- see

@@ -51,6 +51,10 @@ const DAILY_CEILING: Record<string, number> = {
   "helius-das": 20_000,
   "ordinals-wallet": 2_400, // keyless turbo.ordinalswallet.com; paced ~1/s
   "magiceden-solana": 2_000,
+  // Free plan is 1,000 requests/month. 24/day leaves reserve and prevents a
+  // restarted supervisor from treating the monthly plan as a daily budget;
+  // the durable control plane is the authoritative cross-process ceiling.
+  "ordiscan": 24,
 };
 
 const DEFAULT_JAIL_MS = 15 * 60_000;

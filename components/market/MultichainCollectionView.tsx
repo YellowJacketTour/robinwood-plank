@@ -327,6 +327,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // rank), and a genuine signed-Seaport-offer flow (foreign-offer.ts).
   const [detailsTarget, setDetailsTarget] = useState<Listing | null>(null);
   const [traitCounts, setTraitCounts] = useState<Record<string, Record<string, number>> | null>(null);
+  const [openTraitGroups, setOpenTraitGroups] = useState<Record<string, boolean>>({});
   const [offerTarget, setOfferTarget] = useState<Listing | null>(null);
   const [offerAmountEth, setOfferAmountEth] = useState("");
   const [offerBusy, setOfferBusy] = useState(false);
@@ -1833,6 +1834,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   setActiveTier(next.tier);
                   setActiveTiers(next.tiers ?? []);
                 }}
+                onClearAll={() => {
+                  setSearchQuery("");
+                  setMinPriceEth("");
+                  setMaxPriceEth("");
+                  setSelectedTraits({});
+                  setActiveTier("all");
+                  setActiveTiers([]);
+                }}
+                additionalDirty={Object.values(selectedTraits).some(Boolean)}
                 resultCount={bookFilter === "listed" ? filteredListings.length : browseItems.length}
                 rarityAvailable={rarityMap.size > 0}
                 orientation="sidebar"
@@ -1849,32 +1859,73 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 priceLegend={`Price in ${statCurrencySymbol}`}
               />
 
-              {/* TRAIT FILTER -- one dropdown per real trait category, AND-combined. Populated from the SAME collection-wide value counts the Details view's rarity % already uses. */}
-              {traitCounts &&
-                Object.entries(traitCounts)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([traitType, values]) => (
-                    <div key={traitType}>
-                      <label htmlFor={`mc-trait-${traitType}`} className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                        {traitType}
-                      </label>
-                      <select
-                        id={`mc-trait-${traitType}`}
-                        value={selectedTraits[traitType] ?? ""}
-                        onChange={(e) => setSelectedTraits((prev) => ({ ...prev, [traitType]: e.target.value }))}
-                        className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground"
-                      >
-                        <option value="">Any {traitType}</option>
-                        {Object.entries(values)
-                          .sort(([, ca], [, cb]) => ca - cb)
-                          .map(([value, count]) => (
-                            <option key={value} value={value}>
-                              {value} ({count})
-                            </option>
-                          ))}
-                      </select>
+              {/* Trait values are directly inspectable like rarity tiers.
+                  One value per category, AND across categories: this preserves
+                  the resolver's real criteria semantics without implying an
+                  unsupported OR query. Collapsible groups keep a 248px rail
+                  dense while every value remains keyboard/touch accessible. */}
+              {traitCounts && Object.keys(traitCounts).length > 0 && (
+                <fieldset>
+                  <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+                    Traits
+                  </legend>
+                  {Object.keys(selectedTraits).length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1" aria-label="Active trait filters">
+                      {Object.entries(selectedTraits).filter(([, value]) => value).map(([traitType, value]) => (
+                        <button
+                          key={traitType}
+                          type="button"
+                          onClick={() => setSelectedTraits((prev) => ({ ...prev, [traitType]: "" }))}
+                          className="min-h-9 max-w-full rounded-full border border-gold-500/40 bg-gold-500/10 px-2 text-[0.62rem] font-bold text-gold-300"
+                          aria-label={`Remove ${traitType}: ${value}`}
+                        >
+                          <span className="block max-w-[11rem] truncate">{traitType}: {value} ×</span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <div className="space-y-1.5">
+                    {Object.entries(traitCounts)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([traitType, values], index) => {
+                        const selected = selectedTraits[traitType] ?? "";
+                        const sortedValues = Object.entries(values).sort(([, ca], [, cb]) => ca - cb);
+                        return (
+                          <details
+                            key={traitType}
+                            open={openTraitGroups[traitType] ?? (index < 2 || Boolean(selected))}
+                            onToggle={(event) => {
+                              const open = event.currentTarget.open;
+                              setOpenTraitGroups((prev) => prev[traitType] === open ? prev : { ...prev, [traitType]: open });
+                            }}
+                            className="rounded-md border border-line bg-wood-950/60"
+                          >
+                            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-2 text-xs font-bold text-foreground marker:hidden">
+                              <span className="min-w-0 flex-1 truncate">{traitType}</span>
+                              {selected && <span className="max-w-20 truncate text-gold-300">{selected}</span>}
+                              <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">{sortedValues.length}</span>
+                              <span aria-hidden="true" className="text-foreground/45">⌄</span>
+                            </summary>
+                            <div className="max-h-52 overflow-y-auto border-t border-line p-1">
+                              {sortedValues.map(([value, count]) => (
+                                <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected === value}
+                                    onChange={() => setSelectedTraits((prev) => ({ ...prev, [traitType]: selected === value ? "" : value }))}
+                                    className="accent-gold-500"
+                                  />
+                                  <span className="min-w-0 flex-1 break-words">{value}</span>
+                                  <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">{count}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </details>
+                        );
+                      })}
+                  </div>
+                </fieldset>
+              )}
 
               {filtersActive && (
                 <button

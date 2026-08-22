@@ -25,7 +25,21 @@ export type MeshSource =
   | "unisat-collections"
   | "adapter-sync"
   | "seaport-fills"
-  | "native-robinwood";
+  | "native-robinwood"
+  | "hypersync-discovery"
+  | "hypersync-backfill"
+  | "helius-discovery"
+  | "unisat-discovery"
+  | "ordiscan-discovery"
+  | "robinhood-discovery"
+  | "robinhood-opensea"
+  | "robinhood-membership"
+  | "robinhood-metadata"
+  | "evm-metadata"
+  | "unisat-rarity"
+  | "unisat-membership"
+  | "helius-membership"
+  | "opensea-membership";
 
 export type MeshLane = {
   id: string;
@@ -59,7 +73,121 @@ const CG_CHAINS = [
   "bitcoin-mainnet",
 ] as const;
 
+const HYPERSYNC_EVM = [...OS_EVM, "zksync-mainnet"] as const;
+
 export const MESH_LANES: MeshLane[] = [
+  ...OS_EVM.map((chainSlug) => ({
+    id: `opensea-membership:${chainSlug}`,
+    source: "opensea-membership" as const,
+    chainSlug,
+    cells: ["image", "rarity"] as MeshCell[],
+    sliceSec: 180,
+    notes: "One durable NFT page per tick; public reads use the local projection and completed walks rank locally.",
+  })),
+  ...OS_EVM.map((chainSlug) => ({
+    id: `evm-metadata:${chainSlug}`,
+    source: "evm-metadata" as const,
+    chainSlug,
+    cells: ["image", "rarity"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Bounded tokenURI then OpenSea per-token enrichment; completes trait coverage without request-path fan-out.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `hypersync-discovery:${chainSlug}`,
+    source: "hypersync-discovery" as const,
+    chainSlug,
+    cells: ["name", "image"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Forward Transfer discovery with a durable per-chain cursor. Metadata hydration remains a separate cell.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `hypersync-backfill:${chainSlug}`,
+    source: "hypersync-backfill" as const,
+    chainSlug,
+    cells: ["name", "image"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Gap-free genesis-forward historical discovery with its own durable cursor.",
+  })),
+  {
+    id: "helius-discovery:solana-mainnet",
+    source: "helius-discovery",
+    chainSlug: "solana-mainnet",
+    cells: ["name", "image"],
+    sliceSec: 120,
+    notes: "Bounded Helius collection discovery; resumable provider cursor.",
+  },
+  {
+    id: "helius-membership:solana-mainnet",
+    source: "helius-membership",
+    chainSlug: "solana-mainnet",
+    cells: ["rarity"],
+    sliceSec: 180,
+    notes: "One durable DAS grouping page per collection tick; resumes until complete, then ranks locally.",
+  },
+  {
+    id: "unisat-discovery:bitcoin-mainnet",
+    source: "unisat-discovery",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["name", "image"],
+    sliceSec: 60,
+    notes: "One exhaustive UniSat catalog page per tick; stops honestly at provider total.",
+  },
+  {
+    id: "ordiscan-discovery:bitcoin-mainnet",
+    source: "ordiscan-discovery",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["name", "image"],
+    sliceSec: 60,
+    notes: "One Ordiscan catalog page per tick under its small monthly allowance.",
+  },
+  {
+    id: "unisat-rarity:bitcoin-mainnet",
+    source: "unisat-rarity",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["rarity"],
+    sliceSec: 180,
+    notes: "At most one stale/unindexed Ordinals collection per tick; every API page reserves shared UniSat daily capacity.",
+  },
+  {
+    id: "unisat-membership:bitcoin-mainnet",
+    source: "unisat-membership",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["image", "rarity"],
+    sliceSec: 180,
+    notes: "One durable official collection-items page per tick; establishes roster without inventing missing traits.",
+  },
+  {
+    id: "robinhood-discovery:robinhood",
+    source: "robinhood-discovery",
+    chainSlug: "robinhood",
+    cells: ["name", "image"],
+    sliceSec: 60,
+    notes: "First-party Robinhood Chain Transfer discovery.",
+  },
+  {
+    id: "robinhood-opensea:robinhood",
+    source: "robinhood-opensea",
+    chainSlug: "robinhood",
+    cells: ["name", "image"],
+    sliceSec: 120,
+    notes: "Bounded OpenSea Robinhood catalog page, with direct ERC-165 verification before admission.",
+  },
+  {
+    id: "robinhood-membership:robinhood",
+    source: "robinhood-membership",
+    chainSlug: "robinhood",
+    cells: ["image", "rarity"],
+    sliceSec: 180,
+    notes: "One durable token-membership page per tick for non-native Robinhood collections.",
+  },
+  {
+    id: "robinhood-metadata:robinhood",
+    source: "robinhood-metadata",
+    chainSlug: "robinhood",
+    cells: ["image", "rarity"],
+    sliceSec: 180,
+    notes: "Bounded first-party tokenURI enrichment with durable terminal/ retry state; never runs in request paths.",
+  },
   ...OS_EVM.map((chainSlug) => ({
     id: `os-stats:${chainSlug}`,
     source: "opensea-stats" as const,

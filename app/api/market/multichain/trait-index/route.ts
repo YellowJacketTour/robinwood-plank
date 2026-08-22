@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [{ traitIndex, sampleSize }, rarityMap] = await Promise.all([
+    const [{ traitIndex, sampleSize, partial }, rarityMap] = await Promise.all([
       getForeignTraitIndex(chainSlug, collectionSlug),
       getForeignRarity(chainSlug, collectionSlug),
     ]);
@@ -44,7 +44,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         collection: collectionSlug,
-        complete: traitIndex !== null,
+        complete: traitIndex !== null && !partial,
+        partial,
         building: false,
         totalSupply: sampleSize || null,
         scanned: sampleSize,

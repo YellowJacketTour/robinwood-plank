@@ -29,10 +29,24 @@ export async function GET(req: NextRequest) {
   const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
   const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
   const tier = searchParams.get("tier");
+  const cursor = searchParams.get("cursor");
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
+    // Projection-first: page loads never spend a provider request when a
+    // background worker has already materialized real collection members.
+    const { hasCollectionTokenStore, readCollectionTokenProjection } = await import("@/lib/market/multichain/collection-token-store");
+    if (hasCollectionTokenStore()) {
+      const projected = await readCollectionTokenProjection({
+        chainSlug, collectionSlug, limit, cursor, sort, tier,
+      }).catch(() => null);
+      if (projected && projected.tokens.length > 0) {
+        return NextResponse.json(projected, {
+          headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
+        });
+      }
+    }
     const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
     if (hasForeignRarityStore()) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
@@ -104,7 +118,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tokens: await solanaTokens(collectionSlug, limit) }, { headers: { "Cache-Control": "no-store" } });
     }
     if (isRobinhoodChainSlug(chainSlug)) {
-      return NextResponse.json({ tokens: [] }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { tokens: await openSeaTokens("robinhood", collectionSlug, limit) },
+        { headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" } }
+      );
     }
     const chain = foreignChainByChainSlug(chainSlug);
     if (!chain?.openSeaChain) {

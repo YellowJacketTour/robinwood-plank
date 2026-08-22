@@ -561,6 +561,64 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
   }));
 }
 
+/** Bounded keyset page for edge-cached market feeds. Unlike the legacy hub
+ * dump, latency and payload size stay constant as the roster grows. */
+export async function listCollectionFeed(input: {
+  limit?: number;
+  afterId?: number | null;
+  chainSlug?: string | null;
+} = {}): Promise<{ collections: CollectionWithSnapshot[]; nextCursor: number | null }> {
+  const limit = Math.min(Math.max(input.limit ?? 60, 1), 100);
+  const clauses = ["c.id > $1"];
+  const params: unknown[] = [Math.max(0, input.afterId ?? 0)];
+  if (input.chainSlug) {
+    params.push(input.chainSlug);
+    clauses.push(`c.chain_slug = $${params.length}`);
+  }
+  params.push(limit + 1);
+  const result = await postgresQuery<CollectionRow & {
+    floor_price_wei: string | null; floor_price_currency: string | null; floor_price_marketplace: string | null;
+    total_supply: string | null; listed_count: number | null; synced_at: string | null; sync_error: string | null;
+    volume_24h_wei: string | null; sales_24h: number | null; volume_7d_wei: string | null; sales_7d: number | null;
+    volume_30d_wei: string | null; sales_30d: number | null; previous_floor_price_wei: string | null;
+    holder_count: number | null; floor_change_pct: number | null;
+  }>(
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url,
+            c.is_vault_backed, c.creator_handle, c.creator_address, c.creator_ens,
+            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count,
+            s.synced_at, s.sync_error, s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d,
+            s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei, s.holder_count, s.floor_change_pct
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY c.id ASC
+     LIMIT $${params.length}`,
+    params
+  );
+  const hasMore = result.rows.length > limit;
+  const rows = result.rows.slice(0, limit);
+  const collections = rows.map((row) => ({
+    ...rowToCollection(row),
+    floorPriceWei: row.floor_price_wei,
+    floorPriceCurrency: row.floor_price_currency,
+    floorPriceMarketplace: row.floor_price_marketplace,
+    totalSupply: row.total_supply == null ? null : Number(row.total_supply),
+    listedCount: row.listed_count,
+    syncedAt: row.synced_at,
+    syncError: row.sync_error,
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
+    previousFloorPriceWei: row.previous_floor_price_wei,
+    holderCount: row.holder_count,
+    floorChangePct: row.floor_change_pct,
+  }));
+  return { collections, nextCursor: hasMore && rows.length ? Number(rows[rows.length - 1].id) : null };
+}
+
 /**
  * Writes a real, freshly-fetched holder count for one collection -- the
  * on-demand path (see fetchHolderCount in alchemy-nft.ts, called from the

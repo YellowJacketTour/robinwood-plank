@@ -20,7 +20,7 @@ export function isCanonicalRobinwoodHost(hostHeader: string | null | undefined):
   if (!canonHost) return false;
   const incoming = (hostHeader ?? "").split(":")[0]?.toLowerCase() ?? "";
   if (incoming && incoming === canonHost) return true;
-  const site = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const site = process.env.SITE_URL?.trim();
   if (site && hostOf(site) === canonHost) return true;
   return false;
 }

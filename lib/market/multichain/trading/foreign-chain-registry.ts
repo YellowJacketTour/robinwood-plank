@@ -283,23 +283,77 @@ const FOREIGN_DEV_RPC_OVERRIDE = process.env.NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRID
  */
 const PUBLICNODE_FALLBACK: Record<string, string> = {
   "eth-mainnet": "https://ethereum-rpc.publicnode.com",
-  "polygon-mainnet": "https://polygon-bor-rpc.publicnode.com",
   "arb-mainnet": "https://arbitrum-one-rpc.publicnode.com",
   "base-mainnet": "https://base-rpc.publicnode.com",
   "opt-mainnet": "https://optimism-rpc.publicnode.com",
   "bnb-mainnet": "https://bsc-rpc.publicnode.com",
   "avax-mainnet": "https://avalanche-c-chain-rpc.publicnode.com",
-  "zksync-mainnet": "https://zksync-era-rpc.publicnode.com",
 };
 
-export function foreignRpcUrls(chainSlug: string): string[] {
-  if (FOREIGN_DEV_RPC_OVERRIDE) return [FOREIGN_DEV_RPC_OVERRIDE];
+/**
+ * Chain-operated public endpoints are a last-resort safety net. Their own
+ * operators describe them as rate-limited public infrastructure, so they are
+ * deliberately behind both Alchemy and PublicNode and must never be treated
+ * as an "unlimited" production entitlement.
+ */
+const FOUNDATION_RPC_FALLBACK: Record<string, string> = {
+  "arb-mainnet": "https://arb1.arbitrum.io/rpc",
+  "base-mainnet": "https://mainnet.base.org",
+  "opt-mainnet": "https://mainnet.optimism.io",
+  "bnb-mainnet": "https://bsc-dataseed.bnbchain.org",
+  "avax-mainnet": "https://api.avax.network/ext/bc/C/rpc",
+  "zksync-mainnet": "https://mainnet.era.zksync.io",
+};
+
+export type ForeignRpcEndpoint = {
+  id: string;
+  url: string;
+  kind: "keyed" | "configured" | "public-aggregator" | "chain-public" | "development";
+  /** Public endpoints commonly restrict historical eth_getLogs. */
+  archiveLogs: "supported" | "restricted" | "unknown";
+};
+
+function configuredRpcEndpoints(chainSlug: string): ForeignRpcEndpoint[] {
+  // Operators can add independent Ankr/Infura/dRPC/Chainstack/etc accounts
+  // without a deployment-time code change. Server-only by design: URLs often
+  // contain credentials. Example: RPC_URLS_BASE_MAINNET=url1,url2.
+  const envKey = `RPC_URLS_${chainSlug.replace(/-/g, "_").toUpperCase()}`;
+  return (process.env[envKey] ?? "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter((url) => /^https?:\/\//.test(url))
+    .map((url, index) => ({
+      id: `configured-${index + 1}`,
+      url,
+      kind: "configured" as const,
+      archiveLogs: "unknown" as const,
+    }));
+}
+
+export function foreignRpcEndpoints(chainSlug: string): ForeignRpcEndpoint[] {
+  if (FOREIGN_DEV_RPC_OVERRIDE) {
+    return [{ id: "development", url: FOREIGN_DEV_RPC_OVERRIDE, kind: "development", archiveLogs: "unknown" }];
+  }
   const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chainSlug];
   if (!subdomain) {
     throw new Error(`foreign-chain-registry: no Alchemy RPC mapping for chainSlug "${chainSlug}"`);
   }
-  const fallback = PUBLICNODE_FALLBACK[chainSlug];
-  return [`https://${subdomain}.g.alchemy.com/v2/${apiKey()}`, ...(fallback ? [fallback] : [])];
+  const endpoints: ForeignRpcEndpoint[] = [{
+    id: "alchemy",
+    url: `https://${subdomain}.g.alchemy.com/v2/${apiKey()}`,
+    kind: "keyed",
+    archiveLogs: "supported",
+  }];
+  endpoints.push(...configuredRpcEndpoints(chainSlug));
+  const publicNode = PUBLICNODE_FALLBACK[chainSlug];
+  if (publicNode) endpoints.push({ id: "publicnode", url: publicNode, kind: "public-aggregator", archiveLogs: "restricted" });
+  const foundation = FOUNDATION_RPC_FALLBACK[chainSlug];
+  if (foundation) endpoints.push({ id: "chain-public", url: foundation, kind: "chain-public", archiveLogs: "restricted" });
+  return endpoints;
+}
+
+export function foreignRpcUrls(chainSlug: string): string[] {
+  return foreignRpcEndpoints(chainSlug).map((endpoint) => endpoint.url);
 }
 
 /**

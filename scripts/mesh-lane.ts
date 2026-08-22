@@ -19,9 +19,79 @@ async function main(): Promise<void> {
   }
 
   try {
+    if (source === "hypersync-discovery") {
+      const { runHypersyncDiscoveryScan } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+      console.log("[mesh-lane] hypersync-discovery", JSON.stringify(await runHypersyncDiscoveryScan({ chainSlug: chain })));
+      return;
+    }
+    if (source === "hypersync-backfill") {
+      const { runHypersyncBackfillScan } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+      console.log("[mesh-lane] hypersync-backfill", JSON.stringify(await runHypersyncBackfillScan({ chainSlug: chain })));
+      return;
+    }
+    if (source === "helius-discovery") {
+      const { runHeliusCollectionScan } = await import("../lib/market/multichain/discovery/helius-collection-scan");
+      console.log("[mesh-lane] helius-discovery", JSON.stringify(await runHeliusCollectionScan({ maxPages: 1 })));
+      return;
+    }
+    if (source === "helius-membership") {
+      const { scaffoldAllTrackedSolanaCollections } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+      console.log("[mesh-lane] helius-membership", JSON.stringify(await scaffoldAllTrackedSolanaCollections({ limit: 1, delayMs: 0, force: true })));
+      return;
+    }
+    if (source === "unisat-discovery") {
+      const { runUnisatCollectionListScan } = await import("../lib/market/multichain/discovery/unisat-collection-list-scan");
+      console.log("[mesh-lane] unisat-discovery", JSON.stringify(await runUnisatCollectionListScan({ maxPages: 1 })));
+      return;
+    }
+    if (source === "ordiscan-discovery") {
+      const { runOrdiscanCollectionScan } = await import("../lib/market/multichain/discovery/ordiscan-collection-scan");
+      console.log("[mesh-lane] ordiscan-discovery", JSON.stringify(await runOrdiscanCollectionScan({ maxPages: 1 })));
+      return;
+    }
+    if (source === "robinhood-discovery") {
+      const { runRobinhoodChainDiscoveryScan } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
+      console.log("[mesh-lane] robinhood-discovery", JSON.stringify(await runRobinhoodChainDiscoveryScan()));
+      return;
+    }
+    if (source === "robinhood-opensea") {
+      const { runOpenSeaRobinhoodDiscoveryScan } = await import("../lib/market/multichain/discovery/opensea-robinhood-scan");
+      console.log("[mesh-lane] robinhood-opensea", JSON.stringify(await runOpenSeaRobinhoodDiscoveryScan({ maxPages: 1 })));
+      return;
+    }
+    if (source === "robinhood-membership") {
+      const { advanceNextRobinhoodMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      console.log("[mesh-lane] robinhood-membership", JSON.stringify(await advanceNextRobinhoodMembership()));
+      return;
+    }
+    if (source === "robinhood-metadata") {
+      const { advanceRobinhoodTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
+      console.log("[mesh-lane] robinhood-metadata", JSON.stringify(await advanceRobinhoodTokenMetadata()));
+      return;
+    }
+    if (source === "evm-metadata") {
+      const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
+      console.log("[mesh-lane] evm-metadata", JSON.stringify(await advanceEvmTokenMetadata(chain)));
+      return;
+    }
+    if (source === "unisat-rarity") {
+      const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
+      console.log("[mesh-lane] unisat-rarity", JSON.stringify(await scaffoldAllTrackedBitcoinCollections({ limit: 1, delayMs: 0 })));
+      return;
+    }
+    if (source === "unisat-membership") {
+      const { advanceNextTrackedBitcoinMembership } = await import("../lib/market/multichain/discovery/unisat-membership-index-runner");
+      console.log("[mesh-lane] unisat-membership", JSON.stringify(await advanceNextTrackedBitcoinMembership()));
+      return;
+    }
     if (source === "opensea-stats") {
       const { runOpenSeaStatsSync } = await import("../lib/market/multichain/discovery/opensea-stats");
       console.log("[mesh-lane] os", JSON.stringify(await runOpenSeaStatsSync(chain, 20)));
+      return;
+    }
+    if (source === "opensea-membership") {
+      const { advanceNextTrackedEvmMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      console.log("[mesh-lane] opensea-membership", JSON.stringify(await advanceNextTrackedEvmMembership(chain)));
       return;
     }
     if (source === "coingecko-nft") {
@@ -64,7 +134,13 @@ async function main(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/429|403|rate limit|quota/i.test(msg)) {
-      await jailSource(source, 20 * 60_000, true, chain);
+      const providerSource = source === "ordiscan-discovery"
+        ? "ordiscan"
+        : source === "opensea-membership" ? "opensea-stats"
+        : source.startsWith("unisat") ? "unisat" : source;
+      // Quotas attach to the credential/provider account, not one chain.
+      await jailSource(providerSource, 20 * 60_000, true);
+      if (providerSource !== source) await jailSource(source, 20 * 60_000, true);
       console.log(`[mesh-lane] jailed ${source}: ${msg.slice(0, 180)}`);
       return;
     }
@@ -80,9 +156,9 @@ main()
     } catch {
       /* */
     }
-    process.exit(0);
+    process.exitCode = 0;
   })
   .catch((e) => {
     console.error("[mesh-lane] fatal", e instanceof Error ? e.message : e);
-    process.exit(1);
+    process.exitCode = 1;
   });

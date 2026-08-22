@@ -244,6 +244,26 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: "/api/market/multichain/collection",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=120, stale-while-revalidate=600" }],
+      },
+      {
+        source: "/api/market/multichain/feed",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=300, stale-while-revalidate=1800" }],
+      },
+      {
+        source: "/api/market/multichain/holder-count",
+        headers: [{ key: "Cache-Control", value: "public, max-age=60, s-maxage=600, stale-while-revalidate=3600" }],
+      },
+      {
+        source: "/api/market/multichain/rarity",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=300, stale-while-revalidate=3600" }],
+      },
+      {
+        source: "/api/market/multichain/trait-index",
+        headers: [{ key: "Cache-Control", value: "public, max-age=60, s-maxage=600, stale-while-revalidate=3600" }],
+      },
+      {
         source: "/api/ipfs/image",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },

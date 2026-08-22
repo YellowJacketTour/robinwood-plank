@@ -918,7 +918,10 @@ export default function GlobalMarketHub() {
   const chains = useMemo(() => {
     const seen = new Map<string, number>();
     for (const c of collections) {
-      if (isTitleJunkWithoutData(c)) continue;
+      // Chain badges are registry coverage counters, not hydrated-row
+      // counters. A newly discovered address must be visible in the total
+      // immediately even while its name/art/stats cells are still pending.
+      if (isSpamCollectionTitle(c.name)) continue;
       seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
     }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -932,7 +935,8 @@ export default function GlobalMarketHub() {
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (isTitleJunkWithoutData(c)) return false;
+      if (isSpamCollectionTitle(c.name)) return false;
+      if (!showShells && isTitleJunkWithoutData(c)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
       if (onlyArt && !hasArt(c) && !oneChain) return false;

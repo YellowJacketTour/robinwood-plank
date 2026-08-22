@@ -29,8 +29,12 @@
  * by construction, not a bug to fix later.
  */
 import { computeGenericRaritySnapshot, type GenericRarityInput } from "@/lib/rarity-generic";
-import { replaceForeignRarity, getForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
+import { replaceForeignRarity } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
+import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
+import { postgresQuery } from "@/lib/postgres";
 
 const API_BASE = "https://open-api.unisat.io/v3/market/collection/auction/actions";
 const PAGE_SIZE = 100;
@@ -49,16 +53,29 @@ type UniSatActionEvent = {
 };
 
 async function fetchActionsPage(collectionId: string, start: number): Promise<{ list: UniSatActionEvent[]; total: number }> {
+  if (await isSourceJailed("unisat")) throw new Error("unisat-rarity-index-runner: source jailed");
   const key = apiKey();
-  const res = await fetch(API_BASE, {
-    method: "POST",
-    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ filter: { collectionId }, start, limit: PAGE_SIZE }),
-  });
-  if (!res.ok) throw new Error(`unisat-rarity-index-runner: ${res.status} ${res.statusText}`);
-  const body = (await res.json()) as { code: number; msg: string; data?: { list: UniSatActionEvent[]; total: number } };
-  if (body.code !== 0) throw new Error(`unisat-rarity-index-runner: API error ${body.code} ${body.msg}`);
-  return body.data ?? { list: [], total: 0 };
+  // UniSat documents 1,000 free requests/day. Keep explicit headroom for
+  // interactive reads and collection discovery instead of letting this
+  // background indexer consume the entire account allowance.
+  const window = utcDayWindow(900);
+  if (!(await reserveProviderCapacity("unisat:default", window))) {
+    throw new Error("unisat-rarity-index-runner: durable daily ceiling");
+  }
+  try {
+    const res = await fetch(API_BASE, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ filter: { collectionId }, start, limit: PAGE_SIZE }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`unisat-rarity-index-runner: ${res.status} ${res.statusText}`);
+    const body = (await res.json()) as { code: number; msg: string; data?: { list: UniSatActionEvent[]; total: number } };
+    if (body.code !== 0) throw new Error(`unisat-rarity-index-runner: API error ${body.code} ${body.msg}`);
+    return body.data ?? { list: [], total: 0 };
+  } finally {
+    await settleProviderCapacity("unisat:default", window, 1, true).catch(() => {});
+  }
 }
 
 export type BitcoinRarityIndexResult = {
@@ -106,6 +123,23 @@ export async function indexBitcoinCollectionRarity(collectionId: string): Promis
   }
 
   await replaceForeignRarity("bitcoin-mainnet", collectionId, snapshot, traitIndex);
+  const observedAt = new Date();
+  await upsertCollectionTokenProjection("bitcoin-mainnet", collectionId, {
+    tokens: [...snapshot.byTokenId.values()].map((token) => ({
+      tokenId: token.tokenId,
+      name: token.name,
+      imageUrl: token.imageUrl ?? null,
+      traits: items.find((item) => item.tokenId === token.tokenId)?.traits ?? [],
+      rarityScore: token.score,
+      rarityRank: token.rank,
+      rarityPercentile: token.percentile,
+      rarityTier: token.tier,
+    })),
+    expectedCount: null,
+    partial: true,
+    provenance: ["unisat-market-activity", "bespoke-information-content-rarity"],
+    sourceObservedAt: observedAt,
+  });
 
   return { chainSlug: "bitcoin-mainnet", collectionId, tokensIndexed: snapshot.byTokenId.size, eventsWalked, partial: true };
 }
@@ -127,28 +161,39 @@ export async function scaffoldAllTrackedBitcoinCollections(opts?: {
   const force = opts?.force ?? false;
   const freshDays = opts?.freshDays ?? 7;
   const delayMs = opts?.delayMs ?? 1000;
-  const limit = opts?.limit ?? Infinity;
+  // A collection can consume up to MAX_PAGES requests.  An unbounded daily
+  // walk therefore cannot respect the provider ceiling; subsequent passes
+  // resume from the durable rarity timestamps.
+  const limit = opts?.limit ?? 25;
   const log = opts?.onProgress ?? (() => {});
 
   const all = await listTrackedCollections();
-  const bitcoin = all.filter((c) => c.chainSlug === "bitcoin-mainnet").slice(0, limit);
+  const candidates = await postgresQuery<{ contract_address: string }>(
+    `SELECT c.contract_address
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     LEFT JOIN plank_foreign_rarity_collections r
+       ON r.chain_slug = c.chain_slug AND lower(r.collection_slug) = lower(c.contract_address)
+     WHERE c.chain_slug = 'bitcoin-mainnet'
+       AND ($1::boolean OR r.indexed_at IS NULL OR r.indexed_at < NOW() - ($2::text || ' days')::interval)
+     ORDER BY (r.indexed_at IS NULL) DESC,
+       (COALESCE(s.listed_count, 0) > 0 OR s.floor_price_wei IS NOT NULL OR s.volume_24h_wei IS NOT NULL) DESC,
+       (c.name IS NOT NULL AND c.image_url IS NOT NULL) DESC,
+       r.indexed_at ASC NULLS FIRST,
+       c.id
+     LIMIT $3`,
+    [force, freshDays, Math.max(1, Math.trunc(limit))]
+  );
+  const bitcoin = candidates.rows.map((row) => ({ contractAddress: row.contract_address }));
 
   let indexed = 0;
-  let skippedFresh = 0;
+  const skippedFresh = 0;
   let failed = 0;
+  let attempted = 0;
 
   for (const c of bitcoin) {
-    if (!force) {
-      const existing = await getForeignTraitIndex("bitcoin-mainnet", c.contractAddress).catch(() => null);
-      if (existing?.indexedAt) {
-        const ageDays = (Date.now() - new Date(existing.indexedAt).getTime()) / 86_400_000;
-        if (ageDays < freshDays) {
-          skippedFresh += 1;
-          continue;
-        }
-      }
-    }
-
+    if (attempted >= limit) break;
+    attempted += 1;
     try {
       const result = await indexBitcoinCollectionRarity(c.contractAddress);
       log(`indexed ${c.contractAddress} (bitcoin-mainnet): ${result.tokensIndexed} tokens from ${result.eventsWalked} events (PARTIAL -- activity-log coverage only)`);

@@ -17,6 +17,7 @@ import EthUsdValue from "@/components/market/EthUsdValue";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
 import { swrJson } from "@/lib/market/swr-fetch";
 import { ensureChain } from "@/lib/wallet";
+import CriteriaBidValueHud from "@/components/market/CriteriaBidValueHud";
 
 type Props = {
   chainSlug: string;
@@ -178,10 +179,6 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
   const openReview = () => {
     setError(null);
     setSuccess(null);
-    if (!account) {
-      onConnect?.();
-      return;
-    }
     const wei = parseTokenAmount(priceEth, 18);
     if (wei === null || wei <= 0n) {
       setError("Enter an amount.");
@@ -251,7 +248,7 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
             <p className="mt-3 text-xs leading-5 text-foreground/55">
               This is a direct Marketplank bid, not an OpenSea order -- any seller who owns a qualifying item can
               accept it straight against Seaport. {currencySymbol} balance, allowance, expiry, and the order payload
-              are checked before signing. The token-id set is snapshotted into the signed order's Merkle root at this
+              are checked before signing. The token-id set is snapshotted into the signed order&apos;s Merkle root at this
               exact moment.
             </p>
 
@@ -279,7 +276,7 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
                 onClick={() => void submit()}
                 className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
               >
-                {busy ? "Confirm in wallet…" : "Continue to wallet"}
+                {busy ? "Confirm in wallet…" : account ? "Continue to wallet" : "Connect wallet & continue"}
               </button>
             </div>
           </div>
@@ -345,6 +342,7 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
             Bid locks {formatCriteriaLabel(clauses)} · {qualifyingIds.length} items snapshotted into the signed order.
           </p>
         )}
+        <CriteriaBidValueHud offerWei={offerWei} qualifyingIds={qualifyingIds} listings={listings} currencySymbol={currencySymbol} totalFeeBps={MARKETPLANK_NATIVE_LISTING_FEE_BPS} />
       </div>
 
       <div className="flex min-h-12 items-center gap-2 rounded-lg border border-line bg-panel px-2.5">
@@ -374,7 +372,7 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
       </div>
 
       <p className="text-center text-[0.65rem] text-foreground/50">
-        {feePct}% Marketplank fee, fixed -- the real order posts directly to Marketplank, not OpenSea's orderbook.
+        {feePct}% Marketplank fee, fixed -- the real order posts directly to Marketplank, not OpenSea&apos;s orderbook.
       </p>
 
       <button
@@ -383,7 +381,7 @@ export default function NativeForeignOfferForm({ chainSlug, currencySymbol, acco
         onClick={openReview}
         className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
       >
-        {busy ? "Signing…" : !account ? "Connect to build this bid" : "Review & sign criteria bid"}
+        {busy ? "Signing…" : "Review & sign criteria bid"}
       </button>
       {error && (
         <p className="text-center text-xs text-red-300" role="alert">
