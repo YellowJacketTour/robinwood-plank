@@ -213,16 +213,14 @@ export const TOKEN = {
 } as const;
 
 /**
- * Dev-only PlankSpace checkpoint.
+ * Public origin of the independently deployed PlankSpace application.
  *
- * Keep this as an explicit external origin while the wallet-owned profile app
- * is tested. Opening it in a separate browsing context avoids implying that
- * plank.love shares wallet sessions, signatures, cookies, or trust boundaries
- * with the checkpoint deployment. Replace this URL only when PlankSpace has a
- * reviewed canonical plank.love origin.
+ * Never commit a preview or developer-owned hostname here. Each environment
+ * must explicitly provide its reviewed PlankSpace origin. Keeping this unset
+ * renders a configuration notice instead of silently embedding an old build.
  */
 export const PLANKSPACE_URL =
-  "https://spaceback-social.degenwaffle.chatgpt.site" as const;
+  process.env.NEXT_PUBLIC_PLANKSPACE_URL?.trim() || null;
 
 /**
  * Primary navigation in reading order. `emphasis` changes presentation only;

@@ -13,6 +13,7 @@ interface Env {
       };
     };
   };
+  PLANKSPACE_PARENT_ORIGINS?: string;
 }
 
 interface ExecutionContext {
@@ -47,7 +48,11 @@ const worker = {
     response.headers.set("X-Content-Type-Options","nosniff");
     response.headers.set("Referrer-Policy","strict-origin-when-cross-origin");
     response.headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");
-    response.headers.set("Content-Security-Policy","frame-ancestors https://plank.love https://*.plank.love https://*.chatgpt.site");
+    const configuredParents=(env.PLANKSPACE_PARENT_ORIGINS||"")
+      .split(",")
+      .map(value=>value.trim())
+      .filter(value=>/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(value));
+    response.headers.set("Content-Security-Policy",`frame-ancestors https://plank.love https://*.plank.love${configuredParents.length?` ${configuredParents.join(" ")}`:""}`);
     return response;
   },
 };

@@ -19,7 +19,17 @@ export default function PlankSpacePage() {
       <Nav />
       <main id="main-content" tabIndex={-1} className="flex-1 px-2 py-3 sm:px-4">
         <div data-market-shell className="mx-auto w-full max-w-[1500px]">
-          <PlankSpaceFrame src={PLANKSPACE_URL} />
+          {PLANKSPACE_URL ? (
+            <PlankSpaceFrame src={PLANKSPACE_URL} />
+          ) : (
+            <section className="rounded-xl border border-amber-500/40 bg-black/70 p-8 text-amber-50">
+              <h1 className="text-2xl font-bold">PlankSpace is not configured</h1>
+              <p className="mt-3 max-w-2xl text-amber-100/80">
+                Set <code>NEXT_PUBLIC_PLANKSPACE_URL</code> to the reviewed
+                PlankSpace deployment origin for this environment.
+              </p>
+            </section>
+          )}
         </div>
       </main>
       <Footer />

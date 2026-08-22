@@ -53,6 +53,14 @@ Scripts that need writable project-scoped home, npm, XDG, and temporary paths us
 - `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
 - `db/schema.ts` starts intentionally empty
 - `examples/d1/` contains an optional D1 example surface
+
+## Deployment origins
+
+PlankSpace contains no committed preview hostname. Set `NEXT_PUBLIC_SITE_URL`
+to the standalone PlankSpace origin. When embedding it in Plank.love, set both
+`NEXT_PUBLIC_PLANKSPACE_PARENT_ORIGINS` and `PLANKSPACE_PARENT_ORIGINS` to the
+exact comma-separated parent origins that may use the shared wallet bridge.
+Production `plank.love` and its subdomains remain trusted by default.
 - `drizzle.config.ts` supports local migration generation when needed
 
 ## Workspace Auth Headers

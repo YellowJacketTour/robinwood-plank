@@ -62,10 +62,12 @@ export function subscribePlankLoveWalletState(listener:(value:PlankLoveWalletSta
 
 function resolveParentOrigin() {
   if (typeof window === "undefined" || window.parent === window) return null;
+  const configuredParents=(process.env.NEXT_PUBLIC_PLANKSPACE_PARENT_ORIGINS||"")
+    .split(",").map(value=>value.trim()).filter(Boolean);
   const trusted=(value:string|null)=>{
     if(!value)return null;
     try{const origin=new URL(value).origin,host=new URL(origin).hostname;
-      return host==="plank.love"||host.endsWith(".plank.love")||host==="plank-love-plankspace-test.degenwaffle.chatgpt.site"?origin:null;
+      return host==="plank.love"||host.endsWith(".plank.love")||configuredParents.includes(origin)?origin:null;
     }catch{return null}
   };
   // document.referrer changes to the PlankSpace origin after an internal

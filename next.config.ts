@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+function configuredPlankSpaceOrigin() {
+  const value = process.env.NEXT_PUBLIC_PLANKSPACE_URL?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+const plankSpaceOrigin = configuredPlankSpaceOrigin();
+
 /**
  * Security headers + ensure server secrets are never treated as public.
  * UNISWAP_API_KEY must never use the NEXT_PUBLIC_ prefix.
@@ -37,7 +50,7 @@ const securityHeaders = [
       // players (postMessage-controlled, no provider SDK script — so
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
-      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://spaceback-social.degenwaffle.chatgpt.site",
+      `frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com${plankSpaceOrigin ? ` ${plankSpaceOrigin}` : ""}`,
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
