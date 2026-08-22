@@ -32,6 +32,7 @@
   ],
   "exclude": [
     "node_modules",
+    "integrations/plankspace-app",
     "_to_delete",
     "test",
     "hardhat.config.ts",
