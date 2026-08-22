@@ -1464,7 +1464,7 @@ export default function GlobalMarketHub() {
                       {hero.floorPriceWei && (
                         <span className="inline-flex items-center gap-1">
                           {" · "}Floor {formatCompactNative(hero.floorPriceWei).display}
-                          <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
+                          <FloorCurrencyMark collection={hero} />
                         </span>
                       )}
                     </p>

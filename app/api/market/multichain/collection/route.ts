@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
           totalSupply,
           holderCount,
           floorPriceWei: supply?.floorPriceWei ?? null,
+          floorPriceCurrency: supply?.floorPriceCurrency ?? null,
           volume24hWei: marketStats?.volume24hWei ?? null,
           sales24h: marketStats?.sales24h ?? null,
           volume7dWei: marketStats?.volume7dWei ?? null,

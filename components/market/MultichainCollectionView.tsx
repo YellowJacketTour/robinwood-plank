@@ -58,6 +58,7 @@ import ChainIcon from "@/components/market/ChainIcon";
 import type { RarityTier } from "@/lib/rarity";
 import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
+import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
 
@@ -159,12 +160,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const surface = collectionSurface(chainSlug);
   const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
+  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">("art");
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
     listedCount: number | null;
     totalSupply: number | null;
     holderCount: number | null;
     floorPriceWei: string | null;
+    floorPriceCurrency: string | null;
   } | null>(null);
   // Real OpenSea 24h/7d/30d volume/sales (rarity-index-runner.ts, EVM-only
   // -- Solana/Bitcoin/Robinhood-native branches of the listings route always
@@ -398,6 +401,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           sales30d: number | null;
           holderCount: number | null;
           floorPriceWei?: string | null;
+          floorPriceCurrency?: string | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
         ttlMs: 30_000,
@@ -445,6 +449,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         totalSupply: data.collection.totalSupply,
         holderCount: data.collection.holderCount,
         floorPriceWei: data.collection.floorPriceWei ?? null,
+        floorPriceCurrency: data.collection.floorPriceCurrency ?? null,
       });
       // Real, on-demand backfill: if this collection has never had a holder
       // count computed, fetch one now (see holder-count/route.ts's own
@@ -1626,17 +1631,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Solana/Bitcoin, where no real collection-wide bids source exists yet.
   const bestOfferWei = offers.length > 0 ? offers.reduce((max, o) => (BigInt(o.priceWei) > BigInt(max) ? o.priceWei : max), offers[0].priceWei) : null;
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
+  const pricedSaleEvents = saleEvents.filter((e) => e.priceUsd != null);
+  const activityVolumeUsd = pricedSaleEvents.length > 0
+    ? pricedSaleEvents.reduce((sum, e) => sum + e.priceUsd!, 0)
+    : null;
+  const activityTotalsByCurrency = new Map<string, number>();
+  for (const event of saleEvents) {
+    const amount = Number(event.priceAmount);
+    if (!event.priceSymbol || !Number.isFinite(amount)) continue;
+    activityTotalsByCurrency.set(event.priceSymbol, (activityTotalsByCurrency.get(event.priceSymbol) ?? 0) + amount);
+  }
+  const activityVolumeDisplay = [...activityTotalsByCurrency.entries()]
+    .map(([symbol, amount]) => `${amount.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${symbol}`)
+    .join(" + ");
+  const currenciesInLoadedSales = new Set(saleEvents.map((e) => e.priceSymbol).filter(Boolean));
   const volumeWei =
-    saleEvents.length > 0
+    saleEvents.length > 0 && currenciesInLoadedSales.size === 1 && [...currenciesInLoadedSales][0] === nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)
       ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString()
       : marketStatsWindow === "7d"
         ? marketStats?.volume7dWei ?? null
         : marketStatsWindow === "30d"
           ? marketStats?.volume30dWei ?? null
           : marketStats?.volume24hWei ?? null;
-  const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
+  const highestSale = pricedSaleEvents.length > 0
+    ? pricedSaleEvents.reduce((max, e) => e.priceUsd! > max.priceUsd! ? e : max, pricedSaleEvents[0])
+    : null;
   const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana, isBitcoin);
   const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
+  const floorCurrencySymbol = listings.length > 0 ? statCurrencySymbol : (supplyStats?.floorPriceCurrency ?? statCurrencySymbol);
+  const floorUsd = (weiStr: string | null): number | null => toUsd(weiStr, floorCurrencySymbol);
 
   return (
     <div className="space-y-4 p-4">
@@ -1670,8 +1693,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Floor price</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {floorWei ? formatTokenAmount(floorWei, 18, 4) : "—"}
-            {floorWei && statUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+            {floorWei ? <>{formatTokenAmount(floorWei, 18, 4)} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{floorCurrencySymbol}</span></> : "—"}
+            {floorWei && floorUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(floorUsd(floorWei)!)}</span>}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
@@ -1708,17 +1731,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Volume</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {volumeWei ? formatTokenAmount(volumeWei, 18, 3) : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—"}
-            {volumeWei && statUsd(volumeWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+            {activityVolumeDisplay || (volumeWei ? <>{formatTokenAmount(volumeWei, 18, 3)} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{statCurrencySymbol}</span></> : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—")}
+            {activityVolumeUsd != null ? <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(activityVolumeUsd)}</span> : volumeWei && statUsd(volumeWei) != null ? <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(volumeWei)!)}</span> : null}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Highest sale</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {highestSaleWei ? formatTokenAmount(highestSaleWei, 18, 4) : "—"}
-            {highestSaleWei && statUsd(highestSaleWei) != null && (
-              <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
-            )}
+            {highestSale ? <>{highestSale.priceAmount} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{highestSale.priceSymbol}</span></> : "—"}
+            {highestSale?.priceUsd != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(highestSale.priceUsd)}</span>}
           </dd>
         </div>
       </dl>
@@ -1993,6 +2014,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <>
               <button
                 type="button"
+                onClick={() => setBrowseMode((mode) => mode === "art" ? "intelligence" : "art")}
+                aria-pressed={browseMode === "intelligence"}
+                className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                  browseMode === "intelligence" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                }`}
+              >
+                {browseMode === "intelligence" ? "Art & listings" : "Intelligence"}
+              </button>
+              <button
+                type="button"
                 onClick={() => setSweepOpen((v) => !v)}
                 aria-pressed={sweepOpen}
                 className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
@@ -2030,6 +2061,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </>
           }
         >
+          {browseMode === "intelligence" ? (
+            <CollectionIntelligence
+              name={collection?.name ?? collectionSlug}
+              chain={chainDisplayName(chainSlug)}
+              supply={supplyStats?.totalSupply ?? null}
+              holders={supplyStats?.holderCount ?? null}
+              indexed={catalogMeta?.projectedCount ?? tokens.length}
+              rarityCovered={rarityMap.size}
+              rarityTiers={countTiers(rarityMap)}
+              listings={listings.map((listing) => ({
+                priceWei: listing.priceWei,
+                maker: listing.maker,
+                tokenId: listing.tokenId,
+              }))}
+              sales={saleEvents}
+            />
+          ) : (
+          <>
           {criteriaOpen && !isNonEvm && collection && (
             <div className="mb-3">
               {isForeignEvm && bidVenue === "native" ? (
@@ -2232,6 +2281,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 {catalogMeta?.projectedCount ? ` · ${tokens.length.toLocaleString()} of ${catalogMeta.projectedCount.toLocaleString()} indexed shown` : ""}
               </button>
             </div>
+          )}
+          </>
           )}
         </MarketBrowseLayout>
 
