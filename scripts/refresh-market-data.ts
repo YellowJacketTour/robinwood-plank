@@ -163,8 +163,18 @@ async function main(): Promise<void> {
   // collection's deploy block and report caughtUp=false; once the cursor
   // reaches the confirmed head each run costs a single small forward window.
   await step("events", async () => {
-    const { runChainIndexer } = await import("../lib/market/chain-indexer");
+    const { runChainIndexer, reindexNftRange } = await import("../lib/market/chain-indexer");
+    const { unpricedSaleBlockRanges } = await import("../lib/market/chain-events");
     const run = await runChainIndexer();
+    // A transaction/receipt lookup can fail transiently after the Transfer
+    // log itself succeeded. Keep the append-only event immediately, then
+    // heal a bounded number of exact suspect ranges on every cron tick.
+    const repairRanges = (await unpricedSaleBlockRanges()).slice(0, 3);
+    let repaired = 0;
+    for (const range of repairRanges) {
+      const repair = await reindexNftRange(range);
+      repaired += repair.rowsRepaired;
+    }
     const parts = run.sources.map((s) => {
       const range = s.toBlock >= s.fromBlock ? `${s.fromBlock}-${s.toBlock}` : "nothing due";
       return (
@@ -174,7 +184,8 @@ async function main(): Promise<void> {
     });
     return (
       `head=${run.head} confirmed=${run.confirmedHead} ` +
-      `+${run.rowsInserted} new rows, caughtUp=${run.caughtUp} — ${parts.join("; ")}`
+      `+${run.rowsInserted} new rows, repaired=${repaired}, ` +
+      `repairRanges=${repairRanges.length}, caughtUp=${run.caughtUp} — ${parts.join("; ")}`
     );
   });
 

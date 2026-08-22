@@ -23,6 +23,10 @@ test("salesStatsFromLedger returns the empty shape when no Postgres store is con
     const stats = await salesStatsFromLedger();
     assert.deepEqual(stats, {
       saleCount: 0,
+      sales24h: 0,
+      pricedSales24h: 0,
+      unpricedSales24h: 0,
+      volume24hWei: null,
       highestWei: null,
       highestTokenId: null,
       highestTxHash: null,

@@ -81,6 +81,10 @@ export async function GET(req: Request) {
       const fromLive: LedgerSalesStats = {
         ...stats,
         saleCount: canonical.saleCount,
+        sales24h: canonical.sales24h,
+        pricedSales24h: canonical.pricedSales24h,
+        unpricedSales24h: canonical.unpricedSales24h,
+        volume24hWei: canonical.volume24hWei,
         highestWei: canonical.highestWei,
         highestTokenId: canonical.highestTokenId,
         highestTxHash: canonical.highestTxHash,

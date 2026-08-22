@@ -588,7 +588,16 @@ export async function countChainEvents(source?: ChainEventSource): Promise<numbe
 }
 
 export type LedgerSalesStats = {
+  /** Every evidence-classified sale, including rows awaiting price repair. */
   saleCount: number;
+  /** Verified sales in the rolling 24-hour window, priced or not. */
+  sales24h: number;
+  /** 24-hour sales whose consideration has been proven and stored. */
+  pricedSales24h: number;
+  /** Verified 24-hour sales awaiting a successful consideration repair. */
+  unpricedSales24h: number;
+  /** Sum of proven consideration only; null means no priced sale in-window. */
+  volume24hWei: string | null;
   highestWei: string | null;
   highestTokenId: string | null;
   highestTxHash: string | null;
@@ -622,6 +631,10 @@ export async function salesStatsFromLedger(
 ): Promise<LedgerSalesStats> {
   const empty: LedgerSalesStats = {
     saleCount: 0,
+    sales24h: 0,
+    pricedSales24h: 0,
+    unpricedSales24h: 0,
+    volume24hWei: null,
     highestWei: null,
     highestTokenId: null,
     highestTxHash: null,
@@ -636,14 +649,33 @@ export async function salesStatsFromLedger(
         client.query<T>(text, [...values])
     : postgresQuery;
 
-  const totals = await query<{ sale_count: string; total_wei: string | null }>(
-    `SELECT COUNT(*)::text AS sale_count, SUM(price_wei)::text AS total_wei
+  const totals = await query<{
+    sale_count: string;
+    total_wei: string | null;
+    sales_24h: string;
+    priced_sales_24h: string;
+    volume_24h_wei: string | null;
+  }>(
+    `SELECT COUNT(*)::text AS sale_count,
+            SUM(price_wei)::text AS total_wei,
+            COUNT(*) FILTER (
+              WHERE block_timestamp >= NOW() - INTERVAL '24 hours'
+            )::text AS sales_24h,
+            COUNT(*) FILTER (
+              WHERE block_timestamp >= NOW() - INTERVAL '24 hours'
+                AND price_wei IS NOT NULL
+            )::text AS priced_sales_24h,
+            SUM(price_wei) FILTER (
+              WHERE block_timestamp >= NOW() - INTERVAL '24 hours'
+            )::text AS volume_24h_wei
      FROM plank_chain_events
-     WHERE kind = 'sale' AND price_wei IS NOT NULL`
+     WHERE kind = 'sale'`
   );
   const saleCount = Number(totals.rows[0]?.sale_count ?? "0");
   if (saleCount === 0) return empty;
   const totalVolumeWei = totals.rows[0]?.total_wei ?? null;
+  const sales24h = Number(totals.rows[0]?.sales_24h ?? "0");
+  const pricedSales24h = Number(totals.rows[0]?.priced_sales_24h ?? "0");
 
   const highest = await query<{
     price_wei: string;
@@ -661,6 +693,10 @@ export async function salesStatsFromLedger(
 
   return {
     saleCount,
+    sales24h,
+    pricedSales24h,
+    unpricedSales24h: Math.max(0, sales24h - pricedSales24h),
+    volume24hWei: totals.rows[0]?.volume_24h_wei ?? null,
     highestWei: top?.price_wei ?? null,
     highestTokenId: top?.token_id ?? null,
     highestTxHash: top?.tx_hash ?? null,

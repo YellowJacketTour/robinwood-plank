@@ -76,11 +76,18 @@ export async function GET(req: Request) {
       }
     }, null);
     let nativeListed = nativeListings.length;
-    if (nativeListed === 0) {
+    const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
+    const nativeSales = await salesStatsFromLedger().catch(() => null);
+    let canonical: Awaited<
+      ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
+    > = null;
+    if (nativeListed === 0 || (nativeSales?.saleCount ?? 0) === 0) {
       const { fetchCanonicalRobinwoodStats } = await import("@/lib/market/canonical-robinwood");
-      const canonical = await fetchCanonicalRobinwoodStats({
+      canonical = await fetchCanonicalRobinwoodStats({
         hostHeader: req.headers.get("host"),
       });
+    }
+    if (nativeListed === 0) {
       if (canonical) {
         nativeListed = canonical.listedCount;
         if (canonical.floorPriceWei) {
@@ -92,6 +99,14 @@ export async function GET(req: Request) {
         }
       }
     }
+    const preferLocalWindow =
+      (nativeSales?.sales24h ?? 0) > (canonical?.sales24h ?? 0);
+    const nativeSales24h = preferLocalWindow
+      ? nativeSales?.sales24h ?? null
+      : canonical?.sales24h ?? nativeSales?.sales24h ?? null;
+    const nativeVolume24hWei = preferLocalWindow
+      ? nativeSales?.volume24hWei ?? null
+      : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
@@ -124,8 +139,8 @@ export async function GET(req: Request) {
       creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,
-      volume24hWei: null as string | null,
-      sales24h: null as number | null,
+      volume24hWei: nativeVolume24hWei,
+      sales24h: nativeSales24h,
       volume7dWei: null as string | null,
       sales7d: null as number | null,
       volume30dWei: null as string | null,
