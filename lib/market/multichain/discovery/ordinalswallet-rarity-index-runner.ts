@@ -207,6 +207,23 @@ export async function scaffoldAllTrackedOrdinalsWalletCollections(opts?: {
   const limit = opts?.limit ?? 25;
   const log = opts?.onProgress ?? (() => {});
 
+  // REAL BUG FIXED 2026-08-23: this used to require adapter =
+  // 'ordinalswallet-ordinals', so any Bitcoin collection first discovered
+  // by a different source (unisat-collections, ordiscan-ordinals) could
+  // never be picked up here -- confirmed live on "yonder" (discovered via
+  // unisat-collections): stuck with UniSat's rarity source, which is a
+  // marketplace ACTIVITY LOG, not a real enumerator, so a collection with
+  // zero active listings gets almost no trait coverage (partial: true)
+  // even though turbo.ordinalswallet.com has all 121 real items via a
+  // genuine collection enumeration. Ordinals Wallet's rarity source is
+  // strictly more complete than UniSat's activity-log approach for any
+  // collection it actually has -- removed the adapter restriction so
+  // EVERY tracked bitcoin-mainnet collection is attempted here regardless
+  // of which source discovered it (a 404 for a collection OrdinalsWallet
+  // doesn't have is cheap and already handled). Also added `r.partial`
+  // to the eligibility check: a prior partial result (e.g. from UniSat's
+  // activity log) must not block a re-attempt for a full 7-day freshness
+  // window -- only a NON-partial result from any source should do that.
   const all = await listTrackedCollections();
   const candidates = await postgresQuery<{ contract_address: string }>(
     `SELECT c.contract_address
@@ -215,8 +232,7 @@ export async function scaffoldAllTrackedOrdinalsWalletCollections(opts?: {
      LEFT JOIN plank_foreign_rarity_collections r
        ON r.chain_slug = c.chain_slug AND lower(r.collection_slug) = lower(c.contract_address)
      WHERE c.chain_slug = 'bitcoin-mainnet'
-       AND c.adapter = 'ordinalswallet-ordinals'
-       AND ($1::boolean OR r.indexed_at IS NULL OR r.indexed_at < NOW() - ($2::text || ' days')::interval)
+       AND ($1::boolean OR r.indexed_at IS NULL OR r.partial IS TRUE OR r.indexed_at < NOW() - ($2::text || ' days')::interval)
      ORDER BY (r.indexed_at IS NULL) DESC,
        (COALESCE(s.listed_count, 0) > 0 OR s.floor_price_wei IS NOT NULL OR s.volume_24h_wei IS NOT NULL) DESC,
        (c.name IS NOT NULL AND c.image_url IS NOT NULL) DESC,
