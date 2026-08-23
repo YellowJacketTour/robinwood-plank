@@ -63,6 +63,20 @@ function topicToAddress(topic: string): string {
   return "0x" + topic.slice(-40).toLowerCase();
 }
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/**
+ * A Transfer/TransferSingle/TransferBatch log FROM the zero address is the
+ * real, canonical on-chain shape of an ERC-721/1155 mint -- there is no
+ * other reliable signal needed (no third-party indexer opinion required,
+ * same "verify on-chain directly" discipline this module's sibling
+ * discovery paths already use). Every other from-address is a genuine
+ * wallet-to-wallet (or marketplace-fill, excluded separately above) move.
+ */
+function eventTypeFor(fromAddress: string): "mint" | "transfer" {
+  return fromAddress.toLowerCase() === ZERO_ADDRESS ? "mint" : "transfer";
+}
+
 /**
  * Decodes ONE raw log into zero or more transfer events (TransferBatch can
  * carry many token IDs in a single log; sub_index distinguishes them within
@@ -224,12 +238,13 @@ export async function writeTransferLedgerEvents(transfers: DecodedTransfer[]): P
             event_index, sub_index, block_number, block_timestamp, seller, buyer,
             chain_namespace, event_identity, raw_event)
          VALUES
-           ($1, 'wallet-transfer', 'erc-transfer', 'transfer', $2, $3, $4,
-            $5, $6, $7, to_timestamp($8), $9, $10,
-            'eip155', $11, $12::jsonb)
+           ($1, 'wallet-transfer', 'erc-transfer', $2, $3, $4, $5,
+            $6, $7, $8, to_timestamp($9), $10, $11,
+            'eip155', $12, $13::jsonb)
          ON CONFLICT (chain_slug, venue_id, tx_hash, event_index, sub_index) DO NOTHING`,
         [
           chainSlug,
+          eventTypeFor(t.fromAddress),
           t.contractAddress,
           t.tokenId,
           t.txHash,

@@ -49,8 +49,27 @@ function venueCoverage(chainSlug: string) {
  * TRANSFER_TOPIC primitives robinhood-chain-scan.ts already uses for
  * discovery. Bounded so one request can't fan out into an unbounded
  * eth_getLogs scan.
+ *
+ * WAS 50,000 -- a real, live-verified bug, not just a conservative default.
+ * Robinhood Chain (chainId 4663) produces blocks far faster than a typical
+ * L1/L2: live-checked 2026-08-23 by comparing eth_getBlockByNumber
+ * timestamps ~60,178 blocks apart, that span covered barely 100 real
+ * minutes (~7 blocks/sec). 50,000 blocks is therefore only ~2 hours of real
+ * activity -- MUGS (0xab75f3d72509cd3b3a386a03de2b82854f0060e5)'s most
+ * recent real on-chain transfer, live-confirmed via eth_getLogs, sat right
+ * outside that window (~100 minutes old), so its Activity tab rendered
+ * empty even though real, recent activity genuinely existed on-chain.
+ * 1,000,000 blocks (~40 real hours) is confirmed live-safe as a SINGLE
+ * eth_getLogs call against this exact address/topic filter (84 real logs
+ * back in 89ms); 5,000,000 blocks in one call hits this RPC's own
+ * `"log query timed out"` error, so this stays address-filtered and
+ * single-call rather than chunking further out -- honest coverage
+ * improvement over the old 2-hour window, not a claim of full history (that
+ * still needs a real permanent ledger, same as RobinWood has).
  */
-const ACTIVITY_SCAN_BLOCKS = 50_000;
+const ACTIVITY_SCAN_BLOCKS = 1_000_000;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 type RawTransferLog = {
   address: string;
@@ -136,21 +155,29 @@ export async function GET(req: NextRequest) {
         .sort((a, b) => Number.parseInt(b.blockNumber, 16) - Number.parseInt(a.blockNumber, 16))
         .slice(0, limit);
 
-      const events = sorted.map((log) => ({
-        type: "transfer" as const,
-        // Real block timestamps would need one eth_getBlockByNumber call per
-        // distinct block -- real work, deferred rather than faked; null is
-        // honest here, not a placeholder value.
-        timestamp: null,
-        transaction: log.transactionHash,
-        priceWei: null,
-        priceSymbol: null,
-        from: topicToAddress(log.topics[1]),
-        to: topicToAddress(log.topics[2]),
-        tokenId: BigInt(log.topics[3]).toString(),
-        tokenName: null,
-        imageUrl: null,
-      }));
+      const events = sorted.map((log) => {
+        const from = topicToAddress(log.topics[1]);
+        // The real, canonical on-chain shape of an ERC-721 mint: a Transfer
+        // FROM the zero address. Same signal transfer-ledger.ts's
+        // eventTypeFor() now uses for the 8 foreign EVM chains -- checked
+        // here too rather than lumping every genuine mint into "transfer".
+        const kind = from === ZERO_ADDRESS ? ("mint" as const) : ("transfer" as const);
+        return {
+          type: kind,
+          // Real block timestamps would need one eth_getBlockByNumber call per
+          // distinct block -- real work, deferred rather than faked; null is
+          // honest here, not a placeholder value.
+          timestamp: null,
+          transaction: log.transactionHash,
+          priceWei: null,
+          priceSymbol: null,
+          from,
+          to: topicToAddress(log.topics[2]),
+          tokenId: BigInt(log.topics[3]).toString(),
+          tokenName: null,
+          imageUrl: null,
+        };
+      });
 
       return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {

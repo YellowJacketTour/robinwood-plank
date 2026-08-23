@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshotsPage, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
@@ -47,7 +47,11 @@ export async function GET(req: Request) {
   }
 
   try {
-    const collections = await listCollectionsWithSnapshots();
+    const rawLimit = Number(new URL(req.url).searchParams.get("limit") ?? "5000");
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 20000) : 5000;
+    const rawOffset = Number(new URL(req.url).searchParams.get("offset") ?? "0");
+    const offset = Number.isSafeInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+    const { collections, totalCount } = await listCollectionsWithSnapshotsPage({ limit, offset });
 
     // Real 7-day activity (real observed Transfer-log counts, see
     // evm-log-scan.ts -- not a guessed/fabricated $ volume figure, which
@@ -252,9 +256,18 @@ export async function GET(req: Request) {
         });
     });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
+    const windowCollections = [nativeRow, ...withoutDupNative];
     return NextResponse.json({
-      count: withoutDupNative.length + 1,
-      collections: [nativeRow, ...withoutDupNative],
+      count: windowCollections.length,
+      // Real total tracked-collection count (all 317k+, not just this
+      // window) so the UI can honestly show "showing N of totalCount"
+      // instead of implying this response IS the whole catalog. See
+      // listCollectionsWithSnapshotsPage's header for why this response is
+      // now bounded at all.
+      totalCount: totalCount + 1,
+      limit,
+      offset,
+      collections: windowCollections,
     });
   } catch (error) {
     return publicError(error, "Failed to load the multichain index.");

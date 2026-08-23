@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { computeDemandScore } from "@/lib/market/multichain/demand-score";
+import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
@@ -149,6 +150,23 @@ type GlobalTokenHit = {
   imageUrl: string | null;
   rarityRank: number | null;
   rarityTier: string | null;
+};
+
+/**
+ * Creator-entity-linked search expansion (see lib/market/multichain/creator-links.ts):
+ * other tracked collections by the same creator as the top token match,
+ * returned by /api/market/multichain/token-search. "corroborated" means a
+ * real individually-identifying signal matched (handle/ENS/name byline), not
+ * just a shared wallet address -- a shared deployer wallet alone can be a
+ * pooled platform wallet used by unrelated creators, so it's rendered with
+ * less confidence below.
+ */
+type RelatedCreatorHit = {
+  chainSlug: string;
+  contractAddress: string;
+  name: string | null;
+  confidence: "corroborated" | "address-only";
+  matchedOn: Array<"handle" | "ens" | "name-byline" | "address">;
 };
 
 /** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
@@ -745,6 +763,12 @@ export default function GlobalMarketHub() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [collections, setCollections] = useState<TrackedCollection[]>([]);
+  // Real total tracked-collection count across the WHOLE catalog (317k+),
+  // not just the bounded window /api/market/multichain now returns -- see
+  // that route's own header. Falls back to collections.length (the window
+  // size) until the first response lands, since that's still an honest
+  // lower bound.
+  const [totalTrackedCount, setTotalTrackedCount] = useState<number | null>(null);
   const [deadArt, setDeadArt] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -820,6 +844,7 @@ export default function GlobalMarketHub() {
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
   const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
   const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
+  const [relatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -871,7 +896,7 @@ export default function GlobalMarketHub() {
         // one for the full 10-minute swr window -- same stale-poisons-
         // cache fix needed twice already this session (MultichainCollectionView's
         // rarity fetch, ForeignOfferForm's trait-index fetch).
-        const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain?v=index-2", {
+        const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number }>("/api/market/multichain?v=index-3", {
           ttlMs: 60_000,
           swrMs: 600_000,
           session: true,
@@ -882,6 +907,7 @@ export default function GlobalMarketHub() {
         });
         if (!cancelled) {
           const rows = data.collections ?? [];
+          if (typeof data.totalCount === "number") setTotalTrackedCount(data.totalCount);
           const hasHome = rows.some((c) => isHomeRow(c));
           setCollections(
             hasHome
@@ -1118,11 +1144,28 @@ export default function GlobalMarketHub() {
       .map((row) => row.c);
   }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
 
+  /**
+   * Creator-entity-linked search expansion, computed client-side against the
+   * already-loaded `collections` catalog (no extra request needed): when a
+   * search matches a real tracked collection by NAME (e.g. "mugs" matching
+   * "MUGS by 9mm.Pro"), also surface that creator's other tracked
+   * collections. The separate /api/market/multichain/token-search response
+   * covers the complementary case -- a query that only matches an individual
+   * indexed PIECE's name/id, not any collection's own name -- see
+   * relatedByCreator state below; the two are merged for display.
+   */
+  const catalogRelatedByCreator = useMemo(() => {
+    const top = debouncedFilterQuery.trim().length >= 2 ? filtered[0] : null;
+    if (!top) return [];
+    return flattenRelatedCreatorGroup(findRelatedByCreator(collections, top));
+  }, [filtered, debouncedFilterQuery, collections]);
+
   useEffect(() => {
     const query = search.trim();
     if (query.length < 2) {
       setTokenHits([]);
       setTokenSearchLoading(false);
+      setRelatedByCreator([]);
       return;
     }
     const controller = new AbortController();
@@ -1132,10 +1175,13 @@ export default function GlobalMarketHub() {
       if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
       try {
         const response = await fetch(`/api/market/multichain/token-search?${qs}`, { signal: controller.signal });
-        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[] } : null;
-        if (!controller.signal.aborted) setTokenHits(body?.tokens ?? []);
+        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[]; relatedByCreator?: RelatedCreatorHit[] } : null;
+        if (!controller.signal.aborted) {
+          setTokenHits(body?.tokens ?? []);
+          setRelatedByCreator(body?.relatedByCreator ?? []);
+        }
       } catch {
-        if (!controller.signal.aborted) setTokenHits([]);
+        if (!controller.signal.aborted) { setTokenHits([]); setRelatedByCreator([]); }
       } finally {
         if (!controller.signal.aborted) setTokenSearchLoading(false);
       }
@@ -1233,7 +1279,7 @@ export default function GlobalMarketHub() {
       const body = (await res.json().catch(() => null)) as { hydrated?: number } | null;
       if (!body?.hydrated) return;
       invalidateSwr("/api/market/multichain");
-      const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain?v=index-2", {
+      const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number }>("/api/market/multichain?v=index-3", {
         ttlMs: 0,
         swrMs: 60_000,
         session: false,
@@ -1243,6 +1289,7 @@ export default function GlobalMarketHub() {
         },
       });
       if (!cancelled && data.collections) setCollections(data.collections);
+      if (!cancelled && typeof data.totalCount === "number") setTotalTrackedCount(data.totalCount);
     })();
     return () => {
       cancelled = true;
@@ -1421,7 +1468,17 @@ export default function GlobalMarketHub() {
       <div>
         <h2 className="font-display text-xl text-gold-300">Global Market</h2>
         <p className="text-xs text-foreground/50">
-          {collections.length} collection{collections.length === 1 ? "" : "s"} tracked across{" "}
+          {(() => {
+            const total = totalTrackedCount ?? collections.length;
+            // Honest: this page shows a bounded, ranked window (see
+            // /api/market/multichain's own header), not the full tracked
+            // catalog -- say so explicitly when the two diverge instead of
+            // implying collections.length IS the whole roster.
+            return total > collections.length
+              ? `Showing ${collections.length.toLocaleString()} of ${total.toLocaleString()} tracked`
+              : `${total.toLocaleString()} collection${total === 1 ? "" : "s"} tracked`;
+          })()}{" "}
+          across{" "}
           {chains.length} chain{chains.length === 1 ? "" : "s"} — real listings, buy, sweep, and send on every
           EVM one ({collections.filter((c) => c.tradeable).length} of {collections.length}; Solana rows are
           browse-only for now, see the badge on each card).
@@ -2139,6 +2196,67 @@ export default function GlobalMarketHub() {
               )}
             </section>
           )}
+          {search.trim().length >= 2 && (relatedByCreator.length > 0 || catalogRelatedByCreator.length > 0) && (() => {
+            // Merge the two sources this hub computes independently: a
+            // catalog NAME match (client-side, instant) and a token-search
+            // API match (covers a query that only matched an indexed piece,
+            // not any collection's own name) -- deduped so the same related
+            // collection never renders twice regardless of which path found it.
+            const merged = [...catalogRelatedByCreator, ...relatedByCreator].filter((hit, i, arr) =>
+              arr.findIndex((h) => h.chainSlug === hit.chainSlug && h.contractAddress.toLowerCase() === hit.contractAddress.toLowerCase()) === i
+            );
+            // Corroborated (real handle/ENS/name-byline signal) always shown
+            // first and prominently; address-only matches (nothing beyond a
+            // shared wallet, which can be a pooled deployer used by
+            // unrelated creators) render smaller and labeled as only
+            // "possibly" the same creator -- see creator-links.ts for why.
+            const corroborated = merged.filter((r) => r.confidence === "corroborated");
+            const addressOnly = merged.filter((r) => r.confidence === "address-only");
+            const renderRow = (hit: RelatedCreatorHit) => {
+              const full = collections.find((c) => c.chainSlug === hit.chainSlug && c.contractAddress.toLowerCase() === hit.contractAddress.toLowerCase());
+              const href = `/market/multichain/${encodeURIComponent(hit.chainSlug)}/${encodeURIComponent(hit.contractAddress)}`;
+              return (
+                <li key={`related-creator:${hit.chainSlug}:${hit.contractAddress}`}>
+                  <Link href={href} className="dense-card group flex h-full items-center gap-2 p-2 hover:border-line-strong">
+                    <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-wood-900">
+                      <CollectionThumb src={full?.imageUrl ?? null} alt={hit.name ?? displayName(full ?? { name: hit.name } as TrackedCollection)} width={256} variant="tile" />
+                      <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70">
+                        <ChainIcon chainSlug={hit.chainSlug} size={10} />
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold text-foreground">{hit.name || shortCollectionId(hit.contractAddress)}</p>
+                      <p className="truncate text-[0.6rem] text-foreground/45">{chainDisplayName(hit.chainSlug)}</p>
+                    </div>
+                  </Link>
+                </li>
+              );
+            };
+            return (
+              <section className="mb-4 space-y-2" aria-label="More from this creator">
+                {corroborated.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">More from this creator</h3>
+                      <span className="text-[0.65rem] text-foreground/45">{corroborated.length} more collection{corroborated.length === 1 ? "" : "s"}</span>
+                    </div>
+                    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">{corroborated.map(renderRow)}</ul>
+                  </>
+                )}
+                {addressOnly.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <h3 className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/45" title="Shares only a deployer/creator wallet with no handle, ENS, or name match -- that wallet can be a shared platform wallet used by multiple unrelated creators, so this is a weaker signal than the corroborated matches above.">
+                        Possibly the same creator (shared wallet only)
+                      </h3>
+                      <span className="text-[0.6rem] text-foreground/35">{addressOnly.length}</span>
+                    </div>
+                    <ul className="grid grid-cols-3 gap-1.5 opacity-70 sm:grid-cols-5 xl:grid-cols-8">{addressOnly.map(renderRow)}</ul>
+                  </>
+                )}
+              </section>
+            );
+          })()}
           {filtered.length === 0 ? (
             <EmptyState
               title="No collections match"
