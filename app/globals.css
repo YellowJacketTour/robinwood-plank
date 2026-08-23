@@ -346,6 +346,19 @@ html[data-melt="1"] body::after,
 html[data-melt="1"] body::after {
   content: "";
 }
+
+.disco-fluid-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100vw;
+  height: 100dvh;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+html[data-melt="1"] .disco-fluid-backdrop { opacity: 1; }
+html[data-melt="1"] body::after { opacity: calc(0.06 + var(--melt-energy, 0) * 0.04); }
 @media (prefers-reduced-motion: reduce) {
   html[data-melt="1"] body::after,
   .disco-melt-layer { animation: none; filter: saturate(1.1); }

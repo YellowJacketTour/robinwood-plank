@@ -161,6 +161,10 @@ export default function WoodAmpProvider({
       root.style.setProperty("--melt-mid", mid.toFixed(3));
       root.style.setProperty("--melt-treble", treble.toFixed(3));
       root.style.setProperty("--melt-energy", (bass * 0.5 + mid * 0.35 + treble * 0.15).toFixed(3));
+      window.dispatchEvent(new CustomEvent("plank:audio-spectrum", { detail: {
+        energy: bass * 0.5 + mid * 0.35 + treble * 0.15,
+        bass, mid, treble,
+      } }));
       if (active) graph!.frame = requestAnimationFrame(paint);
       else graph!.frame = 0;
     };
