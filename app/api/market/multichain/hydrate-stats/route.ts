@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import {
   updateCollectionMarketStats,
   updateCollectionSupplyFields,
@@ -128,7 +128,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   }
 
   const osChain = chainSlug === "robinhood" ? "robinhood" : foreignChainByChainSlug(chainSlug)?.openSeaChain ?? null;
-  const openSeaApiKey = osChain ? await getOpenSeaApiKey() : null;
+  const openSeaApiKey = osChain ? (await pickOpenSeaKey("live"))?.apiKey ?? null : null;
   if (!osChain || !openSeaApiKey) return filled;
 
   const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {

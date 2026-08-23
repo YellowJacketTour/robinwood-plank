@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FOREIGN_CHAINS, foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { fetchForeignAllListings, fetchForeignCollectionOffers } from "@/lib/market/multichain/trading/foreign-orders";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { resolveOwnedTokenIds } from "@/app/api/market/multichain/owned/route";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
@@ -171,7 +171,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const key = await getOpenSeaApiKey();
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     const [foreignOwned, robinhoodOwned] = await Promise.all([fetchOwnedAll(owner), fetchOwnedRobinhood(owner)]);
     const owned = [...foreignOwned, ...robinhoodOwned.owned];
 

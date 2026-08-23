@@ -180,6 +180,20 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] fills-genesis", JSON.stringify({ scan, updated }));
       return;
     }
+    if (source === "wyvern-fills") {
+      const { scanChainForWyvernFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-wyvern-scan");
+      const scan = await scanChainForWyvernFillsViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] wyvern-fills-live", JSON.stringify(scan));
+      return;
+    }
+    if (source === "wyvern-fills-genesis") {
+      const { scanChainForWyvernFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-wyvern-scan");
+      const scan = await scanChainForWyvernFillsGenesisBackfillViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] wyvern-fills-genesis", JSON.stringify(scan));
+      return;
+    }
     if (source === "native-robinwood") {
       const { sanitizeUnknownZeros } = await import("../lib/market/multichain/store");
       console.log("[mesh-lane] heal", JSON.stringify(await sanitizeUnknownZeros()));

@@ -35,7 +35,7 @@
  * every discovery path in this app uses to keep DeFi position/receipt junk
  * out.
  */
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { ROBINHOOD_RPC_URLS, ROBINHOOD_CHAIN_ID } from "@/lib/mint-contract";
 import { isNotRealCollectibleArt, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
@@ -142,7 +142,10 @@ export async function runOpenSeaRobinhoodDiscoveryScan(
   // 10x from the arbitrary cron-pacing default of 5 so each pass covers
   // more real ground per invocation.
   const maxPages = input.maxPages ?? 50;
-  const apiKey = await getOpenSeaApiKey();
+  // Background discovery scan -- deliberately prefers the MOST-loaded key
+  // with remaining capacity, so it doesn't contend with live page loads for
+  // the least-loaded key when multiple real keys are configured.
+  const apiKey = (await pickOpenSeaKey("background"))?.apiKey ?? null;
   if (!apiKey) {
     return {
       pagesScanned: 0,

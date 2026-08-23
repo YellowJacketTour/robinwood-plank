@@ -31,7 +31,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { fetchAllOpenSeaListings, getOpenSeaApiKey, normaliseOpenSeaListings } from "@/lib/market/opensea";
+import { fetchAllOpenSeaListings, normaliseOpenSeaListings } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
@@ -186,13 +187,19 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
       }
       const openSeaSlug = await resolveOpenSeaCollectionSlug("robinhood", collection.contractAddress).catch(() => null);
+      // "live" priority: a real page load competes for the LEAST-loaded key
+      // in the pool, so background discovery/sync supervisors saturating
+      // their own (most-loaded) key never starve this request.
+      const liveKey = openSeaSlug ? await pickOpenSeaKey("live").catch(() => null) : null;
       const [nativeRows, pulp, openSeaPage] = await Promise.all([
         getListings(collectionSlug),
         // PulpMarket is collection-address scoped. The old client silently
         // hard-coded RobinWood, which made every other Robinhood collection
         // (including MUGS) report aggregate inventory without its orders.
         refreshPulpListings(collection.contractAddress).catch(() => []),
-        openSeaSlug ? fetchAllOpenSeaListings(openSeaSlug).catch(() => null) : Promise.resolve(null),
+        openSeaSlug
+          ? fetchAllOpenSeaListings(openSeaSlug, { apiKeyOverride: liveKey?.apiKey }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       const native: Listing[] = nativeRows.map(({ rawOrder: _rawOrder, ...listing }) => listing);
       // A partial cursor walk cannot safely participate in floor or rarity
@@ -441,7 +448,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const key = await getOpenSeaApiKey();
+    // "live" priority -- see the Robinhood-chain branch above for why.
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }

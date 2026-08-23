@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
@@ -224,7 +224,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ...ledger, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
       }
     }
-    const key = await getOpenSeaApiKey();
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }

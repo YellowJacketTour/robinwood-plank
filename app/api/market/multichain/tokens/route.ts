@@ -4,7 +4,7 @@
  * Swap for foreign collections are out of scope (owner: later).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { publicError, rateLimit } from "@/lib/security";
@@ -199,7 +199,7 @@ export async function GET(req: NextRequest) {
 }
 
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
-  const key = await getOpenSeaApiKey();
+  const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
   if (!key) return [];
   const chainPath = openSeaChain === "matic" ? "matic" : openSeaChain;
   const address = /^0x[0-9a-fA-F]{40}$/.test(contractOrSlug) ? contractOrSlug : null;

@@ -8,7 +8,7 @@
  * chain.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { activityValue } from "@/lib/market/activity-value";
 
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const key = await getOpenSeaApiKey();
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }

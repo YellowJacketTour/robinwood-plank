@@ -26,6 +26,8 @@ export type MeshSource =
   | "adapter-sync"
   | "seaport-fills"
   | "seaport-fills-genesis"
+  | "wyvern-fills"
+  | "wyvern-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -127,6 +129,22 @@ export const MESH_LANES: MeshLane[] = [
     sliceSec: 180,
     notes: "Independent block-0-to-head Seaport 1.1-1.6 fill cursor; never advances the live cursor or skips an uncovered range.",
   })),
+  {
+    id: "wyvern-live:eth-mainnet",
+    source: "wyvern-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Wyvern v1/v2 OrdersMatched live cursor; eth-mainnet only, both real deployments never redeployed elsewhere.",
+  },
+  {
+    id: "wyvern-genesis:eth-mainnet",
+    source: "wyvern-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head Wyvern v1/v2 fill cursor; never advances the live cursor.",
+  },
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-backfill:${chainSlug}`,
     source: "hypersync-backfill" as const,

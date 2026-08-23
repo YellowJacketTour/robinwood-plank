@@ -41,7 +41,7 @@
  * server-prepares/client-signs split lib/market/seaport.ts's own
  * confirmBuy already uses on Robinhood Chain) is the next step.
  */
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { foreignChainByChainSlug, FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 const BASE = "https://api.opensea.io/api/v2";
@@ -70,7 +70,8 @@ export type ForeignSeaportOrder = {
 };
 
 async function openSeaFetch<T>(path: string): Promise<T | null> {
-  const key = await getOpenSeaApiKey();
+  // Live order fetch/prepare for a real buy/sell action -- "live" priority.
+  const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
   if (!key) {
     throw new Error("foreign-orders: no OpenSea API key available (set OPENSEA_API_KEY or let the managed-key cron issue one)");
   }
@@ -84,7 +85,7 @@ async function openSeaFetch<T>(path: string): Promise<T | null> {
 }
 
 async function openSeaPost<T>(path: string, body: unknown): Promise<T> {
-  const key = await getOpenSeaApiKey();
+  const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
   if (!key) {
     throw new Error("foreign-orders: no OpenSea API key available (set OPENSEA_API_KEY or let the managed-key cron issue one)");
   }

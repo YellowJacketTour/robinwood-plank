@@ -7,7 +7,7 @@
  * signing itself; this route only relays the already-signed order.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { FOREIGN_CHAINS, FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unexpected protocol_address." }, { status: 400 });
     }
 
-    const key = await getOpenSeaApiKey();
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }

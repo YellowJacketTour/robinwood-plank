@@ -692,6 +692,28 @@ async function main(): Promise<void> {
     return parts.join("; ");
   });
 
+  // Second real historic marketplace this app indexes directly on-chain --
+  // LooksRare v1 TakerAsk/TakerBid, same dual-cursor live/genesis pattern as
+  // the Seaport steps above. See hypersync-looksrare-scan.ts's own header
+  // for the cited address/event sources and honest v1/eth-mainnet-only scope.
+  await step("looksrare-fills", async () => {
+    const { scanLooksRareFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-looksrare-scan");
+    const { LOOKSRARE_V1_CHAIN_SLUG } = await import("../lib/market/multichain/looksrare-fill-indexer");
+    const result = await scanLooksRareFillsViaHypersync(LOOKSRARE_V1_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("looksrare-fills-backfill", async () => {
+    const { scanLooksRareFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-looksrare-scan");
+    const { LOOKSRARE_V1_CHAIN_SLUG } = await import("../lib/market/multichain/looksrare-fill-indexer");
+    const result = await scanLooksRareFillsGenesisBackfillViaHypersync(LOOKSRARE_V1_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
   // v4 EVM API (the one real candidate for a free cross-EVM ranking
   // endpoint) has been confirmed live 2026-08-17, multiple retests, as

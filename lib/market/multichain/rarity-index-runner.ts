@@ -8,7 +8,7 @@
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
@@ -27,10 +27,24 @@ import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-c
 
 const PAGE_SIZE = 50;
 
+/**
+ * This whole runner is a background job (see header) -- every OpenSea key
+ * lookup below prefers the MOST-loaded key with remaining capacity, via
+ * `pickOpenSeaKey("background")`, so it naturally avoids contending with
+ * live, user-facing requests (token-art.ts, listings/route.ts) for the
+ * SAME key when more than one real key is configured. This file never
+ * reserved provider-window capacity of its own, so this is a pure key
+ * SELECTION swap -- no new capacity bookkeeping added here.
+ */
+async function backgroundOpenSeaKey(): Promise<string | null> {
+  const slot = await pickOpenSeaKey("background");
+  return slot?.apiKey ?? null;
+}
+
 export type RarityIndexBackend = "helius" | "unisat" | "opensea-contract" | "opensea-slug";
 
 /**
- * Same −log2 kernel for every chain. Enumerator differs:
+ * Same -log2 kernel for every chain. Enumerator differs:
  * Solana = Helius grouping, Bitcoin = UniSat activity (always partial),
  * Avalanche/ETH/Base/etc. = OpenSea NFT walk (contract or slug).
  */
@@ -111,7 +125,7 @@ export async function advanceEvmCollectionMembership(
   // page available on this run. The sequential cursor remains unchanged and
   // will retry; provider pagination continues as additive evidence.
   await advanceVerifiedSequentialMembership(chainSlug, contractAddress).catch(() => null);
-  const key = await getOpenSeaApiKey();
+  const key = await backgroundOpenSeaKey();
   if (!key) throw new Error("No OpenSea API key available.");
   const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, key, openSeaChain);
   if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress}`);
@@ -206,7 +220,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
   if (!rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
   const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
-  const openSeaKey = openSeaChain ? await getOpenSeaApiKey() : null;
+  const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
   let complete = 0, empty = 0, retry = 0;
   const errors: string[] = [];
   for (const item of work) {
@@ -284,7 +298,7 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   if (!chain.openSeaChain) {
     throw new Error(`"${chainSlug}" has no OpenSea orderbook -- rarity indexing needs an OpenSea collection slug.`);
   }
-  const key = await getOpenSeaApiKey();
+  const key = await backgroundOpenSeaKey();
   if (!key) throw new Error("No OpenSea API key available.");
 
   const collectionMeta = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}`, {
@@ -380,13 +394,49 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   }> = [];
   let cursor: string | null = null;
   let page = 0;
+  // Real bug (2026-08-23): this loop used to run unbounded until `cursor`
+  // went null. That's fine for a normal-sized PFP collection, but a
+  // collection the size of Courtyard.io (400k+ real graded-card NFTs) needs
+  // ~8,000 pages to fully enumerate -- with no incremental persistence, a
+  // single transient OpenSea error (rate limit, timeout) anywhere in that
+  // walk discarded every page already fetched and the collection stayed
+  // unindexed forever, run after run. MAX_PAGES bounds one run to a real,
+  // honest partial sample (same "provider ceiling -> partial:true" shape
+  // unisat-rarity-index-runner.ts already uses for Bitcoin), and a bounded
+  // retry-with-backoff absorbs a transient 429/5xx instead of losing the
+  // whole walk to it. Subsequent scheduled runs extend coverage further
+  // (existing freshDays/partial re-attempt logic in scaffoldAllTrackedCollections).
+  const MAX_PAGES = 500;
+  const MAX_RETRIES = 3;
 
   do {
     const url = new URL(`https://api.opensea.io/api/v2/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts`);
     url.searchParams.set("limit", String(PAGE_SIZE));
     if (cursor) url.searchParams.set("next", cursor);
-    const res: Response = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) throw new Error(`OpenSea ${res.status} on page ${page}`);
+    let res: Response | null = null;
+    let lastPageError: unknown = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const candidate = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+        if (candidate.ok) { res = candidate; break; }
+        if (candidate.status !== 429 || attempt === MAX_RETRIES) {
+          throw new Error(`OpenSea ${candidate.status} on page ${page}`);
+        }
+        lastPageError = new Error(`OpenSea ${candidate.status} on page ${page}`);
+      } catch (error) {
+        lastPageError = error;
+        if (attempt === MAX_RETRIES) break;
+      }
+      await sleep(1_500 * (attempt + 1));
+    }
+    if (!res) {
+      // A page beyond the first is a real, honest partial sample -- keep
+      // what was already fetched instead of throwing it all away. Only a
+      // total failure to fetch even page 0 is fatal (nothing to persist).
+      if (page === 0) throw lastPageError instanceof Error ? lastPageError : new Error(String(lastPageError));
+      cursor = null;
+      break;
+    }
     const data = (await res.json()) as {
       nfts?: Array<{
         identifier: string;
@@ -407,6 +457,7 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     }
     cursor = data.next ?? null;
     page += 1;
+    if (page >= MAX_PAGES && cursor) break;
   } while (cursor);
 
   const partial = Boolean(cursor) || (supplyHint != null && items.length < supplyHint);
@@ -448,7 +499,7 @@ async function resolveOpenSeaSlug(
   return data.collection ?? null;
 }
 
-/** Dispatches the same −log2 kernel to the chain's real enumerator. Never Alchemy. */
+/** Dispatches the same -log2 kernel to the chain's real enumerator. Never Alchemy. */
 export async function indexRarityForCollectionLookup(chainSlug: string, lookup: string): Promise<IndexRunResult> {
   const backend = rarityIndexBackend(chainSlug, lookup);
   if (backend === "helius") {
@@ -474,7 +525,7 @@ export async function indexRarityForCollectionLookup(chainSlug: string, lookup: 
     };
   }
   if (backend === "opensea-contract") {
-    const key = await getOpenSeaApiKey();
+    const key = await backgroundOpenSeaKey();
     if (!key) throw new Error("No OpenSea API key available.");
     const slug = await resolveOpenSeaSlug(chainSlug, lookup, key);
     if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${lookup}`);
@@ -518,7 +569,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
   const limit = opts?.limit ?? Infinity;
   const log = opts?.onProgress ?? (() => {});
 
-  const key = await getOpenSeaApiKey();
+  const key = await backgroundOpenSeaKey();
   if (!key) throw new Error("No OpenSea API key available.");
 
   const all = await listTrackedCollections();

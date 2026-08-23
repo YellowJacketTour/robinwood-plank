@@ -224,8 +224,16 @@ export async function openSeaKeyStatus(): Promise<{
  * GET an OpenSea endpoint. Returns null rather than throwing on any failure:
  * OpenSea being unreachable must never blank Marketplank's own numbers.
  */
-export async function openSeaGet<T>(path: string): Promise<T | null> {
-  const key = await getOpenSeaApiKey();
+/**
+ * `apiKeyOverride` is purely additive: omit it (every existing caller) and
+ * this is exactly the old single-key behavior. Live, user-facing routes
+ * (listings/route.ts) pass a key selected from the multi-key pool
+ * (opensea-key-pool.ts) here so interactive page loads land on the
+ * least-loaded real key instead of always the one `getOpenSeaApiKey()`
+ * returns.
+ */
+export async function openSeaGet<T>(path: string, apiKeyOverride?: string | null): Promise<T | null> {
+  const key = apiKeyOverride ?? (await getOpenSeaApiKey());
   if (!key) return null;
   try {
     const res = await fetch(`${BASE}${path}`, {
@@ -351,12 +359,14 @@ export type OpenSeaListing = {
 export async function fetchOpenSeaListings(
   slug: string,
   limit = 50,
-  cursor?: string | null
+  cursor?: string | null,
+  apiKeyOverride?: string | null
 ): Promise<{ listings?: OpenSeaListing[]; next?: string } | null> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("next", cursor);
   return openSeaGet(
-    `/listings/collection/${encodeURIComponent(slug)}/all?${params.toString()}`
+    `/listings/collection/${encodeURIComponent(slug)}/all?${params.toString()}`,
+    apiKeyOverride
   );
 }
 
@@ -367,7 +377,7 @@ export async function fetchOpenSeaListings(
  */
 export async function fetchAllOpenSeaListings(
   slug: string,
-  options?: { maxListings?: number; pageSize?: number }
+  options?: { maxListings?: number; pageSize?: number; apiKeyOverride?: string | null }
 ): Promise<{ listings: OpenSeaListing[]; complete: boolean }> {
   const maxListings = Math.min(Math.max(options?.maxListings ?? 10_000, 1), 50_000);
   const pageSize = Math.min(Math.max(options?.pageSize ?? 100, 1), 100);
@@ -375,7 +385,7 @@ export async function fetchAllOpenSeaListings(
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
   do {
-    const page = await fetchOpenSeaListings(slug, Math.min(pageSize, maxListings - listings.length), cursor);
+    const page = await fetchOpenSeaListings(slug, Math.min(pageSize, maxListings - listings.length), cursor, options?.apiKeyOverride);
     if (!page) return { listings, complete: false };
     listings.push(...(page.listings ?? []));
     const next = page.next?.trim() || null;

@@ -19,31 +19,28 @@
  * on-chain, never guessed or fuzzy-resolved.
  */
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { postgresQuery } from "@/lib/postgres";
 import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import {
+  reserveOpenSeaKey,
+  settleOpenSeaKey,
+  loadOpenSeaKeyPool,
+  OPENSEA_STATS_DAILY_ALLOWANCE,
+  type OpenSeaKeyPriority,
+} from "@/lib/market/multichain/discovery/opensea-key-pool";
 
-const SOURCE = "opensea-stats";
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
 /** Real ceiling on the floor price this will ever accept -- same defensive bound alchemy-nft.ts's own MAX_PLAUSIBLE_FLOOR_ETH holds, guards against a corrupted/garbage response being written as a real price. */
 const MAX_PLAUSIBLE_FLOOR = 100_000;
 
-/**
- * No DAILY_CEILING entry exists for "opensea-stats" in source-budget.ts --
- * checkSourceBudget(SOURCE) below only ever gates on jail state for this
- * source, never a daily count (OpenSea's v2 API publishes no fixed daily
- * call cap this app has confirmed). This is an APPROXIMATED, conservative
- * daily allowance -- same order of magnitude as source-budget.ts's own
- * coingecko-nft=8,000 ceiling -- exported so every OTHER module hitting
- * this SAME real OpenSea API key/quota (opensea-bulk-scan.ts, token-art.ts)
- * reserves against the identical shared account rather than a separate one
- * that would let the real, shared rate limit be exceeded unnoticed.
- */
-export const OPENSEA_STATS_DAILY_ALLOWANCE = 5_000;
-export const OPENSEA_STATS_PROVIDER_ACCOUNT = "opensea-stats:default";
+// Multi-key capacity pool moved to opensea-key-pool.ts (2026-08-23) -- every
+// function below now reserves/settles against a SELECTED KEY's own provider
+// account (`opensea-stats:key-N`) instead of one fixed shared account, via
+// reserveOpenSeaKey/settleOpenSeaKey. OPENSEA_STATS_DAILY_ALLOWANCE is
+// re-exported here for back-compat with existing importers.
+export { OPENSEA_STATS_DAILY_ALLOWANCE };
 
 type OpenSeaStatsResponse = {
   total?: { volume?: number; sales?: number; floor_price?: number; floor_price_symbol?: string; num_owners?: number };
@@ -117,30 +114,32 @@ function isQuotaError(status: number, bodyText: string): boolean {
  * bulk-list scan only yields slugs for collections it's currently
  * paging through, not ones already in the database.
  */
-export async function resolveOpenSeaSlug(openSeaChain: string, contractAddress: string, apiKey: string): Promise<string | null> {
-  const gate = checkSourceBudget(SOURCE);
-  if (!gate.allowed) return null;
-  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
+export async function resolveOpenSeaSlug(
+  openSeaChain: string,
+  contractAddress: string,
+  priority: OpenSeaKeyPriority = "background"
+): Promise<string | null> {
+  const slot = await reserveOpenSeaKey(1, { priority });
+  if (!slot) return null;
 
   let res: Response;
   let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/chain/${encodeURIComponent(openSeaChain)}/contract/${encodeURIComponent(contractAddress)}`, {
-      headers: { "x-api-key": apiKey, accept: "application/json" },
+      headers: { "x-api-key": slot.apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
-    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    await settleOpenSeaKey(slot, 1, true);
     settled = true;
   } catch {
-    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
-    recordSourceFailure(SOURCE, false);
+    if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+    recordSourceFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
     return null;
   }
 
@@ -148,10 +147,10 @@ export async function resolveOpenSeaSlug(openSeaChain: string, contractAddress: 
   try {
     body = (await res.json()) as { collection?: string };
   } catch {
-    recordSourceFailure(SOURCE, false);
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
-  recordSourceSuccess(SOURCE);
+  recordSourceSuccess(slot.providerAccount);
   return body.collection ?? null;
 }
 
@@ -161,31 +160,32 @@ function statsNoneKey(slug: string): string {
 }
 
 /** Returns null (never throws) on any real failure -- a stats miss must never break the caller's own registration flow, same discipline every other adapter in this app holds. */
-export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string): Promise<OpenSeaCollectionStats | null> {
-  const gate = checkSourceBudget(SOURCE);
-  if (!gate.allowed) return null;
-  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
+export async function fetchOpenSeaCollectionStats(
+  slug: string,
+  priority: OpenSeaKeyPriority = "background"
+): Promise<OpenSeaCollectionStats | null> {
+  const slot = await reserveOpenSeaKey(1, { priority });
+  if (!slot) return null;
 
   let res: Response;
   let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/collections/${encodeURIComponent(slug)}/stats`, {
-      headers: { "x-api-key": apiKey, accept: "application/json" },
+      headers: { "x-api-key": slot.apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
-    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    await settleOpenSeaKey(slot, 1, true);
     settled = true;
   } catch {
-    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
-    recordSourceFailure(SOURCE, false);
+    if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
 
   lastStatsNotFound = false;
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+    recordSourceFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
     lastStatsNotFound = res.status === 404;
     return null;
   }
@@ -194,10 +194,10 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
   try {
     body = (await res.json()) as OpenSeaStatsResponse;
   } catch {
-    recordSourceFailure(SOURCE, false);
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
-  recordSourceSuccess(SOURCE);
+  recordSourceSuccess(slot.providerAccount);
 
   const oneDay = body.intervals?.find((i) => i.interval === "one_day");
   const sevenDay = body.intervals?.find((i) => i.interval === "seven_day");
@@ -220,30 +220,31 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
 }
 
 /** Exact-slug collection object — name/image only. Null fields stay null (fail closed). */
-export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string): Promise<OpenSeaCollectionDisplay | null> {
-  const gate = checkSourceBudget(SOURCE);
-  if (!gate.allowed) return null;
-  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
+export async function fetchOpenSeaCollectionDisplay(
+  slug: string,
+  priority: OpenSeaKeyPriority = "background"
+): Promise<OpenSeaCollectionDisplay | null> {
+  const slot = await reserveOpenSeaKey(1, { priority });
+  if (!slot) return null;
 
   let res: Response;
   let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/collections/${encodeURIComponent(slug)}`, {
-      headers: { "x-api-key": apiKey, accept: "application/json" },
+      headers: { "x-api-key": slot.apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
-    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    await settleOpenSeaKey(slot, 1, true);
     settled = true;
   } catch {
-    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
-    recordSourceFailure(SOURCE, false);
+    if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+    recordSourceFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
     return null;
   }
 
@@ -251,10 +252,10 @@ export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string
   try {
     body = (await res.json()) as { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null };
   } catch {
-    recordSourceFailure(SOURCE, false);
+    recordSourceFailure(slot.providerAccount, false);
     return null;
   }
-  recordSourceSuccess(SOURCE);
+  recordSourceSuccess(slot.providerAccount);
   const supply = body.total_supply;
   const handle = body.twitter_username?.trim().replace(/^@/, "") || null;
   return {
@@ -273,34 +274,36 @@ const LISTING_PAGE_SIZE = 50;
  * finishes (no `next`). Truncated walks return null so a partial page is
  * never stored as if it were the full listed count.
  */
-export async function fetchOpenSeaListedCount(slug: string, apiKey: string, openSeaChain?: string): Promise<number | null> {
+export async function fetchOpenSeaListedCount(
+  slug: string,
+  openSeaChain?: string,
+  priority: OpenSeaKeyPriority = "background"
+): Promise<number | null> {
   const unique = new Set<string>();
   let cursor: string | null = null;
   for (let page = 0; page < MAX_LISTING_PAGES; page++) {
-    const gate = checkSourceBudget(SOURCE);
-    if (!gate.allowed) return null;
     const qs = new URLSearchParams({ limit: String(LISTING_PAGE_SIZE) });
     if (openSeaChain) qs.set("chain", openSeaChain);
     if (cursor) qs.set("next", cursor);
-    const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-    if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
+    const slot = await reserveOpenSeaKey(1, { priority });
+    if (!slot) return null;
     let res: Response;
     let settled = false;
     try {
       res = await fetch(`${OPENSEA_BASE}/listings/collection/${encodeURIComponent(slug)}/all?${qs}`, {
-        headers: { "x-api-key": apiKey, accept: "application/json" },
+        headers: { "x-api-key": slot.apiKey, accept: "application/json" },
         signal: AbortSignal.timeout(15_000),
       });
-      await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+      await settleOpenSeaKey(slot, 1, true);
       settled = true;
     } catch {
-      if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
-      recordSourceFailure(SOURCE, false);
+      if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
+      recordSourceFailure(slot.providerAccount, false);
       return null;
     }
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
-      recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+      recordSourceFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
       return null;
     }
     let body: {
@@ -310,10 +313,10 @@ export async function fetchOpenSeaListedCount(slug: string, apiKey: string, open
     try {
       body = (await res.json()) as typeof body;
     } catch {
-      recordSourceFailure(SOURCE, false);
+      recordSourceFailure(slot.providerAccount, false);
       return null;
     }
-    recordSourceSuccess(SOURCE);
+    recordSourceSuccess(slot.providerAccount);
     for (const listing of body.listings ?? []) {
       const tokenId = listing.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria;
       if (tokenId) unique.add(tokenId);
@@ -342,21 +345,20 @@ export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddr
   const result: OpenSeaStatsSyncResult = { chainSlug, candidates: 1, slugResolved: 0, updated: 0, displayUpdated: 0, errors: 0 };
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
-  const apiKey = await getOpenSeaApiKey();
-  if (!openSeaChain || !apiKey) return result;
+  if (!openSeaChain) return result;
 
   const cacheKey = slugCacheKey(chainSlug, contractAddress);
   let slug = await kv.get<string>(cacheKey);
   if (slug === "__none__") return { ...result, errors: 1 };
   if (!slug) {
-    slug = await resolveOpenSeaSlug(openSeaChain, contractAddress, apiKey);
+    slug = await resolveOpenSeaSlug(openSeaChain, contractAddress);
     if (!slug) return { ...result, errors: 1 };
     await kv.set(cacheKey, slug);
   }
   result.slugResolved = 1;
-  const stats = await fetchOpenSeaCollectionStats(slug, apiKey);
+  const stats = await fetchOpenSeaCollectionStats(slug);
   if (!stats) return { ...result, errors: 1 };
-  const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
+  const display = await fetchOpenSeaCollectionDisplay(slug);
   if (display && (display.name || display.imageUrl || display.creatorHandle)) {
     await updateCollectionDisplay(chainSlug, contractAddress, {
       name: display.name,
@@ -364,7 +366,7 @@ export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddr
       creatorHandle: display.creatorHandle,
     }).then(() => { result.displayUpdated = 1; }).catch(() => { result.errors += 1; });
   }
-  const listedCount = await fetchOpenSeaListedCount(slug, apiKey, openSeaChain);
+  const listedCount = await fetchOpenSeaListedCount(slug, openSeaChain);
   await updateCollectionSupplyFields(chainSlug, contractAddress, {
     listedCount,
     totalSupply: display?.totalSupply ?? null,
@@ -408,8 +410,8 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
   const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
   if (!openSeaChain) return result;
 
-  const apiKey = await getOpenSeaApiKey();
-  if (!apiKey) return result;
+  const pool = await loadOpenSeaKeyPool();
+  if (pool.length === 0) return result;
 
   const NO_SLUG = "__none__";
   const cursorKey = `plank:market:opensea-stats-cursor:${chainSlug}`;
@@ -439,12 +441,13 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
     return result;
   }
 
+  const anyKeyAvailable = () => pool.some((entry) => checkSourceBudget(entry.providerAccount).allowed);
+
   let processed = 0;
   let lastSeenId = afterId;
   for (const row of rows.rows) {
     if (processed >= maxUpdates) break;
-    const gate = checkSourceBudget(SOURCE);
-    if (!gate.allowed) break;
+    if (!anyKeyAvailable()) break;
 
     const cacheKey = slugCacheKey(chainSlug, row.contract_address);
     let slug = await kv.get<string>(cacheKey);
@@ -454,10 +457,9 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       continue;
     }
     if (!slug) {
-      slug = await resolveOpenSeaSlug(openSeaChain, row.contract_address, apiKey);
+      slug = await resolveOpenSeaSlug(openSeaChain, row.contract_address);
       if (!slug) {
-        const still = checkSourceBudget(SOURCE);
-        if (!still.allowed) break;
+        if (!anyKeyAvailable()) break;
         await kv.set(cacheKey, NO_SLUG);
         result.errors += 1;
         lastSeenId = row.id;
@@ -475,14 +477,14 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
     result.slugResolved += 1;
     processed += 1;
 
-    const stats = await fetchOpenSeaCollectionStats(slug, apiKey);
+    const stats = await fetchOpenSeaCollectionStats(slug);
     if (!stats) {
       if (lastStatsNotFound) await kv.set(noneKey, "1").catch(() => {});
       result.errors += 1;
       lastSeenId = row.id;
       continue;
     }
-    const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
+    const display = await fetchOpenSeaCollectionDisplay(slug);
     if (display && (display.name || display.imageUrl || display.creatorHandle)) {
       await updateCollectionDisplay(chainSlug, row.contract_address, {
         name: display.name,
@@ -494,7 +496,7 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
         result.errors += 1;
       });
     }
-    const listedCount = await fetchOpenSeaListedCount(slug, apiKey, openSeaChain);
+    const listedCount = await fetchOpenSeaListedCount(slug, openSeaChain);
     if (listedCount != null || display?.totalSupply != null) {
       await updateCollectionSupplyFields(chainSlug, row.contract_address, {
         listedCount,

@@ -26,7 +26,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignCollectionOffers, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { getOffers } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
       0,
       MAX_ART_LOOKUPS
     );
-    const key = await getOpenSeaApiKey();
+    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     const artByToken = new Map<string, { imageUrl: string | null; name: string | null }>();
     if (key && specificTokenIds.length > 0) {
       const firstWithContract = rawOffers.find((o) => o.contractAddress);

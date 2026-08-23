@@ -28,8 +28,8 @@
  * shape opensea-robinhood-scan.ts already parses -- confirming the same
  * OpenSeaCollectionsPage type applies chain-agnostically.
  */
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
-import { slugCacheKey, OPENSEA_STATS_DAILY_ALLOWANCE, OPENSEA_STATS_PROVIDER_ACCOUNT } from "@/lib/market/multichain/discovery/opensea-stats";
+import { slugCacheKey } from "@/lib/market/multichain/discovery/opensea-stats";
+import { reserveOpenSeaKey, settleOpenSeaKey, loadOpenSeaKeyPool } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay, hasMultichainStore } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
@@ -38,13 +38,12 @@ import { isNotRealCollectibleArt } from "@/lib/market/multichain/discovery/evm-l
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { durableKv as kv } from "@/lib/market/durable-kv";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 
-// OPENSEA_STATS_DAILY_ALLOWANCE / OPENSEA_STATS_PROVIDER_ACCOUNT are imported
-// from opensea-stats.ts above -- this module shares that SAME real OpenSea
-// API key/quota pool, so it reserves against the identical account rather
-// than a separate one that would let the real, shared rate limit be
-// exceeded unnoticed.
+// Reserves through the shared multi-key OpenSea pool (opensea-key-pool.ts)
+// with priority "background" -- this is a discovery supervisor, not a page
+// load, so when >1 real key is configured it deliberately picks the
+// MOST-loaded key with remaining capacity, leaving the least-loaded key(s)
+// free for live, user-facing requests (see listings/route.ts).
 
 /**
  * Persists OpenSea's own opaque pagination cursor per chain -- a plain
@@ -91,22 +90,22 @@ type OpenSeaCollectionsPage = {
   next: string | null;
 };
 
-async function fetchCollectionsPage(apiKey: string, openSeaChain: string, cursor: string | null): Promise<OpenSeaCollectionsPage> {
+async function fetchCollectionsPage(openSeaChain: string, cursor: string | null): Promise<OpenSeaCollectionsPage> {
   const url = new URL(`${OPENSEA_BASE}/collections`);
   url.searchParams.set("chain", openSeaChain);
   url.searchParams.set("limit", "100");
   if (cursor) url.searchParams.set("next", cursor);
-  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) {
-    throw new Error(`opensea-bulk-scan: durable daily ceiling fetching chain=${openSeaChain}`);
+  const slot = await reserveOpenSeaKey(1, { priority: "background" });
+  if (!slot) {
+    throw new Error(`opensea-bulk-scan: no OpenSea key with remaining capacity fetching chain=${openSeaChain}`);
   }
   let settled = false;
   try {
     const res = await fetch(url.toString(), {
-      headers: { "x-api-key": apiKey, accept: "application/json" },
+      headers: { "x-api-key": slot.apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(20_000),
     });
-    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    await settleOpenSeaKey(slot, 1, true);
     settled = true;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -114,7 +113,7 @@ async function fetchCollectionsPage(apiKey: string, openSeaChain: string, cursor
     }
     return (await res.json()) as OpenSeaCollectionsPage;
   } catch (error) {
-    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
     throw error;
   }
 }
@@ -155,8 +154,8 @@ export async function runOpenSeaBulkScan(
     skippedNoMetadata: 0,
     skippedAlreadyTracked: 0,
   };
-  const apiKey = await getOpenSeaApiKey();
-  if (!apiKey) return { ...base, error: "opensea-bulk-scan: no OpenSea API key available" };
+  const pool = await loadOpenSeaKeyPool();
+  if (pool.length === 0) return { ...base, error: "opensea-bulk-scan: no OpenSea API key available" };
   if (!hasMultichainStore()) return { ...base, error: "opensea-bulk-scan: no multichain datastore configured" };
 
   let cursor: string | null = await readBulkCursor(input.chainSlug);
@@ -164,7 +163,7 @@ export async function runOpenSeaBulkScan(
 
   try {
     for (let page = 0; page < maxPages; page++) {
-      const pageData = await fetchCollectionsPage(apiKey, input.openSeaChain, cursor);
+      const pageData = await fetchCollectionsPage(input.openSeaChain, cursor);
       result.pagesScanned += 1;
       result.entriesSeen += pageData.collections.length;
 
