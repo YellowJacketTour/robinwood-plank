@@ -11,6 +11,7 @@ import {
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { getPreferredWalletProvider, isWalletConnectActive } from "@/lib/wallet-connect";
 import { FOREIGN_SEAPORT_ADDRESS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { stringToHex } from "viem";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -1114,7 +1115,10 @@ export async function signMessage(
   try {
     return (await provider.request({
       method: "personal_sign",
-      params: [message, address],
+      // EIP-1193 personal_sign expects hex-encoded message bytes. Robinhood
+      // mobile can accept a raw string but signs it differently, which makes
+      // viem's server-side verifyMessage recovery fail.
+      params: [stringToHex(message), address],
     })) as string;
   } catch (err) {
     const msg = (err as { message?: string })?.message || "Signature rejected.";
