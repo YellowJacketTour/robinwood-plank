@@ -51,7 +51,23 @@ export async function GET(req: Request) {
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 20000) : 5000;
     const rawOffset = Number(new URL(req.url).searchParams.get("offset") ?? "0");
     const offset = Number.isSafeInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
-    const { collections, totalCount } = await listCollectionsWithSnapshotsPage({ limit, offset });
+    // Real server-side chain filter + sort, finishing the wiring
+    // listCollectionsWithSnapshotsPage's own chainSlugs/sortColumn/sortDir
+    // params already supported -- without this, a chain tab's "genuinely
+    // uncapped, keep scrolling" reachability had no way to ask the server
+    // for MORE of just that one chain, only more of the whole catalog.
+    const chainsParam = new URL(req.url).searchParams.get("chains");
+    const chainSlugFilter = chainsParam ? chainsParam.split(",").map((s) => s.trim()).filter(Boolean) : null;
+    const sortColumn = new URL(req.url).searchParams.get("sort");
+    const sortDirParam = new URL(req.url).searchParams.get("dir");
+    const sortDir = sortDirParam === "asc" ? "asc" : sortDirParam === "desc" ? "desc" : null;
+    const { collections, totalCount } = await listCollectionsWithSnapshotsPage({
+      limit,
+      offset,
+      chainSlugs: chainSlugFilter,
+      sortColumn,
+      sortDir,
+    });
 
     // Real 7-day activity (real observed Transfer-log counts, see
     // evm-log-scan.ts -- not a guessed/fabricated $ volume figure, which
@@ -256,7 +272,13 @@ export async function GET(req: Request) {
         });
     });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
-    const windowCollections = [nativeRow, ...withoutDupNative];
+    // Only the very first page (offset 0) of an unfiltered-or-robinhood-
+    // including request gets the synthetic native row prepended -- infinite
+    // scroll now calls this route again with a growing offset to fetch MORE
+    // of the same window, and re-prepending it on every later page would
+    // duplicate it in the client's appended list.
+    const includeNativeRow = offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"));
+    const windowCollections = includeNativeRow ? [nativeRow, ...withoutDupNative] : withoutDupNative;
     return NextResponse.json({
       count: windowCollections.length,
       // Real total tracked-collection count (all 317k+, not just this
@@ -264,7 +286,7 @@ export async function GET(req: Request) {
       // instead of implying this response IS the whole catalog. See
       // listCollectionsWithSnapshotsPage's header for why this response is
       // now bounded at all.
-      totalCount: totalCount + 1,
+      totalCount: includeNativeRow ? totalCount + 1 : totalCount,
       limit,
       offset,
       collections: windowCollections,

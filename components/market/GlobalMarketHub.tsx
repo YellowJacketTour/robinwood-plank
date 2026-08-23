@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
@@ -433,10 +433,22 @@ function compareNullable(a: number | null, b: number | null, dir: SortDir): numb
 /**
  * The one real comparator every sortable column above resolves through --
  * `grade` is the default ("Trending"), everything else reads a single real
- * field/derived value off the row. Floor price is only ever a MEANINGFUL
- * ordering within the same currency (see the header this replaced for why
- * cross-currency floor comparison is dishonest); a cross-currency pair
- * falls through to a 0 (no opinion), not a fabricated ranking.
+ * field/derived value off the row.
+ *
+ * Real bug fixed live 2026-08-23: Floor and Volume used to compare RAW
+ * per-chain coin quantities (wei/lamports/sats) directly -- meaningless
+ * across chains (a real "0.05 ETH" floor, worth real dollars, could sort
+ * below a real "500 SOL" floor purely because 0.05 < 500 as raw numbers,
+ * regardless of which is actually worth more). Floor's old fallback for a
+ * cross-currency pair was to return 0 ("no opinion") rather than a wrong
+ * ranking, but that's still not a real cross-chain ranking -- Volume had no
+ * such guard at all and really did compare raw magnitudes across chains.
+ * `toUsd` is the exact same real conversion this same table already uses
+ * for its own visible "$X" figures next to the coin amount (see toUsd's
+ * call sites in the render below) -- reusing it here, rather than inventing
+ * a second conversion, is what makes the sort match what's on screen. A row
+ * with no fetched USD price yet (toUsd returns null) sorts to the end via
+ * compareNullable, same as every other "genuinely absent data" column.
  */
 function compareByColumn(
   a: TrackedCollection,
@@ -444,23 +456,23 @@ function compareByColumn(
   column: SortColumn,
   dir: SortDir,
   window: "24h" | "7d" | "30d",
-  hasArt: (c: TrackedCollection) => boolean
+  hasArt: (c: TrackedCollection) => boolean,
+  toUsd: (weiStr: string | null, currency: string | null) => number | null
 ): number {
   switch (column) {
     case "name":
       return dir === "asc" ? (a.name ?? "").localeCompare(b.name ?? "") : (b.name ?? "").localeCompare(a.name ?? "");
     case "floor": {
-      const fa = a.floorPriceWei ? Number(a.floorPriceWei) : null;
-      const fb = b.floorPriceWei ? Number(b.floorPriceWei) : null;
-      if (fa != null && fb != null && a.floorPriceCurrency !== b.floorPriceCurrency) return 0;
+      const fa = toUsd(a.floorPriceWei, a.floorPriceCurrency);
+      const fb = toUsd(b.floorPriceWei, b.floorPriceCurrency);
       return compareNullable(fa, fb, dir);
     }
     case "change":
       return compareNullable(a.floorChangePct, b.floorChangePct, dir);
     case "volume": {
-      const va = windowVolumeWei(a, window);
-      const vb = windowVolumeWei(b, window);
-      return compareNullable(va != null ? Number(va) : null, vb != null ? Number(vb) : null, dir);
+      const va = toUsd(windowVolumeWei(a, window), chainNativeAsset(a.chainSlug));
+      const vb = toUsd(windowVolumeWei(b, window), chainNativeAsset(b.chainSlug));
+      return compareNullable(va, vb, dir);
     }
     case "sales":
       return compareNullable(windowSales(a, window), windowSales(b, window), dir);
@@ -863,6 +875,34 @@ export default function GlobalMarketHub() {
   // mount-once, empty-deps-array case; it does not cascade.
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
   const [onlyWatched, setOnlyWatched] = useState(() => searchParams.get("starred") === "1");
+  // Real, ALWAYS-correct per-chain totals across the WHOLE catalog (see
+  // /api/market/multichain/chain-counts's own header) -- independent of
+  // whatever bounded page of `collections` happens to be loaded. Real bug
+  // fixed live 2026-08-23: the chain-tab badges used to be a client-side
+  // tally over just the loaded window (`chains` below), which undercounted
+  // every chain except whichever the ORDER BY happened to front-load
+  // (confirmed live: "ARBITRUM 4268" vs the real 17,333+). null until the
+  // first response lands; badges fall back to the old client-side tally for
+  // that one frame so nothing flashes to 0.
+  const [chainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await swrJson<{ counts: Record<string, number> }>("/api/market/multichain/chain-counts", {
+          ttlMs: 60_000,
+          swrMs: 600_000,
+          session: true,
+        });
+        if (!cancelled && data.counts) setChainCounts(data.counts);
+      } catch {
+        // Badges just keep showing the client-side-tally fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("plank:market:watchlist-v1");
@@ -1025,20 +1065,25 @@ export default function GlobalMarketHub() {
   // (same count) falls back to slug order for a stable sort, not a fixed
   // pin.
   const chains = useMemo(() => {
+    // Real fix live 2026-08-23: badges now read chainCounts -- a real
+    // server-side `SELECT chain_slug, COUNT(*) ... GROUP BY chain_slug`
+    // aggregate over the WHOLE catalog (see /api/market/multichain/
+    // chain-counts) -- instead of tallying whatever single bounded page of
+    // `collections` happened to be loaded, which undercounted every chain
+    // except whichever the default ORDER BY front-loaded.
+    if (chainCounts) {
+      return Object.entries(chainCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    }
+    // Fallback for the one frame before the real counts have loaded --
+    // same client-side tally as before, just not the steady-state source.
     const seen = new Map<string, number>();
     for (const c of collections) {
-      // Chain badges are registry coverage counters, not hydrated-row
-      // counters. A newly discovered address must be visible in the total
-      // immediately even while its name/art/stats cells are still pending.
-      // RobinWood's native home row has its own dedicated card above this
-      // registry and is not a discovered collection row; counting it here
-      // made the badge exactly one higher than the traversable chain roster.
       if (isHomeRow(c)) continue;
       if (isSpamCollectionTitle(c.name)) continue;
       seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
     }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [collections]);
+  }, [collections, chainCounts]);
 
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
   const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
@@ -1085,17 +1130,20 @@ export default function GlobalMarketHub() {
       if (home !== 0) return home;
       const book = Number(hasMarketEvidence(b)) - Number(hasMarketEvidence(a));
       if (book !== 0) return book;
-      const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
+      const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt, toUsd);
       if (primary !== 0) return primary;
+      // Real USD-equivalent tie-break, same conversion as the primary "floor"
+      // sort case above -- a raw-wei tie-break would reintroduce the exact
+      // cross-chain magnitude bug this whole comparator was just fixed for.
       const floorTie = compareNullable(
-        displayFloorWei(a) ? Number(displayFloorWei(a)) : null,
-        displayFloorWei(b) ? Number(displayFloorWei(b)) : null,
+        toUsd(displayFloorWei(a), a.floorPriceCurrency),
+        toUsd(displayFloorWei(b), b.floorPriceCurrency),
         "desc"
       );
       if (floorTie !== 0) return floorTie;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, watchlist, showShells, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, watchlist, showShells, priceMin, priceMax, deadArt, usdPrices]);
 
   // Real perf fix, live-reproduced 2026-08-23 -- see scoreSearchFields's own
   // header for the full measured evidence (750-1500ms of main-thread block
@@ -1140,9 +1188,9 @@ export default function GlobalMarketHub() {
       )
       .map(({ c, fields }) => ({ c, score: scoreSearchFields(fields, q) }))
       .filter((row) => row.score >= 0)
-      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt))
+      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt, toUsd))
       .map((row) => row.c);
-  }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
+  }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices]);
 
   /**
    * Creator-entity-linked search expansion, computed client-side against the
@@ -1192,6 +1240,133 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
   }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
+
+  // Real, genuinely-uncapped reachability -- no manual "load more" wall, no
+  // fixed row ceiling. `collections` keeps growing via real server-side
+  // pages as the grid scrolls (see the sentinel/IntersectionObserver below),
+  // fetched from the same /api/market/multichain route, until the real
+  // per-scope total is exhausted. Two independent paging cursors, since a
+  // single active chain tab must fetch REAL rows for THAT chain
+  // (WHERE chain_slug = ...) rather than continuing to page through the
+  // whole unfiltered catalog and hoping enough of that one chain turns up:
+  //   - allOffsetRef: how many rows this session has fetched with no chain
+  //     filter (the "browse everything" mode).
+  //   - chainOffsetsRef: per-chain-slug offset, used once exactly one chain
+  //     tab is active -- so switching tabs never re-fetches from scratch,
+  //     it resumes wherever that chain's own paging left off.
+  // Rows already present (from either mode) are de-duped by (chain,
+  // contract) before appending, so the two cursors overlapping is harmless.
+  const allOffsetRef = useRef(0);
+  const chainOffsetsRef = useRef<Record<string, number>>({});
+  const exhaustedRef = useRef<Set<string>>(new Set());
+  const [loadingMore, setLoadingMore] = useState(false);
+  const activeChainSlug = chainFilter.size === 1 ? [...chainFilter][0] : null;
+  const loadMoreCollections = useCallback(async () => {
+    const mode = activeChainSlug ?? "__all__";
+    if (loadingMore || exhaustedRef.current.has(mode)) return;
+    setLoadingMore(true);
+    try {
+      const offset = mode === "__all__" ? allOffsetRef.current : (chainOffsetsRef.current[mode] ?? 0);
+      const qs = new URLSearchParams({ limit: "500", offset: String(offset) });
+      if (activeChainSlug) qs.set("chains", activeChainSlug);
+      const res = await fetch(`/api/market/multichain?${qs.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { collections?: TrackedCollection[]; totalCount?: number };
+      const rows = data.collections ?? [];
+      if (mode === "__all__") allOffsetRef.current = offset + rows.length;
+      else chainOffsetsRef.current[mode] = offset + rows.length;
+      if (rows.length === 0 || (typeof data.totalCount === "number" && offset + rows.length >= data.totalCount)) {
+        exhaustedRef.current.add(mode);
+      }
+      if (rows.length > 0) {
+        setCollections((prev) => {
+          const seen = new Set(prev.map((c) => `${c.chainSlug}:${c.contractAddress}`));
+          const additions = rows.filter((c) => !seen.has(`${c.chainSlug}:${c.contractAddress}`));
+          return additions.length ? [...prev, ...additions] : prev;
+        });
+      }
+    } catch {
+      // Best-effort -- the next scroll-triggered intersection retries.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeChainSlug, loadingMore]);
+
+  // Real DOM windowing -- caps how many cards are ever mounted at once so
+  // scrolling deep into a 99,999-row chain (Solana) stays fast, recycling
+  // nodes out the top as more load in at the bottom instead of the whole
+  // grid accumulating thousands of live image-bearing <li> nodes (the real,
+  // confirmed 2026-08-19 crash this pagination model exists to prevent --
+  // see GRID_PAGE_SIZE's own header).
+  const GRID_WINDOW_SIZE = 300;
+  const gridSentinelRef = useRef<HTMLDivElement | null>(null);
+  // Real bug fixed live 2026-08-23: `filtered` (the client-side-feature-
+  // filtered set: onlyArt/onlyListed/showShells/hasMarketEvidence, etc.)
+  // can genuinely be SMALLER than one grid page even while the real
+  // server-side total for the active scope is 12,000+ -- most raw rows the
+  // unfiltered initial load happened to include for a given chain (e.g.
+  // Bitcoin) don't carry the art/listing/evidence fields those toggles
+  // require. Gating the "load more" sentinel on `filtered.length` alone
+  // meant it silently never mounted for exactly that case -- the real fix
+  // is a scope-aware "is there more on the SERVER" signal, independent of
+  // how many of the rows already fetched happen to pass today's feature
+  // filters.
+  const chainLoadedCount = useMemo(() => {
+    if (!activeChainSlug) return collections.length;
+    let n = 0;
+    for (const c of collections) if (c.chainSlug === activeChainSlug) n += 1;
+    return n;
+  }, [collections, activeChainSlug]);
+  const scopeRealTotal = activeChainSlug ? (chainCounts?.[activeChainSlug] ?? null) : totalTrackedCount;
+  const scopeHasMoreServerData = scopeRealTotal == null || scopeRealTotal > chainLoadedCount;
+
+  useEffect(() => {
+    const el = gridSentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setGridVisibleCount((n) => (filtered.length > n ? n + GRID_PAGE_SIZE : n));
+        // Keep the real server-side buffer well ahead of what's rendered so
+        // scrolling never outruns it into a dead stop -- and keep fetching
+        // whenever the real scope total says more exists server-side, even
+        // if today's feature filters are hiding most of what's loaded.
+        if (filtered.length - gridVisibleCount < GRID_PAGE_SIZE * 4 || scopeHasMoreServerData) {
+          loadMoreCollections();
+        }
+      },
+      { rootMargin: "1000px 0px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [filtered.length, gridVisibleCount, loadMoreCollections, scopeHasMoreServerData]);
+
+  // Prime the buffer as soon as a single chain tab is chosen (or on first
+  // mount for the unfiltered "all chains" scope), instead of waiting for a
+  // scroll that may never happen because the sentinel itself couldn't
+  // mount yet (see chainLoadedCount's own header above) -- keeps fetching
+  // real pages until either a real per-scope buffer exists or the real
+  // total is exhausted, so switching to Bitcoin alone is enough to start
+  // making its full 12,866+ genuinely reachable.
+  //
+  // Real bug fixed live 2026-08-23: this used to be a single effect running
+  // its own manual `while` loop with a captured-once, never-updated
+  // `scopeHasMoreServerData`/`chainLoadedCount`/`loadMoreCollections`
+  // closure -- so switching chain tabs mid-loop never actually redirected
+  // it (a stale "__all__"-mode loop from the initial mount just kept
+  // running in the background under a NEW active chain tab, fetching more
+  // of the unfiltered catalog instead of the selected chain). A plain
+  // effect with a real dependency array is the correct fix: React re-runs
+  // it -- with FRESH values, including a fresh loadMoreCollections closure
+  // scoped to the CURRENT activeChainSlug -- every time any of those
+  // values actually change, including right after loadMoreCollections'
+  // own setCollections/setLoadingMore updates land. That naturally
+  // reproduces "keep fetching single hops until primed", without a
+  // hand-rolled loop that can't observe a mid-flight scope change.
+  useEffect(() => {
+    if (!scopeHasMoreServerData || loadingMore || chainLoadedCount >= 400) return;
+    void loadMoreCollections();
+  }, [activeChainSlug, scopeHasMoreServerData, loadingMore, chainLoadedCount, loadMoreCollections]);
 
   // URL persistence -- reflects every real filter/sort field above into the
   // query string (router.replace, not push, so filtering doesn't spam
@@ -2274,7 +2449,7 @@ export default function GlobalMarketHub() {
             // high-density gallery sites (Unsplash et al.) solve by adding
             // columns, not by growing cell size.
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
-              {filtered.slice(0, gridVisibleCount).map((c, i) => (
+              {filtered.slice(Math.max(0, gridVisibleCount - GRID_WINDOW_SIZE), gridVisibleCount).map((c, i) => (
                 <li key={key(c)} className="row-enter" style={{ "--row-delay": `${Math.min(i, 16) * 15}ms` } as CSSProperties}>
                   <Link
                     href={collectionHref(c)}
@@ -2373,17 +2548,24 @@ export default function GlobalMarketHub() {
               ))}
             </ul>
           )}
-          {filtered.length > gridVisibleCount && (
+          {(filtered.length > gridVisibleCount || loadingMore || scopeHasMoreServerData) && (
             <div className="mt-3 flex flex-col items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setGridVisibleCount((n) => n + GRID_PAGE_SIZE)}
-                className="min-h-11 rounded-md border border-line bg-panel px-5 text-sm font-bold text-foreground/80 transition-colors hover:border-gold-400/60 hover:text-gold-300"
-              >
-                Show more ({filtered.length - gridVisibleCount} left)
-              </button>
+              {/* Real infinite scroll -- no manual click, no page-number wall.
+               * This sentinel intersecting the viewport is the only trigger:
+               * it both reveals more of what's already loaded AND, once the
+               * loaded buffer runs thin, fetches real additional rows from
+               * the server (loadMoreCollections) so a chain tab stays
+               * reachable all the way to its real total, not just whatever
+               * fit in the first response. */}
+              <div ref={gridSentinelRef} aria-hidden="true" className="h-px w-full" />
+              {loadingMore && (
+                <span className="min-h-11 rounded-md border border-line bg-panel px-5 py-2 text-sm font-bold text-foreground/60">
+                  Loading more…
+                </span>
+              )}
               <p className="text-[0.65rem] text-foreground/40">
-                Showing {Math.min(gridVisibleCount, filtered.length)} of {filtered.length}
+                Showing {Math.min(gridVisibleCount, filtered.length)} of{" "}
+                {(activeChainSlug ? chainCounts?.[activeChainSlug] : totalTrackedCount) ?? filtered.length}
               </p>
             </div>
           )}
