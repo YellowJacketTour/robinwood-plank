@@ -164,7 +164,7 @@ function ReownModalInner({ open, onClose, onConnected }: Props) {
   }, [isConnected, walletProvider, walletProviderType]);
 
   useEffect(() => {
-    if (!open || !isConnected || !address) return;
+    if (!isConnected || !address) return;
     if (finishedForAddress.current === address) return;
 
     let cancelled = false;
@@ -200,7 +200,6 @@ function ReownModalInner({ open, onClose, onConnected }: Props) {
 export default function ConnectWalletModalReown({ open, onClose, onConnected }: Props) {
   const handleClose = useCallback(() => onClose(), [onClose]);
 
-  if (!open) return null;
   if (moduleInitError) return <ErrorPanel message={moduleInitError} onClose={handleClose} />;
   return <ReownModalInner open={open} onClose={onClose} onConnected={onConnected} />;
 }

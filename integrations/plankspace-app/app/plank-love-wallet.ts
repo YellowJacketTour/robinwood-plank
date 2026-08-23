@@ -1,15 +1,65 @@
 "use client";
 
-import {connectWallet,ensureRobinhoodChain,getChainId,getConnectedAccounts,signMessage} from "@/lib/wallet";
+export type PlankLoveWalletState = {
+  address: string | null;
+  chainId: number | null;
+  status: "disconnected" | "connecting" | "connected";
+  isConnected: boolean;
+};
 
-export type PlankLoveWalletState={address:string|null;chainId:number|null;status:"disconnected"|"connecting"|"connected";isConnected:boolean};
-let state:PlankLoveWalletState={address:null,chainId:null,status:"disconnected",isConnected:false};
-const listeners=new Set<(value:PlankLoveWalletState)=>void>();
-function publish(next:PlankLoveWalletState){state=next;listeners.forEach(listener=>listener(next));return next}
+type Method = "getState" | "connect" | "ensureRobinhoodChain" | "signMessage";
+type Result = { state?: PlankLoveWalletState; signature?: string; address?: string };
 
-export function subscribePlankLoveWalletState(listener:(value:PlankLoveWalletState)=>void){listeners.add(listener);listener(state);return()=>{listeners.delete(listener)}}
-export async function getPlankLoveWalletState(){const address=(await getConnectedAccounts())[0]?.toLowerCase()||null;let chainId:number|null=null;if(address)chainId=await getChainId().catch(()=>null);return publish({address,chainId,status:address?"connected":"disconnected",isConnected:Boolean(address)})}
-export async function connectPlankLoveWallet(){const existing=(await getConnectedAccounts())[0],address=(existing||await connectWallet()).toLowerCase();publish({address,chainId:await getChainId().catch(()=>null),status:"connected",isConnected:true});return address}
-export async function ensurePlankLoveRobinhoodChain(){await ensureRobinhoodChain();return getPlankLoveWalletState()}
-export async function signPlankLoveMessage(message:string,address:string){if(!message.startsWith("PlankSpace wallet verification\n")||message.length>2400)throw new Error("PlankSpace rejected an unknown signing request.");return signMessage(address,message)}
-export async function disconnectPlankLoveWallet(){return publish({address:null,chainId:null,status:"disconnected",isConnected:false})}
+function request(method: Method, payload?: { address?: string; message?: string }): Promise<Result> {
+  if (typeof window === "undefined") return Promise.reject(new Error("Wallet requests run in the browser."));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("plank:wallet-response", onResponse);
+      reject(new Error("Plank.love did not finish the wallet request. Try again."));
+    }, method === "connect" || method === "signMessage" ? 120_000 : 30_000);
+    const onResponse = (raw: Event) => {
+      const detail = (raw as CustomEvent).detail as { requestId?: string; result?: Result; error?: string };
+      if (detail?.requestId !== requestId) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener("plank:wallet-response", onResponse);
+      if (detail.error) reject(new Error(detail.error));
+      else resolve(detail.result || {});
+    };
+    window.addEventListener("plank:wallet-response", onResponse);
+    window.dispatchEvent(new CustomEvent("plank:wallet-request", { detail: { requestId, method, payload } }));
+  });
+}
+
+export async function getPlankLoveWalletState() {
+  const result = await request("getState");
+  return result.state || { address: null, chainId: null, status: "disconnected", isConnected: false };
+}
+
+export async function connectPlankLoveWallet() {
+  const result = await request("connect");
+  const address = result.address || result.state?.address;
+  if (!address) throw new Error("Plank.love did not return a connected wallet.");
+  return address.toLowerCase();
+}
+
+export async function ensurePlankLoveRobinhoodChain(address?: string) {
+  const result = await request("ensureRobinhoodChain", { address });
+  if (!result.state) throw new Error("Could not verify Robinhood Chain.");
+  return result.state;
+}
+
+export async function signPlankLoveMessage(message: string, address: string) {
+  if (!message.startsWith("PlankSpace authorization\n") || message.length > 2000) {
+    throw new Error("PlankSpace rejected an unknown signing request.");
+  }
+  const result = await request("signMessage", { message, address });
+  if (!result.signature) throw new Error("Plank.love did not return a signature.");
+  return result.signature;
+}
+
+export async function disconnectPlankLoveWallet() {
+  // Deliberately do not disconnect the app-wide Plank.love session from a
+  // feature route. The main wallet control owns disconnect behavior.
+  return getPlankLoveWalletState();
+}

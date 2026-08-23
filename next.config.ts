@@ -47,6 +47,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: process.cwd(),
+  },
+  outputFileTracingRoot: process.cwd(),
   // Arbitrary NFT CDNs (OpenSea seadn, Magic Eden, Ordinals, IPFS gateways).
   // ListingCard also marks remote art unoptimized; this keep next/image from
   // crashing the whole collection page when a fallback uses collection.image.
