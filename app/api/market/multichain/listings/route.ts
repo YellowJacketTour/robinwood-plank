@@ -31,13 +31,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { fetchOpenSeaListings, getOpenSeaApiKey, normaliseOpenSeaListings } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import type { Listing } from "@/lib/market/types";
+import { refreshPulpListings } from "@/lib/market/pulp";
+import { mergeBook } from "@/lib/market/book";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -179,8 +181,24 @@ export async function GET(req: NextRequest) {
       if (!collection) {
         return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
       }
-      const native = await getListings(collectionSlug);
-      const listings: Listing[] = native.slice(0, limit).map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      const openSeaSlug = await resolveOpenSeaCollectionSlug("robinhood", collection.contractAddress).catch(() => null);
+      const [nativeRows, pulp, openSeaPage] = await Promise.all([
+        getListings(collectionSlug),
+        // PulpMarket is collection-address scoped. The old client silently
+        // hard-coded RobinWood, which made every other Robinhood collection
+        // (including MUGS) report aggregate inventory without its orders.
+        refreshPulpListings(collection.contractAddress).catch(() => []),
+        openSeaSlug ? fetchOpenSeaListings(openSeaSlug, 200).catch(() => null) : Promise.resolve(null),
+      ]);
+      const native: Listing[] = nativeRows.map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      const openSea = normaliseOpenSeaListings(openSeaPage?.listings ?? []);
+      const listings = mergeBook(
+        native,
+        [...pulp, ...openSea],
+        collection.slug,
+        undefined,
+        collection.contractAddress
+      );
       const supply = await getCollectionSupplyStats(chainSlug, collection.contractAddress).catch(() => null);
       const marketStats = await getCollectionMarketStats(chainSlug, collection.contractAddress).catch(() => null);
       return NextResponse.json(

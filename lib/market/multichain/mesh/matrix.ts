@@ -117,7 +117,7 @@ export const MESH_LANES: MeshLane[] = [
     chainSlug,
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 120,
-    notes: "Canonical Seaport 1.6 OrderFulfilled live cursor; scans first, then rebuilds collection windows.",
+    notes: "Canonical Seaport 1.1-1.6 OrderFulfilled live cursor; scans first, then rebuilds collection windows.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `seaport-genesis:${chainSlug}`,
@@ -125,7 +125,7 @@ export const MESH_LANES: MeshLane[] = [
     chainSlug,
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 180,
-    notes: "Independent block-0-to-head Seaport 1.6 fill cursor; never advances the live cursor or skips an uncovered range.",
+    notes: "Independent block-0-to-head Seaport 1.1-1.6 fill cursor; never advances the live cursor or skips an uncovered range.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-backfill:${chainSlug}`,

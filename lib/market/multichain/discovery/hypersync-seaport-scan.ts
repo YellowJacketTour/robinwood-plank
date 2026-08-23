@@ -37,7 +37,7 @@ import {
   writeCursor,
   type FillScanResult,
 } from "@/lib/market/multichain/seaport-fill-indexer";
-import { FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { ALL_SEAPORT_ADDRESSES } from "@/lib/market/multichain/seaport-deployments";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
@@ -66,7 +66,7 @@ function hypersyncUrl(chainId: number): string {
  * it's stored.
  */
 export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<FillScanResult> {
-  return scanChainForFillsInternal(chainSlug, chainSlug, "forward-from-recent");
+  return scanChainForFillsInternal(chainSlug, `${chainSlug}::seaport-all-live-v1`, "forward-from-recent");
 }
 
 /**
@@ -89,7 +89,9 @@ export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<
  * through quickly, no wasted correctness risk either way.
  */
 export async function scanChainForFillsGenesisBackfillViaHypersync(chainSlug: string): Promise<FillScanResult> {
-  return scanChainForFillsInternal(chainSlug, `${chainSlug}::genesis-backfill`, "forward-from-genesis");
+  // New cursor namespace is intentional: an older 1.6-only cursor may already
+  // be at head and cannot prove that 1.1-1.5 ranges were ever queried.
+  return scanChainForFillsInternal(chainSlug, `${chainSlug}::seaport-all-genesis-v1`, "forward-from-genesis");
 }
 
 async function scanChainForFillsInternal(
@@ -149,7 +151,7 @@ async function scanChainForFillsInternal(
   let query: Query = {
     fromBlock,
     toBlock,
-    logs: [{ address: [FOREIGN_SEAPORT_ADDRESS], topics: [[ORDER_FULFILLED_TOPIC]] }],
+    logs: [{ address: ALL_SEAPORT_ADDRESSES, topics: [[ORDER_FULFILLED_TOPIC]] }],
     fieldSelection: {
       log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "BlockNumber", "TransactionHash", "LogIndex"],
       // Real block.timestamp field (confirmed against the installed
@@ -228,7 +230,7 @@ async function scanChainForFillsInternal(
   await writeChainCoverage({
     chainSlug,
     lane: mode === "forward-from-genesis" ? "historical" : "forward",
-    standardGroup: "seaport-1.6-fills",
+    standardGroup: "seaport-1.1-through-1.6-fills",
     rangeStart: mode === "forward-from-genesis" ? 0 : fromBlock,
     nextBlock,
     targetBlock: height,

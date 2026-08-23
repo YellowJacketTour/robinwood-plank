@@ -37,7 +37,8 @@ import { postgresQuery } from "@/lib/postgres";
 import { confirmedHead, planScan } from "@/lib/market/chain-indexer";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 import { rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
-import { FOREIGN_CHAINS, FOREIGN_SEAPORT_ADDRESS, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { FOREIGN_CHAINS, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { ALL_SEAPORT_ADDRESSES } from "@/lib/market/multichain/seaport-deployments";
 
 const ORDER_FULFILLED_ABI = [
   {
@@ -372,7 +373,10 @@ export async function scanChainForFills(
   const confirmationDepth =
     opts?.confirmationDepth ?? CONFIRMATION_DEPTH_BY_CHAIN[chainSlug] ?? DEFAULT_CONFIRMATION_DEPTH;
 
-  const lastIndexedBlock = await readCursor(chainSlug);
+  // A new namespace is deliberate. The former cursor only proved Seaport
+  // 1.6 coverage; reusing it would permanently skip legacy deployments.
+  const cursorKey = `${chainSlug}::seaport-all-rpc-live-v1`;
+  const lastIndexedBlock = await readCursor(cursorKey);
   // No historical backfill target -- bootstraps from just-below-head on
   // first run (see migration's own "forward-only" scope note). A
   // genesis block one chunk behind head means the very first tick still
@@ -403,7 +407,7 @@ export async function scanChainForFills(
         {
           fromBlock: "0x" + window.fromBlock.toString(16),
           toBlock: "0x" + window.toBlock.toString(16),
-          address: FOREIGN_SEAPORT_ADDRESS,
+          address: ALL_SEAPORT_ADDRESSES,
           topics: [ORDER_FULFILLED_TOPIC],
         },
       ]);
@@ -466,7 +470,7 @@ export async function scanChainForFills(
       if (rows.length > 0) {
         totalWritten += await writeFills(rows);
       }
-      await writeCursor(chainSlug, window.toBlock);
+      await writeCursor(cursorKey, window.toBlock);
       lastSucceededBlock = window.toBlock;
     }
   } catch (err) {

@@ -58,7 +58,8 @@ export function mergeBook(
    * own. (PulpMarket's is additionally a relative path on their own image
    * proxy, so it would hotlink and bypass our same-origin proxy contract.)
    */
-  imageByTokenId?: Map<string, string> | Record<string, string>
+  imageByTokenId?: Map<string, string> | Record<string, string>,
+  contractAddress = NFT_CONTRACT_ADDRESS
 ): Listing[] {
   const lookupImage = (tokenId: string): string | undefined => {
     if (!imageByTokenId) return undefined;
@@ -126,7 +127,7 @@ export function mergeBook(
       expiresAt: t.expiresAt ?? new Date(Date.now() + 365 * 86_400_000).toISOString(),
       kind: "fixed",
       venue: t.venue,
-      externalUrl: externalUrlFor(NFT_CONTRACT_ADDRESS, tokenId),
+      externalUrl: externalUrlFor(contractAddress, tokenId),
       // Ours first (already resolved at listing time), then our own index.
       ...(() => {
         const img = existing?.imageUrl || lookupImage(tokenId);

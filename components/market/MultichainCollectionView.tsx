@@ -61,6 +61,7 @@ import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/mar
 import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
+import { displayMugsName } from "@/lib/market/multichain/mugs-display";
 
 type ForeignOffer = {
   orderHash: string;
@@ -1203,7 +1204,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       })
       .map((t) => ({
       tokenId: t.tokenId,
-      name: t.name,
+      name: displayMugsName({
+        chainSlug,
+        contractAddress: collection?.contractAddress || collectionSlug,
+        tokenId: t.tokenId,
+        name: t.name,
+        traits: t.traits,
+      }),
       animationUrl: t.animationUrl,
       mediaType: t.mediaType,
       imageUrl:
@@ -1836,7 +1843,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 : `${browseItems.length.toLocaleString()} NFTs${catalogMeta?.partial ? " · completing metadata" : ""}`
           }
           lead={
-            listings.length > 0 ? (
+            listings.length > 0 || rarityMap.size > 0 ? (
               <>
               {rarityMap.size > 0 && raritySample && (
                 <p className="px-0.5 text-[0.58rem] text-foreground/40">
