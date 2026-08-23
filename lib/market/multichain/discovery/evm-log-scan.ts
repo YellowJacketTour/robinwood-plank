@@ -46,6 +46,24 @@ import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
 import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
+import { recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+
+/**
+ * Same real-quota text alchemy-nft.ts's isAlchemyQuotaStatus already
+ * verified live against Alchemy's actual response body ("Monthly capacity
+ * limit exceeded... upgrade your scaling policy") -- confirmed live again
+ * 2026-08-23 via a direct eth_blockNumber call against the real configured
+ * key. Duplicated here (not imported) because alchemy-nft.ts's helper is
+ * unexported and this module already has its own quota marker convention
+ * (`QUOTA:` prefix below) rather than a thrown Error subtype.
+ */
+function isAlchemyQuotaText(text: string): boolean {
+  return /monthly capacity|capacity limit exceeded|too many requests|rate limit|quota/i.test(text);
+}
+
+function nextUtcMonthStartMs(now = new Date()): number {
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+}
 
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 /** ERC-1155's two mandatory balance-change events. A collection registry
@@ -119,7 +137,20 @@ export async function rpcCall<T>(rpcUrl: string, method: string, params: unknown
     body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
   });
   const json = (await res.json()) as { result?: T; error?: { message: string } };
-  if (json.error) throw new Error(`${method}: ${json.error.message}`);
+  if (json.error) {
+    // Real, live-confirmed shape (2026-08-23): Alchemy returns a real HTTP
+    // 429 whose body is still valid JSON-RPC error shape
+    // {code:429,message:"Monthly capacity limit exceeded..."} -- fetch()
+    // still resolves (only network failures reject), so this still reaches
+    // json.error either way; matched on the message text rather than
+    // res.status so a 429 from some other transient cause (not this
+    // specific real account-level exhaustion) doesn't over-jail. Prefixed
+    // "QUOTA:" so callers can distinguish a real account-level exhaustion
+    // (jail the key) from any other RPC error (e.g. "chain not enabled",
+    // which must NOT jail the whole key over one chain's config gap).
+    const prefix = isAlchemyQuotaText(json.error.message) ? "QUOTA:" : "";
+    throw new Error(`${prefix}${method}: ${json.error.message}`);
+  }
   return json.result as T;
 }
 
@@ -378,11 +409,40 @@ export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> 
   // inside the free tier's real per-call constraints instead of fanning
   // out and risking a burst the account-wide rate limit doesn't like.
   for (const chainSlug of DISCOVERY_CHAINS) {
+    // No unjailed key left in the pool -- either unconfigured or every
+    // configured key is already circuit-broken (see the QUOTA branch
+    // below). Skip cleanly instead of throwing "ALCHEMY_API_KEY is
+    // required" on every chain, every tick: HyperSync (discover-hypersync)
+    // shares this exact cursor table (readCursor/writeCursor, keyed only
+    // by chainSlug) and keeps advancing it for free regardless, so a
+    // skipped tick here is not a stalled chain, just this one redundant
+    // raw-log lane sitting out until Alchemy capacity actually returns.
+    const key = await pickAlchemyKey("background");
+    if (!key) {
+      results.push({ chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0, error: "alchemy-evm-logscan: no unjailed pool key configured/available -- skipped, hypersync-evm-scan still covers this chain's cursor" });
+      continue;
+    }
     try {
-      const key = await pickAlchemyKey("background");
-      if (!key) throw new Error("ALCHEMY_API_KEY is required for EVM discovery scanning (raw eth_getLogs, not the NFT API's demo-key fallback).");
       results.push(await runEvmDiscoveryScan({ chainSlug, rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/${key.apiKey}` }));
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith("QUOTA:")) {
+        // Real account-level exhaustion, confirmed by Alchemy's own response
+        // text (not our own approximated daily-CU counter, which has no
+        // visibility into real per-call CU cost and can read "healthy"
+        // while the account is genuinely capped -- confirmed live
+        // 2026-08-23: pool-health reported 1/1,000,000 used while a direct
+        // eth_blockNumber call against the same key returned this exact
+        // 429). Jail THIS key via the same source-budget circuit breaker
+        // alchemy-key-pool.ts's orderCandidates already filters on, until
+        // the real UTC month rolls over -- matches alchemy-nft.ts's
+        // jailAlchemyNftUntilMonthReset exactly, so the very next call to
+        // pickAlchemyKey (this loop's next chain, or the next cron tick)
+        // stops retrying a call already proven to fail and falls through
+        // to the clean skip branch above instead of repeating this network
+        // round trip once per chain, forever.
+        recordSourceFailure(key.providerAccount, true, Math.max(60_000, nextUtcMonthStartMs() - Date.now()));
+      }
       results.push({
         chainSlug,
         fromBlock: 0,
@@ -391,7 +451,7 @@ export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> 
         candidates: 0,
         registered: 0,
         skippedNoMetadata: 0,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
     }
   }

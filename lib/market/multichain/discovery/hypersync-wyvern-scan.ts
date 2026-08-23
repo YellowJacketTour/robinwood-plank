@@ -50,7 +50,7 @@ const MAX_LOGS_PER_RUN = 20_000; // same free-tier event-quota guard
 
 const HYPERSYNC_WYVERN_PROVIDER_ACCOUNT = "hypersync-wyvern:default";
 /** Same approximation rationale as hypersync-seaport-scan.ts's own allowance constant -- no DAILY_CEILING entry exists for "hypersync-wyvern" (HyperSync's real limit is event/storage volume, not call count). */
-const HYPERSYNC_WYVERN_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_WYVERN_DAILY_ALLOWANCE = 200_000;
 
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
   const window = utcDayWindow(HYPERSYNC_WYVERN_DAILY_ALLOWANCE);

@@ -46,7 +46,7 @@ const CHUNK_BLOCKS = 50_000;
 const MAX_LOGS_PER_RUN = 20_000;
 
 const HYPERSYNC_BLUR_PROVIDER_ACCOUNT = "hypersync-blur:default";
-const HYPERSYNC_BLUR_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_BLUR_DAILY_ALLOWANCE = 200_000;
 
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
   const window = utcDayWindow(HYPERSYNC_BLUR_DAILY_ALLOWANCE);

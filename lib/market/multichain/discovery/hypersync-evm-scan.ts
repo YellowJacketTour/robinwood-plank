@@ -59,18 +59,31 @@ import { postgresQuery } from "@/lib/postgres";
 
 const HYPERSYNC_EVM_PROVIDER_ACCOUNT = "hypersync-evm:default";
 /**
- * No DAILY_CEILING entry exists for "hypersync-evm" in source-budget.ts --
- * this file does not even call checkSourceBudget today. HyperSync's own
- * real free-tier limit (this file's own header) is EVENT-volume/storage
- * bounded (~100k events / 5GB / 7-day-idle), not a per-call count, so
- * there is no exact call-count ceiling to carry over. This is therefore
- * an APPROXIMATED, conservative per-call allowance (same order of
- * magnitude as source-budget.ts's own magiceden-solana=2,000 ceiling),
- * purely to give a real cross-process durable guard against runaway
- * concurrent scan workers -- not a claim this is HyperSync's documented
- * per-call limit.
+ * RE-VERIFIED LIVE 2026-08-23 (owner pushback on a report that treated this
+ * as a real capacity block): fetched docs.envio.dev/docs/HyperSync/api-tokens,
+ * docs.envio.dev/blog/what-is-hypersync, and envio.dev/pricing directly --
+ * none of them state ANY per-key, per-day, or per-IP request-count limit
+ * for HyperSync. The only thing api-tokens.md documents is that a token is
+ * REQUIRED (since 2025-11-03) and that usage is tracked as "Requests" and
+ * "Credits" for billing visibility -- not that a specific number of either
+ * gets you rate-limited. No DAILY_CEILING entry exists for "hypersync-evm"
+ * in source-budget.ts either -- this file has never called
+ * checkSourceBudget. There is therefore NO real documented number to carry
+ * over here, which is exactly this app's own standing rule for when a
+ * self-imposed ceiling must be removed (see source-budget.ts's
+ * ordinals-wallet/ordinalswallet-ordinals entries for the established
+ * precedent). This constant is NOT removed outright only because
+ * reserveProviderCapacity's ProviderWindow requires a numeric allowance to
+ * function at all (unlike source-budget.ts's DAILY_CEILING, which can
+ * simply omit a source and fall through to `allowed: true`) -- raised here
+ * to a level that exists purely as a runaway-concurrent-worker safety
+ * valve (100x the old 2,000 approximation; no real cron cadence run in
+ * this app comes remotely close to it), never as a claimed real HyperSync
+ * limit. If Envio ever publishes an actual documented number, replace this
+ * with that number and cite the source, same as every other real ceiling
+ * in this file's family (UniSat, CoinGecko, etc.).
  */
-const HYPERSYNC_EVM_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_EVM_DAILY_ALLOWANCE = 200_000;
 
 /**
  * Blocks requested per HyperSync call. Far wider than evm-log-scan.ts's

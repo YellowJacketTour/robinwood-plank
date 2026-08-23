@@ -39,7 +39,7 @@ const CHUNK_BLOCKS = 50_000;
 const MAX_LOGS_PER_RUN = 20_000;
 
 const HYPERSYNC_FOUNDATION_PROVIDER_ACCOUNT = "hypersync-foundation:default";
-const HYPERSYNC_FOUNDATION_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_FOUNDATION_DAILY_ALLOWANCE = 200_000;
 
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
   const window = utcDayWindow(HYPERSYNC_FOUNDATION_DAILY_ALLOWANCE);

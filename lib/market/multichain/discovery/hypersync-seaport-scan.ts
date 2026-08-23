@@ -47,7 +47,7 @@ const MAX_LOGS_PER_RUN = 20_000; // same free-tier event-quota guard
 
 const HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT = "hypersync-seaport:default";
 /** Same approximation rationale as hypersync-evm-scan.ts's own HYPERSYNC_EVM_DAILY_ALLOWANCE -- no DAILY_CEILING entry exists for "hypersync-seaport" (HyperSync's real limit is event/storage volume, not call count). Approximated at the same conservative order of magnitude, purely to add a durable cross-process guard on top of the existing in-memory checkSourceBudget gate. */
-const HYPERSYNC_SEAPORT_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_SEAPORT_DAILY_ALLOWANCE = 200_000;
 
 /** One real HyperSync call (getHeight or a query page) reserved/settled durably around it. */
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {

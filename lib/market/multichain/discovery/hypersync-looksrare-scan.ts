@@ -40,7 +40,7 @@ const MAX_LOGS_PER_RUN = 20_000;
 
 const HYPERSYNC_LOOKSRARE_PROVIDER_ACCOUNT = "hypersync-looksrare:default";
 /** Same approximation rationale as hypersync-seaport-scan.ts's own allowance constant -- purely a durable cross-process guard layered on top of the in-memory checkSourceBudget gate. */
-const HYPERSYNC_LOOKSRARE_DAILY_ALLOWANCE = 2_000;
+const HYPERSYNC_LOOKSRARE_DAILY_ALLOWANCE = 200_000;
 
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
   const window = utcDayWindow(HYPERSYNC_LOOKSRARE_DAILY_ALLOWANCE);
