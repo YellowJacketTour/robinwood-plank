@@ -45,6 +45,7 @@ import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
+import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 /** ERC-1155's two mandatory balance-change events. A collection registry
@@ -364,10 +365,13 @@ export async function runAllOwnRankingPromotions(): Promise<RankingPromotionResu
 }
 
 export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> {
-  const apiKey = process.env.ALCHEMY_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("ALCHEMY_API_KEY is required for EVM discovery scanning (raw eth_getLogs, not the NFT API's demo-key fallback).");
-  }
+  // Background discovery lane -- picks a key from the multi-key pool
+  // (least-loaded, background priority) per chain, falling back to the
+  // single ALCHEMY_API_KEY. See alchemy-key-pool.ts's header: Alchemy's
+  // real throughput/CU cap is account-wide, so pooling only multiplies
+  // real capacity when the configured keys span separate Alchemy
+  // accounts -- still built for that case, with zero regression when
+  // only one key is configured.
   const results: DiscoveryScanResult[] = [];
   // Sequential, same reasoning as runMultichainSync and runChainIndexer:
   // one chain's scan finishing before the next starts is what keeps this
@@ -375,7 +379,9 @@ export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> 
   // out and risking a burst the account-wide rate limit doesn't like.
   for (const chainSlug of DISCOVERY_CHAINS) {
     try {
-      results.push(await runEvmDiscoveryScan({ chainSlug, rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/${apiKey}` }));
+      const key = await pickAlchemyKey("background");
+      if (!key) throw new Error("ALCHEMY_API_KEY is required for EVM discovery scanning (raw eth_getLogs, not the NFT API's demo-key fallback).");
+      results.push(await runEvmDiscoveryScan({ chainSlug, rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/${key.apiKey}` }));
     } catch (error) {
       results.push({
         chainSlug,

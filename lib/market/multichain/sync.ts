@@ -104,7 +104,7 @@ export async function runMultichainSync(input: { maxCollections?: number; chainS
         "the snapshot table has nowhere to write otherwise."
     );
   }
-  if (!process.env.ALCHEMY_API_KEY?.trim()) {
+  if (!process.env.ALCHEMY_API_KEY?.trim() && !process.env.ALCHEMY_API_KEYS?.trim()) {
     console.warn(
       "[multichain-sync] ALCHEMY_API_KEY is not set -- falling back to Alchemy's shared " +
         '"demo" key, which is heavily rate-limited and NOT suitable for production sync ' +

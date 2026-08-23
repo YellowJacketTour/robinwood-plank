@@ -34,6 +34,10 @@ export type MeshSource =
   | "x2y2-fills-genesis"
   | "foundation-fills"
   | "foundation-fills-genesis"
+  | "sudoswap-fills"
+  | "sudoswap-fills-genesis"
+  | "rarible-fills"
+  | "rarible-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -166,6 +170,38 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 180,
     notes: "Independent genesis-block-to-head Foundation Market fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "sudoswap-live:eth-mainnet",
+    source: "sudoswap-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Sudoswap v1 SwapNFTInPair/SwapNFTOutPair live cursor; eth-mainnet only. Decoded via HyperSync JoinMode.JoinAll receipt-log correlation, not a single-log decode -- see sudoswap-fill-indexer.ts.",
+  },
+  {
+    id: "sudoswap-genesis:eth-mainnet",
+    source: "sudoswap-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head Sudoswap v1 fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "rarible-live:eth-mainnet",
+    source: "rarible-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Rarible ExchangeV2 Match live cursor; eth-mainnet only. Decoded via the matchOrders transaction's own real calldata (fetched via HyperSync's transaction field selection), not the near-parameterless Match log alone -- see rarible-fill-indexer.ts.",
+  },
+  {
+    id: "rarible-genesis:eth-mainnet",
+    source: "rarible-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head Rarible ExchangeV2 fill cursor; never advances the live cursor.",
   },
   {
     id: "blur-live:eth-mainnet",

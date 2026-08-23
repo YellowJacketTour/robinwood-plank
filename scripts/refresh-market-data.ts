@@ -111,8 +111,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -774,6 +774,52 @@ async function main(): Promise<void> {
     const { scanFoundationFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-foundation-scan");
     const { FOUNDATION_CHAIN_SLUG } = await import("../lib/market/multichain/foundation-fill-indexer");
     const result = await scanFoundationFillsGenesisBackfillViaHypersync(FOUNDATION_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  // Sixth real historic marketplace this app indexes directly on-chain --
+  // Sudoswap v1 SwapNFTInPair/SwapNFTOutPair, AMM-pool shaped, decoded via
+  // HyperSync JoinMode.JoinAll receipt-log correlation (not calldata --
+  // swapTokenForAnyNFTs is ID-agnostic). See hypersync-sudoswap-scan.ts and
+  // sudoswap-fill-indexer.ts for the full cited technique.
+  await step("sudoswap-fills", async () => {
+    const { scanSudoswapFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-sudoswap-scan");
+    const { SUDOSWAP_CHAIN_SLUG } = await import("../lib/market/multichain/sudoswap-fill-indexer");
+    const result = await scanSudoswapFillsViaHypersync(SUDOSWAP_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("sudoswap-fills-backfill", async () => {
+    const { scanSudoswapFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-sudoswap-scan");
+    const { SUDOSWAP_CHAIN_SLUG } = await import("../lib/market/multichain/sudoswap-fill-indexer");
+    const result = await scanSudoswapFillsGenesisBackfillViaHypersync(SUDOSWAP_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  // Seventh real historic marketplace this app indexes directly on-chain --
+  // Rarible ExchangeV2 Match, decoded via matchOrders' own real calldata
+  // (fetched alongside the log in the same HyperSync query). See
+  // hypersync-rarible-scan.ts and rarible-fill-indexer.ts for the full
+  // cited technique and honest partial-fill/asset-class limitations.
+  await step("rarible-fills", async () => {
+    const { scanRaribleFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-rarible-scan");
+    const { RARIBLE_CHAIN_SLUG } = await import("../lib/market/multichain/rarible-fill-indexer");
+    const result = await scanRaribleFillsViaHypersync(RARIBLE_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("rarible-fills-backfill", async () => {
+    const { scanRaribleFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-rarible-scan");
+    const { RARIBLE_CHAIN_SLUG } = await import("../lib/market/multichain/rarible-fill-indexer");
+    const result = await scanRaribleFillsGenesisBackfillViaHypersync(RARIBLE_CHAIN_SLUG);
     return result.error
       ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
       : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;

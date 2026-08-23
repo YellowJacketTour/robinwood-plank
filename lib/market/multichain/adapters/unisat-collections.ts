@@ -89,6 +89,24 @@ type UniSatCollectionEntry = {
   uniqueHolders?: number | null;
 };
 
+/**
+ * NO MULTI-KEY POOL BUILT FOR UNISAT (doc check performed 2026-08-23, per
+ * this session's standing rule -- see opensea-key-pool.ts / alchemy-key-pool.ts
+ * / helius-key-pool.ts for the same check on those providers). UniSat's
+ * public unisat-dev-docs (github.com/unisat-wallet/unisat-dev-docs) do not
+ * document a per-key request quota anywhere in open-api/README.md or the
+ * auth-related pages -- the app must issue an authenticated key by email
+ * request (contact@unisat.io), and this repo's own existing
+ * UNISAT_TESTNET_API_KEY/UNISAT_API_KEY split already treats keys as
+ * account/environment-scoped credentials, not independent capacity
+ * grants. Absent any documented per-key bucket (the one thing that made
+ * pooling worthwhile for OpenSea/Alchemy/Helius, all of which DO
+ * genuinely round-robin real bookkeeping even though their capacity is
+ * also account-wide), minting several UniSat keys under the same account
+ * would only add bookkeeping with no plausible capacity benefit, so this
+ * stays single-key. If UniSat ever documents independent per-key
+ * capacity, build unisat-key-pool.ts following the exact same pattern.
+ */
 function requireApiKey(): string {
   const key = process.env.UNISAT_API_KEY;
   if (!key) throw new Error("unisat-collections: UNISAT_API_KEY is not configured");

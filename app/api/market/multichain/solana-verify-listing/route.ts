@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Connection } from "@solana/web3.js";
 import { fetchM2Listing } from "@/lib/market/multichain/adapters/magiceden-m2-onchain";
 import { publicError, rateLimit } from "@/lib/security";
+import { pickHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,10 +34,12 @@ export const runtime = "nodejs";
 // already use client-side -- see test/market/server-feature-flags.test.ts's
 // header on why this stays a plain module constant read at the call site
 // (in an app/ route, not lib/) rather than something that test's
-// KNOWN_BUILD_FROZEN registry needs to track.
-function solanaRpcUrl(): string {
-  const helius = process.env.HELIUS_API_KEY?.trim();
-  if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius}`;
+// KNOWN_BUILD_FROZEN registry needs to track. Uses the multi-key pool
+// (least-loaded, live priority) when >1 real Helius key is configured --
+// falls back to the single HELIUS_API_KEY otherwise, zero behavior change.
+async function solanaRpcUrl(): Promise<string> {
+  const helius = await pickHeliusKey("live");
+  if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius.apiKey}`;
   return (
     process.env.SOLANA_RPC_URL?.trim() ||
     process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
@@ -168,7 +171,7 @@ export async function GET(req: NextRequest) {
     const priceLamports = searchParams.get("priceLamports") ?? undefined;
     const lead =
       seller && auctionHouse && tokenAccount ? { seller, auctionHouse, tokenAccount, priceLamports } : undefined;
-    const connection = new Connection(solanaRpcUrl(), "confirmed");
+    const connection = new Connection(await solanaRpcUrl(), "confirmed");
     const result = await verifySolanaListingOnChain({ tokenMint, connection, lead });
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

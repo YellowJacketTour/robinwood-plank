@@ -65,6 +65,20 @@ const SOURCE = "coingecko-nft";
  * the real, durable guard: checked BEFORE every real request, same
  * fail-closed discipline as checkSourceBudget.
  */
+/**
+ * NO MULTI-KEY POOL BUILT FOR COINGECKO (doc check re-confirmed 2026-08-23,
+ * consistent with what this file already documents above): CoinGecko's
+ * Demo-tier key raises the rate limit for the ACCOUNT that registered it,
+ * not per key -- the same account-bound constraint opensea-key-pool.ts's
+ * header documents for OpenSea. Multiple Demo keys minted under one
+ * CoinGecko account would not multiply real capacity; only keys from
+ * separate CoinGecko accounts would. Given the free/no-cost nature of a
+ * Demo key and the low call volume this module needs (well under even one
+ * account's 10,000/mo), building and maintaining a pool here has no real
+ * payoff today. If that changes, follow opensea-key-pool.ts's exact
+ * pattern (COINGECKO_API_KEYS, position-based ids, least/most-loaded
+ * selection).
+ */
 const MONTHLY_CEILING = 9_000; // real margin under CoinGecko's documented 10,000/mo Demo cap
 
 /** Matches source-budget.ts's own DAILY_CEILING["coingecko-nft"] exactly -- this only adds cross-process durability on top of the existing in-memory ceiling and the monthly-KV guard above, never changes what the daily ceiling actually is. */

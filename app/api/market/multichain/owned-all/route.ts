@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { rateLimit } from "@/lib/security";
+import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "owner is required" }, { status: 400 });
   }
 
-  const apiKey = process.env.ALCHEMY_API_KEY?.trim() || "demo";
+  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
 
   const results = await Promise.all(
     FOREIGN_CHAINS.map(async (chain): Promise<OwnedItem[]> => {

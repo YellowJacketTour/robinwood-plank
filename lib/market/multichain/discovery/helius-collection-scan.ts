@@ -12,6 +12,7 @@
  */
 import { durableKv } from "@/lib/market/durable-kv";
 import { upsertTrackedCollection } from "@/lib/market/multichain/store";
+import { reserveHeliusKey, settleHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
 
 const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 100; // real, confirmed-safe live 2026-08-20 -- limit=1000 times out server-side
@@ -45,28 +46,31 @@ export function shouldSkipZeroMemberCollection(item: HeliusSearchItem): boolean 
   return typeof n === "number" && n < MIN_REAL_MEMBER_COUNT;
 }
 
-function apiKey(): string {
-  const key = process.env.HELIUS_API_KEY?.trim();
-  if (!key) throw new Error("helius-collection-scan: HELIUS_API_KEY is not configured");
-  return key;
-}
-
+/** Background discovery lane -- reserves+settles a FRESH pool key per page fetched. */
 async function fetchPage(cursor: string | null): Promise<{ items: HeliusSearchItem[]; nextCursor: string | null }> {
   const params: Record<string, unknown> = { interface: "MplCoreCollection", limit: PAGE_SIZE };
   if (cursor) params.cursor = cursor;
-  const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method: "searchAssets", params }),
-  });
-  if (!res.ok) throw new Error(`helius-collection-scan: HTTP ${res.status}`);
-  const body = (await res.json()) as {
-    result?: { items: HeliusSearchItem[]; cursor?: string | null };
-    error?: { code: number; message: string };
-  };
-  if (body.error) throw new Error(`helius-collection-scan: ${body.error.code} ${body.error.message}`);
-  const items = body.result?.items ?? [];
-  return { items, nextCursor: items.length === PAGE_SIZE ? (body.result?.cursor ?? null) : null };
+  const slot = await reserveHeliusKey(1, { priority: "background" });
+  if (!slot) throw new Error("helius-collection-scan: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  let ok = false;
+  try {
+    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method: "searchAssets", params }),
+    });
+    if (!res.ok) throw new Error(`helius-collection-scan: HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      result?: { items: HeliusSearchItem[]; cursor?: string | null };
+      error?: { code: number; message: string };
+    };
+    if (body.error) throw new Error(`helius-collection-scan: ${body.error.code} ${body.error.message}`);
+    const items = body.result?.items ?? [];
+    ok = true;
+    return { items, nextCursor: items.length === PAGE_SIZE ? (body.result?.cursor ?? null) : null };
+  } finally {
+    await settleHeliusKey(slot, 1, ok);
+  }
 }
 
 type StoredCursor = { cursor: string | null; done: boolean; doneAt?: number };

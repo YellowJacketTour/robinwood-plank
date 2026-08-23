@@ -11,6 +11,7 @@ import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-l
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -224,7 +225,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `No Alchemy NFT API mapping for "${chainSlug}"` }, { status: 400 });
   }
 
-  const apiKey = process.env.ALCHEMY_API_KEY?.trim() || "demo";
+  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
   const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
   url.searchParams.set("owner", owner);
   url.searchParams.append("contractAddresses[]", contractAddress);

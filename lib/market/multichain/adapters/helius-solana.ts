@@ -31,14 +31,9 @@
  * marketplace.
  */
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
+import { reserveHeliusKey, settleHeliusKey, type HeliusKeySlot } from "@/lib/market/multichain/discovery/helius-key-pool";
 
 const RPC_URL = "https://mainnet.helius-rpc.com";
-
-function apiKey(): string {
-  const key = process.env.HELIUS_API_KEY?.trim();
-  if (!key) throw new Error("helius-solana: HELIUS_API_KEY is not configured");
-  return key;
-}
 
 type HeliusAsset = {
   id: string;
@@ -57,16 +52,25 @@ function pickCreatorAddress(creators: HeliusAsset["creators"]): string | null {
   return (verified ?? creators.find((c) => c.address))?.address ?? null;
 }
 
-async function rpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
-  });
-  if (!res.ok) throw new Error(`helius-solana: HTTP ${res.status} calling ${method}`);
-  const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
-  if (body.error) throw new Error(`helius-solana: ${method} — ${body.error.code} ${body.error.message}`);
-  return body.result as T;
+/** Reserves+settles a FRESH key from the pool on every call (not once per run), same real per-attempt behavior as OpenSea's pool. `priority` "live" for a user-triggered fetchSnapshot, "background" for a discovery/sync supervisor. */
+async function rpc<T>(method: string, params: Record<string, unknown>, priority: "live" | "background" = "live"): Promise<T> {
+  const slot: HeliusKeySlot | null = await reserveHeliusKey(1, { priority });
+  if (!slot) throw new Error("helius-solana: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  let ok = false;
+  try {
+    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
+    });
+    if (!res.ok) throw new Error(`helius-solana: HTTP ${res.status} calling ${method}`);
+    const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
+    if (body.error) throw new Error(`helius-solana: ${method} — ${body.error.code} ${body.error.message}`);
+    ok = true;
+    return body.result as T;
+  } finally {
+    await settleHeliusKey(slot, 1, ok);
+  }
 }
 
 export const heliusSolanaAdapter: ChainAdapter = {

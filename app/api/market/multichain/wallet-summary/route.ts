@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FOREIGN_CHAINS, foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { fetchForeignAllListings, fetchForeignCollectionOffers } from "@/lib/market/multichain/trading/foreign-orders";
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { resolveOwnedTokenIds } from "@/app/api/market/multichain/owned/route";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
@@ -49,7 +50,7 @@ const ALCHEMY_SUBDOMAIN: Record<string, string> = {
 type OwnedItem = { chainSlug: string; contractAddress: string; collectionName: string | null; tokenId: string };
 
 async function fetchOwnedAll(owner: string): Promise<OwnedItem[]> {
-  const apiKey = process.env.ALCHEMY_API_KEY?.trim() || "demo";
+  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
   const results = await Promise.all(
     FOREIGN_CHAINS.map(async (chain): Promise<OwnedItem[]> => {
       const subdomain = ALCHEMY_SUBDOMAIN[chain.chainSlug];

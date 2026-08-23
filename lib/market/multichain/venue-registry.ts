@@ -61,24 +61,25 @@ export const MARKET_VENUES = [
     protocol: "rarible",
     versions: ["exchange-v2"],
     capabilities: ["sales"],
-    coverage: "planned",
+    coverage: "partial",
     chainSlugs: ["eth-mainnet"],
     notes:
-      "CONFIRMED BLOCKED 2026-08-23, NOT A GAP -- researched via Rarible's own real source, " +
-      "https://github.com/rarible/protocol-contracts, projects/exchange-v2/contracts/ExchangeV2Core.sol. " +
-      "Rarible's legacy standalone RaribleExchange (v1) is retired; today's real Rarible-originated " +
-      "on-chain settlement is ExchangeV2 (mainnet 0x9757F2d2b135150BBeb65308D4a91804107cd8D6 per Rarible's " +
-      "own docs.rarible.org/reference/contract-addresses), a genuinely distinct contract from Seaport -- " +
-      "NOT a case of Rarible's UI merely wrapping Seaport, so this is real missing coverage, not double- " +
-      "counting an already-indexed Seaport fill under a second label. However, directly fetched " +
-      "ExchangeV2Core.sol and confirmed by exact line match that its only completed-trade event is " +
-      "`event Match(bytes32 leftHash, bytes32 rightHash, uint newLeftFill, uint newRightFill);` -- two " +
-      "order hashes and two fill amounts, with NO nftContract/tokenId/price/party fields at all. Real " +
-      "asset/price/party data only exists inside the internal _doTransfers ERC721/ERC20/ETH Transfer legs " +
-      "emitted by the token contracts themselves within the same tx, which would have to be correlated by " +
-      "tx hash after the fact -- the same materially-different, non-log-self-contained data-access pattern " +
-      "documented as the Sudoswap blocker above, not the single-log decode this app's HyperSync scanners " +
-      "are built around. Left planned, not guessed.",
+      "BUILT 2026-08-23 -- ExchangeV2 0x9757F2d2b135150BBeb65308D4a91804107cd8D6 (eth-mainnet) Match " +
+      "events are indexed via a dual-cursor HyperSync lane (plank_rarible_fills + shared " +
+      "plank_market_event_assets/payments legs). The Match log itself really is near-parameterless (`event " +
+      "Match(bytes32 leftHash, bytes32 rightHash, uint newLeftFill, uint newRightFill)`, confirmed against " +
+      "ExchangeV2Core.sol) -- real nftContract/tokenId/price/party data is recovered instead from the SAME " +
+      "transaction's own matchOrders(...) calldata, fetched via HyperSync's transaction field selection in " +
+      "the same bulk query (no per-tx RPC fallback), ABI-decoded using the real LibOrder.Order/LibAsset.Asset " +
+      "tuple shapes and cross-checked against TransferExecutor.sol's real ERC721/ERC1155/ERC20 asset-data " +
+      "encoding -- see rarible-fill-indexer.ts for the full citation. Partial, not indexed: (1) directPurchase " +
+      "(a different ExchangeV2Core entry point with a flat LibDirectTransfer.Purchase calldata shape) also " +
+      "emits Match but is not decoded, only matchOrders calls are; (2) a genuine partial fill against a " +
+      "resting order-book order would report the order's calldata-declared value rather than the Match " +
+      "event's own newLeftFill/newRightFill settled amount -- not cross-validated this pass, stated as a " +
+      "known limitation rather than silently guessed; (3) the COLLECTION and CRYPTO_PUNKS asset classes " +
+      "(LibAsset.sol) leave nft_contract/token_id NULL (undecoded_asset_class records which one) since their " +
+      "real data encoding was not independently verified.",
   },
   {
     id: "sudoswap",
@@ -87,23 +88,25 @@ export const MARKET_VENUES = [
     protocol: "sudoswap",
     versions: ["v1", "v2"],
     capabilities: ["sales", "listings", "bids"],
-    coverage: "planned",
+    coverage: "partial",
     chainSlugs: ["eth-mainnet"],
     notes:
-      "CONFIRMED BLOCKED 2026-08-23, NOT A GAP -- researched via sudoswap's own real source, " +
-      "https://github.com/sudoswap/lssvm, src/LSSVMPair.sol. LSSVMPairFactory (real mainnet address " +
-      "0xb16c1342e617a5b6e4b631eb114483fdb289c0a4, Etherscan-confirmed) deploys minimal-proxy LSSVMPair " +
-      "instances per collection. Directly fetched src/LSSVMPair.sol and confirmed by exact line match: " +
-      "`event SwapNFTInPair();` and `event SwapNFTOutPair();` are REAL, VERIFIED, PARAMETERLESS -- no " +
-      "tokenId, no ETH amount, no direction beyond which of the two fires. This is architecturally " +
-      "different from every other venue this app indexes: those all decode a fill entirely from one " +
-      "log's topics+data (the established HyperSync log-scan pattern this app uses everywhere else). A " +
-      "Sudoswap swap has NO such self-contained log -- reconstructing pool/tokenId/ETH-amount/direction " +
-      "requires correlating the parameterless event with sibling ERC721 Transfer logs AND the ETH value " +
-      "moved in the same tx (trace_call or balance-delta, not log data) in the same transaction, which is " +
-      "a materially different data-access pattern (full receipt+trace fetching per swap, not bulk log " +
-      "scanning) than every other indexer in this app and was not built this pass rather than force a " +
-      "guessed/partial normalization. Left planned, not guessed.",
+      "BUILT 2026-08-23 -- LSSVMPairFactory 0xb16c1342e617a5b6e4b631eb114483fdb289c0a4 (eth-mainnet) pool " +
+      "swaps are indexed via a dual-cursor HyperSync lane (plank_sudoswap_fills + shared " +
+      "plank_market_event_assets/payments legs), topic0-only filtered across all addresses (no single " +
+      "'the exchange' contract exists -- every pool is its own minimal-proxy clone). " +
+      "`event SwapNFTInPair();`/`event SwapNFTOutPair();` (src/LSSVMPair.sol) really are parameterless, " +
+      "confirmed by exact line match -- real pool/tokenId/counterparty/price data is recovered instead by " +
+      "correlating the Swap log with its accompanying ERC721/ERC20 Transfer log(s) in the SAME transaction, " +
+      "via HyperSync's own JoinMode.JoinAll (documented client behavior: matched-log transactions' sibling " +
+      "logs are returned in the same query), not a per-swap trace or receipt RPC call -- see " +
+      "sudoswap-fill-indexer.ts for the full citation, including why calldata alone is insufficient " +
+      "(swapTokenForAnyNFTs is ID-agnostic; it never states which tokenIds it bought). Partial, not " +
+      "indexed: native-ETH-denominated pools leave currency_token/price_wei NULL -- the real amount paid " +
+      "is only observable via internal/trace-level ETH transfer visibility (LSSVMPair refunds excess ETH " +
+      "internally, an untracked transfer), out of scope for this app's log-only architecture; " +
+      "ERC20-denominated pools DO get a real decoded price. Sudoswap v2 (different factory/pair contracts) " +
+      "was not independently verified this pass and remains out of scope.",
   },
   { id: "magiceden-solana", label: "Magic Eden", family: "solana", protocol: "magiceden", versions: ["current"], capabilities: ["sales", "transfers", "listings", "bids"], coverage: "partial", chainSlugs: ["solana-mainnet"], notes: "Recent API activity exists; program-history and complete book ingestion remain incomplete." },
   { id: "tensor-solana", label: "Tensor", family: "solana", protocol: "tensor", versions: ["current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program/account decoder and compressed-NFT support required." },

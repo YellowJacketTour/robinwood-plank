@@ -13,6 +13,7 @@ import { buildMagicEdenBuyNow } from "@/lib/market/multichain/adapters/magiceden
 import { fetchM2Listing } from "@/lib/market/multichain/adapters/magiceden-m2-onchain";
 import { publicError, rateLimit } from "@/lib/security";
 import { looksLikeSolanaPubkey } from "@/lib/market/multichain/solana-pubkey";
+import { pickHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,9 +36,9 @@ export async function POST(req: NextRequest) {
 
   try {
     if (body.seller && body.auctionHouse && body.tokenAccount && looksLikeSolanaPubkey(body.tokenMint)) {
-      const helius = process.env.HELIUS_API_KEY?.trim();
+      const helius = await pickHeliusKey("live");
       const rpc = helius
-        ? `https://mainnet.helius-rpc.com/?api-key=${helius}`
+        ? `https://mainnet.helius-rpc.com/?api-key=${helius.apiKey}`
         : process.env.SOLANA_RPC_URL?.trim() ||
           process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
           "https://api.mainnet-beta.solana.com";

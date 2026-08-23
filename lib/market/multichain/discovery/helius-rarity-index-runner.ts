@@ -40,14 +40,10 @@ import {
   writeCollectionMembershipCursor,
 } from "@/lib/market/multichain/collection-token-store";
 
+import { reserveHeliusKey, settleHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
+
 const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 1000;
-
-function apiKey(): string {
-  const key = process.env.HELIUS_API_KEY?.trim();
-  if (!key) throw new Error("helius-rarity-index-runner: HELIUS_API_KEY is not configured");
-  return key;
-}
 
 type HeliusGroupedAsset = {
   id: string;
@@ -77,18 +73,27 @@ function assetsToItems(assets: HeliusGroupedAsset[]): GenericRarityInput[] {
   }));
 }
 
+/** Background discovery lane -- reserves+settles a FRESH pool key per call (priority "background" so live user traffic on the same project keys is not contended with). */
 async function heliusRpc<T>(method: string, params: unknown): Promise<T> {
-  const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
-  const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
-  if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
-  if (body.result == null) throw new Error(`helius-rarity-index-runner: empty ${method}`);
-  return body.result;
+  const slot = await reserveHeliusKey(1, { priority: "background" });
+  if (!slot) throw new Error("helius-rarity-index-runner: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  let ok = false;
+  try {
+    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
+    const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
+    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
+    if (body.result == null) throw new Error(`helius-rarity-index-runner: empty ${method}`);
+    ok = true;
+    return body.result;
+  } finally {
+    await settleHeliusKey(slot, 1, ok);
+  }
 }
 
 /**
@@ -133,23 +138,31 @@ async function fetchGroupedPage(collectionAddress: string, page: number): Promis
 async function fetchGroupedPageWithTotal(collectionAddress: string, page: number): Promise<{
   items: HeliusGroupedAsset[]; total: number | null;
 }> {
-  const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "plank",
-      method: "searchAssets",
-      params: { grouping: ["collection", collectionAddress], page, limit: PAGE_SIZE },
-    }),
-  });
-  if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
-  const body = (await res.json()) as {
-    result?: { items: HeliusGroupedAsset[]; total?: number };
-    error?: { code: number; message: string };
-  };
-  if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
-  return { items: body.result?.items ?? [], total: body.result?.total ?? null };
+  const slot = await reserveHeliusKey(1, { priority: "background" });
+  if (!slot) throw new Error("helius-rarity-index-runner: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  let ok = false;
+  try {
+    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "plank",
+        method: "searchAssets",
+        params: { grouping: ["collection", collectionAddress], page, limit: PAGE_SIZE },
+      }),
+    });
+    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      result?: { items: HeliusGroupedAsset[]; total?: number };
+      error?: { code: number; message: string };
+    };
+    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
+    ok = true;
+    return { items: body.result?.items ?? [], total: body.result?.total ?? null };
+  } finally {
+    await settleHeliusKey(slot, 1, ok);
+  }
 }
 
 export type SolanaRarityIndexResult = {
