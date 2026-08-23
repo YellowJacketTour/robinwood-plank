@@ -138,6 +138,58 @@ export function formatTokenAmount(
 }
 
 /**
+ * Compact display variant of formatTokenAmount for tight UI real estate
+ * (tier-floor chips, price badges): genuine sub-cent / dust-level amounts
+ * (e.g. spam listings priced at a handful of wei) render as full raw
+ * decimals under formatTokenAmount's own dust rule, which is correct for
+ * precision but is 10-14 characters wide and breaks fixed-width badge
+ * layouts. This keeps normal-range amounts identical to formatTokenAmount
+ * and only compacts values below `threshold` (default 1e-6 units) into
+ * scientific notation, e.g. "8e-12" instead of "0.000000000008".
+ *
+ * Only used for display; never for arithmetic — full BigInt precision is
+ * still what powers sweeps/comparisons via the raw wei value.
+ */
+export function formatTokenAmountCompact(
+  raw: string | bigint,
+  decimals: number,
+  maxFractionDigits = 8,
+  threshold = 1e-6
+): string {
+  const value = typeof raw === "bigint" ? raw : BigInt(raw || "0");
+  const neg = value < BigInt(0);
+  const abs = neg ? -value : value;
+  if (abs === BigInt(0)) return "0";
+
+  const base = BigInt(10) ** BigInt(decimals);
+  const whole = abs / base;
+  const frac = abs % base;
+
+  // Only dust (no whole part) can ever be small enough to need scientific
+  // notation, and only if it clears formatTokenAmount's normal precision
+  // (i.e. its dust rule would otherwise expand to full raw decimals).
+  if (whole === BigInt(0)) {
+    const minVisible = base / BigInt(10) ** BigInt(Math.min(maxFractionDigits, decimals));
+    if (frac > BigInt(0) && frac < minVisible) {
+      // Exact value = frac / 10^decimals. Render as significant-digit
+      // scientific notation from the exact fractional string (no float
+      // round-trip needed since we only ever read a short digit prefix).
+      const fracStr = frac.toString().padStart(decimals, "0");
+      const firstNonZero = fracStr.search(/[1-9]/);
+      const exponent = -(firstNonZero + 1);
+      const sig = fracStr.slice(firstNonZero, firstNonZero + 3).replace(/0+$/, "") || "0";
+      const mantissa = sig.length > 1 ? `${sig[0]}.${sig.slice(1)}` : sig;
+      const asNumber = Number(`0.${fracStr}`);
+      if (asNumber < threshold) {
+        return `${neg ? "-" : ""}${mantissa}e${exponent}`;
+      }
+    }
+  }
+
+  return formatTokenAmount(raw, decimals, maxFractionDigits);
+}
+
+/**
  * Thousands separators for a decimal string's INTEGER part only — display
  * only, operates on the string formatTokenAmount already produced. Never
  * parses the value (no Number()/parseFloat), so full BigInt precision from

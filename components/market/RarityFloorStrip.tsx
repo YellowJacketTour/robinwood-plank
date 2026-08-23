@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { formatTokenAmount } from "@/lib/trade";
+import { formatTokenAmount, formatTokenAmountCompact } from "@/lib/trade";
 import { formatUsd } from "@/lib/eth-price";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -90,14 +90,16 @@ export default function RarityFloorStrip({
         >
           <p className="text-[0.55rem] font-bold uppercase tracking-wide text-foreground/45">All</p>
           <p
-            className="flex items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-gold-300"
+            className="flex min-w-0 items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-gold-300"
             aria-label={collFloor == null ? "—" : `${formatTokenAmount(collFloor, 18, 3)} ${currencySymbol}`}
           >
             {collFloor == null ? (
               "—"
             ) : (
               <>
-                {formatTokenAmount(collFloor, 18, 3)}
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={`${formatTokenAmount(collFloor, 18, 8)} ${currencySymbol}`}>
+                  {formatTokenAmountCompact(collFloor, 18, 3)}
+                </span>
                 <ChainIcon chainSlug={chainSlug} size={20} className="shrink-0" />
               </>
             )}
@@ -146,14 +148,16 @@ export default function RarityFloorStrip({
                 <span style={{ color }}>{row.tier}</span>
               </p>
               <p
-                className="flex items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-foreground"
+                className="flex min-w-0 items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-foreground"
                 aria-label={row.floorWei == null ? "—" : `${formatTokenAmount(row.floorWei, 18, 3)} ${currencySymbol}`}
               >
                 {row.floorWei == null ? (
                   "—"
                 ) : (
                   <>
-                    {formatTokenAmount(row.floorWei, 18, 3)}
+                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={`${formatTokenAmount(row.floorWei, 18, 8)} ${currencySymbol}`}>
+                      {formatTokenAmountCompact(row.floorWei, 18, 3)}
+                    </span>
                     <ChainIcon chainSlug={chainSlug} size={20} className="shrink-0" />
                   </>
                 )}

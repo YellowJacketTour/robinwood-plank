@@ -27,7 +27,7 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   "cryptopunks-native": "bg-gold-500/15 text-gold-300",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
-import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import { formatTokenAmount, formatTokenAmountCompact, shortAddress } from "@/lib/trade";
 import { tierColor, tierGlow, tierAnimationClass, tierCardStyle } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
@@ -213,13 +213,18 @@ export default function ListingCard({
               Price
             </span>
             <p
-              className={`whitespace-nowrap text-[clamp(0.95rem,4vw,1.25rem)] font-extrabold tabular-nums ${
+              className={`min-w-0 text-[clamp(0.95rem,4vw,1.25rem)] font-extrabold tabular-nums ${
                 isOffer ? "text-emerald-300" : "text-gold-300"
               }`}
               aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ${currencySymbol}`}
             >
-              <span aria-hidden="true" className="inline-flex items-center gap-1.5">
-                {formatTokenAmount(listing.priceWei, 18, 4)}
+              <span aria-hidden="true" className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                <span
+                  className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+                  title={`${formatTokenAmount(listing.priceWei, 18, 8)} ${currencySymbol}`}
+                >
+                  {formatTokenAmountCompact(listing.priceWei, 18, 4)}
+                </span>
                 <ChainIcon chainSlug={chainSlug} size={20} className="inline-block shrink-0" />
               </span>
             </p>

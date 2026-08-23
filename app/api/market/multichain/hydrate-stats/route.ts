@@ -14,6 +14,8 @@ import {
   updateHolderCount,
 } from "@/lib/market/multichain/store";
 import { isBitcoinChainSlug, isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { fetchAllOpenSeaListings } from "@/lib/market/opensea";
+import { CRYPTOPUNKS_CONTRACT, getCryptoPunksNativeBookStats } from "@/lib/market/multichain/native-market-adapters/cryptopunks";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,7 +36,40 @@ function nativeToWei(v: number | undefined): string | null {
   return BigInt(Math.round(v * 1e18)).toString();
 }
 
+/**
+ * CryptoPunks predates ERC-721 and Seaport (see the identical guard and
+ * comment in listings/route.ts). Its own contract-state book is the
+ * authoritative live listedCount -- OpenSea's generic /stats endpoint
+ * reports a punksOfferedForSale count of 0 for it (confirmed live), which
+ * would otherwise clobber the real ~1,100-listing native count below via
+ * updateCollectionSupplyFields's "0 is a real count" COALESCE semantics.
+ * This is why the Global Market Hub's Grade column showed "-" for
+ * CryptoPunks: gradeScore() requires a real live listedCount, and the
+ * generic OpenSea pass kept overwriting the true one with a false zero.
+ */
+const isCryptoPunks = (chainSlug: string, contractAddress: string) =>
+  chainSlug === "eth-mainnet" && contractAddress.toLowerCase() === CRYPTOPUNKS_CONTRACT;
+
 async function refreshOne(chainSlug: string, contractAddress: string): Promise<boolean> {
+  if (isCryptoPunks(chainSlug, contractAddress)) {
+    try {
+      const nativeStats = await getCryptoPunksNativeBookStats();
+      await updateCollectionSupplyFields(chainSlug, contractAddress, {
+        listedCount: nativeStats.listedCount,
+        totalSupply: 10_000,
+      });
+      if (nativeStats.floorWei) {
+        await updateCollectionFloorOnly(chainSlug, contractAddress, {
+          floorPriceWei: nativeStats.floorWei,
+          floorPriceCurrency: "ETH",
+          floorPriceMarketplace: "cryptopunks-native",
+        }).catch(() => {});
+      }
+    } catch {
+      /* fall through to the generic path below for volume/holders only */
+    }
+  }
+
   if (isSolanaChainSlug(chainSlug)) {
     const me = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(contractAddress)}/stats`, {
       headers: { accept: "application/json" },
@@ -179,11 +214,42 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
       filled = true;
     }
     if (typeof stats.total?.listed_count === "number") {
-      await updateCollectionSupplyFields(chainSlug, contractAddress, {
-        listedCount: stats.total.listed_count,
-        totalSupply: null,
-      }).catch(() => {});
+      // Never let OpenSea's generic count clobber CryptoPunks' real
+      // contract-state count above -- see isCryptoPunks's own comment.
+      if (!isCryptoPunks(chainSlug, contractAddress)) {
+        await updateCollectionSupplyFields(chainSlug, contractAddress, {
+          listedCount: stats.total.listed_count,
+          totalSupply: null,
+        }).catch(() => {});
+      }
       filled = true;
+    } else if (!isCryptoPunks(chainSlug, contractAddress)) {
+      // Some real, high-volume collections (confirmed live: Courtyard.io on
+      // Polygon, 400k+ supply / 2.5M+ lifetime sales) simply omit
+      // `total.listed_count` from this endpoint's response entirely --
+      // there is no missing/zero value to distrust, the field is absent.
+      // Fall back to OpenSea's own real order book: a bounded page walk of
+      // the SAME /listings/collection/{slug}/all endpoint listings/route.ts
+      // already uses to render this collection's actual cards, so the
+      // count is real live orders, never fabricated. A truncated walk still
+      // yields a true lower bound (never an inflated number), which is
+      // enough for gradeScore()'s "is there a live book at all" check even
+      // when the full count isn't captured.
+      const page = await fetchAllOpenSeaListings(slug, { apiKeyOverride: openSeaApiKey, maxListings: 500, pageSize: 100 }).catch(() => null);
+      if (page && page.listings.length > 0) {
+        const distinctTokens = new Set(
+          page.listings
+            .map((l) => l.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria)
+            .filter((id): id is string => Boolean(id))
+        );
+        if (distinctTokens.size > 0) {
+          await updateCollectionSupplyFields(chainSlug, contractAddress, {
+            listedCount: distinctTokens.size,
+            totalSupply: null,
+          }).catch(() => {});
+          filled = true;
+        }
+      }
     }
   }
 

@@ -551,9 +551,21 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   // established -- this rarity walk's own `partial` reflects only ITS
   // sample coverage, not the collection's true membership size.
   if (items.length) {
+    // REAL BUG FIXED 2026-08-23 (same class as the rarity-tier fix directly
+    // above): OpenSea's /nfts response parsed into `items` above already
+    // carries `imageUrl` per token (line ~509-514) -- it was captured into
+    // `images` for replaceForeignRarity's aggregate snapshot (line ~533) but
+    // silently dropped from THIS per-token projection write, which is what
+    // the grid/detail view actually renders cards from. Confirmed live
+    // against Courtyard.io on 2026-08-23: 24,750 tokens had a real
+    // rarity_tier written by this same function, 0 had image_url --
+    // every one of those cards showed "ART PENDING" despite this exact walk
+    // having already seen a real display_image_url/image_url for each of
+    // them in the very same OpenSea response used to compute its tier.
     await upsertCollectionTokenProjection(chainSlug, contractAddress, {
       tokens: [...snapshot.byTokenId.values()].map((token) => ({
         tokenId: token.tokenId, name: token.name,
+        imageUrl: images.get(token.tokenId) ?? null,
         rarityScore: token.score, rarityRank: token.rank,
         rarityPercentile: token.percentile, rarityTier: token.tier,
       })),
