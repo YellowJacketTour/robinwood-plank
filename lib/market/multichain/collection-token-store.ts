@@ -101,6 +101,41 @@ export async function readCollectionTokenProjection(input: {
   };
 }
 
+/**
+ * Resolve an order-book window against the canonical token projection.
+ * Books are sparse and token-id keyed, so this stays O(listed rows) even
+ * when the collection universe is billions or trillions of pieces. Never
+ * substitute collection-level metadata for a missing token row.
+ */
+export async function readProjectedTokensByIds(
+  chainSlug: string,
+  collectionSlug: string,
+  tokenIds: string[]
+): Promise<Map<string, ProjectedCollectionToken>> {
+  const ids = [...new Set(tokenIds.map(String).map((id) => id.trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const rows = await postgresQuery<TokenRow>(
+    `SELECT token_id, name, image_url, animation_url, media_type, traits,
+            rarity_score, rarity_rank, rarity_percentile, rarity_tier
+     FROM plank_collection_tokens
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+       AND token_id = ANY($3::text[])`,
+    [chainSlug, collectionSlug, ids]
+  );
+  return new Map(rows.rows.map((row) => [row.token_id, {
+    tokenId: row.token_id,
+    name: row.name,
+    imageUrl: row.image_url,
+    animationUrl: row.animation_url,
+    mediaType: row.media_type,
+    traits: normalizeTraits(row.traits),
+    rarityScore: row.rarity_score,
+    rarityRank: row.rarity_rank,
+    rarityPercentile: row.rarity_percentile,
+    rarityTier: row.rarity_tier,
+  }]));
+}
+
 /** Merge one background-indexer page without erasing richer fields. */
 export async function upsertCollectionTokenProjection(
   chainSlug: string, collectionSlug: string, page: CollectionTokenProjectionPage

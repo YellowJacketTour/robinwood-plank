@@ -206,6 +206,28 @@ export async function GET(req: NextRequest) {
         undefined,
         collection.contractAddress
       );
+      // Venue rows commonly omit per-token metadata. Joining the sparse book
+      // to the canonical projection by token id prevents every missing image
+      // from falling through to the collection logo (the MUGS identical-card
+      // failure) while keeping the operation proportional to listed rows.
+      const { readProjectedTokensByIds } = await import("@/lib/market/multichain/collection-token-store");
+      const projected = await readProjectedTokensByIds(
+        chainSlug,
+        collection.contractAddress,
+        listings.map((listing) => listing.tokenId)
+      ).catch(() => new Map());
+      const enrichedListings = listings.map((listing) => {
+        const token = projected.get(String(listing.tokenId));
+        if (!token) return listing;
+        return {
+          ...listing,
+          tokenName: token.name ?? listing.tokenName,
+          imageUrl: token.imageUrl ?? listing.imageUrl,
+          animationUrl: token.animationUrl ?? listing.animationUrl,
+          mediaType: token.mediaType ?? listing.mediaType,
+          traits: token.traits.length ? token.traits : listing.traits,
+        };
+      });
       const supply = await getCollectionSupplyStats(chainSlug, collection.contractAddress).catch(() => null);
       const marketStats = await getCollectionMarketStats(chainSlug, collection.contractAddress).catch(() => null);
       return NextResponse.json(
@@ -225,7 +247,7 @@ export async function GET(req: NextRequest) {
             volume30dWei: marketStats?.volume30dWei ?? null,
             sales30d: marketStats?.sales30d ?? null,
           },
-          listings,
+          listings: enrichedListings,
           bookCoverage: {
             complete: Boolean(openSeaPage?.complete),
             sources: {
