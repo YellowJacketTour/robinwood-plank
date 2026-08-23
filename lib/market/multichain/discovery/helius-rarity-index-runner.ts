@@ -40,9 +40,8 @@ import {
   writeCollectionMembershipCursor,
 } from "@/lib/market/multichain/collection-token-store";
 
-import { reserveHeliusKey, settleHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
+import { reserveDasSlot, settleDasSlot } from "@/lib/market/multichain/discovery/solana-das-pool";
 
-const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 1000;
 
 type HeliusGroupedAsset = {
@@ -75,24 +74,24 @@ function assetsToItems(assets: HeliusGroupedAsset[]): GenericRarityInput[] {
 
 /** Background discovery lane -- reserves+settles a FRESH pool key per call (priority "background" so live user traffic on the same project keys is not contended with). */
 async function heliusRpc<T>(method: string, params: unknown): Promise<T> {
-  const slot = await reserveHeliusKey(1, { priority: "background" });
-  if (!slot) throw new Error("helius-rarity-index-runner: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  const slot = await reserveDasSlot(1, { priority: "background" });
+  if (!slot) throw new Error("helius-rarity-index-runner: no Solana DAS provider available (pool exhausted/jailed, or none configured)");
   let ok = false;
   try {
-    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+    const res = await fetch(slot.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
       signal: AbortSignal.timeout(20_000),
     });
-    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status} via ${slot.provider}`);
     const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
-    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
-    if (body.result == null) throw new Error(`helius-rarity-index-runner: empty ${method}`);
+    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message} via ${slot.provider}`);
+    if (body.result == null) throw new Error(`helius-rarity-index-runner: empty ${method} via ${slot.provider}`);
     ok = true;
     return body.result;
   } finally {
-    await settleHeliusKey(slot, 1, ok);
+    await settleDasSlot(slot, 1, ok);
   }
 }
 
@@ -138,11 +137,11 @@ async function fetchGroupedPage(collectionAddress: string, page: number): Promis
 async function fetchGroupedPageWithTotal(collectionAddress: string, page: number): Promise<{
   items: HeliusGroupedAsset[]; total: number | null;
 }> {
-  const slot = await reserveHeliusKey(1, { priority: "background" });
-  if (!slot) throw new Error("helius-rarity-index-runner: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  const slot = await reserveDasSlot(1, { priority: "background" });
+  if (!slot) throw new Error("helius-rarity-index-runner: no Solana DAS provider available (pool exhausted/jailed, or none configured)");
   let ok = false;
   try {
-    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+    const res = await fetch(slot.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -152,16 +151,16 @@ async function fetchGroupedPageWithTotal(collectionAddress: string, page: number
         params: { grouping: ["collection", collectionAddress], page, limit: PAGE_SIZE },
       }),
     });
-    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status} via ${slot.provider}`);
     const body = (await res.json()) as {
       result?: { items: HeliusGroupedAsset[]; total?: number };
       error?: { code: number; message: string };
     };
-    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
+    if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message} via ${slot.provider}`);
     ok = true;
     return { items: body.result?.items ?? [], total: body.result?.total ?? null };
   } finally {
-    await settleHeliusKey(slot, 1, ok);
+    await settleDasSlot(slot, 1, ok);
   }
 }
 

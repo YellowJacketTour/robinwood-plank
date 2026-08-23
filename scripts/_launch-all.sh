@@ -33,7 +33,23 @@ launch_if_dead() {
   # supervisor's log grow to 28.1 GB unattended, filling the drive to 8GB
   # free. Every long-running process's output is now piped through
   # _rotate-log.sh, which hard-caps each log at 50MB regardless of cause.
-  nohup bash -c "$cmd" 2>&1 | bash scripts/_rotate-log.sh "$log" 50 &
+  #
+  # REAL INCIDENT 2026-08-23 (part 2), found while wiring in new Solana DAS
+  # keys: `cmd | rotate-log.sh &` backgrounds the whole PIPELINE, and bash's
+  # `$!` after that only ever captures the PID of the pipeline's LAST stage
+  # (rotate-log.sh) -- a PIPE SIBLING of `bash -c "$cmd"`, not its parent.
+  # taskkill //T on that tracked PID therefore tree-kills only rotate-log.sh
+  # and its own descendants, never reaching the real supervisor loop or its
+  # tsx children at all. Confirmed live: 4 full overlapping generations of
+  # refresh-market-data.ts (going back to an 11:42 launch) were all still
+  # running simultaneously, every prior "stop and relaunch" this session
+  # having silently added one more on top instead of replacing the last.
+  # Fixed with `> >(...)` process substitution: this backgrounds ONLY
+  # `bash -c "$cmd"` under nohup (so $! is its real PID, correctly
+  # tree-killable), with rotate-log.sh living downstream of a pipe that
+  # closes -- and rotate-log.sh exits on EOF -- the moment the real process
+  # dies, so it never needs separate tracking.
+  nohup bash -c "$cmd" > >(bash scripts/_rotate-log.sh "$log" 50) 2>&1 &
   local newpid=$!
   disown
   echo "$newpid" > "$pidfile"
@@ -55,7 +71,7 @@ launch_if_dead() {
 if netstat -ano 2>/dev/null | grep -q ":3800.*LISTENING"; then
   echo "[devserver] already listening on 3800, skipping"
 else
-  nohup bash -c "npx next dev -p 3800" 2>&1 | bash scripts/_rotate-log.sh "/c/tmp/plank-supervisor-logs/devserver.log" 50 &
+  nohup bash -c "npx next dev -p 3800" > >(bash scripts/_rotate-log.sh "/c/tmp/plank-supervisor-logs/devserver.log" 50) 2>&1 &
   disown
   echo "[devserver] launched (port-checked)"
 fi

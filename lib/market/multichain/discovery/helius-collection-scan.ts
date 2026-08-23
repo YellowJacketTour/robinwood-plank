@@ -12,9 +12,8 @@
  */
 import { durableKv } from "@/lib/market/durable-kv";
 import { upsertTrackedCollection } from "@/lib/market/multichain/store";
-import { reserveHeliusKey, settleHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
+import { reserveDasSlot, settleDasSlot } from "@/lib/market/multichain/discovery/solana-das-pool";
 
-const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 100; // real, confirmed-safe live 2026-08-20 -- limit=1000 times out server-side
 const CHAIN_SLUG = "solana-mainnet";
 // Not plank_multichain_discovery_cursor (that table's last_scanned_block
@@ -50,26 +49,26 @@ export function shouldSkipZeroMemberCollection(item: HeliusSearchItem): boolean 
 async function fetchPage(cursor: string | null): Promise<{ items: HeliusSearchItem[]; nextCursor: string | null }> {
   const params: Record<string, unknown> = { interface: "MplCoreCollection", limit: PAGE_SIZE };
   if (cursor) params.cursor = cursor;
-  const slot = await reserveHeliusKey(1, { priority: "background" });
-  if (!slot) throw new Error("helius-collection-scan: no Helius key available (pool exhausted/jailed, or HELIUS_API_KEY not configured)");
+  const slot = await reserveDasSlot(1, { priority: "background" });
+  if (!slot) throw new Error("helius-collection-scan: no Solana DAS provider available (pool exhausted/jailed, or none configured)");
   let ok = false;
   try {
-    const res = await fetch(`${RPC_URL}/?api-key=${slot.apiKey}`, {
+    const res = await fetch(slot.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method: "searchAssets", params }),
     });
-    if (!res.ok) throw new Error(`helius-collection-scan: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`helius-collection-scan: HTTP ${res.status} via ${slot.provider}`);
     const body = (await res.json()) as {
       result?: { items: HeliusSearchItem[]; cursor?: string | null };
       error?: { code: number; message: string };
     };
-    if (body.error) throw new Error(`helius-collection-scan: ${body.error.code} ${body.error.message}`);
+    if (body.error) throw new Error(`helius-collection-scan: ${body.error.code} ${body.error.message} via ${slot.provider}`);
     const items = body.result?.items ?? [];
     ok = true;
     return { items, nextCursor: items.length === PAGE_SIZE ? (body.result?.cursor ?? null) : null };
   } finally {
-    await settleHeliusKey(slot, 1, ok);
+    await settleDasSlot(slot, 1, ok);
   }
 }
 
