@@ -989,6 +989,21 @@ export default function GlobalMarketHub() {
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
   const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
 
+  // A marketplace may intentionally group several contracts under one
+  // branded collection (XCOPY Editions is a live example). Shared art is
+  // therefore not proof that two contracts are duplicates. Preserve both
+  // canonical identities, but expose the address suffix whenever the same
+  // chain + display name occurs more than once so cards cannot masquerade as
+  // duplicate rows and users can navigate the exact contract they mean.
+  const ambiguousCollectionNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const collection of collections) {
+      const identity = `${collection.chainSlug}:${displayName(collection).trim().toLowerCase()}`;
+      counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([identity]) => identity));
+  }, [collections]);
+
   const ranked = useMemo(() => {
     const min = priceMin.trim() ? Number(priceMin) : null;
     const max = priceMax.trim() ? Number(priceMax) : null;
@@ -2089,6 +2104,11 @@ export default function GlobalMarketHub() {
                       <p className="truncate text-sm font-bold text-foreground" title={displayName(c)}>
                         {displayName(c)}
                       </p>
+                      {ambiguousCollectionNames.has(`${c.chainSlug}:${displayName(c).trim().toLowerCase()}`) && (
+                        <p className="truncate font-mono text-[0.6rem] text-gold-300/70" title={c.contractAddress}>
+                          contract {shortCollectionId(c.contractAddress)}
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1">
                         <span
                           className="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider"

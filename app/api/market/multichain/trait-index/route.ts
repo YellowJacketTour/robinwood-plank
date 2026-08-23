@@ -47,6 +47,37 @@ export async function GET(req: NextRequest) {
     const effectivePartial = hasStoredTraits ? partial : projected?.partial ?? true;
     const scanned = hasStoredTraits ? sampleSize : projected?.projectedCount ?? 0;
 
+    // A visit is real demand. Keep provider work out of the request itself,
+    // but raise this collection ahead of the background round-robin. The two
+    // jobs are deliberately separate: membership discovers every token ID;
+    // metadata resolves tokenURI attributes and only then can rarity close.
+    if (effectiveTraits === null || effectivePartial) {
+      const isEvmContract = /^0x[0-9a-f]{40}$/i.test(collectionSlug);
+      if (isEvmContract) {
+        const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+        const normalized = collectionSlug.toLowerCase();
+        const membershipSource = chainSlug === "robinhood" ? "robinhood-membership" : "opensea-membership";
+        await Promise.all([
+          enqueueDataJob({
+            jobKey: `demand:membership:${chainSlug}:${normalized}`,
+            kind: `mesh-lane:${chainSlug}`,
+            source: membershipSource,
+            chainSlug,
+            subject: normalized,
+            priority: 95,
+          }),
+          enqueueDataJob({
+            jobKey: `demand:metadata:${chainSlug}:${normalized}`,
+            kind: `mesh-lane:${chainSlug}`,
+            source: "evm-metadata",
+            chainSlug,
+            subject: normalized,
+            priority: 94,
+          }),
+        ]).catch(() => {});
+      }
+    }
+
     return NextResponse.json(
       {
         collection: collectionSlug,

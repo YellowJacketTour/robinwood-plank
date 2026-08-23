@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     }
     if (source === "evm-metadata") {
       const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
-      console.log("[mesh-lane] evm-metadata", JSON.stringify(await advanceEvmTokenMetadata(chain)));
+      console.log("[mesh-lane] evm-metadata", JSON.stringify(await advanceEvmTokenMetadata(chain, 12, subject || null)));
       return;
     }
     if (source === "unisat-rarity") {

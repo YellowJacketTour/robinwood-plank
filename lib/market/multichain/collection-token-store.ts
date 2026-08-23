@@ -281,16 +281,26 @@ export async function searchProjectedTokens(input: {
   }));
 }
 
-export async function readTokenMetadataWork(chainSlug: string, limit: number): Promise<TokenMetadataWork[]> {
+export async function readTokenMetadataWork(
+  chainSlug: string,
+  limit: number,
+  collectionSlug?: string | null
+): Promise<TokenMetadataWork[]> {
   const bounded = Math.min(Math.max(Math.trunc(limit), 1), 25);
+  const params: unknown[] = [chainSlug];
+  const collectionClause = collectionSlug ? `AND lower(collection_slug) = lower($2)` : "";
+  if (collectionSlug) params.push(collectionSlug);
+  params.push(bounded);
+  const limitParam = `$${params.length}`;
   const result = await postgresQuery<{ collection_slug: string; token_id: string }>(
     `SELECT collection_slug, token_id FROM plank_collection_tokens
      WHERE chain_slug = $1 AND (
        metadata_state = 'pending'
        OR (metadata_state = 'retry' AND metadata_attempted_at < NOW() - INTERVAL '30 minutes')
      )
+     ${collectionClause}
      ORDER BY metadata_attempted_at ASC NULLS FIRST, projected_at ASC
-     LIMIT $2`, [chainSlug, bounded]);
+     LIMIT ${limitParam}`, params);
   return result.rows.map((row) => ({ collectionSlug: row.collection_slug, tokenId: row.token_id }));
 }
 

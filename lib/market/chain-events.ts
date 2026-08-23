@@ -598,6 +598,10 @@ export type LedgerSalesStats = {
   unpricedSales24h: number;
   /** Sum of proven consideration only; null means no priced sale in-window. */
   volume24hWei: string | null;
+  sales7d: number;
+  volume7dWei: string | null;
+  sales30d: number;
+  volume30dWei: string | null;
   highestWei: string | null;
   highestTokenId: string | null;
   highestTxHash: string | null;
@@ -635,6 +639,10 @@ export async function salesStatsFromLedger(
     pricedSales24h: 0,
     unpricedSales24h: 0,
     volume24hWei: null,
+    sales7d: 0,
+    volume7dWei: null,
+    sales30d: 0,
+    volume30dWei: null,
     highestWei: null,
     highestTokenId: null,
     highestTxHash: null,
@@ -655,6 +663,10 @@ export async function salesStatsFromLedger(
     sales_24h: string;
     priced_sales_24h: string;
     volume_24h_wei: string | null;
+    sales_7d: string;
+    volume_7d_wei: string | null;
+    sales_30d: string;
+    volume_30d_wei: string | null;
   }>(
     `SELECT COUNT(*)::text AS sale_count,
             SUM(price_wei)::text AS total_wei,
@@ -667,7 +679,11 @@ export async function salesStatsFromLedger(
             )::text AS priced_sales_24h,
             SUM(price_wei) FILTER (
               WHERE block_timestamp >= NOW() - INTERVAL '24 hours'
-            )::text AS volume_24h_wei
+            )::text AS volume_24h_wei,
+            COUNT(*) FILTER (WHERE block_timestamp >= NOW() - INTERVAL '7 days')::text AS sales_7d,
+            SUM(price_wei) FILTER (WHERE block_timestamp >= NOW() - INTERVAL '7 days')::text AS volume_7d_wei,
+            COUNT(*) FILTER (WHERE block_timestamp >= NOW() - INTERVAL '30 days')::text AS sales_30d,
+            SUM(price_wei) FILTER (WHERE block_timestamp >= NOW() - INTERVAL '30 days')::text AS volume_30d_wei
      FROM plank_chain_events
      WHERE kind = 'sale'`
   );
@@ -697,6 +713,10 @@ export async function salesStatsFromLedger(
     pricedSales24h,
     unpricedSales24h: Math.max(0, sales24h - pricedSales24h),
     volume24hWei: totals.rows[0]?.volume_24h_wei ?? null,
+    sales7d: Number(totals.rows[0]?.sales_7d ?? "0"),
+    volume7dWei: totals.rows[0]?.volume_7d_wei ?? null,
+    sales30d: Number(totals.rows[0]?.sales_30d ?? "0"),
+    volume30dWei: totals.rows[0]?.volume_30d_wei ?? null,
     highestWei: top?.price_wei ?? null,
     highestTokenId: top?.token_id ?? null,
     highestTxHash: top?.tx_hash ?? null,

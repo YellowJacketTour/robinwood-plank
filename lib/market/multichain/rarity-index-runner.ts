@@ -156,12 +156,12 @@ export async function advanceNextRobinhoodMembership() {
 /** Enrich a tiny durable batch from first-party tokenURI metadata. Public
  * requests never perform these RPC/IPFS calls. Missing metadata is recorded
  * honestly; transient failures are retried after a bounded cooldown. */
-export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6) {
+export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, collectionSlug?: string | null) {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
   const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
   if (!openSeaChain || !rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
-  const work = await readTokenMetadataWork(chainSlug, limit);
+  const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
   const openSeaKey = await getOpenSeaApiKey();
   let complete = 0, empty = 0, retry = 0;
   const errors: string[] = [];

@@ -43,6 +43,10 @@ export type CanonicalRobinwoodStats = {
   pricedSales24h: number;
   unpricedSales24h: number;
   volume24hWei: string | null;
+  sales7d: number;
+  volume7dWei: string | null;
+  sales30d: number;
+  volume30dWei: string | null;
   highestWei: string | null;
   highestTokenId: string | null;
   highestTxHash: string | null;
@@ -114,6 +118,10 @@ export async function fetchCanonicalRobinwoodStats(input: {
       : Math.max(0, sales24h - pricedSales24h);
   const volume24hWei =
     typeof salesObj.volume24hWei === "string" ? salesObj.volume24hWei : null;
+  const sales7d = typeof salesObj.sales7d === "number" ? salesObj.sales7d : 0;
+  const volume7dWei = typeof salesObj.volume7dWei === "string" ? salesObj.volume7dWei : null;
+  const sales30d = typeof salesObj.sales30d === "number" ? salesObj.sales30d : 0;
+  const volume30dWei = typeof salesObj.volume30dWei === "string" ? salesObj.volume30dWei : null;
   const highestWei = typeof salesObj.highestWei === "string" ? salesObj.highestWei : null;
   const highestTokenId = typeof salesObj.highestTokenId === "string" ? salesObj.highestTokenId : null;
   const highestTxHash = typeof salesObj.highestTxHash === "string" ? salesObj.highestTxHash : null;
@@ -130,6 +138,10 @@ export async function fetchCanonicalRobinwoodStats(input: {
     pricedSales24h,
     unpricedSales24h,
     volume24hWei,
+    sales7d,
+    volume7dWei,
+    sales30d,
+    volume30dWei,
     highestWei,
     highestTokenId,
     highestTxHash,
