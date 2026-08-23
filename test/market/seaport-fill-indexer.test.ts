@@ -84,6 +84,12 @@ test("decodes a real ABI-encoded listing fill (NFT offer, native consideration)"
   assert.equal(decoded!.currencyToken, null); // native, not ERC-20
   assert.equal(decoded!.priceWei, "1000000000000000000");
   assert.deepEqual(decoded!.paymentLegs, [{ token: null, amountAtomic: "1000000000000000000" }]);
+  assert.deepEqual(decoded!.assetLegs, [{
+    side: "offer", legIndex: 0, itemType: 2, token: NFT_CONTRACT.toLowerCase(), tokenId: "1106", amountAtomic: "1", recipient: null,
+  }]);
+  assert.deepEqual(decoded!.monetaryLegs, [{
+    side: "consideration", legIndex: 0, token: null, amountAtomic: "1000000000000000000", recipient: SELLER.toLowerCase(),
+  }]);
 });
 
 test("decodes an ERC-20 (WETH bid) fill correctly, capturing the currency token", () => {
@@ -246,4 +252,29 @@ test("an NFT-for-NFT swap is classified as such and scores only its real fee", (
   assert.ok(d);
   assert.equal(d!.shape, "swap");
   assert.equal(d!.marketplaceFeeWei, "500000000000000");
+  assert.equal(d!.assetLegs.length, 2, "both assets survive bundle normalization");
+  assert.equal(d!.monetaryLegs.length, 1, "the fee remains a separate payment leg");
+});
+
+test("bundle fills preserve every NFT and every payment recipient without allocating price", () => {
+  const secondCollection = "0x3333333333333333333333333333333333333333";
+  const log = iface.encodeEventLog("OrderFulfilled", [
+    ORDER_HASH, SELLER, ZERO, BUYER,
+    [
+      { itemType: 2, token: NFT_CONTRACT, identifier: 1n, amount: 1n },
+      { itemType: 2, token: secondCollection, identifier: 2n, amount: 1n },
+    ],
+    [
+      { itemType: 0, token: ZERO, identifier: 0n, amount: 900n, recipient: SELLER },
+      { itemType: 0, token: ZERO, identifier: 0n, amount: 100n, recipient: MARKET_FEE_RECIPIENT },
+    ],
+  ]);
+  const d = decodeOrderFulfilled(log.topics as string[], log.data);
+  assert.ok(d);
+  assert.deepEqual(d!.assetLegs.map((leg) => [leg.token, leg.tokenId]), [
+    [NFT_CONTRACT.toLowerCase(), "1"], [secondCollection.toLowerCase(), "2"],
+  ]);
+  assert.deepEqual(d!.monetaryLegs.map((leg) => [leg.amountAtomic, leg.recipient]), [
+    ["900", SELLER.toLowerCase()], ["100", MARKET_FEE_RECIPIENT.toLowerCase()],
+  ]);
 });

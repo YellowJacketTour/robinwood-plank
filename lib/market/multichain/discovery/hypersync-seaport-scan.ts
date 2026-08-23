@@ -175,7 +175,7 @@ async function scanChainForFillsInternal(
         if (block.number != null && block.timestamp != null) timestampByBlock.set(block.number, block.timestamp);
       }
 
-      const rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; fill: ReturnType<typeof decodeOrderFulfilled> }[] = [];
+      const rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; deploymentAddress: string | null; fill: ReturnType<typeof decodeOrderFulfilled> }[] = [];
       for (const log of res.data.logs) {
         totalLogs += 1;
         if (!log.topics || !log.data || !log.transactionHash) continue;
@@ -201,11 +201,12 @@ async function scanChainForFillsInternal(
           logIndex: log.logIndex ?? 0,
           blockNumber,
           blockTimestamp: timestampByBlock.get(blockNumber) ?? null,
+          deploymentAddress: log.address?.toLowerCase() ?? null,
           fill,
         });
       }
       const validRows = rows.filter(
-        (r): r is { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; fill: NonNullable<typeof r.fill> } => r.fill != null
+        (r): r is { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; deploymentAddress: string | null; fill: NonNullable<typeof r.fill> } => r.fill != null
       );
       if (validRows.length > 0) {
         totalWritten += await writeFills(validRows);
