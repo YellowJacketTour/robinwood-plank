@@ -1,8 +1,15 @@
 @echo off
 REM Portable Postgres 17 used by Marketplank local hub (port 55556).
-REM Must not run as Administrator — postgres.exe refuses High IL.
-set "PGBIN=C:\Users\k1rby\AppData\Local\Temp\claude\c--Users-k1rby-OneDrive-Desktop-SpacePoker\0af330af-4a2c-4f52-b187-0a7965cb6ae0\scratchpad\pg\pgsql\bin"
-set "PGDATA=C:\Users\k1rby\AppData\Local\Temp\claude\c--Users-k1rby-OneDrive-Desktop-SpacePoker\0af330af-4a2c-4f52-b187-0a7965cb6ae0\scratchpad\pg-data"
+REM Must not run as Administrator -- postgres.exe refuses High IL.
+REM REAL INCIDENT 2026-08-23: this previously pointed into a Claude Code
+REM SESSION scratchpad Temp folder, which is not durable -- the OS/session
+REM lifecycle cleaned up part of the binary directory (pg_ctl.exe, the lib/
+REM folder) between sessions, taking Postgres offline with no warning.
+REM Moved both the binaries and the real data directory to a permanent,
+REM session-independent location under the user's own profile so this
+REM class of outage cannot happen again.
+set "PGBIN=C:\Users\k1rby\pg-local\pgsql\bin"
+set "PGDATA=C:\Users\k1rby\pg-local\pg-data"
 set "PGLOG=%TEMP%\plank-pg.log"
 netstat -ano | findstr ":55556" | findstr "LISTENING" >nul 2>nul
 if not errorlevel 1 (

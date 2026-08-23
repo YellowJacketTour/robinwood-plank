@@ -401,6 +401,48 @@ export async function fetchAllOpenSeaListings(
 export const OPENSEA_LISTINGS_KV = "plank:market:opensea-listings-v1";
 
 /**
+ * Per-collection last-known-good OpenSea book, keyed by OpenSea collection
+ * slug. Distinct from OPENSEA_LISTINGS_KV above, which is hardcoded to the
+ * single OPENSEA_COLLECTION_SLUG (Marketplank's own collection) — every
+ * OTHER Robinhood-Chain collection routed through fetchAllOpenSeaListings
+ * (see multichain/listings/route.ts) had no cache at all, so a single
+ * transient rate-limit/timeout mid-cursor-walk (increasingly likely with
+ * multiple background supervisors sharing the OpenSea key pool) zeroed the
+ * OpenSea contribution to that poll's merged book outright — even though a
+ * moment earlier a different request's walk succeeded. This is the fallback
+ * so a real complete walk's result survives one bad poll.
+ */
+function openSeaCollectionCacheKey(slug: string): string {
+  return `plank:market:opensea-listings-by-slug-v1:${slug}`;
+}
+
+/** Last real, complete OpenSea walk for this collection slug, if any. */
+export async function readCachedOpenSeaListingsForSlug(
+  slug: string
+): Promise<NormalisedOpenSeaListing[] | null> {
+  if (!hasDurableKv()) return null;
+  try {
+    const rows = await kv.get<NormalisedOpenSeaListing[]>(openSeaCollectionCacheKey(slug));
+    return rows ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a real, complete OpenSea walk for this collection slug for future incomplete-walk fallback. */
+export async function writeCachedOpenSeaListingsForSlug(
+  slug: string,
+  normalised: NormalisedOpenSeaListing[]
+): Promise<void> {
+  if (!hasDurableKv()) return;
+  try {
+    await kv.set(openSeaCollectionCacheKey(slug), normalised);
+  } catch {
+    /* best-effort; next complete walk retries */
+  }
+}
+
+/**
  * Alias of the shared foreign-listing shape (lib/market/foreign-listings.ts).
  *
  * Kept as a named export because callers and tests already import this name.

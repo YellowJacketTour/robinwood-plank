@@ -31,7 +31,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { fetchAllOpenSeaListings, normaliseOpenSeaListings } from "@/lib/market/opensea";
+import {
+  fetchAllOpenSeaListings,
+  normaliseOpenSeaListings,
+  readCachedOpenSeaListingsForSlug,
+  writeCachedOpenSeaListingsForSlug,
+} from "@/lib/market/opensea";
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
@@ -203,10 +208,25 @@ export async function GET(req: NextRequest) {
       ]);
       const native: Listing[] = nativeRows.map(({ rawOrder: _rawOrder, ...listing }) => listing);
       // A partial cursor walk cannot safely participate in floor or rarity
-      // projections: the missing next page may contain a cheaper token.
-      const openSea = openSeaPage?.complete
-        ? normaliseOpenSeaListings(openSeaPage.listings)
-        : [];
+      // projections: the missing next page may contain a cheaper token. But
+      // dropping it to [] outright is what produced the observed "populates
+      // then reverts to empty" flicker (mergeBook has nothing else to fall
+      // back to for the OpenSea side of the book that poll) -- fall back to
+      // the last REAL complete walk for this collection instead, so a
+      // transient rate-limit/timeout on the shared OpenSea key pool degrades
+      // to stale-but-real data, not a false zero.
+      let openSeaIsPartial = false;
+      let openSea: ReturnType<typeof normaliseOpenSeaListings> = [];
+      if (openSeaPage?.complete) {
+        openSea = normaliseOpenSeaListings(openSeaPage.listings);
+        if (openSeaSlug) void writeCachedOpenSeaListingsForSlug(openSeaSlug, openSea).catch(() => {});
+      } else if (openSeaSlug) {
+        const cached = await readCachedOpenSeaListingsForSlug(openSeaSlug).catch(() => null);
+        if (cached && cached.length > 0) {
+          openSea = cached;
+          openSeaIsPartial = true;
+        }
+      }
       const listings = mergeBook(
         native,
         [...pulp, ...openSea],
@@ -256,12 +276,24 @@ export async function GET(req: NextRequest) {
             sales30d: marketStats?.sales30d ?? null,
           },
           listings: enrichedListings,
+          // `complete` is true only when THIS poll's own OpenSea cursor walk
+          // finished. `partial` is the client-facing signal for "this specific
+          // poll's OpenSea walk was incomplete, so the opensea rows shown here
+          // (if any) are a fallback from a previous good walk, not fresh" --
+          // distinct from a genuine complete-and-truly-empty result. See
+          // opensea.ts's readCachedOpenSeaListingsForSlug/writeCachedOpenSea
+          // ListingsForSlug for the fallback this flag describes.
           bookCoverage: {
             complete: Boolean(openSeaPage?.complete),
+            partial: openSeaIsPartial,
             sources: {
               native: "durable",
               pulp: "upstream-unpaginated",
-              opensea: openSeaPage?.complete ? "cursor-exhausted" : "incomplete-excluded",
+              opensea: openSeaPage?.complete
+                ? "cursor-exhausted"
+                : openSeaIsPartial
+                  ? "incomplete-fallback-cached"
+                  : "incomplete-excluded",
             },
           },
         },

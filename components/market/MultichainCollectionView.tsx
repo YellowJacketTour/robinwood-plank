@@ -253,7 +253,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [listingsUnavailable, setListingsUnavailable] = useState<string | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
-  const [bookCoverage, setBookCoverage] = useState<{ sources: Record<string, string> } | null>(null);
+  const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -485,7 +485,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       void swrJson<{
         listings: Listing[];
         listingsUnavailable?: string | null;
-        bookCoverage?: { sources: Record<string, string> } | null;
+        bookCoverage?: { complete?: boolean; partial?: boolean; sources: Record<string, string> } | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`, {
         ttlMs: 8_000,
@@ -493,7 +493,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         session: true,
       })
         .then((book) => {
-          setListings(book.listings ?? []);
+          const nextListings = book.listings ?? [];
+          // A poll whose server-side OpenSea walk was incomplete
+          // (bookCoverage.partial) is not authoritative for "the OpenSea
+          // side of the book just became empty" -- the server already
+          // falls back to its own last-known-good cache when it can (see
+          // route.ts), but if that cache was itself empty this poll's
+          // `nextListings` can still be a false, transient zero relative to
+          // what's already showing. Never let a partial poll regress a real,
+          // non-empty grid to nothing; a genuinely complete-and-empty result
+          // (partial: false) is trusted as real.
+          setListings((prev) => {
+            if (nextListings.length > 0) return nextListings;
+            if (book.bookCoverage?.partial && prev.length > 0) return prev;
+            return nextListings;
+          });
           setListingsUnavailable(book.listingsUnavailable ?? null);
           setBookCoverage(book.bookCoverage ?? null);
         })
@@ -1805,6 +1819,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             {bookCoverageNote(bookCoverage?.sources) && (
               <span className="ml-1 text-amber-400/80" title="This venue wasn't queried on this deployment -- the listing count above may be undercounted, not necessarily a real zero.">
                 · {bookCoverageNote(bookCoverage?.sources)}
+              </span>
+            )}
+            {bookCoverage?.partial && (
+              <span className="ml-1 text-foreground/40" title="This poll's OpenSea listing walk didn't finish -- showing the last known-good listings while it retries.">
+                · refreshing…
               </span>
             )}
           </p>
