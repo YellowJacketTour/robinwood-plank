@@ -211,11 +211,28 @@ function searchText(value: string | null | undefined): string {
 }
 
 function collectionSearchScore(c: TrackedCollection, rawQuery: string): number {
+  return scoreSearchFields([displayName(c), c.contractAddress, c.creatorHandle, c.creatorEns].map(searchText), rawQuery);
+}
+
+/**
+ * Real perf fix (live-observed, 2026-08-23): with this session's dataset
+ * grown to ~297,000 tracked collections, the catalog search box was doing
+ * `searchText()` (Unicode NFKD normalize + regex strip) on up to 4 fields
+ * for all ~297k rows on EVERY keystroke, synchronously inside a React
+ * useMemo -- measured 750-1500ms of main-thread blocking per character via
+ * a real browser reproduction (performance.now() around each keystroke's
+ * dispatchEvent to next paint), which is what actually read as "the input
+ * itself is laggy" (typing echoed with a visible stall), not the already-
+ * debounced (220ms) token-search network fetch. Precomputing each
+ * collection's normalized fields ONCE per `collections` load (see
+ * `searchIndex` below) turns every keystroke's cost into cheap plain
+ * string compares instead of re-running Unicode normalization 297k*4 times.
+ */
+function scoreSearchFields(normalizedFields: string[], rawQuery: string): number {
   const q = searchText(rawQuery);
   if (!q) return 0;
-  const fields = [displayName(c), c.contractAddress, c.creatorHandle, c.creatorEns].map(searchText);
   let best = -1;
-  for (const field of fields) {
+  for (const field of normalizedFields) {
     if (!field) continue;
     if (field === q) best = Math.max(best, 1000);
     else if (field.startsWith(q)) best = Math.max(best, 800);
@@ -1054,25 +1071,52 @@ export default function GlobalMarketHub() {
     });
   }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, watchlist, showShells, priceMin, priceMax, deadArt]);
 
+  // Real perf fix, live-reproduced 2026-08-23 -- see scoreSearchFields's own
+  // header for the full measured evidence (750-1500ms of main-thread block
+  // per keystroke at this session's real ~297,000-row dataset). Two
+  // independent costs were stacked on every single keystroke:
+  //   1. `searchText()` (Unicode NFKD normalize + regex) re-run over 4
+  //      fields for all ~297k rows, every keystroke -- pure duplicated work,
+  //      since a collection's own name/address/creator never changes
+  //      keystroke to keystroke. Precomputed once per `collections` load.
+  //   2. The full filter+score+sort itself running synchronously on the
+  //      RAW, un-debounced `search` value -- so even a single fast-typed
+  //      character forced one full 297k-row pass before the input's own
+  //      re-render could commit. `search` still drives the input's value
+  //      (so the character always echoes instantly); `debouncedFilterQuery`
+  //      is what the expensive filter actually reads, updated on the same
+  //      cadence the token-search network fetch below already used (220ms)
+  //      -- one shared, already-proven-comfortable debounce interval, not a
+  //      second competing constant.
+  const searchIndex = useMemo(
+    () => collections.map((c) => ({ c, fields: [displayName(c), c.contractAddress, c.creatorHandle, c.creatorEns].map(searchText) })),
+    [collections]
+  );
+  const [debouncedFilterQuery, setDebouncedFilterQuery] = useState(search);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedFilterQuery(search), 220);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
   /** Catalog grid only — a name query must not blank Live rankings (that table sits above the search box). */
   const filtered = useMemo(() => {
-    const q = search.trim();
+    const q = debouncedFilterQuery.trim();
     if (!q) return ranked;
     // Search is a catalog-wide discovery operation. Feature toggles such as
     // "has art" must not hide a collection whose indexed pieces prove that
     // it exists (the MUGS collection did exactly that). Chain selection still
     // scopes results; junk-name suppression remains a safety invariant.
-    return collections
-      .filter((c) =>
+    return searchIndex
+      .filter(({ c }) =>
         (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) &&
         (!onlyWatched || watchlist.has(key(c))) &&
         !isSpamCollectionTitle(c.name)
       )
-      .map((c) => ({ c, score: collectionSearchScore(c, q) }))
+      .map(({ c, fields }) => ({ c, score: scoreSearchFields(fields, q) }))
       .filter((row) => row.score >= 0)
       .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt))
       .map((row) => row.c);
-  }, [ranked, collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
+  }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
 
   useEffect(() => {
     const query = search.trim();

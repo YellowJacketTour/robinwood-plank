@@ -37,7 +37,46 @@ type Props = {
   listedTotal?: number | null;
   /** Full catalog counts so a tier with no listing in the loaded book is still filterable. */
   catalogCounts?: Record<string, number>;
+  /**
+   * Real wash-trade SUSPICION over the sales this floor strip's collection
+   * page has loaded -- from lib/market/wash-trade-signal.ts's
+   * computeWashSuspicion(), a principled heuristic (exact self-transfers +
+   * reciprocal address-pair round-trips), not a fraud determination. Null
+   * when there was no evaluable sale (no real from/to addresses to judge).
+   */
+  washSuspicion?: { ratio: number; evaluatedTradeCount: number } | null;
 };
+
+/** Below this many evaluable trades, a suspicion ratio is too noisy to show honestly -- one flagged trade out of two looks alarming (50%) but is not a real signal. Matches this module's general "never falsely accuse a legitimate collection" posture. */
+const MIN_EVALUABLE_TRADES_TO_SHOW = 4;
+/** Below this ratio, don't bother the user with a near-zero figure -- a couple of stray flagged trades in a large healthy window is expected noise, not a signal worth a UI element. */
+const MIN_RATIO_TO_SHOW = 0.03;
+
+function WashSuspicionBadge({ washSuspicion }: { washSuspicion: { ratio: number; evaluatedTradeCount: number } }) {
+  if (
+    washSuspicion.evaluatedTradeCount < MIN_EVALUABLE_TRADES_TO_SHOW ||
+    washSuspicion.ratio < MIN_RATIO_TO_SHOW
+  ) {
+    return null;
+  }
+  const pct = Math.round(washSuspicion.ratio * 100);
+  // Tone scales with magnitude but never reads as an accusation: amber only
+  // past a fairly high bar, otherwise a neutral foreground tint -- this is a
+  // heuristic estimate over a loaded sample, not a verdict on the collection.
+  const tone = washSuspicion.ratio >= 0.25 ? "text-amber-300/90 border-amber-400/30 bg-amber-500/10" : "text-foreground/55 border-line";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[0.55rem] font-semibold tabular-nums ${tone}`}
+      title={
+        `~${pct}% of this page's loaded sale volume matches a real, cited wash-trading heuristic ` +
+        `(exact self-transfers, or the same two wallets trading back and forth) over ${washSuspicion.evaluatedTradeCount} evaluable trades. ` +
+        `This is an estimate from a public, principled pattern, not a determination that any specific trade or the collection is fraudulent.`
+      }
+    >
+      ⚠︎ ~{pct}% possible wash trades
+    </span>
+  );
+}
 
 /**
  * State-of-the-art floorboard strip: collection floor + each rarity's floor
@@ -54,6 +93,7 @@ export default function RarityFloorStrip({
   usdValueFor,
   listedTotal = null,
   catalogCounts,
+  washSuspicion = null,
 }: Props) {
   const collFloor = useMemo(() => collectionFloorWei(listings), [listings]);
   const rows = useMemo(() => tierFloors(listings, rarity), [listings, rarity]);
@@ -67,8 +107,9 @@ export default function RarityFloorStrip({
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2 px-0.5">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+        <p className="flex items-center gap-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
           Floors by rarity
+          {washSuspicion && <WashSuspicionBadge washSuspicion={washSuspicion} />}
         </p>
         <p className="text-[0.58rem] text-foreground/40">vs collection floor · tap to filter / sweep</p>
       </div>

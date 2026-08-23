@@ -5,9 +5,11 @@ import { ArrowRight } from "lucide-react";
 import { shortAddress } from "@/lib/trade";
 import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { normalizeRarityTier } from "@/lib/rarity";
 import ScrollBox from "@/components/market/ScrollBox";
 import { withImageWidth } from "@/lib/ipfs";
 import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { kindColor, kindLabel, venueLabel } from "@/lib/market/multichain/activity-kind-style";
 
 export type ForeignActivityEvent = {
   type: string;
@@ -26,12 +28,19 @@ export type ForeignActivityEvent = {
   blockNumber?: string | null;
   logIndex?: number | null;
   evidenceSource?: string | null;
-};
-
-const KIND_STYLE: Record<string, string> = {
-  sale: "text-gold-300",
-  mint: "text-emerald-300",
-  transfer: "text-foreground/50",
+  /** Only present on rows from the unioned first-party ledger
+   * (ledger-activity.ts) -- OpenSea/Magic Eden-sourced rows have neither,
+   * and the venue/batch chip below simply doesn't render for those. */
+  venueId?: string | null;
+  batchSize?: number | null;
+  /** Real, pre-computed rarity from the SAME token-projection store the
+   * collection grid reads (readProjectedTokensByIds) -- a per-row fallback
+   * for a token this collection's full-set `rarity` map (fetched once,
+   * separately, via /api/market/multichain/rarity) doesn't happen to cover
+   * yet. Never fabricated: absent unless that store has really indexed
+   * this exact token. */
+  rarityRank?: number | null;
+  rarityTier?: string | null;
 };
 
 function ago(iso: string | null): string {
@@ -100,7 +109,22 @@ export default function ForeignActivityFeed({ events, loading, chainSlug, rarity
       <ScrollBox storageKey={`foreign-activity-${chainSlug}`} defaultHeight={420} maxHeight={1000}>
         <ul className="space-y-1.5">
           {events.map((event, i) => {
-            const eventRarity = event.tokenId ? rarity.get(event.tokenId) : undefined;
+            // Prefer the full-collection rarity map (has percentile + the
+            // real plank-style display name); fall back to this row's own
+            // rarityRank/rarityTier from the token-projection store when
+            // the map hasn't resolved this token -- both are real,
+            // pre-computed sources, never a guess.
+            const mapRarity = event.tokenId ? rarity.get(event.tokenId) : undefined;
+            const eventRarity: RarityLookup | undefined =
+              mapRarity ??
+              (event.rarityRank != null && event.rarityTier
+                ? {
+                    name: event.tokenName ?? (event.tokenId ? `#${event.tokenId}` : ""),
+                    tier: normalizeRarityTier(event.rarityTier),
+                    rank: event.rarityRank,
+                    percentile: 0,
+                  }
+                : undefined);
             const selectable = Boolean(onSelectToken && event.tokenId);
             return (
               <li
@@ -128,7 +152,7 @@ export default function ForeignActivityFeed({ events, loading, chainSlug, rarity
 
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <span className={`shrink-0 text-xs font-bold capitalize ${KIND_STYLE[event.type] ?? "text-foreground/60"}`}>{event.type}</span>
+                    <span className={`shrink-0 text-xs font-bold ${kindColor(event.type)}`}>{kindLabel(event.type)}</span>
                     <span className="truncate text-xs font-bold text-foreground">
                       {eventRarity?.name ?? event.tokenName ?? (event.tokenId ? `#${event.tokenId}` : "")}
                     </span>
@@ -141,6 +165,8 @@ export default function ForeignActivityFeed({ events, loading, chainSlug, rarity
                   <span className="font-mono text-[0.6rem] text-foreground/40">
                     {event.tokenId ? `#${event.tokenId}` : ""}
                     {eventRarity ? ` · R${eventRarity.rank} · ${eventRarity.tier}` : ""}
+                    {event.venueId ? ` · ${venueLabel(event.venueId)}` : ""}
+                    {event.batchSize && event.batchSize > 1 ? ` · +${event.batchSize - 1} more` : ""}
                   </span>
                 </div>
 

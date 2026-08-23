@@ -119,6 +119,36 @@ async function fetchScriptPubKeyHex(mempoolBase: string, txid: string): Promise<
   return tx.vout.map((o) => o.scriptpubkey);
 }
 
+/**
+ * Real, live sat/vB fee rate -- audit finding, 2026-08-23: this panel used
+ * to hardcode `feeRateSatPerVb: 2` for every fulfillment PSBT regardless of
+ * real network conditions. Bitcoin's fee market is genuinely volatile (a
+ * rate that clears in minutes during quiet periods can leave a transaction
+ * unconfirmed for hours or days during congestion); a fixed guess is
+ * exactly the kind of shortcut a fee-aware Bitcoiner would flag on sight.
+ *
+ * mempool.space's own public, key-free endpoint (`/v1/fees/recommended`,
+ * same host this panel already trusts for UTXO/tx lookups) returns
+ * {fastestFee, halfHourFee, hourFee, economyFee, minimumFee} in sat/vB.
+ * `halfHourFee` is used as the default -- a reasonable balance for a
+ * non-urgent NFT/inscription purchase, matching most wallet UIs' own
+ * "normal" tier. Falls back to a conservative 5 sat/vB (not the old 2) only
+ * if the live call fails, so a transient network error can't silently
+ * revert to an unrealistically low, possibly-stuck rate.
+ */
+async function fetchRecommendedFeeRateSatPerVb(mempoolBase: string): Promise<number> {
+  try {
+    const res = await fetch(`${mempoolBase}/v1/fees/recommended`);
+    if (!res.ok) throw new Error("fee endpoint not ok");
+    const fees = (await res.json()) as { halfHourFee?: number; fastestFee?: number };
+    const rate = fees.halfHourFee ?? fees.fastestFee;
+    if (typeof rate === "number" && rate > 0) return rate;
+    throw new Error("fee endpoint returned no usable rate");
+  } catch {
+    return 5;
+  }
+}
+
 export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
   const mempoolBase = mainnetEnabled ? "https://mempool.space/api" : "https://mempool.space/testnet4/api";
   const mempoolTxPath = mainnetEnabled ? "https://mempool.space/tx" : "https://mempool.space/testnet4/tx";
@@ -144,6 +174,33 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
   const [myInscriptionsError, setMyInscriptionsError] = useState<string | null>(null);
   const [selling, setSelling] = useState(false);
   const [sellError, setSellError] = useState<string | null>(null);
+
+  // Real safety-confirmation step -- built in response to the documented
+  // "wallet accidentally spends an inscription-bearing UTXO as plain sats"
+  // risk class (101blockchains.com / Gate Wiki Ordinals-safety writeups).
+  // This app's OWN PSBT construction (native-bitcoin-listing.ts) never does
+  // blind coin-selection -- every payment/dummy UTXO here is already run
+  // through bitcoin-utxo-safety.ts's fail-closed filterProvenSafeUtxos gate
+  // server-side before it can be spent. The real remaining gap was that the
+  // wallet-signing popup is UniSat's own UI, not this app's, so a user never
+  // saw an explicit, app-controlled statement of exactly which inscription
+  // and which UTXOs this app is about to ask them to sign for. These two
+  // pending-confirm states hold everything needed to show that, between
+  // "build the PSBT" and "ask the wallet to sign it."
+  const [pendingSellConfirm, setPendingSellConfirm] = useState<{
+    inscriptionId: string;
+    txid: string;
+    vout: number;
+    valueSats: number;
+    priceSats: number;
+    scriptPubKeyHex: string;
+  } | null>(null);
+  const [pendingBuyConfirm, setPendingBuyConfirm] = useState<{
+    listing: Listing;
+    buyerDummyUtxo: Utxo;
+    buyerPaymentUtxoCandidates: Utxo[];
+    feeRateSatPerVb: number;
+  } | null>(null);
 
   const loadListings = useCallback(async () => {
     setListingsLoading(true);
@@ -214,7 +271,9 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
     }
   }, []);
 
-  const submitListing = useCallback(async () => {
+  /** Step 1: validate + resolve the real scriptPubKey, then STOP and show the
+   * safety-confirmation modal -- never signs anything itself. */
+  const prepareListing = useCallback(async () => {
     if (!address || !pubkeyHex) {
       setSellError("Connect your UniSat wallet first.");
       return;
@@ -233,14 +292,38 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
       const scriptPubKeyHex = scriptPubKeys[vout];
       if (!scriptPubKeyHex) throw new Error(`Output ${vout} not found on that transaction.`);
 
+      setPendingSellConfirm({
+        inscriptionId: sellInscriptionId.trim(),
+        txid: sellTxid.trim(),
+        vout,
+        valueSats,
+        priceSats,
+        scriptPubKeyHex,
+      });
+    } catch (e) {
+      setSellError(errorMessage(e, "Failed to prepare the listing."));
+    } finally {
+      setSelling(false);
+    }
+  }, [address, pubkeyHex, sellInscriptionId, sellTxid, sellVout, sellValueSats, sellPriceSats]);
+
+  /** Step 2: only reachable from the confirmation modal -- builds the PSBT
+   * and asks the wallet to sign it for the EXACT inscription/UTXO the user
+   * just saw and confirmed. */
+  const confirmAndSignListing = useCallback(async () => {
+    if (!address || !pubkeyHex || !pendingSellConfirm) return;
+    const confirm = pendingSellConfirm;
+    setSelling(true);
+    setSellError(null);
+    try {
       const buildRes = await fetch("/api/market/multichain/native-bitcoin-listing-build", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sellerAddress: address,
           sellerInternalPubkeyHex: pubkeyHex,
-          inscriptionUtxo: { txid: sellTxid.trim(), vout, valueSats, scriptPubKeyHex },
-          priceSats,
+          inscriptionUtxo: { txid: confirm.txid, vout: confirm.vout, valueSats: confirm.valueSats, scriptPubKeyHex: confirm.scriptPubKeyHex },
+          priceSats: confirm.priceSats,
         }),
       });
       const built = (await buildRes.json()) as { psbtBase64?: string; inputIndexToSign?: number; error?: string; message?: string };
@@ -265,11 +348,12 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
       const createRes = await fetch("/api/market/multichain/native-bitcoin-listings", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inscriptionId: sellInscriptionId.trim(), sellerPsbtBase64: signedPsbtBase64 }),
+        body: JSON.stringify({ inscriptionId: confirm.inscriptionId, sellerPsbtBase64: signedPsbtBase64 }),
       });
       const createBody = (await createRes.json()) as { error?: string; message?: string };
       if (!createRes.ok) throw new Error(createBody.message ?? createBody.error ?? "Failed to create the listing.");
 
+      setPendingSellConfirm(null);
       setSellInscriptionId("");
       setSellTxid("");
       setSellVout("0");
@@ -281,9 +365,12 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
     } finally {
       setSelling(false);
     }
-  }, [address, pubkeyHex, sellInscriptionId, sellTxid, sellVout, sellValueSats, sellPriceSats, loadListings]);
+  }, [address, pubkeyHex, pendingSellConfirm, loadListings]);
 
-  const buyListing = useCallback(
+  /** Step 1: discover the buyer's own UTXOs, pick dummy/payment candidates,
+   * then STOP and show the safety-confirmation modal -- never signs
+   * anything itself. Mirrors prepareListing's split for the sell side. */
+  const prepareBuy = useCallback(
     async (listing: Listing) => {
       if (!address || !pubkeyHex) {
         setActionError("Connect your UniSat wallet first.");
@@ -324,59 +411,79 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
         };
         const buyerDummyUtxo = await withScripts(dummyCandidate);
         const buyerPaymentUtxoCandidates = await Promise.all(paymentCandidates.slice(0, 5).map(withScripts));
+        const feeRateSatPerVb = await fetchRecommendedFeeRateSatPerVb(mempoolBase);
 
-        const fulfillRes = await fetch(`/api/market/native-bitcoin-listing/${encodeURIComponent(listing.id)}/fulfill`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            buyerAddress: address,
-            buyerInternalPubkeyHex: pubkeyHex,
-            buyerReceivingAddress: address,
-            buyerChangeAddress: address,
-            buyerDummyUtxo,
-            buyerPaymentUtxoCandidates,
-            feeRateSatPerVb: 2,
-          }),
-        });
-        const fulfilled = (await fulfillRes.json()) as {
-          psbtBase64?: string;
-          inputIndexesForBuyerToSign?: number[];
-          error?: string;
-          message?: string;
-        };
-        if (!fulfillRes.ok || !fulfilled.psbtBase64) {
-          throw new Error(fulfilled.message ?? fulfilled.error ?? "Failed to build the fulfillment PSBT.");
-        }
-
-        const provider = getUnisat();
-        if (!provider) throw new Error("UniSat wallet not found.");
-        const psbtHex = Buffer.from(fulfilled.psbtBase64, "base64").toString("hex");
-        const signedPsbtHex = await provider.signPsbt(psbtHex, {
-          autoFinalized: false,
-          toSignInputs: (fulfilled.inputIndexesForBuyerToSign ?? []).map((index) => ({ index, address })),
-        });
-        const signedFulfillmentPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
-
-        const broadcastRes = await fetch(`/api/market/native-bitcoin-listing/${encodeURIComponent(listing.id)}/broadcast`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ signedFulfillmentPsbtBase64 }),
-        });
-        const broadcastBody = (await broadcastRes.json()) as { txid?: string; error?: string; message?: string };
-        if (!broadcastRes.ok || !broadcastBody.txid) {
-          throw new Error(broadcastBody.message ?? broadcastBody.error ?? "Broadcast rejected -- see the message above for why.");
-        }
-
-        setLastTxid(broadcastBody.txid);
-        await loadListings();
+        setPendingBuyConfirm({ listing, buyerDummyUtxo, buyerPaymentUtxoCandidates, feeRateSatPerVb });
       } catch (e) {
-        setActionError(errorMessage(e, "Purchase failed."));
+        setActionError(errorMessage(e, "Failed to prepare the purchase."));
       } finally {
         setActionBusyId(null);
       }
     },
-    [address, pubkeyHex, loadListings]
+    [address, pubkeyHex, mempoolBase]
   );
+
+  /** Step 2: only reachable from the confirmation modal -- builds the
+   * fulfillment PSBT for the EXACT listing/UTXOs the user just saw and
+   * confirmed, signs it, and broadcasts it. */
+  const confirmAndSignBuy = useCallback(async () => {
+    if (!address || !pubkeyHex || !pendingBuyConfirm) return;
+    const { listing, buyerDummyUtxo, buyerPaymentUtxoCandidates, feeRateSatPerVb } = pendingBuyConfirm;
+    setActionBusyId(listing.id);
+    setActionError(null);
+    setLastTxid(null);
+    try {
+      const fulfillRes = await fetch(`/api/market/native-bitcoin-listing/${encodeURIComponent(listing.id)}/fulfill`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          buyerAddress: address,
+          buyerInternalPubkeyHex: pubkeyHex,
+          buyerReceivingAddress: address,
+          buyerChangeAddress: address,
+          buyerDummyUtxo,
+          buyerPaymentUtxoCandidates,
+          feeRateSatPerVb,
+        }),
+      });
+      const fulfilled = (await fulfillRes.json()) as {
+        psbtBase64?: string;
+        inputIndexesForBuyerToSign?: number[];
+        error?: string;
+        message?: string;
+      };
+      if (!fulfillRes.ok || !fulfilled.psbtBase64) {
+        throw new Error(fulfilled.message ?? fulfilled.error ?? "Failed to build the fulfillment PSBT.");
+      }
+
+      const provider = getUnisat();
+      if (!provider) throw new Error("UniSat wallet not found.");
+      const psbtHex = Buffer.from(fulfilled.psbtBase64, "base64").toString("hex");
+      const signedPsbtHex = await provider.signPsbt(psbtHex, {
+        autoFinalized: false,
+        toSignInputs: (fulfilled.inputIndexesForBuyerToSign ?? []).map((index) => ({ index, address })),
+      });
+      const signedFulfillmentPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
+
+      const broadcastRes = await fetch(`/api/market/native-bitcoin-listing/${encodeURIComponent(listing.id)}/broadcast`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ signedFulfillmentPsbtBase64 }),
+      });
+      const broadcastBody = (await broadcastRes.json()) as { txid?: string; error?: string; message?: string };
+      if (!broadcastRes.ok || !broadcastBody.txid) {
+        throw new Error(broadcastBody.message ?? broadcastBody.error ?? "Broadcast rejected -- see the message above for why.");
+      }
+
+      setPendingBuyConfirm(null);
+      setLastTxid(broadcastBody.txid);
+      await loadListings();
+    } catch (e) {
+      setActionError(errorMessage(e, "Purchase failed."));
+    } finally {
+      setActionBusyId(null);
+    }
+  }, [address, pubkeyHex, pendingBuyConfirm, loadListings]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -482,7 +589,7 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
         </div>
         {sellError && <p className="mt-2 text-sm text-red-400">{sellError}</p>}
         <button
-          onClick={submitListing}
+          onClick={prepareListing}
           disabled={selling || !address}
           className="mt-3 rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-60"
         >
@@ -513,7 +620,7 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
                 </p>
               </div>
               <button
-                onClick={() => buyListing(listing)}
+                onClick={() => prepareBuy(listing)}
                 disabled={actionBusyId === listing.id || !address || listing.sellerAddress === address}
                 className="rounded-md bg-gold-500 px-3 py-1.5 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-60"
               >
@@ -523,6 +630,120 @@ export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
           ))}
         </ul>
       </section>
+
+      {pendingSellConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-lg border border-line bg-panel p-5">
+            <h4 className="mb-2 text-base font-bold text-gold-400">Confirm listing</h4>
+            <p className="mb-3 text-sm text-foreground/70">
+              You are about to ask your wallet to sign a listing for the exact inscription and UTXO below. Double-check
+              this is the item you mean to sell before continuing.
+            </p>
+            <dl className="mb-4 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">Inscription</dt>
+                <dd className="break-all text-right font-mono text-xs text-foreground">{pendingSellConfirm.inscriptionId}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">UTXO</dt>
+                <dd className="break-all text-right font-mono text-xs text-foreground">
+                  {pendingSellConfirm.txid}:{pendingSellConfirm.vout}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">UTXO value</dt>
+                <dd className="text-foreground">{pendingSellConfirm.valueSats.toLocaleString()} sats</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">List price</dt>
+                <dd className="text-foreground">{pendingSellConfirm.priceSats.toLocaleString()} sats</dd>
+              </div>
+            </dl>
+            {sellError && <p className="mb-3 text-sm text-red-400">{sellError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPendingSellConfirm(null)}
+                disabled={selling}
+                className="rounded-md border border-line px-4 py-2 text-sm text-foreground/70 hover:border-line-strong disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAndSignListing}
+                disabled={selling}
+                className="rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-60"
+              >
+                {selling ? "Signing…" : "Sign & list"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingBuyConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-lg border border-line bg-panel p-5">
+            <h4 className="mb-2 text-base font-bold text-gold-400">Confirm purchase</h4>
+            <p className="mb-3 text-sm text-foreground/70">
+              You are about to ask your wallet to sign a purchase for the exact inscription and UTXOs below. Double-check
+              this is the item you mean to buy before continuing.
+            </p>
+            <dl className="mb-4 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">Inscription</dt>
+                <dd className="break-all text-right font-mono text-xs text-foreground">{pendingBuyConfirm.listing.inscriptionId}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">Price</dt>
+                <dd className="text-foreground">{pendingBuyConfirm.listing.priceSats.toLocaleString()} sats</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">Network fee rate</dt>
+                <dd className="text-foreground">
+                  {pendingBuyConfirm.feeRateSatPerVb.toLocaleString()} sat/vB
+                  <span className="ml-1 text-xs text-foreground/40">(live, mempool.space half-hour estimate)</span>
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-foreground/50">Dummy input</dt>
+                <dd className="break-all text-right font-mono text-xs text-foreground">
+                  {pendingBuyConfirm.buyerDummyUtxo.txid}:{pendingBuyConfirm.buyerDummyUtxo.vout} (
+                  {pendingBuyConfirm.buyerDummyUtxo.valueSats.toLocaleString()} sats)
+                </dd>
+              </div>
+              <div>
+                <dt className="mb-1 text-foreground/50">Payment UTXO candidates</dt>
+                <dd>
+                  <ul className="space-y-1">
+                    {pendingBuyConfirm.buyerPaymentUtxoCandidates.map((u) => (
+                      <li key={`${u.txid}:${u.vout}`} className="break-all font-mono text-xs text-foreground">
+                        {u.txid}:{u.vout} ({u.valueSats.toLocaleString()} sats)
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+            </dl>
+            {actionError && <p className="mb-3 text-sm text-red-400">{actionError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPendingBuyConfirm(null)}
+                disabled={actionBusyId === pendingBuyConfirm.listing.id}
+                className="rounded-md border border-line px-4 py-2 text-sm text-foreground/70 hover:border-line-strong disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAndSignBuy}
+                disabled={actionBusyId === pendingBuyConfirm.listing.id}
+                className="rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-60"
+              >
+                {actionBusyId === pendingBuyConfirm.listing.id ? "Signing…" : "Sign & buy"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -160,6 +160,32 @@ async function main(): Promise<void> {
     );
   }
 
+  // Expired KV rows (durable-kv rows written with an `ex` TTL) and expired
+  // market_orders. scripts/postgres-maintenance.mjs runs this same pair of
+  // DELETEs but is ONLY invoked in production, from a cron entry documented
+  // in docs/INMOTION_DEPLOYMENT.md section 11 -- confirmed live 2026-08-23
+  // that nothing in local dev (this supervisor loop included) ever ran it,
+  // so TTL'd rows here accumulated with no local eviction path. Cheap
+  // (single indexed DELETE each) and safe to run on every tick, incremental
+  // included, same as postgres-maintenance.mjs's own cron cadence.
+  try {
+    const { postgresQuery } = await import("../lib/postgres");
+    const expiredKv = await postgresQuery(
+      "DELETE FROM plank_kv_values WHERE expires_at <= NOW()"
+    );
+    const expiredOrders = await postgresQuery(
+      "DELETE FROM market_orders WHERE expires_at <= NOW()"
+    );
+    console.log(
+      `[refresh] maintenance: expired kv=${expiredKv.rowCount ?? 0} orders=${expiredOrders.rowCount ?? 0}`
+    );
+  } catch (error) {
+    console.error(
+      "[refresh] maintenance: check failed —",
+      error instanceof Error ? error.message : error
+    );
+  }
+
   // Permanent on-chain event ledger. Runs FIRST, and on every tick including
   // incremental ones, because it is the only step whose output is append-only
   // and irreplaceable: every other snapshot here can be rebuilt from upstream
