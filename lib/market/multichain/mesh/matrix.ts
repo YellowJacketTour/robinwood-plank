@@ -39,7 +39,8 @@ export type MeshSource =
   | "unisat-rarity"
   | "unisat-membership"
   | "helius-membership"
-  | "opensea-membership";
+  | "opensea-membership"
+  | "cryptopunks-native";
 
 export type MeshLane = {
   id: string;
@@ -76,6 +77,14 @@ const CG_CHAINS = [
 const HYPERSYNC_EVM = [...OS_EVM, "zksync-mainnet"] as const;
 
 export const MESH_LANES: MeshLane[] = [
+  {
+    id: "cryptopunks-native:eth-mainnet",
+    source: "cryptopunks-native",
+    chainSlug: "eth-mainnet",
+    cells: ["floor", "listedCount"],
+    sliceSec: 120,
+    notes: "Canonical pre-ERC721 CryptoPunks contract-state book; additive to aggregator venues.",
+  },
   ...OS_EVM.map((chainSlug) => ({
     id: `opensea-membership:${chainSlug}`,
     source: "opensea-membership" as const,

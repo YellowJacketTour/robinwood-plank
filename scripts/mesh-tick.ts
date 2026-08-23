@@ -43,7 +43,9 @@ async function main(): Promise<void> {
       kind: `mesh-lane:${lane.chainSlug}`,
       source: lane.source,
       chainSlug: lane.chainSlug,
-      subject: lane.id,
+      // Background lanes rotate globally. Only demand jobs carry an exact
+      // collection subject; a lane id is orchestration identity, not data.
+      subject: null,
       payload: { sliceSec: lane.sliceSec, cells: lane.cells },
       priority: lane.source === "seaport-fills" || lane.source === "native-robinwood" ? 100 : 20,
     });

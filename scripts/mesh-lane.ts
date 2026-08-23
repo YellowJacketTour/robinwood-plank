@@ -20,6 +20,11 @@ async function main(): Promise<void> {
   }
 
   try {
+    if (source === "cryptopunks-native") {
+      const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
+      console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
+      return;
+    }
     if (source === "hypersync-discovery") {
       const { runHypersyncDiscoveryScan } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
       console.log("[mesh-lane] hypersync-discovery", JSON.stringify(await runHypersyncDiscoveryScan({ chainSlug: chain })));

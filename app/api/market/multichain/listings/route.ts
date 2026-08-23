@@ -120,6 +120,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
 
+  // CryptoPunks predates ERC-721 and Seaport. Its canonical embedded market
+  // is additive to aggregator venues and is read from our durable contract-
+  // state projection, never inferred from an empty OpenSea response.
+  const normalizedCollection = collectionSlug.toLowerCase();
+  if (chainSlug === "eth-mainnet" && normalizedCollection === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
+    try {
+      const { getCryptoPunksNativeBook } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+      const native = await getCryptoPunksNativeBook(limit);
+      const listings: Listing[] = native.map((offer) => ({
+        id: `cryptopunks-native:${offer.tokenId}`,
+        collectionSlug,
+        tokenId: offer.tokenId,
+        tokenName: `CryptoPunk #${offer.tokenId}`,
+        maker: offer.seller,
+        priceWei: offer.minValue,
+        expiresAt: "9999-12-31T23:59:59.999Z",
+        kind: "fixed",
+        imageUrl: `https://www.larvalabs.com/cryptopunks/cryptopunk${offer.tokenId}.png`,
+        venue: "cryptopunks-native",
+        externalUrl: `https://www.cryptopunks.app/cryptopunks/details/${offer.tokenId}`,
+        foreignChainSlug: chainSlug,
+      }));
+      const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
+      void prioritizeCollectionDemand(chainSlug, normalizedCollection).catch(() => {});
+      return NextResponse.json({
+        collection: await collectionEnvelope(chainSlug, normalizedCollection),
+        listings,
+      }, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } });
+    } catch (error) {
+      return publicError(error, "Failed to load CryptoPunks native listings");
+    }
+  }
+
   // Robinhood Chain is deliberately absent from FOREIGN_CHAINS (see
   // foreign-chain-registry.ts's own header) -- it's Marketplank's own home
   // chain, not a foreign one, so its listings live in the native order

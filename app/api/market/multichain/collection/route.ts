@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
     if (!tracked) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
+    const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
+    void prioritizeCollectionDemand(chainSlug, tracked.contractAddress).catch(() => {});
     const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
     const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
     let holderCount = supply?.holderCount ?? null;

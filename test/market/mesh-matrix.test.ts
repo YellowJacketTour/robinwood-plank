@@ -36,6 +36,7 @@ describe("sync mesh matrix", () => {
   it("gives EVM at least two independent stats sources (OS + CG)", () => {
     const eth = MESH_LANES.filter((l) => l.chainSlug === "eth-mainnet").map((l) => l.source);
     assert.ok(eth.includes("opensea-stats"));
+    assert.ok(eth.includes("cryptopunks-native"));
     assert.ok(eth.includes("coingecko-nft"));
   });
 
