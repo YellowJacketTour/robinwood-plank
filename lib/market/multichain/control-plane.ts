@@ -8,6 +8,16 @@ export type ProviderWindow = {
   allowance: number;
 };
 
+/** UniSat currently documents 2,000 Open API calls/day. Background work is
+ * capped below that hard limit so collection pages, visitor-triggered reads,
+ * and Bitcoin transaction preparation retain deterministic headroom. Every
+ * background UniSat lane must share this exact account/window key. */
+export const UNISAT_BACKGROUND_DAILY_ALLOWANCE = 1_800;
+
+export function unisatBackgroundDayWindow(now = new Date()): ProviderWindow {
+  return utcDayWindow(UNISAT_BACKGROUND_DAILY_ALLOWANCE, now);
+}
+
 /** Atomically reserve shared provider capacity. False means defer, never call. */
 export async function reserveProviderCapacity(
   providerAccount: string,

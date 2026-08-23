@@ -5,7 +5,7 @@
  * separate rarity lane and are never fabricated here.
  */
 import { postgresQuery } from "@/lib/postgres";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { reserveProviderCapacity, settleProviderCapacity, unisatBackgroundDayWindow } from "@/lib/market/multichain/control-plane";
 import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 import {
   readCollectionMembershipCursor,
@@ -35,7 +35,7 @@ function apiKey(): string {
 
 async function fetchPage(collectionId: string, start: number): Promise<{ items: UniSatItem[]; total: number | null }> {
   if (await isSourceJailed("unisat")) throw new Error("unisat-membership: source jailed");
-  const window = utcDayWindow(900);
+  const window = unisatBackgroundDayWindow();
   if (!(await reserveProviderCapacity("unisat:default", window))) {
     throw new Error("unisat-membership: durable daily ceiling");
   }

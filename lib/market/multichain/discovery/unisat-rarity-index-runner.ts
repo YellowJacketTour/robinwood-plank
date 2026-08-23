@@ -31,7 +31,7 @@
 import { computeGenericRaritySnapshot, type GenericRarityInput } from "@/lib/rarity-generic";
 import { replaceForeignRarity } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { reserveProviderCapacity, settleProviderCapacity, unisatBackgroundDayWindow } from "@/lib/market/multichain/control-plane";
 import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
@@ -55,10 +55,10 @@ type UniSatActionEvent = {
 async function fetchActionsPage(collectionId: string, start: number): Promise<{ list: UniSatActionEvent[]; total: number }> {
   if (await isSourceJailed("unisat")) throw new Error("unisat-rarity-index-runner: source jailed");
   const key = apiKey();
-  // UniSat documents 1,000 free requests/day. Keep explicit headroom for
-  // interactive reads and collection discovery instead of letting this
-  // background indexer consume the entire account allowance.
-  const window = utcDayWindow(900);
+  // This enrichment shares the same durable 1,800-call background window as
+  // membership. Membership runs first so an activity-heavy collection can
+  // never starve canonical piece discovery.
+  const window = unisatBackgroundDayWindow();
   if (!(await reserveProviderCapacity("unisat:default", window))) {
     throw new Error("unisat-rarity-index-runner: durable daily ceiling");
   }

@@ -30,6 +30,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
+import { reserveProviderCapacity, settleProviderCapacity, unisatBackgroundDayWindow } from "@/lib/market/multichain/control-plane";
 
 const API_BASE = "https://open-api.unisat.io/v1/collection-indexer/collection";
 const PAGE_SIZE = 100;
@@ -55,17 +56,25 @@ function requireApiKey(): string {
 
 async function fetchPage(start: number): Promise<{ total: number; list: UniSatCollectionListEntry[] }> {
   const key = requireApiKey();
-  const res = await fetch(`${API_BASE}/list?start=${start}&limit=${PAGE_SIZE}`, {
-    headers: { authorization: `Bearer ${key}` },
-  });
-  if (!res.ok) {
-    throw new Error(`unisat-collection-list-scan: ${res.status} ${res.statusText} fetching collection/list`);
+  const window = unisatBackgroundDayWindow();
+  if (!(await reserveProviderCapacity("unisat:default", window))) {
+    throw new Error("unisat-collection-list-scan: durable daily ceiling");
   }
-  const body = (await res.json()) as { code: number; msg: string; data: { total: number; list: UniSatCollectionListEntry[] } };
-  if (body.code !== 0) {
-    throw new Error(`unisat-collection-list-scan: API error ${body.code} ${body.msg}`);
+  try {
+    const res = await fetch(`${API_BASE}/list?start=${start}&limit=${PAGE_SIZE}`, {
+      headers: { authorization: `Bearer ${key}` },
+    });
+    if (!res.ok) {
+      throw new Error(`unisat-collection-list-scan: ${res.status} ${res.statusText} fetching collection/list`);
+    }
+    const body = (await res.json()) as { code: number; msg: string; data: { total: number; list: UniSatCollectionListEntry[] } };
+    if (body.code !== 0) {
+      throw new Error(`unisat-collection-list-scan: API error ${body.code} ${body.msg}`);
+    }
+    return body.data;
+  } finally {
+    await settleProviderCapacity("unisat:default", window, 1, true).catch(() => {});
   }
-  return body.data;
 }
 
 async function readStart(): Promise<number> {

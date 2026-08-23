@@ -579,6 +579,29 @@ async function main(): Promise<void> {
       .join("; ");
   });
 
+  // Spend authenticated capacity on canonical collection membership before
+  // the lower-value activity-derived rarity sample below. Two 100-piece
+  // pages per incremental tick yields up to 144,000 newly projected pieces
+  // per UTC day at a two-minute cadence while the shared durable 1,800-call
+  // gate retains 200 calls of provider headroom. Cursors are per collection;
+  // failures never erase earlier pages and the oldest incomplete collection
+  // is resumed automatically.
+  await step("hydrate-bitcoin-membership", async () => {
+    const { advanceNextTrackedBitcoinMembership } = await import("../lib/market/multichain/discovery/unisat-membership-index-runner");
+    const attempts = full ? 20 : 2;
+    let pages = 0;
+    let pieces = 0;
+    let completed = 0;
+    for (let i = 0; i < attempts; i++) {
+      const result = await advanceNextTrackedBitcoinMembership();
+      if (!result) break;
+      pages += 1;
+      pieces += result.itemsObserved;
+      if (result.complete) completed += 1;
+    }
+    return `${pages} membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
+  });
+
   // Discovery only creates identities. Keep a separate, tightly bounded
   // hydration lane on every incremental tick so newly found EVM contracts
   // acquire names, art, floors and market snapshots instead of remaining

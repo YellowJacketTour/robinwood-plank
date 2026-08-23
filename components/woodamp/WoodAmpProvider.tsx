@@ -90,6 +90,11 @@ export default function WoodAmpProvider({
   children: React.ReactNode;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioGraphRef = useRef<{
+    context: AudioContext;
+    analyser: AnalyserNode;
+    frame: number;
+  } | null>(null);
   // Play intent survives track changes: when true, a newly selected track
   // starts playing as soon as it can.
   const intentRef = useRef(false);
@@ -113,6 +118,61 @@ export default function WoodAmpProvider({
   const [open, setOpen] = useState(false);
 
   const track = playlist[index] ?? playlist[0];
+
+  /* Disco mode is an ambient visualization of the site's real audio, not a
+     decorative equalizer with fabricated motion. A MediaElementSource can
+     only be created once for a given <audio>, so the graph is retained for
+     the provider's lifetime and resumed after each user-initiated play. */
+  const startDiscoAnalysis = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || document.documentElement.dataset.melt !== "1") return;
+    let graph = audioGraphRef.current;
+    if (!graph) {
+      try {
+        const context = new AudioContext();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.84;
+        const source = context.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(context.destination);
+        graph = { context, analyser, frame: 0 };
+        audioGraphRef.current = graph;
+      } catch {
+        return;
+      }
+    }
+    void graph.context.resume().catch(() => {});
+    if (graph.frame) cancelAnimationFrame(graph.frame);
+    const bins = new Uint8Array(graph.analyser.frequencyBinCount);
+    const root = document.documentElement;
+    const average = (from: number, to: number) => {
+      let sum = 0;
+      for (let i = from; i < Math.min(to, bins.length); i++) sum += bins[i];
+      return sum / Math.max(1, Math.min(to, bins.length) - from) / 255;
+    };
+    const paint = () => {
+      const active = !audio.paused && root.dataset.melt === "1";
+      graph!.analyser.getByteFrequencyData(bins);
+      const bass = active ? average(0, 8) : 0;
+      const mid = active ? average(8, 30) : 0;
+      const treble = active ? average(30, bins.length) : 0;
+      root.style.setProperty("--melt-bass", bass.toFixed(3));
+      root.style.setProperty("--melt-mid", mid.toFixed(3));
+      root.style.setProperty("--melt-treble", treble.toFixed(3));
+      root.style.setProperty("--melt-energy", (bass * 0.5 + mid * 0.35 + treble * 0.15).toFixed(3));
+      if (active) graph!.frame = requestAnimationFrame(paint);
+      else graph!.frame = 0;
+    };
+    graph.frame = requestAnimationFrame(paint);
+  }, []);
+
+  useEffect(() => () => {
+    const graph = audioGraphRef.current;
+    if (!graph) return;
+    if (graph.frame) cancelAnimationFrame(graph.frame);
+    void graph.context.close();
+  }, []);
 
   // --- initial state from storage + ambient muted autoplay ---------------
   useEffect(() => {
@@ -482,7 +542,10 @@ export default function WoodAmpProvider({
         src={isAudioSource(track.source) ? track.src : undefined}
         preload="none"
         muted
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          setPlaying(true);
+          startDiscoAnalysis();
+        }}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
