@@ -13,8 +13,17 @@ import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 import { hydrateBitcoinArt } from "@/lib/market/multichain/discovery/bitcoin-art-rotator";
 import { runCoinGeckoNftStats } from "@/lib/market/multichain/discovery/coingecko-nft-stats";
 
-/** Matches source-budget.ts's own DAILY_CEILING["magiceden-solana"] exactly. */
-const ME_DAILY_ALLOWANCE = 2_000;
+/**
+ * source-budget.ts's DAILY_CEILING deliberately has NO entry for
+ * "magiceden-solana" -- confirmed live 2026-08-23, stats-mainnet.magiceden.io
+ * is not part of Magic Eden's documented public API and has no published
+ * rate limit (see that file's own comment). This durable per-day allowance
+ * is therefore a safety-valve, not a real provider limit: set high enough
+ * that it never blocks real throughput on its own. The circuit breaker
+ * (jail on 429/403) is the real protection against actually exceeding
+ * whatever undocumented limit the endpoint enforces.
+ */
+const ME_DAILY_ALLOWANCE = 50_000;
 
 export type HydrateAllArtResult = {
   bitcoin: Awaited<ReturnType<typeof hydrateBitcoinArt>>;

@@ -41,11 +41,12 @@ const ALCHEMY_NFT_PROVIDER_ACCOUNT = "alchemy-nft:default";
  * jailAlchemyNftUntilMonthReset below), never a daily call ceiling.
  * rpc-meter.ts also carries no daily/monthly ceiling constant to defer
  * to -- it is pure compute-unit metering with no gate of its own. This is
- * therefore an APPROXIMATED, conservative daily allowance (same order of
- * magnitude as source-budget.ts's own magiceden-solana=2,000 ceiling),
- * added purely for cross-process durability on top of the existing
- * monthly jail -- not a claim that 2,000/day is Alchemy's real documented
- * limit.
+ * therefore an APPROXIMATED, conservative daily allowance, added purely
+ * for cross-process durability on top of the existing monthly jail -- not
+ * a claim that 2,000/day is Alchemy's real documented limit. (No longer
+ * benchmarked against magiceden-solana's old ceiling -- that entry was
+ * removed 2026-08-23 as an unsourced guess against an undocumented
+ * endpoint; see source-budget.ts's own comment.)
  */
 const ALCHEMY_NFT_DAILY_ALLOWANCE = 2_000;
 

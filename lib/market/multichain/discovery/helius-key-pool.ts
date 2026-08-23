@@ -30,11 +30,26 @@ import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/ja
 
 /**
  * No DAILY_CEILING entry exists for "helius:key-N" in source-budget.ts --
- * checkSourceBudget only ever gates on jail state for this key. This
- * mirrors the existing "helius-das": 20_000 entry already in
- * source-budget.ts for the pre-pool single-key lane (a conservative,
- * well-under-free-tier daily figure), reused per-key here so
- * plank_provider_windows has a real bounded window to reserve against.
+ * checkSourceBudget only ever gates on jail state for this key, never a
+ * daily count. This constant is used ONLY to size the durable
+ * plank_provider_windows reservation window (utcDayWindow), not as a
+ * checkSourceBudget ceiling.
+ *
+ * The 20_000 figure previously cited a "helius-das": 20_000 entry in
+ * source-budget.ts's DAILY_CEILING map; that entry was removed 2026-08-23
+ * (dead -- no call site anywhere ever called
+ * checkSourceBudget("helius-das"), and Helius's own docs
+ * (helius.dev/docs/billing/rate-limits) define DAS/Enhanced limits purely
+ * as requests-per-second by plan tier -- Free 2 RPS / Developer 10 RPS /
+ * Business 50 RPS / Professional 100 RPS -- with no documented flat daily
+ * request count to cite). 20_000 is kept here only as a generous, clearly
+ * labeled safety-valve bound for the reservation window's arithmetic (a
+ * window has to be sized to *something* for reserveProviderCapacity's
+ * per-window accounting to work) -- at even the Free tier's 2 RPS, a day
+ * has capacity for ~172,800 requests, so this number is intentionally far
+ * below what any real plan tier allows and will not itself throttle
+ * anything; the actual gate is jail state (consecutive/quota failures),
+ * not this figure.
  */
 export const HELIUS_DAILY_ALLOWANCE = 20_000;
 
