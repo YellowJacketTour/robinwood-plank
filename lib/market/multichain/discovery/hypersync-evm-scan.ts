@@ -53,9 +53,24 @@ import {
   type DiscoveryScanResult,
 } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain/store";
-import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
+import { writeCollectionCell, writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
+
+const HYPERSYNC_EVM_PROVIDER_ACCOUNT = "hypersync-evm:default";
+/**
+ * No DAILY_CEILING entry exists for "hypersync-evm" in source-budget.ts --
+ * this file does not even call checkSourceBudget today. HyperSync's own
+ * real free-tier limit (this file's own header) is EVENT-volume/storage
+ * bounded (~100k events / 5GB / 7-day-idle), not a per-call count, so
+ * there is no exact call-count ceiling to carry over. This is therefore
+ * an APPROXIMATED, conservative per-call allowance (same order of
+ * magnitude as source-budget.ts's own magiceden-solana=2,000 ceiling),
+ * purely to give a real cross-process durable guard against runaway
+ * concurrent scan workers -- not a claim this is HyperSync's documented
+ * per-call limit.
+ */
+const HYPERSYNC_EVM_DAILY_ALLOWANCE = 2_000;
 
 /**
  * Blocks requested per HyperSync call. Far wider than evm-log-scan.ts's
@@ -174,6 +189,24 @@ function hypersyncUrl(chainId: number): string {
   return `https://${chainId}.hypersync.xyz`;
 }
 
+/** One real HyperSync call (getHeight or a query page) reserved/settled durably around it -- never reserves per logical scan, only per actual outbound request. */
+async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
+  const window = utcDayWindow(HYPERSYNC_EVM_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window))) {
+    throw new Error("hypersync-evm-scan: durable daily ceiling");
+  }
+  let settled = false;
+  try {
+    const result = await fn();
+    await settleProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
+    return result;
+  } catch (error) {
+    if (!settled) await settleProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * Scans forward from the stored cursor using HyperSync, tallies ERC-721-
  * shaped Transfer activity by contract (identical candidate logic to
@@ -200,7 +233,7 @@ export async function runHypersyncDiscoveryScan(input: {
   const apiToken = requireApiToken();
   const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
 
-  const height = await client.getHeight();
+  const height = await withHypersyncReservation(() => client.getHeight());
   const cursor = await readCursor(input.chainSlug);
   const fromBlock = cursor == null ? Math.max(0, height - CHUNK_BLOCKS) : cursor + 1;
   const toBlock = Math.min(height, fromBlock + (FORWARD_CHUNK_BLOCKS[input.chainSlug] ?? 10));
@@ -222,7 +255,7 @@ export async function runHypersyncDiscoveryScan(input: {
 
   let lastBlockSeen = fromBlock;
   while (logsScanned < MAX_LOGS_PER_RUN) {
-    const res = await client.get(query);
+    const res = await withHypersyncReservation(() => client.get(query));
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -320,7 +353,7 @@ export async function runHypersyncBackfillScan(input: {
   // discovery first started (never changes once set, since the forward
   // scanner's own cursor moves past it immediately on its first run).
   const forwardCursor = await readCursor(input.chainSlug);
-  const height = await client.getHeight();
+  const height = await withHypersyncReservation(() => client.getHeight());
   const ceiling = forwardCursor ?? Math.max(0, height - CHUNK_BLOCKS);
 
   // How far genesis-forward this function has already scanned. Starts at 0.
@@ -343,7 +376,7 @@ export async function runHypersyncBackfillScan(input: {
 
   let nextBlock = scannedUpTo;
   while (logsScanned < MAX_LOGS_PER_RUN) {
-    const res = await client.get(query);
+    const res = await withHypersyncReservation(() => client.get(query));
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -472,7 +505,7 @@ export async function runHypersyncPriorityWindowScan(input: {
 
   let nextBlock = scannedUpTo;
   while (logsScanned < MAX_LOGS_PER_RUN) {
-    const res = await client.get(query);
+    const res = await withHypersyncReservation(() => client.get(query));
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();

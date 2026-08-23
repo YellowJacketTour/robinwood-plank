@@ -29,7 +29,7 @@
  * OpenSeaCollectionsPage type applies chain-agnostically.
  */
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
-import { slugCacheKey } from "@/lib/market/multichain/discovery/opensea-stats";
+import { slugCacheKey, OPENSEA_STATS_DAILY_ALLOWANCE, OPENSEA_STATS_PROVIDER_ACCOUNT } from "@/lib/market/multichain/discovery/opensea-stats";
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay, hasMultichainStore } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
@@ -38,6 +38,13 @@ import { isNotRealCollectibleArt } from "@/lib/market/multichain/discovery/evm-l
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { durableKv as kv } from "@/lib/market/durable-kv";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+
+// OPENSEA_STATS_DAILY_ALLOWANCE / OPENSEA_STATS_PROVIDER_ACCOUNT are imported
+// from opensea-stats.ts above -- this module shares that SAME real OpenSea
+// API key/quota pool, so it reserves against the identical account rather
+// than a separate one that would let the real, shared rate limit be
+// exceeded unnoticed.
 
 /**
  * Persists OpenSea's own opaque pagination cursor per chain -- a plain
@@ -89,15 +96,27 @@ async function fetchCollectionsPage(apiKey: string, openSeaChain: string, cursor
   url.searchParams.set("chain", openSeaChain);
   url.searchParams.set("limit", "100");
   if (cursor) url.searchParams.set("next", cursor);
-  const res = await fetch(url.toString(), {
-    headers: { "x-api-key": apiKey, accept: "application/json" },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`opensea-bulk-scan: ${res.status} ${res.statusText} fetching chain=${openSeaChain} -- ${body.slice(0, 200)}`);
+  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) {
+    throw new Error(`opensea-bulk-scan: durable daily ceiling fetching chain=${openSeaChain}`);
   }
-  return (await res.json()) as OpenSeaCollectionsPage;
+  let settled = false;
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { "x-api-key": apiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`opensea-bulk-scan: ${res.status} ${res.statusText} fetching chain=${openSeaChain} -- ${body.slice(0, 200)}`);
+    }
+    return (await res.json()) as OpenSeaCollectionsPage;
+  } catch (error) {
+    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    throw error;
+  }
 }
 
 export type OpenSeaBulkScanResult = {

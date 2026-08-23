@@ -42,6 +42,7 @@ import {
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { durableKv } from "@/lib/market/durable-kv";
 import { postgresQuery } from "@/lib/postgres";
 import { preferHighestResImageUrl } from "@/lib/market/collection-art";
@@ -65,6 +66,10 @@ const SOURCE = "coingecko-nft";
  * fail-closed discipline as checkSourceBudget.
  */
 const MONTHLY_CEILING = 9_000; // real margin under CoinGecko's documented 10,000/mo Demo cap
+
+/** Matches source-budget.ts's own DAILY_CEILING["coingecko-nft"] exactly -- this only adds cross-process durability on top of the existing in-memory ceiling and the monthly-KV guard above, never changes what the daily ceiling actually is. */
+const CG_DAILY_ALLOWANCE = 8_000;
+const CG_PROVIDER_ACCOUNT = "coingecko-nft:default";
 
 function monthKey(): string {
   return new Date().toISOString().slice(0, 7); // YYYY-MM
@@ -143,7 +148,20 @@ async function fetchPlatformList(platform: string): Promise<ListItem[]> {
     if (!gate.allowed) {
       throw new Error(`coingecko-nft-stats: source jailed/exhausted (${gate.reason}) -- stopping platform list fetch for "${platform}" early, ${out.length} id(s) collected so far`);
     }
-    const res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders() });
+    const window = utcDayWindow(CG_DAILY_ALLOWANCE);
+    if (!(await reserveProviderCapacity(CG_PROVIDER_ACCOUNT, window))) {
+      throw new Error(`coingecko-nft-stats: durable daily ceiling -- stopping platform list fetch for "${platform}" early, ${out.length} id(s) collected so far`);
+    }
+    let res: Response;
+    let settled = false;
+    try {
+      res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders() });
+      await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true);
+      settled = true;
+    } catch (error) {
+      if (!settled) await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+      throw error;
+    }
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
@@ -288,8 +306,13 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
     if (!gate.allowed) break;
     if (!(await checkAndIncrementMonthlyBudget())) break;
 
+    const window = utcDayWindow(CG_DAILY_ALLOWANCE);
+    if (!(await reserveProviderCapacity(CG_PROVIDER_ACCOUNT, window))) break;
+    let settled = false;
     try {
       const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.cgId)}`, { headers: apiHeaders() });
+      await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true);
+      settled = true;
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
@@ -340,6 +363,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
       // HTTP response, so it's a generic failure, not a confirmed quota
       // error -- the 3-consecutive-failure threshold handles a source
       // that's genuinely down without jailing it on the first hiccup.
+      if (!settled) await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
       recordSourceFailure(SOURCE, false);
       errors += 1;
     }

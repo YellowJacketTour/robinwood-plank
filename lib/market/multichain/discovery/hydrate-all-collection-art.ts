@@ -8,9 +8,13 @@
  */
 import { updateCollectionDisplay, upsertTrackedCollection } from "@/lib/market/multichain/store";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 import { hydrateBitcoinArt } from "@/lib/market/multichain/discovery/bitcoin-art-rotator";
 import { runCoinGeckoNftStats } from "@/lib/market/multichain/discovery/coingecko-nft-stats";
+
+/** Matches source-budget.ts's own DAILY_CEILING["magiceden-solana"] exactly. */
+const ME_DAILY_ALLOWANCE = 2_000;
 
 export type HydrateAllArtResult = {
   bitcoin: Awaited<ReturnType<typeof hydrateBitcoinArt>>;
@@ -23,12 +27,18 @@ type MeRow = { collectionSymbol?: string; name?: string | null; image?: string |
 export async function hydrateSolanaFromMagicEden(): Promise<{ matched: number; updated: number }> {
   const src = "magiceden-solana";
   if (!checkSourceBudget(src).allowed) return { matched: 0, updated: 0 };
+  const window = utcDayWindow(ME_DAILY_ALLOWANCE);
+  const account = "magiceden-solana:default";
+  if (!(await reserveProviderCapacity(account, window))) return { matched: 0, updated: 0 };
   let entries: MeRow[] = [];
+  let settled = false;
   try {
     const res = await fetch(
       "https://stats-mainnet.magiceden.io/collection_stats/search/all?window=1d&limit=250&sort=volume&direction=desc",
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) }
     );
+    await settleProviderCapacity(account, window, 1, true);
+    settled = true;
     if (res.status === 429 || res.status === 403) {
       recordSourceFailure(src, true);
       return { matched: 0, updated: 0 };
@@ -40,6 +50,7 @@ export async function hydrateSolanaFromMagicEden(): Promise<{ matched: number; u
     recordSourceSuccess(src);
     entries = (await res.json()) as MeRow[];
   } catch {
+    if (!settled) await settleProviderCapacity(account, window, 1, true).catch(() => {});
     recordSourceFailure(src, false);
     return { matched: 0, updated: 0 };
   }

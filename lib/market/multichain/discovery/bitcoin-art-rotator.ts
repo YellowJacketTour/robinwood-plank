@@ -24,7 +24,12 @@ import {
   recordSourceSuccess,
   recordSourceFailure,
 } from "@/lib/market/multichain/discovery/source-budget";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { preferHighestResImageUrl } from "@/lib/market/collection-art";
+
+/** Matches source-budget.ts's own DAILY_CEILING entries for these two sources exactly -- this only adds cross-process durability on top, never changes the ceiling. */
+const OW_DAILY_ALLOWANCE = 2_400;
+const CG_DAILY_ALLOWANCE = 8_000;
 
 const OW = "ordinals-wallet";
 const UNISAT = "unisat-collections";
@@ -71,11 +76,17 @@ function isHttpsImage(url: string | null | undefined): string | null {
 async function tryOrdinalsWallet(slug: string): Promise<{ name: string | null; imageUrl: string | null } | "none" | "skip"> {
   if (!(await canUse(OW))) return "skip";
   if ((await durableKv.get<string>(OW_NONE(slug))) === "1") return "none";
+  const window = utcDayWindow(OW_DAILY_ALLOWANCE);
+  const account = "ordinals-wallet:default";
+  if (!(await reserveProviderCapacity(account, window))) return "skip";
+  let settled = false;
   try {
     const res = await fetch(`https://turbo.ordinalswallet.com/collection/${encodeURIComponent(slug)}`, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(12_000),
     });
+    await settleProviderCapacity(account, window, 1, true);
+    settled = true;
     if (res.status === 404) {
       recordSourceSuccess(OW);
       await durableKv.set(OW_NONE(slug), "1", { ex: 7 * 24 * 60 * 60 });
@@ -97,6 +108,7 @@ async function tryOrdinalsWallet(slug: string): Promise<{ name: string | null; i
     if (!imageUrl && !name) return "none";
     return { name, imageUrl };
   } catch {
+    if (!settled) await settleProviderCapacity(account, window, 1, true).catch(() => {});
     recordSourceFailure(OW, false);
     return "skip";
   }
@@ -117,11 +129,17 @@ async function tryCoinGecko(slug: string): Promise<{ name: string | null; imageU
   const key = process.env.COINGECKO_API_KEY?.trim();
   const headers: Record<string, string> = { accept: "application/json" };
   if (key) headers["x-cg-demo-api-key"] = key;
+  const window = utcDayWindow(CG_DAILY_ALLOWANCE);
+  const account = "coingecko-nft:default";
+  if (!(await reserveProviderCapacity(account, window))) return "skip";
+  let settled = false;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/nfts/${encodeURIComponent(slug)}`, {
       headers,
       signal: AbortSignal.timeout(12_000),
     });
+    await settleProviderCapacity(account, window, 1, true);
+    settled = true;
     if (res.status === 404) {
       recordSourceSuccess(CG);
       return "none";
@@ -142,6 +160,7 @@ async function tryCoinGecko(slug: string): Promise<{ name: string | null; imageU
     if (!imageUrl && !name) return "none";
     return { name, imageUrl };
   } catch {
+    if (!settled) await settleProviderCapacity(account, window, 1, true).catch(() => {});
     recordSourceFailure(CG, false);
     return "skip";
   }

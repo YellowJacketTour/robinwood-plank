@@ -24,11 +24,26 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { postgresQuery } from "@/lib/postgres";
 import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 
 const SOURCE = "opensea-stats";
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
 /** Real ceiling on the floor price this will ever accept -- same defensive bound alchemy-nft.ts's own MAX_PLAUSIBLE_FLOOR_ETH holds, guards against a corrupted/garbage response being written as a real price. */
 const MAX_PLAUSIBLE_FLOOR = 100_000;
+
+/**
+ * No DAILY_CEILING entry exists for "opensea-stats" in source-budget.ts --
+ * checkSourceBudget(SOURCE) below only ever gates on jail state for this
+ * source, never a daily count (OpenSea's v2 API publishes no fixed daily
+ * call cap this app has confirmed). This is an APPROXIMATED, conservative
+ * daily allowance -- same order of magnitude as source-budget.ts's own
+ * coingecko-nft=8,000 ceiling -- exported so every OTHER module hitting
+ * this SAME real OpenSea API key/quota (opensea-bulk-scan.ts, token-art.ts)
+ * reserves against the identical shared account rather than a separate one
+ * that would let the real, shared rate limit be exceeded unnoticed.
+ */
+export const OPENSEA_STATS_DAILY_ALLOWANCE = 5_000;
+export const OPENSEA_STATS_PROVIDER_ACCOUNT = "opensea-stats:default";
 
 type OpenSeaStatsResponse = {
   total?: { volume?: number; sales?: number; floor_price?: number; floor_price_symbol?: string; num_owners?: number };
@@ -105,14 +120,20 @@ function isQuotaError(status: number, bodyText: string): boolean {
 export async function resolveOpenSeaSlug(openSeaChain: string, contractAddress: string, apiKey: string): Promise<string | null> {
   const gate = checkSourceBudget(SOURCE);
   if (!gate.allowed) return null;
+  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
 
   let res: Response;
+  let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/chain/${encodeURIComponent(openSeaChain)}/contract/${encodeURIComponent(contractAddress)}`, {
       headers: { "x-api-key": apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
+    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
   } catch {
+    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
     recordSourceFailure(SOURCE, false);
     return null;
   }
@@ -143,14 +164,20 @@ function statsNoneKey(slug: string): string {
 export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string): Promise<OpenSeaCollectionStats | null> {
   const gate = checkSourceBudget(SOURCE);
   if (!gate.allowed) return null;
+  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
 
   let res: Response;
+  let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/collections/${encodeURIComponent(slug)}/stats`, {
       headers: { "x-api-key": apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
+    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
   } catch {
+    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
     recordSourceFailure(SOURCE, false);
     return null;
   }
@@ -196,14 +223,20 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
 export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string): Promise<OpenSeaCollectionDisplay | null> {
   const gate = checkSourceBudget(SOURCE);
   if (!gate.allowed) return null;
+  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
 
   let res: Response;
+  let settled = false;
   try {
     res = await fetch(`${OPENSEA_BASE}/collections/${encodeURIComponent(slug)}`, {
       headers: { "x-api-key": apiKey, accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
+    await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
   } catch {
+    if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
     recordSourceFailure(SOURCE, false);
     return null;
   }
@@ -249,13 +282,19 @@ export async function fetchOpenSeaListedCount(slug: string, apiKey: string, open
     const qs = new URLSearchParams({ limit: String(LISTING_PAGE_SIZE) });
     if (openSeaChain) qs.set("chain", openSeaChain);
     if (cursor) qs.set("next", cursor);
+    const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+    if (!(await reserveProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window))) return null;
     let res: Response;
+    let settled = false;
     try {
       res = await fetch(`${OPENSEA_BASE}/listings/collection/${encodeURIComponent(slug)}/all?${qs}`, {
         headers: { "x-api-key": apiKey, accept: "application/json" },
         signal: AbortSignal.timeout(15_000),
       });
+      await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true);
+      settled = true;
     } catch {
+      if (!settled) await settleProviderCapacity(OPENSEA_STATS_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
       recordSourceFailure(SOURCE, false);
       return null;
     }

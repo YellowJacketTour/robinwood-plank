@@ -39,11 +39,33 @@ import {
 } from "@/lib/market/multichain/seaport-fill-indexer";
 import { ALL_SEAPORT_ADDRESSES } from "@/lib/market/multichain/seaport-deployments";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
-import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
+import { writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 
 const SOURCE = "hypersync-seaport";
 const CHUNK_BLOCKS = 50_000; // same conservative window hypersync-evm-scan.ts already uses
 const MAX_LOGS_PER_RUN = 20_000; // same free-tier event-quota guard
+
+const HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT = "hypersync-seaport:default";
+/** Same approximation rationale as hypersync-evm-scan.ts's own HYPERSYNC_EVM_DAILY_ALLOWANCE -- no DAILY_CEILING entry exists for "hypersync-seaport" (HyperSync's real limit is event/storage volume, not call count). Approximated at the same conservative order of magnitude, purely to add a durable cross-process guard on top of the existing in-memory checkSourceBudget gate. */
+const HYPERSYNC_SEAPORT_DAILY_ALLOWANCE = 2_000;
+
+/** One real HyperSync call (getHeight or a query page) reserved/settled durably around it. */
+async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
+  const window = utcDayWindow(HYPERSYNC_SEAPORT_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT, window))) {
+    throw new Error("hypersync-seaport-scan: durable daily ceiling");
+  }
+  let settled = false;
+  try {
+    const result = await fn();
+    await settleProviderCapacity(HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
+    return result;
+  } catch (error) {
+    if (!settled) await settleProviderCapacity(HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    throw error;
+  }
+}
 
 function requireApiToken(): string {
   const token = process.env.ENVIO_API_TOKEN?.trim();
@@ -118,7 +140,7 @@ async function scanChainForFillsInternal(
 
   let height: number;
   try {
-    height = await client.getHeight();
+    height = await withHypersyncReservation(() => client.getHeight());
     recordSourceSuccess(SOURCE);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -167,7 +189,7 @@ async function scanChainForFillsInternal(
 
   try {
     while (totalLogs < MAX_LOGS_PER_RUN) {
-      const res = await client.get(query);
+      const res = await withHypersyncReservation(() => client.get(query));
       recordSourceSuccess(SOURCE);
 
       const timestampByBlock = new Map<number, number>();
