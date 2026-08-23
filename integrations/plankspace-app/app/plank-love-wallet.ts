@@ -50,7 +50,8 @@ export async function ensurePlankLoveRobinhoodChain(address?: string) {
 }
 
 export async function signPlankLoveMessage(message: string, address: string) {
-  if (!message.startsWith("PlankSpace authorization\n") || message.length > 2000) {
+  const expectedPrefix = "PlankSpace wallet verification\nSite: https://plank.love/plankspace\n";
+  if (!message.startsWith(expectedPrefix) || !message.includes("Safety: This is only a login signature") || message.length > 2000) {
     throw new Error("PlankSpace rejected an unknown signing request.");
   }
   const result = await request("signMessage", { message, address });

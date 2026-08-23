@@ -84,6 +84,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // restores WalletConnect sessions only while its hooks are mounted.
   const [connectMounted, setConnectMounted] = useState(true);
   const pendingPlankSpaceConnects = useRef<string[]>([]);
+  const walletStateRef = useRef({ address, chainId, status });
+  walletStateRef.current = { address, chainId, status };
 
   const applyAccounts = useCallback((accounts: string[] | undefined) => {
     const next = accounts?.[0] ?? null;
@@ -195,22 +197,37 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       void (async () => {
         try {
           if (detail.method === "getState") {
-            respond(detail.requestId, { state: { address, chainId, status, isConnected: Boolean(address) } });
+            const current = walletStateRef.current;
+            respond(detail.requestId, { state: { ...current, isConnected: Boolean(current.address) } });
           } else if (detail.method === "connect") {
-            if (address) respond(detail.requestId, { address, state: { address, chainId, status: "connected", isConnected: true } });
+            const current = walletStateRef.current;
+            if (current.address) respond(detail.requestId, { address: current.address, state: { ...current, status: "connected", isConnected: true } });
             else {
+              let restored: string | null = null;
+              for (let attempt = 0; attempt < 8 && !restored; attempt += 1) {
+                const accounts = await getConnectedAccounts();
+                restored = accounts[0] || walletStateRef.current.address;
+                if (!restored) await new Promise(resolve => window.setTimeout(resolve, 250));
+              }
+              if (restored) {
+                adoptAccount(restored);
+                respond(detail.requestId, { address: restored, state: { address: restored, chainId: walletStateRef.current.chainId, status: "connected", isConnected: true } });
+                return;
+              }
               pendingPlankSpaceConnects.current.push(detail.requestId);
               openConnect();
             }
           } else if (detail.method === "ensureRobinhoodChain") {
             await ensureRobinhoodChain();
             await refresh();
-            respond(detail.requestId, { state: { address, chainId, status, isConnected: Boolean(address) } });
+            const current = walletStateRef.current;
+            respond(detail.requestId, { state: { ...current, isConnected: Boolean(current.address) } });
           } else if (detail.method === "signMessage") {
-            if (!address || !detail.payload?.message) throw new Error("Connect your Plank.love wallet first.");
-            if (detail.payload.address && detail.payload.address.toLowerCase() !== address.toLowerCase()) throw new Error("Signing wallet does not match the connected profile.");
-            const signature = await signWalletMessage(address, detail.payload.message);
-            respond(detail.requestId, { address, signature });
+            const currentAddress = walletStateRef.current.address;
+            if (!currentAddress || !detail.payload?.message) throw new Error("Connect your Plank.love wallet first.");
+            if (detail.payload.address && detail.payload.address.toLowerCase() !== currentAddress.toLowerCase()) throw new Error("Signing wallet does not match the connected profile.");
+            const signature = await signWalletMessage(currentAddress, detail.payload.message);
+            respond(detail.requestId, { address: currentAddress, signature });
           } else throw new Error("Unsupported wallet request.");
         } catch (e) {
           respond(detail.requestId, undefined, e instanceof Error ? e.message : "Wallet request failed.");
@@ -219,7 +236,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("plank:wallet-request", onRequest);
     return () => window.removeEventListener("plank:wallet-request", onRequest);
-  }, [address, chainId, status, openConnect, refresh]);
+  }, [adoptAccount, openConnect, refresh]);
 
   const disconnect = useCallback(() => {
     setAddress(null);
@@ -304,4 +321,3 @@ export function useWallet(): WalletContextValue {
   }
   return ctx;
 }
-
