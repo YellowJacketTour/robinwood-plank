@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Interface } from "ethers";
-import { decodePunkOffer } from "../../lib/market/multichain/native-market-adapters/cryptopunks";
+import { decodePunkOffer, isPublicCryptoPunkAsk } from "../../lib/market/multichain/native-market-adapters/cryptopunks";
 
 const iface = new Interface(["function punksOfferedForSale(uint256) view returns (bool,uint256,address,uint256,address)"]);
 
@@ -18,4 +18,11 @@ test("rejects inactive, failed, and mismatched slots", () => {
   assert.equal(decodePunkOffer(7, true, inactive), null);
   assert.equal(decodePunkOffer(7, false, mismatch), null);
   assert.equal(decodePunkOffer(7, true, mismatch), null);
+});
+
+test("only positive unrestricted asks enter the public CryptoPunks book", () => {
+  const base = { tokenId: "1", seller: "0x1111111111111111111111111111111111111111" };
+  assert.equal(isPublicCryptoPunkAsk({ ...base, minValue: "1", onlySellTo: "0x0000000000000000000000000000000000000000" }), true);
+  assert.equal(isPublicCryptoPunkAsk({ ...base, minValue: "0", onlySellTo: "0x0000000000000000000000000000000000000000" }), false);
+  assert.equal(isPublicCryptoPunkAsk({ ...base, minValue: "1", onlySellTo: "0x2222222222222222222222222222222222222222" }), false);
 });

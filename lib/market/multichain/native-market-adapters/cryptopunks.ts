@@ -28,6 +28,26 @@ export type CryptoPunkOffer = {
   onlySellTo: string;
 };
 
+export function isPublicCryptoPunkAsk(offer: CryptoPunkOffer): boolean {
+  return BigInt(offer.minValue) > 0n && /^0x0{40}$/.test(offer.onlySellTo);
+}
+
+export async function getCryptoPunksNativeBookStats(): Promise<{ listedCount: number; floorWei: string | null }> {
+  const result = await postgresQuery<{ listed_count: string; floor_wei: string | null }>(
+    `SELECT COUNT(*)::text AS listed_count, MIN(amount_atomic)::text AS floor_wei
+     FROM plank_market_live_orders
+     WHERE chain_slug = $1 AND venue_id = $2 AND side = 'ask'
+       AND amount_atomic > 0
+       AND COALESCE(raw_order->>'onlySellTo', '0x0000000000000000000000000000000000000000')
+           = '0x0000000000000000000000000000000000000000'`,
+    [CHAIN_SLUG, VENUE_ID]
+  );
+  return {
+    listedCount: Number(result.rows[0]?.listed_count ?? 0),
+    floorWei: result.rows[0]?.floor_wei ?? null,
+  };
+}
+
 /** Durable current-state book for request paths; the request never scans 10k contract slots. */
 export async function getCryptoPunksNativeBook(limit = 200): Promise<CryptoPunkOffer[]> {
   const result = await postgresQuery<{
@@ -37,6 +57,9 @@ export async function getCryptoPunksNativeBook(limit = 200): Promise<CryptoPunkO
             raw_order->>'onlySellTo' AS only_sell_to
      FROM plank_market_live_orders
      WHERE chain_slug = $1 AND venue_id = $2 AND side = 'ask'
+       AND amount_atomic > 0
+       AND COALESCE(raw_order->>'onlySellTo', '0x0000000000000000000000000000000000000000')
+           = '0x0000000000000000000000000000000000000000'
      ORDER BY amount_atomic ASC, token_id
      LIMIT $3`,
     [CHAIN_SLUG, VENUE_ID, Math.min(Math.max(limit, 1), 2_000)]
@@ -121,9 +144,14 @@ async function readBook(rpcUrl: string): Promise<CryptoPunkOffer[]> {
 }
 
 async function persistBook(offers: CryptoPunkOffer[]): Promise<void> {
+  // The contract exposes both public asks and address-restricted private
+  // offers through the same mapping. Only positive, unrestricted asks form
+  // the public order book/floor; persisting private or zero-value records as
+  // listings makes them look executable to every visitor when they are not.
+  const publicOffers = offers.filter(isPublicCryptoPunkAsk);
   await withPostgresTransaction(async (client) => {
     await client.query(`DELETE FROM plank_market_live_orders WHERE chain_slug = $1 AND venue_id = $2`, [CHAIN_SLUG, VENUE_ID]);
-    if (offers.length) {
+    if (publicOffers.length) {
       await client.query(
         `INSERT INTO plank_market_live_orders
            (chain_slug, venue_id, order_id, side, collection_key, token_id, maker,
@@ -136,7 +164,7 @@ async function persistBook(offers: CryptoPunkOffer[]): Promise<void> {
          ON CONFLICT (chain_slug, venue_id, order_id) DO UPDATE SET
            maker = EXCLUDED.maker, amount_atomic = EXCLUDED.amount_atomic,
            source_updated_at = EXCLUDED.source_updated_at, raw_order = EXCLUDED.raw_order`,
-        [CHAIN_SLUG, VENUE_ID, CRYPTOPUNKS_CONTRACT, JSON.stringify(offers.map((offer) => ({
+        [CHAIN_SLUG, VENUE_ID, CRYPTOPUNKS_CONTRACT, JSON.stringify(publicOffers.map((offer) => ({
           token_id: offer.tokenId, seller: offer.seller, min_value: offer.minValue, only_sell_to: offer.onlySellTo,
         })))]
       );
@@ -161,12 +189,12 @@ export async function syncCryptoPunksNativeBook(): Promise<{ listed: number; pub
     try {
       const offers = await readBook(rpcUrl);
       await persistBook(offers);
-      const publicOffers = offers.filter((offer) => /^0x0{40}$/.test(offer.onlySellTo));
+      const publicOffers = offers.filter(isPublicCryptoPunkAsk);
       const floorWei = publicOffers.reduce<string | null>((floor, offer) => floor == null || BigInt(offer.minValue) < BigInt(floor) ? offer.minValue : floor, null);
-      await updateCollectionSupplyFields(CHAIN_SLUG, CRYPTOPUNKS_CONTRACT, { listedCount: offers.length, totalSupply: SUPPLY });
+      await updateCollectionSupplyFields(CHAIN_SLUG, CRYPTOPUNKS_CONTRACT, { listedCount: publicOffers.length, totalSupply: SUPPLY });
       await recordFloorObservation(CHAIN_SLUG, CRYPTOPUNKS_CONTRACT, {
         priceAtomic: floorWei, currency: "ETH", marketplace: VENUE_ID,
-        listedCount: offers.length, source: "cryptopunks-contract-state",
+        listedCount: publicOffers.length, source: "cryptopunks-contract-state",
       });
       const traits = await syncCryptoPunksTraits().catch(() => ({ indexed: 0, traits: 0 }));
       return { listed: offers.length, publicListed: publicOffers.length, floorWei, rpcUrl, traitIndexed: traits.indexed };

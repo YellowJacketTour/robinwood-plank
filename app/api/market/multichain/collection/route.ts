@@ -31,6 +31,16 @@ export async function GET(req: NextRequest) {
     let holderCount = supply?.holderCount ?? null;
     let listedCount = supply?.listedCount ?? null;
     let totalSupply = supply?.totalSupply ?? null;
+    let floorPriceWei = supply?.floorPriceWei ?? null;
+    let floorPriceCurrency = supply?.floorPriceCurrency ?? null;
+    if (chainSlug === "eth-mainnet" && tracked.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
+      const { getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+      const native = await getCryptoPunksNativeBookStats();
+      totalSupply = 10_000;
+      listedCount = native.listedCount;
+      floorPriceWei = native.floorWei;
+      floorPriceCurrency = native.floorWei == null ? null : "ETH";
+    }
     if (isSolanaChainSlug(chainSlug)) {
       const me = await fetch(
         `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/stats`,
@@ -64,8 +74,8 @@ export async function GET(req: NextRequest) {
           listedCount,
           totalSupply,
           holderCount,
-          floorPriceWei: supply?.floorPriceWei ?? null,
-          floorPriceCurrency: supply?.floorPriceCurrency ?? null,
+          floorPriceWei,
+          floorPriceCurrency,
           volume24hWei: marketStats?.volume24hWei ?? null,
           sales24h: marketStats?.sales24h ?? null,
           volume7dWei: marketStats?.volume7dWei ?? null,

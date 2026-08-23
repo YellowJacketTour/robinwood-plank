@@ -30,6 +30,9 @@ type ProjectionRow = { projected_count: number; expected_count: number | null; p
   provenance: string[]; source_observed_at: Date | string; projected_at: Date | string };
 
 export function hasCollectionTokenStore(): boolean { return hasPostgresConfig(); }
+function canonicalCollectionSlug(value: string): string {
+  return /^0x[0-9a-f]{40}$/i.test(value) ? value.toLowerCase() : value;
+}
 export function encodeTokenCursor(tokenId: string): string {
   return Buffer.from(tokenId, "utf8").toString("base64url");
 }
@@ -102,6 +105,7 @@ export async function readCollectionTokenProjection(input: {
 export async function upsertCollectionTokenProjection(
   chainSlug: string, collectionSlug: string, page: CollectionTokenProjectionPage
 ): Promise<void> {
+  collectionSlug = canonicalCollectionSlug(collectionSlug);
   const provenance = [...new Set(page.provenance.map((value) => value.trim()).filter(Boolean))];
   if (!provenance.length) throw new Error("collection token projection requires provenance");
   if (!Number.isFinite(page.sourceObservedAt.getTime())) throw new Error("sourceObservedAt must be a valid date");
@@ -178,6 +182,7 @@ export async function writeCollectionMembershipCursor(input: {
   expectedCount?: number | null; complete: boolean; lastError?: string | null;
   sourceObservedAt?: Date;
 }): Promise<void> {
+  input = { ...input, collectionSlug: canonicalCollectionSlug(input.collectionSlug) };
   const count = await postgresQuery<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM plank_collection_tokens
      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,

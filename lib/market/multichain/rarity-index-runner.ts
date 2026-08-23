@@ -70,6 +70,12 @@ export async function advanceVerifiedSequentialMembership(chainSlug: string, con
   const boundary = await readSequentialMintBoundary({ chainSlug, contractAddress: canonicalAddress, rpcUrls });
   if (!boundary) return null;
   const checkpoint = await readCollectionMembershipCursor(chainSlug, canonicalAddress, SEQUENTIAL_MEMBERSHIP_SOURCE);
+  // A revisit of an unchanged, already-complete mint boundary is a no-op.
+  // Rewriting the projection as partial here used to regress a fully verified
+  // trait/rarity catalog every time visitor demand re-ran membership.
+  if (checkpoint?.complete && checkpoint.expectedCount === boundary.expectedCount) {
+    return { ...boundary, itemsObserved: 0, complete: true, nextTokenId: null };
+  }
   const firstPending = Math.max(boundary.firstTokenId, Number(checkpoint?.cursor ?? boundary.firstTokenId));
   const end = Math.min(boundary.lastTokenId, firstPending + SEQUENTIAL_SEED_SIZE - 1);
   const tokens = end >= firstPending

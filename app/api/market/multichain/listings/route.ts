@@ -126,8 +126,11 @@ export async function GET(req: NextRequest) {
   const normalizedCollection = collectionSlug.toLowerCase();
   if (chainSlug === "eth-mainnet" && normalizedCollection === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
     try {
-      const { getCryptoPunksNativeBook } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
-      const native = await getCryptoPunksNativeBook(limit);
+      const { getCryptoPunksNativeBook, getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+      const [native, nativeStats] = await Promise.all([
+        getCryptoPunksNativeBook(limit),
+        getCryptoPunksNativeBookStats(),
+      ]);
       const listings: Listing[] = native.map((offer) => ({
         id: `cryptopunks-native:${offer.tokenId}`,
         collectionSlug,
@@ -145,7 +148,14 @@ export async function GET(req: NextRequest) {
       const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
       void prioritizeCollectionDemand(chainSlug, normalizedCollection).catch(() => {});
       return NextResponse.json({
-        collection: await collectionEnvelope(chainSlug, normalizedCollection),
+        collection: {
+          ...(await collectionEnvelope(chainSlug, normalizedCollection)),
+          // CryptoPunks is a fixed canonical 10,000-item universe. Do not let
+          // an aggregator's temporarily incomplete token index redefine it.
+          totalSupply: 10_000,
+          listedCount: nativeStats.listedCount,
+          floorPriceWei: nativeStats.floorWei,
+        },
         listings,
       }, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } });
     } catch (error) {

@@ -164,6 +164,7 @@ export async function GET(req: Request) {
     };
 
     let cryptoPunksNativeBookIndexed = false;
+    let cryptoPunksNativeStats: { listedCount: number; floorWei: string | null } | null = null;
     if (hasPostgresConfig()) {
       const coverage = await postgresQuery<{ indexed: boolean }>(
         `SELECT EXISTS (
@@ -173,9 +174,16 @@ export async function GET(req: Request) {
          ) AS indexed`
       ).catch(() => ({ rows: [] }));
       cryptoPunksNativeBookIndexed = coverage.rows[0]?.indexed === true;
+      if (cryptoPunksNativeBookIndexed) {
+        const { getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+        cryptoPunksNativeStats = await getCryptoPunksNativeBookStats().catch(() => null);
+      }
     }
 
-    const mapped = collections.map((c) => ({
+    const mapped = collections.map((c) => {
+      const isCryptoPunks = c.chainSlug === "eth-mainnet"
+        && c.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb";
+      return ({
         chainSlug: c.chainSlug,
         chainId: c.chainId,
         contractAddress: c.contractAddress,
@@ -184,12 +192,14 @@ export async function GET(req: Request) {
         imageUrl: c.imageUrl,
         externalUrl: c.externalUrl,
         isVaultBacked: c.isVaultBacked,
-        floorPriceWei: c.floorPriceWei,
-        floorPriceCurrency: c.floorPriceCurrency,
-        floorPriceMarketplace: c.floorPriceMarketplace,
-        totalSupply: c.totalSupply,
+        floorPriceWei: isCryptoPunks && cryptoPunksNativeStats ? cryptoPunksNativeStats.floorWei : c.floorPriceWei,
+        floorPriceCurrency: isCryptoPunks && cryptoPunksNativeStats?.floorWei ? "ETH" : c.floorPriceCurrency,
+        floorPriceMarketplace: isCryptoPunks && cryptoPunksNativeStats ? "cryptopunks-native" : c.floorPriceMarketplace,
+        totalSupply: isCryptoPunks ? 10_000 : c.totalSupply,
         listedCount:
-          hasUnindexedNativeBook(c.chainSlug, c.contractAddress) && !cryptoPunksNativeBookIndexed
+          isCryptoPunks && cryptoPunksNativeStats
+            ? cryptoPunksNativeStats.listedCount
+          : hasUnindexedNativeBook(c.chainSlug, c.contractAddress) && !cryptoPunksNativeBookIndexed
             ? null
             : c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
             ? null
@@ -239,7 +249,8 @@ export async function GET(req: Request) {
               : null,
         floorChangeEvidence: null,
         isNativeHome: false,
-      }));
+        });
+    });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
     return NextResponse.json({
       count: withoutDupNative.length + 1,
