@@ -2275,15 +2275,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               })}
             </ul>
           )}
-          {bookFilter === "all" && tokenLimit < surface.catalogCap && tokens.length >= Math.min(tokenLimit, surface.catalogCap) && (
-            <div className="mt-3 flex justify-center">
+          {bookFilter === "all" && tokenLimit < surface.catalogCap && (
+            catalogMeta?.projectedCount != null
+              ? tokens.length < Math.min(surface.catalogCap, catalogMeta.projectedCount)
+              : tokens.length >= Math.min(tokenLimit, surface.catalogCap)
+          ) && (
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
               <button
                 type="button"
-                onClick={() => setTokenLimit((n) => Math.min(surface.catalogCap, n + surface.catalogPageSize))}
+                onClick={() => setTokenLimit((n) => Math.min(
+                  surface.catalogCap,
+                  Math.max(n, tokens.length) + surface.catalogPageSize
+                ))}
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
                 Load more
                 {catalogMeta?.projectedCount ? ` · ${tokens.length.toLocaleString()} of ${catalogMeta.projectedCount.toLocaleString()} indexed shown` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTokenLimit(Math.min(
+                  surface.catalogCap,
+                  catalogMeta?.projectedCount ?? catalogMeta?.expectedCount ?? surface.catalogCap
+                ))}
+                className="min-h-10 rounded-md border border-purple-400/50 px-4 text-xs font-bold text-purple-200 hover:bg-purple-400/10"
+              >
+                Show all
+                {catalogMeta?.projectedCount
+                  ? ` · ${Math.min(surface.catalogCap, catalogMeta.projectedCount).toLocaleString()} indexed`
+                  : ""}
               </button>
             </div>
           )}
