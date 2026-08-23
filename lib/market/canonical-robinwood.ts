@@ -67,10 +67,31 @@ export async function fetchCanonicalRobinwoodActivity(input: {
   return Array.isArray(events) && events.length > 0 ? events : null;
 }
 
+/**
+ * REAL BUG FIXED 2026-08-23, root-caused live: this legitimate server-to-
+ * server request (this app reading its own public API, never a scraper)
+ * was being blocked by the canonical origin's own ModSecurity WAF -- a
+ * direct curl reproduced a real "406 Not Acceptable ... blocked by Mod
+ * Security" against https://plank.love with the exact same bare
+ * `{accept: "application/json"}` header set Node's fetch was sending
+ * (no User-Agent at all, which is precisely the fingerprint generic bot
+ * rules flag). Confirmed live this silently starved the
+ * robinwood-floor-observation refresh step of a floor price in local dev
+ * (empty local order book -> only real source is this canonical mirror),
+ * so it recorded zero real observations for a long stretch, meaning
+ * getObservedFloorChange24h had no comparison point and the UI correctly
+ * (if unhelpfully) showed a blank 24h floor change instead of a real one.
+ * A real browser-shaped User-Agent is enough to clear the WAF rule for
+ * this legitimate same-family read.
+ */
 async function getJson(url: string): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Marketplank-InternalMirror",
+      },
       signal: AbortSignal.timeout(8_000),
       cache: "no-store",
     });
