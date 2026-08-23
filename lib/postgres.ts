@@ -16,12 +16,16 @@ const REQUIRED_POSTGRES_ENV = [
   "PGPASSWORD",
 ] as const;
 
+function postgresConnectionString(): string | null {
+  return process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim() || null;
+}
+
 function postgresGlobal(): PostgresGlobal {
   return globalThis as PostgresGlobal;
 }
 
 export function hasPostgresConfig(): boolean {
-  return REQUIRED_POSTGRES_ENV.every((name) =>
+  return Boolean(postgresConnectionString()) || REQUIRED_POSTGRES_ENV.every((name) =>
     Boolean(process.env[name]?.trim())
   );
 }
@@ -72,19 +76,22 @@ function postgresSsl(): false | { rejectUnauthorized: boolean } {
 export function postgresPool(): Pool {
   const state = postgresGlobal();
   if (!state.__plankPostgresPool) {
+    const connectionString = postgresConnectionString();
     state.__plankPostgresPool = new Pool({
-      host: required("PGHOST"),
-      port: postgresPort(),
-      database: required("PGDATABASE"),
-      user: required("PGUSER"),
-      password: required("PGPASSWORD"),
+      ...(connectionString ? { connectionString } : {
+        host: required("PGHOST"),
+        port: postgresPort(),
+        database: required("PGDATABASE"),
+        user: required("PGUSER"),
+        password: required("PGPASSWORD"),
+      }),
       max: postgresPoolMax(),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
       statement_timeout: 15_000,
       query_timeout: 20_000,
       application_name: "plank-love-passenger",
-      ssl: postgresSsl(),
+      ...(connectionString ? {} : { ssl: postgresSsl() }),
     });
     state.__plankPostgresPool.on("error", (error) => {
       console.error("[postgres] idle client error:", error);

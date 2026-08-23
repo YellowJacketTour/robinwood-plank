@@ -88,3 +88,6 @@ public/arcade/deploy-addresses.testnet.json
 /blob-report/
 test/e2e/.hardhat-node.pid
 test/e2e/.casino-keeper.pid
+
+.vercel
+.env*

@@ -22,7 +22,6 @@ the same directory that contains `package.json`; allow files to be replaced.
 
 ```powershell
 npm install
-npm run db:migrate
 npm run build
 git add --all
 git commit -m "fix: restore native PlankSpace wallet and profiles"
@@ -33,6 +32,20 @@ The migration requires the same `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`,
 `PGPORT`, and `PGSSLMODE` values used by the deployed application. Add those
 variables to Vercel Preview as well as local `.env.local`. Do not put their
 values in Git.
+
+For a Vercel Preview database, first connect a PostgreSQL/Neon store to the
+Vercel project with **Preview** enabled. Then pull that preview environment and
+apply the migrations to that same database:
+
+```powershell
+npx vercel link
+npx vercel env pull .env.preview.local --environment=preview
+node --env-file=.env.preview.local scripts/migrate-postgres.mjs
+```
+
+The server accepts either Vercel-style `POSTGRES_URL` / `DATABASE_URL` or the
+individual `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPORT`, and
+`PGSSLMODE` variables.
 
 Vercel also needs `NEXT_PUBLIC_WALLET_UI=reown` and the existing
 `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` so Plank.love and PlankSpace use the

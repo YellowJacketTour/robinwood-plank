@@ -35,17 +35,20 @@ const ssl =
     ? false
     : { rejectUnauthorized: sslMode === "verify-ca" || sslMode === "verify-full" };
 
+const connectionString = process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim();
 const pool = new Pool({
-  host: required("PGHOST"),
-  port: integerEnv("PGPORT", 5432, 1, 65_535),
-  database: required("PGDATABASE"),
-  user: required("PGUSER"),
-  password: required("PGPASSWORD"),
+  ...(connectionString ? { connectionString } : {
+    host: required("PGHOST"),
+    port: integerEnv("PGPORT", 5432, 1, 65_535),
+    database: required("PGDATABASE"),
+    user: required("PGUSER"),
+    password: required("PGPASSWORD"),
+  }),
   max: 1,
   connectionTimeoutMillis: 10_000,
   statement_timeout: 30_000,
   application_name: "plank-love-migrations",
-  ssl,
+  ...(connectionString ? {} : { ssl }),
 });
 
 const files = (await fs.readdir(migrationsDir))
