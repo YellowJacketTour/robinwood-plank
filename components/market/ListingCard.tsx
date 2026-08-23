@@ -22,6 +22,7 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   pulp: "bg-[#F0803C]/15 text-[#F0803C]",
   magiceden: "bg-[#E42575]/15 text-[#E42575]",
   unisat: "bg-[#F7931A]/15 text-[#F7931A]",
+  "ordinals-wallet": "bg-[#F7931A]/15 text-[#F7931A]",
   "cryptopunks-native": "bg-gold-500/15 text-gold-300",
   marketplank: "bg-gold-500/15 text-gold-300",
 };

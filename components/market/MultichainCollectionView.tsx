@@ -1629,10 +1629,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // real sale events in the activity feed (bounded to whatever activity/
   // route.ts returned, same honesty as everywhere else here -- this is
   // "volume in the loaded window," not an all-time indexed total).
-  const floorWei =
+  // A rendered book is frequently a presentation window, not a proof that
+  // every venue cursor was exhausted. Prefer the durable aggregate floor;
+  // only derive from rows when no indexed aggregate exists. This prevents a
+  // partial page from replacing a cheaper listing that lives later in the
+  // venue cursor.
+  const floorWei = supplyStats?.floorPriceWei ?? (
     listings.length > 0
       ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei)
-      : supplyStats?.floorPriceWei ?? null;
+      : null
+  );
   // Real max across BOTH sources merged by this route (native offers first,
   // then OpenSea-sourced offers -- see offers/route.ts's header) -- offers[0]
   // alone was wrong whenever a native offer existed alongside a higher-priced
@@ -1668,7 +1674,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     : null;
   const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana, isBitcoin);
   const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
-  const floorCurrencySymbol = listings.length > 0 ? statCurrencySymbol : (supplyStats?.floorPriceCurrency ?? statCurrencySymbol);
+  const floorCurrencySymbol = supplyStats?.floorPriceWei
+    ? (supplyStats.floorPriceCurrency ?? statCurrencySymbol)
+    : statCurrencySymbol;
   const floorUsd = (weiStr: string | null): number | null => toUsd(weiStr, floorCurrencySymbol);
 
   return (

@@ -31,7 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { fetchOpenSeaListings, getOpenSeaApiKey, normaliseOpenSeaListings } from "@/lib/market/opensea";
+import { fetchAllOpenSeaListings, getOpenSeaApiKey, normaliseOpenSeaListings } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
@@ -53,7 +53,8 @@ function mapBitcoinListings(
   collectionSlug: string,
   chainSlug: string,
   raw: Array<{ id: string; tokenId: string; maker: string; priceWei: string; imageUrl: string | null }>,
-  buyable: boolean
+  buyable: boolean,
+  venue: "unisat" | "ordinals-wallet" = "unisat"
 ): Listing[] {
   return [...raw]
     .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
@@ -66,8 +67,10 @@ function mapBitcoinListings(
       expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       kind: "fixed" as const,
       imageUrl: l.imageUrl ?? undefined,
-      venue: "unisat" as const,
-      externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
+      venue,
+      externalUrl: venue === "unisat"
+        ? `https://unisat.io/inscription/${l.tokenId}`
+        : `https://ordinalswallet.com/inscription/${l.tokenId}`,
       foreignChainSlug: chainSlug,
       // UniSat auctionId only -- Ordinals Wallet escrow prices are display
       // overlays and cannot be filled via create_bid_prepare.
@@ -188,10 +191,14 @@ export async function GET(req: NextRequest) {
         // hard-coded RobinWood, which made every other Robinhood collection
         // (including MUGS) report aggregate inventory without its orders.
         refreshPulpListings(collection.contractAddress).catch(() => []),
-        openSeaSlug ? fetchOpenSeaListings(openSeaSlug, 200).catch(() => null) : Promise.resolve(null),
+        openSeaSlug ? fetchAllOpenSeaListings(openSeaSlug).catch(() => null) : Promise.resolve(null),
       ]);
       const native: Listing[] = nativeRows.map(({ rawOrder: _rawOrder, ...listing }) => listing);
-      const openSea = normaliseOpenSeaListings(openSeaPage?.listings ?? []);
+      // A partial cursor walk cannot safely participate in floor or rarity
+      // projections: the missing next page may contain a cheaper token.
+      const openSea = openSeaPage?.complete
+        ? normaliseOpenSeaListings(openSeaPage.listings)
+        : [];
       const listings = mergeBook(
         native,
         [...pulp, ...openSea],
@@ -219,6 +226,14 @@ export async function GET(req: NextRequest) {
             sales30d: marketStats?.sales30d ?? null,
           },
           listings,
+          bookCoverage: {
+            complete: Boolean(openSeaPage?.complete),
+            sources: {
+              native: "durable",
+              pulp: "upstream-unpaginated",
+              opensea: openSeaPage?.complete ? "cursor-exhausted" : "incomplete-excluded",
+            },
+          },
         },
         { headers: { "Cache-Control": "no-store" } }
       );
@@ -349,7 +364,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(
           {
             collection: await collectionEnvelope(chainSlug, collectionSlug),
-            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
+            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
             listingsUnavailable: ow.listings.length > 0 ? null : "unisat-rate-limit",
           },
           { headers: { "Cache-Control": "no-store" } }
@@ -370,7 +385,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(
           {
             collection: await collectionEnvelope(chainSlug, collectionSlug),
-            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
+            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
             listingsUnavailable: "unisat-rate-limit",
           },
           { headers: { "Cache-Control": "no-store" } }

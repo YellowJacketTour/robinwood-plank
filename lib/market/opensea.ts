@@ -350,11 +350,41 @@ export type OpenSeaListing = {
 
 export async function fetchOpenSeaListings(
   slug: string,
-  limit = 50
+  limit = 50,
+  cursor?: string | null
 ): Promise<{ listings?: OpenSeaListing[]; next?: string } | null> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("next", cursor);
   return openSeaGet(
-    `/listings/collection/${encodeURIComponent(slug)}/all?limit=${limit}`
+    `/listings/collection/${encodeURIComponent(slug)}/all?${params.toString()}`
   );
+}
+
+/**
+ * Walk the venue cursor instead of allowing one API page to redefine a
+ * collection's listed universe. The bound is a transport safety ceiling, not
+ * a claim of completeness: callers receive `complete: false` if it is hit.
+ */
+export async function fetchAllOpenSeaListings(
+  slug: string,
+  options?: { maxListings?: number; pageSize?: number }
+): Promise<{ listings: OpenSeaListing[]; complete: boolean }> {
+  const maxListings = Math.min(Math.max(options?.maxListings ?? 10_000, 1), 50_000);
+  const pageSize = Math.min(Math.max(options?.pageSize ?? 100, 1), 100);
+  const listings: OpenSeaListing[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await fetchOpenSeaListings(slug, Math.min(pageSize, maxListings - listings.length), cursor);
+    if (!page) return { listings, complete: false };
+    listings.push(...(page.listings ?? []));
+    const next = page.next?.trim() || null;
+    if (!next) return { listings: listings.slice(0, maxListings), complete: true };
+    if (seenCursors.has(next)) return { listings: listings.slice(0, maxListings), complete: false };
+    seenCursors.add(next);
+    cursor = next;
+  } while (listings.length < maxListings);
+  return { listings: listings.slice(0, maxListings), complete: false };
 }
 
 /** Cached, normalised OpenSea listings. No TTL — see migration 003. */
@@ -447,8 +477,8 @@ export async function readOpenSeaListings(): Promise<NormalisedOpenSeaListing[]>
  * nothing — an outage should shrink the visible market, not empty it.
  */
 export async function refreshOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
-  const page = await fetchOpenSeaListings(OPENSEA_COLLECTION_SLUG, 100);
-  if (!page?.listings?.length) return readOpenSeaListings();
+  const page = await fetchAllOpenSeaListings(OPENSEA_COLLECTION_SLUG);
+  if (!page.complete || !page.listings.length) return readOpenSeaListings();
   const normalised = normaliseOpenSeaListings(page.listings);
   if (normalised.length === 0) return readOpenSeaListings();
   if (hasDurableKv()) {

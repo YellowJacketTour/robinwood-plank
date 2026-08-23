@@ -373,8 +373,10 @@ export async function scanChainForFills(
   const confirmationDepth =
     opts?.confirmationDepth ?? CONFIRMATION_DEPTH_BY_CHAIN[chainSlug] ?? DEFAULT_CONFIRMATION_DEPTH;
 
-  // A new namespace is deliberate. The former cursor only proved Seaport
-  // 1.6 coverage; reusing it would permanently skip legacy deployments.
+  // A new namespace is deliberate: live scans must listen to every known
+  // deployment. This cursor intentionally remains near-head/forward-only;
+  // block-0 historical completeness is owned by the independent HyperSync
+  // genesis lane and must never be inferred from this RPC cursor.
   const cursorKey = `${chainSlug}::seaport-all-rpc-live-v1`;
   const lastIndexedBlock = await readCursor(cursorKey);
   // No historical backfill target -- bootstraps from just-below-head on

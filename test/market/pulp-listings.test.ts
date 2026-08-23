@@ -98,6 +98,7 @@ test("Pulp rows join the book, tagged and linking out", () => {
 test("Pulp cache and outbound links are collection-scoped, never RobinWood-hard-coded", () => {
   const mugs = "0xab75f3d72509cd3b3a386a03de2b82854f0060e5";
   assert.match(pulpListingsKey(mugs), new RegExp(mugs));
+  assert.notEqual(pulpListingsKey(mugs), pulpListingsKey("0x327ceaaedbbcF55F4d06F1aBc71bd9bC8ADCb156"));
   const [row] = mergeBook([], [{
     tokenId: "27", priceWei: "100", maker: "0xmaker", expiresAt: null, venue: "pulp",
   }], "mugs", undefined, mugs);

@@ -41,13 +41,12 @@ import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 
 const PULP_BASE = "https://pulpmarket.app";
 
-export const PULP_LISTINGS_KV = "plank:market:pulp-listings-v1";
+const LEGACY_PULP_LISTINGS_KV = "plank:market:pulp-listings-v1";
+export const PULP_LISTINGS_KV = "plank:market:pulp-listings-v2";
 
 export function pulpListingsKey(collectionAddress: string): string {
   const normalized = collectionAddress.toLowerCase();
-  return normalized === NFT_CONTRACT_ADDRESS.toLowerCase()
-    ? PULP_LISTINGS_KV
-    : `${PULP_LISTINGS_KV}:${PULP_CHAIN_ID}:${normalized}`;
+  return `${PULP_LISTINGS_KV}:${PULP_CHAIN_ID}:${normalized}`;
 }
 
 /** Their chain ids: 369 PulseChain, 1 Ethereum, 8453 Base, 146 Sonic, 4663 Robinhood. */
@@ -160,7 +159,15 @@ export function normalisePulpListings(nfts: readonly PulpNft[]): NormalisedForei
 export async function readPulpListings(collectionAddress = NFT_CONTRACT_ADDRESS): Promise<NormalisedForeignListing[]> {
   if (!hasDurableKv()) return [];
   try {
-    const rows = (await kv.get<NormalisedForeignListing[]>(pulpListingsKey(collectionAddress))) ?? [];
+    const scoped = await kv.get<NormalisedForeignListing[]>(pulpListingsKey(collectionAddress));
+    // One-way compatibility read for the former RobinWood-only singleton.
+    // Every new write is chain + collection scoped, so no other collection
+    // can ever inherit RobinWood's book through a shared cache key.
+    const rows = scoped ?? (
+      collectionAddress.toLowerCase() === NFT_CONTRACT_ADDRESS.toLowerCase()
+        ? (await kv.get<NormalisedForeignListing[]>(LEGACY_PULP_LISTINGS_KV)) ?? []
+        : []
+    );
     // Stamped on read for the same reason as the OpenSea blob: stored rows
     // are only ever as new as the writer that wrote them, and a consumer must
     // not assume a field that data at rest predates.
