@@ -39,7 +39,6 @@
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^2.0.0",
     "@envio-dev/hypersync-client": "^1.4.0",
-    "@envio-dev/hypersync-client-win32-x64-msvc": "^1.0.0",
     "@opensea/seaport-js": "^4.1.5",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
@@ -89,6 +88,9 @@
       "serialize-javascript": "7.0.5"
     },
     "axios": "^1.18.1"
+  },
+  "optionalDependencies": {
+    "@envio-dev/hypersync-client-win32-x64-msvc": "^1.0.0"
   },
   "devDependencies": {
     "@chainlink/contracts": "^1.5.0",
