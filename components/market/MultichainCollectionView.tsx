@@ -1831,9 +1831,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           summary={
             bookFilter === "listed"
               ? `${filteredListings.length} on the market`
-              : catalogMeta && catalogMeta.projectedCount > browseItems.length
-                ? `${browseItems.length.toLocaleString()} loaded · ${catalogMeta.projectedCount.toLocaleString()} indexed${catalogMeta.partial ? " and syncing" : ""}`
-                : `${browseItems.length.toLocaleString()} items${catalogMeta?.partial ? " · syncing" : ""}`
+              : catalogMeta && (catalogMeta.expectedCount ?? catalogMeta.projectedCount) > browseItems.length
+                ? `${browseItems.length.toLocaleString()} shown · ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()} total NFTs${catalogMeta.partial ? " · completing metadata" : ""}`
+                : `${browseItems.length.toLocaleString()} NFTs${catalogMeta?.partial ? " · completing metadata" : ""}`
           }
           lead={
             listings.length > 0 ? (
@@ -2277,7 +2277,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           )}
           {bookFilter === "all" && tokenLimit < surface.catalogCap && (
             catalogMeta?.projectedCount != null
-              ? tokens.length < Math.min(surface.catalogCap, catalogMeta.projectedCount)
+              ? tokens.length < Math.min(
+                  surface.catalogCap,
+                  catalogMeta.expectedCount ?? catalogMeta.projectedCount
+                )
               : tokens.length >= Math.min(tokenLimit, surface.catalogCap)
           ) && (
             <div className="mt-3 flex flex-wrap justify-center gap-2">
@@ -2290,19 +2293,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
                 Load more
-                {catalogMeta?.projectedCount ? ` · ${tokens.length.toLocaleString()} of ${catalogMeta.projectedCount.toLocaleString()} indexed shown` : ""}
+                {catalogMeta ? ` · ${tokens.length.toLocaleString()} of ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()} shown` : ""}
               </button>
               <button
                 type="button"
                 onClick={() => setTokenLimit(Math.min(
                   surface.catalogCap,
-                  catalogMeta?.projectedCount ?? catalogMeta?.expectedCount ?? surface.catalogCap
+                  catalogMeta?.expectedCount ?? catalogMeta?.projectedCount ?? surface.catalogCap
                 ))}
                 className="min-h-10 rounded-md border border-purple-400/50 px-4 text-xs font-bold text-purple-200 hover:bg-purple-400/10"
               >
-                Show all
-                {catalogMeta?.projectedCount
-                  ? ` · ${Math.min(surface.catalogCap, catalogMeta.projectedCount).toLocaleString()} indexed`
+                View all NFTs
+                {catalogMeta
+                  ? ` · ${Math.min(surface.catalogCap, catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()}`
                   : ""}
               </button>
             </div>
