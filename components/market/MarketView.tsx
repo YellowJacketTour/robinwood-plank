@@ -43,6 +43,20 @@ import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { countTiers } from "@/lib/market/rarity-lookup";
+import CollectionIntelligence from "@/components/market/CollectionIntelligence";
+
+/** Structurally matches CollectionIntelligence's own (unexported) Sale type -- see that component. Built from /api/market/activity's real permanent-ledger events, kind==="sale" only. */
+type IntelSale = {
+  timestamp?: string | null;
+  tokenId?: string | null;
+  priceWei?: string | null;
+  priceUsd?: number | null;
+  priceSymbol: string | null;
+  transaction: string | null;
+  from: string | null;
+  to: string | null;
+};
 
 /** Same shape /api/market/collection-index (built for Gallery.tsx's art browsing) already returns -- see that route for the real, precomputed, immutable-post-reveal dataset this reuses. */
 type CollectionIndexEntry = {
@@ -308,6 +322,19 @@ export default function MarketView() {
   const [viewMode, setViewMode] = useState<"listed" | "all">("listed");
   const [allEntries, setAllEntries] = useState<CollectionIndexEntry[] | null>(null);
   const [allEntriesLoading, setAllEntriesLoading] = useState(false);
+
+  // REAL GAP FIXED 2026-08-23, flagged live ("we dont have intel on planks
+  // when its like the only one with for sure everything ... what happened
+  // to intelligence agency feature richness"): every foreign-chain
+  // collection (MultichainCollectionView.tsx) already has an Intel toggle
+  // driving CollectionIntelligence -- wash-trade suspicion, demand score,
+  // maker concentration, rarity/holder/listed coverage -- but the native
+  // RobinWood collection, this app's own flagship, never had it wired in
+  // at all. Same lazy-load-on-demand pattern as the all-items toggle above.
+  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">("art");
+  const [intelSales, setIntelSales] = useState<IntelSale[] | null>(null);
+  const [intelLoading, setIntelLoading] = useState(false);
+  const [intelHolders, setIntelHolders] = useState<number | null>(null);
   // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
   // previously kept its own useState populated once via getConnectedAccounts()
   // with no accountsChanged listener, which is why the nav could say
@@ -959,6 +986,48 @@ export default function MarketView() {
     const listedIds = new Set(listings.map((l) => l.tokenId));
     return allEntries.filter((e) => !listedIds.has(String(e.tokenId)));
   }, [allEntries, listings]);
+
+  // Lazy-load Intel's real sale history + holder count + ETH/USD reference
+  // only once a viewer actually opens the Intel panel -- same reasoning as
+  // the all-items fetch above.
+  useEffect(() => {
+    if (browseMode !== "intelligence" || intelSales || intelLoading) return;
+    let alive = true;
+    setIntelLoading(true);
+    Promise.all([
+      fetch("/api/market/activity?full=1", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+      fetch("/api/market/holders", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+      fetch("/api/market/eth-price", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+    ])
+      .then(([activityData, holdersData, ethPriceData]: [{ events?: Array<{ kind: string; tokenId: string; from: string; to: string; priceWei: string | null; txHash: string; timestamp: string | null }> } | null, { holders?: number | null } | null, { ethUsd?: number | null } | null]) => {
+        if (!alive) return;
+        const ethUsd = ethPriceData?.ethUsd ?? null;
+        const events = Array.isArray(activityData?.events) ? activityData.events : [];
+        const sales: IntelSale[] = events
+          .filter((e) => e.kind === "sale")
+          .map((e) => ({
+            timestamp: e.timestamp,
+            tokenId: e.tokenId,
+            priceWei: e.priceWei,
+            priceUsd: e.priceWei != null && ethUsd != null ? (Number(e.priceWei) / 1e18) * ethUsd : null,
+            priceSymbol: "ETH",
+            transaction: e.txHash,
+            from: e.from,
+            to: e.to,
+          }));
+        setIntelSales(sales);
+        setIntelHolders(typeof holdersData?.holders === "number" ? holdersData.holders : null);
+      })
+      .catch(() => {
+        if (alive) setIntelSales([]);
+      })
+      .finally(() => {
+        if (alive) setIntelLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [browseMode, intelSales, intelLoading]);
   const sortedVisibleListings = useMemo(
     () => sortListings(visibleListings, sort),
     [visibleListings, sort]
@@ -1357,6 +1426,27 @@ export default function MarketView() {
                   }
                   filters={
                     <>
+                      {COLLECTION && !loading && (
+                        <div className="mb-3">
+                          <p className="mb-1 text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Show</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(["listed", "all"] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setViewMode(mode)}
+                                aria-pressed={viewMode === mode}
+                                className={`min-h-8 rounded-md border px-2.5 text-xs font-bold ${
+                                  viewMode === mode ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-line text-foreground/55 hover:text-gold-300"
+                                }`}
+                                title={mode === "all" ? `Browse all ${ROBINWOOD_TOTAL_SUPPLY} planks, not just the ${listings.length} currently listed` : "Only currently-listed planks"}
+                              >
+                                {mode === "all" ? "All items" : "Listed only"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <FilterBar
                         filters={filters}
                         onChange={setFilters}
@@ -1398,6 +1488,18 @@ export default function MarketView() {
                       {COLLECTION && !loading && (
                         <button
                           type="button"
+                          onClick={() => setBrowseMode((m) => (m === "art" ? "intelligence" : "art"))}
+                          aria-pressed={browseMode === "intelligence"}
+                          className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                            browseMode === "intelligence" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                          }`}
+                        >
+                          {browseMode === "intelligence" ? "Art & listings" : "Intel"}
+                        </button>
+                      )}
+                      {COLLECTION && !loading && (
+                        <button
+                          type="button"
                           onClick={() => setSweepOpen((v) => !v)}
                           aria-pressed={sweepOpen}
                           aria-controls="sweep-planner"
@@ -1421,24 +1523,6 @@ export default function MarketView() {
                           Bid by criteria
                         </button>
                       )}
-                      {COLLECTION && !loading && (
-                        <div className="flex min-h-10 shrink-0 items-center gap-0.5 rounded-lg border border-line-strong p-0.5">
-                          {(["listed", "all"] as const).map((mode) => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => setViewMode(mode)}
-                              aria-pressed={viewMode === mode}
-                              className={`min-h-8 rounded-md px-2.5 text-xs font-bold transition ${
-                                viewMode === mode ? "bg-gold-400/15 text-gold-300" : "text-foreground/55 hover:text-gold-300"
-                              }`}
-                              title={mode === "all" ? `Browse all ${ROBINWOOD_TOTAL_SUPPLY} planks, not just the ${listings.length} currently listed` : "Only currently-listed planks"}
-                            >
-                              {mode === "all" ? "All items" : "Listed only"}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                       <label className="flex items-center gap-1.5">
                         <span className="sr-only">Sort listings</span>
                         <select
@@ -1456,6 +1540,22 @@ export default function MarketView() {
                     </>
                   }
                 >
+                  {browseMode === "intelligence" ? (
+                    <CollectionIntelligence
+                      name={COLLECTION?.name ?? "RobinWood"}
+                      chain="Robinhood Chain"
+                      supply={ROBINWOOD_TOTAL_SUPPLY}
+                      holders={intelHolders}
+                      indexed={rarityMap.size}
+                      rarityCovered={rarityMap.size}
+                      rarityTiers={countTiers(rarityMap)}
+                      artUrls={listings.map((l) => l.imageUrl).filter((url): url is string => Boolean(url))}
+                      listings={listings.map((l) => ({ priceWei: l.priceWei, maker: l.maker, tokenId: l.tokenId }))}
+                      sales={intelSales ?? []}
+                      listedCount={listings.length}
+                    />
+                  ) : (
+                  <>
                   {COLLECTION && !loading && sweepOpen && (
                     <div
                       id="sweep-planner"
@@ -1548,6 +1648,8 @@ export default function MarketView() {
                         </div>
                       )}
                     </div>
+                  )}
+                  </>
                   )}
                 </MarketBrowseLayout>
               </div>
