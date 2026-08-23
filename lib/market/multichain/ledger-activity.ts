@@ -120,12 +120,12 @@ type UnionRow = {
  * per-venue honesty notes (NULL currency, NULL token_id, etc.).
  */
 const UNION_SQL = `
-  SELECT 'transfer' AS kind, 'wallet-transfer' AS venue_id,
+  SELECT event_type AS kind, 'wallet-transfer' AS venue_id,
          tx_hash, event_index AS log_index, block_number::text AS block_number, block_timestamp,
          seller AS from_addr, buyer AS to_addr, token_id::text AS token_id, NULL::text AS batch_size,
          NULL::text AS currency_token, NULL::text AS price_wei
   FROM plank_market_events
-  WHERE chain_slug = $1 AND lower(collection_key) = $2 AND event_type = 'transfer'
+  WHERE chain_slug = $1 AND lower(collection_key) = $2 AND event_type IN ('transfer', 'mint')
 
   UNION ALL
   SELECT 'sale', 'seaport',

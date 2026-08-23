@@ -187,7 +187,7 @@ export async function listCollectionsForSync(
  */
 export async function getTrackedCollection(chainSlug: string, contractAddress: string): Promise<TrackedCollection | null> {
   const result = await postgresQuery<CollectionRow>(
-    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address
+    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, creator_ens
      FROM plank_multichain_collections
      WHERE chain_slug = $1 AND contract_address = $2
      LIMIT 1`,
@@ -195,6 +195,49 @@ export async function getTrackedCollection(chainSlug: string, contractAddress: s
   );
   const row = result.rows[0];
   return row ? rowToCollection(row) : null;
+}
+
+/**
+ * Targeted lookup for the creator-entity-linking search expansion (see
+ * lib/market/multichain/creator-links.ts for the matching/confidence logic
+ * this feeds -- this function only fetches candidates, it does not decide
+ * who counts as "the same creator"). Three indexed OR'd equality checks plus
+ * one bounded ILIKE for the "by <creator>" name-byline signal, each scoped
+ * to a signal the target row actually has -- never a full-table scan, and
+ * never invoked unless the search's matched collection carries at least one
+ * real creator signal.
+ */
+export async function findCollectionsByCreatorSignals(input: {
+  creatorAddress: string | null;
+  creatorHandle: string | null;
+  creatorEns: string | null;
+  nameByline: string | null;
+  excludeChainSlug: string;
+  excludeContractAddress: string;
+  limit?: number;
+}): Promise<Array<{ chainSlug: string; contractAddress: string; name: string | null; creatorAddress: string | null; creatorHandle: string | null; creatorEns: string | null }>> {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (input.creatorAddress) { params.push(input.creatorAddress); clauses.push(`lower(creator_address) = lower($${params.length})`); }
+  if (input.creatorHandle) { params.push(input.creatorHandle); clauses.push(`lower(creator_handle) = lower($${params.length})`); }
+  if (input.creatorEns) { params.push(input.creatorEns); clauses.push(`lower(creator_ens) = lower($${params.length})`); }
+  if (input.nameByline) { params.push(`%by ${input.nameByline}`); clauses.push(`name ILIKE $${params.length}`); }
+  if (!clauses.length) return [];
+  params.push(input.excludeChainSlug, input.excludeContractAddress);
+  const limit = Math.min(Math.max(Math.trunc(input.limit ?? 12), 1), 25);
+  params.push(limit);
+  const result = await postgresQuery<{ chain_slug: string; contract_address: string; name: string | null; creator_address: string | null; creator_handle: string | null; creator_ens: string | null }>(
+    `SELECT chain_slug, contract_address, name, creator_address, creator_handle, creator_ens
+     FROM plank_multichain_collections
+     WHERE (${clauses.join(" OR ")})
+       AND NOT (chain_slug = $${params.length - 2} AND contract_address = $${params.length - 1})
+     LIMIT $${params.length}`,
+    params
+  );
+  return result.rows.map((row) => ({
+    chainSlug: row.chain_slug, contractAddress: row.contract_address, name: row.name,
+    creatorAddress: row.creator_address, creatorHandle: row.creator_handle, creatorEns: row.creator_ens,
+  }));
 }
 
 /**
@@ -762,6 +805,88 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
   }));
+}
+
+/**
+ * Bounded, ranked window over the full catalog for the Global Market Hub's
+ * INITIAL page load. Real bug found live 2026-08-23: listCollectionsWithSnapshots()
+ * above returns every tracked row with no LIMIT -- it was never given one,
+ * not a regression, and the catalog simply grew (317,253 rows / ~211MB JSON
+ * at time of fix) past the point that was ever safe for a browser to
+ * fetch-and-parse in one response; a real Playwright session and a manual
+ * in-page fetch() both hung/failed on it while a server-side curl (no DOM to
+ * hold the parsed result in) completed fine. Ranked by real observed 24h
+ * sales/volume (a live proxy for "active enough to matter on first paint";
+ * the hub's own client-side "grade" sort needs cross-chain recentActivity
+ * data this query doesn't have, so this is deliberately an approximation,
+ * not a claim of matching it exactly) with vault-backed rows first. Returns
+ * a real `totalCount` (via COUNT(*) OVER()) so the UI can honestly show
+ * "showing N of totalCount" instead of silently truncating. Search/filter
+ * beyond this window is served by the already-paginated, DB-side
+ * token-search route (see collection-token-store.ts's searchProjectedTokens
+ * and findCollectionsByCreatorSignals above) rather than requiring the full
+ * catalog in memory.
+ */
+export async function listCollectionsWithSnapshotsPage(input: {
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ collections: CollectionWithSnapshot[]; totalCount: number }> {
+  const limit = Math.min(Math.max(input.limit ?? 5000, 1), 20000);
+  const offset = Math.max(input.offset ?? 0, 0);
+  const result = await postgresQuery<
+    CollectionRow & {
+      floor_price_wei: string | null;
+      floor_price_currency: string | null;
+      floor_price_marketplace: string | null;
+      total_supply: string | null;
+      listed_count: number | null;
+      synced_at: string | null;
+      sync_error: string | null;
+      volume_24h_wei: string | null;
+      sales_24h: number | null;
+      volume_7d_wei: string | null;
+      sales_7d: number | null;
+      volume_30d_wei: string | null;
+      sales_30d: number | null;
+      previous_floor_price_wei: string | null;
+      holder_count: number | null;
+      floor_change_pct: number | null;
+      total_count: string;
+    }
+  >(
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed,
+            c.creator_handle, c.creator_address, c.creator_ens,
+            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
+            s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            s.holder_count, s.floor_change_pct,
+            COUNT(*) OVER() AS total_count
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     ORDER BY (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, c.chain_slug, c.contract_address
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  const totalCount = result.rows.length ? Number(result.rows[0].total_count) : 0;
+  const collections = result.rows.map((row) => ({
+    ...rowToCollection(row),
+    floorPriceWei: row.floor_price_wei,
+    floorPriceCurrency: row.floor_price_currency,
+    floorPriceMarketplace: row.floor_price_marketplace,
+    totalSupply: row.total_supply == null ? null : Number(row.total_supply),
+    listedCount: row.listed_count,
+    syncedAt: row.synced_at,
+    syncError: row.sync_error,
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
+    previousFloorPriceWei: row.previous_floor_price_wei,
+    holderCount: row.holder_count,
+    floorChangePct: row.floor_change_pct,
+  }));
+  return { collections, totalCount };
 }
 
 /** Bounded keyset page for edge-cached market feeds. Unlike the legacy hub
