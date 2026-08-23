@@ -16,6 +16,14 @@ Continuously fill **sourced** cells (name, image, floor, listed, volume, sales, 
 
 Empty cell = dash. `0` only when we **counted** an empty book.
 
+The mesh guarantees resumable, fail-closed progress only when its required
+production cron is installed (see `docs/INMOTION_DEPLOYMENT.md`). It does not
+claim that one vendor registry defines the universe. In particular, Bitcoin
+collection membership can be parent/child provenance, an on-chain gallery, or
+a venue-maintained registry; those identities remain distinct until a sourced
+join proves equivalence. Completeness is therefore measured per
+`chain × identity namespace × source × cell`, never by a single global count.
+
 ## 2. Why one pipeline failed (do not regress)
 
 | Incident | Rule it created |

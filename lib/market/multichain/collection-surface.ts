@@ -63,7 +63,11 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   robinhood: {
     chainSlug: "robinhood",
     catalogPageSize: 400,
-    catalogCap: 1542,
+    // Robinhood Chain is not synonymous with the 1,542-piece RobinWood
+    // contract. Community collections such as MUGS are materially larger.
+    // The native collection naturally stops at its indexed supply; this is
+    // only a request ceiling and must never truncate other contracts.
+    catalogCap: 12000,
     bookPageSize: 400,
     catalog: "native rarity + gallery",
     book: "native Seaport + plank.love overlay",

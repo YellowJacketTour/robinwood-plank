@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
@@ -114,6 +114,28 @@ const COMBINED_OFFER_DISCOUNT_BPS = 1000;
 /** Caps how many "offer the rest" wallet prompts one combined action can trigger -- an unbounded remainder could otherwise turn one click into dozens of signature prompts. */
 const COMBINED_REMAINDER_CAP = 5;
 
+function boundedCatalogTake(raw: string | null, pageSize: number, cap: number): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < pageSize) return pageSize;
+  return Math.min(parsed, cap);
+}
+
+function parseTierList(raw: string | null): RarityTier[] {
+  if (!raw) return [];
+  const accepted = new Set<string>(TIER_ORDER);
+  return [...new Set(raw.split(",").filter((value): value is RarityTier => accepted.has(value)))];
+}
+
+function readBrowseExtras(key: string): { openTraitGroups?: Record<string, boolean> } {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(key) ?? "{}") as { openTraitGroups?: Record<string, boolean> };
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Browse + buy + sweep + send surface for ONE tracked multichain collection
  * (see plank_multichain_collections) -- deliberately a NEW page, not an
@@ -159,9 +181,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     partial: boolean;
   } | null>(null);
   const surface = collectionSurface(chainSlug);
-  const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
+  const browseStorageKey = `marketplank:browse:v1:${chainSlug}:${collectionSlug.toLowerCase()}`;
+  const [tokenLimit, setTokenLimit] = useState(() => boundedCatalogTake(searchParams.get("take"), surface.catalogPageSize, surface.catalogCap));
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
-  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">("art");
+  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">(() => searchParams.get("view") === "intelligence" ? "intelligence" : "art");
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
     listedCount: number | null;
@@ -238,7 +261,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [sweepClauses, setSweepClauses] = useState<CriteriaClause[]>([]);
   const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
-  const [activeTiers, setActiveTiers] = useState<RarityTier[]>([]);
+  const [activeTiers, setActiveTiers] = useState<RarityTier[]>(() => parseTierList(searchParams.get("tiers")));
   const [sweepPreview, setSweepPreview] = useState<Listing[] | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
 
@@ -340,7 +363,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // rank), and a genuine signed-Seaport-offer flow (foreign-offer.ts).
   const [detailsTarget, setDetailsTarget] = useState<Listing | null>(null);
   const [traitCounts, setTraitCounts] = useState<Record<string, Record<string, number>> | null>(null);
-  const [openTraitGroups, setOpenTraitGroups] = useState<Record<string, boolean>>({});
+  const [openTraitGroups, setOpenTraitGroups] = useState<Record<string, boolean>>(() => readBrowseExtras(browseStorageKey).openTraitGroups ?? {});
+  const restoredScrollRef = useRef(false);
   const [offerTarget, setOfferTarget] = useState<Listing | null>(null);
   const [offerAmountEth, setOfferAmountEth] = useState("");
   const [offerBusy, setOfferBusy] = useState(false);
@@ -1262,12 +1286,43 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (maxPriceEth.trim()) params.set("max", maxPriceEth.trim());
     if (traitClauses.length > 0) params.set("traits", JSON.stringify(selectedTraits));
     if (activeTier !== "all") params.set("tier", activeTier);
+    if (activeTiers.length > 0) params.set("tiers", activeTiers.join(","));
     if (listingSort !== "price-asc") params.set("sort", listingSort);
     if (bookFilter !== "listed") params.set("show", bookFilter);
+    if (tokenLimit > surface.catalogPageSize) params.set("take", String(tokenLimit));
+    if (browseMode !== "art") params.set("view", browseMode);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract.
-  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, listingSort, bookFilter]);
+  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, activeTiers, listingSort, bookFilter, tokenLimit, browseMode, surface.catalogPageSize]);
+
+  // Expanded facet groups and scroll are transient workspace state: useful on
+  // refresh/back navigation, but intentionally not encoded into share URLs.
+  useEffect(() => {
+    try { window.sessionStorage.setItem(browseStorageKey, JSON.stringify({ openTraitGroups })); } catch { /* storage is best effort */ }
+  }, [browseStorageKey, openTraitGroups]);
+
+  useEffect(() => {
+    if (restoredScrollRef.current) return;
+    restoredScrollRef.current = true;
+    let prior = 0;
+    try { prior = Number(window.sessionStorage.getItem(`${browseStorageKey}:scroll`) ?? "0"); } catch { /* ignore */ }
+    if (Number.isFinite(prior) && prior > 0) requestAnimationFrame(() => window.scrollTo({ top: prior, behavior: "instant" }));
+    let queued = false;
+    const save = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        try { window.sessionStorage.setItem(`${browseStorageKey}:scroll`, String(Math.round(window.scrollY))); } catch { /* ignore */ }
+      });
+    };
+    window.addEventListener("scroll", save, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", save);
+      try { window.sessionStorage.setItem(`${browseStorageKey}:scroll`, String(Math.round(window.scrollY))); } catch { /* ignore */ }
+    };
+  }, [browseStorageKey]);
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
@@ -2215,10 +2270,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
-                {catalogBuilding ? "Preparing this collection’s pieces…" : filtersActive ? "No items match your search." : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
+                {filtersActive ? "No indexed items match this filter intersection." : catalogBuilding ? "Preparing this collection’s pieces…" : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
               </p>
               <p className="text-xs text-foreground/45">
-                {catalogBuilding ? "The live indexer is prioritizing this exact contract. This page will update automatically." : filtersActive ? "Try widening your price range or clearing a filter." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
+                {filtersActive ? (catalogBuilding ? "Indexing continues in the background; widen or clear a filter to inspect the currently indexed universe." : "Try widening your price range or clearing a filter.") : catalogBuilding ? "The live indexer is prioritizing this exact contract. This page will update automatically." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
               </p>
             </div>
           ) : (

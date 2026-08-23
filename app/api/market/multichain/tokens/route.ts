@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       const projected = await readCollectionTokenProjection({
         chainSlug, collectionSlug, limit, cursor, sort, tier,
       }).catch(() => null);
-      if (projected && projected.tokens.length > 0) {
+      if (projected) {
         // A partial projection is useful enough to render, but it is not a
         // terminal cache hit. Renew the demand job whenever somebody is
         // actively viewing it so the mesh keeps walking the provider cursor
@@ -74,7 +74,10 @@ export async function GET(req: NextRequest) {
             priority: 90,
           }).catch(() => {});
         }
-        return NextResponse.json({ ...projected, building: projected.partial }, {
+        // Zero rows can be the correct result of a tier filter. Returning the
+        // projection metadata is what distinguishes "no matching Legendary"
+        // from "this collection has never been indexed".
+        return NextResponse.json({ ...projected, building: projected.partial && projected.tokens.length === 0 }, {
           headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
         });
       }

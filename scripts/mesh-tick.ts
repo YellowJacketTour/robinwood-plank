@@ -18,7 +18,10 @@ function runLane(source: string, chain: string, subject?: string | null): Promis
   return new Promise((resolve) => {
     const p = spawn(
       process.execPath,
-      ["--import", "tsx", "--env-file=.env.local", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
+      // The scheduler process is the environment boundary. Children inherit
+      // its production/local environment; hard-coding .env.local here made a
+      // correctly configured production tick fail before a lane could run.
+      ["--import", "tsx", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
         ...(subject ? [`--subject=${subject}`] : [])],
       { cwd: process.cwd(), stdio: "inherit", shell: false }
     );

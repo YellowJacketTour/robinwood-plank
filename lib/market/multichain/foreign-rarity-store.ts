@@ -44,7 +44,11 @@ export async function listForeignRarityTokens(
   limit: number,
   opts?: { sort?: "id" | "rank" | "rank-desc"; tier?: string | null }
 ): Promise<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>> {
-  const cap = Math.min(Math.max(limit, 1), 2000);
+  // Keep this fallback symmetric with the canonical token projection and
+  // collection surface. The old 2,000 ceiling made a fully indexed 5,876
+  // piece collection appear truncated whenever its projection row was
+  // temporarily unavailable, even though every rarity row already existed.
+  const cap = Math.min(Math.max(limit, 1), 12000);
   const sort = opts?.sort ?? "id";
   const tier = opts?.tier?.trim() || null;
   const orderSql =
