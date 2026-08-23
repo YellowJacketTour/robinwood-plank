@@ -484,7 +484,7 @@ function compareByColumn(
       return compareNullable(collectionDemandScore(a), collectionDemandScore(b), dir);
     case "grade":
     default:
-      return compareNullable(gradeScore(a, hasArt(a)), gradeScore(b, hasArt(b)), dir);
+      return compareNullable(gradeScore(a, hasArt(a), toUsd), gradeScore(b, hasArt(b), toUsd), dir);
   }
 }
 
@@ -550,23 +550,53 @@ function hasGradeEvidence(c: TrackedCollection): boolean {
   return (c.listedCount != null && c.listedCount > 0) || c.isVaultBacked;
 }
 
-function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
+/**
+ * Log-scale magnitude curve, same shape as activityPoints below: 0 at the
+ * floor, `max` points only once `value` reaches `ceilingUsd` (or `ceiling`
+ * for a raw count, e.g. listedCount). Anything above the ceiling still caps
+ * at `max` -- this isn't trying to rank whales against each other, just to
+ * stop a binary "present at all" flag from paying a $0.46 floor the exact
+ * same points as a $60,000 floor.
+ *
+ * REAL BUG FIXED 2026-08-23, flagged live ("low volume low floor low sales
+ * collections ranking so high across top grades"): floor/volume/listed
+ * were pure booleans (any nonzero value = full points), so a sub-dollar
+ * microcap with one listing scored identically on those axes to a blue
+ * chip. Confirmed live against the rankings table: Government Toucans
+ * ($0.46 floor, $0.49 24h volume, 3 listed) graded A by hitting every
+ * boolean flag at once, same as collections with real six-figure volume.
+ */
+function magnitudePoints(value: number, ceiling: number, max: number): number {
+  if (!(value > 0)) return 0;
+  const frac = Math.log10(1 + value) / Math.log10(1 + ceiling);
+  return Math.max(0, Math.min(max, frac * max));
+}
+
+function gradeBreakdown(
+  c: TrackedCollection,
+  artOk: boolean,
+  toUsd: (weiStr: string | null, currency: string | null) => number | null
+): GradeBreakdown {
   const activityPoints = (Math.min(c.recentActivity, 5000) / 5000) * 300;
-  const hasVolume = Boolean(c.volume24hWei && c.volume24hWei !== "0");
   const hasCreator = Boolean(c.creatorHandle || c.creatorEns);
   const liveBook = c.listedCount != null && c.listedCount > 0;
-  const hasFloor = Boolean(c.floorPriceWei && c.floorPriceWei !== "0");
+  const floorUsd = toUsd(displayFloorWei(c), c.floorPriceCurrency) ?? 0;
+  const volumeUsd = toUsd(c.volume24hWei, chainNativeAsset(c.chainSlug)) ?? 0;
   const vault = Boolean(c.isVaultBacked);
   const home = Boolean(c.isNativeHome);
+  // Ceilings are real, observed blue-chip-tier magnitudes (e.g. BAYC-class
+  // floor/volume, a 1,000+ listing order book) -- not arbitrary round
+  // numbers, so a genuinely deep market still earns full points while a
+  // dust-priced collection with one listing earns a small fraction of them.
   const parts: GradeBreakdown["parts"] = [
     { label: "Has real art", points: artOk ? 400 : 0, max: 400, met: artOk },
-    { label: "Live listed count", points: liveBook ? 500 : 0, max: 500, met: liveBook },
-    { label: "Real floor price", points: hasFloor ? 400 : 0, max: 400, met: hasFloor },
-    { label: "Real 24h volume", points: hasVolume ? 400 : 0, max: 400, met: hasVolume },
+    { label: "Live listed count", points: Math.round(magnitudePoints(c.listedCount ?? 0, 1000, 500)), max: 500, met: liveBook },
+    { label: "Real floor price", points: Math.round(magnitudePoints(floorUsd, 50_000, 400)), max: 400, met: floorUsd > 0 },
+    { label: "Real 24h volume", points: Math.round(magnitudePoints(volumeUsd, 500_000, 400)), max: 400, met: volumeUsd > 0 },
     { label: "Recent chain activity", points: Math.round(activityPoints), max: 300, met: c.recentActivity > 0 },
     { label: "Known creator handle/ENS", points: hasCreator ? 50 : 0, max: 50, met: hasCreator },
-    { label: "Native RobinWood collection", points: home ? 400 : 0, max: 400, met: home },
-    { label: "Vault / decentralized NFT liquidity (on-chain)", points: vault ? 400 : 0, max: 400, met: vault },
+    { label: "Native RobinWood collection", points: home ? 150 : 0, max: 150, met: home },
+    { label: "Vault / decentralized NFT liquidity (on-chain)", points: vault ? 150 : 0, max: 150, met: vault },
   ];
   return {
     score: parts.reduce((sum, p) => sum + p.points, 0),
@@ -576,8 +606,12 @@ function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
 }
 
 /** Null when the row has no market evidence -- an image on a tradeable chain is not a grade. Still not wash-trade or stolen-art detection. */
-function gradeScore(c: TrackedCollection, artOk: boolean): number | null {
-  const b = gradeBreakdown(c, artOk);
+function gradeScore(
+  c: TrackedCollection,
+  artOk: boolean,
+  toUsd: (weiStr: string | null, currency: string | null) => number | null
+): number | null {
+  const b = gradeBreakdown(c, artOk, toUsd);
   return b.gradable ? b.score : null;
 }
 
@@ -1410,12 +1444,12 @@ export default function GlobalMarketHub() {
     });
     return candidates
       .sort((a, b) => {
-        const g = (gradeScore(b, true) ?? 0) - (gradeScore(a, true) ?? 0);
+        const g = (gradeScore(b, true, toUsd) ?? 0) - (gradeScore(a, true, toUsd) ?? 0);
         if (g !== 0) return g;
         return (collectionDemandScore(b) ?? 0) - (collectionDemandScore(a) ?? 0);
       })
       .slice(0, 6);
-  }, [collections, deadArt, chainFilter]);
+  }, [collections, deadArt, chainFilter, usdPrices]);
 
   // Rankings is the first N rows of the SAME `filtered` list the grid
   // renders -- one filter/sort, two presentations. Previously the table
@@ -1738,7 +1772,7 @@ export default function GlobalMarketHub() {
             {/* Immersive large hero: the single highest-graded mover, full art, full stats. */}
             {(() => {
               const hero = topMovers[0];
-              const heroGrade = gradeBreakdown(hero, true);
+              const heroGrade = gradeBreakdown(hero, true, toUsd);
               return (
                 <Link
                   href={collectionHref(hero)}
@@ -1792,7 +1826,7 @@ export default function GlobalMarketHub() {
             {/* Medium strip: the next 5 graded movers, immersive art tiles, 2-up on mobile. */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2">
               {topMovers.slice(1).map((c) => {
-                const grade = gradeBreakdown(c, true);
+                const grade = gradeBreakdown(c, true, toUsd);
                 return (
                   <Link
                     key={key(c)}
@@ -2140,7 +2174,7 @@ export default function GlobalMarketHub() {
                         )}
                       </td>
                       <td className="px-2 py-2 text-right">
-                        <GradeBadge breakdown={gradeBreakdown(c, hasArt(c))} />
+                        <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd)} />
                       </td>
                     </tr>
                   );
@@ -2474,7 +2508,7 @@ export default function GlobalMarketHub() {
                       {/* Visible composite grade, always -- gradeScore already drives the "Trending" sort; this makes that grading legible on the card itself instead of staying an invisible sort key. Only shown for a graded (art-present) row. */}
                       {hasArt(c) && (
                         <span className="absolute right-1.5 top-1.5">
-                          <GradeBadge breakdown={gradeBreakdown(c, hasArt(c))} />
+                          <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd)} />
                         </span>
                       )}
                     </div>
