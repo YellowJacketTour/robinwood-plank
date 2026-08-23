@@ -7,10 +7,10 @@ test("venue ids are unique and every venue declares capabilities", () => {
   for (const venue of MARKET_VENUES) assert.ok(venue.capabilities.length > 0, venue.id);
 });
 
-test("CryptoPunks native coverage is explicit and never presented as indexed", () => {
+test("CryptoPunks native coverage distinguishes indexed book state from pending history lanes", () => {
   const venue = venuesForChain("eth-mainnet").find((candidate) => candidate.id === "cryptopunks-native");
   assert.ok(venue);
-  assert.equal(venue.coverage, "planned");
+  assert.equal(venue.coverage, "partial");
   assert.ok(venue.capabilities.includes("listings"));
 });
 

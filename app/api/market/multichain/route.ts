@@ -4,6 +4,7 @@ import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity, get
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
+import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -157,6 +158,18 @@ export async function GET(req: Request) {
       isNativeHome: true,
     };
 
+    let cryptoPunksNativeBookIndexed = false;
+    if (hasPostgresConfig()) {
+      const coverage = await postgresQuery<{ indexed: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM plank_market_coverage
+           WHERE chain_slug = 'eth-mainnet' AND venue_id = 'cryptopunks-native'
+             AND capability = 'listings' AND status = 'indexed'
+         ) AS indexed`
+      ).catch(() => ({ rows: [] }));
+      cryptoPunksNativeBookIndexed = coverage.rows[0]?.indexed === true;
+    }
+
     const mapped = collections.map((c) => ({
         chainSlug: c.chainSlug,
         chainId: c.chainId,
@@ -171,7 +184,7 @@ export async function GET(req: Request) {
         floorPriceMarketplace: c.floorPriceMarketplace,
         totalSupply: c.totalSupply,
         listedCount:
-          hasUnindexedNativeBook(c.chainSlug, c.contractAddress)
+          hasUnindexedNativeBook(c.chainSlug, c.contractAddress) && !cryptoPunksNativeBookIndexed
             ? null
             : c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
             ? null

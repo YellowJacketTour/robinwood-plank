@@ -709,6 +709,12 @@ async function main(): Promise<void> {
     return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
   });
 
+  await step("cryptopunks-native-book", async () => {
+    const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
+    const result = await syncCryptoPunksNativeBook();
+    return `${result.listed} contract listings (${result.publicListed} public); floor ${result.floorWei ?? "none"}`;
+  });
+
   // RobinWood's native Marketplank floor is built from executable orders,
   // not inferred from purchases. Record it every refresh so the API can
   // produce a real 24h comparison once both endpoints exist.
