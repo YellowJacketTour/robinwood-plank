@@ -70,12 +70,29 @@ async function main(): Promise<void> {
     }
     if (source === "robinhood-metadata") {
       const { advanceRobinhoodTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
-      console.log("[mesh-lane] robinhood-metadata", JSON.stringify(await advanceRobinhoodTokenMetadata()));
+      let attempted = 0, complete = 0, empty = 0, retry = 0, rarityFinalized = 0;
+      const deadline = Date.now() + 45_000;
+      while (attempted < 250 && Date.now() < deadline) {
+        const batch = await advanceRobinhoodTokenMetadata(25);
+        attempted += batch.attempted; complete += batch.complete; empty += batch.empty;
+        retry += batch.retry; rarityFinalized += batch.rarityFinalized;
+        if (batch.attempted === 0) break;
+      }
+      console.log("[mesh-lane] robinhood-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized }));
       return;
     }
     if (source === "evm-metadata") {
       const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
-      console.log("[mesh-lane] evm-metadata", JSON.stringify(await advanceEvmTokenMetadata(chain, 12, subject || null)));
+      let attempted = 0, complete = 0, empty = 0, retry = 0, rarityFinalized = 0;
+      const deadline = Date.now() + 45_000;
+      const ceiling = subject ? 250 : 75;
+      while (attempted < ceiling && Date.now() < deadline) {
+        const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
+        attempted += batch.attempted; complete += batch.complete; empty += batch.empty;
+        retry += batch.retry; rarityFinalized += batch.rarityFinalized;
+        if (batch.attempted === 0) break;
+      }
+      console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized }));
       return;
     }
     if (source === "unisat-rarity") {
@@ -89,8 +106,11 @@ async function main(): Promise<void> {
       return;
     }
     if (source === "opensea-stats") {
-      const { runOpenSeaStatsSync } = await import("../lib/market/multichain/discovery/opensea-stats");
-      console.log("[mesh-lane] os", JSON.stringify(await runOpenSeaStatsSync(chain, 20)));
+      const { runOpenSeaStatsSync, syncOpenSeaCollectionStats } = await import("../lib/market/multichain/discovery/opensea-stats");
+      const output = subject
+        ? await syncOpenSeaCollectionStats(chain, subject)
+        : await runOpenSeaStatsSync(chain, 20);
+      console.log("[mesh-lane] os", JSON.stringify(output));
       return;
     }
     if (source === "opensea-membership") {

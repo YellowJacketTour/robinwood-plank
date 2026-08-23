@@ -188,6 +188,14 @@ export const MESH_LANES: MeshLane[] = [
     sliceSec: 180,
     notes: "Bounded first-party tokenURI enrichment with durable terminal/ retry state; never runs in request paths.",
   },
+  {
+    id: "os-stats:robinhood",
+    source: "opensea-stats",
+    chainSlug: "robinhood",
+    cells: ["floor", "listedCount", "volume24h", "sales24h", "name", "image", "holders"],
+    sliceSec: 180,
+    notes: "OpenSea Robinhood floor, listings, and 24h/7d/30d windows; additive to native Marketplank data.",
+  },
   ...OS_EVM.map((chainSlug) => ({
     id: `os-stats:${chainSlug}`,
     source: "opensea-stats" as const,

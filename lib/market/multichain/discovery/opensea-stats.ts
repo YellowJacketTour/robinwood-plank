@@ -31,7 +31,7 @@ const OPENSEA_BASE = "https://api.opensea.io/api/v2";
 const MAX_PLAUSIBLE_FLOOR = 100_000;
 
 type OpenSeaStatsResponse = {
-  total?: { volume?: number; sales?: number; floor_price?: number; floor_price_symbol?: string };
+  total?: { volume?: number; sales?: number; floor_price?: number; floor_price_symbol?: string; num_owners?: number };
   intervals?: Array<{ interval: string; volume?: number; sales?: number }>;
 };
 
@@ -40,6 +40,11 @@ export type OpenSeaCollectionStats = {
   floorPriceCurrency: string | null;
   volume24hWei: string | null;
   sales24h: number | null;
+  volume7dWei: string | null;
+  sales7d: number | null;
+  volume30dWei: string | null;
+  sales30d: number | null;
+  holderCount: number | null;
 };
 
 export type OpenSeaCollectionDisplay = {
@@ -168,11 +173,22 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
   recordSourceSuccess(SOURCE);
 
   const oneDay = body.intervals?.find((i) => i.interval === "one_day");
+  const sevenDay = body.intervals?.find((i) => i.interval === "seven_day");
+  const thirtyDay = body.intervals?.find((i) => i.interval === "thirty_day");
+  const positiveSales = (value: number | undefined) =>
+    typeof value === "number" && value > 0 ? value : null;
   return {
     floorPriceWei: toWeiString(body.total?.floor_price),
     floorPriceCurrency: body.total?.floor_price != null && body.total.floor_price > 0 ? (body.total.floor_price_symbol || "ETH") : null,
     volume24hWei: toWeiString(oneDay?.volume),
-    sales24h: typeof oneDay?.sales === "number" && oneDay.sales > 0 ? oneDay.sales : null,
+    sales24h: positiveSales(oneDay?.sales),
+    volume7dWei: toWeiString(sevenDay?.volume),
+    sales7d: positiveSales(sevenDay?.sales),
+    volume30dWei: toWeiString(thirtyDay?.volume),
+    sales30d: positiveSales(thirtyDay?.sales),
+    holderCount: typeof body.total?.num_owners === "number" && body.total.num_owners > 0
+      ? Math.round(body.total.num_owners)
+      : null,
   };
 }
 
@@ -224,13 +240,14 @@ const LISTING_PAGE_SIZE = 50;
  * finishes (no `next`). Truncated walks return null so a partial page is
  * never stored as if it were the full listed count.
  */
-export async function fetchOpenSeaListedCount(slug: string, apiKey: string): Promise<number | null> {
+export async function fetchOpenSeaListedCount(slug: string, apiKey: string, openSeaChain?: string): Promise<number | null> {
   const unique = new Set<string>();
   let cursor: string | null = null;
   for (let page = 0; page < MAX_LISTING_PAGES; page++) {
     const gate = checkSourceBudget(SOURCE);
     if (!gate.allowed) return null;
     const qs = new URLSearchParams({ limit: String(LISTING_PAGE_SIZE) });
+    if (openSeaChain) qs.set("chain", openSeaChain);
     if (cursor) qs.set("next", cursor);
     let res: Response;
     try {
@@ -281,6 +298,59 @@ export type OpenSeaStatsSyncResult = {
   errors: number;
 };
 
+/** Refresh one exact collection immediately for visit/repair jobs. Source budgets still apply. */
+export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddress: string): Promise<OpenSeaStatsSyncResult> {
+  const result: OpenSeaStatsSyncResult = { chainSlug, candidates: 1, slugResolved: 0, updated: 0, displayUpdated: 0, errors: 0 };
+  const chain = foreignChainByChainSlug(chainSlug);
+  const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
+  const apiKey = await getOpenSeaApiKey();
+  if (!openSeaChain || !apiKey) return result;
+
+  const cacheKey = slugCacheKey(chainSlug, contractAddress);
+  let slug = await kv.get<string>(cacheKey);
+  if (slug === "__none__") return { ...result, errors: 1 };
+  if (!slug) {
+    slug = await resolveOpenSeaSlug(openSeaChain, contractAddress, apiKey);
+    if (!slug) return { ...result, errors: 1 };
+    await kv.set(cacheKey, slug);
+  }
+  result.slugResolved = 1;
+  const stats = await fetchOpenSeaCollectionStats(slug, apiKey);
+  if (!stats) return { ...result, errors: 1 };
+  const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
+  if (display && (display.name || display.imageUrl || display.creatorHandle)) {
+    await updateCollectionDisplay(chainSlug, contractAddress, {
+      name: display.name,
+      imageUrl: display.imageUrl,
+      creatorHandle: display.creatorHandle,
+    }).then(() => { result.displayUpdated = 1; }).catch(() => { result.errors += 1; });
+  }
+  const listedCount = await fetchOpenSeaListedCount(slug, apiKey, openSeaChain);
+  await updateCollectionSupplyFields(chainSlug, contractAddress, {
+    listedCount,
+    totalSupply: display?.totalSupply ?? null,
+    holderCount: stats.holderCount,
+  }).catch(() => { result.errors += 1; });
+  if (stats.floorPriceWei != null) {
+    await updateCollectionFloorOnly(chainSlug, contractAddress, {
+      floorPriceWei: stats.floorPriceWei,
+      floorPriceCurrency: stats.floorPriceCurrency,
+      floorPriceMarketplace: "opensea",
+    }).catch(() => { result.errors += 1; });
+  }
+  await updateCollectionMarketStats(chainSlug, contractAddress, {
+    volume24hWei: stats.volume24hWei,
+    sales24h: stats.sales24h,
+    volume7dWei: stats.volume7dWei,
+    sales7d: stats.sales7d,
+    volume30dWei: stats.volume30dWei,
+    sales30d: stats.sales30d,
+    currentFloorPriceWei: null,
+  }).catch(() => { result.errors += 1; });
+  result.updated = 1;
+  return result;
+}
+
 /**
  * Real fix, live 2026-08-20, for the empty Floor/24h Volume cells on
  * every Alchemy-covered EVM chain traced back to Alchemy's own
@@ -296,7 +366,8 @@ export type OpenSeaStatsSyncResult = {
 export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): Promise<OpenSeaStatsSyncResult> {
   const result: OpenSeaStatsSyncResult = { chainSlug, candidates: 0, slugResolved: 0, updated: 0, displayUpdated: 0, errors: 0 };
   const chain = foreignChainByChainSlug(chainSlug);
-  if (!chain?.openSeaChain) return result;
+  const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
+  if (!openSeaChain) return result;
 
   const apiKey = await getOpenSeaApiKey();
   if (!apiKey) return result;
@@ -344,7 +415,7 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       continue;
     }
     if (!slug) {
-      slug = await resolveOpenSeaSlug(chain.openSeaChain, row.contract_address, apiKey);
+      slug = await resolveOpenSeaSlug(openSeaChain, row.contract_address, apiKey);
       if (!slug) {
         const still = checkSourceBudget(SOURCE);
         if (!still.allowed) break;
@@ -384,11 +455,12 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
         result.errors += 1;
       });
     }
-    const listedCount = await fetchOpenSeaListedCount(slug, apiKey);
+    const listedCount = await fetchOpenSeaListedCount(slug, apiKey, openSeaChain);
     if (listedCount != null || display?.totalSupply != null) {
       await updateCollectionSupplyFields(chainSlug, row.contract_address, {
         listedCount,
         totalSupply: display?.totalSupply ?? null,
+        holderCount: stats.holderCount,
       }).catch(() => {
         result.errors += 1;
       });
@@ -402,10 +474,15 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
         result.errors += 1;
       });
     }
-    if (stats.volume24hWei != null || stats.sales24h != null) {
+    if (stats.volume24hWei != null || stats.sales24h != null || stats.volume7dWei != null || stats.sales7d != null
+      || stats.volume30dWei != null || stats.sales30d != null) {
       await updateCollectionMarketStats(chainSlug, row.contract_address, {
         volume24hWei: stats.volume24hWei,
         sales24h: stats.sales24h,
+        volume7dWei: stats.volume7dWei,
+        sales7d: stats.sales7d,
+        volume30dWei: stats.volume30dWei,
+        sales30d: stats.sales30d,
         currentFloorPriceWei: null,
       }).catch(() => {
         result.errors += 1;

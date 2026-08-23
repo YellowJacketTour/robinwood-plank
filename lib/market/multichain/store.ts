@@ -516,9 +516,9 @@ export async function getObservedFloorChange24h(
 export async function updateCollectionSupplyFields(
   chainSlug: string,
   contractAddress: string,
-  supply: { listedCount: number | null; totalSupply: number | null }
+  supply: { listedCount: number | null; totalSupply: number | null; holderCount?: number | null }
 ): Promise<void> {
-  if (supply.listedCount == null && supply.totalSupply == null) return;
+  if (supply.listedCount == null && supply.totalSupply == null && supply.holderCount == null) return;
   const collection = await postgresQuery<{ id: number }>(
     `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
     [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
@@ -528,12 +528,13 @@ export async function updateCollectionSupplyFields(
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
-     VALUES ($1, NULL, NULL, NULL, $2, $3, NULL, NOW(), NULL)
+     VALUES ($1, NULL, NULL, NULL, $2, $3, $4, NOW(), NULL)
      ON CONFLICT (collection_id) DO UPDATE SET
        total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
        listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
+       holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
        synced_at = NOW()`,
-    [id, supply.totalSupply, supply.listedCount]
+    [id, supply.totalSupply, supply.listedCount, supply.holderCount ?? null]
   );
 }
 
