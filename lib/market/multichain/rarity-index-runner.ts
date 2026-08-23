@@ -211,16 +211,16 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
   const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
-  if (!openSeaChain || !rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
+  if (!rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
   const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
-  const openSeaKey = await getOpenSeaApiKey();
+  const openSeaKey = openSeaChain ? await getOpenSeaApiKey() : null;
   let complete = 0, empty = 0, retry = 0;
   const errors: string[] = [];
   for (const item of work) {
     try {
       const metadata = await resolveEvmTokenMetadata({ rpcUrls,
         contractAddress: item.collectionSlug, tokenId: item.tokenId }).catch(async (onchainError) => {
-          if (!openSeaKey) throw onchainError;
+          if (!openSeaKey || !openSeaChain) throw onchainError;
           return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain,
             contractAddress: item.collectionSlug, tokenId: item.tokenId });
         });
@@ -263,7 +263,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       traitIndex[trait.traitType][trait.value] ??= [];
       traitIndex[trait.traitType][trait.value].push(item.tokenId);
     }
-    const slug = openSeaKey ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaKey, openSeaChain).catch(() => null) : null;
+    const slug = openSeaKey && openSeaChain ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaKey, openSeaChain).catch(() => null) : null;
     await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, slug ? [slug] : []);
     await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
       tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,

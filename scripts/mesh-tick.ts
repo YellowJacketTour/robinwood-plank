@@ -47,7 +47,7 @@ async function main(): Promise<void> {
       // collection subject; a lane id is orchestration identity, not data.
       subject: null,
       payload: { sliceSec: lane.sliceSec, cells: lane.cells },
-      priority: lane.source === "seaport-fills" || lane.source === "native-robinwood" ? 100 : 20,
+      priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 100 : 20,
     });
   }
 

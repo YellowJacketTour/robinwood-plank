@@ -25,6 +25,7 @@ export type MeshSource =
   | "unisat-collections"
   | "adapter-sync"
   | "seaport-fills"
+  | "seaport-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -32,6 +33,7 @@ export type MeshSource =
   | "unisat-discovery"
   | "ordiscan-discovery"
   | "robinhood-discovery"
+  | "robinhood-backfill"
   | "robinhood-opensea"
   | "robinhood-membership"
   | "robinhood-metadata"
@@ -93,7 +95,7 @@ export const MESH_LANES: MeshLane[] = [
     sliceSec: 180,
     notes: "One durable NFT page per tick; public reads use the local projection and completed walks rank locally.",
   })),
-  ...OS_EVM.map((chainSlug) => ({
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `evm-metadata:${chainSlug}`,
     source: "evm-metadata" as const,
     chainSlug,
@@ -110,6 +112,22 @@ export const MESH_LANES: MeshLane[] = [
     notes: "Forward Transfer discovery with a durable per-chain cursor. Metadata hydration remains a separate cell.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `seaport-live:${chainSlug}`,
+    source: "seaport-fills" as const,
+    chainSlug,
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Canonical Seaport 1.6 OrderFulfilled live cursor; scans first, then rebuilds collection windows.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `seaport-genesis:${chainSlug}`,
+    source: "seaport-fills-genesis" as const,
+    chainSlug,
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent block-0-to-head Seaport 1.6 fill cursor; never advances the live cursor or skips an uncovered range.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-backfill:${chainSlug}`,
     source: "hypersync-backfill" as const,
     chainSlug,
@@ -123,7 +141,7 @@ export const MESH_LANES: MeshLane[] = [
     chainSlug: "solana-mainnet",
     cells: ["name", "image"],
     sliceSec: 120,
-    notes: "Bounded Helius collection discovery; resumable provider cursor.",
+    notes: "Exhaustive Metaplex Core collection-account catalog with a resumable DAS cursor; legacy/pNFT collections enter through marketplace discovery and are exhaustively enumerated by DAS grouping once known.",
   },
   {
     id: "helius-membership:solana-mainnet",
@@ -131,7 +149,7 @@ export const MESH_LANES: MeshLane[] = [
     chainSlug: "solana-mainnet",
     cells: ["rarity"],
     sliceSec: 180,
-    notes: "One durable DAS grouping page per collection tick; resumes until complete, then ranks locally.",
+    notes: "One durable DAS grouping page per collection tick across Core, legacy NFT, and pNFT standards; resumes to the provider total, then ranks locally.",
   },
   {
     id: "unisat-discovery:bitcoin-mainnet",
@@ -139,7 +157,7 @@ export const MESH_LANES: MeshLane[] = [
     chainSlug: "bitcoin-mainnet",
     cells: ["name", "image"],
     sliceSec: 60,
-    notes: "One exhaustive UniSat catalog page per tick; stops honestly at provider total.",
+    notes: "One exhaustive UniSat registry page per tick; stops honestly at provider total. Ordinals collections are registry provenance, not a Bitcoin consensus primitive.",
   },
   {
     id: "ordiscan-discovery:bitcoin-mainnet",
@@ -172,6 +190,14 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["name", "image"],
     sliceSec: 60,
     notes: "First-party Robinhood Chain Transfer discovery.",
+  },
+  {
+    id: "robinhood-backfill:robinhood",
+    source: "robinhood-backfill",
+    chainSlug: "robinhood",
+    cells: ["name", "image"],
+    sliceSec: 180,
+    notes: "Independent block-zero Transfer discovery through Robinhood Chain RPC; same ERC-165 admission as the live lane.",
   },
   {
     id: "robinhood-opensea:robinhood",

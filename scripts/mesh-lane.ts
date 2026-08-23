@@ -60,6 +60,11 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] robinhood-discovery", JSON.stringify(await runRobinhoodChainDiscoveryScan()));
       return;
     }
+    if (source === "robinhood-backfill") {
+      const { runRobinhoodChainDiscoveryGenesisBackfill } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
+      console.log("[mesh-lane] robinhood-backfill", JSON.stringify(await runRobinhoodChainDiscoveryGenesisBackfill()));
+      return;
+    }
     if (source === "robinhood-opensea") {
       const { runOpenSeaRobinhoodDiscoveryScan } = await import("../lib/market/multichain/discovery/opensea-robinhood-scan");
       console.log("[mesh-lane] robinhood-opensea", JSON.stringify(await runOpenSeaRobinhoodDiscoveryScan({ maxPages: 1 })));
@@ -153,8 +158,26 @@ async function main(): Promise<void> {
       return;
     }
     if (source === "seaport-fills") {
+      if (chain !== "robinhood") {
+        const { scanChainForFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-seaport-scan");
+        const scan = await scanChainForFillsViaHypersync(chain);
+        if (scan.error) throw new Error(scan.error);
+        const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+        const updated = await updateEvmVolumeFromSeaportFills(chain);
+        console.log("[mesh-lane] fills-live", JSON.stringify({ scan, updated }));
+        return;
+      }
       const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
       console.log("[mesh-lane] fills", JSON.stringify(await updateEvmVolumeFromSeaportFills(chain)));
+      return;
+    }
+    if (source === "seaport-fills-genesis") {
+      const { scanChainForFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-seaport-scan");
+      const scan = await scanChainForFillsGenesisBackfillViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+      const updated = await updateEvmVolumeFromSeaportFills(chain);
+      console.log("[mesh-lane] fills-genesis", JSON.stringify({ scan, updated }));
       return;
     }
     if (source === "native-robinwood") {

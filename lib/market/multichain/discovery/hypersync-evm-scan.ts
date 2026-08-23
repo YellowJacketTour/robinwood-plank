@@ -54,6 +54,8 @@ import {
 } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain/store";
 import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
+import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
+import { postgresQuery } from "@/lib/postgres";
 
 /**
  * Blocks requested per HyperSync call. Far wider than evm-log-scan.ts's
@@ -92,7 +94,7 @@ async function registerObservedCandidates(
   chainSlug: string,
   candidates: Array<[string, number]>,
   sourceBlock: number
-): Promise<{ registered: number; skippedNoMetadata: number }> {
+): Promise<{ registered: number; skippedNoMetadata: number; accepted: Set<string> }> {
   let snapshots = new Map<string, Awaited<ReturnType<typeof fetchSnapshotsBatch>> extends Map<string, infer V> ? V : never>();
   const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
   if (checkSourceBudget("alchemy-nft").allowed) {
@@ -106,12 +108,14 @@ async function registerObservedCandidates(
 
   let registered = 0;
   let skippedNoMetadata = 0;
+  const accepted = new Set<string>();
   for (const [contractAddress] of candidates) {
     const snapshot = snapshots.get(contractAddress.toLowerCase());
     if (snapshot && isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
       skippedNoMetadata += 1;
       continue;
     }
+    accepted.add(contractAddress.toLowerCase());
     await upsertTrackedCollection({
       chainSlug,
       chainId: EVM_CHAIN_ID[chainSlug] ?? null,
@@ -133,7 +137,25 @@ async function registerObservedCandidates(
     if (!snapshot) skippedNoMetadata += 1;
     registered += 1;
   }
-  return { registered, skippedNoMetadata };
+  return { registered, skippedNoMetadata, accepted };
+}
+
+async function persistObservedErc721Membership(
+  chainSlug: string,
+  observed: Map<string, Set<string>>,
+  accepted: Set<string>,
+  source: string
+): Promise<void> {
+  const observedAt = new Date();
+  for (const [contractAddress, tokenIds] of observed) {
+    if (!accepted.has(contractAddress) || tokenIds.size === 0) continue;
+    await upsertCollectionTokenProjection(chainSlug, contractAddress, {
+      tokens: [...tokenIds].map((tokenId) => ({ tokenId, name: null, imageUrl: null, traits: [] })),
+      partial: true,
+      provenance: [source],
+      sourceObservedAt: observedAt,
+    });
+  }
 }
 
 function requireApiToken(): string {
@@ -188,6 +210,7 @@ export async function runHypersyncDiscoveryScan(input: {
   }
 
   const tally = new Map<string, number>();
+  const observedErc721 = new Map<string, Set<string>>();
   let logsScanned = 0;
   let query: Query = {
     fromBlock,
@@ -207,6 +230,12 @@ export async function runHypersyncDiscoveryScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     lastBlockSeen = res.nextBlock;
@@ -218,7 +247,8 @@ export async function runHypersyncDiscoveryScan(input: {
 
   const candidates = [...tally.entries()];
 
-  const { registered, skippedNoMetadata } = await registerObservedCandidates(input.chainSlug, candidates, lastBlockSeen - 1);
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, lastBlockSeen - 1);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-live");
 
   await writeCursor(input.chainSlug, lastBlockSeen - 1);
   await writeChainCoverage({
@@ -301,6 +331,7 @@ export async function runHypersyncBackfillScan(input: {
   }
 
   const tally = new Map<string, number>();
+  const observedErc721 = new Map<string, Set<string>>();
   let logsScanned = 0;
   let query: Query = {
     fromBlock: scannedUpTo,
@@ -320,6 +351,12 @@ export async function runHypersyncBackfillScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     nextBlock = res.nextBlock;
@@ -331,13 +368,37 @@ export async function runHypersyncBackfillScan(input: {
 
   const candidates = [...tally.entries()];
 
-  const { registered, skippedNoMetadata } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-genesis");
 
   // nextBlock is exactly what HyperSync itself reports as covered -- no
   // gap possible, unlike a precomputed window claimed complete regardless
   // of whether the scan actually reached its far edge.
   await writeCursor(backfillKey, nextBlock);
   const done = nextBlock >= ceiling;
+  if (done) {
+    // A completed genesis walk plus the independently-live forward lane is
+    // authoritative membership evidence even on chains (notably zkSync)
+    // where no collection-catalog vendor exists. New live mints set their
+    // projection partial again and the metadata lane re-finalizes rarity.
+    await postgresQuery(
+      `INSERT INTO plank_collection_membership_cursors (
+         chain_slug, collection_slug, source, cursor, expected_count,
+         observed_count, complete, source_observed_at, updated_at
+       )
+       SELECT chain_slug, collection_slug, 'hypersync-transfer-membership', NULL,
+         COUNT(*)::bigint, COUNT(*)::bigint, TRUE, NOW(), NOW()
+       FROM plank_collection_tokens
+       WHERE chain_slug = $1
+       GROUP BY chain_slug, collection_slug
+       ON CONFLICT (chain_slug, collection_slug, source) DO UPDATE SET
+         expected_count = EXCLUDED.expected_count,
+         observed_count = EXCLUDED.observed_count,
+         complete = TRUE,
+         source_observed_at = NOW(), updated_at = NOW()`,
+      [input.chainSlug]
+    );
+  }
   await writeChainCoverage({
     chainSlug: input.chainSlug,
     lane: "historical",

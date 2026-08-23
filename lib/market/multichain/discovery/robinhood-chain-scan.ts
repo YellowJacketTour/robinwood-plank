@@ -157,15 +157,20 @@ export type RobinhoodDiscoveryResult = {
  * collections. Meant to be called on the same cron cadence as
  * runAllEvmDiscoveryScans (scripts/refresh-market-data.ts).
  */
-export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscoveryResult> {
+async function runRobinhoodChainDiscoveryScanInternal(
+  cursorKey: string,
+  mode: "forward" | "historical"
+): Promise<RobinhoodDiscoveryResult> {
   const rpcUrl = ROBINHOOD_RPC_URLS[0];
   if (!rpcUrl) throw new Error("robinhood-chain-scan: no RPC URL configured (ROBINHOOD_RPC_URLS is empty)");
 
   const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
   const latest = parseInt(latestHex, 16);
 
-  const cursor = await readCursor(CHAIN_SLUG);
-  const fromBlock = cursor !== null ? cursor + 1 : Math.max(0, latest - CHUNK_BLOCKS);
+  const cursor = await readCursor(cursorKey);
+  const fromBlock = cursor !== null
+    ? cursor + 1
+    : mode === "historical" ? 0 : Math.max(0, latest - CHUNK_BLOCKS);
   const toBlock = Math.min(fromBlock + CHUNK_BLOCKS - 1, latest);
   if (fromBlock > toBlock) {
     return { fromBlock, toBlock: fromBlock - 1, candidatesSeen: 0, registered: 0, skippedNotArt: 0 };
@@ -238,16 +243,27 @@ export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscove
     registered += 1;
   }
 
-  await writeCursor(CHAIN_SLUG, toBlock);
+  await writeCursor(cursorKey, toBlock);
   await writeChainCoverage({
     chainSlug: CHAIN_SLUG,
-    lane: "forward",
+    lane: mode,
     standardGroup: "erc721+erc1155",
-    rangeStart: fromBlock,
+    rangeStart: mode === "historical" ? 0 : fromBlock,
     nextBlock: toBlock + 1,
     targetBlock: latest + 1,
     observedHead: latest,
-    state: toBlock >= latest ? "live" : "backfilling",
+    state: toBlock >= latest ? (mode === "historical" ? "complete" : "live") : "backfilling",
   });
   return { fromBlock, toBlock, candidatesSeen: transferCounts.size, registered, skippedNotArt };
+}
+
+export function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscoveryResult> {
+  return runRobinhoodChainDiscoveryScanInternal(CHAIN_SLUG, "forward");
+}
+
+/** Independent block-zero provenance walk. It deliberately never rewinds or
+ * shares the live cursor, so a slow historical RPC window cannot make newly
+ * minted Robinhood collections stale. */
+export function runRobinhoodChainDiscoveryGenesisBackfill(): Promise<RobinhoodDiscoveryResult> {
+  return runRobinhoodChainDiscoveryScanInternal(`${CHAIN_SLUG}:backfill`, "historical");
 }

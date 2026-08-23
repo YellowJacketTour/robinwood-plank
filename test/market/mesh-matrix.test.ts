@@ -40,6 +40,26 @@ describe("sync mesh matrix", () => {
     assert.ok(eth.includes("coingecko-nft"));
   });
 
+  it("runs independent live and genesis fill lanes on every EVM chain", () => {
+    for (const chain of [
+      "eth-mainnet", "polygon-mainnet", "arb-mainnet", "base-mainnet",
+      "opt-mainnet", "bnb-mainnet", "avax-mainnet", "zksync-mainnet",
+    ]) {
+      const sources = MESH_LANES.filter((lane) => lane.chainSlug === chain).map((lane) => lane.source);
+      assert.ok(sources.includes("hypersync-discovery"), `missing live discovery on ${chain}`);
+      assert.ok(sources.includes("hypersync-backfill"), `missing genesis discovery on ${chain}`);
+      assert.ok(sources.includes("seaport-fills"), `missing live fills on ${chain}`);
+      assert.ok(sources.includes("seaport-fills-genesis"), `missing genesis fills on ${chain}`);
+      assert.ok(sources.includes("evm-metadata"), `missing first-party metadata enrichment on ${chain}`);
+    }
+  });
+
+  it("keeps Robinhood live discovery independent from its genesis walk", () => {
+    const sources = MESH_LANES.filter((lane) => lane.chainSlug === "robinhood").map((lane) => lane.source);
+    assert.ok(sources.includes("robinhood-discovery"));
+    assert.ok(sources.includes("robinhood-backfill"));
+  });
+
   it("gives Bitcoin art a path that is not UniSat-only", () => {
     const btc = MESH_LANES.filter((l) => l.chainSlug === "bitcoin-mainnet").map((l) => l.source);
     assert.ok(btc.includes("ordinals-wallet"));

@@ -39,6 +39,7 @@ import {
 } from "@/lib/market/multichain/seaport-fill-indexer";
 import { FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
 const SOURCE = "hypersync-seaport";
 const CHUNK_BLOCKS = 50_000; // same conservative window hypersync-evm-scan.ts already uses
@@ -223,5 +224,16 @@ async function scanChainForFillsInternal(
     return { chainSlug, fromBlock, toBlock: lastSucceededBlock, logsScanned: totalLogs, fillsWritten: totalWritten, error: message };
   }
 
+  const nextBlock = Math.min(height, lastSucceededBlock + 1);
+  await writeChainCoverage({
+    chainSlug,
+    lane: mode === "forward-from-genesis" ? "historical" : "forward",
+    standardGroup: "seaport-1.6-fills",
+    rangeStart: mode === "forward-from-genesis" ? 0 : fromBlock,
+    nextBlock,
+    targetBlock: height,
+    observedHead: height,
+    state: nextBlock >= height ? (mode === "forward-from-genesis" ? "complete" : "live") : "backfilling",
+  });
   return { chainSlug, fromBlock, toBlock: lastSucceededBlock, logsScanned: totalLogs, fillsWritten: totalWritten };
 }
