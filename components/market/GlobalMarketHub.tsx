@@ -985,6 +985,13 @@ export default function GlobalMarketHub() {
   const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
   const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
   const [relatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
+  // Real, full-catalog search results (/api/market/multichain/collection-
+  // search) -- see that route's own header for the real bug this fixes:
+  // the client-side searchIndex below only ever covers whatever rows have
+  // scrolled into view via infinite scroll, never the full ~383,000-row
+  // catalog, so a real tracked collection could return "no matches" purely
+  // for not having been scrolled to yet.
+  const [serverCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -1314,7 +1321,7 @@ export default function GlobalMarketHub() {
     // "has art" must not hide a collection whose indexed pieces prove that
     // it exists (the MUGS collection did exactly that). Chain selection still
     // scopes results; junk-name suppression remains a safety invariant.
-    return searchIndex
+    const localMatches = searchIndex
       .filter(({ c }) =>
         (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) &&
         (!onlyWatched || watchlist.has(key(c))) &&
@@ -1324,7 +1331,20 @@ export default function GlobalMarketHub() {
       .filter((row) => row.score >= 0)
       .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt, toUsd, gradeCtx))
       .map((row) => row.c);
-  }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices]);
+    // Real, full-catalog server results merged in -- see
+    // serverCollectionHits' own declaration for why this is necessary
+    // (infinite scroll means `collections`/searchIndex above only ever
+    // covers a loaded subset, never the full tracked catalog).
+    const localKeys = new Set(localMatches.map(key));
+    const serverOnly = serverCollectionHits.filter(
+      (c) =>
+        !localKeys.has(key(c)) &&
+        (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) &&
+        (!onlyWatched || watchlist.has(key(c))) &&
+        !isSpamCollectionTitle(c.name)
+    );
+    return [...localMatches, ...serverOnly];
+  }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices, serverCollectionHits]);
 
   /**
    * Creator-entity-linked search expansion, computed client-side against the
@@ -1366,6 +1386,27 @@ export default function GlobalMarketHub() {
         if (!controller.signal.aborted) { setTokenHits([]); setRelatedByCreator([]); }
       } finally {
         if (!controller.signal.aborted) setTokenSearchLoading(false);
+      }
+    }, 220);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [search, chainFilter]);
+
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2) {
+      setServerCollectionHits([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const qs = new URLSearchParams({ q: query });
+      if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
+      try {
+        const response = await fetch(`/api/market/multichain/collection-search?${qs}`, { signal: controller.signal });
+        const body = response.ok ? (await response.json() as { collections?: TrackedCollection[] }) : null;
+        if (!controller.signal.aborted) setServerCollectionHits(body?.collections ?? []);
+      } catch {
+        if (!controller.signal.aborted) setServerCollectionHits([]);
       }
     }, 220);
     return () => { window.clearTimeout(timer); controller.abort(); };

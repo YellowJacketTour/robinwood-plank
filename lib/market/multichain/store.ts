@@ -935,6 +935,94 @@ export async function listCollectionsWithSnapshotsPage(input: {
   return { collections, totalCount };
 }
 
+/**
+ * Real server-side, full-catalog collection NAME/address search.
+ *
+ * REAL BUG FIXED 2026-08-23, flagged live ("something is bricking the
+ * search results"): GlobalMarketHub's search box only ever filtered the
+ * `collections` React state -- which, since the infinite-scroll rebuild
+ * earlier this session, holds only whatever rows have actually scrolled
+ * into view, never the full ~383,000-row catalog. Searching for a real,
+ * genuinely tracked collection (confirmed live: Yonder, a real Bitcoin
+ * Ordinals collection with 121 real indexed pieces) returned "no
+ * collections match" simply because it had never been scrolled to, not
+ * because it doesn't exist. This function is the real fix: it queries the
+ * full table directly, independent of whatever page the infinite scroll
+ * happens to have loaded client-side.
+ */
+export async function searchTrackedCollectionsByName(
+  query: string,
+  input: { limit?: number; chainSlugs?: string[] | null } = {}
+): Promise<CollectionWithSnapshot[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const limit = Math.min(Math.max(input.limit ?? 60, 1), 200);
+  const params: unknown[] = [`%${q}%`, q];
+  const whereClauses = [`(c.name ILIKE $1 OR c.contract_address ILIKE $1)`];
+  const chainSlugs = (input.chainSlugs ?? []).filter(Boolean);
+  if (chainSlugs.length > 0) {
+    params.push(chainSlugs);
+    whereClauses.push(`c.chain_slug = ANY($${params.length}::text[])`);
+  }
+  params.push(limit);
+  const result = await postgresQuery<
+    CollectionRow & {
+      floor_price_wei: string | null;
+      floor_price_currency: string | null;
+      floor_price_marketplace: string | null;
+      total_supply: string | null;
+      listed_count: number | null;
+      synced_at: string | null;
+      sync_error: string | null;
+      volume_24h_wei: string | null;
+      sales_24h: number | null;
+      volume_7d_wei: string | null;
+      sales_7d: number | null;
+      volume_30d_wei: string | null;
+      sales_30d: number | null;
+      previous_floor_price_wei: string | null;
+      holder_count: number | null;
+      floor_change_pct: number | null;
+    }
+  >(
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed,
+            c.creator_handle, c.creator_address, c.creator_ens,
+            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
+            s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            s.holder_count, s.floor_change_pct
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE ${whereClauses.join(" AND ")}
+     ORDER BY
+       (c.name ILIKE $2) DESC,
+       (c.name ILIKE $2 || '%') DESC,
+       (c.is_vault_backed IS TRUE) DESC,
+       s.sales_24h DESC NULLS LAST,
+       c.chain_slug, c.contract_address
+     LIMIT $${params.length}`,
+    params
+  );
+  return result.rows.map((row) => ({
+    ...rowToCollection(row),
+    floorPriceWei: row.floor_price_wei,
+    floorPriceCurrency: row.floor_price_currency,
+    floorPriceMarketplace: row.floor_price_marketplace,
+    totalSupply: row.total_supply == null ? null : Number(row.total_supply),
+    listedCount: row.listed_count,
+    syncedAt: row.synced_at,
+    syncError: row.sync_error,
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
+    previousFloorPriceWei: row.previous_floor_price_wei,
+    holderCount: row.holder_count,
+    floorChangePct: row.floor_change_pct,
+  }));
+}
+
 /** Bounded keyset page for edge-cached market feeds. Unlike the legacy hub
  * dump, latency and payload size stay constant as the roster grows. */
 export async function listCollectionFeed(input: {
