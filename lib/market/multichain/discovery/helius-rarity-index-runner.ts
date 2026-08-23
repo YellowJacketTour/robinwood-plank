@@ -32,6 +32,7 @@ import { computeGenericRaritySnapshot, type GenericRarityInput } from "@/lib/rar
 import { replaceForeignRarity, getForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 import { looksLikeSolanaPubkey } from "@/lib/market/multichain/solana-pubkey";
+import { postgresQuery } from "@/lib/postgres";
 import {
   readCollectionMembershipCursor,
   readProjectedRarityInputs,
@@ -217,6 +218,27 @@ export async function advanceSolanaCollectionMembership(collectionAddress: strin
     }).catch(() => {});
     throw error;
   }
+}
+
+/** Fair, durable Solana work selector. Incomplete walks win; completed
+ * collections rotate oldest-first, so a live cron neither restarts page one
+ * nor permanently starves collections discovered later. */
+export async function advanceNextTrackedSolanaMembership() {
+  const source = "helius-das-grouping";
+  const candidates = await postgresQuery<{ contract_address: string }>(
+    `SELECT c.contract_address
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_collection_membership_cursors m
+       ON m.chain_slug = c.chain_slug
+      AND lower(m.collection_slug) = lower(c.contract_address)
+      AND m.source = $1
+     WHERE c.chain_slug = 'solana-mainnet'
+     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id
+     LIMIT 1`,
+    [source]
+  );
+  const collectionAddress = candidates.rows[0]?.contract_address;
+  return collectionAddress ? advanceSolanaCollectionMembership(collectionAddress) : null;
 }
 
 async function persistSolanaSnapshot(

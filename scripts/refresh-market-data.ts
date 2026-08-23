@@ -85,6 +85,12 @@ const explicit = [
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
   "--hydrate-opensea",
+  "--hydrate-bitcoin-membership",
+  "--hydrate-solana-membership",
+  "--seaport-fills",
+  "--seaport-fills-backfill",
+  "--cryptopunks-native-book",
+  "--robinwood-floor-observation",
   "--own-ranking",
   "--scaffold-rarity",
 ].filter((t) => args.has(t));
@@ -104,8 +110,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -600,6 +606,26 @@ async function main(): Promise<void> {
       if (result.complete) completed += 1;
     }
     return `${pages} membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
+  });
+
+  // Helius DAS uses a different identity/membership model from EVM and
+  // Bitcoin. Advance bounded 1,000-asset pages on every cron pass using the
+  // durable fair selector; this is the live parity lane for Solana traits and
+  // rarity, not an EVM adapter disguised behind a shared interface.
+  await step("hydrate-solana-membership", async () => {
+    const { advanceNextTrackedSolanaMembership } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+    const attempts = full ? 10 : 1;
+    let pages = 0;
+    let pieces = 0;
+    let completed = 0;
+    for (let i = 0; i < attempts; i++) {
+      const result = await advanceNextTrackedSolanaMembership();
+      if (!result) break;
+      pages += 1;
+      pieces += result.tokensIndexed;
+      if (result.complete) completed += 1;
+    }
+    return `${pages} DAS membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
   });
 
   // Discovery only creates identities. Keep a separate, tightly bounded
