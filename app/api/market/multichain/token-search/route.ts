@@ -13,8 +13,12 @@ export async function GET(req: NextRequest) {
   if (query.length < 2) return NextResponse.json({ tokens: [] });
   if (!hasCollectionTokenStore()) return NextResponse.json({ tokens: [] });
   const chainSlugs = (searchParams.get("chains") ?? "").split(",").filter(Boolean);
+  const rarityTier = searchParams.get("rarityTier");
+  const traitType = searchParams.get("traitType");
+  const traitValue = searchParams.get("traitValue");
+  const trait = traitType && traitValue ? { traitType, value: traitValue } : null;
   try {
-    const tokens = await searchProjectedTokens({ query, chainSlugs, limit: 40 });
+    const tokens = await searchProjectedTokens({ query, chainSlugs, limit: 40, rarityTier, trait });
     return NextResponse.json({ tokens }, {
       headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" },
     });

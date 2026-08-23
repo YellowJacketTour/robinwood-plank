@@ -28,6 +28,12 @@ export type MeshSource =
   | "seaport-fills-genesis"
   | "wyvern-fills"
   | "wyvern-fills-genesis"
+  | "blur-fills"
+  | "blur-fills-genesis"
+  | "x2y2-fills"
+  | "x2y2-fills-genesis"
+  | "foundation-fills"
+  | "foundation-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -144,6 +150,54 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 180,
     notes: "Independent genesis-block-to-head Wyvern v1/v2 fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "foundation-live:eth-mainnet",
+    source: "foundation-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Foundation Market BuyPriceAccepted/OfferAccepted/ReserveAuctionFinalized live cursor; eth-mainnet only.",
+  },
+  {
+    id: "foundation-genesis:eth-mainnet",
+    source: "foundation-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head Foundation Market fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "blur-live:eth-mainnet",
+    source: "blur-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "BlurExchange OrdersMatched live cursor; eth-mainnet only. Blend pooled-bid financing is out of scope -- see blur-fill-indexer.ts.",
+  },
+  {
+    id: "blur-genesis:eth-mainnet",
+    source: "blur-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head BlurExchange fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "x2y2-live:eth-mainnet",
+    source: "x2y2-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "X2Y2_r1 EvInventory live cursor (COMPLETE_SELL_OFFER/COMPLETE_BUY_OFFER only); eth-mainnet only.",
+  },
+  {
+    id: "x2y2-genesis:eth-mainnet",
+    source: "x2y2-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head X2Y2_r1 fill cursor; never advances the live cursor.",
   },
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-backfill:${chainSlug}`,

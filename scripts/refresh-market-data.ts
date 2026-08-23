@@ -111,8 +111,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -709,6 +709,71 @@ async function main(): Promise<void> {
     const { scanLooksRareFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-looksrare-scan");
     const { LOOKSRARE_V1_CHAIN_SLUG } = await import("../lib/market/multichain/looksrare-fill-indexer");
     const result = await scanLooksRareFillsGenesisBackfillViaHypersync(LOOKSRARE_V1_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  // Third real historic marketplace this app indexes directly on-chain --
+  // BlurExchange OrdersMatched (Blend pooled-bid financing deliberately out
+  // of scope, see blur-fill-indexer.ts's own header), same dual-cursor
+  // live/genesis pattern as the Seaport/LooksRare/Wyvern steps above.
+  await step("blur-fills", async () => {
+    const { scanBlurFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-blur-scan");
+    const { BLUR_CHAIN_SLUG } = await import("../lib/market/multichain/blur-fill-indexer");
+    const result = await scanBlurFillsViaHypersync(BLUR_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("blur-fills-backfill", async () => {
+    const { scanBlurFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-blur-scan");
+    const { BLUR_CHAIN_SLUG } = await import("../lib/market/multichain/blur-fill-indexer");
+    const result = await scanBlurFillsGenesisBackfillViaHypersync(BLUR_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  // Fourth real historic marketplace this app indexes directly on-chain --
+  // X2Y2 (X2Y2_r1) EvInventory, same dual-cursor live/genesis pattern.
+  await step("x2y2-fills", async () => {
+    const { scanX2Y2FillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-x2y2-scan");
+    const { X2Y2_CHAIN_SLUG } = await import("../lib/market/multichain/x2y2-fill-indexer");
+    const result = await scanX2Y2FillsViaHypersync(X2Y2_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("x2y2-fills-backfill", async () => {
+    const { scanX2Y2FillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-x2y2-scan");
+    const { X2Y2_CHAIN_SLUG } = await import("../lib/market/multichain/x2y2-fill-indexer");
+    const result = await scanX2Y2FillsGenesisBackfillViaHypersync(X2Y2_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  // Fifth real historic marketplace this app indexes directly on-chain --
+  // Foundation Market's BuyPriceAccepted/OfferAccepted/ReserveAuctionFinalized,
+  // same dual-cursor live/genesis pattern as the steps above. See
+  // hypersync-foundation-scan.ts's own header for the cited address/event
+  // sources and honest eth-mainnet-only scope.
+  await step("foundation-fills", async () => {
+    const { scanFoundationFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-foundation-scan");
+    const { FOUNDATION_CHAIN_SLUG } = await import("../lib/market/multichain/foundation-fill-indexer");
+    const result = await scanFoundationFillsViaHypersync(FOUNDATION_CHAIN_SLUG);
+    return result.error
+      ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
+      : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;
+  });
+
+  await step("foundation-fills-backfill", async () => {
+    const { scanFoundationFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-foundation-scan");
+    const { FOUNDATION_CHAIN_SLUG } = await import("../lib/market/multichain/foundation-fill-indexer");
+    const result = await scanFoundationFillsGenesisBackfillViaHypersync(FOUNDATION_CHAIN_SLUG);
     return result.error
       ? `${result.chainSlug}: ERR(${result.error.slice(0, 60)})`
       : `${result.chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`;

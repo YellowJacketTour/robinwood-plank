@@ -175,6 +175,26 @@ function isBitcoinChainSlugName(chainSlug: string): boolean {
   return chainSlug === "bitcoin-mainnet";
 }
 
+/**
+ * Turns the Bitcoin/Solana listings route's `bookCoverage.sources` map into
+ * a short, honest note -- e.g. "UniSat not connected" when the deployment
+ * has no UNISAT_API_KEY, so a real 0-listings collection (route.ts's own
+ * "queried" status, confirmed live for Yonder) is never visually
+ * indistinguishable from a venue this deployment silently never asked.
+ * Only flags sources this app can't reach at all ("credential-missing" /
+ * "wallet-session-missing"); "queried"/"catalog-overlay"/"cursor-read" (a
+ * venue that WAS asked, empty or not) render nothing.
+ */
+function bookCoverageNote(sources: Record<string, string> | undefined | null): string | null {
+  if (!sources) return null;
+  const venueLabel: Record<string, string> = { unisat: "UniSat", ordinalsWallet: "Ordinals Wallet", ordnet: "ord.net" };
+  const missing = Object.entries(sources)
+    .filter(([, status]) => status === "credential-missing" || status === "wallet-session-missing")
+    .map(([source]) => venueLabel[source] ?? source);
+  if (missing.length === 0) return null;
+  return `${missing.join(" & ")} not connected`;
+}
+
 export default function MultichainCollectionView({ chainSlug, collectionSlug }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -232,6 +252,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [listingsUnavailable, setListingsUnavailable] = useState<string | null>(null);
+  /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
+  const [bookCoverage, setBookCoverage] = useState<{ sources: Record<string, string> } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -463,6 +485,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       void swrJson<{
         listings: Listing[];
         listingsUnavailable?: string | null;
+        bookCoverage?: { sources: Record<string, string> } | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`, {
         ttlMs: 8_000,
@@ -472,6 +495,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         .then((book) => {
           setListings(book.listings ?? []);
           setListingsUnavailable(book.listingsUnavailable ?? null);
+          setBookCoverage(book.bookCoverage ?? null);
         })
         .catch(() => {
           setListingsUnavailable("book-unavailable");
@@ -1778,6 +1802,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             {supplyStats?.listedCount != null
               ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? ` · ${listingsBookDelayedLabel(listingsUnavailable, chainSlug)}` : ""}`
               : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}${catalogMeta?.partial ? ` · ${catalogMeta.projectedCount.toLocaleString()} indexed so far` : ""}`}
+            {bookCoverageNote(bookCoverage?.sources) && (
+              <span className="ml-1 text-amber-400/80" title="This venue wasn't queried on this deployment -- the listing count above may be undercounted, not necessarily a real zero.">
+                · {bookCoverageNote(bookCoverage?.sources)}
+              </span>
+            )}
           </p>
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
             {collection.contractAddress}
@@ -2130,7 +2159,34 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               >
                 Sweep floorboards
               </button>
-              {!isNonEvm && (
+              {isNonEvm ? (
+                // REAL VENUE-CAPABILITY GAP, not a missing feature: UniSat's
+                // Marketplace API (the only Bitcoin bid venue this app
+                // integrates -- see unisat-ordinals-trade.ts) only exposes
+                // create_bid/confirm_bid against a specific auctionId for a
+                // specific inscription's live auction; its swagger
+                // (collection-marketplace.yaml) has no collection-wide or
+                // trait-criteria bid endpoint at all. Magic Eden's Solana
+                // collection-offer API *does* support this (see
+                // magiceden-solana-trade.ts), so this disables only for
+                // Bitcoin's real gap rather than every non-EVM chain --
+                // isNonEvm covers both today since Solana criteria bids
+                // aren't wired into this UI yet either, but the reason
+                // differs: Solana is an unbuilt integration, Bitcoin is a
+                // venue that structurally can't do it.
+                <button
+                  type="button"
+                  disabled
+                  title={
+                    isBitcoin
+                      ? "Not supported by connected Bitcoin marketplaces -- UniSat's bid API only covers a specific inscription's own auction, not a collection- or trait-wide offer."
+                      : "Criteria bidding isn't wired up for this chain yet."
+                  }
+                  className="min-h-10 shrink-0 cursor-not-allowed rounded-lg border border-line px-3 text-xs font-bold text-foreground/30"
+                >
+                  Bid by criteria
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() => setCriteriaOpen((v) => !v)}

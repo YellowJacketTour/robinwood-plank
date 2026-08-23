@@ -306,23 +306,40 @@ export async function searchProjectedTokens(input: {
   query: string;
   chainSlugs?: string[];
   limit?: number;
+  /** Real faceted drill-down, all backed by columns/indexes this store already has -- never a parallel query system. */
+  rarityTier?: string | null;
+  /** { traitType, value } -- matches the same jsonb shape readProjectedTraitIndex already indexes via CROSS JOIN LATERAL jsonb_array_elements(traits). */
+  trait?: { traitType: string; value: string } | null;
 }): Promise<GlobalTokenSearchHit[]> {
   const query = input.query.trim();
   if (!query) return [];
   const limit = Math.min(Math.max(Math.trunc(input.limit ?? 40), 1), 60);
   const chains = [...new Set((input.chainSlugs ?? []).map((v) => v.trim()).filter(Boolean))];
   const params: unknown[] = [query, `${query}%`];
-  let chainWhere = "";
+  let where = "(token_id = $1 OR token_id ILIKE $2 OR lower(name) LIKE lower($2))";
   if (chains.length) {
     params.push(chains);
-    chainWhere = `AND chain_slug = ANY($${params.length}::text[])`;
+    where += ` AND chain_slug = ANY($${params.length}::text[])`;
+  }
+  const rarityTier = input.rarityTier?.trim() || null;
+  if (rarityTier) {
+    params.push(rarityTier);
+    where += ` AND lower(rarity_tier) = lower($${params.length})`;
+  }
+  const trait = input.trait && input.trait.traitType.trim() && input.trait.value.trim() ? input.trait : null;
+  if (trait) {
+    params.push(trait.traitType.trim(), trait.value.trim());
+    where += ` AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(traits) t
+      WHERE lower(t->>'traitType') = lower($${params.length - 1}) AND lower(t->>'value') = lower($${params.length})
+    )`;
   }
   params.push(limit);
   const result = await postgresQuery<TokenRow & { chain_slug: string; collection_slug: string }>(
     `SELECT chain_slug, collection_slug, token_id, name, image_url, animation_url,
        media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier
      FROM plank_collection_tokens
-     WHERE (token_id = $1 OR token_id ILIKE $2 OR lower(name) LIKE lower($2)) ${chainWhere}
+     WHERE ${where}
      ORDER BY CASE WHEN token_id = $1 THEN 0 WHEN token_id ILIKE $2 THEN 1 ELSE 2 END,
        projected_at DESC
      LIMIT $${params.length}`,

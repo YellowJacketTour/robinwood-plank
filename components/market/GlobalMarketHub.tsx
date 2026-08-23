@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { computeDemandScore } from "@/lib/market/multichain/demand-score";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
@@ -360,12 +361,13 @@ function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddres
  * is this app's own honest composite (see gradeScore's header) standing in
  * for OpenSea's plain volume-desc "Trending" default.
  */
-type SortColumn = "grade" | "name" | "floor" | "change" | "volume" | "sales" | "listed" | "holders";
+type SortColumn = "grade" | "demand" | "name" | "floor" | "change" | "volume" | "sales" | "listed" | "holders";
 type SortDir = "asc" | "desc";
 
 /** Column -> the direction that reads as "most interesting first" on a first click, e.g. Volume/Floor/Sales/Holders/Listed/Grade default to descending (biggest first), Name defaults A-Z (ascending), matching every real marketplace rankings table checked in this session's research. */
 const DEFAULT_SORT_DIR: Record<SortColumn, SortDir> = {
   grade: "desc",
+  demand: "desc",
   name: "asc",
   floor: "desc",
   change: "desc",
@@ -374,6 +376,16 @@ const DEFAULT_SORT_DIR: Record<SortColumn, SortDir> = {
   listed: "desc",
   holders: "desc",
 };
+
+/** computeDemandScore() only wants the real fields it documents (see lib/market/multichain/demand-score.ts) -- this app's token-projection rarity coverage isn't fetched per-collection on this client-side row today, so those two fields are honestly omitted (undefined, not fabricated), not zeroed. */
+function collectionDemandScore(c: TrackedCollection): number | null {
+  const breakdown = computeDemandScore({
+    volume24hWei: c.volume24hWei, volume7dWei: c.volume7dWei, volume30dWei: c.volume30dWei,
+    sales24h: c.sales24h, sales7d: c.sales7d, sales30d: c.sales30d,
+    listedCount: c.listedCount, totalSupply: c.totalSupply, holderCount: c.holderCount,
+  });
+  return breakdown.gradable ? breakdown.score : null;
+}
 
 /** Null/undefined always sorts to the end regardless of direction -- the standard convention for a metric that's genuinely absent for some rows (e.g. holderCount is EVM-only, 7d/30d volume needs a later pass) rather than hiding the whole column or fabricating a 0. */
 function compareNullable(a: number | null, b: number | null, dir: SortDir): number {
@@ -421,6 +433,8 @@ function compareByColumn(
       return compareNullable(a.listedCount, b.listedCount, dir);
     case "holders":
       return compareNullable(a.holderCount, b.holderCount, dir);
+    case "demand":
+      return compareNullable(collectionDemandScore(a), collectionDemandScore(b), dir);
     case "grade":
     default:
       return compareNullable(gradeScore(a, hasArt(a)), gradeScore(b, hasArt(b)), dir);
@@ -1116,11 +1130,14 @@ export default function GlobalMarketHub() {
   }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
-  // order book, highest 24h volume as the tiebreak -- never a curated/paid
+  // order book, filtered to executable rows only -- never a curated/paid
   // slot (this hub has no such inventory to sell), and never a row a
   // visitor couldn't actually act on. Immersive large-hero + medium-strip
   // carousel (flagged live 2026-08-18: the single-card banner "isn't
-  // immersive"), not a single static banner.
+  // immersive"). Tiebreak is computeDemandScore (lib/market/multichain/demand-score.ts)
+  // -- real recency-weighted momentum/liquidity-depth/distribution-breadth,
+  // not a plain volume24h sort -- so "Trending" actually reflects
+  // acceleration, not just raw size.
   const topMovers = useMemo(() => {
     const candidates = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
@@ -1130,7 +1147,7 @@ export default function GlobalMarketHub() {
       .sort((a, b) => {
         const g = (gradeScore(b, true) ?? 0) - (gradeScore(a, true) ?? 0);
         if (g !== 0) return g;
-        return Number(BigInt(b.volume24hWei!) - BigInt(a.volume24hWei!));
+        return (collectionDemandScore(b) ?? 0) - (collectionDemandScore(a) ?? 0);
       })
       .slice(0, 6);
   }, [collections, deadArt, chainFilter]);
@@ -1984,6 +2001,7 @@ export default function GlobalMarketHub() {
           aria-label="Sort collections"
         >
           <option value="grade:desc">Trending (graded)</option>
+          <option value="demand:desc">Demand score: high to low</option>
           <option value="floor:desc">Floor: high to low</option>
           <option value="floor:asc">Floor: low to high</option>
           <option value="name:asc">Name: A-Z</option>

@@ -8,7 +8,8 @@
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
-import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
@@ -39,6 +40,55 @@ const PAGE_SIZE = 50;
 async function backgroundOpenSeaKey(): Promise<string | null> {
   const slot = await pickOpenSeaKey("background");
   return slot?.apiKey ?? null;
+}
+
+/**
+ * REAL FIX 2026-08-23: every fetch in this file used to be made with ONE key
+ * string, selected once at the top of a run (`backgroundOpenSeaKey()`) and
+ * held for every subsequent call -- including inside indexForeignCollectionRarity's
+ * own up-to-500-page NFT walk and its bounded 429 retry loop. That bypassed
+ * the whole point of a multi-key pool: it never reserved/settled durable
+ * capacity (so `plank_provider_windows` and getPoolHealth() saw zero usage
+ * from this file's actual heaviest OpenSea consumer), never recorded
+ * success/failure for the per-key circuit breaker, and -- worst of all for
+ * "never fail" -- if that ONE borrowed key got jailed or exhausted mid-walk,
+ * every remaining retry kept hammering the SAME bad key while N-1 other
+ * healthy keys sat idle in the pool.
+ *
+ * This reserves (and settles) a FRESH key from the pool on every single
+ * call, so a bad/exhausted key naturally fails over to the next-best key on
+ * the very next attempt, and every call now participates in both the
+ * durable per-key capacity ledger and the per-key circuit breaker. Returns
+ * `exhausted: true` when the ENTIRE pool is out of capacity/jailed right
+ * now -- callers must treat that as a normal, expected outcome (skip/defer/
+ * partial), never let it propagate as an unhandled rejection.
+ */
+export type ReservedFetchResult =
+  | { ok: true; res: Response }
+  | { ok: false; exhausted: true }
+  | { ok: false; exhausted: false; status: number | null; detail: string };
+
+async function reservedBackgroundFetch(url: string): Promise<ReservedFetchResult> {
+  const slot = await reserveOpenSeaKey(1, { priority: "background" });
+  if (!slot) return { ok: false, exhausted: true };
+  let res: Response;
+  let settled = false;
+  try {
+    res = await fetch(url, { headers: { "x-api-key": slot.apiKey, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+    await settleOpenSeaKey(slot, 1, true);
+    settled = true;
+  } catch (error) {
+    if (!settled) await settleOpenSeaKey(slot, 1, true).catch(() => {});
+    recordSourceFailure(slot.providerAccount, false);
+    return { ok: false, exhausted: false, status: null, detail: error instanceof Error ? error.message : String(error) };
+  }
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "");
+    recordSourceFailure(slot.providerAccount, res.status === 429 || res.status === 403);
+    return { ok: false, exhausted: false, status: res.status, detail: bodyText.slice(0, 200) };
+  }
+  recordSourceSuccess(slot.providerAccount);
+  return { ok: true, res };
 }
 
 export type RarityIndexBackend = "helius" | "unisat" | "opensea-contract" | "opensea-slug";
@@ -125,20 +175,21 @@ export async function advanceEvmCollectionMembership(
   // page available on this run. The sequential cursor remains unchanged and
   // will retry; provider pagination continues as additive evidence.
   await advanceVerifiedSequentialMembership(chainSlug, contractAddress).catch(() => null);
-  const key = await backgroundOpenSeaKey();
-  if (!key) throw new Error("No OpenSea API key available.");
-  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, key, openSeaChain);
-  if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress}`);
+  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, openSeaChain);
+  if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress} (no OpenSea key with capacity, or the collection genuinely has no slug)`);
   const checkpoint = await readCollectionMembershipCursor(chainSlug, contractAddress, OPENSEA_MEMBERSHIP_SOURCE);
   const url = new URL(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}/nfts`);
   url.searchParams.set("limit", String(PAGE_SIZE));
   if (checkpoint?.cursor) url.searchParams.set("next", checkpoint.cursor);
   const observedAt = new Date();
   try {
-    const response = await fetch(url, {
-      headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000),
-    });
-    if (!response.ok) throw new Error(`OpenSea ${response.status} enumerating ${contractAddress}`);
+    const fetched = await reservedBackgroundFetch(url.toString());
+    if (!fetched.ok) {
+      throw new Error(fetched.exhausted
+        ? `OpenSea pool exhausted/jailed enumerating ${contractAddress}`
+        : `OpenSea ${fetched.status ?? "error"} enumerating ${contractAddress} -- ${fetched.detail}`);
+    }
+    const response = fetched.res;
     const body = await response.json() as {
       nfts?: Array<{ identifier: string; name?: string | null; image_url?: string | null;
         display_image_url?: string | null; animation_url?: string | null;
@@ -270,7 +321,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       traitIndex[trait.traitType][trait.value] ??= [];
       traitIndex[trait.traitType][trait.value].push(item.tokenId);
     }
-    const slug = openSeaKey && openSeaChain ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaKey, openSeaChain).catch(() => null) : null;
+    const slug = openSeaChain ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaChain).catch(() => null) : null;
     await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, slug ? [slug] : []);
     await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
       tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
@@ -298,12 +349,18 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   if (!chain.openSeaChain) {
     throw new Error(`"${chainSlug}" has no OpenSea orderbook -- rarity indexing needs an OpenSea collection slug.`);
   }
-  const key = await backgroundOpenSeaKey();
-  if (!key) throw new Error("No OpenSea API key available.");
-
-  const collectionMeta = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}`, {
-    headers: { "x-api-key": key, accept: "application/json" },
-  }).then((r) => (r.ok ? r.json() : null))) as {
+  // Every fetch below reserves a fresh key from the pool per call (see
+  // reservedBackgroundFetch's own header) instead of holding one key for
+  // this entire function -- a key that goes bad mid-run now fails over to
+  // the next-best key on the very next call rather than dragging the whole
+  // collection down with it. No upfront "no key at all" gate here either:
+  // a momentarily fully-exhausted/jailed pool degrades to `collectionMeta:
+  // null` below the same way a single failed fetch always has, and the
+  // real, honest failure surfaces at the one place that actually needs a
+  // result (`contractAddress` unresolved) -- which the caller
+  // (scaffoldAllTrackedCollections) already isolates per-collection.
+  const collectionMetaFetch = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}`);
+  const collectionMeta = (collectionMetaFetch.ok ? await collectionMetaFetch.res.json() : null) as {
     name?: string;
     image_url?: string;
     contracts?: Array<{ address: string; chain: string }>;
@@ -363,11 +420,8 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   // entries alongside "one_day", so reading those out is zero extra API
   // calls -- not a second fetch, not a fabricated multi-window figure
   // derived from a single data point.
-  const stats = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}/stats`, {
-    headers: { "x-api-key": key, accept: "application/json" },
-  })
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)) as { intervals?: Array<{ interval: string; volume?: number; sales?: number }> } | null;
+  const statsFetch = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}/stats`).catch(() => null);
+  const stats = (statsFetch?.ok ? await statsFetch.res.json() : null) as { intervals?: Array<{ interval: string; volume?: number; sales?: number }> } | null;
   const oneDay = stats?.intervals?.find((i) => i.interval === "one_day");
   const sevenDay = stats?.intervals?.find((i) => i.interval === "seven_day");
   const thirtyDay = stats?.intervals?.find((i) => i.interval === "thirty_day");
@@ -416,17 +470,21 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     let res: Response | null = null;
     let lastPageError: unknown = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const candidate = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
-        if (candidate.ok) { res = candidate; break; }
-        if (candidate.status !== 429 || attempt === MAX_RETRIES) {
-          throw new Error(`OpenSea ${candidate.status} on page ${page}`);
-        }
-        lastPageError = new Error(`OpenSea ${candidate.status} on page ${page}`);
-      } catch (error) {
-        lastPageError = error;
-        if (attempt === MAX_RETRIES) break;
-      }
+      // Reserve a FRESH key on every attempt -- if the key attempt N just
+      // used got jailed/exhausted by that very call, attempt N+1 naturally
+      // fails over to a different, healthy key in the pool instead of
+      // retrying the same bad one (see reservedBackgroundFetch's header).
+      const fetched = await reservedBackgroundFetch(url.toString());
+      if (fetched.ok) { res = fetched.res; break; }
+      // Pool-exhausted (every key jailed/out of capacity right now) is
+      // retried with backoff same as a 429 -- a jail cools down, and a
+      // multi-key pool commonly has SOME capacity return within seconds as
+      // other in-flight reservations settle.
+      const retryable = fetched.exhausted || fetched.status === 429;
+      lastPageError = new Error(fetched.exhausted
+        ? `OpenSea pool exhausted/jailed on page ${page}`
+        : `OpenSea ${fetched.status ?? "error"} on page ${page} -- ${fetched.detail}`);
+      if (!retryable || attempt === MAX_RETRIES) break;
       await sleep(1_500 * (attempt + 1));
     }
     if (!res) {
@@ -485,16 +543,14 @@ function sleep(ms: number): Promise<void> {
 async function resolveOpenSeaSlug(
   chainSlug: string,
   contractAddress: string,
-  key: string,
   openSeaChainOverride?: string
 ): Promise<string | null> {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
   if (!openSeaChain) return null;
-  const res = await fetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`, {
-    headers: { "x-api-key": key, accept: "application/json" },
-  });
-  if (!res.ok) return null;
+  const fetched = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`);
+  if (!fetched.ok) return null;
+  const res = fetched.res;
   const data = (await res.json()) as { collection?: string };
   return data.collection ?? null;
 }
@@ -525,10 +581,8 @@ export async function indexRarityForCollectionLookup(chainSlug: string, lookup: 
     };
   }
   if (backend === "opensea-contract") {
-    const key = await backgroundOpenSeaKey();
-    if (!key) throw new Error("No OpenSea API key available.");
-    const slug = await resolveOpenSeaSlug(chainSlug, lookup, key);
-    if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${lookup}`);
+    const slug = await resolveOpenSeaSlug(chainSlug, lookup);
+    if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${lookup} (no OpenSea key with capacity, or the collection genuinely has no slug)`);
     return indexForeignCollectionRarity(chainSlug, slug);
   }
   return indexForeignCollectionRarity(chainSlug, lookup);
@@ -569,9 +623,17 @@ export async function scaffoldAllTrackedCollections(opts?: {
   const limit = opts?.limit ?? Infinity;
   const log = opts?.onProgress ?? (() => {});
 
-  const key = await backgroundOpenSeaKey();
-  if (!key) throw new Error("No OpenSea API key available.");
-
+  // REAL FIX 2026-08-23: this used to grab ONE key upfront and throw for the
+  // ENTIRE run if the pool happened to be empty/jailed at that exact instant
+  // -- discarding every collection's chance to be scaffolded this pass, even
+  // ones that end up skipped for entirely unrelated reasons (fresh, no-
+  // OpenSea-chain, native-book-owned) that need no OpenSea call at all. Per
+  // this repo's own resumable-cursor philosophy ("persist at complete
+  // success", never "all or nothing"), there is no upfront gate now --
+  // resolveOpenSeaSlug/indexForeignCollectionRarity each reserve their own
+  // key per call and degrade to a per-collection skip/fail (see their own
+  // headers), so a transient pool exhaustion costs this pass only the
+  // collections it actually touched while exhausted, not the whole run.
   const all = await listTrackedCollections();
   const solana = all.filter((c) => !foreignChainByChainSlug(c.chainSlug));
   // Also excludes chains with no OpenSea integration (zkSync today,
@@ -606,7 +668,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
   }
 
   for (const c of evm) {
-    const slug = await resolveOpenSeaSlug(c.chainSlug, c.contractAddress, key).catch(() => null);
+    const slug = await resolveOpenSeaSlug(c.chainSlug, c.contractAddress).catch(() => null);
     if (!slug) {
       log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea slug; Alchemy rarity is off (monthly cap). Helius/UniSat runners cover SOL/BTC.`);
       failed += 1;

@@ -29,10 +29,82 @@ export const MARKET_VENUES = [
   { id: "opensea-seaport-legacy", label: "OpenSea / legacy Seaport", family: "evm", protocol: "seaport", versions: ["1.1", "1.2", "1.3", "1.4", "1.5"], capabilities: ["sales", "transfers"], coverage: "partial", chainSlugs: [], notes: "Canonical 1.1-1.5 deployments use a block-0-to-head HyperSync lane plus an all-deployment live RPC fallback; partial until each deployed chain/version cell proves tip coverage." },
   { id: "opensea-wyvern", label: "OpenSea / Wyvern", family: "evm", protocol: "wyvern", versions: ["1", "2"], capabilities: ["sales"], coverage: "partial", chainSlugs: ["eth-mainnet"], notes: "Real v1 (0x7Be8...) + v2/bulk-cancellations (0x7f26...) OrdersMatched dual-cursor HyperSync scan is wired (plank_wyvern_fills). Partial, not indexed: OrdersMatched carries maker/taker/price but not NFT contract/token id, which only exist in atomicMatch_ calldata (not decoded here) -- fee-leg normalization also remains open." },
   { id: "cryptopunks-native", label: "CryptoPunks native market", family: "evm", protocol: "cryptopunks-native", versions: ["original"], capabilities: ["sales", "transfers", "listings", "bids"], coverage: "partial", chainSlugs: ["eth-mainnet"], notes: "Current punksOfferedForSale state is indexed; full event history and bid state are the remaining lanes." },
-  { id: "blur", label: "Blur", family: "evm", protocol: "blur", versions: ["v1", "v2"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["eth-mainnet", "blast-mainnet"], notes: "Exchange executions and pool bids require protocol-specific decoding." },
+  { id: "blur", label: "Blur", family: "evm", protocol: "blur", versions: ["v1", "v2"], capabilities: ["sales"], coverage: "partial", chainSlugs: ["eth-mainnet"], notes: "BlurExchange OrdersMatched direct fills are indexed on eth-mainnet via a dual-cursor HyperSync lane (plank_blur_fills + shared plank_market_event_assets/payments legs), address 0x000000000000Ad05Ccc4F10045630fb830B95127 confirmed via Sourcify exact-match verification. Partial, not indexed: Blend pooled-bid/lending-financed purchases are a structurally different loan-origination event, not a simple fill, and are not normalized here -- see blur-fill-indexer.ts. Blast-mainnet Blur deployment not independently verified this pass, left out rather than guessed." },
   { id: "looksrare", label: "LooksRare", family: "evm", protocol: "looksrare", versions: ["v1", "v2"], capabilities: ["sales"], coverage: "partial", chainSlugs: ["eth-mainnet"], notes: "v1 TakerAsk/TakerBid fills are indexed on eth-mainnet via a dual-cursor HyperSync lane (plank_looksrare_fills + shared plank_market_event_assets/payments legs); v2 (multi-chain LooksRareProtocol, different event shape) remains planned/unverified." },
-  { id: "x2y2", label: "X2Y2", family: "evm", protocol: "x2y2", versions: ["v1"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["eth-mainnet"], notes: "Inventory and execution events require item-level allocation." },
-  { id: "sudoswap", label: "Sudoswap", family: "evm", protocol: "sudoswap", versions: ["v1", "v2"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: [], notes: "AMM swaps are normalized as pool-mediated sales, not orderbook fills." },
+  { id: "x2y2", label: "X2Y2", family: "evm", protocol: "x2y2", versions: ["v1"], capabilities: ["sales"], coverage: "partial", chainSlugs: ["eth-mainnet"], notes: "EvInventory direct fills (COMPLETE_SELL_OFFER/COMPLETE_BUY_OFFER only) are indexed on eth-mainnet via a dual-cursor HyperSync lane (plank_x2y2_fills + shared plank_market_event_assets/payments legs), scanning the real live-traffic X2Y2 Exchange proxy 0x74312363e45DCaBA76c59ec49a7Aa8A65a67EeD3 (Sourcify exact-match verified, 901,846 real txs) using the real ABI from its X2Y2_r1 implementation 0x6D7812d41A08BC2a910B562d8B56411964A4eD88 (also Sourcify exact-match verified) -- live-smoke-tested with 5,069 real decoded fills found in its first 100k blocks. Partial, not indexed: NFT identity (nft_contract/token_id) is only decoded for the confirmed ERC721Delegate item.data shape; other delegateTypes and auction/bid/cancel/refund lifecycle events sharing the same EvInventory name are left out rather than guessed -- see x2y2-fill-indexer.ts." },
+  {
+    id: "foundation",
+    label: "Foundation",
+    family: "evm",
+    protocol: "foundation",
+    versions: ["v2"],
+    capabilities: ["sales"],
+    coverage: "partial",
+    chainSlugs: ["eth-mainnet"],
+    notes:
+      "FNDNFTMarket 0xcDA72070E455bb31C7690a170224Ce43623d0B6f (eth-mainnet) -- Foundation's own official " +
+      "repo https://github.com/f8n/fnd-protocol, addresses.js prod[1].nftMarket, cross-confirmed by " +
+      "Etherscan's 'Foundation: Market' label at the identical address. BuyPriceAccepted, OfferAccepted, " +
+      "and ReserveAuctionFinalized (contracts/mixins/nftMarket/*.sol, verbatim event signatures) are " +
+      "indexed via a dual-cursor HyperSync lane (plank_foundation_fills + shared " +
+      "plank_market_event_assets/payments legs). Partial, not indexed: ReserveAuctionFinalized does not " +
+      "itself carry nftContract/tokenId, only auctionId -- resolved via a genesis-forward " +
+      "ReserveAuctionCreated lookup table; a finalize log seen before its creation row (only possible in " +
+      "the live-forward lane ahead of a completed genesis backfill) is written with nft_contract/token_id " +
+      "left NULL rather than guessed. Older FNDNFTMarket v1/private-sale mechanics predating this proxy " +
+      "were not independently re-verified this pass.",
+  },
+  {
+    id: "rarible",
+    label: "Rarible",
+    family: "evm",
+    protocol: "rarible",
+    versions: ["exchange-v2"],
+    capabilities: ["sales"],
+    coverage: "planned",
+    chainSlugs: ["eth-mainnet"],
+    notes:
+      "CONFIRMED BLOCKED 2026-08-23, NOT A GAP -- researched via Rarible's own real source, " +
+      "https://github.com/rarible/protocol-contracts, projects/exchange-v2/contracts/ExchangeV2Core.sol. " +
+      "Rarible's legacy standalone RaribleExchange (v1) is retired; today's real Rarible-originated " +
+      "on-chain settlement is ExchangeV2 (mainnet 0x9757F2d2b135150BBeb65308D4a91804107cd8D6 per Rarible's " +
+      "own docs.rarible.org/reference/contract-addresses), a genuinely distinct contract from Seaport -- " +
+      "NOT a case of Rarible's UI merely wrapping Seaport, so this is real missing coverage, not double- " +
+      "counting an already-indexed Seaport fill under a second label. However, directly fetched " +
+      "ExchangeV2Core.sol and confirmed by exact line match that its only completed-trade event is " +
+      "`event Match(bytes32 leftHash, bytes32 rightHash, uint newLeftFill, uint newRightFill);` -- two " +
+      "order hashes and two fill amounts, with NO nftContract/tokenId/price/party fields at all. Real " +
+      "asset/price/party data only exists inside the internal _doTransfers ERC721/ERC20/ETH Transfer legs " +
+      "emitted by the token contracts themselves within the same tx, which would have to be correlated by " +
+      "tx hash after the fact -- the same materially-different, non-log-self-contained data-access pattern " +
+      "documented as the Sudoswap blocker above, not the single-log decode this app's HyperSync scanners " +
+      "are built around. Left planned, not guessed.",
+  },
+  {
+    id: "sudoswap",
+    label: "Sudoswap",
+    family: "evm",
+    protocol: "sudoswap",
+    versions: ["v1", "v2"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "planned",
+    chainSlugs: ["eth-mainnet"],
+    notes:
+      "CONFIRMED BLOCKED 2026-08-23, NOT A GAP -- researched via sudoswap's own real source, " +
+      "https://github.com/sudoswap/lssvm, src/LSSVMPair.sol. LSSVMPairFactory (real mainnet address " +
+      "0xb16c1342e617a5b6e4b631eb114483fdb289c0a4, Etherscan-confirmed) deploys minimal-proxy LSSVMPair " +
+      "instances per collection. Directly fetched src/LSSVMPair.sol and confirmed by exact line match: " +
+      "`event SwapNFTInPair();` and `event SwapNFTOutPair();` are REAL, VERIFIED, PARAMETERLESS -- no " +
+      "tokenId, no ETH amount, no direction beyond which of the two fires. This is architecturally " +
+      "different from every other venue this app indexes: those all decode a fill entirely from one " +
+      "log's topics+data (the established HyperSync log-scan pattern this app uses everywhere else). A " +
+      "Sudoswap swap has NO such self-contained log -- reconstructing pool/tokenId/ETH-amount/direction " +
+      "requires correlating the parameterless event with sibling ERC721 Transfer logs AND the ETH value " +
+      "moved in the same tx (trace_call or balance-delta, not log data) in the same transaction, which is " +
+      "a materially different data-access pattern (full receipt+trace fetching per swap, not bulk log " +
+      "scanning) than every other indexer in this app and was not built this pass rather than force a " +
+      "guessed/partial normalization. Left planned, not guessed.",
+  },
   { id: "magiceden-solana", label: "Magic Eden", family: "solana", protocol: "magiceden", versions: ["current"], capabilities: ["sales", "transfers", "listings", "bids"], coverage: "partial", chainSlugs: ["solana-mainnet"], notes: "Recent API activity exists; program-history and complete book ingestion remain incomplete." },
   { id: "tensor-solana", label: "Tensor", family: "solana", protocol: "tensor", versions: ["current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program/account decoder and compressed-NFT support required." },
   { id: "metaplex-solana", label: "Metaplex programs", family: "solana", protocol: "metaplex", versions: ["auction-house", "bubblegum", "core"], capabilities: ["sales", "transfers"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program-family provenance including compressed and Core assets." },

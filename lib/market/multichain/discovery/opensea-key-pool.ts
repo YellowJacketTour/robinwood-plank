@@ -23,7 +23,8 @@
 import { postgresQuery } from "@/lib/postgres";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
-import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
+import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
+import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
 
 /**
  * No DAILY_CEILING entry exists for "opensea-stats:key-N" in
@@ -159,4 +160,70 @@ export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKey
 
 export async function settleOpenSeaKey(slot: OpenSeaKeySlot, cost = 1, success = true): Promise<void> {
   await settleProviderCapacity(slot.providerAccount, slot.window, cost, success);
+}
+
+export type OpenSeaKeyHealth = {
+  id: string;
+  providerAccount: string;
+  /** Reserved+consumed against OPENSEA_STATS_DAILY_ALLOWANCE for today's UTC window (the durable, cross-process figure -- see plank_provider_windows). */
+  usedToday: number;
+  allowanceToday: number;
+  /** In-memory (this process only) circuit-breaker state -- resets on restart, see source-budget.ts's own header. */
+  processJailed: boolean;
+  processJailedUntil: number | null;
+  processCallsToday: number;
+  /** Durable (cross-process, survives restarts) circuit-breaker state -- see mesh/jail.ts's own header. This is the one that actually blocks a NEW process from immediately retrying a key another worker just jailed. */
+  durableJailed: boolean;
+  durableJailRemainingMs: number;
+};
+
+export type OpenSeaPoolHealth = {
+  configured: number;
+  healthy: number;
+  jailedOrExhausted: number;
+  /** True when every configured key is currently jailed or out of capacity -- the pool would return null to every caller right now. */
+  degraded: boolean;
+  keys: OpenSeaKeyHealth[];
+};
+
+/**
+ * Real-time, one-call health snapshot for every configured pool key -- the
+ * "single place to see pool health at a glance" the owner's audit standard
+ * ("super simple to audit") requires. Reads the SAME durable
+ * plank_provider_windows rows and jail state every real reservation
+ * checks, never a separate/derived approximation, so this is never able to
+ * say "healthy" while a real caller would actually be refused.
+ */
+export async function getPoolHealth(): Promise<OpenSeaPoolHealth> {
+  const pool = await loadOpenSeaKeyPool();
+  const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
+  const usage = await loadTodayUsage(pool.map((e) => e.providerAccount), window);
+  const keys: OpenSeaKeyHealth[] = await Promise.all(
+    pool.map(async (entry) => {
+      const processState = readSourceBudget(entry.providerAccount);
+      const durableJailed = await isSourceJailed(entry.providerAccount);
+      const durableJailRemainingMs = durableJailed ? await jailRemainingMs(entry.providerAccount) : 0;
+      return {
+        id: entry.id,
+        providerAccount: entry.providerAccount,
+        usedToday: usage.get(entry.providerAccount) ?? 0,
+        allowanceToday: OPENSEA_STATS_DAILY_ALLOWANCE,
+        processJailed: processState.jailed,
+        processJailedUntil: processState.jailedUntil,
+        processCallsToday: processState.callsToday,
+        durableJailed,
+        durableJailRemainingMs,
+      };
+    })
+  );
+  const jailedOrExhausted = keys.filter(
+    (k) => k.processJailed || k.durableJailed || k.usedToday >= k.allowanceToday
+  ).length;
+  return {
+    configured: keys.length,
+    healthy: keys.length - jailedOrExhausted,
+    jailedOrExhausted,
+    degraded: keys.length === 0 || jailedOrExhausted >= keys.length,
+    keys,
+  };
 }
