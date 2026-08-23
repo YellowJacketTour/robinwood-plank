@@ -130,6 +130,7 @@ type TrackedCollection = {
   sales30d: number | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
+  floorChangeStatus?: "observed-24h" | "collecting-baseline" | null;
   /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
   totalSupply: number | null;
   listedCount: number | null;
@@ -1774,6 +1775,13 @@ export default function GlobalMarketHub() {
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? (
                           `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                        ) : c.floorChangeStatus === "collecting-baseline" ? (
+                          <span
+                            className="text-amber-300/80"
+                            title="Executable floor tracking is active. An exact 24-hour comparison appears after the first complete observation window."
+                          >
+                            Baseline
+                          </span>
                         ) : (
                           <span title={emptyCellReason(c, "change")}>—</span>
                         )}

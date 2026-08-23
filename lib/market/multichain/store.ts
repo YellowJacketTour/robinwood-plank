@@ -429,7 +429,7 @@ export async function recordFloorObservation(
 ): Promise<void> {
   const price = nonzeroWei(observation.priceAtomic);
   if (!price || !observation.currency || !observation.marketplace) return;
-  await postgresQuery(
+  const result = await postgresQuery<{ id: number }>(
     `INSERT INTO plank_collection_floor_observations
        (collection_id, price_atomic, currency, marketplace, listed_count, source)
      SELECT id, $3, $4, $5, $6, $7
@@ -440,7 +440,8 @@ export async function recordFloorObservation(
        currency = EXCLUDED.currency,
        listed_count = EXCLUDED.listed_count,
        source = EXCLUDED.source,
-       observed_at = NOW()`,
+       observed_at = NOW()
+     RETURNING id`,
     [
       chainSlug,
       normalizeContractAddress(chainSlug, contractAddress),
@@ -451,6 +452,11 @@ export async function recordFloorObservation(
       observation.source,
     ]
   );
+  if (result.rowCount !== 1) {
+    throw new Error(
+      `Cannot record floor observation for untracked collection ${chainSlug}:${contractAddress}.`
+    );
+  }
 }
 
 /**

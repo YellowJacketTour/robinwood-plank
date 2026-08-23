@@ -155,6 +155,11 @@ export async function GET(req: Request) {
       holderCount: nativeHolders,
       floorChangePct: nativeFloorChange?.changePct ?? null,
       floorChangeEvidence: nativeFloorChange,
+      floorChangeStatus: nativeFloorChange
+        ? "observed-24h"
+        : nativeFloor != null
+          ? "collecting-baseline"
+          : null,
       isNativeHome: true,
     };
 

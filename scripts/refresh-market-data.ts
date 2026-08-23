@@ -721,11 +721,11 @@ async function main(): Promise<void> {
   await step("robinwood-floor-observation", async () => {
     const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
     const { getListings } = await import("../lib/market/orders-store");
-    const { recordFloorObservation } = await import("../lib/market/multichain/store");
+    const { recordFloorObservation, upsertTrackedCollection } = await import("../lib/market/multichain/store");
     const bySlug = await getListings("robinwood").catch(() => []);
     const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
     const listings = bySlug.length >= byContract.length ? bySlug : byContract;
-    const floor = listings.reduce<bigint | null>((minimum, listing) => {
+    let floor = listings.reduce<bigint | null>((minimum, listing) => {
       try {
         const price = BigInt(listing.priceWei);
         return minimum == null || price < minimum ? price : minimum;
@@ -733,14 +733,42 @@ async function main(): Promise<void> {
         return minimum;
       }
     }, null);
+    let listedCount = listings.length;
+    let source = "native-executable-order-book";
+    // A local/dev worker can legitimately have an empty local order store
+    // while the canonical deployment owns the live signed book. Observe the
+    // same canonical book the public projection uses, otherwise local refresh
+    // runs register the collection but still never create a price endpoint.
+    if (floor == null) {
+      const { fetchCanonicalRobinwoodStats } = await import("../lib/market/canonical-robinwood");
+      const canonical = await fetchCanonicalRobinwoodStats({ hostHeader: null });
+      if (canonical?.floorPriceWei) {
+        floor = BigInt(canonical.floorPriceWei);
+        listedCount = canonical.listedCount;
+        source = "canonical-native-executable-order-book";
+      }
+    }
+    // RobinWood is projected into the public index as its native home row,
+    // rather than discovered by a third-party adapter. Floor observations
+    // resolve their FK by (chain, contract), so the native collection must
+    // still be registered in the same durable collection table first. Before
+    // this invariant was enforced the INSERT ... SELECT matched zero rows and
+    // every scheduled observation was silently discarded.
+    await upsertTrackedCollection({
+      chainSlug: "robinhood",
+      chainId: 4663,
+      contractAddress: NFT_CONTRACT_ADDRESS,
+      adapter: "robinhood-native",
+      isVaultBacked: true,
+    });
     await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
       priceAtomic: floor?.toString() ?? null,
       currency: "ETH",
       marketplace: "marketplank",
-      listedCount: listings.length,
-      source: "native-executable-order-book",
+      listedCount,
+      source,
     });
-    return floor == null ? "no executable native floor" : `${listings.length} listings; floor ${floor}`;
+    return floor == null ? "no executable native floor" : `${listedCount} listings; floor ${floor}`;
   });
 
   // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,
