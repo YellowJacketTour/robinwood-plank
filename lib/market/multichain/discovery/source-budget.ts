@@ -49,7 +49,24 @@ const DAILY_CEILING: Record<string, number> = {
   "unisat-indexer": 5_000,
   "unisat-collections": 400, // authenticated open-api 403s hard; stay well under
   "helius-das": 20_000,
-  "ordinals-wallet": 2_400, // keyless turbo.ordinalswallet.com; paced ~1/s
+  // turbo.ordinalswallet.com ("ordinals-wallet" = bitcoin-art-rotator.ts's
+  // per-inscription art-lookup lane; "ordinalswallet-ordinals" = the
+  // collection/snapshot/rarity adapter lane in ordinalswallet-ordinals.ts,
+  // ordinalswallet-collection-scan.ts, ordinalswallet-rarity-index-runner.ts)
+  // is fully keyless (no auth header at all) and documents NO rate limit --
+  // confirmed live 2026-08-23, not a guess. Per EXPLICIT owner direction,
+  // this app never self-imposes a limit/ceiling/pacing delay unless it maps
+  // to a REAL, documented provider-side limit -- there is deliberately NO
+  // entry for either of these two keys in this map (not even a large
+  // placeholder number): checkSourceBudget() falls through to `allowed:
+  // true` for any source absent from DAILY_CEILING, which is exactly the
+  // "no throttle" behavior wanted here. The circuit breaker (jail on
+  // consecutive/quota failures) still applies regardless of ceiling. The
+  // durable reserveProviderCapacity/settleProviderCapacity window (a
+  // separate mechanism, Postgres-backed) still records real usage in
+  // plank_provider_windows for observability, with its own allowance
+  // parameter set high enough it never blocks -- see each file's own
+  // comment for that number.
   "magiceden-solana": 2_000,
   // Free plan is 1,000 requests/month. 24/day leaves reserve and prevents a
   // restarted supervisor from treating the monthly plan as a daily budget;

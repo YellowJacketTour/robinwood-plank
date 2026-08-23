@@ -152,11 +152,29 @@ export async function upsertTrackedCollection(input: {
   adapter: string;
   isVaultBacked?: boolean;
 }): Promise<number> {
+  // Real bug found live 2026-08-23: unconditionally reassigning `adapter`
+  // on every conflict let a second discovery source with the same
+  // (chain_slug, contract_address) string silently steal ownership of a
+  // row an earlier source already registered -- confirmed live for
+  // Bitcoin Ordinals, where UniSat's own collectionId and OrdinalsWallet's
+  // slug are frequently the identical human-readable string (e.g.
+  // "bitcoin-frogs"): running the OrdinalsWallet discovery scan flipped
+  // ~1,446 rows from "unisat-collections" to "ordinalswallet-ordinals".
+  // First-writer-wins now: a row keeps its original adapter across
+  // conflicts unless re-upserted under that SAME adapter (the normal,
+  // intended re-confirm-my-own-row case every discovery scan already
+  // does on every pass). This is exactly the behavior every Bitcoin
+  // discovery scan's own header comment (ordiscan-collection-scan.ts,
+  // ordinalswallet-collection-scan.ts) already documented as the
+  // *intended* outcome of a same-string collision -- the SQL just didn't
+  // implement it yet.
   const result = await postgresQuery<{ id: number }>(
     `INSERT INTO plank_multichain_collections (chain_slug, chain_id, contract_address, adapter, is_vault_backed)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (chain_slug, contract_address)
-     DO UPDATE SET adapter = EXCLUDED.adapter, is_vault_backed = EXCLUDED.is_vault_backed
+     DO UPDATE SET
+       adapter = plank_multichain_collections.adapter,
+       is_vault_backed = EXCLUDED.is_vault_backed
      RETURNING id`,
     [
       input.chainSlug,

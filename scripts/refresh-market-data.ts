@@ -80,6 +80,7 @@ const explicit = [
   "--discover-hypersync-backfill",
   "--discover-bitcoin-collections",
   "--discover-ordiscan-collections",
+  "--discover-ordinalswallet-collections",
   "--discover-solana-collections",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
@@ -110,8 +111,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -522,6 +523,20 @@ async function main(): Promise<void> {
     return `page ${r.page}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedEmpty} empty)${r.done ? " — DONE, full catalog walked" : ""}`;
   });
 
+  // Third real Bitcoin Ordinals collection-discovery source, keyless
+  // (turbo.ordinalswallet.com needs no API key at all) -- see
+  // ordinalswallet-collection-scan.ts's own header for why it registers
+  // under its own "ordinalswallet-ordinals" adapter rather than merging
+  // into UniSat's or Ordiscan's rows. Its real catalog is far larger
+  // (~424k rows, confirmed live) than either of the other two Bitcoin
+  // scans because it includes rune-ticker/junk entries; the scan itself
+  // filters those out via a real total_supply > 0 check.
+  await step("discover-ordinalswallet-collections", async () => {
+    const { runOrdinalsWalletCollectionScan } = await import("../lib/market/multichain/discovery/ordinalswallet-collection-scan");
+    const r = await runOrdinalsWalletCollectionScan({ maxPages: full ? 30 : 10 });
+    return `offset ${r.offset}/${r.total}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedEmpty} empty)${r.done ? " — DONE, full catalog walked" : ""}`;
+  });
+
   // Exhaustive Solana collection discovery via Helius DAS -- see
   // helius-collection-scan.ts's own header for the real, live-verified
   // scope: covers Metaplex's newer Core standard exhaustively, NOT legacy
@@ -737,6 +752,22 @@ async function main(): Promise<void> {
       onProgress: (line) => console.log(`[refresh:scaffold-rarity-bitcoin] ${line}`),
     });
     return `${result.totalTracked} Bitcoin tracked -> ${result.indexed} indexed (partial coverage), ${result.skippedFresh} fresh, ${result.failed} failed`;
+  });
+
+  // Ordinals Wallet's own real trait/rarity scaffold -- see
+  // ordinalswallet-rarity-index-runner.ts's own header: UNLIKE
+  // scaffold-rarity-bitcoin above (a marketplace activity log, always
+  // partial by construction), this source is a real collection
+  // enumeration -- a single call returns every real inscription in the
+  // collection with real traits, so `partial` here reflects an honest
+  // count comparison against the collection's own stated total_supply,
+  // not an always-true flag.
+  await step("scaffold-rarity-ordinalswallet", async () => {
+    const { scaffoldAllTrackedOrdinalsWalletCollections } = await import("../lib/market/multichain/discovery/ordinalswallet-rarity-index-runner");
+    const result = await scaffoldAllTrackedOrdinalsWalletCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity-ordinalswallet] ${line}`),
+    });
+    return `${result.totalTracked} OrdinalsWallet tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed`;
   });
 
   // Real 24h volume/sales for every EVM chain, from this app's own

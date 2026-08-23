@@ -11,6 +11,7 @@ import { unisatCollectionsAdapter } from "@/lib/market/multichain/adapters/unisa
 import { robinhoodNativeAdapter } from "@/lib/market/multichain/adapters/robinhood-native";
 import { heliusSolanaAdapter } from "@/lib/market/multichain/adapters/helius-solana";
 import { ordiscanOrdinalsAdapter } from "@/lib/market/multichain/adapters/ordiscan-ordinals";
+import { ordinalsWalletOrdinalsAdapter } from "@/lib/market/multichain/adapters/ordinalswallet-ordinals";
 import {
   hasMultichainStore,
   listCollectionsForSync,
@@ -28,6 +29,7 @@ const ADAPTERS: Record<string, ChainAdapter> = {
   [robinhoodNativeAdapter.name]: robinhoodNativeAdapter,
   [heliusSolanaAdapter.name]: heliusSolanaAdapter,
   [ordiscanOrdinalsAdapter.name]: ordiscanOrdinalsAdapter,
+  [ordinalsWalletOrdinalsAdapter.name]: ordinalsWalletOrdinalsAdapter,
 };
 
 /**
@@ -55,6 +57,12 @@ const ADAPTER_MIN_INTERVAL_MS: Record<string, number> = {
   // page itself, which is Cloudflare-challenge-gated). Paced the same as
   // UniSat above, same reasoning: a keyed, presumably tiered API.
   [ordiscanOrdinalsAdapter.name]: 500,
+  // ordinalsWalletOrdinalsAdapter (turbo.ordinalswallet.com) deliberately has
+  // NO entry here: it is keyless with no documented rate limit anywhere
+  // (confirmed live), and per explicit owner direction this app does not
+  // self-impose pacing/ceilings on a source with no real, documented
+  // provider-side limit to stay under. Real HTTP round-trip time is the
+  // only pacing.
 };
 
 const lastCallAt = new Map<string, number>();
