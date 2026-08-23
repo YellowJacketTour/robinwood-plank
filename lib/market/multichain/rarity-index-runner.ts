@@ -22,6 +22,7 @@ import {
 } from "@/lib/market/multichain/collection-token-store";
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
 
 const PAGE_SIZE = 50;
 
@@ -56,6 +57,43 @@ export type IndexRunResult = {
 };
 
 const OPENSEA_MEMBERSHIP_SOURCE = "opensea-nfts";
+const SEQUENTIAL_MEMBERSHIP_SOURCE = "verified-sequential-mints";
+const SEQUENTIAL_SEED_SIZE = 750;
+
+/** Materialize a bounded slice of a publisher-verified contiguous token-id
+ * universe. This makes an open-ended collection complete through the exact
+ * on-chain boundary observed on this run, while later runs naturally append
+ * newly minted ids. Metadata remains a separate bounded worker. */
+export async function advanceVerifiedSequentialMembership(chainSlug: string, contractAddress: string) {
+  const canonicalAddress = contractAddress.toLowerCase();
+  const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
+  const boundary = await readSequentialMintBoundary({ chainSlug, contractAddress: canonicalAddress, rpcUrls });
+  if (!boundary) return null;
+  const checkpoint = await readCollectionMembershipCursor(chainSlug, canonicalAddress, SEQUENTIAL_MEMBERSHIP_SOURCE);
+  const firstPending = Math.max(boundary.firstTokenId, Number(checkpoint?.cursor ?? boundary.firstTokenId));
+  const end = Math.min(boundary.lastTokenId, firstPending + SEQUENTIAL_SEED_SIZE - 1);
+  const tokens = end >= firstPending
+    ? Array.from({ length: end - firstPending + 1 }, (_, index) => ({
+        tokenId: String(firstPending + index), name: null, imageUrl: null,
+        animationUrl: null, traits: [],
+      }))
+    : [];
+  const complete = end >= boundary.lastTokenId;
+  const observedAt = new Date();
+  await upsertCollectionTokenProjection(chainSlug, canonicalAddress, {
+    // Membership can be complete while metadata/traits are still pending.
+    // Keep the projection partial until advanceEvmTokenMetadata proves every
+    // row terminal and writes the full-population rarity snapshot.
+    tokens, expectedCount: boundary.expectedCount, partial: true,
+    provenance: [boundary.provenance], sourceObservedAt: observedAt,
+  });
+  await writeCollectionMembershipCursor({
+    chainSlug, collectionSlug: canonicalAddress, source: SEQUENTIAL_MEMBERSHIP_SOURCE,
+    cursor: complete ? String(boundary.lastTokenId + 1) : String(end + 1),
+    expectedCount: boundary.expectedCount, complete, sourceObservedAt: observedAt,
+  });
+  return { ...boundary, itemsObserved: tokens.length, complete, nextTokenId: complete ? null : end + 1 };
+}
 
 /** Advance one OpenSea NFT page for a known EVM contract. The contract is
  * the durable key used by routes; the OpenSea slug is retained as an alias. */
@@ -67,6 +105,13 @@ export async function advanceEvmCollectionMembership(
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
   if (!openSeaChain) throw new Error(`${chainSlug} has no OpenSea NFT enumerator`);
+  // Seed any independently verified on-chain universe before provider
+  // pagination. Provider results enrich these rows; they do not define the
+  // collection's size or decide whether a live mint exists.
+  // A temporary RPC failure must not also discard the independent OpenSea
+  // page available on this run. The sequential cursor remains unchanged and
+  // will retry; provider pagination continues as additive evidence.
+  await advanceVerifiedSequentialMembership(chainSlug, contractAddress).catch(() => null);
   const key = await getOpenSeaApiKey();
   if (!key) throw new Error("No OpenSea API key available.");
   const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, key, openSeaChain);
@@ -195,13 +240,13 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   for (const collectionSlug of new Set(work.map((item) => item.collectionSlug))) {
     const state = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
       `SELECT COUNT(*) FILTER (WHERE t.metadata_state IN ('pending','retry'))::text AS remaining,
-         COALESCE(bool_or(m.complete), FALSE) AS membership_complete
+         EXISTS (
+           SELECT 1 FROM plank_collection_membership_cursors m
+           WHERE m.chain_slug = $1 AND lower(m.collection_slug) = lower($2) AND m.complete
+         ) AS membership_complete
        FROM plank_collection_tokens t
-       LEFT JOIN plank_collection_membership_cursors m
-         ON m.chain_slug = t.chain_slug AND lower(m.collection_slug) = lower(t.collection_slug)
-          AND m.source = $3
        WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)`,
-      [chainSlug, collectionSlug, OPENSEA_MEMBERSHIP_SOURCE]);
+      [chainSlug, collectionSlug]);
     if (Number(state.rows[0]?.remaining ?? 1) !== 0 || !state.rows[0]?.membership_complete) continue;
     const items = await readProjectedRarityInputs(chainSlug, collectionSlug);
     if (!items.length) continue;

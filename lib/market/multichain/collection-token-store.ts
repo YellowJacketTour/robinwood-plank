@@ -165,7 +165,8 @@ export async function readCollectionMembershipCursor(
     complete: boolean; last_error: string | null;
   }>(`SELECT cursor, expected_count, observed_count, complete, last_error
       FROM plank_collection_membership_cursors
-      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND source = $3`,
+      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND source = $3
+      ORDER BY updated_at DESC LIMIT 1`,
   [chainSlug, collectionSlug, source]);
   const row = result.rows[0];
   return row ? { cursor: row.cursor, expectedCount: row.expected_count,
