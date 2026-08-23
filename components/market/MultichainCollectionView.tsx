@@ -152,6 +152,29 @@ function readBrowseExtras(key: string): { openTraitGroups?: Record<string, boole
 /** Real listings-grid sort keys -- price (from each listing's own real priceWei, currency-consistent within one collection unlike GlobalMarketHub's cross-collection floor) and rarity rank (only meaningful once rarityMap is populated, see rarityMap's own header) -- never a fabricated rank for an unindexed collection. */
 type ListingSort = "default" | "price-asc" | "price-desc" | "rarity-asc" | "rarity-desc";
 
+/**
+ * REAL BUG FIXED 2026-08-23: this label used to be hardcoded "UniSat book
+ * delayed" for EVERY chain and every cause -- confirmed live on Milady
+ * Maker (eth-mainnet, OpenSea-sourced), which showed "UniSat book delayed"
+ * despite UniSat having nothing to do with that collection. The real
+ * `listingsUnavailable` reason strings, per app/api/market/multichain/
+ * listings/route.ts: "opensea-rate-limit" (the EVM/OpenSea branch's only
+ * current reason) or the client-side catch-all "book-unavailable" set on
+ * a network/parse failure (see the fetch .catch() a few lines above).
+ * Bitcoin/Solana branches don't set this field at all today (their own
+ * bookCoverage.sources object already reports per-venue status).
+ */
+function listingsBookDelayedLabel(reason: string, chainSlug: string): string {
+  if (reason === "opensea-rate-limit") return "OpenSea rate-limited, retrying";
+  if (isBitcoinChainSlugName(chainSlug)) return "Bitcoin marketplace book delayed";
+  if (chainSlug === "solana-mainnet") return "Magic Eden book delayed";
+  return "listings book delayed";
+}
+
+function isBitcoinChainSlugName(chainSlug: string): boolean {
+  return chainSlug === "bitcoin-mainnet";
+}
+
 export default function MultichainCollectionView({ chainSlug, collectionSlug }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1753,7 +1776,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </h2>
           <p className="text-xs text-foreground/50">
             {supplyStats?.listedCount != null
-              ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? " · UniSat book delayed" : ""}`
+              ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? ` · ${listingsBookDelayedLabel(listingsUnavailable, chainSlug)}` : ""}`
               : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}${catalogMeta?.partial ? ` · ${catalogMeta.projectedCount.toLocaleString()} indexed so far` : ""}`}
           </p>
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
