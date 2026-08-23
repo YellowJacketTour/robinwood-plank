@@ -11,6 +11,9 @@ const CollectionEvidenceSpace = dynamic(() => import("@/components/market/Collec
 // echarts touches canvas/DOM at import time -- client-only, same reasoning
 // as CollectionEvidenceSpace's R3F Canvas above.
 const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false, loading: () => <div className="h-40 w-full animate-pulse rounded-lg bg-background/55" /> });
+// sigma.js/graphology touch canvas/window at import time -- same ssr:false reasoning.
+const CollectionTradeGraph = dynamic(() => import("@/components/market/CollectionTradeGraph"), { ssr: false, loading: () => <div className="h-72 animate-pulse rounded-xl border border-line bg-background/55" /> });
+const CollectionDossier = dynamic(() => import("@/components/market/CollectionDossier"), { ssr: false, loading: () => <div className="h-40 animate-pulse rounded-xl border border-line bg-background/55" /> });
 
 type Sale = { timestamp?: string | null; tokenId?: string | null; tokenName?: string | null; imageUrl?: string | null; priceWei?: string | null; priceAmount?: string | null; priceUsd?: number | null; priceSymbol: string | null; transaction: string | null; from: string | null; to: string | null };
 type Listing = { priceWei: string; maker?: string | null; tokenId: string };
@@ -211,7 +214,7 @@ export default function CollectionIntelligence(props: {
   listedCount?: number | null;
 }) {
   const [timeRange, setTimeRange] = useState<[number, number] | null>(null);
-  const [landscape, setLandscape] = useState<"space" | "timeline">("space");
+  const [landscape, setLandscape] = useState<"space" | "timeline" | "network" | "dossier">("space");
   const accent = useProceduralAccent(props.artUrls);
   const scopedSales = timeRange ? props.sales.filter((sale) => { const time = sale.timestamp ? Date.parse(sale.timestamp) : NaN; return Number.isFinite(time) && time >= timeRange[0] && time <= timeRange[1]; }) : props.sales;
   const listedPct = props.supply ? props.listings.length / props.supply * 100 : 0;
@@ -294,8 +297,40 @@ export default function CollectionIntelligence(props: {
     <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>{props.artUrls.slice(0, 4).map((url, index) => <div key={`${url}-${index}`} className="absolute aspect-square w-[38%] max-w-80 rounded-full bg-cover bg-center opacity-[0.04] blur-[2px] saturate-150" style={{ backgroundImage: `linear-gradient(135deg, transparent, rgba(9,6,15,.88)), url(${JSON.stringify(url)})`, right: `${(index % 2) * 42 - 8}%`, top: `${Math.floor(index / 2) * 48 - 12}%`, transform: `rotate(${index % 2 ? 9 : -8}deg) scale(1.15)` }}/>)}</div>
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-[0.62rem] font-black uppercase tracking-[0.18em]" style={{ color: accent }}>Collection intelligence</p><h3 className="font-display text-lg text-gold-300">Market structure & provenance</h3><p className="text-xs text-foreground/45">Computed only from indexed evidence · loaded-window metrics are labeled, never extrapolated.</p></div><div className="flex gap-1"><button type="button" onClick={() => download("csv")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export CSV</button><button type="button" onClick={() => download("json")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export JSON</button></div></div>
       {props.historyCoverage && <div className="grid gap-2 rounded-lg border border-amber-400/35 bg-amber-500/5 p-2 text-[0.65rem] sm:grid-cols-3" role="status"><div><span className="block font-black uppercase tracking-wider text-foreground/45">Protocol coverage</span><strong>{props.historyCoverage.completeThroughGenesis ? `${props.historyCoverage.scope ?? "source"} chain scan complete` : `${props.historyCoverage.scope ?? "source"} backfill in progress`}</strong><span className="block text-amber-200/75">Total multi-venue market history is not yet complete.</span></div><div><span className="block font-black uppercase tracking-wider text-foreground/45">Evidence ledger</span><strong>{props.sales.length.toLocaleString()} loaded / {props.historyCoverage.indexedEvents.toLocaleString()} indexed</strong></div><div><span className="block font-black uppercase tracking-wider text-foreground/45">Observed span</span><strong>{props.historyCoverage.oldestTimestamp ? new Date(props.historyCoverage.oldestTimestamp).toLocaleDateString() : "Timestamp repair pending"} to {props.historyCoverage.newestTimestamp ? new Date(props.historyCoverage.newestTimestamp).toLocaleDateString() : "now"}</strong></div></div>}
-      <div className="flex gap-1" role="tablist" aria-label="Intelligence landscape"><button type="button" role="tab" aria-selected={landscape === "space"} onClick={() => setLandscape("space")} className={`min-h-10 rounded-md border px-3 text-xs font-bold ${landscape === "space" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line"}`}>Spatial evidence</button><button type="button" role="tab" aria-selected={landscape === "timeline"} onClick={() => setLandscape("timeline")} className={`min-h-10 rounded-md border px-3 text-xs font-bold ${landscape === "timeline" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line"}`}>Exact chronology</button></div>
-      {landscape === "space" ? <CollectionEvidenceSpace sales={props.sales}/> : <EvidenceTimeline sales={props.sales} range={timeRange} onRange={setTimeRange}/>}
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Intelligence landscape">
+        {([
+          ["space", "Spatial evidence"],
+          ["timeline", "Exact chronology"],
+          ["network", "Trade network"],
+          ["dossier", "Dossier"],
+        ] as const).map(([mode, label]) => (
+          <button key={mode} type="button" role="tab" aria-selected={landscape === mode} onClick={() => setLandscape(mode)} className={`min-h-10 rounded-md border px-3 text-xs font-bold ${landscape === mode ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line"}`}>{label}</button>
+        ))}
+      </div>
+      {landscape === "space" && <CollectionEvidenceSpace sales={props.sales}/>}
+      {landscape === "timeline" && <EvidenceTimeline sales={props.sales} range={timeRange} onRange={setTimeRange}/>}
+      {landscape === "network" && <CollectionTradeGraph sales={scopedSales}/>}
+      {landscape === "dossier" && (
+        <CollectionDossier
+          facts={{
+            name: props.name,
+            chain: props.chain,
+            supply: props.supply,
+            holders: props.holders,
+            listedCount: props.listedCount ?? props.listings.length,
+            demandScore: demandScore.gradable ? demandScore.score : null,
+            demandGradable: demandScore.gradable,
+            washRatio: washResult.totalTradeCount ? washResult.suspicionRatio : null,
+            washTradeCount: washResult.suspiciousTradeCount,
+            totalTradeCount: washResult.totalTradeCount,
+            makerHhi,
+            makerGini: makerCounts.length ? makerGini : null,
+            usdVolume,
+            observedTransactions: scopedSales.length,
+            walletCount: new Set(scopedSales.flatMap((s) => [s.from?.toLowerCase(), s.to?.toLowerCase()]).filter(Boolean)).size,
+          }}
+        />
+      )}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {gauges.map((g) => <Gauge key={g.label} label={g.label} value={g.value} max={g.max} formatted={g.formatted} accent={accent} />)}
         {cards.map(([label, value]) => <motion.div key={label} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.25 }} title={`${label}: ${value}`} className="group rounded-lg border border-line bg-background/65 p-3 backdrop-blur-sm transition hover:-translate-y-0.5 hover:bg-[color-mix(in_srgb,var(--collection-accent)_12%,transparent)]" style={{ borderColor: undefined }} onMouseEnter={(e) => (e.currentTarget.style.borderColor = accent)} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "")}><p className="text-[0.58rem] font-black uppercase text-foreground/40">{label}</p><p className="mt-1 break-words font-display text-base text-gold-300">{value}</p></motion.div>)}

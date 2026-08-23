@@ -2,6 +2,7 @@
 
 import { Canvas, type ThreeEvent, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import { EffectComposer, Bloom, Scanline, Vignette } from "@react-three/postprocessing";
 import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
@@ -46,7 +47,19 @@ export default function CollectionEvidenceSpace({ sales }: { sales: EvidenceSale
   if (!rows.length) return <div className="grid min-h-72 place-items-center rounded-xl border border-dashed border-line bg-background/55 p-6 text-center text-xs text-foreground/45">Spatial evidence requires timestamped, USD-valued observations. No points are invented when valuation or time is missing.</div>;
   return <article className="relative overflow-hidden rounded-xl border border-purple-400/35 bg-[#07050d]" aria-label="Interactive spatial market evidence">
     <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-sm"><p className="text-[0.58rem] font-black uppercase tracking-[0.18em] text-purple-300">Evidence space</p><h4 className="font-display text-lg text-gold-300">Time × value × currency</h4><p className="text-[0.65rem] text-foreground/55">Drag to orbit · wheel or pinch to zoom · hover any point for its exact record.</p></div>
-    <div className="h-[26rem] max-h-[62vh] min-h-72 w-full"><Canvas dpr={[1, 1.75]} camera={{ position: [7, 4.5, 10], fov: 45 }} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }} frameloop="demand"><color attach="background" args={["#07050d"]}/><ambientLight intensity={.5}/><gridHelper args={[16, 16, "#5f407d", "#1c1428"]} position={[0, -2.8, 0]}/><EvidenceCloud sales={sales} active={active} onActive={setActive}/><OrbitControls makeDefault enableDamping dampingFactor={.08} minDistance={5} maxDistance={24}/></Canvas></div>
+    <div className="h-[26rem] max-h-[62vh] min-h-72 w-full"><Canvas dpr={[1, 1.75]} camera={{ position: [7, 4.5, 10], fov: 45 }} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }} frameloop="demand"><color attach="background" args={["#07050d"]}/><ambientLight intensity={.5}/><gridHelper args={[16, 16, "#5f407d", "#1c1428"]} position={[0, -2.8, 0]}/><EvidenceCloud sales={sales} active={active} onActive={setActive}/><OrbitControls makeDefault enableDamping dampingFactor={.08} minDistance={5} maxDistance={24}/>
+      {/* Real HUD glow, not decoration for its own sake: Bloom lifts the
+          already-real evidence points and grid lines into a visible glow so
+          the scene reads as instrument-panel light instead of a flat plot.
+          Scanline+Vignette are the same real, maintained @react-three/
+          postprocessing effects (MIT, pmndrs) the HUD research brief cited
+          -- low opacity, never obscures a real data point. */}
+      <EffectComposer multisampling={0}>
+        <Bloom luminanceThreshold={0.15} luminanceSmoothing={0.4} intensity={0.6} mipmapBlur />
+        <Scanline density={1.75} opacity={0.06} />
+        <Vignette eskil={false} offset={0.25} darkness={0.55} />
+      </EffectComposer>
+    </Canvas></div>
     <div className="absolute inset-x-3 bottom-3 z-10 rounded-lg border border-line bg-background/90 p-2 backdrop-blur-md"><p className="text-[0.6rem] font-black uppercase tracking-wider text-foreground/45">{selected ? "Exact observed event" : `${rows.length.toLocaleString()} evidence points`}</p>{selected ? <p className="truncate text-xs"><strong className="text-gold-300">${selected.priceUsd?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong> · {selected.priceAmount} {selected.priceSymbol} · {selected.timestamp ? new Date(selected.timestamp).toLocaleString() : "time unavailable"} · {selected.tokenName || (selected.tokenId ? `#${selected.tokenId}` : "collection sale")} · {selected.transaction}</p> : <p className="text-xs text-foreground/55">Horizontal: chronology · vertical: logarithmic USD value · depth: payment currency. This is evidence geometry, not simulated scenery.</p>}</div>
   </article>;
 }
