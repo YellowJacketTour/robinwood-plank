@@ -5,6 +5,7 @@ import { foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-re
 import { recordFloorObservation, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { computeGenericRaritySnapshot, type GenericRarityInput } from "@/lib/rarity-generic";
 import { replaceForeignRarity, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
+import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 
 export const CRYPTOPUNKS_CONTRACT = "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb";
 const CHAIN_SLUG = "eth-mainnet";
@@ -121,6 +122,27 @@ export async function syncCryptoPunksTraits(): Promise<{ indexed: number; traits
   }
   const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };
   await replaceForeignRarity(CHAIN_SLUG, CRYPTOPUNKS_CONTRACT, snapshot, traitIndex, ["cryptopunks"], images);
+  // Mirror the rarity snapshot into plank_collection_tokens too, the same way
+  // the generic OpenSea rarity-index-runner does for every collection it owns
+  // (see rarity-index-runner.ts's own upsertCollectionTokenProjection calls
+  // right after its replaceForeignRarity calls). The generic scaffold loop is
+  // deliberately blocked from touching native-book collections like this one
+  // (hasUnindexedNativeBook -- see venue-registry.ts), but that guard only
+  // protects the WRITE path from a second, conflicting indexer; it was never
+  // meant to leave rarity_rank/rarity_tier permanently NULL in the projection
+  // table this adapter itself owns. Anything reading token.rarityRank/
+  // rarityTier straight off /api/market/multichain/tokens or /token-search
+  // (GlobalMarketHub's "Individual pieces" results, for one) was silently
+  // blank for every native-book collection until this backfill exists.
+  await upsertCollectionTokenProjection(CHAIN_SLUG, CRYPTOPUNKS_CONTRACT, {
+    tokens: [...snapshot.byTokenId.values()].map((token) => ({
+      tokenId: token.tokenId, name: token.name, imageUrl: images.get(token.tokenId) ?? null,
+      rarityScore: token.score, rarityRank: token.rank,
+      rarityPercentile: token.percentile, rarityTier: token.tier,
+    })),
+    expectedCount: items.length, partial: false,
+    provenance: ["cryptopunks-native-book", "bespoke-information-content-rarity"], sourceObservedAt: new Date(),
+  });
   return { indexed: items.length, traits: Object.values(traitIndex).reduce((sum, values) => sum + Object.keys(values).length, 0) };
 }
 
