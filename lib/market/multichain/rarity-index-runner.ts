@@ -339,7 +339,7 @@ export async function advanceRobinhoodTokenMetadata(limit = 6) {
   return advanceEvmTokenMetadata("robinhood", limit);
 }
 
-export async function indexForeignCollectionRarity(chainSlug: string, collectionSlug: string): Promise<IndexRunResult> {
+export async function indexForeignCollectionRarity(chainSlug: string, collectionSlug: string, knownContractAddress?: string | null): Promise<IndexRunResult> {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain) throw new Error(`"${chainSlug}" is not in FOREIGN_CHAINS.`);
   // This whole runner scrapes OpenSea's own metadata/rarity -- meaningless
@@ -381,7 +381,30 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   // other chains that already match cleanly.
   const chainAliases: Record<string, string[]> = { matic: ["matic", "polygon"] };
   const acceptableChainValues = chainAliases[chain.openSeaChain] ?? [chain.openSeaChain];
-  const contractAddress = collectionMeta?.contracts?.find((c) => acceptableChainValues.includes(c.chain))?.address;
+  // REAL BUG FIXED 2026-08-23: OpenSea's v2 /collections/{slug} resource
+  // (this fetch, right above) genuinely does not exist for the vast
+  // majority of BNB Chain (bsc) collections -- confirmed live against even
+  // famous, high-volume BSC collections (Pancake Bunnies, Pancake Squad):
+  // /chain/bsc/contract/{address} resolves a real slug, but /collections/
+  // {slug} and /collections/{slug}/stats both 404 "Collection ... not
+  // found" for that exact same slug. This is a real, structural OpenSea
+  // coverage gap for BNB specifically (Polygon/Ethereum/Base collections,
+  // including obscure zero-volume ones, resolve fine on this same
+  // endpoint) -- not a wrong chain-slug mapping (bsc is correct) and not
+  // fixable from this app's side. Every real caller of this function
+  // (scaffoldAllTrackedCollections, indexRarityForCollectionLookup's
+  // opensea-contract branch) already knows the real contract address
+  // before calling in -- it derived `collectionSlug` FROM that address via
+  // the working /chain/{chain}/contract/{address} endpoint one step
+  // earlier. Threading that known address through here (instead of
+  // re-deriving it from the broken /collections/{slug} response) means a
+  // 404 on this best-effort display/stats fetch no longer blocks the
+  // per-token walk below (`/chain/{chain}/contract/{address}/nfts`, which
+  // DOES work for BSC and already carries real images/traits) from ever
+  // running. `collectionMeta` (possibly null) is still used below for
+  // name/image/creator display enrichment on chains where it succeeds.
+  const contractAddress = knownContractAddress
+    ?? collectionMeta?.contracts?.find((c) => acceptableChainValues.includes(c.chain))?.address;
   if (!contractAddress) throw new Error(`Could not resolve a ${chain.openSeaChain} contract for "${collectionSlug}".`);
 
   // Real OpenSea art/name/creator, persisted into the SAME registry row
@@ -625,7 +648,7 @@ export async function indexRarityForCollectionLookup(chainSlug: string, lookup: 
   if (backend === "opensea-contract") {
     const slug = await resolveOpenSeaSlug(chainSlug, lookup);
     if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${lookup} (no OpenSea key with capacity, or the collection genuinely has no slug)`);
-    return indexForeignCollectionRarity(chainSlug, slug);
+    return indexForeignCollectionRarity(chainSlug, slug, lookup);
   }
   return indexForeignCollectionRarity(chainSlug, lookup);
 }
@@ -736,7 +759,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
     }
 
     try {
-      const result = await indexForeignCollectionRarity(c.chainSlug, slug);
+      const result = await indexForeignCollectionRarity(c.chainSlug, slug, c.contractAddress);
       log(`indexed ${slug} (${c.chainSlug}): ${result.tokensIndexed} tokens${result.partial ? " (PARTIAL)" : ""}`);
       indexed += 1;
     } catch (error) {
