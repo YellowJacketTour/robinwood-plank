@@ -288,7 +288,10 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
    --melt-bias goes 0 → 1. Reduced motion = static. */
 html[data-melt="1"] body::after,
 .disco-melt-layer {
-  --spread: calc(180deg * (1 - var(--melt-bias, 0.35)));
+  /* Unitless because --accent-h is unitless. Adding degrees to a unitless
+     hue invalidated every HSL gradient in browsers, leaving only the icon
+     state while the advertised color melt remained invisible. */
+  --spread: calc(180 * (1 - var(--melt-bias, 0.35)));
   pointer-events: none;
   position: fixed;
   inset: 0;

@@ -1575,12 +1575,12 @@ export default function GlobalMarketHub() {
               type="button"
               onClick={() => setOnlyWatched((value) => !value)}
               aria-pressed={onlyWatched}
-              className={`relative flex min-h-10 items-center gap-2 border px-4 text-xs font-black uppercase tracking-wide transition-all hover:-translate-y-0.5 ${onlyWatched ? "border-gold-300 bg-gold-300 text-[#0c0906] shadow-[0_0_18px_rgba(244,201,93,.45)]" : "border-gold-300/45 text-gold-200 hover:bg-gold-300/10"}`}
+              aria-label={onlyWatched ? `Showing ${watchlist.size} starred collections` : `Show ${watchlist.size} starred collections`}
+              title={onlyWatched ? `Showing starred collections (${watchlist.size})` : `Show starred collections (${watchlist.size})`}
+              className={`relative grid size-11 shrink-0 place-items-center border text-xl leading-none transition-all hover:-translate-y-0.5 ${onlyWatched ? "border-gold-300 bg-gold-300 text-panel-strong shadow-[0_0_18px_hsl(var(--accent-h)_var(--accent-s)_var(--accent-l-400)_/_45%)]" : "border-gold-300/45 bg-panel-strong text-gold-300 hover:bg-gold-300/10"}`}
               style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}
             >
-              <span aria-hidden className="text-lg leading-none">★</span>
-              Starred
-              <span className="font-mono text-[0.65rem] opacity-75">{watchlist.size}</span>
+              <span aria-hidden>★</span>
             </button>
             {chains.map(([slug, count]) => {
               const active = chainFilter.has(slug);
@@ -1797,10 +1797,10 @@ export default function GlobalMarketHub() {
                           `${changeArrow}${Math.abs(change).toFixed(1)}%`
                         ) : c.floorChangeStatus === "collecting-baseline" ? (
                           <span
-                            className="text-amber-300/80"
-                            title="Executable floor tracking is active. An exact 24-hour comparison appears after the first complete observation window."
+                            className="text-foreground/40"
+                            title="No complete, comparable 24-hour floor observation exists yet. Tracking is active; no change is shown until both endpoints are evidenced."
                           >
-                            Baseline
+                            —
                           </span>
                         ) : (
                           <span title={emptyCellReason(c, "change")}>—</span>

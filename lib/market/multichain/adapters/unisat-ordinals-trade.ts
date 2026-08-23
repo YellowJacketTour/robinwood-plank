@@ -89,7 +89,7 @@ function requireApiKey(): string {
   const key = process.env.UNISAT_API_KEY;
   if (!key) {
     throw new Error(
-      "unisat-ordinals-trade: UNISAT_API_KEY is not configured. Sign up at UniSat's Developer Center (see docs.unisat.io/developer-support/how-to-acquire-a-unisat-api-key) -- free tier is 5 calls/sec, 1,000 calls/day, no KYC or partnership approval required."
+      "unisat-ordinals-trade: UNISAT_API_KEY is not configured. Register at developer.unisat.io and create a free mainnet key -- UniSat's current Open API documentation states 5 calls/sec and up to 2,000 calls/day."
     );
   }
   return key;
