@@ -1,0 +1,1224 @@
+@import "tailwindcss";
+
+:root {
+  --font-display: var(--font-stencil);
+  --font-sans: var(--font-body);
+  /* Registers Tailwind's own built-in `font-mono` utility against the real
+     next/font variable (design-direction preview, 2026-08-19) -- no custom
+     class needed, `font-mono` just works everywhere after this. */
+  --font-mono: var(--font-data);
+
+  /*
+   * Site-wide accent theme -- one adjustable hue/saturation pair plus four
+   * lightness stops, driving --color-gold-300..600 below via hsl(). These
+   * defaults are the ORIGINAL literal gold hex values re-expressed as HSL
+   * (verified: #af761d/#e9b43f/#eec164/#f8d98a all sit at hue ~40,
+   * sat ~75-82% -- picking one shared hue/sat pair and varying only
+   * lightness reproduces all four almost exactly), so a page with no saved
+   * preference renders byte-for-byte the same gold the app always has.
+   * ThemeAccentPicker.tsx (nav) overwrites these four vars on
+   * documentElement at runtime for one-tap retheming; a blocking bootstrap
+   * script in app/layout.tsx applies any saved choice before first paint so
+   * there's no flash back to gold on load.
+   */
+  --accent-h: 40;
+  --accent-s: 78%;
+  --accent-l-600: 41%;
+  --accent-l-500: 59%;
+  --accent-l-400: 66%;
+  --accent-l-300: 77%;
+  --melt-bias: 0.35;
+
+  /*
+   * "Totality" base tones -- flagged live 2026-08-19 ("we need themes for
+   * the totality such as the base brown and everything"): a preset was
+   * only re-tinting the gold trim, not the dark wood/background world
+   * underneath it, so switching to Forest Canopy still sat on the exact
+   * same brown page. --base-h/-s are pure hue/sat derivatives of the
+   * accent (a fixed -20deg hue offset, ~0.55x the saturation) -- the same
+   * relationship the ORIGINAL literal gold (hue ~40) already had to the
+   * original literal wood-950 (hue ~20, far less saturated): a wood tone
+   * reads as "the same material, in shadow" next to its trim color, not an
+   * unrelated color. Reusing that one real relationship for every preset
+   * is what makes Cedar Wood, Forest Canopy, Tang Citrus, and Wizard
+   * Violet each feel like one coherent material world instead of a
+   * recolored accent on an unchanged brown room. Lightness stops below
+   * stay FIXED per surface (unlike the accent's) -- these are near-black
+   * page/panel surfaces at every hue, so varying only hue/sat keeps every
+   * theme exactly as dark and exactly as readable as the app has always
+   * been; nothing here can accidentally wash a surface out.
+   */
+  --base-h: calc(var(--accent-h) - 20);
+  --base-s: calc(var(--accent-s) * 0.55);
+  --background: hsl(var(--base-h) calc(var(--base-s) * 0.65) 6%);
+  --foreground: #fff2cf;
+}
+
+@theme inline {
+  /* Only values that must reference runtime CSS vars (next/font) stay
+     inline; colors live in the plain @theme below so utilities emit
+     var(--color-*) and can be re-themed per scope. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(--font-stencil);
+  --font-sans: var(--font-body);
+  /* Registers Tailwind's own built-in `font-mono` utility against the real
+     next/font variable (design-direction preview, 2026-08-19) -- no custom
+     class needed, `font-mono` just works everywhere after this. */
+  --font-mono: var(--font-data);
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-flicker: flicker 2.2s ease-in-out infinite;
+}
+
+@theme {
+  /* Canonical palette — DESIGN.md is the single source of truth.
+     (The market mockup's :root hexes were drift; the module's --market-*
+     vars alias these.) */
+  /* hsl(base-h, base-s, FIXED lightness) -- see --base-h/-s's own header on
+     :root above. Lightness stops (8/12/14/16/24/32%) are the original
+     literal wood hex values' own lightness, unchanged -- only hue/sat
+     move with the active theme. */
+  --color-wood-950: hsl(var(--base-h) var(--base-s) 8%);
+  --color-wood-900: hsl(var(--base-h) var(--base-s) 12%);
+  --color-wood-850: hsl(var(--base-h) var(--base-s) 14%);
+  --color-wood-800: hsl(var(--base-h) var(--base-s) 16%);
+  --color-wood-700: hsl(var(--base-h) var(--base-s) 24%);
+  --color-wood-600: hsl(var(--base-h) var(--base-s) 32%);
+  --color-forest-900: #0d1f16;
+  --color-forest-800: #123322;
+  --color-forest-700: #1a4a30;
+  --color-forest-600: #24693f;
+  /* Driven by the --accent- custom properties defined on :root above, not
+     literal hex -- this is what makes ThemeAccentPicker's one-tap retheming
+     reach every "gold" bg/text/border utility class sitewide (buttons,
+     badges, active nav pills, focus rings, price/accent text) with zero
+     per-component changes: Tailwind's plain (non-inline) @theme block
+     emits a rule setting color to var(--color-gold-400), and
+     --color-gold-400 itself cascades from --accent-h/-s/-l-400, so
+     overwriting those four vars on documentElement retints every consumer
+     at once, same as changing four CSS custom properties always would. */
+  --color-gold-600: hsl(var(--accent-h) var(--accent-s) var(--accent-l-600));
+  --color-gold-500: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500));
+  --color-gold-400: hsl(var(--accent-h) var(--accent-s) var(--accent-l-400));
+  --color-gold-300: hsl(var(--accent-h) var(--accent-s) var(--accent-l-300));
+
+  /* Semantic surface tokens (DESIGN.md components + mockup structure):
+     border-line / border-line-strong / bg-panel / bg-panel-soft /
+     bg-panel-strong / text-cream / text-cream-muted. Additive names —
+     nothing outside the market surface consumes them yet. */
+  --color-cream: #fff2cf;
+  --color-cream-muted: #c9b58a;
+  /* Also accent-derived (was a literal rgba(233,180,63,...) = the gold-500
+     hex restated) so every border-line/border-line-strong consumer retints
+     along with gold-*, not just buttons/badges. */
+  --color-line: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 24%);
+  --color-line-strong: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 50%);
+  /* Base-derived (were literal rgba(28,16,8/41,26,15/17,10,5,...) -- all
+     three sit at the same ~base-h/-s this theme already uses, just three
+     more near-black lightness stops) so every panel/card/table surface --
+     the majority of the app's actual screen area -- moves with the theme
+     too, not just wood-*. */
+  --color-panel: hsl(var(--base-h) var(--base-s) 7% / 94%);
+  --color-panel-soft: hsl(var(--base-h) var(--base-s) 11% / 88%);
+  --color-panel-strong: hsl(var(--base-h) var(--base-s) 4% / 97%);
+
+  --shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.34);
+  --shadow-gold: 0 0 0 1px hsl(var(--accent-h) var(--accent-s) var(--accent-l-400) / 14%), 0 10px 32px rgba(0, 0, 0, 0.38);
+}
+
+* {
+  scroll-behavior: smooth;
+}
+
+/* Mockup-derived (docs/mockups/landing-redesign/finalized.html): a single
+   capped plank-head.webp anchored at the top over a strong dark wash, with
+   the page's own background-color filling everything below it — never
+   plank-legs.webp stretched to the full scroll height. That stretch was a
+   later, unreviewed elaboration on this rule (recorded, not designed) that
+   produced the "wall of bright yellow" the owner flagged as looking
+   strange; this restores the approved treatment. See PlankBackground.tsx
+   (now a no-op — this is pure CSS, no JS sizing needed). */
+body {
+  /* Was a literal #14100b -- restating the token instead of using it meant
+     the page's own background never moved with the theme even after
+     --background itself became theme-derived above. Fixed as part of the
+     same "totality" pass. */
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body), Arial, Helvetica, sans-serif;
+  /* Solid page field. The plank-head masthead illustration is rendered by the
+     hero section itself (components/Hero.tsx) rather than as a body
+     background: a page-length canvas can't be reliably darkened by a single
+     gradient, so the art used to bleed through mid-page as a bright band.
+     Scoping it to the hero keeps the mockup's "capped head at the top" intent
+     and guarantees the rest of the page stays clean.
+
+     Recovered from backup-pre-rebase-7bf018f. A rebase restored the body copy
+     of this art while Hero.tsx kept painting it too, so production was
+     rendering the masthead TWICE — the second copy bleeding down the page,
+     which is precisely what this change existed to stop. */
+  font-weight: 700;
+}
+
+/* Strong, warm typography that stays readable over every part of the Plank
+   art. These marketing-page clamps NEVER apply inside the market surface
+   ([data-market-shell]) — there, component styles are authoritative; the
+   !important overrides were silently repainting the mockup-accurate market
+   type gold and oversized. */
+/* Display type only. The heavy outline existed to keep copy legible over the
+   full-page character art; the background now matches the mockup (capped
+   head over a near-solid wash), so body copy sits on near-black and the
+   outline just made everything look chunky and unlike the approved design.
+   Headings keep a soft lift for depth.
+
+   This refinement was written on 2026-07-30, then lost: a rebase kept the
+   homepage components byte-for-byte but dropped this hunk, so production went
+   back to outlining every p/a/button/span and force-clamping paragraph size.
+   Recovered from backup-pre-rebase-7bf018f. */
+body :where(h1, h2, h3, h4):not([data-market-shell] *) {
+  text-shadow: 0 2px 6px rgba(20, 8, 2, 0.75);
+}
+
+body dt:not([data-market-shell] *) {
+  color: #e9c987 !important;
+  font-size: 1rem !important;
+  font-weight: 800;
+}
+
+body dd:not([data-market-shell] *) {
+  color: #fff2cf !important;
+  font-size: 1.15rem !important;
+  font-weight: 900;
+}
+
+body [class*="text-foreground/"]:not([data-market-shell] *) {
+  color: #f8e7c2 !important;
+}
+
+body .text-forest-600 {
+  color: #f8d98a !important;
+}
+
+body :where(.bg-wood-900\/85, .bg-wood-900\/90, .bg-wood-900\/95) {
+  background-color: rgba(42, 22, 10, 0.96) !important;
+}
+
+body :where(.bg-forest-900\/70, .bg-forest-900\/75) {
+  background-color: rgba(30, 18, 8, 0.95) !important;
+}
+
+button:not([data-market-shell] *),
+a.rounded-lg:not([data-market-shell] *),
+a.rounded-md:not([data-market-shell] *) {
+  font-size: 1rem !important;
+  font-weight: 900 !important;
+}
+
+body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
+  color: #261105 !important;
+  text-shadow:
+    0 1px 0 rgba(255, 242, 207, 0.8),
+    0 2px 2px rgba(89, 43, 12, 0.35) !important;
+}
+
+/* Uncial Antiqua ships ONE weight (400) and app/layout.tsx loads only that
+   cut. Everything inherited `font-weight: 700` from `body`, and buttons/links
+   are forced to 900, so the browser had no bold face to use and synthesised
+   one — smearing the glyphs sideways. Faux-bold on a display face reads as
+   "chunky", and it is not what this typeface looks like.
+
+   Pinning 400 here is not a style preference; it is the only weight that
+   exists. If a heavier display face is ever wanted, it needs a different
+   family with a real bold cut, not a heavier number against this one. */
+.font-display {
+  font-family: var(--font-stencil), "Georgia", serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Plank grain — the brand's signature surface texture (DESIGN.md
+   "Elevation & Depth"): fine 1px gold-tinted board lines at 92deg, 11px
+   pitch. Originated on the footer; now a shared treatment for large brand
+   surfaces (footer, market shell, mockup panels). Deliberately quiet but
+   visible — never behind dense data text. */
+/* Theme pass 2026-08-19: was a literal rgba(233,180,63,...) -- the exact
+   gold-500 hex restated as a 5%-alpha line -- so the grain stayed gold on
+   every theme. Now accent-derived, same alpha. */
+.wood-grain-surface {
+  background-image: repeating-linear-gradient(
+    92deg,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 0,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 1px,
+    transparent 1px,
+    transparent 11px
+  );
+}
+
+/* Also reused, unchanged, by components/AppBackdrop.tsx as the shared quiet
+   backdrop for dense app pages (Trade/Market/Gallery) — see that file for
+   why. Keep this the single source of truth for that texture; don't fork a
+   second copy of the gradient recipe elsewhere.
+   Theme pass 2026-08-19: the flat base color and the diagonal gradient's
+   three stops were all literal (near-black) wood hex -- now --base-h/-s
+   derived, same lightness stops the literals had, so the footer (this
+   app's largest single always-visible surface below the fold) moves with
+   the theme instead of staying the original brown forever. */
+.site-footer-surface {
+  background-color: hsl(var(--base-h) var(--base-s) 5%);
+  background-image:
+    linear-gradient(180deg, rgba(10, 6, 3, 0.18), rgba(10, 6, 3, 0.62)),
+    repeating-linear-gradient(
+      92deg,
+      hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 0,
+      hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 1px,
+      transparent 1px,
+      transparent 11px
+    ),
+    linear-gradient(
+      120deg,
+      hsl(var(--base-h) var(--base-s) 10%),
+      hsl(var(--base-h) var(--base-s) 7%) 62%,
+      hsl(var(--base-h) var(--base-s) 4%)
+    );
+}
+
+/* Disco / opal oil-slick on the page itself so every route (not only
+   AppBackdrop pages) can melt. Spread collapses toward --accent-h as
+   --melt-bias goes 0 → 1. Reduced motion = static. */
+html[data-melt="1"] body::after,
+.disco-melt-layer {
+  --spread: calc(180deg * (1 - var(--melt-bias, 0.35)));
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  opacity: 0.55;
+  mix-blend-mode: overlay;
+  background:
+    radial-gradient(ellipse 80% 60% at 12% 18%, hsl(calc(var(--accent-h) + var(--spread) * 0.05) 95% 62%) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 55% at 88% 12%, hsl(calc(var(--accent-h) + var(--spread) * 0.45) 90% 58%) 0%, transparent 52%),
+    radial-gradient(ellipse 90% 70% at 50% 95%, hsl(calc(var(--accent-h) - var(--spread) * 0.35) 88% 50%) 0%, transparent 58%),
+    radial-gradient(ellipse 55% 45% at 6% 82%, hsl(calc(var(--accent-h) + var(--spread) * 0.85) 92% 60%) 0%, transparent 48%),
+    radial-gradient(ellipse 50% 40% at 92% 70%, hsl(calc(var(--accent-h) + var(--spread) * 0.2) 80% 55%) 0%, transparent 50%),
+    conic-gradient(from 200deg at 48% 42%,
+      hsl(calc(var(--accent-h)) 80% 48%),
+      hsl(calc(var(--accent-h) + var(--spread) * 0.33) 85% 52%),
+      hsl(calc(var(--accent-h) + var(--spread) * 0.66) 80% 50%),
+      hsl(calc(var(--accent-h) + var(--spread)) 75% 46%),
+      hsl(calc(var(--accent-h)) 80% 48%));
+  background-size: 180% 180%;
+  animation: disco-drift 22s ease-in-out infinite;
+}
+@keyframes disco-drift {
+  0%, 100% { background-position: 0% 15%, 100% 0%, 40% 100%, 0% 80%, 100% 60%, 45% 35%; filter: hue-rotate(0deg) saturate(1.15); }
+  50% { background-position: 35% 55%, 55% 40%, 20% 15%, 75% 90%, 30% 40%, 60% 50%; filter: hue-rotate(calc(55deg * (1 - var(--melt-bias, 0.35)))) saturate(1.35); }
+}
+html[data-melt="1"] body::after {
+  content: "";
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-melt="1"] body::after,
+  .disco-melt-layer { animation: none; filter: saturate(1.1); }
+}
+
+.wood-frame {
+  border: 3px solid var(--color-gold-500);
+  box-shadow:
+    inset 0 0 0 3px rgba(0, 0, 0, 0.35),
+    0 8px 30px -10px rgba(0, 0, 0, 0.7);
+}
+
+.plank-title {
+  color: #ffd95a;
+  -webkit-text-stroke: 2px #351806;
+  paint-order: stroke fill;
+  text-shadow:
+    -2px -2px 0 #351806,
+    2px -2px 0 #351806,
+    -2px 2px 0 #351806,
+    2px 2px 0 #351806,
+    0 5px 7px rgba(18, 7, 1, 0.95),
+    0 0 20px rgba(255, 217, 90, 0.5) !important;
+}
+.section-title {
+  font-family: var(--font-stencil), "Georgia", serif;
+  /* Single-weight face — see .font-display. Without this it inherits 700 from
+     body and the browser fakes a bold that does not exist. */
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  /* Dense: big enough to brand, small enough to avoid empty chrome */
+  font-size: clamp(1.75rem, 5.5vw, 2.75rem) !important;
+  line-height: 1.05;
+  text-shadow:
+    -2px -2px 0 #311708,
+    2px -2px 0 #311708,
+    -2px 2px 0 #311708,
+    2px 2px 0 #311708,
+    0 6px 8px #120701,
+    0 0 24px rgba(18, 7, 1, 0.9);
+}
+
+/* Any text that sits directly on the giant scrolling background (not
+   inside an opaque card) needs a guaranteed-legible shadow, since the
+   backdrop swings from near-black to bright yellow across the page. */
+.lede {
+  color: #fff0c9 !important;
+  font-weight: 800;
+  text-shadow:
+    -1px -1px 0 #1a0b03,
+    1px -1px 0 #1a0b03,
+    -1px 1px 0 #1a0b03,
+    1px 1px 0 #1a0b03,
+    0 4px 6px #120701,
+    0 0 18px rgba(18, 7, 1, 0.92);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(-1deg); }
+  50% { transform: translateY(-10px) rotate(1deg); }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  45% { opacity: 0.85; transform: scale(0.97); }
+  55% { opacity: 1; transform: scale(1.03); }
+}
+
+@keyframes organism-float {
+  0% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(6px, -10px) scale(1.04); }
+  50% { transform: translate(-4px, -4px) scale(0.97); }
+  75% { transform: translate(-8px, 6px) scale(1.02); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+.animate-organism-float {
+  animation-name: organism-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes liquidity-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.animate-liquidity-pulse {
+  animation: liquidity-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-organism-float,
+  .animate-liquidity-pulse {
+    animation: none;
+  }
+}
+
+/* "LIVE" indicator dot (design-direction preview, 2026-08-19) -- same
+   glowing-pulse language real trading terminals (Axiom, Photon) use for a
+   live data feed. Opacity-only, GPU-cheap, respects reduced-motion below. */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-pulse-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 6px currentColor;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse-dot {
+    animation: none;
+  }
+}
+
+/* Staggered row/card entrance -- used by GlobalMarketHub's rankings table
+   and Biggest Movers strip as data resolves. Delay is set per-element via
+   the --row-delay custom property (capped by callers). The blanket
+   prefers-reduced-motion override further down (zeroing all
+   animation-duration) already neutralizes this for reduced-motion users --
+   no separate guard needed here. */
+@keyframes row-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.row-enter {
+  animation: row-fade-in 0.35s ease-out both;
+  animation-delay: var(--row-delay, 0s);
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-flicker {
+  animation: flicker 2.2s ease-in-out infinite;
+}
+
+/* Scroll reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.reveal.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+::selection {
+  background: var(--color-gold-500);
+  color: #1b120a;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-gold-400);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+section[id],
+div[id] {
+  scroll-margin-top: 5.5rem;
+}
+
+button,
+a,
+input {
+  touch-action: manipulation;
+}
+
+input {
+  font-size: 16px;
+}
+
+@media (max-width: 639px) {
+  section {
+    padding-top: 2.5rem !important;
+    padding-bottom: 2.5rem !important;
+  }
+
+  .wood-frame {
+    border-width: 2px;
+  }
+
+  .section-title {
+    font-size: clamp(1.55rem, 8vw, 2.1rem) !important;
+    line-height: 1.08;
+  }
+}
+
+/* Density helpers — keep desktop/mobile tight without empty chrome */
+.section-tight {
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .section-tight {
+    padding-top: 1.75rem;
+    padding-bottom: 1.75rem;
+  }
+}
+
+/* Compact card used across trade / boards / mint strips -- the single
+   most-reused surface class in the app. Theme pass 2026-08-19: border/bg
+   were both literal (near-identical to --color-line and --color-panel's
+   own OLD literals) -- now the actual tokens, so this card always matches
+   whatever bg-panel/border-line renders elsewhere on the same theme
+   instead of drifting from them under anything but default gold. */
+.dense-card {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
+
+/* Wooden ledger — Good Wood / Bad Boards. Theme pass 2026-08-19: border and
+   both gradient stops were literal wood/gold hex -- now token/accent
+   derived (the three gradient stops are the exact wood-700/800/900
+   formulas, restated inline since a background-image gradient can't
+   reference a shorthand utility class). */
+.wood-ledger {
+  border-radius: 0.5rem;
+  border: 2px solid hsl(var(--accent-h) var(--accent-s) 52%);
+  box-shadow:
+    inset 0 0 0 1px rgba(40, 18, 6, 0.5),
+    0 8px 22px -12px rgba(0, 0, 0, 0.8);
+  background-image:
+    repeating-linear-gradient(
+      92deg,
+      rgba(0, 0, 0, 0.12) 0px,
+      rgba(0, 0, 0, 0.12) 1px,
+      transparent 1px,
+      transparent 8px
+    ),
+    linear-gradient(
+      165deg,
+      hsl(var(--base-h) var(--base-s) 24%) 0%,
+      hsl(var(--base-h) var(--base-s) 16%) 50%,
+      hsl(var(--base-h) var(--base-s) 12%) 100%
+    );
+}
+
+.wood-ledger-ruled {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 1.4rem,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 10%) 1.4rem,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 10%) calc(1.4rem + 1px)
+  );
+}
+
+/* Airdrop allocation panel — beat global p/button clamps; dense & readable */
+.airdrop-panel {
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-weight: 600;
+}
+
+.airdrop-panel :where(p, span, label, strong, code, button, input, th, td, li) {
+  font-size: inherit !important;
+  line-height: inherit !important;
+  text-shadow:
+    0 1px 1px rgba(12, 6, 2, 0.9),
+    0 0 8px rgba(12, 6, 2, 0.55) !important;
+}
+
+.airdrop-panel .airdrop-label {
+  font-size: 0.62rem !important;
+  line-height: 1.15 !important;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e9c987;
+}
+
+.airdrop-panel .airdrop-stat {
+  font-family: var(--font-stencil), Georgia, serif;
+  font-size: 1.15rem !important;
+  line-height: 1.1 !important;
+  /* Single-weight face — see .font-display. 700 here only ever rendered as
+     synthetic bold. */
+  font-weight: 400;
+  color: #f8d98a;
+  font-variant-numeric: tabular-nums;
+}
+
+.airdrop-panel .airdrop-stat-sm {
+  font-size: 0.95rem !important;
+}
+
+.airdrop-panel .airdrop-meta {
+  font-size: 0.68rem !important;
+  line-height: 1.25 !important;
+  font-weight: 600;
+  color: #f3e0b0;
+  opacity: 0.88;
+}
+
+.airdrop-panel .airdrop-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+.airdrop-panel .airdrop-row {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) 4.25rem 4.75rem 5.25rem;
+  column-gap: 0.35rem;
+  align-items: baseline;
+  min-height: 1.35rem;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 0.7rem !important;
+  line-height: 1.35rem !important;
+  font-weight: 600;
+  color: #cfeec4;
+}
+
+/* Wallet · NFTs · Free · Wood · Paid · Drop% · PLANK */
+.airdrop-panel .airdrop-row-wide {
+  grid-template-columns: 1.4rem minmax(0, 1fr) 2.1rem 2.1rem 2.1rem 2.1rem 3.6rem;
+  column-gap: 0.28rem;
+  font-size: 0.66rem !important;
+}
+
+@media (min-width: 640px) {
+  .airdrop-panel .airdrop-row {
+    grid-template-columns: 2rem minmax(0, 1.15fr) 4.5rem 5rem 5.5rem 3.25rem;
+    font-size: 0.72rem !important;
+  }
+  .airdrop-panel .airdrop-row-wide {
+    grid-template-columns: 1.75rem minmax(0, 1fr) 2.6rem 2.6rem 2.6rem 2.6rem 4rem 4.5rem;
+    font-size: 0.7rem !important;
+  }
+}
+
+.airdrop-panel .airdrop-sort {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  font-weight: 800 !important;
+  color: #e9c987 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.airdrop-panel .airdrop-sort:hover {
+  color: #f8d98a !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.airdrop-panel .airdrop-row-head {
+  color: #e9c987;
+  opacity: 0.75;
+  font-size: 0.58rem !important;
+  line-height: 1.2rem !important;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+.airdrop-panel .airdrop-input {
+  min-height: 2rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(196, 146, 46, 0.5);
+  background: rgba(27, 18, 10, 0.9);
+  padding: 0.3rem 0.55rem;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.75rem !important;
+  line-height: 1.2 !important;
+  font-weight: 600;
+  color: #f8d98a;
+  outline: none;
+}
+
+.airdrop-panel .airdrop-input::placeholder {
+  color: rgba(243, 224, 176, 0.35);
+  font-weight: 500;
+}
+
+.airdrop-panel .airdrop-input:focus {
+  border-color: #eec164;
+}
+
+.airdrop-panel .airdrop-btn {
+  min-height: 2rem;
+  border-radius: 0.35rem;
+  background: #d9a441;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.72rem !important;
+  line-height: 1.2 !important;
+  font-weight: 800 !important;
+  color: #261105 !important;
+  text-shadow: 0 1px 0 rgba(255, 242, 207, 0.75) !important;
+  white-space: nowrap;
+}
+
+.airdrop-panel .airdrop-btn:hover {
+  background: #eec164;
+}
+
+.airdrop-panel .airdrop-btn:disabled {
+  opacity: 0.55;
+}
+
+.airdrop-panel .airdrop-btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(196, 146, 46, 0.45);
+  color: #f8d98a !important;
+  text-shadow: 0 1px 1px rgba(12, 6, 2, 0.9) !important;
+}
+
+.airdrop-panel .airdrop-btn-ghost:hover {
+  background: rgba(217, 164, 65, 0.12);
+}
+
+.airdrop-panel .airdrop-result {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(196, 146, 46, 0.28);
+  background: rgba(27, 18, 10, 0.55);
+}
+
+@media (min-width: 640px) {
+  .airdrop-panel .airdrop-result {
+    grid-template-columns: auto 1fr auto auto auto;
+    align-items: baseline;
+  }
+}
+
+.airdrop-panel .airdrop-result-k {
+  font-size: 0.58rem !important;
+  line-height: 1.1 !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #e9c987;
+  opacity: 0.8;
+}
+
+.airdrop-panel .airdrop-result-v {
+  font-size: 0.8rem !important;
+  line-height: 1.2 !important;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f8d98a;
+}
+
+.airdrop-panel .airdrop-result-v.ok {
+  color: #9fe0a0;
+}
+
+.airdrop-panel .airdrop-result-v.bad {
+  color: #ffc9b0;
+}
+
+/* Unified page shell width */
+.site-shell {
+  width: 100%;
+  max-width: 64rem; /* max-w-5xl */
+  margin-inline: auto;
+}
+
+/* NFT detail modal — override global p/dt/dd/button size/shadow so traits
+   and labels don't collide or get clipped in the popup. */
+body .nft-modal,
+body .nft-modal :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span) {
+  text-shadow: 0 1px 2px rgba(12, 6, 2, 0.85) !important;
+}
+
+body .nft-modal p {
+  font-size: inherit !important;
+  line-height: 1.4 !important;
+}
+
+body .nft-modal dt {
+  font-size: 0.75rem !important;
+  line-height: 1.25 !important;
+  font-weight: 800 !important;
+}
+
+body .nft-modal dd {
+  font-size: 0.95rem !important;
+  line-height: 1.35 !important;
+  font-weight: 800 !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+body .nft-modal button,
+body .nft-modal a.rounded-lg {
+  font-size: 0.95rem !important;
+  line-height: 1.25 !important;
+}
+
+body .nft-modal .nft-modal-title {
+  font-size: clamp(1.15rem, 4.2vw, 1.65rem) !important;
+  line-height: 1.2 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+body .nft-modal .nft-modal-trait-label {
+  font-size: 0.65rem !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.08em;
+}
+
+body .nft-modal .nft-modal-trait-value {
+  font-size: 0.85rem !important;
+  line-height: 1.3 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+body .nft-modal .nft-modal-body {
+  scrollbar-gutter: stable;
+}
+
+/* Themed scrollbar for dark wood/gold surfaces — used by the swap token
+   modal and anything else that shouldn't fall back to a stock white bar. */
+.token-modal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(233, 180, 63, 0.4) #2a1a0f;
+}
+
+.token-modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.token-modal-scroll::-webkit-scrollbar-track {
+  background: #2a1a0f;
+  border-radius: 999px;
+}
+
+.token-modal-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(233, 180, 63, 0.4);
+  border-radius: 999px;
+  border: 2px solid #2a1a0f;
+}
+
+.token-modal-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(233, 180, 63, 0.6);
+}
+
+/* Text sitting on top of NFT artwork has to stay readable against ANY
+   background color the art happens to use (this collection ranges from
+   near-white to saturated green/purple/orange). A flat color alone isn't
+   enough — bright fill + a dark stroke/shadow stack keeps it legible on
+   every one of them, the same principle as comic-lettering or map labels. */
+.legible-text {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 6px rgba(0, 0, 0, 0.75),
+    0 0 1px rgba(0, 0, 0, 0.9);
+}
+
+
+/* Tier badges. First attempt kept dark text ON the tier's own light fill
+   (Common/Uncommon/Rare/Epic are all light/pastel) plus a border — still
+   unreadable in practice, confirmed live, because dark-on-light-pastel is
+   inherently low-contrast at this badge's small size regardless of the
+   border. Fixed properly this time by flipping the whole scheme to the
+   SAME pattern already proven legible elsewhere on this site (Gallery's
+   rank badge): a near-opaque dark backing plate with the tier's color used
+   for the TEXT, not the fill. Callers set `color: tierColor(tier)` inline;
+   this class supplies the guaranteed-dark background + border so that
+   bright text always has a backdrop, whatever art or holo sheen sits
+   underneath. Overlay callers provide their own positioning; z-index lifts
+   those positioned badges above .holo-card's ::before/::after (both z-index:
+   1), which otherwise paint over the badge text. */
+.tier-badge {
+  z-index: 2;
+  /* ≥90% opaque so tier labels stay readable on any art/holo sheen */
+  background: rgba(10, 6, 2, 0.92);
+  border: 1px solid currentColor;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+/* Money / hash-sensitive data modules & buckets (balances, prices, CAs,
+   vault addresses, trade rows). Always ≥90% opaque so text never washes
+   out over background art, live viz, or busy market chrome. Prefer this
+   class (or Tailwind bg-wood-950/90 / bg-wood-900/90) on any panel that
+   shows wallet, amount, or address content. */
+.data-module {
+  /* Theme pass 2026-08-19: was literal; now base-derived, matching
+     --color-panel-strong's own lightness stop. */
+  background-color: hsl(var(--base-h) var(--base-s) 4% / 92%);
+}
+
+/* Same root cause as .tier-badge above, generalized: ANY overlay badge/
+   label/checkmark sitting inside a .holo-card element needs an explicit
+   z-index above 1, or the holo sheen's ::before/::after (z-index: 1) paints
+   over it regardless of the badge's own color scheme — z-index:auto always
+   loses to an explicit z-index even if the auto element comes later in the
+   DOM. Applied to every non-tier overlay (selection checkmarks, "Listed"
+   labels, Floor/trust badges, id/rank badges) so none of them can suffer
+   the same bug independently. Position stays caller-owned so absolute
+   overlay utilities are never overridden by this shared class. */
+.card-overlay {
+  z-index: 2;
+}
+
+/* Rarity-tier motion — Legendary top tier (lib/rarity.ts tierAnimationClass).
+   Reduced-motion users get the static glow only, via the prefers-reduced-motion
+   override below. */
+@keyframes tier-pulse-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
+.tier-pulse {
+  animation: tier-pulse-glow 2.2s ease-in-out infinite;
+}
+
+/* Always-on, cursor-tracking holo field (lib/holo.ts drives --holo-x/
+   --holo-y/--holo-angle/--holo-falloff from ONE shared global pointer
+   position, applied per-card relative to each card's own screen position —
+   see that file for why this replaced a swipe animation: a swipe is a
+   scripted pass with a beginning and end, a real foil card's shine is a
+   permanent property of the surface that just repositions as you (or the
+   light) move. This never turns off; --holo-falloff dims it with distance
+   from the cursor instead of an opacity on/off switch.
+   Two layers: a soft white hotspot (::before) for the base sheen, and a
+   thin rainbow arc (::after) whose hue rotates with --holo-angle — actual
+   foil is iridescent, not just brighter-when-lit. */
+.holo-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.holo-card::before,
+.holo-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.holo-card::before {
+  opacity: calc(var(--holo-falloff, 0.55) * var(--holo-intensity, 0) * 0.8);
+  background: radial-gradient(
+    circle 220px at var(--holo-x, 50%) var(--holo-y, 50%),
+    rgba(255, 255, 255, 0.65),
+    rgba(255, 255, 255, 0.18) 40%,
+    transparent 70%
+  );
+  mix-blend-mode: overlay;
+}
+
+.holo-card::after {
+  /* overlay, not color-dodge: dodge blows saturated colors straight to
+     white on this collection's many light/pastel backgrounds, which read
+     as broken rather than iridescent. overlay stays a tint. */
+  opacity: calc(var(--holo-falloff, 0.55) * var(--holo-intensity, 0) * 0.3);
+  background: conic-gradient(
+    from var(--holo-angle, 0deg) at var(--holo-x, 50%) var(--holo-y, 50%),
+    #ff8a8a,
+    #ffd88a,
+    #a8ff8a,
+    #8ad4ff,
+    #c28aff,
+    #ff8ad4,
+    #ff8a8a
+  );
+  mix-blend-mode: overlay;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ============================================================
+   WoodAmp (components/woodamp/) — keyframes + range hardware.
+   Layout and colors are Tailwind utilities in the components; only
+   what CSS utilities can't express lives here. The global
+   prefers-reduced-motion kill-switch above freezes the animations.
+   Colors reference the @theme vars — never restate a hex.
+   ============================================================ */
+
+@keyframes woodamp-eq {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes woodamp-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.woodamp-eq-bar {
+  transform-origin: bottom;
+  animation: woodamp-eq 0.8s ease-in-out infinite alternate;
+}
+
+.woodamp-marquee > span {
+  display: inline-block;
+  animation: woodamp-marquee 12s linear infinite;
+}
+
+.woodamp-eq-paused,
+.woodamp-marquee-paused {
+  animation-play-state: paused !important;
+}
+
+/* Seek/volume sliders: a groove carved into the wood with a brass knob.
+   The input itself is the groove; thumbs are styled per-engine. */
+.woodamp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.8),
+    inset 0 -1px 0 rgba(233, 180, 63, 0.12);
+  outline-offset: 4px;
+  cursor: pointer;
+}
+
+.woodamp-range:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.woodamp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range-slim {
+  height: 6px;
+}
+
+.woodamp-range-slim::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.woodamp-range-slim::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+/* ============================================================
+   Market styling/UX polish pass (ListingCard, foreign confirm modals,
+   MultichainCollectionView loading/empty states). Tokens only -- see
+   the @theme block above for --color-panel-soft/--color-line/--color-gold-*.
+   ============================================================ */
+
+/* Skeleton shimmer -- a moving highlight sweeping across a panel-toned
+   placeholder, used instead of a flat animate-pulse block wherever a
+   loading placeholder needs to read as "real content incoming" rather than
+   a generic grey box. Reduced-motion users get the global kill-switch
+   above (animation-duration -> 0.01ms), same as every other keyframe here. */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 150% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-panel-soft) 30%,
+    rgba(233, 180, 63, 0.16) 50%,
+    var(--color-panel-soft) 70%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+/* Gold ring spinner -- the real busy indicator for the sign/confirm
+   buttons in ForeignSweepConfirm/ForeignOfferConfirm/
+   ForeignCombinedSweepConfirm, replacing a plain disabled-button label
+   with a genuine in-progress affordance. */
+@keyframes spin-gold {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner-gold {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid rgba(233, 180, 63, 0.28);
+  border-top-color: var(--color-gold-400);
+  animation: spin-gold 0.7s linear infinite;
+}
+
+/* Calm confirmation pop -- a small settle-in for success glyphs/badges
+   (on-chain verification check, accepted-offer confirmation) so a state
+   change reads as a deliberate moment, not a layout flash. */
+@keyframes success-pop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.success-pop {
+  animation: success-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Hover glow for card-shaped surfaces (ListingCard, owned-item cards) --
+   pairs with the existing hover:-translate-y-0.5 lift already in use;
+   applies the same --shadow-gold token BuyConfirm/etc. reference so the
+   glow reads as the site's one "this is interactive gold chrome" signal. */
+.hover-glow-gold {
+  transition: box-shadow 0.2s ease;
+}
+
+.hover-glow-gold:hover {
+  box-shadow: var(--shadow-gold);
+}
