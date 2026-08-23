@@ -40,7 +40,7 @@
  * and lives in exactly one place (evm-log-scan.ts), imported, not
  * duplicated.
  */
-import { HypersyncClient, type Query } from "@envio-dev/hypersync-client";
+import { HypersyncClient, type Query, type Log as HypersyncLog } from "@envio-dev/hypersync-client";
 import { alchemyNftAdapter, fetchSnapshotsBatch } from "@/lib/market/multichain/adapters/alchemy-nft";
 import {
   EVM_CHAIN_ID,
@@ -53,6 +53,7 @@ import {
   type DiscoveryScanResult,
 } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain/store";
+import { decodeTransferLog, writeTransferLedgerEvents, type RawTransferLog, type DecodedTransfer } from "@/lib/market/multichain/discovery/transfer-ledger";
 import { writeCollectionCell, writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
@@ -186,6 +187,43 @@ async function persistObservedErc721Membership(
   }
 }
 
+/**
+ * Shared write-path for all three HyperSync scan functions below (forward,
+ * genesis backfill, priority window) -- decodes every raw Transfer/
+ * TransferSingle/TransferBatch log already fetched for the tally (never a
+ * second query) into plank_market_events rows, using each log's own
+ * block's real Timestamp field (HyperSync returns it for free via
+ * fieldSelection.block, no extra eth_getBlockByNumber round trip needed
+ * the way the RPC-bound evm-log-scan.ts path requires).
+ */
+async function writeTransfersFromHypersyncLogs(
+  chainSlug: string,
+  logs: Array<{ address?: string | null; topics: Array<string | null | undefined>; data?: string | null; transactionHash?: string | null; logIndex?: number; blockNumber?: number }>,
+  blocks: Array<{ number?: number; timestamp?: number }>
+): Promise<void> {
+  const timestampByBlock = new Map<number, number>();
+  for (const b of blocks) {
+    if (b.number != null && b.timestamp != null) timestampByBlock.set(b.number, b.timestamp);
+  }
+  const decoded: DecodedTransfer[] = [];
+  for (const log of logs) {
+    if (log.address == null || log.transactionHash == null || log.logIndex == null || log.blockNumber == null) continue;
+    const raw: RawTransferLog = {
+      address: log.address,
+      topics: log.topics,
+      data: log.data ?? null,
+      transactionHash: log.transactionHash,
+      logIndex: log.logIndex,
+      blockNumber: log.blockNumber,
+    };
+    for (const t of decodeTransferLog(chainSlug, raw)) {
+      t.blockTimestamp = timestampByBlock.get(t.blockNumber) ?? null;
+      decoded.push(t);
+    }
+  }
+  await writeTransferLedgerEvents(decoded);
+}
+
 function requireApiToken(): string {
   const token = process.env.ENVIO_API_TOKEN?.trim();
   if (!token) {
@@ -257,18 +295,24 @@ export async function runHypersyncDiscoveryScan(input: {
 
   const tally = new Map<string, number>();
   const observedErc721 = new Map<string, Set<string>>();
+  const rawTransferLogs: HypersyncLog[] = [];
+  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
   let query: Query = {
     fromBlock,
     toBlock,
     logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
-    fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
+      block: ["Number", "Timestamp"],
+    },
     maxNumLogs: MAX_LOGS_PER_RUN,
   };
 
   let lastBlockSeen = fromBlock;
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await withHypersyncReservation(() => client.get(query));
+    seenBlocks.push(...res.data.blocks);
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -276,6 +320,7 @@ export async function runHypersyncDiscoveryScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      rawTransferLogs.push(log);
       if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
         const tokenId = BigInt(log.topics[3]).toString();
         const ids = observedErc721.get(key) ?? new Set<string>();
@@ -290,6 +335,7 @@ export async function runHypersyncDiscoveryScan(input: {
   }
 
   await recordActivity(input.chainSlug, tally);
+  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   const candidates = [...tally.entries()];
 
@@ -378,18 +424,24 @@ export async function runHypersyncBackfillScan(input: {
 
   const tally = new Map<string, number>();
   const observedErc721 = new Map<string, Set<string>>();
+  const rawTransferLogs: HypersyncLog[] = [];
+  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: ceiling,
     logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
-    fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
+      block: ["Number", "Timestamp"],
+    },
     maxNumLogs: MAX_LOGS_PER_RUN,
   };
 
   let nextBlock = scannedUpTo;
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await withHypersyncReservation(() => client.get(query));
+    seenBlocks.push(...res.data.blocks);
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -397,6 +449,7 @@ export async function runHypersyncBackfillScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      rawTransferLogs.push(log);
       if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
         const tokenId = BigInt(log.topics[3]).toString();
         const ids = observedErc721.get(key) ?? new Set<string>();
@@ -411,6 +464,7 @@ export async function runHypersyncBackfillScan(input: {
   }
 
   await recordActivity(input.chainSlug, tally);
+  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   const candidates = [...tally.entries()];
 
@@ -507,18 +561,24 @@ export async function runHypersyncPriorityWindowScan(input: {
   }
 
   const tally = new Map<string, number>();
+  const rawTransferLogs: HypersyncLog[] = [];
+  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: input.toBlockCeiling,
     logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
-    fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
+      block: ["Number", "Timestamp"],
+    },
     maxNumLogs: MAX_LOGS_PER_RUN,
   };
 
   let nextBlock = scannedUpTo;
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await withHypersyncReservation(() => client.get(query));
+    seenBlocks.push(...res.data.blocks);
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -526,6 +586,7 @@ export async function runHypersyncPriorityWindowScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      rawTransferLogs.push(log);
       logsScanned += 1;
     }
     nextBlock = res.nextBlock;
@@ -534,6 +595,7 @@ export async function runHypersyncPriorityWindowScan(input: {
   }
 
   await recordActivity(input.chainSlug, tally);
+  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   const candidates = [...tally.entries()];
 

@@ -194,6 +194,20 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] wyvern-fills-genesis", JSON.stringify(scan));
       return;
     }
+    if (source === "cryptokitties-fills") {
+      const { scanChainForCryptoKittiesFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptokitties-scan");
+      const scan = await scanChainForCryptoKittiesFillsViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptokitties-fills-live", JSON.stringify(scan));
+      return;
+    }
+    if (source === "cryptokitties-fills-genesis") {
+      const { scanChainForCryptoKittiesFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptokitties-scan");
+      const scan = await scanChainForCryptoKittiesFillsGenesisBackfillViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptokitties-fills-genesis", JSON.stringify(scan));
+      return;
+    }
     if (source === "native-robinwood") {
       const { sanitizeUnknownZeros } = await import("../lib/market/multichain/store");
       console.log("[mesh-lane] heal", JSON.stringify(await sanitizeUnknownZeros()));
