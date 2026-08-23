@@ -29,7 +29,11 @@ launch_if_dead() {
     return
   fi
   rm -f "$pidfile"
-  nohup bash -c "$cmd" > "$log" 2>&1 &
+  # REAL INCIDENT 2026-08-23: a plain `> "$log" 2>&1` redirect let one
+  # supervisor's log grow to 28.1 GB unattended, filling the drive to 8GB
+  # free. Every long-running process's output is now piped through
+  # _rotate-log.sh, which hard-caps each log at 50MB regardless of cause.
+  nohup bash -c "$cmd" 2>&1 | bash scripts/_rotate-log.sh "$log" 50 &
   local newpid=$!
   disown
   echo "$newpid" > "$pidfile"
@@ -51,7 +55,7 @@ launch_if_dead() {
 if netstat -ano 2>/dev/null | grep -q ":3800.*LISTENING"; then
   echo "[devserver] already listening on 3800, skipping"
 else
-  nohup bash -c "npx next dev -p 3800" > "/c/tmp/plank-supervisor-logs/devserver.log" 2>&1 &
+  nohup bash -c "npx next dev -p 3800" 2>&1 | bash scripts/_rotate-log.sh "/c/tmp/plank-supervisor-logs/devserver.log" 50 &
   disown
   echo "[devserver] launched (port-checked)"
 fi
