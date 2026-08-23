@@ -37,7 +37,7 @@ const EXPLORE_LINKS = [
   { href: "/launch", label: "Launch" },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
-  { href: PLANKSPACE_URL, label: "PlankSpace", external: true },
+  { href: PLANKSPACE_URL, label: "PlankSpace" },
   { href: "/learn", label: "Learn" },
   { href: "/floorboards", label: "Under the floorboards" },
   { href: "/migrate", label: "Migrate" },

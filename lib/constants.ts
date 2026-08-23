@@ -222,7 +222,7 @@ export const TOKEN = {
  * reviewed canonical plank.love origin.
  */
 export const PLANKSPACE_URL =
-  "https://spaceback-social.degenwaffle.chatgpt.site" as const;
+  "/plankspace" as const;
 
 /**
  * Primary navigation in reading order. `emphasis` changes presentation only;
@@ -234,7 +234,7 @@ export const NAV_LINKS = [
   { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
-  { href: PLANKSPACE_URL, label: "PlankSpace", external: true },
+{ href: PLANKSPACE_URL, label: "PlankSpace" },
   { href: "/learn", label: "Learn" },
   // Airdrop intentionally removed from the nav (2026-07) to make room for
   // the WoodAmp music chip — the #airdrop section and its checker still
