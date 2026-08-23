@@ -99,8 +99,6 @@ const nextConfig: NextConfig = {
     return [
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
-      { source: "/plank-classic.jpeg", destination: "/images/plank-head.webp" },
-      { source: "/plank-robinwood.png", destination: "/images/plank-logo.webp" },
     ];
   },
   async headers() {

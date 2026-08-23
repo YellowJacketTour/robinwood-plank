@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   CHAIN,
   CONTRACT_ADDRESS,
+  PLANKSPACE_URL,
   SOCIAL_LINKS,
 } from "@/lib/constants";
 
@@ -36,7 +37,7 @@ const EXPLORE_LINKS = [
   { href: "/launch", label: "Launch" },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
-  { href: "/plankspace", label: "PlankSpace" },
+  { href: PLANKSPACE_URL, label: "PlankSpace", external: true },
   { href: "/learn", label: "Learn" },
   { href: "/floorboards", label: "Under the floorboards" },
   { href: "/migrate", label: "Migrate" },

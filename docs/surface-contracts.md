@@ -8,13 +8,18 @@ These are behavioural requirements: the features, states and safety disclosures
 a redesign of a given surface may not quietly drop. A visual pass can change how
 any of this looks; it may not remove the capability.
 
-## PlankSpace
+## PlankSpace checkpoint
 
-The primary navigation exposes native PlankSpace routes beginning at
-`/plankspace`. PlankSpace uses the same root wallet provider, same-origin API
-handlers, and PostgreSQL deployment as the rest of Plank.love. It must not use
-an iframe, external child origin, secondary wallet connector, PIN bypass, or
-developer-owned test hostname.
+The primary navigation and footer expose **PlankSpace** as an external,
+new-tab destination while the wallet-owned social profile app is in dev-only
+testing. Its origin is centralized in `PLANKSPACE_URL` in `lib/constants.ts`.
+
+Do not iframe the checkpoint or imply that its wallet connection, signatures,
+cookies, profile ownership, or persistence are shared with plank.love. The
+external-link treatment must retain `noopener noreferrer` and an accessible
+new-tab label. Moving PlankSpace onto a canonical plank.love origin requires a
+separate review of wallet authentication, CSP, storage, privacy/terms, and
+deployment ownership before changing this contract.
 
 Split out of DESIGN.md on 2026-08-02 — a design system should describe how to
 build anything, not enumerate what each page contains. Mixing the two meant the
