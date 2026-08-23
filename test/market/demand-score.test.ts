@@ -95,6 +95,34 @@ test("computeDemandScore guards divide-by-zero on totalSupply=0 by ignoring the 
   assert.equal(result.gradable, false);
 });
 
+test("computeDemandScore discounts momentum proportionally when a real washSuspicionRatio is supplied", () => {
+  const input: DemandScoreInput = {
+    ...EMPTY,
+    volume24hWei: String(50_000), volume7dWei: String(7 * 10_000), volume30dWei: String(30 * 10_000),
+  };
+  const clean = computeDemandScore(input);
+  const halfWashed = computeDemandScore({ ...input, washSuspicionRatio: 0.5 });
+  const fullyWashed = computeDemandScore({ ...input, washSuspicionRatio: 1 });
+  const cleanMomentum = clean.parts.find((p) => p.label.startsWith("Volume"))!.points;
+  const halfMomentum = halfWashed.parts.find((p) => p.label.startsWith("Volume"))!.points;
+  const fullMomentum = fullyWashed.parts.find((p) => p.label.startsWith("Volume"))!.points;
+  assert.ok(halfMomentum < cleanMomentum, `expected half-washed momentum (${halfMomentum}) < clean (${cleanMomentum})`);
+  assert.equal(fullMomentum, 0);
+  assert.ok(halfWashed.score < clean.score);
+  // Wash suspicion never touches other terms (depth/breadth/rarity weren't set here, so both scores should be momentum-only and non-negative).
+  assert.ok(halfWashed.score >= 0);
+});
+
+test("computeDemandScore treats an absent washSuspicionRatio identically to before (no accidental discount)", () => {
+  const input: DemandScoreInput = {
+    ...EMPTY,
+    volume24hWei: String(50_000), volume7dWei: String(7 * 10_000), volume30dWei: String(30 * 10_000),
+  };
+  const withoutField = computeDemandScore(input);
+  const explicitZero = computeDemandScore({ ...input, washSuspicionRatio: 0 });
+  assert.equal(withoutField.score, explicitZero.score);
+});
+
 test("computeDemandScore ignores non-finite/garbage wei strings instead of throwing", () => {
   const result = computeDemandScore({
     ...EMPTY,

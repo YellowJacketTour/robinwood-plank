@@ -69,6 +69,21 @@ export type DemandScoreInput = {
   /** Count of tokens in the projection that carry a real computed rarity rank, and the total projected token count -- both from plank_collection_tokens (see collection-token-store.ts). Optional: undefined when the token projection hasn't run for this collection yet (never fabricated as 0/0). */
   rankedTokenCount?: number | null;
   projectedTokenCount?: number | null;
+  /**
+   * Fraction of recent volume suspected wash-traded, in [0,1] -- computed by
+   * a caller with access to real per-sale buyer/seller addresses via
+   * lib/market/wash-trade-signal.ts's computeWashSuspicion() over the same
+   * recent window this score's momentum term reads (e.g. 24h/7d ledger
+   * sales). Optional and honestly undefined (not 0) when the caller has no
+   * per-sale wallet data for this collection yet -- momentum is the ONLY
+   * term this ever discounts, because self/reciprocal-pair trading directly
+   * fabricates rate24/rate7/rate30, the exact inputs windowMomentum() reads;
+   * it never touches depth/breadth/rarity, which aren't gameable the same
+   * way. Never sets momentum to negative or hides the collection -- purely
+   * a proportional discount, so an honest collection with washSuspicion=0
+   * scores identically to before this field existed.
+   */
+  washSuspicionRatio?: number | null;
 };
 
 export type DemandScoreBreakdown = {
@@ -162,7 +177,18 @@ export function computeDemandScore(input: DemandScoreInput): DemandScoreBreakdow
   const momentum = windowMomentum(input);
   if (momentum != null) {
     gradable = true;
-    parts.push({ label: "Volume/sales momentum (24h vs 7d/30d baseline)", points: Math.round(momentum * WEIGHTS.momentum), max: WEIGHTS.momentum });
+    // Discount momentum by real suspected-wash volume share, when a caller
+    // supplied one -- see the field's own doc comment above for why this is
+    // the only term touched and why it is a discount, never a penalty below
+    // the "no momentum" floor of 0.
+    const washRatio = input.washSuspicionRatio != null && Number.isFinite(input.washSuspicionRatio)
+      ? Math.max(0, Math.min(1, input.washSuspicionRatio))
+      : 0;
+    const discountedMomentum = momentum * (1 - washRatio);
+    const label = washRatio > 0
+      ? `Volume/sales momentum (24h vs 7d/30d baseline, ${Math.round(washRatio * 100)}% suspected-wash volume discounted)`
+      : "Volume/sales momentum (24h vs 7d/30d baseline)";
+    parts.push({ label, points: Math.round(discountedMomentum * WEIGHTS.momentum), max: WEIGHTS.momentum });
   }
 
   const depth = ratio01(input.listedCount, input.totalSupply);
