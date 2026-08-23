@@ -22,6 +22,9 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   pulp: "bg-[#F0803C]/15 text-[#F0803C]",
   magiceden: "bg-[#E42575]/15 text-[#E42575]",
   unisat: "bg-[#F7931A]/15 text-[#F7931A]",
+  "ordinals-wallet": "bg-[#F7931A]/15 text-[#F7931A]",
+  ordnet: "bg-[#FF6B35]/15 text-[#FF9B73]",
+  "cryptopunks-native": "bg-gold-500/15 text-gold-300",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
@@ -143,7 +146,7 @@ export default function ListingCard({
           alt={`${collection.name} ${displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name })}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
-          className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+          className={`object-contain transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
           unoptimized
           onLoad={() => setImageLoaded(true)}
         />

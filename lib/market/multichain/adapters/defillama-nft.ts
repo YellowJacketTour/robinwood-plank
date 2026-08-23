@@ -53,6 +53,7 @@ type LlamaCollection = {
 };
 
 const COLLECTIONS_URL = "https://nft.llama.fi/collections";
+const COLLECTION_URL = "https://nft.llama.fi/collection";
 
 // A single GET returns the whole dataset (~4k rows, no pagination) -- cache
 // it in-process for a short window so a batch of fetchSnapshot calls in one
@@ -67,6 +68,20 @@ async function fetchAllCollections(): Promise<LlamaCollection[]> {
   const rows = (await res.json()) as LlamaCollection[];
   cache = { at: Date.now(), rows };
   return rows;
+}
+
+/** The bulk feed can repeat one marketplace-level aggregate across every
+ * contract grouped into that collection. Its XCOPY Editions rows currently
+ * share the same 1,416 supply even though the exact-contract endpoint reports
+ * 20, 74 and 83 respectively. Read identity/supply from the exact endpoint;
+ * retain bulk floor/book fields only as marketplace-group evidence. */
+async function fetchExactCollection(contractAddress: string): Promise<LlamaCollection | null> {
+  const response = await fetch(`${COLLECTION_URL}/${encodeURIComponent(contractAddress)}`, {
+    headers: { accept: "application/json" }, signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) return null;
+  const body = await response.json() as LlamaCollection[] | LlamaCollection;
+  return Array.isArray(body) ? body[0] ?? null : body;
 }
 
 /**
@@ -103,14 +118,15 @@ export const defillamaNftAdapter: ChainAdapter = {
     if (!match) {
       throw new Error(`defillama-nft: ${contractAddress} not in nft.llama.fi/collections`);
     }
+    const exact = await fetchExactCollection(contractAddress).catch(() => null);
     return {
-      name: match.name,
-      imageUrl: match.image,
+      name: exact?.name ?? match.name,
+      imageUrl: exact?.image ?? match.image,
       externalUrl: null, // DeFiLlama's collection payload has no marketplace link field
       floorPriceWei: toWeiString(match.floorPrice),
       floorPriceCurrency: match.floorPrice != null ? "ETH" : null,
       floorPriceMarketplace: match.floorPrice != null ? "defillama" : null,
-      totalSupply: sanitizeTotalSupply(match.totalSupply),
+      totalSupply: sanitizeTotalSupply(exact?.totalSupply ?? match.totalSupply),
       listedCount: match.onSaleCount,
     };
   },

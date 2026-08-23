@@ -28,6 +28,10 @@
   --accent-l-400: 66%;
   --accent-l-300: 77%;
   --melt-bias: 0.35;
+  --melt-energy: 0;
+  --melt-bass: 0;
+  --melt-mid: 0;
+  --melt-treble: 0;
 
   /*
    * "Totality" base tones -- flagged live 2026-08-19 ("we need themes for
@@ -143,7 +147,13 @@ body {
      the page's own background never moved with the theme even after
      --background itself became theme-derived above. Fixed as part of the
      same "totality" pass. */
-  background-color: var(--background);
+  /* The opaque base and the disco field live in two negative stacking
+     layers below all application content. Keeping the body itself
+     transparent is what makes the melt ambient instead of tinting artwork,
+     tables, controls, or text. */
+  background-color: transparent;
+  position: relative;
+  isolation: isolate;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
   /* Solid page field. The plank-head masthead illustration is rendered by the
@@ -158,6 +168,15 @@ body {
      rendering the masthead TWICE — the second copy bleeding down the page,
      which is precisely what this change existed to stop. */
   font-weight: 700;
+}
+
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: var(--background);
 }
 
 /* Strong, warm typography that stays readable over every part of the Plank
@@ -288,13 +307,16 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
    --melt-bias goes 0 → 1. Reduced motion = static. */
 html[data-melt="1"] body::after,
 .disco-melt-layer {
-  --spread: calc(180deg * (1 - var(--melt-bias, 0.35)));
+  /* Unitless because --accent-h is unitless. Adding degrees to a unitless
+     hue invalidated every HSL gradient in browsers, leaving only the icon
+     state while the advertised color melt remained invisible. */
+  --spread: calc(180 * (1 - var(--melt-bias, 0.35)));
   pointer-events: none;
   position: fixed;
   inset: 0;
-  z-index: 8;
-  opacity: 0.55;
-  mix-blend-mode: overlay;
+  z-index: -1;
+  opacity: calc(0.2 + var(--melt-energy, 0) * 0.22);
+  mix-blend-mode: screen;
   background:
     radial-gradient(ellipse 80% 60% at 12% 18%, hsl(calc(var(--accent-h) + var(--spread) * 0.05) 95% 62%) 0%, transparent 55%),
     radial-gradient(ellipse 70% 55% at 88% 12%, hsl(calc(var(--accent-h) + var(--spread) * 0.45) 90% 58%) 0%, transparent 52%),
@@ -307,16 +329,36 @@ html[data-melt="1"] body::after,
       hsl(calc(var(--accent-h) + var(--spread) * 0.66) 80% 50%),
       hsl(calc(var(--accent-h) + var(--spread)) 75% 46%),
       hsl(calc(var(--accent-h)) 80% 48%));
-  background-size: 180% 180%;
-  animation: disco-drift 22s ease-in-out infinite;
+  background-size:
+    calc(165% + var(--melt-bass, 0) * 35%) calc(165% + var(--melt-bass, 0) * 35%),
+    calc(175% + var(--melt-mid, 0) * 28%) calc(175% + var(--melt-mid, 0) * 28%),
+    190% 190%, 170% 170%, 180% 180%, 185% 185%;
+  transform: scale(calc(1 + var(--melt-bass, 0) * 0.035));
+  transform-origin: center;
+  animation: disco-drift calc(24s - var(--melt-energy, 0) * 10s) ease-in-out infinite;
+  will-change: background-position, filter, opacity, transform;
 }
 @keyframes disco-drift {
-  0%, 100% { background-position: 0% 15%, 100% 0%, 40% 100%, 0% 80%, 100% 60%, 45% 35%; filter: hue-rotate(0deg) saturate(1.15); }
-  50% { background-position: 35% 55%, 55% 40%, 20% 15%, 75% 90%, 30% 40%, 60% 50%; filter: hue-rotate(calc(55deg * (1 - var(--melt-bias, 0.35)))) saturate(1.35); }
+  0%, 100% { background-position: 0% 15%, 100% 0%, 40% 100%, 0% 80%, 100% 60%, 45% 35%; filter: hue-rotate(calc(-18deg * var(--melt-treble, 0))) saturate(calc(1.2 + var(--melt-mid, 0) * 0.7)) blur(calc(8px + var(--melt-bass, 0) * 8px)); }
+  33% { background-position: 24% 48%, 68% 22%, 58% 72%, 18% 46%, 78% 84%, 54% 46%; }
+  66% { background-position: 48% 24%, 42% 56%, 22% 36%, 68% 76%, 36% 22%, 66% 58%; filter: hue-rotate(calc((70deg * (1 - var(--melt-bias, 0.35))) + (28deg * var(--melt-treble, 0)))) saturate(calc(1.35 + var(--melt-mid, 0) * 0.85)) blur(calc(10px + var(--melt-bass, 0) * 10px)); }
 }
 html[data-melt="1"] body::after {
   content: "";
 }
+
+.disco-fluid-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100vw;
+  height: 100dvh;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+html[data-melt="1"] .disco-fluid-backdrop { opacity: 1; }
+html[data-melt="1"] body::after { opacity: calc(0.06 + var(--melt-energy, 0) * 0.04); }
 @media (prefers-reduced-motion: reduce) {
   html[data-melt="1"] body::after,
   .disco-melt-layer { animation: none; filter: saturate(1.1); }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
@@ -58,8 +58,10 @@ import ChainIcon from "@/components/market/ChainIcon";
 import type { RarityTier } from "@/lib/rarity";
 import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
+import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
+import { displayMugsName } from "@/lib/market/multichain/mugs-display";
 
 type ForeignOffer = {
   orderHash: string;
@@ -112,6 +114,28 @@ const COMBINED_OFFER_DISCOUNT_BPS = 1000;
 /** Caps how many "offer the rest" wallet prompts one combined action can trigger -- an unbounded remainder could otherwise turn one click into dozens of signature prompts. */
 const COMBINED_REMAINDER_CAP = 5;
 
+function boundedCatalogTake(raw: string | null, pageSize: number): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < pageSize) return pageSize;
+  return parsed;
+}
+
+function parseTierList(raw: string | null): RarityTier[] {
+  if (!raw) return [];
+  const accepted = new Set<string>(TIER_ORDER);
+  return [...new Set(raw.split(",").filter((value): value is RarityTier => accepted.has(value)))];
+}
+
+function readBrowseExtras(key: string): { openTraitGroups?: Record<string, boolean> } {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(key) ?? "{}") as { openTraitGroups?: Record<string, boolean> };
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Browse + buy + sweep + send surface for ONE tracked multichain collection
  * (see plank_multichain_collections) -- deliberately a NEW page, not an
@@ -147,16 +171,27 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
-  const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null;
+    animationUrl?: string | null; mediaType?: string | null;
+    traits?: Array<{ traitType: string; value: string }> }>>([]);
+  const [catalogBuilding, setCatalogBuilding] = useState(false);
+  const [catalogMeta, setCatalogMeta] = useState<{
+    projectedCount: number;
+    expectedCount: number | null;
+    partial: boolean;
+  } | null>(null);
   const surface = collectionSurface(chainSlug);
-  const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
+  const browseStorageKey = `marketplank:browse:v1:${chainSlug}:${collectionSlug.toLowerCase()}`;
+  const [tokenLimit, setTokenLimit] = useState(() => boundedCatalogTake(searchParams.get("take"), surface.catalogPageSize));
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
+  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">(() => searchParams.get("view") === "intelligence" ? "intelligence" : "art");
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
     listedCount: number | null;
     totalSupply: number | null;
     holderCount: number | null;
     floorPriceWei: string | null;
+    floorPriceCurrency: string | null;
   } | null>(null);
   // Real OpenSea 24h/7d/30d volume/sales (rarity-index-runner.ts, EVM-only
   // -- Solana/Bitcoin/Robinhood-native branches of the listings route always
@@ -226,7 +261,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [sweepClauses, setSweepClauses] = useState<CriteriaClause[]>([]);
   const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
-  const [activeTiers, setActiveTiers] = useState<RarityTier[]>([]);
+  const [activeTiers, setActiveTiers] = useState<RarityTier[]>(() => parseTierList(searchParams.get("tiers")));
   const [sweepPreview, setSweepPreview] = useState<Listing[] | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
 
@@ -271,6 +306,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [offers, setOffers] = useState<ForeignOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
   const [activity, setActivity] = useState<ForeignActivityEvent[]>([]);
+  const [historyCoverage, setHistoryCoverage] = useState<{ source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
 
   // MY LISTINGS -- own active listings in this collection. See
@@ -327,6 +363,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // rank), and a genuine signed-Seaport-offer flow (foreign-offer.ts).
   const [detailsTarget, setDetailsTarget] = useState<Listing | null>(null);
   const [traitCounts, setTraitCounts] = useState<Record<string, Record<string, number>> | null>(null);
+  const [openTraitGroups, setOpenTraitGroups] = useState<Record<string, boolean>>(() => readBrowseExtras(browseStorageKey).openTraitGroups ?? {});
+  const restoredScrollRef = useRef(false);
   const [offerTarget, setOfferTarget] = useState<Listing | null>(null);
   const [offerAmountEth, setOfferAmountEth] = useState("");
   const [offerBusy, setOfferBusy] = useState(false);
@@ -336,25 +374,41 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
-  const fetchCatalogTokens = useCallback(() => {
+  const fetchCatalogTokens = useCallback(async () => {
     const sort =
       listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
     const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
-    const qs = new URLSearchParams({
-      chainSlug,
-      collectionSlug,
-      limit: String(Math.min(surface.catalogCap, tokenLimit)),
-      art: "2",
-      sort,
-    });
-    if (tierFilter) qs.set("tier", tierFilter);
-    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-      `/api/market/multichain/tokens?${qs.toString()}`,
-      { ttlMs: 8_000, swrMs: 45_000, session: true }
-    )
-      .then((tok) => setTokens(tok.tokens ?? []))
-      .catch(() => setTokens([]));
-  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogCap]);
+    type TokenPage = { tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
+      animationUrl?: string | null; mediaType?: string | null;
+      traits?: Array<{ traitType: string; value: string }> }>;
+      nextCursor?: string | null; building?: boolean; projectedCount?: number;
+      expectedCount?: number | null; partial?: boolean };
+    const accumulated: TokenPage["tokens"] = [];
+    let cursor: string | null = null;
+    let last: TokenPage | null = null;
+    try {
+      while (accumulated.length < tokenLimit) {
+        const qs = new URLSearchParams({ chainSlug, collectionSlug,
+          limit: String(Math.min(surface.catalogPageSize, tokenLimit - accumulated.length)), art: "2", sort });
+        if (tierFilter) qs.set("tier", tierFilter);
+        if (cursor) qs.set("cursor", cursor);
+        last = await swrJson<TokenPage>(`/api/market/multichain/tokens?${qs.toString()}`,
+          { ttlMs: 8_000, swrMs: 45_000, session: true });
+        accumulated.push(...(last.tokens ?? []));
+        cursor = last.nextCursor ?? null;
+        if (!cursor || !last.tokens?.length) break;
+      }
+      setTokens(accumulated);
+      setCatalogBuilding(Boolean(last?.building));
+      setCatalogMeta(typeof last?.projectedCount === "number" ? {
+        projectedCount: last.projectedCount, expectedCount: last.expectedCount ?? null,
+        partial: Boolean(last.partial),
+      } : null);
+    } catch {
+      setTokens(accumulated);
+      setCatalogBuilding(false);
+    }
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogPageSize]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -375,6 +429,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           sales30d: number | null;
           holderCount: number | null;
           floorPriceWei?: string | null;
+          floorPriceCurrency?: string | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
         ttlMs: 30_000,
@@ -422,6 +477,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         totalSupply: data.collection.totalSupply,
         holderCount: data.collection.holderCount,
         floorPriceWei: data.collection.floorPriceWei ?? null,
+        floorPriceCurrency: data.collection.floorPriceCurrency ?? null,
       });
       // Real, on-demand backfill: if this collection has never had a holder
       // count computed, fetch one now (see holder-count/route.ts's own
@@ -469,6 +525,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     void fetchCatalogTokens();
   }, [fetchCatalogTokens]);
+
+  useEffect(() => {
+    if (!catalogBuilding) return;
+    const id = setInterval(() => void fetchCatalogTokens(), 10_000);
+    return () => clearInterval(id);
+  }, [catalogBuilding, fetchCatalogTokens]);
 
   // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- same shared fetch + short-TTL swr pattern
   // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
@@ -618,13 +680,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // Sale/transfer history is inherently append-only for anything already
       // recorded -- a long swr window is correct, the only "freshness" that
       // matters is whether a NEW event has landed.
-      const data = await swrJson<{ events: ForeignActivityEvent[] }>(
-        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=25`,
+      const data = await swrJson<{ events: ForeignActivityEvent[]; coverage?: { source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } }>(
+        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=500`,
         { ttlMs: 30_000, swrMs: 300_000, session: true }
       );
       setActivity(data.events ?? []);
+      setHistoryCoverage(data.coverage ?? null);
     } catch {
       setActivity([]);
+      setHistoryCoverage(null);
     } finally {
       setActivityLoading(false);
     }
@@ -814,17 +878,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!isSolana && !isBitcoin) {
-        try {
-          const data = await swrJson<{ counts: Record<string, Record<string, number>> }>(
-            `/api/market/multichain/traits?collectionSlug=${encodeURIComponent(collectionSlug)}`,
-            { ttlMs: 300_000, swrMs: 3_600_000, session: true }
-          );
-          if (!cancelled) setTraitCounts(data.counts ?? {});
-        } catch {
-          if (!cancelled) setTraitCounts({});
-        }
-      }
       try {
         const idx = await swrJson<TraitIndexResponse>(
           `/api/market/multichain/trait-index?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
@@ -832,14 +885,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         );
         if (!cancelled) {
           setTraitIndex(idx);
-          if (idx.complete && idx.traits) {
+          if (idx.traits) {
             const derived: Record<string, Record<string, number>> = {};
             for (const [type, values] of Object.entries(idx.traits)) {
               derived[type] = {};
               for (const [value, ids] of Object.entries(values)) derived[type][value] = ids.length;
             }
             setTraitCounts((prev) => (prev && Object.keys(prev).length > 0 ? prev : derived));
-            setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
+            if (idx.complete) setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
           }
         }
       } catch {
@@ -852,9 +905,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   }, [collectionSlug, chainSlug, isSolana, isBitcoin]);
 
   const browseAsListing = useCallback(
-    (tokenId: string, imageUrl?: string | null, name?: string | null): Listing => {
+    (tokenId: string, imageUrl?: string | null, name?: string | null,
+      animationUrl?: string | null, mediaType?: string | null): Listing => {
       const live = listings.find((l) => l.tokenId === tokenId);
-      if (live) return live;
+      if (live) return { ...live, animationUrl: animationUrl ?? live.animationUrl,
+        mediaType: mediaType ?? live.mediaType };
       return {
         id: `browse:${chainSlug}:${tokenId}`,
         collectionSlug,
@@ -864,6 +919,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         expiresAt: new Date(0).toISOString(),
         kind: "fixed",
         imageUrl: imageUrl ?? undefined,
+        animationUrl: animationUrl ?? undefined,
+        mediaType: mediaType ?? undefined,
         foreignChainSlug: chainSlug,
       };
     },
@@ -873,7 +930,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openDetails = useCallback(
     (tokenId: string) => {
       const token = tokens.find((t) => t.tokenId === tokenId);
-      setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name));
+      setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name,
+        token?.animationUrl, token?.mediaType));
     },
     [tokens, browseAsListing]
   );
@@ -881,16 +939,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openOffer = useCallback(
     async (listing: Listing) => {
       setOfferError(null);
-      const who = await requireAccount();
-      if (!who) return;
       setOfferAmountEth("");
       setOfferTarget(listing);
     },
-    [requireAccount]
+    []
   );
 
   const confirmOffer = useCallback(async () => {
-    if (!offerTarget || !account) return;
+    if (!offerTarget) return;
+    if (!account) { await requireAccount(); return; }
     if (!isSolana && !collection?.contractAddress) return;
     setOfferError(null);
     try {
@@ -930,7 +987,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setOfferBusy(false);
       setStatus(null);
     }
-  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers]);
+  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers, requireAccount]);
 
   const handleAcceptOffer = useCallback(
     async (offer: ForeignOffer) => {
@@ -1029,15 +1086,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     async (listing: Listing) => {
       setError(null);
       if (!isCrossChainBuyable(listing)) return;
-      const who = await requireAccount();
-      if (!who) return;
       setBuyTarget(listing);
     },
-    [requireAccount]
+    []
   );
 
   const confirmBuy = useCallback(async () => {
     if (!buyTarget) return;
+    if (!account) { await requireAccount(); return; }
     setError(null);
     try {
       setBuyBusy(true);
@@ -1071,7 +1127,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setBuyBusy(false);
       setStatus(null);
     }
-  }, [buyTarget, load, loadOwned]);
+  }, [buyTarget, load, loadOwned, account, requireAccount]);
 
   // AND-combined active trait clauses, derived from selectedTraits --
   // shared by the client-side grid filter and the server-side sweep call.
@@ -1152,12 +1208,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const browseItems = useMemo(() => {
     if (bookFilter === "listed") {
-      return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null, imageUrl: listing.imageUrl ?? null, listing }));
+      return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null,
+        imageUrl: listing.imageUrl ?? null, animationUrl: listing.animationUrl ?? null,
+        mediaType: listing.mediaType ?? null, listing }));
     }
     const q = searchQuery.trim().toLowerCase();
     const fromTokens = tokens
       .filter((t) => {
         if (q && !t.tokenId.toLowerCase().includes(q) && !(t.name ?? "").toLowerCase().includes(q)) return false;
+        if (traitClauses.length > 0) {
+          const has = (traitType: string, value: string) =>
+            (t.traits ?? []).some((trait) => trait.traitType === traitType && trait.value === value);
+          if (!traitClauses.every((clause) => has(clause.traitType, clause.value))) return false;
+        }
         const tierFilter = activeTiers.length > 0 ? activeTiers : activeTier !== "all" ? [activeTier] : [];
         if (tierFilter.length > 0) {
           const r = rarityFor(t.tokenId);
@@ -1167,7 +1230,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       })
       .map((t) => ({
       tokenId: t.tokenId,
-      name: t.name,
+      name: displayMugsName({
+        chainSlug,
+        contractAddress: collection?.contractAddress || collectionSlug,
+        tokenId: t.tokenId,
+        name: t.name,
+        traits: t.traits,
+      }),
+      animationUrl: t.animationUrl,
+      mediaType: t.mediaType,
       imageUrl:
         t.imageUrl ||
         catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, t.tokenId)[0] ||
@@ -1204,7 +1275,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       });
     }
     return rows;
-  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, traitClauses, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
@@ -1217,17 +1288,46 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (maxPriceEth.trim()) params.set("max", maxPriceEth.trim());
     if (traitClauses.length > 0) params.set("traits", JSON.stringify(selectedTraits));
     if (activeTier !== "all") params.set("tier", activeTier);
+    if (activeTiers.length > 0) params.set("tiers", activeTiers.join(","));
     if (listingSort !== "price-asc") params.set("sort", listingSort);
     if (bookFilter !== "listed") params.set("show", bookFilter);
+    if (tokenLimit > surface.catalogPageSize) params.set("take", String(tokenLimit));
+    if (browseMode !== "art") params.set("view", browseMode);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract.
-  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, listingSort, bookFilter]);
+  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, activeTiers, listingSort, bookFilter, tokenLimit, browseMode, surface.catalogPageSize]);
+
+  // Expanded facet groups and scroll are transient workspace state: useful on
+  // refresh/back navigation, but intentionally not encoded into share URLs.
+  useEffect(() => {
+    try { window.sessionStorage.setItem(browseStorageKey, JSON.stringify({ openTraitGroups })); } catch { /* storage is best effort */ }
+  }, [browseStorageKey, openTraitGroups]);
+
+  useEffect(() => {
+    if (restoredScrollRef.current) return;
+    restoredScrollRef.current = true;
+    let prior = 0;
+    try { prior = Number(window.sessionStorage.getItem(`${browseStorageKey}:scroll`) ?? "0"); } catch { /* ignore */ }
+    if (Number.isFinite(prior) && prior > 0) requestAnimationFrame(() => window.scrollTo({ top: prior, behavior: "instant" }));
+    let queued = false;
+    const save = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        try { window.sessionStorage.setItem(`${browseStorageKey}:scroll`, String(Math.round(window.scrollY))); } catch { /* ignore */ }
+      });
+    };
+    window.addEventListener("scroll", save, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", save);
+      try { window.sessionStorage.setItem(`${browseStorageKey}:scroll`, String(Math.round(window.scrollY))); } catch { /* ignore */ }
+    };
+  }, [browseStorageKey]);
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
-    const who = await requireAccount();
-    if (!who) return;
     // Preview from the trait-filtered set when a filter is active, so what
     // the confirm modal shows matches what the real sweep (below, via
     // fetchForeignTraitFilteredListings) will actually pull.
@@ -1259,10 +1359,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return;
     }
     setSweepPreview(cheapest);
-  }, [listings, filteredListings, traitClauses, sweepCount, requireAccount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
+  }, [listings, filteredListings, traitClauses, sweepCount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;
+    if (!account) { await requireAccount(); return; }
     setError(null);
     setSweepStatuses(null);
     try {
@@ -1316,12 +1417,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSweepBusy(false);
       setStatus(null);
     }
-  }, [sweepPreview, chainSlug, collectionSlug, isSolana, isBitcoin, traitClauses, load, loadOwned]);
+  }, [sweepPreview, chainSlug, collectionSlug, isSolana, isBitcoin, traitClauses, load, loadOwned, account, requireAccount]);
 
   const openCombinedPreview = useCallback(async () => {
     setCombinedError(null);
-    const who = await requireAccount();
-    if (!who) return;
     const budget = Number(combinedBudgetEth);
     if (!(budget > 0)) {
       setCombinedError("Enter a budget greater than 0.");
@@ -1354,10 +1453,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return;
     }
     setCombinedPreview({ affordable, remainder });
-  }, [combinedBudgetEth, listings, filteredListings, traitClauses, isNonEvm, requireAccount]);
+  }, [combinedBudgetEth, listings, filteredListings, traitClauses, isNonEvm]);
 
   const confirmCombined = useCallback(async () => {
     if (!combinedPreview) return;
+    if (!account) { await requireAccount(); return; }
     const { affordable, remainder } = combinedPreview;
     setCombinedError(null);
     setCombinedStatuses(null);
@@ -1454,7 +1554,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setCombinedBusy(false);
       setStatus(null);
     }
-  }, [combinedPreview, isSolana, isBitcoin, chainSlug, collectionSlug, collection, account, traitClauses, load, loadOwned, loadOffers]);
+  }, [combinedPreview, isSolana, isBitcoin, chainSlug, collectionSlug, collection, account, traitClauses, load, loadOwned, loadOffers, requireAccount]);
 
   const toggleSendSelection = useCallback((tokenId: string) => {
     setSelectedForSend((prev) => {
@@ -1468,8 +1568,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const openSendConfirm = useCallback(
     async (tokenIds: string[]) => {
       setError(null);
-      const who = await requireAccount();
-      if (!who) return;
       setSendTarget(tokenIds);
       setSendRecipient("");
       setSendFeeQuote(null);
@@ -1496,11 +1594,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setSendFeeError(e instanceof Error ? e.message : "Could not estimate the send fee.");
       }
     },
-    [chainSlug, isNonEvm, requireAccount]
+    [chainSlug, isNonEvm]
   );
 
   const confirmSend = useCallback(async () => {
-    if (!sendTarget || !account) return;
+    if (!sendTarget) return;
+    if (!account) { await requireAccount(); return; }
     if (!isNonEvm && !collection?.contractAddress) return;
     setError(null);
     try {
@@ -1549,7 +1648,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSendBusy(false);
       setStatus(null);
     }
-  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, isNonEvm, isSolana, isBitcoin, loadOwned]);
+  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, isNonEvm, isSolana, isBitcoin, loadOwned, requireAccount]);
 
   const tokenOffers = useMemo(() => offers.filter((o) => o.acceptable && o.tokenId), [offers]);
   const collectionWideOffers = useMemo(() => offers.filter((o) => !o.acceptable), [offers]);
@@ -1587,10 +1686,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // real sale events in the activity feed (bounded to whatever activity/
   // route.ts returned, same honesty as everywhere else here -- this is
   // "volume in the loaded window," not an all-time indexed total).
-  const floorWei =
+  // A rendered book is frequently a presentation window, not a proof that
+  // every venue cursor was exhausted. Prefer the durable aggregate floor;
+  // only derive from rows when no indexed aggregate exists. This prevents a
+  // partial page from replacing a cheaper listing that lives later in the
+  // venue cursor.
+  const floorWei = supplyStats?.floorPriceWei ?? (
     listings.length > 0
       ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei)
-      : supplyStats?.floorPriceWei ?? null;
+      : null
+  );
   // Real max across BOTH sources merged by this route (native offers first,
   // then OpenSea-sourced offers -- see offers/route.ts's header) -- offers[0]
   // alone was wrong whenever a native offer existed alongside a higher-priced
@@ -1599,17 +1704,37 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Solana/Bitcoin, where no real collection-wide bids source exists yet.
   const bestOfferWei = offers.length > 0 ? offers.reduce((max, o) => (BigInt(o.priceWei) > BigInt(max) ? o.priceWei : max), offers[0].priceWei) : null;
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
+  const pricedSaleEvents = saleEvents.filter((e) => e.priceUsd != null);
+  const activityVolumeUsd = pricedSaleEvents.length > 0
+    ? pricedSaleEvents.reduce((sum, e) => sum + e.priceUsd!, 0)
+    : null;
+  const activityTotalsByCurrency = new Map<string, number>();
+  for (const event of saleEvents) {
+    const amount = Number(event.priceAmount);
+    if (!event.priceSymbol || !Number.isFinite(amount)) continue;
+    activityTotalsByCurrency.set(event.priceSymbol, (activityTotalsByCurrency.get(event.priceSymbol) ?? 0) + amount);
+  }
+  const activityVolumeDisplay = [...activityTotalsByCurrency.entries()]
+    .map(([symbol, amount]) => `${amount.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${symbol}`)
+    .join(" + ");
+  const currenciesInLoadedSales = new Set(saleEvents.map((e) => e.priceSymbol).filter(Boolean));
   const volumeWei =
-    saleEvents.length > 0
+    saleEvents.length > 0 && currenciesInLoadedSales.size === 1 && [...currenciesInLoadedSales][0] === nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)
       ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString()
       : marketStatsWindow === "7d"
         ? marketStats?.volume7dWei ?? null
         : marketStatsWindow === "30d"
           ? marketStats?.volume30dWei ?? null
           : marketStats?.volume24hWei ?? null;
-  const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
+  const highestSale = pricedSaleEvents.length > 0
+    ? pricedSaleEvents.reduce((max, e) => e.priceUsd! > max.priceUsd! ? e : max, pricedSaleEvents[0])
+    : null;
   const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana, isBitcoin);
   const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
+  const floorCurrencySymbol = supplyStats?.floorPriceWei
+    ? (supplyStats.floorPriceCurrency ?? statCurrencySymbol)
+    : statCurrencySymbol;
+  const floorUsd = (weiStr: string | null): number | null => toUsd(weiStr, floorCurrencySymbol);
 
   return (
     <div className="space-y-4 p-4">
@@ -1629,7 +1754,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <p className="text-xs text-foreground/50">
             {supplyStats?.listedCount != null
               ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? " · UniSat book delayed" : ""}`
-              : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}`}
+              : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}${catalogMeta?.partial ? ` · ${catalogMeta.projectedCount.toLocaleString()} indexed so far` : ""}`}
           </p>
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
             {collection.contractAddress}
@@ -1643,14 +1768,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Floor price</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {floorWei ? formatTokenAmount(floorWei, 18, 4) : "—"}
-            {floorWei && statUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+            {floorWei ? <>{formatTokenAmount(floorWei, 18, 4)} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{floorCurrencySymbol}</span></> : "—"}
+            {floorWei && floorUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(floorUsd(floorWei)!)}</span>}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Items</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {supplyStats?.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"}
+            {supplyStats?.totalSupply != null
+              ? supplyStats.totalSupply.toLocaleString()
+              : catalogMeta
+                ? `${catalogMeta.projectedCount.toLocaleString()}${catalogMeta.partial ? "+" : ""}`
+                : "—"}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
@@ -1677,17 +1806,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Volume</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {volumeWei ? formatTokenAmount(volumeWei, 18, 3) : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—"}
-            {volumeWei && statUsd(volumeWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+            {activityVolumeDisplay || (volumeWei ? <>{formatTokenAmount(volumeWei, 18, 3)} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{statCurrencySymbol}</span></> : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—")}
+            {activityVolumeUsd != null ? <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(activityVolumeUsd)}</span> : volumeWei && statUsd(volumeWei) != null ? <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(volumeWei)!)}</span> : null}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Highest sale</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
-            {highestSaleWei ? formatTokenAmount(highestSaleWei, 18, 4) : "—"}
-            {highestSaleWei && statUsd(highestSaleWei) != null && (
-              <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
-            )}
+            {highestSale ? <>{highestSale.priceAmount} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{highestSale.priceSymbol}</span></> : "—"}
+            {highestSale?.priceUsd != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(highestSale.priceUsd)}</span>}
           </dd>
         </div>
       </dl>
@@ -1776,10 +1903,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           summary={
             bookFilter === "listed"
               ? `${filteredListings.length} on the market`
-              : `${browseItems.length} items`
+              : catalogMeta && (catalogMeta.expectedCount ?? catalogMeta.projectedCount) > browseItems.length
+                ? `${browseItems.length.toLocaleString()} shown · ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()} total NFTs${catalogMeta.partial ? " · completing metadata" : ""}`
+                : `${browseItems.length.toLocaleString()} NFTs${catalogMeta?.partial ? " · completing metadata" : ""}`
           }
           lead={
-            listings.length > 0 ? (
+            listings.length > 0 || rarityMap.size > 0 ? (
               <>
               {rarityMap.size > 0 && raritySample && (
                 <p className="px-0.5 text-[0.58rem] text-foreground/40">
@@ -1833,6 +1962,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   setActiveTier(next.tier);
                   setActiveTiers(next.tiers ?? []);
                 }}
+                onClearAll={() => {
+                  setSearchQuery("");
+                  setMinPriceEth("");
+                  setMaxPriceEth("");
+                  setSelectedTraits({});
+                  setActiveTier("all");
+                  setActiveTiers([]);
+                }}
+                additionalDirty={Object.values(selectedTraits).some(Boolean)}
                 resultCount={bookFilter === "listed" ? filteredListings.length : browseItems.length}
                 rarityAvailable={rarityMap.size > 0}
                 orientation="sidebar"
@@ -1849,32 +1987,83 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 priceLegend={`Price in ${statCurrencySymbol}`}
               />
 
-              {/* TRAIT FILTER -- one dropdown per real trait category, AND-combined. Populated from the SAME collection-wide value counts the Details view's rarity % already uses. */}
-              {traitCounts &&
-                Object.entries(traitCounts)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([traitType, values]) => (
-                    <div key={traitType}>
-                      <label htmlFor={`mc-trait-${traitType}`} className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                        {traitType}
-                      </label>
-                      <select
-                        id={`mc-trait-${traitType}`}
-                        value={selectedTraits[traitType] ?? ""}
-                        onChange={(e) => setSelectedTraits((prev) => ({ ...prev, [traitType]: e.target.value }))}
-                        className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground"
-                      >
-                        <option value="">Any {traitType}</option>
-                        {Object.entries(values)
-                          .sort(([, ca], [, cb]) => ca - cb)
-                          .map(([value, count]) => (
-                            <option key={value} value={value}>
-                              {value} ({count})
-                            </option>
-                          ))}
-                      </select>
+              {/* Trait values are directly inspectable like rarity tiers.
+                  One value per category, AND across categories: this preserves
+                  the resolver's real criteria semantics without implying an
+                  unsupported OR query. Collapsible groups keep a 248px rail
+                  dense while every value remains keyboard/touch accessible. */}
+              {traitCounts && Object.keys(traitCounts).length > 0 && (
+                <fieldset>
+                  <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+                    Traits
+                  </legend>
+                  {Object.keys(selectedTraits).length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1" aria-label="Active trait filters">
+                      {Object.entries(selectedTraits).filter(([, value]) => value).map(([traitType, value]) => (
+                        <button
+                          key={traitType}
+                          type="button"
+                          onClick={() => setSelectedTraits((prev) => ({ ...prev, [traitType]: "" }))}
+                          className="min-h-9 max-w-full rounded-full border border-gold-500/40 bg-gold-500/10 px-2 text-[0.62rem] font-bold text-gold-300"
+                          aria-label={`Remove ${traitType}: ${value}`}
+                        >
+                          <span className="block max-w-[11rem] truncate">{traitType}: {value} ×</span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <div className="space-y-1.5">
+                    {Object.entries(traitCounts)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([traitType, values], index) => {
+                        const selected = selectedTraits[traitType] ?? "";
+                        const sortedValues = Object.entries(values).sort(([, ca], [, cb]) => cb - ca);
+                        return (
+                          <details
+                            key={traitType}
+                            open={openTraitGroups[traitType] ?? (index === 0 || Boolean(selected))}
+                            onToggle={(event) => {
+                              const open = event.currentTarget.open;
+                              setOpenTraitGroups((prev) => prev[traitType] === open ? prev : { ...prev, [traitType]: open });
+                            }}
+                            className="rounded-md border border-line bg-wood-950/60"
+                          >
+                            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-2 text-xs font-bold text-foreground marker:hidden">
+                              <span className="min-w-0 flex-1 truncate">{traitType}</span>
+                              {selected && <span className="max-w-20 truncate text-gold-300">{selected}</span>}
+                              <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">{sortedValues.length}</span>
+                              <span aria-hidden="true" className="text-foreground/45">⌄</span>
+                            </summary>
+                            <div className="max-h-52 overflow-y-auto border-t border-line p-1">
+                              {sortedValues.map(([value, count]) => (
+                                <label key={value} title={`${traitType}: ${value} · ${count.toLocaleString()} items`} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected === value}
+                                    onChange={() => setSelectedTraits((prev) => ({ ...prev, [traitType]: selected === value ? "" : value }))}
+                                    className="accent-gold-500"
+                                  />
+                                  <span className="min-w-0 flex-1 truncate">{value}</span>
+                                  <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">{count}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </details>
+                        );
+                      })}
+                  </div>
+                </fieldset>
+              )}
+              {(!traitCounts || Object.keys(traitCounts).length === 0) && (
+                <fieldset>
+                  <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">Traits</legend>
+                  <p className="rounded-md border border-line bg-wood-950/60 px-2.5 py-2 text-[0.65rem] leading-relaxed text-foreground/50" role="status">
+                    {!traitIndex || traitIndex.building || !traitIndex.complete
+                      ? `Indexing verified traits${traitIndex?.scanned ? ` · ${traitIndex.scanned.toLocaleString()}${traitIndex.totalSupply ? ` / ${traitIndex.totalSupply.toLocaleString()}` : ""}` : ""}…`
+                      : "No verified trait metadata is available for this collection yet."}
+                  </p>
+                </fieldset>
+              )}
 
               {filtersActive && (
                 <button
@@ -1898,6 +2087,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
           toolbar={
             <>
+              <button
+                type="button"
+                onClick={() => setBrowseMode((mode) => mode === "art" ? "intelligence" : "art")}
+                aria-pressed={browseMode === "intelligence"}
+                className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                  browseMode === "intelligence" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                }`}
+              >
+                {browseMode === "intelligence" ? "Art & listings" : "Intel"}
+              </button>
               <button
                 type="button"
                 onClick={() => setSweepOpen((v) => !v)}
@@ -1937,6 +2136,26 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </>
           }
         >
+          {browseMode === "intelligence" ? (
+            <CollectionIntelligence
+              name={collection?.name ?? collectionSlug}
+              chain={chainDisplayName(chainSlug)}
+              supply={supplyStats?.totalSupply ?? null}
+              holders={supplyStats?.holderCount ?? null}
+              indexed={catalogMeta?.projectedCount ?? tokens.length}
+              rarityCovered={rarityMap.size}
+              rarityTiers={countTiers(rarityMap)}
+              artUrls={[collection?.image, ...tokens.map((token) => token.imageUrl)].filter((url): url is string => Boolean(url))}
+              listings={listings.map((listing) => ({
+                priceWei: listing.priceWei,
+                maker: listing.maker,
+                tokenId: listing.tokenId,
+              }))}
+              sales={saleEvents}
+              historyCoverage={historyCoverage}
+            />
+          ) : (
+          <>
           {criteriaOpen && !isNonEvm && collection && (
             <div className="mb-3">
               {isForeignEvm && bidVenue === "native" ? (
@@ -2053,10 +2272,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
-                {filtersActive ? "No items match your search." : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
+                {filtersActive ? "No indexed items match this filter intersection." : catalogBuilding ? "Preparing this collection’s pieces…" : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
               </p>
               <p className="text-xs text-foreground/45">
-                {filtersActive ? "Try widening your price range or clearing a filter." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
+                {filtersActive ? (catalogBuilding ? "Indexing continues in the background; widen or clear a filter to inspect the currently indexed universe." : "Try widening your price range or clearing a filter.") : catalogBuilding ? "The live indexer is prioritizing this exact contract. This page will update automatically." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
               </p>
             </div>
           ) : (
@@ -2114,7 +2333,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         {(foreignOfferCurrency(chainSlug) || isSolana) && (
                           <button
                             type="button"
-                            onClick={() => void openOffer(browseAsListing(item.tokenId, item.imageUrl, item.name))}
+                          onClick={() => void openOffer(browseAsListing(item.tokenId, item.imageUrl, item.name,
+                            item.animationUrl, item.mediaType))}
                             className="min-h-8 flex-1 rounded-md border border-line px-2 text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
                           >
                             Offer
@@ -2127,16 +2347,33 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               })}
             </ul>
           )}
-          {bookFilter === "all" && tokenLimit < surface.catalogCap && tokens.length >= Math.min(tokenLimit, surface.catalogCap) && (
-            <div className="mt-3 flex justify-center">
+          {bookFilter === "all" && (
+            catalogMeta?.projectedCount != null
+              ? tokens.length < (catalogMeta.expectedCount ?? catalogMeta.projectedCount)
+              : tokens.length >= tokenLimit
+          ) && (
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
               <button
                 type="button"
-                onClick={() => setTokenLimit((n) => Math.min(surface.catalogCap, n + surface.catalogPageSize))}
+                onClick={() => setTokenLimit((n) => Math.max(n, tokens.length) + surface.catalogPageSize)}
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
-                Load more of this collection
+                Load more
+                {catalogMeta ? ` · ${tokens.length.toLocaleString()} of ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()} shown` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTokenLimit((n) => Math.max(n, tokens.length) + surface.catalogPageSize * 5)}
+                className="min-h-10 rounded-md border border-purple-400/50 px-4 text-xs font-bold text-purple-200 hover:bg-purple-400/10"
+              >
+                View all NFTs
+                {catalogMeta
+                  ? ` · ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()}`
+                  : ""}
               </button>
             </div>
+          )}
+          </>
           )}
         </MarketBrowseLayout>
 

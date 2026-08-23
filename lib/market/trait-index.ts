@@ -334,8 +334,9 @@ export async function getTraitIndex(
       state.building = true;
       state.inflight = buildIndex(collection)
         .then(async (idx) => {
+          const previousScanned = state.index?.scanned ?? 0;
           state.index = idx;
-          if (isComplete(idx) || idx.scanned > (state.index?.scanned ?? 0)) {
+          if (isComplete(idx) || idx.scanned > previousScanned) {
             await writeKv(idx);
           }
           return idx;

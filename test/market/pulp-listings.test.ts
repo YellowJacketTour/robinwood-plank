@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalisePulpListings, pulpTokenUrl, type PulpNft } from "../../lib/market/pulp";
+import { normalisePulpListings, pulpListingsKey, pulpTokenUrl, type PulpNft } from "../../lib/market/pulp";
 import { mergeBook } from "../../lib/market/book";
 import {
   isForeignListing,
@@ -93,6 +93,16 @@ test("Pulp rows join the book, tagged and linking out", () => {
   assert.equal(merged[0].tokenId, "77");
   assert.ok(merged[0].externalUrl?.startsWith("https://pulpmarket.app/?collection="));
   assert.ok(!("rawOrder" in merged[0]));
+});
+
+test("Pulp cache and outbound links are collection-scoped, never RobinWood-hard-coded", () => {
+  const mugs = "0xab75f3d72509cd3b3a386a03de2b82854f0060e5";
+  assert.match(pulpListingsKey(mugs), new RegExp(mugs));
+  assert.notEqual(pulpListingsKey(mugs), pulpListingsKey("0x327ceaaedbbcF55F4d06F1aBc71bd9bC8ADCb156"));
+  const [row] = mergeBook([], [{
+    tokenId: "27", priceWei: "100", maker: "0xmaker", expiresAt: null, venue: "pulp",
+  }], "mugs", undefined, mugs);
+  assert.equal(row.externalUrl, `${pulpTokenUrl(mugs, "27")}`);
 });
 
 test("cheapest wins across venues, and an exact tie goes to us", () => {

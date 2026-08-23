@@ -45,13 +45,17 @@ import { alchemyNftAdapter, fetchSnapshotsBatch } from "@/lib/market/multichain/
 import {
   EVM_CHAIN_ID,
   TRANSFER_TOPIC,
-  MIN_TRANSFERS_TO_CONSIDER,
+  TRANSFER_SINGLE_TOPIC,
+  TRANSFER_BATCH_TOPIC,
   isNotRealCollectibleArt,
   readCursor,
   writeCursor,
   type DiscoveryScanResult,
 } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain/store";
+import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
+import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
+import { postgresQuery } from "@/lib/postgres";
 
 /**
  * Blocks requested per HyperSync call. Far wider than evm-log-scan.ts's
@@ -63,11 +67,96 @@ import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain
  */
 const CHUNK_BLOCKS = 50_000;
 
-/** Hard ceiling on total logs pulled in one invocation, independent of
- * CHUNK_BLOCKS -- a dense chain's 50k-block window can still return far
- * more raw Transfer logs than a sparse one. Protects the free-tier event
- * quota directly rather than trusting block-count alone as a proxy for it. */
-const MAX_LOGS_PER_RUN = 20_000;
+// Transfer is shared by ERC-20 and ERC-721, and HyperSync cannot predicate on
+// "topic3 is present". Real production probes showed maxNumLogs may overshoot
+// heavily at server batch boundaries (e.g. 119k logs for a 5k target). These
+// per-chain spans are therefore the enforceable forward-scan bound, calibrated
+// from observed log density on 2026-08-22. Historical coverage remains on the
+// separately cursored backfill lanes; catalog APIs remain the roster fast path.
+const FORWARD_CHUNK_BLOCKS: Record<string, number> = {
+  "eth-mainnet": 10,
+  "polygon-mainnet": 10,
+  "arb-mainnet": 800,
+  "base-mainnet": 20,
+  "opt-mainnet": 10,
+  "bnb-mainnet": 15,
+  "avax-mainnet": 150,
+  "zksync-mainnet": 900,
+};
+
+/** HyperSync documents maxNumLogs as a target that may overshoot at a block
+ * boundary, not a strict ceiling. A 5k target kept observed dense-chain
+ * responses below the intended ~20k/run envelope; the client still advances
+ * only to the server's exact nextBlock, so this bound creates no scan gap. */
+const MAX_LOGS_PER_RUN = 5_000;
+
+async function registerObservedCandidates(
+  chainSlug: string,
+  candidates: Array<[string, number]>,
+  sourceBlock: number
+): Promise<{ registered: number; skippedNoMetadata: number; accepted: Set<string> }> {
+  let snapshots = new Map<string, Awaited<ReturnType<typeof fetchSnapshotsBatch>> extends Map<string, infer V> ? V : never>();
+  const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
+  if (checkSourceBudget("alchemy-nft").allowed) {
+    try {
+      snapshots = await fetchSnapshotsBatch(chainSlug, candidates.map(([address]) => address));
+    } catch {
+      // Identity is independently proven by a real ERC-721-shaped on-chain
+      // event. Metadata is a separate cell and may be hydrated later.
+    }
+  }
+
+  let registered = 0;
+  let skippedNoMetadata = 0;
+  const accepted = new Set<string>();
+  for (const [contractAddress] of candidates) {
+    const snapshot = snapshots.get(contractAddress.toLowerCase());
+    if (snapshot && isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
+      skippedNoMetadata += 1;
+      continue;
+    }
+    accepted.add(contractAddress.toLowerCase());
+    await upsertTrackedCollection({
+      chainSlug,
+      chainId: EVM_CHAIN_ID[chainSlug] ?? null,
+      contractAddress,
+      // Keep the eventual hydration adapter attached even when its current
+      // account is exhausted; admission no longer depends on that account.
+      adapter: alchemyNftAdapter.name,
+      isVaultBacked: false,
+    });
+    await writeCollectionCell({
+      chainSlug,
+      collectionKey: contractAddress.toLowerCase(),
+      cell: "identity",
+      source: "hypersync-transfer-log",
+      sourceBlock,
+      state: snapshot ? "fresh" : "partial",
+      coverage: snapshot ? 1 : 0.25,
+    });
+    if (!snapshot) skippedNoMetadata += 1;
+    registered += 1;
+  }
+  return { registered, skippedNoMetadata, accepted };
+}
+
+async function persistObservedErc721Membership(
+  chainSlug: string,
+  observed: Map<string, Set<string>>,
+  accepted: Set<string>,
+  source: string
+): Promise<void> {
+  const observedAt = new Date();
+  for (const [contractAddress, tokenIds] of observed) {
+    if (!accepted.has(contractAddress) || tokenIds.size === 0) continue;
+    await upsertCollectionTokenProjection(chainSlug, contractAddress, {
+      tokens: [...tokenIds].map((tokenId) => ({ tokenId, name: null, imageUrl: null, traits: [] })),
+      partial: true,
+      provenance: [source],
+      sourceObservedAt: observedAt,
+    });
+  }
+}
 
 function requireApiToken(): string {
   const token = process.env.ENVIO_API_TOKEN?.trim();
@@ -114,31 +203,39 @@ export async function runHypersyncDiscoveryScan(input: {
   const height = await client.getHeight();
   const cursor = await readCursor(input.chainSlug);
   const fromBlock = cursor == null ? Math.max(0, height - CHUNK_BLOCKS) : cursor + 1;
-  const toBlock = Math.min(height, fromBlock + CHUNK_BLOCKS);
+  const toBlock = Math.min(height, fromBlock + (FORWARD_CHUNK_BLOCKS[input.chainSlug] ?? 10));
 
   if (fromBlock >= toBlock) {
     return { chainSlug: input.chainSlug, fromBlock, toBlock: fromBlock, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0 };
   }
 
   const tally = new Map<string, number>();
+  const observedErc721 = new Map<string, Set<string>>();
   let logsScanned = 0;
   let query: Query = {
     fromBlock,
     toBlock,
-    logs: [{ topics: [[TRANSFER_TOPIC]] }],
+    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
     fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    maxNumLogs: MAX_LOGS_PER_RUN,
   };
 
   let lastBlockSeen = fromBlock;
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await client.get(query);
     for (const log of res.data.logs) {
-      // 4 topics = ERC-721 (indexed from/to/tokenId); 3 = ERC-20 sharing
-      // the same Transfer signature, not ours -- same real signal
-      // evm-log-scan.ts's own tally loop uses.
-      if (!log.address || log.topics.length !== 4) continue;
+      if (!log.address) continue;
+      const topic0 = log.topics[0]?.toLowerCase();
+      if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     lastBlockSeen = res.nextBlock;
@@ -148,44 +245,22 @@ export async function runHypersyncDiscoveryScan(input: {
 
   await recordActivity(input.chainSlug, tally);
 
-  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+  const candidates = [...tally.entries()];
 
-  let registered = 0;
-  let skippedNoMetadata = 0;
-  const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
-  if (!checkSourceBudget("alchemy-nft").allowed) {
-    skippedNoMetadata += candidates.length;
-    await writeCursor(input.chainSlug, lastBlockSeen - 1);
-    return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata };
-  }
-  try {
-    const snapshots = await fetchSnapshotsBatch(
-      input.chainSlug,
-      candidates.map(([contractAddress]) => contractAddress)
-    );
-    for (const [contractAddress] of candidates) {
-      const snapshot = snapshots.get(contractAddress.toLowerCase());
-      if (!snapshot || isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
-        skippedNoMetadata += 1;
-        continue;
-      }
-      await upsertTrackedCollection({
-        chainSlug: input.chainSlug,
-        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
-        contractAddress,
-        adapter: alchemyNftAdapter.name,
-        isVaultBacked: false,
-      });
-      registered += 1;
-    }
-  } catch {
-    // Batch call itself failed (network/rate-limit) -- nothing registered
-    // this pass, all candidates counted as no-metadata rather than
-    // crashing the whole scan. Next tick's cursor picks up fresh ground.
-    skippedNoMetadata += candidates.length;
-  }
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, lastBlockSeen - 1);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-live");
 
   await writeCursor(input.chainSlug, lastBlockSeen - 1);
+  await writeChainCoverage({
+    chainSlug: input.chainSlug,
+    lane: "forward",
+    standardGroup: "erc721+erc1155",
+    rangeStart: fromBlock,
+    nextBlock: lastBlockSeen,
+    targetBlock: height,
+    observedHead: height,
+    state: lastBlockSeen >= height ? "live" : "backfilling",
+  });
   return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata };
 }
 
@@ -256,11 +331,12 @@ export async function runHypersyncBackfillScan(input: {
   }
 
   const tally = new Map<string, number>();
+  const observedErc721 = new Map<string, Set<string>>();
   let logsScanned = 0;
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: ceiling,
-    logs: [{ topics: [[TRANSFER_TOPIC]] }],
+    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
     fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
     maxNumLogs: MAX_LOGS_PER_RUN,
   };
@@ -269,9 +345,18 @@ export async function runHypersyncBackfillScan(input: {
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await client.get(query);
     for (const log of res.data.logs) {
-      if (!log.address || log.topics.length !== 4) continue;
+      if (!log.address) continue;
+      const topic0 = log.topics[0]?.toLowerCase();
+      if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     nextBlock = res.nextBlock;
@@ -281,39 +366,49 @@ export async function runHypersyncBackfillScan(input: {
 
   await recordActivity(input.chainSlug, tally);
 
-  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+  const candidates = [...tally.entries()];
 
-  let registered = 0;
-  let skippedNoMetadata = 0;
-  try {
-    const snapshots = await fetchSnapshotsBatch(
-      input.chainSlug,
-      candidates.map(([contractAddress]) => contractAddress)
-    );
-    for (const [contractAddress] of candidates) {
-      const snapshot = snapshots.get(contractAddress.toLowerCase());
-      if (!snapshot || isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
-        skippedNoMetadata += 1;
-        continue;
-      }
-      await upsertTrackedCollection({
-        chainSlug: input.chainSlug,
-        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
-        contractAddress,
-        adapter: alchemyNftAdapter.name,
-        isVaultBacked: false,
-      });
-      registered += 1;
-    }
-  } catch {
-    skippedNoMetadata += candidates.length;
-  }
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-genesis");
 
   // nextBlock is exactly what HyperSync itself reports as covered -- no
   // gap possible, unlike a precomputed window claimed complete regardless
   // of whether the scan actually reached its far edge.
   await writeCursor(backfillKey, nextBlock);
   const done = nextBlock >= ceiling;
+  if (done) {
+    // A completed genesis walk plus the independently-live forward lane is
+    // authoritative membership evidence even on chains (notably zkSync)
+    // where no collection-catalog vendor exists. New live mints set their
+    // projection partial again and the metadata lane re-finalizes rarity.
+    await postgresQuery(
+      `INSERT INTO plank_collection_membership_cursors (
+         chain_slug, collection_slug, source, cursor, expected_count,
+         observed_count, complete, source_observed_at, updated_at
+       )
+       SELECT chain_slug, collection_slug, 'hypersync-transfer-membership', NULL,
+         COUNT(*)::bigint, COUNT(*)::bigint, TRUE, NOW(), NOW()
+       FROM plank_collection_tokens
+       WHERE chain_slug = $1
+       GROUP BY chain_slug, collection_slug
+       ON CONFLICT (chain_slug, collection_slug, source) DO UPDATE SET
+         expected_count = EXCLUDED.expected_count,
+         observed_count = EXCLUDED.observed_count,
+         complete = TRUE,
+         source_observed_at = NOW(), updated_at = NOW()`,
+      [input.chainSlug]
+    );
+  }
+  await writeChainCoverage({
+    chainSlug: input.chainSlug,
+    lane: "historical",
+    standardGroup: "erc721+erc1155",
+    rangeStart: 0,
+    nextBlock,
+    targetBlock: ceiling,
+    observedHead: height,
+    state: done ? "complete" : "backfilling",
+  });
   return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, done };
 }
 
@@ -370,7 +465,7 @@ export async function runHypersyncPriorityWindowScan(input: {
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: input.toBlockCeiling,
-    logs: [{ topics: [[TRANSFER_TOPIC]] }],
+    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
     fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
     maxNumLogs: MAX_LOGS_PER_RUN,
   };
@@ -379,7 +474,10 @@ export async function runHypersyncPriorityWindowScan(input: {
   while (logsScanned < MAX_LOGS_PER_RUN) {
     const res = await client.get(query);
     for (const log of res.data.logs) {
-      if (!log.address || log.topics.length !== 4) continue;
+      if (!log.address) continue;
+      const topic0 = log.topics[0]?.toLowerCase();
+      if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       logsScanned += 1;
@@ -391,36 +489,21 @@ export async function runHypersyncPriorityWindowScan(input: {
 
   await recordActivity(input.chainSlug, tally);
 
-  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+  const candidates = [...tally.entries()];
 
-  let registered = 0;
-  let skippedNoMetadata = 0;
-  try {
-    const snapshots = await fetchSnapshotsBatch(
-      input.chainSlug,
-      candidates.map(([contractAddress]) => contractAddress)
-    );
-    for (const [contractAddress] of candidates) {
-      const snapshot = snapshots.get(contractAddress.toLowerCase());
-      if (!snapshot || isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
-        skippedNoMetadata += 1;
-        continue;
-      }
-      await upsertTrackedCollection({
-        chainSlug: input.chainSlug,
-        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
-        contractAddress,
-        adapter: alchemyNftAdapter.name,
-        isVaultBacked: false,
-      });
-      registered += 1;
-    }
-  } catch {
-    skippedNoMetadata += candidates.length;
-  }
+  const { registered, skippedNoMetadata } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
 
   await writeCursor(input.cursorKey, nextBlock);
   const done = nextBlock >= input.toBlockCeiling;
+  await writeChainCoverage({
+    chainSlug: input.chainSlug,
+    lane: "priority",
+    standardGroup: "erc721+erc1155",
+    rangeStart: input.fromBlockFloor,
+    nextBlock,
+    targetBlock: input.toBlockCeiling,
+    state: done ? "complete" : "backfilling",
+  });
   return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, done };
 }
 

@@ -36,6 +36,16 @@ if errorlevel 1 (
 )
 
 REM Already live? Do not spawn a second Next (EADDRINUSE / two trees).
+REM The sync fabric is a separate scheduled process: pages remain fast and
+REM read-only while bounded workers advance every chain in the background.
+schtasks /Query /TN "plank-market-fabric" >nul 2>nul
+if errorlevel 1 (
+  schtasks /Create /TN "plank-market-fabric" /TR "%~dp0scripts\start-local-market-worker.bat" /SC ONCE /ST 00:00 /RL LIMITED /F >nul 2>nul
+  schtasks /Run /TN "plank-market-fabric" >nul 2>nul
+) else (
+  schtasks /Run /TN "plank-market-fabric" >nul 2>nul
+)
+
 netstat -ano | findstr ":3800" | findstr "LISTENING" >nul 2>nul
 if not errorlevel 1 (
   echo Already live — not starting a second process.

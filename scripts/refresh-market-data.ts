@@ -84,6 +84,13 @@ const explicit = [
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
+  "--hydrate-opensea",
+  "--hydrate-bitcoin-membership",
+  "--hydrate-solana-membership",
+  "--seaport-fills",
+  "--seaport-fills-backfill",
+  "--cryptopunks-native-book",
+  "--robinwood-floor-observation",
   "--own-ranking",
   "--scaffold-rarity",
 ].filter((t) => args.has(t));
@@ -103,8 +110,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -162,8 +169,18 @@ async function main(): Promise<void> {
   // collection's deploy block and report caughtUp=false; once the cursor
   // reaches the confirmed head each run costs a single small forward window.
   await step("events", async () => {
-    const { runChainIndexer } = await import("../lib/market/chain-indexer");
+    const { runChainIndexer, reindexNftRange } = await import("../lib/market/chain-indexer");
+    const { unpricedSaleBlockRanges } = await import("../lib/market/chain-events");
     const run = await runChainIndexer();
+    // A transaction/receipt lookup can fail transiently after the Transfer
+    // log itself succeeded. Keep the append-only event immediately, then
+    // heal a bounded number of exact suspect ranges on every cron tick.
+    const repairRanges = (await unpricedSaleBlockRanges()).slice(0, 3);
+    let repaired = 0;
+    for (const range of repairRanges) {
+      const repair = await reindexNftRange(range);
+      repaired += repair.rowsRepaired;
+    }
     const parts = run.sources.map((s) => {
       const range = s.toBlock >= s.fromBlock ? `${s.fromBlock}-${s.toBlock}` : "nothing due";
       return (
@@ -173,7 +190,8 @@ async function main(): Promise<void> {
     });
     return (
       `head=${run.head} confirmed=${run.confirmedHead} ` +
-      `+${run.rowsInserted} new rows, caughtUp=${run.caughtUp} — ${parts.join("; ")}`
+      `+${run.rowsInserted} new rows, repaired=${repaired}, ` +
+      `repairRanges=${repairRanges.length}, caughtUp=${run.caughtUp} — ${parts.join("; ")}`
     );
   });
 
@@ -567,6 +585,62 @@ async function main(): Promise<void> {
       .join("; ");
   });
 
+  // Spend authenticated capacity on canonical collection membership before
+  // the lower-value activity-derived rarity sample below. Two 100-piece
+  // pages per incremental tick yields up to 144,000 newly projected pieces
+  // per UTC day at a two-minute cadence while the shared durable 1,800-call
+  // gate retains 200 calls of provider headroom. Cursors are per collection;
+  // failures never erase earlier pages and the oldest incomplete collection
+  // is resumed automatically.
+  await step("hydrate-bitcoin-membership", async () => {
+    const { advanceNextTrackedBitcoinMembership } = await import("../lib/market/multichain/discovery/unisat-membership-index-runner");
+    const attempts = full ? 20 : 2;
+    let pages = 0;
+    let pieces = 0;
+    let completed = 0;
+    for (let i = 0; i < attempts; i++) {
+      const result = await advanceNextTrackedBitcoinMembership();
+      if (!result) break;
+      pages += 1;
+      pieces += result.itemsObserved;
+      if (result.complete) completed += 1;
+    }
+    return `${pages} membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
+  });
+
+  // Helius DAS uses a different identity/membership model from EVM and
+  // Bitcoin. Advance bounded 1,000-asset pages on every cron pass using the
+  // durable fair selector; this is the live parity lane for Solana traits and
+  // rarity, not an EVM adapter disguised behind a shared interface.
+  await step("hydrate-solana-membership", async () => {
+    const { advanceNextTrackedSolanaMembership } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+    const attempts = full ? 10 : 1;
+    let pages = 0;
+    let pieces = 0;
+    let completed = 0;
+    for (let i = 0; i < attempts; i++) {
+      const result = await advanceNextTrackedSolanaMembership();
+      if (!result) break;
+      pages += 1;
+      pieces += result.tokensIndexed;
+      if (result.complete) completed += 1;
+    }
+    return `${pages} DAS membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
+  });
+
+  // Discovery only creates identities. Keep a separate, tightly bounded
+  // hydration lane on every incremental tick so newly found EVM contracts
+  // acquire names, art, floors and market snapshots instead of remaining
+  // invisible hex shells forever. Each chain has its own durable cursor and
+  // failures remain isolated by runOpenSeaStatsSync's source breaker.
+  await step("hydrate-opensea", async () => {
+    const { runOpenSeaStatsSync } = await import("../lib/market/multichain/discovery/opensea-stats");
+    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
+    const runs = [];
+    for (const chain of FOREIGN_CHAINS) runs.push(await runOpenSeaStatsSync(chain.chainSlug, 3));
+    return runs.map((r) => `${r.chainSlug}: ${r.displayUpdated} display/${r.updated} stats`).join("; ");
+  });
+
   // Self-hosted, on-chain Seaport OrderFulfilled fill index -- see
   // migration 023_seaport_fill_index.sql and lib/market/multichain/
   // seaport-fill-indexer.ts's own headers. Same backfill-and-live-sync-
@@ -583,6 +657,24 @@ async function main(): Promise<void> {
           : `${r.chainSlug}: ${r.fromBlock}-${r.toBlock} +${r.fillsWritten}/${r.logsScanned}`
       )
       .join("; ");
+  });
+
+  // Separate genesis cursor for the same canonical fill ledger. The live
+  // cursor above protects freshness; this lane closes the older-history gap
+  // continuously without ever moving that live cursor backwards. HyperSync
+  // seeks across empty pre-deployment ranges and is capped by matched logs,
+  // so chains progress by useful evidence rather than 50k empty blocks/tick.
+  await step("seaport-fills-backfill", async () => {
+    const { scanChainForFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-seaport-scan");
+    const { EVM_CHAIN_ID } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const parts: string[] = [];
+    for (const chainSlug of Object.keys(EVM_CHAIN_ID)) {
+      const result = await scanChainForFillsGenesisBackfillViaHypersync(chainSlug);
+      parts.push(result.error
+        ? `${chainSlug}: ERR(${result.error.slice(0, 60)})`
+        : `${chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`);
+    }
+    return parts.join("; ");
   });
 
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
@@ -664,6 +756,68 @@ async function main(): Promise<void> {
       totalUpdated += r.updated;
     }
     return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
+  });
+
+  await step("cryptopunks-native-book", async () => {
+    const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
+    const result = await syncCryptoPunksNativeBook();
+    return `${result.listed} contract listings (${result.publicListed} public); floor ${result.floorWei ?? "none"}`;
+  });
+
+  // RobinWood's native Marketplank floor is built from executable orders,
+  // not inferred from purchases. Record it every refresh so the API can
+  // produce a real 24h comparison once both endpoints exist.
+  await step("robinwood-floor-observation", async () => {
+    const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
+    const { getListings } = await import("../lib/market/orders-store");
+    const { recordFloorObservation, upsertTrackedCollection } = await import("../lib/market/multichain/store");
+    const bySlug = await getListings("robinwood").catch(() => []);
+    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
+    const listings = bySlug.length >= byContract.length ? bySlug : byContract;
+    let floor = listings.reduce<bigint | null>((minimum, listing) => {
+      try {
+        const price = BigInt(listing.priceWei);
+        return minimum == null || price < minimum ? price : minimum;
+      } catch {
+        return minimum;
+      }
+    }, null);
+    let listedCount = listings.length;
+    let source = "native-executable-order-book";
+    // A local/dev worker can legitimately have an empty local order store
+    // while the canonical deployment owns the live signed book. Observe the
+    // same canonical book the public projection uses, otherwise local refresh
+    // runs register the collection but still never create a price endpoint.
+    if (floor == null) {
+      const { fetchCanonicalRobinwoodStats } = await import("../lib/market/canonical-robinwood");
+      const canonical = await fetchCanonicalRobinwoodStats({ hostHeader: null });
+      if (canonical?.floorPriceWei) {
+        floor = BigInt(canonical.floorPriceWei);
+        listedCount = canonical.listedCount;
+        source = "canonical-native-executable-order-book";
+      }
+    }
+    // RobinWood is projected into the public index as its native home row,
+    // rather than discovered by a third-party adapter. Floor observations
+    // resolve their FK by (chain, contract), so the native collection must
+    // still be registered in the same durable collection table first. Before
+    // this invariant was enforced the INSERT ... SELECT matched zero rows and
+    // every scheduled observation was silently discarded.
+    await upsertTrackedCollection({
+      chainSlug: "robinhood",
+      chainId: 4663,
+      contractAddress: NFT_CONTRACT_ADDRESS,
+      adapter: "robinhood-native",
+      isVaultBacked: true,
+    });
+    await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
+      priceAtomic: floor?.toString() ?? null,
+      currency: "ETH",
+      marketplace: "marketplank",
+      listedCount,
+      source,
+    });
+    return floor == null ? "no executable native floor" : `${listedCount} listings; floor ${floor}`;
   });
 
   // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,

@@ -34,21 +34,40 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [{ traitIndex, sampleSize }, rarityMap] = await Promise.all([
+    const [{ traitIndex, sampleSize, partial }, rarityMap] = await Promise.all([
       getForeignTraitIndex(chainSlug, collectionSlug),
       getForeignRarity(chainSlug, collectionSlug),
     ]);
     const rankings: Record<string, number> = {};
     for (const [tokenId, r] of rarityMap) rankings[tokenId] = r.rank;
+    const { readProjectedTraitIndex } = await import("@/lib/market/multichain/collection-token-store");
+    const hasStoredTraits = Boolean(traitIndex && Object.keys(traitIndex).length > 0);
+    const projected = hasStoredTraits ? null : await readProjectedTraitIndex(chainSlug, collectionSlug).catch(() => null);
+    const effectiveTraits = hasStoredTraits ? traitIndex : (projected && Object.keys(projected.traits).length > 0 ? projected.traits : null);
+    const effectivePartial = hasStoredTraits ? partial : projected?.partial ?? true;
+    const scanned = hasStoredTraits ? sampleSize : projected?.projectedCount ?? 0;
+
+    // A visit is real demand. Keep provider work out of the request itself,
+    // but raise this collection ahead of the background round-robin. The two
+    // jobs are deliberately separate: membership discovers every token ID;
+    // metadata resolves tokenURI attributes and only then can rarity close.
+    if (effectiveTraits === null || effectivePartial) {
+      const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
+      void prioritizeCollectionDemand(chainSlug, collectionSlug).catch(() => {});
+    }
 
     return NextResponse.json(
       {
         collection: collectionSlug,
-        complete: traitIndex !== null,
-        building: false,
-        totalSupply: sampleSize || null,
-        scanned: sampleSize,
-        traits: traitIndex,
+        complete: effectiveTraits !== null && !effectivePartial,
+        partial: effectivePartial,
+        // Partial traits are a live work-in-progress, not a completed index.
+        // The collection view uses this signal to keep refreshing until the
+        // durable membership cursor closes and full-population rarity exists.
+        building: effectivePartial,
+        totalSupply: projected?.expectedCount ?? (sampleSize || null),
+        scanned,
+        traits: effectiveTraits,
         rankings: Object.keys(rankings).length > 0 ? rankings : null,
       },
       { headers: { "Cache-Control": "no-store" } }

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
+import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -76,11 +78,18 @@ export async function GET(req: Request) {
       }
     }, null);
     let nativeListed = nativeListings.length;
-    if (nativeListed === 0) {
+    const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
+    const nativeSales = await salesStatsFromLedger().catch(() => null);
+    let canonical: Awaited<
+      ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
+    > = null;
+    if (nativeListed === 0 || (nativeSales?.saleCount ?? 0) === 0) {
       const { fetchCanonicalRobinwoodStats } = await import("@/lib/market/canonical-robinwood");
-      const canonical = await fetchCanonicalRobinwoodStats({
+      canonical = await fetchCanonicalRobinwoodStats({
         hostHeader: req.headers.get("host"),
       });
+    }
+    if (nativeListed === 0) {
       if (canonical) {
         nativeListed = canonical.listedCount;
         if (canonical.floorPriceWei) {
@@ -92,7 +101,20 @@ export async function GET(req: Request) {
         }
       }
     }
+    const preferLocalWindow =
+      (nativeSales?.sales24h ?? 0) > (canonical?.sales24h ?? 0);
+    const nativeSales24h = preferLocalWindow
+      ? nativeSales?.sales24h ?? null
+      : canonical?.sales24h ?? nativeSales?.sales24h ?? null;
+    const nativeVolume24hWei = preferLocalWindow
+      ? nativeSales?.volume24hWei ?? null
+      : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
+    const nativeFloorChange = await getObservedFloorChange24h(
+      "robinhood",
+      NFT_CONTRACT_ADDRESS,
+      "marketplank"
+    ).catch(() => null);
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
     try {
@@ -124,18 +146,44 @@ export async function GET(req: Request) {
       creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,
-      volume24hWei: null as string | null,
-      sales24h: null as number | null,
-      volume7dWei: null as string | null,
-      sales7d: null as number | null,
-      volume30dWei: null as string | null,
-      sales30d: null as number | null,
+      volume24hWei: nativeVolume24hWei,
+      sales24h: nativeSales24h,
+      volume7dWei: nativeSales?.volume7dWei ?? canonical?.volume7dWei ?? null,
+      sales7d: nativeSales?.sales7d ?? canonical?.sales7d ?? null,
+      volume30dWei: nativeSales?.volume30dWei ?? canonical?.volume30dWei ?? null,
+      sales30d: nativeSales?.sales30d ?? canonical?.sales30d ?? null,
       holderCount: nativeHolders,
-      floorChangePct: null as number | null,
+      floorChangePct: nativeFloorChange?.changePct ?? null,
+      floorChangeEvidence: nativeFloorChange,
+      floorChangeStatus: nativeFloorChange
+        ? "observed-24h"
+        : nativeFloor != null
+          ? "collecting-baseline"
+          : null,
       isNativeHome: true,
     };
 
-    const mapped = collections.map((c) => ({
+    let cryptoPunksNativeBookIndexed = false;
+    let cryptoPunksNativeStats: { listedCount: number; floorWei: string | null } | null = null;
+    if (hasPostgresConfig()) {
+      const coverage = await postgresQuery<{ indexed: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM plank_market_coverage
+           WHERE chain_slug = 'eth-mainnet' AND venue_id = 'cryptopunks-native'
+             AND capability = 'listings' AND status = 'indexed'
+         ) AS indexed`
+      ).catch(() => ({ rows: [] }));
+      cryptoPunksNativeBookIndexed = coverage.rows[0]?.indexed === true;
+      if (cryptoPunksNativeBookIndexed) {
+        const { getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+        cryptoPunksNativeStats = await getCryptoPunksNativeBookStats().catch(() => null);
+      }
+    }
+
+    const mapped = collections.map((c) => {
+      const isCryptoPunks = c.chainSlug === "eth-mainnet"
+        && c.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb";
+      return ({
         chainSlug: c.chainSlug,
         chainId: c.chainId,
         contractAddress: c.contractAddress,
@@ -144,12 +192,16 @@ export async function GET(req: Request) {
         imageUrl: c.imageUrl,
         externalUrl: c.externalUrl,
         isVaultBacked: c.isVaultBacked,
-        floorPriceWei: c.floorPriceWei,
-        floorPriceCurrency: c.floorPriceCurrency,
-        floorPriceMarketplace: c.floorPriceMarketplace,
-        totalSupply: c.totalSupply,
+        floorPriceWei: isCryptoPunks && cryptoPunksNativeStats ? cryptoPunksNativeStats.floorWei : c.floorPriceWei,
+        floorPriceCurrency: isCryptoPunks && cryptoPunksNativeStats?.floorWei ? "ETH" : c.floorPriceCurrency,
+        floorPriceMarketplace: isCryptoPunks && cryptoPunksNativeStats ? "cryptopunks-native" : c.floorPriceMarketplace,
+        totalSupply: isCryptoPunks ? 10_000 : c.totalSupply,
         listedCount:
-          c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
+          isCryptoPunks && cryptoPunksNativeStats
+            ? cryptoPunksNativeStats.listedCount
+          : hasUnindexedNativeBook(c.chainSlug, c.contractAddress) && !cryptoPunksNativeBookIndexed
+            ? null
+            : c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
             ? null
             : c.listedCount,
         syncedAt: c.syncedAt,
@@ -195,8 +247,10 @@ export async function GET(req: Request) {
             : c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
               ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
               : null,
+        floorChangeEvidence: null,
         isNativeHome: false,
-      }));
+        });
+    });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
     return NextResponse.json({
       count: withoutDupNative.length + 1,

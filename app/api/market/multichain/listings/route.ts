@@ -31,13 +31,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { fetchAllOpenSeaListings, getOpenSeaApiKey, normaliseOpenSeaListings } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import type { Listing } from "@/lib/market/types";
+import { refreshPulpListings } from "@/lib/market/pulp";
+import { mergeBook } from "@/lib/market/book";
+import { fetchOrdNetListings, isOrdNetConfigured, ordNetSatsToPriceWei } from "@/lib/market/multichain/adapters/ordnet";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,7 +54,8 @@ function mapBitcoinListings(
   collectionSlug: string,
   chainSlug: string,
   raw: Array<{ id: string; tokenId: string; maker: string; priceWei: string; imageUrl: string | null }>,
-  buyable: boolean
+  buyable: boolean,
+  venue: "unisat" | "ordinals-wallet" = "unisat"
 ): Listing[] {
   return [...raw]
     .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
@@ -64,8 +68,10 @@ function mapBitcoinListings(
       expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       kind: "fixed" as const,
       imageUrl: l.imageUrl ?? undefined,
-      venue: "unisat" as const,
-      externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
+      venue,
+      externalUrl: venue === "unisat"
+        ? `https://unisat.io/inscription/${l.tokenId}`
+        : `https://ordinalswallet.com/inscription/${l.tokenId}`,
       foreignChainSlug: chainSlug,
       // UniSat auctionId only -- Ordinals Wallet escrow prices are display
       // overlays and cannot be filled via create_bid_prepare.
@@ -120,6 +126,49 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
 
+  // CryptoPunks predates ERC-721 and Seaport. Its canonical embedded market
+  // is additive to aggregator venues and is read from our durable contract-
+  // state projection, never inferred from an empty OpenSea response.
+  const normalizedCollection = collectionSlug.toLowerCase();
+  if (chainSlug === "eth-mainnet" && normalizedCollection === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
+    try {
+      const { getCryptoPunksNativeBook, getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+      const [native, nativeStats] = await Promise.all([
+        getCryptoPunksNativeBook(limit),
+        getCryptoPunksNativeBookStats(),
+      ]);
+      const listings: Listing[] = native.map((offer) => ({
+        id: `cryptopunks-native:${offer.tokenId}`,
+        collectionSlug,
+        tokenId: offer.tokenId,
+        tokenName: `CryptoPunk #${offer.tokenId}`,
+        maker: offer.seller,
+        priceWei: offer.minValue,
+        expiresAt: "9999-12-31T23:59:59.999Z",
+        kind: "fixed",
+        imageUrl: `https://www.larvalabs.com/cryptopunks/cryptopunk${offer.tokenId}.png`,
+        venue: "cryptopunks-native",
+        externalUrl: `https://www.cryptopunks.app/cryptopunks/details/${offer.tokenId}`,
+        foreignChainSlug: chainSlug,
+      }));
+      const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
+      void prioritizeCollectionDemand(chainSlug, normalizedCollection).catch(() => {});
+      return NextResponse.json({
+        collection: {
+          ...(await collectionEnvelope(chainSlug, normalizedCollection)),
+          // CryptoPunks is a fixed canonical 10,000-item universe. Do not let
+          // an aggregator's temporarily incomplete token index redefine it.
+          totalSupply: 10_000,
+          listedCount: nativeStats.listedCount,
+          floorPriceWei: nativeStats.floorWei,
+        },
+        listings,
+      }, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } });
+    } catch (error) {
+      return publicError(error, "Failed to load CryptoPunks native listings");
+    }
+  }
+
   // Robinhood Chain is deliberately absent from FOREIGN_CHAINS (see
   // foreign-chain-registry.ts's own header) -- it's Marketplank's own home
   // chain, not a foreign one, so its listings live in the native order
@@ -136,8 +185,50 @@ export async function GET(req: NextRequest) {
       if (!collection) {
         return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
       }
-      const native = await getListings(collectionSlug);
-      const listings: Listing[] = native.slice(0, limit).map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      const openSeaSlug = await resolveOpenSeaCollectionSlug("robinhood", collection.contractAddress).catch(() => null);
+      const [nativeRows, pulp, openSeaPage] = await Promise.all([
+        getListings(collectionSlug),
+        // PulpMarket is collection-address scoped. The old client silently
+        // hard-coded RobinWood, which made every other Robinhood collection
+        // (including MUGS) report aggregate inventory without its orders.
+        refreshPulpListings(collection.contractAddress).catch(() => []),
+        openSeaSlug ? fetchAllOpenSeaListings(openSeaSlug).catch(() => null) : Promise.resolve(null),
+      ]);
+      const native: Listing[] = nativeRows.map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      // A partial cursor walk cannot safely participate in floor or rarity
+      // projections: the missing next page may contain a cheaper token.
+      const openSea = openSeaPage?.complete
+        ? normaliseOpenSeaListings(openSeaPage.listings)
+        : [];
+      const listings = mergeBook(
+        native,
+        [...pulp, ...openSea],
+        collection.slug,
+        undefined,
+        collection.contractAddress
+      );
+      // Venue rows commonly omit per-token metadata. Joining the sparse book
+      // to the canonical projection by token id prevents every missing image
+      // from falling through to the collection logo (the MUGS identical-card
+      // failure) while keeping the operation proportional to listed rows.
+      const { readProjectedTokensByIds } = await import("@/lib/market/multichain/collection-token-store");
+      const projected = await readProjectedTokensByIds(
+        chainSlug,
+        collection.contractAddress,
+        listings.map((listing) => listing.tokenId)
+      ).catch(() => new Map());
+      const enrichedListings = listings.map((listing) => {
+        const token = projected.get(String(listing.tokenId));
+        if (!token) return listing;
+        return {
+          ...listing,
+          tokenName: token.name ?? listing.tokenName,
+          imageUrl: token.imageUrl ?? listing.imageUrl,
+          animationUrl: token.animationUrl ?? listing.animationUrl,
+          mediaType: token.mediaType ?? listing.mediaType,
+          traits: token.traits.length ? token.traits : listing.traits,
+        };
+      });
       const supply = await getCollectionSupplyStats(chainSlug, collection.contractAddress).catch(() => null);
       const marketStats = await getCollectionMarketStats(chainSlug, collection.contractAddress).catch(() => null);
       return NextResponse.json(
@@ -157,7 +248,15 @@ export async function GET(req: NextRequest) {
             volume30dWei: marketStats?.volume30dWei ?? null,
             sales30d: marketStats?.sales30d ?? null,
           },
-          listings,
+          listings: enrichedListings,
+          bookCoverage: {
+            complete: Boolean(openSeaPage?.complete),
+            sources: {
+              native: "durable",
+              pulp: "upstream-unpaginated",
+              opensea: openSeaPage?.complete ? "cursor-exhausted" : "incomplete-excluded",
+            },
+          },
         },
         { headers: { "Cache-Control": "no-store" } }
       );
@@ -275,46 +374,63 @@ export async function GET(req: NextRequest) {
   // missing key, otherwise fetch real data" posture the OpenSea/EVM branch
   // below already uses, instead of claiming no source exists at all.
   if (chainSlug && isBitcoinChainSlug(chainSlug)) {
-    if (!process.env.UNISAT_API_KEY) {
-      return NextResponse.json({ error: "UniSat API key is not configured on this deployment." }, { status: 503 });
-    }
     try {
       const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
-      const raw = await fetchUniSatListings(collectionSlug, Math.min(limit, 20));
-      const listings: Listing[] = mapBitcoinListings(collectionSlug, chainSlug, raw, true);
-      if (listings.length === 0) {
-        const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
-        const ow = await fetchOrdinalsWalletCatalog(collectionSlug);
-        return NextResponse.json(
-          {
-            collection: await collectionEnvelope(chainSlug, collectionSlug),
-            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
-            listingsUnavailable: ow.listings.length > 0 ? null : "unisat-rate-limit",
-          },
-          { headers: { "Cache-Control": "no-store" } }
-        );
+      const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
+      const [unisatResult, owResult, ordnetResult] = await Promise.allSettled([
+        process.env.UNISAT_API_KEY
+          ? fetchUniSatListings(collectionSlug, Math.min(limit, 20))
+          : Promise.resolve([]),
+        fetchOrdinalsWalletCatalog(collectionSlug),
+        isOrdNetConfigured() ? fetchOrdNetListings(collectionSlug, limit) : Promise.resolve([]),
+      ]);
+      const unisat = unisatResult.status === "fulfilled" ? unisatResult.value : [];
+      const ow = owResult.status === "fulfilled" ? owResult.value : { listings: [] };
+      const ordnet = ordnetResult.status === "fulfilled" ? ordnetResult.value : [];
+      const candidates: Listing[] = [
+        ...mapBitcoinListings(collectionSlug, chainSlug, unisat, true),
+        ...mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
+        ...ordnet.map((row): Listing => ({
+          id: `ordnet:${row.listingId}`,
+          collectionSlug,
+          tokenId: row.inscriptionId,
+          tokenName: row.inscriptionName,
+          maker: row.sellerAddress,
+          priceWei: ordNetSatsToPriceWei(row.priceSats),
+          expiresAt: row.listingExpiresAt ?? "9999-12-31T23:59:59.999Z",
+          kind: "fixed",
+          venue: "ordnet",
+          externalUrl: `https://ord.net/inscription/${row.inscriptionId}`,
+          foreignChainSlug: chainSlug,
+        })),
+      ];
+      // One executable economic position per inscription in the grid; retain
+      // the cheapest venue while source coverage remains visible below.
+      const cheapest = new Map<string, Listing>();
+      for (const listing of candidates) {
+        const previous = cheapest.get(listing.tokenId);
+        if (!previous || BigInt(listing.priceWei) < BigInt(previous.priceWei)) cheapest.set(listing.tokenId, listing);
       }
+      const listings = [...cheapest.values()].sort((a, b) => {
+        const left = BigInt(a.priceWei), right = BigInt(b.priceWei);
+        return left < right ? -1 : left > right ? 1 : 0;
+      }).slice(0, limit);
       return NextResponse.json(
         {
           collection: await collectionEnvelope(chainSlug, collectionSlug),
           listings,
+          bookCoverage: {
+            complete: false,
+            sources: {
+              unisat: !process.env.UNISAT_API_KEY ? "credential-missing" : unisatResult.status === "fulfilled" ? "queried" : "upstream-error",
+              ordinalsWallet: owResult.status === "fulfilled" ? "catalog-overlay" : "upstream-error",
+              ordnet: !isOrdNetConfigured() ? "wallet-session-missing" : ordnetResult.status === "fulfilled" ? "cursor-read" : "upstream-error",
+            },
+          },
         },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (/403|rate limit|-2006/i.test(msg)) {
-        const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
-        const ow = await fetchOrdinalsWalletCatalog(collectionSlug).catch(() => ({ listings: [] }));
-        return NextResponse.json(
-          {
-            collection: await collectionEnvelope(chainSlug, collectionSlug),
-            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
-            listingsUnavailable: "unisat-rate-limit",
-          },
-          { headers: { "Cache-Control": "no-store" } }
-        );
-      }
       return publicError(error, "Failed to load Bitcoin Ordinals listings");
     }
   }

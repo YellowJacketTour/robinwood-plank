@@ -39,10 +39,12 @@ import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { ROBINHOOD_RPC_URLS, ROBINHOOD_CHAIN_ID } from "@/lib/mint-contract";
 import { isNotRealCollectibleArt, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { durableKv } from "@/lib/market/durable-kv";
 
 const CHAIN_SLUG = "robinhood";
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
 const ERC721_INTERFACE_ID = "0x80ac58cd";
+const CURSOR_KEY = "plank:market:opensea-robinhood-collection-cursor";
 
 type OpenSeaCollectionEntry = {
   collection: string;
@@ -118,6 +120,8 @@ export type OpenSeaRobinhoodDiscoveryResult = {
   skippedNotArt: number;
   skippedNotErc721: number;
   skippedAlreadyTracked: number;
+  nextCursor?: string | null;
+  cycleComplete?: boolean;
   error?: string;
 };
 
@@ -160,7 +164,7 @@ export async function runOpenSeaRobinhoodDiscoveryScan(
     };
   }
 
-  let cursor: string | null = null;
+  let cursor = await durableKv.get<string>(CURSOR_KEY);
   let pagesScanned = 0;
   let entriesSeen = 0;
   let registered = 0;
@@ -216,8 +220,9 @@ export async function runOpenSeaRobinhoodDiscoveryScan(
         registered += 1;
       }
 
-      if (!result.next) break;
       cursor = result.next;
+      await durableKv.set(CURSOR_KEY, cursor);
+      if (!cursor) break;
     }
   } catch (error) {
     return {
@@ -231,5 +236,7 @@ export async function runOpenSeaRobinhoodDiscoveryScan(
     };
   }
 
-  return { pagesScanned, entriesSeen, registered, skippedNotArt, skippedNotErc721, skippedAlreadyTracked };
+  const cycleComplete = pagesScanned > 0 && cursor === null;
+  return { pagesScanned, entriesSeen, registered, skippedNotArt, skippedNotErc721,
+    skippedAlreadyTracked, nextCursor: cursor, cycleComplete };
 }

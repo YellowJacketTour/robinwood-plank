@@ -38,6 +38,8 @@ import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
 import WethBalance from "@/components/market/WethBalance";
 import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/FilterBar";
+import TraitFacetFilters from "@/components/market/TraitFacetFilters";
+import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -278,6 +280,8 @@ export default function MarketView() {
   // without the request burst.
   const [visitedTabs, setVisitedTabs] = useState<Set<MarketTab>>(() => new Set(["buy-sell"]));
   const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
+  const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
+  const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>({});
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
   // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
@@ -338,6 +342,19 @@ export default function MarketView() {
   const [ownedTokenIds, setOwnedTokenIds] = useState<Set<string> | undefined>(undefined);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!COLLECTION) return;
+    let cancelled = false;
+    const load = () => fetchTraitIndex(COLLECTION!).then((index) => {
+      if (!cancelled) setTraitIndex(index);
+    }).catch(() => {
+      if (!cancelled) setTraitIndex({ collection: COLLECTION!.slug, complete: false, building: false, totalSupply: null, scanned: 0, traits: null, rankings: null });
+    });
+    void load();
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!COLLECTION) return;
@@ -571,8 +588,6 @@ export default function MarketView() {
         setError(MARKETPLANK_RELIST_MESSAGE);
         return;
       }
-      const who = await requireAccount();
-      if (!who) return;
       if (isCrossChainBuyable(listing)) {
         // Branch out BEFORE any Robinhood-Chain-specific derivation below --
         // validateListingOrder assumes a Robinhood-Chain order shape and
@@ -611,11 +626,12 @@ export default function MarketView() {
         setError(e instanceof Error ? e.message : "Could not open this listing.");
       }
     },
-    [listings, requireAccount]
+    [listings]
   );
 
   const confirmBuy = useCallback(async () => {
-    if (!buyTarget || !account) return;
+    if (!buyTarget) return;
+    if (!account) { handleConnect(); return; }
     setError(null);
     try {
       setStatus("Confirm in wallet…");
@@ -639,7 +655,7 @@ export default function MarketView() {
     } finally {
       setStatus(null);
     }
-  }, [buyTarget, account, refresh]);
+  }, [buyTarget, account, refresh, handleConnect]);
 
   /**
    * Foreign-chain counterpart to confirmBuy. Deliberately does not touch
@@ -652,7 +668,8 @@ export default function MarketView() {
    * calls MarketplankForeignFeeRouter directly.
    */
   const confirmForeignBuy = useCallback(async () => {
-    if (!foreignBuyTarget || !account) return;
+    if (!foreignBuyTarget) return;
+    if (!account) { handleConnect(); return; }
     setError(null);
     try {
       setForeignBuyBusy(true);
@@ -674,7 +691,7 @@ export default function MarketView() {
       setForeignBuyBusy(false);
       setStatus(null);
     }
-  }, [foreignBuyTarget, account, refresh]);
+  }, [foreignBuyTarget, account, refresh, handleConnect]);
 
   /**
    * Opens the sweep checkout. The plan arrives already validated (planSweep
@@ -684,16 +701,15 @@ export default function MarketView() {
   const handleSweep = useCallback(
     async (plan: SweepPlan) => {
       setError(null);
-      const who = await requireAccount();
-      if (!who) return;
       if (plan.items.length === 0) return;
       setSweepTarget(plan);
     },
-    [requireAccount]
+    []
   );
 
   const confirmSweep = useCallback(async () => {
-    if (!sweepTarget || !account || sweeping || !COLLECTION) return; // busy lock
+    if (!sweepTarget || sweeping || !COLLECTION) return; // busy lock
+    if (!account) { handleConnect(); return; }
     setError(null);
     try {
       setSweeping(true);
@@ -710,16 +726,11 @@ export default function MarketView() {
       setSweeping(false);
       setStatus(null);
     }
-  }, [sweepTarget, account, sweeping, refresh]);
+  }, [sweepTarget, account, sweeping, refresh, handleConnect]);
 
-  const handleOffer = useCallback(
-    async (listing: Listing) => {
-      const who = await requireAccount();
-      if (!who) return;
-      setOfferTarget({ tokenId: listing.tokenId });
-    },
-    [requireAccount]
-  );
+  const handleOffer = useCallback((listing: Listing) => {
+    setOfferTarget({ tokenId: listing.tokenId });
+  }, []);
 
   /**
    * Opens the accept-offer checkout. Mirrors handleBuy exactly: the order is
@@ -886,10 +897,13 @@ export default function MarketView() {
   // Derived book data is memoized on its actual inputs: this component
   // re-renders on every countdown tick and poll update, and the BigInt
   // filter/sort/floor passes were re-running each time.
-  const visibleListings = useMemo(
-    () => applyFilters(listings, filters, rarityMap),
-    [listings, filters, rarityMap]
-  );
+  const visibleListings = useMemo(() => {
+    const base = applyFilters(listings, filters, rarityMap);
+    const clauses = Object.entries(selectedTraits).filter(([, value]) => Boolean(value));
+    if (clauses.length === 0 || !traitIndex?.traits) return base;
+    const allowed = clauses.map(([type, value]) => new Set(traitIndex.traits?.[type]?.[value] ?? []));
+    return base.filter((listing) => allowed.every((ids) => ids.has(listing.tokenId)));
+  }, [listings, filters, rarityMap, selectedTraits, traitIndex]);
   const sortedVisibleListings = useMemo(
     () => sortListings(visibleListings, sort),
     [visibleListings, sort]
@@ -998,13 +1012,14 @@ export default function MarketView() {
         </p>
       )}
 
-      {offerTarget && account && COLLECTION && (
+      {offerTarget && COLLECTION && (
         <OfferForm
           account={account}
           collection={COLLECTION}
           tokenId={offerTarget.tokenId}
           traitMode={offerTarget.trait}
           listings={listings}
+          onConnect={handleConnect}
           onClose={() => setOfferTarget(null)}
           onSubmitted={() => {
             setOfferTarget(null);
@@ -1286,14 +1301,26 @@ export default function MarketView() {
                       : `${visibleListings.length} ${visibleListings.length === 1 ? "Plank" : "Planks"} on the market`
                   }
                   filters={
-                    <FilterBar
-                      filters={filters}
-                      onChange={setFilters}
-                      resultCount={loading ? 0 : visibleListings.length}
-                      rarityAvailable={rarityMap.size > 0}
-                      orientation="sidebar"
-                      tierCounts={tierListedCounts}
-                    />
+                    <>
+                      <FilterBar
+                        filters={filters}
+                        onChange={setFilters}
+                        resultCount={loading ? 0 : visibleListings.length}
+                        rarityAvailable={rarityMap.size > 0}
+                        orientation="sidebar"
+                        tierCounts={tierListedCounts}
+                        additionalDirty={Object.values(selectedTraits).some(Boolean)}
+                        onClearAll={() => { setFilters(EMPTY_FILTERS); setSelectedTraits({}); }}
+                      />
+                      <TraitFacetFilters
+                        counts={traitIndex?.traits ? Object.fromEntries(Object.entries(traitIndex.traits).map(([type, values]) => [type, Object.fromEntries(Object.entries(values).map(([value, ids]) => [value, ids.length]))])) : null}
+                        selected={selectedTraits}
+                        onChange={setSelectedTraits}
+                        building={!traitIndex?.complete && Boolean(traitIndex?.building || traitIndex?.scanned)}
+                        scanned={traitIndex?.scanned}
+                        totalSupply={traitIndex?.totalSupply}
+                      />
+                    </>
                   }
                   lead={
                     !loading && rarityMap.size > 0 && listings.length > 0 ? (
@@ -1332,10 +1359,7 @@ export default function MarketView() {
                       {COLLECTION && !loading && (
                         <button
                           type="button"
-                          onClick={async () => {
-                            const who = await requireAccount();
-                            if (who) setOfferTarget({ trait: true });
-                          }}
+                          onClick={() => setOfferTarget({ trait: true })}
                           className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                           title="Bid on any plank matching trait, rarity, or combo"
                         >

@@ -58,7 +58,11 @@ export default function RarityFloorStrip({
   const collFloor = useMemo(() => collectionFloorWei(listings), [listings]);
   const rows = useMemo(() => tierFloors(listings, rarity), [listings, rarity]);
 
-  if (listings.length === 0) return null;
+  // Rarity navigation is a catalog capability, not an order-book capability.
+  // A venue may report a collection-level listed total before its executable
+  // orders have reached our local book (MUGS exposed exactly this state). Keep
+  // the proven tier controls available and render unknown floors as dashes.
+  if (listings.length === 0 && rarity.size === 0) return null;
 
   return (
     <div className="space-y-1.5">
@@ -105,7 +109,7 @@ export default function RarityFloorStrip({
           )}
           <p className="text-[0.55rem] text-foreground/40">
             {listedTotal != null && listedTotal > listings.length
-              ? `${listings.length} of ${listedTotal} listed`
+              ? `${listings.length} loaded · ${listedTotal} reported listed`
               : `${listings.length} listed`}
           </p>
         </button>

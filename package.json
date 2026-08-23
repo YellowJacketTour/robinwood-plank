@@ -26,6 +26,8 @@
     "market:refresh": "tsx scripts/refresh-market-data.ts",
     "market:spokes": "tsx scripts/spoke-backfill.ts",
     "market:mesh": "tsx --env-file=.env.local scripts/mesh-tick.ts",
+    "market:fabric:tick": "tsx --env-file=.env.local scripts/mesh-tick.ts",
+    "market:fabric:bitcoin-rarity": "tsx --env-file=.env.local scripts/mesh-lane.ts --source=unisat-rarity --chain=bitcoin-mainnet",
     "market:refresh:full": "tsx scripts/refresh-market-data.ts --full",
     "market:reindex": "tsx scripts/reindex-chain-events.ts",
     "discover:compute-rarity": "tsx scripts/compute-rarity.ts",
@@ -38,6 +40,8 @@
     "@bitcoinerlab/secp256k1": "^2.0.0",
     "@envio-dev/hypersync-client": "^1.4.0",
     "@opensea/seaport-js": "^4.1.5",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
     "@reown/appkit": "1.8.23",
     "@reown/appkit-adapter-ethers": "1.8.23",
     "@solana/spl-token": "^0.4.15",
@@ -55,7 +59,8 @@
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
     "sharp": "^0.35.0",
-    "solana-web3js-v2": "npm:@solana/web3.js@^2.0.0"
+    "solana-web3js-v2": "npm:@solana/web3.js@^2.0.0",
+    "three": "^0.185.1"
   },
   "overrides": {
     "postcss": "^8.5.20",

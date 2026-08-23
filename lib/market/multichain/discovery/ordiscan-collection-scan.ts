@@ -31,6 +31,8 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
+import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 
 const API_BASE = "https://api.ordiscan.com/v1/collections";
 const CHAIN_SLUG = "bitcoin-mainnet";
@@ -53,15 +55,24 @@ function requireApiKey(): string {
 }
 
 async function fetchPage(page: number): Promise<OrdiscanCollectionEntry[]> {
+  if (await isSourceJailed("ordiscan")) throw new Error("ordiscan-collection-scan: source jailed");
   const key = requireApiKey();
-  const res = await fetch(`${API_BASE}?page=${page}`, {
-    headers: { authorization: `Bearer ${key}` },
-  });
-  if (!res.ok) {
-    throw new Error(`ordiscan-collection-scan: ${res.status} ${res.statusText} fetching collections page ${page}`);
+  const window = utcDayWindow(24);
+  if (!(await reserveProviderCapacity("ordiscan:default", window))) {
+    throw new Error("ordiscan-collection-scan: durable daily ceiling");
   }
-  const body = (await res.json()) as { data: OrdiscanCollectionEntry[] };
-  return body.data ?? [];
+  try {
+    const res = await fetch(`${API_BASE}?page=${page}`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      throw new Error(`ordiscan-collection-scan: ${res.status} ${res.statusText} fetching collections page ${page}`);
+    }
+    return ((await res.json()) as { data: OrdiscanCollectionEntry[] }).data ?? [];
+  } finally {
+    await settleProviderCapacity("ordiscan:default", window, 1, true).catch(() => {});
+  }
 }
 
 async function readPage(): Promise<number> {

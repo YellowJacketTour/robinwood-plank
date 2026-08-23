@@ -33,11 +33,12 @@
  */
 import { Interface } from "ethers";
 import { MARKET_FEE_RECIPIENT } from "@/lib/constants";
-import { postgresQuery } from "@/lib/postgres";
+import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import { confirmedHead, planScan } from "@/lib/market/chain-indexer";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 import { rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
-import { FOREIGN_CHAINS, FOREIGN_SEAPORT_ADDRESS, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { FOREIGN_CHAINS, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { ALL_SEAPORT_ADDRESSES, seaportVersionForAddress } from "@/lib/market/multichain/seaport-deployments";
 
 const ORDER_FULFILLED_ABI = [
   {
@@ -150,6 +151,26 @@ export type DecodedFill = {
   tokenId: string | null;
   currencyToken: string | null;
   priceWei: string | null;
+  /** Every monetary leg, grouped by its actual token. Never sum these raw amounts across currencies. */
+  paymentLegs: Array<{ token: string | null; amountAtomic: string }>;
+  /** Every fulfilled item in ABI order. This is the lossless bundle record. */
+  assetLegs: Array<{
+    side: "offer" | "consideration";
+    legIndex: number;
+    itemType: number;
+    token: string | null;
+    tokenId: string | null;
+    amountAtomic: string;
+    recipient: string | null;
+  }>;
+  /** Every monetary leg in ABI order, including its recipient. */
+  monetaryLegs: Array<{
+    side: "offer" | "consideration";
+    legIndex: number;
+    token: string | null;
+    amountAtomic: string;
+    recipient: string | null;
+  }>;
   /**
    * Native/ERC-20 value that provably reached MARKET_FEE_RECIPIENT in this
    * exact fill, in the same currency as priceWei. This -- not priceWei --
@@ -260,6 +281,29 @@ export function decodeOrderFulfilled(topics: string[], data: string): DecodedFil
     const key = currencyOf(item);
     totalsByCurrency.set(key, (totalsByCurrency.get(key) ?? BigInt(0)) + item.amount);
   }
+
+  const assetLegs = [
+    ...offer.map((item, legIndex) => ({ item, legIndex, side: "offer" as const, recipient: null })),
+    ...consideration.map((item, legIndex) => ({ item, legIndex, side: "consideration" as const, recipient: item.recipient?.toLowerCase() ?? null })),
+  ].filter(({ item }) => isNft(item)).map(({ item, legIndex, side, recipient }) => ({
+    side,
+    legIndex,
+    itemType: Number(item.itemType),
+    token: item.token?.toLowerCase() ?? null,
+    tokenId: item.identifier.toString(),
+    amountAtomic: item.amount.toString(),
+    recipient,
+  }));
+  const monetaryLegs = [
+    ...offer.map((item, legIndex) => ({ item, legIndex, side: "offer" as const, recipient: null })),
+    ...consideration.map((item, legIndex) => ({ item, legIndex, side: "consideration" as const, recipient: item.recipient?.toLowerCase() ?? null })),
+  ].filter(({ item }) => isMoney(item)).map(({ item, legIndex, side, recipient }) => ({
+    side,
+    legIndex,
+    token: currencyOf(item),
+    amountAtomic: item.amount.toString(),
+    recipient,
+  }));
   let priceCurrency: string | null = null;
   let priceTotal = BigInt(0);
   if (totalsByCurrency.has(null)) {
@@ -306,6 +350,12 @@ export function decodeOrderFulfilled(topics: string[], data: string): DecodedFil
     tokenId: subjectNft ? subjectNft.identifier.toString() : null,
     currencyToken: priceCurrency,
     priceWei: payingItems.length > 0 ? priceTotal.toString() : null,
+    paymentLegs: [...totalsByCurrency.entries()].map(([token, amount]) => ({
+      token,
+      amountAtomic: amount.toString(),
+    })),
+    assetLegs,
+    monetaryLegs,
     marketplaceFeeWei: marketplaceFee.toString(),
     shape,
   };
@@ -366,7 +416,12 @@ export async function scanChainForFills(
   const confirmationDepth =
     opts?.confirmationDepth ?? CONFIRMATION_DEPTH_BY_CHAIN[chainSlug] ?? DEFAULT_CONFIRMATION_DEPTH;
 
-  const lastIndexedBlock = await readCursor(chainSlug);
+  // A new namespace is deliberate: live scans must listen to every known
+  // deployment. This cursor intentionally remains near-head/forward-only;
+  // block-0 historical completeness is owned by the independent HyperSync
+  // genesis lane and must never be inferred from this RPC cursor.
+  const cursorKey = `${chainSlug}::seaport-all-rpc-live-v1`;
+  const lastIndexedBlock = await readCursor(cursorKey);
   // No historical backfill target -- bootstraps from just-below-head on
   // first run (see migration's own "forward-only" scope note). A
   // genesis block one chunk behind head means the very first tick still
@@ -397,7 +452,7 @@ export async function scanChainForFills(
         {
           fromBlock: "0x" + window.fromBlock.toString(16),
           toBlock: "0x" + window.toBlock.toString(16),
-          address: FOREIGN_SEAPORT_ADDRESS,
+          address: ALL_SEAPORT_ADDRESSES,
           topics: [ORDER_FULFILLED_TOPIC],
         },
       ]);
@@ -410,8 +465,9 @@ export async function scanChainForFills(
         blockNumber: number;
         blockTimestamp: number | null;
         fill: DecodedFill;
+        deploymentAddress: string | null;
       }[] = [];
-      const decoded: { txHash: string; logIndex: number; blockNumber: number; fill: DecodedFill }[] = [];
+      const decoded: { txHash: string; logIndex: number; blockNumber: number; deploymentAddress: string | null; fill: DecodedFill }[] = [];
       for (const log of logs) {
         const fill = decodeOrderFulfilled(log.topics, log.data);
         if (!fill) continue;
@@ -420,6 +476,7 @@ export async function scanChainForFills(
           logIndex: Number.parseInt(log.logIndex, 16),
           blockNumber: Number.parseInt(log.blockNumber, 16),
           fill,
+          deploymentAddress: log.address?.toLowerCase() ?? null,
         });
       }
       // Real block_timestamp, one real eth_getBlockByNumber call per
@@ -455,12 +512,13 @@ export async function scanChainForFills(
           blockNumber: d.blockNumber,
           blockTimestamp: timestampByBlock.get(d.blockNumber) ?? null,
           fill: d.fill,
+          deploymentAddress: d.deploymentAddress,
         });
       }
       if (rows.length > 0) {
         totalWritten += await writeFills(rows);
       }
-      await writeCursor(chainSlug, window.toBlock);
+      await writeCursor(cursorKey, window.toBlock);
       lastSucceededBlock = window.toBlock;
     }
   } catch (err) {
@@ -484,7 +542,7 @@ export async function scanChainForFills(
 }
 
 export async function writeFills(
-  rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp?: number | null; fill: DecodedFill }[]
+  rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp?: number | null; deploymentAddress?: string | null; fill: DecodedFill }[]
 ): Promise<number> {
   // Dedupe within-batch -- same reason appendChainEvents does: Postgres
   // rejects ON CONFLICT DO NOTHING against two conflicting rows in one
@@ -510,12 +568,12 @@ export async function writeFills(
     // eth_getBlockByNumber `timestamp` on the RPC path) into a real
     // TIMESTAMPTZ; NULL stays NULL when a caller genuinely doesn't have
     // one yet, never fabricated as "now."
-    const result = await postgresQuery(
-      `INSERT INTO plank_seaport_fills
-         (chain_slug, tx_hash, log_index, block_number, block_timestamp, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape)
-       VALUES ($1, $2, $3, $4, to_timestamp($14), $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13)
-       ON CONFLICT (chain_slug, tx_hash, log_index) DO NOTHING`,
-      [
+    const result = await withPostgresTransaction(async (client) => {
+      const parent = await client.query(
+        `INSERT INTO plank_seaport_fills
+         (chain_slug, tx_hash, log_index, block_number, block_timestamp, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape, payment_legs)
+       VALUES ($1, $2, $3, $4, to_timestamp($14), $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13, $15::jsonb)
+       ON CONFLICT (chain_slug, tx_hash, log_index) DO NOTHING`, [
         r.chainSlug,
         r.txHash,
         r.logIndex,
@@ -530,8 +588,28 @@ export async function writeFills(
         r.fill.marketplaceFeeWei,
         r.fill.shape,
         r.blockTimestamp ?? null,
-      ]
-    );
+        JSON.stringify(r.fill.paymentLegs),
+      ]);
+      for (const leg of r.fill.assetLegs) {
+        await client.query(
+          `INSERT INTO plank_market_event_assets
+             (chain_slug, venue_id, protocol_version, deployment_address, tx_hash, event_index, leg_index, side, item_type, token_address, token_id, amount_atomic, recipient)
+           VALUES ($1, 'seaport', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric, $12)
+           ON CONFLICT DO NOTHING`,
+          [r.chainSlug, r.deploymentAddress ? seaportVersionForAddress(r.deploymentAddress) : null, r.deploymentAddress ?? null, r.txHash, r.logIndex, leg.legIndex, leg.side, leg.itemType, leg.token, leg.tokenId, leg.amountAtomic, leg.recipient]
+        );
+      }
+      for (const leg of r.fill.monetaryLegs) {
+        await client.query(
+          `INSERT INTO plank_market_event_payments
+             (chain_slug, venue_id, protocol_version, deployment_address, tx_hash, event_index, leg_index, side, token_address, amount_atomic, recipient, allocation_method)
+           VALUES ($1, 'seaport', $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, 'unallocated')
+           ON CONFLICT DO NOTHING`,
+          [r.chainSlug, r.deploymentAddress ? seaportVersionForAddress(r.deploymentAddress) : null, r.deploymentAddress ?? null, r.txHash, r.logIndex, leg.legIndex, leg.side, leg.token, leg.amountAtomic, leg.recipient]
+        );
+      }
+      return parent;
+    });
     const isNew = (result.rowCount ?? 0) > 0;
     written += isNew ? 1 : 0;
 

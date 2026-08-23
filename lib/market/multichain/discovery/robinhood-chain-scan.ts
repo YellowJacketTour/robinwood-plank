@@ -44,25 +44,26 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, recordActivity, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { ROBINHOOD_RPC_URLS, ROBINHOOD_CHAIN_ID } from "@/lib/mint-contract";
-import { TRANSFER_TOPIC, isNotRealCollectibleArt, rpcCall, readCursor, writeCursor } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC, isNotRealCollectibleArt, rpcCall, readCursor, writeCursor } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
 const CHAIN_SLUG = "robinhood";
 const CHUNK_BLOCKS = 10;
-const MIN_TRANSFERS_TO_CONSIDER = 2;
 
 type RawLog = { address: string; topics: string[]; blockNumber: string };
 
 /** ERC-165 interface ID for ERC-721, per the standard -- the one reliable, on-chain-verifiable signal that a contract is genuinely an NFT collection, needing no third-party indexer's opinion. */
 const ERC721_INTERFACE_ID = "0x80ac58cd";
+const ERC1155_INTERFACE_ID = "0xd9b67a26";
 
 function encodeCall(selector: string, argsHex = ""): string {
   return selector + argsHex;
 }
 
 /** Best-effort raw ERC-721 read: supportsInterface, name, symbol. Returns null on ANY failure -- a contract that doesn't cleanly answer these isn't treated as a real collection, fail-closed exactly like every other discovery path in this app. */
-async function readErc721Metadata(rpcUrl: string, contractAddress: string): Promise<{ name: string | null; symbol: string | null } | null> {
+async function readNftMetadata(rpcUrl: string, contractAddress: string): Promise<{ name: string | null; symbol: string | null; standard: "erc721" | "erc1155" } | null> {
   try {
-    const supportsErc721 = (await rpcCall<string>(rpcUrl, "eth_call", [
+    const supports = async (interfaceId: string) => (await rpcCall<string>(rpcUrl, "eth_call", [
       // bytes4 is RIGHT-padded in ABI encoding (padEnd), not left-padded --
       // this was a real, confirmed-live bug: the left-padded (padStart)
       // version of this exact supportsInterface(0x80ac58cd) call reverted
@@ -73,17 +74,20 @@ async function readErc721Metadata(rpcUrl: string, contractAddress: string): Prom
       // returned null, so runRobinhoodChainDiscoveryScan could only ever
       // have registered zero collections via on-chain verification. Fixed
       // here; discoverer opensea-robinhood-scan.ts carries the same fix.
-      { to: contractAddress, data: encodeCall("0x01ffc9a7", ERC721_INTERFACE_ID.slice(2).padEnd(64, "0")) },
+      { to: contractAddress, data: encodeCall("0x01ffc9a7", interfaceId.slice(2).padEnd(64, "0")) },
       "latest",
     ])) as string;
-    // A revert or a false (32-byte zero) response means "not ERC-721" -- both fail closed.
-    if (!supportsErc721 || supportsErc721 === "0x" || BigInt(supportsErc721) === 0n) return null;
+    const supportsErc721 = await supports(ERC721_INTERFACE_ID).catch(() => "0x");
+    const supportsErc1155 = await supports(ERC1155_INTERFACE_ID).catch(() => "0x");
+    const is721 = supportsErc721 !== "0x" && BigInt(supportsErc721) !== 0n;
+    const is1155 = supportsErc1155 !== "0x" && BigInt(supportsErc1155) !== 0n;
+    if (!is721 && !is1155) return null;
 
     const [nameHex, symbolHex] = await Promise.all([
       rpcCall<string>(rpcUrl, "eth_call", [{ to: contractAddress, data: "0x06fdde03" }, "latest"]).catch(() => null),
       rpcCall<string>(rpcUrl, "eth_call", [{ to: contractAddress, data: "0x95d89b41" }, "latest"]).catch(() => null),
     ]);
-    return { name: decodeAbiString(nameHex), symbol: decodeAbiString(symbolHex) };
+    return { name: decodeAbiString(nameHex), symbol: decodeAbiString(symbolHex), standard: is721 ? "erc721" : "erc1155" };
   } catch {
     return null;
   }
@@ -153,15 +157,20 @@ export type RobinhoodDiscoveryResult = {
  * collections. Meant to be called on the same cron cadence as
  * runAllEvmDiscoveryScans (scripts/refresh-market-data.ts).
  */
-export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscoveryResult> {
+async function runRobinhoodChainDiscoveryScanInternal(
+  cursorKey: string,
+  mode: "forward" | "historical"
+): Promise<RobinhoodDiscoveryResult> {
   const rpcUrl = ROBINHOOD_RPC_URLS[0];
   if (!rpcUrl) throw new Error("robinhood-chain-scan: no RPC URL configured (ROBINHOOD_RPC_URLS is empty)");
 
   const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
   const latest = parseInt(latestHex, 16);
 
-  const cursor = await readCursor(CHAIN_SLUG);
-  const fromBlock = cursor !== null ? cursor + 1 : Math.max(0, latest - CHUNK_BLOCKS);
+  const cursor = await readCursor(cursorKey);
+  const fromBlock = cursor !== null
+    ? cursor + 1
+    : mode === "historical" ? 0 : Math.max(0, latest - CHUNK_BLOCKS);
   const toBlock = Math.min(fromBlock + CHUNK_BLOCKS - 1, latest);
   if (fromBlock > toBlock) {
     return { fromBlock, toBlock: fromBlock - 1, candidatesSeen: 0, registered: 0, skippedNotArt: 0 };
@@ -171,13 +180,15 @@ export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscove
     {
       fromBlock: `0x${fromBlock.toString(16)}`,
       toBlock: `0x${toBlock.toString(16)}`,
-      topics: [TRANSFER_TOPIC],
+      topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]],
     },
   ]);
 
   const transferCounts = new Map<string, number>();
   for (const log of logs) {
-    if (log.topics.length !== 4) continue; // ERC-20 Transfer shares the same topic0 but only 3 topics -- excluded exactly like evm-log-scan.ts's own filter.
+    const topic0 = log.topics[0]?.toLowerCase();
+    if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+    if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
     const addr = log.address.toLowerCase();
     transferCounts.set(addr, (transferCounts.get(addr) ?? 0) + 1);
   }
@@ -185,10 +196,8 @@ export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscove
   let registered = 0;
   let skippedNotArt = 0;
   for (const [contractAddress, count] of transferCounts) {
-    if (count < MIN_TRANSFERS_TO_CONSIDER) continue;
-
-    const meta = await readErc721Metadata(rpcUrl, contractAddress);
-    if (!meta) continue; // fails ERC-721 interface check -- not a collection, real signal, not a heuristic.
+    const meta = await readNftMetadata(rpcUrl, contractAddress);
+    if (!meta) continue; // fails both standard interface checks.
 
     const existing = await postgresQuery<{ id: number }>(
       `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
@@ -203,8 +212,10 @@ export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscove
     // real per-token art" pattern rarity-index-runner.ts uses, cheap
     // because it's a single extra RPC round-trip only for genuinely new
     // candidates, never on every tick.
-    const sample = await resolveTokenImage(rpcUrl, contractAddress, 1n);
-    if (isNotRealCollectibleArt(meta.name, sample.imageUrl)) {
+    const sample = meta.standard === "erc721"
+      ? await resolveTokenImage(rpcUrl, contractAddress, 1n)
+      : { name: null, imageUrl: null };
+    if (meta.standard === "erc721" && isNotRealCollectibleArt(meta.name, sample.imageUrl)) {
       skippedNotArt += 1;
       continue;
     }
@@ -219,10 +230,40 @@ export async function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscove
       name: sample.name ?? meta.name ?? null,
       imageUrl: sample.imageUrl ?? null,
     }).catch(() => {});
+    await writeCollectionCell({
+      chainSlug: CHAIN_SLUG,
+      collectionKey: contractAddress,
+      cell: "identity",
+      source: `robinhood-${meta.standard}-interface`,
+      sourceBlock: toBlock,
+      state: meta.standard === "erc721" && sample.imageUrl ? "fresh" : "partial",
+      coverage: meta.standard === "erc721" && sample.imageUrl ? 1 : 0.5,
+    }).catch(() => {});
     await recordActivity(CHAIN_SLUG, new Map([[contractAddress, count]])).catch(() => {});
     registered += 1;
   }
 
-  await writeCursor(CHAIN_SLUG, toBlock);
+  await writeCursor(cursorKey, toBlock);
+  await writeChainCoverage({
+    chainSlug: CHAIN_SLUG,
+    lane: mode,
+    standardGroup: "erc721+erc1155",
+    rangeStart: mode === "historical" ? 0 : fromBlock,
+    nextBlock: toBlock + 1,
+    targetBlock: latest + 1,
+    observedHead: latest,
+    state: toBlock >= latest ? (mode === "historical" ? "complete" : "live") : "backfilling",
+  });
   return { fromBlock, toBlock, candidatesSeen: transferCounts.size, registered, skippedNotArt };
+}
+
+export function runRobinhoodChainDiscoveryScan(): Promise<RobinhoodDiscoveryResult> {
+  return runRobinhoodChainDiscoveryScanInternal(CHAIN_SLUG, "forward");
+}
+
+/** Independent block-zero provenance walk. It deliberately never rewinds or
+ * shares the live cursor, so a slow historical RPC window cannot make newly
+ * minted Robinhood collections stale. */
+export function runRobinhoodChainDiscoveryGenesisBackfill(): Promise<RobinhoodDiscoveryResult> {
+  return runRobinhoodChainDiscoveryScanInternal(`${CHAIN_SLUG}:backfill`, "historical");
 }

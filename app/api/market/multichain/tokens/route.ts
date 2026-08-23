@@ -17,6 +17,8 @@ export type CollectionToken = {
   tokenId: string;
   name: string | null;
   imageUrl: string | null;
+  animationUrl?: string | null;
+  mediaType?: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -25,14 +27,90 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 2000);
+  // Bounded response page, not a collection-size limit. Projection cursors
+  // provide lossless traversal for collections of any cardinality.
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 800);
   const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
   const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
   const tier = searchParams.get("tier");
+  const cursor = searchParams.get("cursor");
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
+    // Projection-first: page loads never spend a provider request when a
+    // background worker has already materialized real collection members.
+    const { hasCollectionTokenStore, readCollectionTokenProjection } = await import("@/lib/market/multichain/collection-token-store");
+    if (hasCollectionTokenStore()) {
+      const projected = await readCollectionTokenProjection({
+        chainSlug, collectionSlug, limit, cursor, sort, tier,
+      }).catch(() => null);
+      if (projected) {
+        // A partial projection is useful enough to render, but it is not a
+        // terminal cache hit. Renew the demand job whenever somebody is
+        // actively viewing it so the mesh keeps walking the provider cursor
+        // instead of rotating away after the first 50-token page.
+        if (projected.partial && /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)) {
+          const eligible = isRobinhoodChainSlug(chainSlug) || Boolean(foreignChainByChainSlug(chainSlug)?.openSeaChain);
+          if (eligible) {
+            const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+            const source = isRobinhoodChainSlug(chainSlug) ? "robinhood-membership" : "opensea-membership";
+            await enqueueDataJob({
+              jobKey: `demand:membership:${chainSlug}:${collectionSlug.toLowerCase()}`,
+              kind: `mesh-lane:${chainSlug}`,
+              source,
+              chainSlug,
+              subject: collectionSlug.toLowerCase(),
+              priority: 90,
+            }).catch(() => {});
+          }
+        }
+        if (projected.partial && isBitcoinChainSlug(chainSlug)) {
+          const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+          await enqueueDataJob({
+            jobKey: `demand:membership:${chainSlug}:${collectionSlug}`,
+            kind: `mesh-lane:${chainSlug}`,
+            source: "unisat-membership",
+            chainSlug,
+            subject: collectionSlug,
+            priority: 90,
+          }).catch(() => {});
+        }
+        // Zero rows can be the correct result of a tier filter. Returning the
+        // projection metadata is what distinguishes "no matching Legendary"
+        // from "this collection has never been indexed".
+        return NextResponse.json({ ...projected, building: projected.partial && projected.tokens.length === 0 }, {
+          headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
+        });
+      }
+    }
+    // A cold projection never performs provider work in this request. It
+    // records exact demand so the isolated mesh hydrates this contract ahead
+    // of the background round-robin on its next tick.
+    const contractAddress = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug.toLowerCase() : null;
+    if (contractAddress && (isRobinhoodChainSlug(chainSlug) || foreignChainByChainSlug(chainSlug)?.openSeaChain)) {
+      const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+      const source = isRobinhoodChainSlug(chainSlug) ? "robinhood-membership" : "opensea-membership";
+      await enqueueDataJob({
+        jobKey: `demand:membership:${chainSlug}:${contractAddress}`,
+        kind: `mesh-lane:${chainSlug}`,
+        source,
+        chainSlug,
+        subject: contractAddress,
+        priority: 90,
+      }).catch(() => {});
+    }
+    if (isBitcoinChainSlug(chainSlug)) {
+      const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+      await enqueueDataJob({
+        jobKey: `demand:membership:${chainSlug}:${collectionSlug}`,
+        kind: `mesh-lane:${chainSlug}`,
+        source: "unisat-membership",
+        chainSlug,
+        subject: collectionSlug,
+        priority: 90,
+      }).catch(() => {});
+    }
     const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
     if (hasForeignRarityStore()) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
@@ -104,7 +182,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tokens: await solanaTokens(collectionSlug, limit) }, { headers: { "Cache-Control": "no-store" } });
     }
     if (isRobinhoodChainSlug(chainSlug)) {
-      return NextResponse.json({ tokens: [] }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ tokens: [], partial: true, building: true },
+        { headers: { "Cache-Control": "no-store" } });
     }
     const chain = foreignChainByChainSlug(chainSlug);
     if (!chain?.openSeaChain) {
@@ -203,7 +282,11 @@ function mapUniSatItems(list: UniSatItem[]): CollectionToken[] {
     .map((i) => ({
       tokenId: i.inscriptionId!,
       name: i.collectionItemName ?? i.name ?? null,
-      imageUrl: `https://ordinals.com/content/${i.inscriptionId}`,
+      imageUrl: /^image\//i.test(i.contentType ?? "")
+        ? `https://ordinals.com/content/${i.inscriptionId}` : null,
+      animationUrl: /^(video|audio)\//i.test(i.contentType ?? "")
+        ? `https://ordinals.com/content/${i.inscriptionId}` : null,
+      mediaType: i.contentType ?? null,
     }));
 }
 

@@ -44,8 +44,13 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
+import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** ERC-1155's two mandatory balance-change events. A collection registry
+ * which only watches ERC-721 Transfer is structurally incomplete. */
+export const TRANSFER_SINGLE_TOPIC = "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
+export const TRANSFER_BATCH_TOPIC = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
 
 /** Mirrors alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN chainSlug set. */
 export const EVM_CHAIN_ID: Record<string, number> = {
@@ -171,13 +176,15 @@ export async function runEvmDiscoveryScan(input: {
     {
       fromBlock: "0x" + fromBlock.toString(16),
       toBlock: "0x" + toBlock.toString(16),
-      topics: [TRANSFER_TOPIC],
+      topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]],
     },
   ]);
 
   const tally = new Map<string, number>();
   for (const log of logs) {
-    if (log.topics.length !== 4) continue; // 3 topics = ERC-20 sharing the same signature, not ours
+    const topic0 = log.topics[0]?.toLowerCase();
+    if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue; // ERC-20
+    if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
     const key = log.address.toLowerCase();
     tally.set(key, (tally.get(key) ?? 0) + 1);
   }
@@ -189,7 +196,10 @@ export async function runEvmDiscoveryScan(input: {
   // too quiet to cross MIN_TRANSFERS_TO_CONSIDER in any single window.
   await recordActivity(input.chainSlug, tally);
 
-  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+  // A standards-shaped event is durable identity evidence. Requiring two
+  // events in the same tiny scan window permanently missed quiet collections;
+  // popularity belongs in ranking, not admission.
+  const candidates = [...tally.entries()];
 
   let registered = 0;
   let skippedNoMetadata = 0;
@@ -221,11 +231,30 @@ export async function runEvmDiscoveryScan(input: {
       await writeSnapshot(id, snapshot);
       registered += 1;
     } catch {
+      // Provider exhaustion must not discard an identity proven on-chain.
+      await upsertTrackedCollection({
+        chainSlug: input.chainSlug,
+        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
+        contractAddress,
+        adapter: alchemyNftAdapter.name,
+        isVaultBacked: false,
+      });
       skippedNoMetadata += 1;
+      registered += 1;
     }
   }
 
   await writeCursor(input.chainSlug, toBlock);
+  await writeChainCoverage({
+    chainSlug: input.chainSlug,
+    lane: "forward",
+    standardGroup: "erc721+erc1155",
+    rangeStart: fromBlock,
+    nextBlock: toBlock + 1,
+    targetBlock: headBlock + 1,
+    observedHead: headBlock,
+    state: toBlock >= headBlock ? "live" : "backfilling",
+  });
 
   return {
     chainSlug: input.chainSlug,

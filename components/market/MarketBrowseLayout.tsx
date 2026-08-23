@@ -49,7 +49,7 @@ export default function MarketBrowseLayout({
         aria-controls={drawerId}
         onClick={() => setOpen(true)}
       >
-        Filters
+        Filters &amp; traits
       </button>
 
       {open && (

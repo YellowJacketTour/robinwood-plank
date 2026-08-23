@@ -15,7 +15,6 @@
 export type CollectionSurface = {
   chainSlug: string;
   catalogPageSize: number;
-  catalogCap: number;
   bookPageSize: number;
   catalog: string;
   book: string;
@@ -24,7 +23,6 @@ export type CollectionSurface = {
 
 const EVM: Omit<CollectionSurface, "chainSlug"> = {
   catalogPageSize: 400,
-  catalogCap: 2000,
   bookPageSize: 200,
   catalog: "plank_foreign_rarity + OpenSea NFT walk",
   book: "OpenSea listings",
@@ -42,7 +40,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   "solana-mainnet": {
     chainSlug: "solana-mainnet",
     catalogPageSize: 800,
-    catalogCap: 2000,
     bookPageSize: 200,
     catalog: "foreign rarity (Helius DAS) else ME listings/activities",
     book: "Magic Eden listings",
@@ -51,7 +48,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   "bitcoin-mainnet": {
     chainSlug: "bitcoin-mainnet",
     catalogPageSize: 800,
-    catalogCap: 2000,
     bookPageSize: 200,
     catalog: "foreign rarity else OW catalog else UniSat items",
     book: "UniSat auction list",
@@ -60,7 +56,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   robinhood: {
     chainSlug: "robinhood",
     catalogPageSize: 400,
-    catalogCap: 1542,
     bookPageSize: 400,
     catalog: "native rarity + gallery",
     book: "native Seaport + plank.love overlay",
@@ -73,7 +68,6 @@ export function collectionSurface(chainSlug: string): CollectionSurface {
     COLLECTION_SURFACES[chainSlug] ?? {
       chainSlug,
       catalogPageSize: 400,
-      catalogCap: 2000,
       bookPageSize: 200,
       catalog: "rarity index if present",
       book: "chain venue if any",

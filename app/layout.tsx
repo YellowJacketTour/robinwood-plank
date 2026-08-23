@@ -13,6 +13,7 @@ import VersionUpdatePrompt from "@/components/VersionUpdatePrompt";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
 import { ACCENT_BOOTSTRAP_SCRIPT } from "@/lib/theme-accent";
+import DiscoFluidBackdrop from "@/components/DiscoFluidBackdrop";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -88,6 +89,7 @@ export default function RootLayout({
               the root layout so playback survives client-side navigation
               (route links in Nav use <Link> for exactly this reason). */}
           <WoodAmpProvider>
+            <DiscoFluidBackdrop />
             <SplashIntro />
             <ArtServiceWorker />
             {/* Tells a stale tab a new build shipped. DEPLOYMENT_VERSION is

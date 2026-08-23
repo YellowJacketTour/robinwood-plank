@@ -15,6 +15,7 @@ import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-
 import EthUsdValue from "@/components/market/EthUsdValue";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
 import { swrJson } from "@/lib/market/swr-fetch";
+import CriteriaBidValueHud from "@/components/market/CriteriaBidValueHud";
 
 type Props = {
   chainSlug: string;
@@ -130,10 +131,6 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
   const openReview = () => {
     setError(null);
     setSuccess(null);
-    if (!account) {
-      onConnect?.();
-      return;
-    }
     const wei = parseTokenAmount(priceEth, 18);
     if (wei === null || wei <= BigInt(0)) {
       setError("Enter an amount.");
@@ -206,7 +203,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
 
             <p className="mt-3 text-xs leading-5 text-foreground/55">
               {currencySymbol} balance, allowance, expiry, and the order payload are checked before signing. The token-id set is snapshotted into the signed
-              order's Merkle root at this exact moment.
+              order&apos;s Merkle root at this exact moment.
             </p>
 
             {error && (
@@ -233,7 +230,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
                 onClick={() => void submit()}
                 className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
               >
-                {busy ? "Confirm in wallet…" : "Continue to wallet"}
+                {busy ? "Confirm in wallet…" : account ? "Continue to wallet" : "Connect wallet & continue"}
               </button>
             </div>
           </div>
@@ -308,6 +305,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
             Bid locks {formatCriteriaLabel(clauses)} · {qualifyingIds.length} items snapshotted into the signed order.
           </p>
         )}
+        <CriteriaBidValueHud offerWei={offerWei} qualifyingIds={collectionWildcard ? (listings ?? []).map((listing) => listing.tokenId) : qualifyingIds} listings={listings} currencySymbol={currencySymbol} totalFeeBps={0} />
       </div>
 
       <div className="flex min-h-12 items-center gap-2 rounded-lg border border-line bg-panel px-2.5">
@@ -336,7 +334,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
         ))}
       </div>
 
-      <p className="text-center text-[0.65rem] text-foreground/50">No marketplace fee on offer creation — the real order posts directly to OpenSea's orderbook.</p>
+      <p className="text-center text-[0.65rem] text-foreground/50">No marketplace fee on offer creation — the real order posts directly to OpenSea&apos;s orderbook.</p>
 
       <button
         type="button"
@@ -344,7 +342,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
         onClick={openReview}
         className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
       >
-        {busy ? "Signing…" : !account ? "Connect to build this bid" : "Review & sign criteria bid"}
+        {busy ? "Signing…" : "Review & sign criteria bid"}
       </button>
       {error && (
         <p className="text-center text-xs text-red-300" role="alert">

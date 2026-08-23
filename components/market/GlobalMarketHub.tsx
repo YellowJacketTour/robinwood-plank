@@ -10,6 +10,7 @@ import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
+import CurrencyIcon from "@/components/market/CurrencyIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
@@ -129,6 +130,7 @@ type TrackedCollection = {
   sales30d: number | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
+  floorChangeStatus?: "observed-24h" | "collecting-baseline" | null;
   /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
   totalSupply: number | null;
   listedCount: number | null;
@@ -136,6 +138,16 @@ type TrackedCollection = {
   holderCount: number | null;
   /** True only for the injected RobinWood native book row — links to /market, not /market/multichain. */
   isNativeHome?: boolean;
+};
+
+type GlobalTokenHit = {
+  chainSlug: string;
+  collectionSlug: string;
+  tokenId: string;
+  name: string | null;
+  imageUrl: string | null;
+  rarityRank: number | null;
+  rarityTier: string | null;
 };
 
 /** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
@@ -191,6 +203,25 @@ function displayName(c: TrackedCollection): string {
     return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
   }
   return n;
+}
+
+function searchText(value: string | null | undefined): string {
+  return (value ?? "").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function collectionSearchScore(c: TrackedCollection, rawQuery: string): number {
+  const q = searchText(rawQuery);
+  if (!q) return 0;
+  const fields = [displayName(c), c.contractAddress, c.creatorHandle, c.creatorEns].map(searchText);
+  let best = -1;
+  for (const field of fields) {
+    if (!field) continue;
+    if (field === q) best = Math.max(best, 1000);
+    else if (field.startsWith(q)) best = Math.max(best, 800);
+    else if (field.split(" ").some((word) => word.startsWith(q))) best = Math.max(best, 650);
+    else if (field.includes(q)) best = Math.max(best, 500);
+  }
+  return best;
 }
 /** Real listed-count/total-supply as a percentage -- null unless both real figures are present (never a fabricated 0%). Shared by both the "Listed" column's own display AND its sort. */
 function listedPctOf(c: TrackedCollection): number | null {
@@ -259,6 +290,23 @@ function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null 
       )}
     </span>
   );
+}
+
+function FloorCurrencyMark({ collection }: { collection: TrackedCollection }) {
+  const symbol = normalizeAssetSymbol(collection.floorPriceCurrency);
+  if (symbol && symbol !== chainNativeAsset(collection.chainSlug)) {
+    return <CurrencyIcon symbol={symbol} size={14} className="shrink-0" />;
+  }
+  return <ChainIcon chainSlug={collection.chainSlug} size={14} className="shrink-0" />;
+}
+
+function chainNativeAsset(chainSlug: string): string {
+  if (chainSlug === "polygon-mainnet") return "POL";
+  if (chainSlug === "bnb-mainnet") return "BNB";
+  if (chainSlug === "avax-mainnet") return "AVAX";
+  if (chainSlug === "solana-mainnet") return "SOL";
+  if (chainSlug === "bitcoin-mainnet") return "BTC";
+  return "ETH";
 }
 
 function shortCollectionId(address: string): string {
@@ -431,13 +479,14 @@ function hasMarketEvidence(c: TrackedCollection): boolean {
   if (c.sales24h != null && c.sales24h > 0) return true;
   return false;
 }
-/** ETH-like grades need a book or volume, not floor+JPEG alone. */
+/** A grade is a current market-readiness score, not a popularity score.
+ * Historical sales and a quoted floor cannot make an asset executable today.
+ * Require a verified live listing or redeemable vault; native books such as
+ * CryptoPunks must flow through their own adapter instead of receiving a
+ * home/brand exception. This keeps dead and partially hydrated rows from
+ * displacing genuinely liquid collections. */
 function hasGradeEvidence(c: TrackedCollection): boolean {
-  if (c.isNativeHome) return true;
-  if (c.listedCount != null && c.listedCount > 0) return true;
-  if (c.volume24hWei && c.volume24hWei !== "0") return true;
-  if (c.sales24h != null && c.sales24h > 0) return true;
-  return false;
+  return (c.listedCount != null && c.listedCount > 0) || c.isVaultBacked;
 }
 
 function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
@@ -595,7 +644,7 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
               <p className="mb-2 text-[0.6rem] text-foreground/35">
                 {letter
                   ? `${thresholdLabel} points needed for ${letter}. Not a wash-trade or stolen-art score.`
-                  : "No letter until this collection has a real floor, listed count, 24h volume, or 24h sales. Transfer activity and a JPEG are not a market grade. Not wash-trade or stolen-art detection."}
+                  : "No letter until this collection has executable liquidity: a live listing or a redeemable on-chain vault. Sales history, transfer activity, a floor claim, and artwork alone cannot create a market grade. Not wash-trade or stolen-art detection."}
               </p>
               <ul className="space-y-1">
                 {breakdown.parts.map((p) => (
@@ -738,6 +787,8 @@ export default function GlobalMarketHub() {
   // stale scroll position deep into a different result set.
   const GRID_PAGE_SIZE = 60;
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
+  const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
+  const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -755,6 +806,7 @@ export default function GlobalMarketHub() {
   // within an effect" lint rule is a false positive for exactly this
   // mount-once, empty-deps-array case; it does not cascade.
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  const [onlyWatched, setOnlyWatched] = useState(() => searchParams.get("starred") === "1");
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("plank:market:watchlist-v1");
@@ -918,7 +970,14 @@ export default function GlobalMarketHub() {
   const chains = useMemo(() => {
     const seen = new Map<string, number>();
     for (const c of collections) {
-      if (isTitleJunkWithoutData(c)) continue;
+      // Chain badges are registry coverage counters, not hydrated-row
+      // counters. A newly discovered address must be visible in the total
+      // immediately even while its name/art/stats cells are still pending.
+      // RobinWood's native home row has its own dedicated card above this
+      // registry and is not a discovered collection row; counting it here
+      // made the badge exactly one higher than the traversable chain roster.
+      if (isHomeRow(c)) continue;
+      if (isSpamCollectionTitle(c.name)) continue;
       seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
     }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -927,12 +986,29 @@ export default function GlobalMarketHub() {
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
   const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
 
+  // A marketplace may intentionally group several contracts under one
+  // branded collection (XCOPY Editions is a live example). Shared art is
+  // therefore not proof that two contracts are duplicates. Preserve both
+  // canonical identities, but expose the address suffix whenever the same
+  // chain + display name occurs more than once so cards cannot masquerade as
+  // duplicate rows and users can navigate the exact contract they mean.
+  const ambiguousCollectionNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const collection of collections) {
+      const identity = `${collection.chainSlug}:${displayName(collection).trim().toLowerCase()}`;
+      counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([identity]) => identity));
+  }, [collections]);
+
   const ranked = useMemo(() => {
     const min = priceMin.trim() ? Number(priceMin) : null;
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
+      if (onlyWatched && !watchlist.has(key(c))) return false;
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (isTitleJunkWithoutData(c)) return false;
+      if (isSpamCollectionTitle(c.name)) return false;
+      if (!showShells && isTitleJunkWithoutData(c)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
       if (onlyArt && !hasArt(c) && !oneChain) return false;
@@ -962,18 +1038,56 @@ export default function GlobalMarketHub() {
       if (floorTie !== 0) return floorTie;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, watchlist, showShells, priceMin, priceMax, deadArt]);
 
   /** Catalog grid only — a name query must not blank Live rankings (that table sits above the search box). */
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     if (!q) return ranked;
-    return ranked.filter((c) => (c.name ?? "").toLowerCase().includes(q));
-  }, [ranked, search]);
+    // Search is a catalog-wide discovery operation. Feature toggles such as
+    // "has art" must not hide a collection whose indexed pieces prove that
+    // it exists (the MUGS collection did exactly that). Chain selection still
+    // scopes results; junk-name suppression remains a safety invariant.
+    return collections
+      .filter((c) =>
+        (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) &&
+        (!onlyWatched || watchlist.has(key(c))) &&
+        !isSpamCollectionTitle(c.name)
+      )
+      .map((c) => ({ c, score: collectionSearchScore(c, q) }))
+      .filter((row) => row.score >= 0)
+      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt))
+      .map((row) => row.c);
+  }, [ranked, collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
+
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2) {
+      setTokenHits([]);
+      setTokenSearchLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setTokenSearchLoading(true);
+      const qs = new URLSearchParams({ q: query });
+      if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
+      try {
+        const response = await fetch(`/api/market/multichain/token-search?${qs}`, { signal: controller.signal });
+        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[] } : null;
+        if (!controller.signal.aborted) setTokenHits(body?.tokens ?? []);
+      } catch {
+        if (!controller.signal.aborted) setTokenHits([]);
+      } finally {
+        if (!controller.signal.aborted) setTokenSearchLoading(false);
+      }
+    }, 220);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [search, chainFilter]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // URL persistence -- reflects every real filter/sort field above into the
   // query string (router.replace, not push, so filtering doesn't spam
@@ -992,13 +1106,14 @@ export default function GlobalMarketHub() {
     if (!onlyArt) params.set("art", "0");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
+    if (onlyWatched) params.set("starred", "1");
     if (showShells) params.set("shells", "1");
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract; including them would re-run this on every render for no reason.
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
   // order book, highest 24h volume as the tiebreak -- never a curated/paid
@@ -1133,6 +1248,7 @@ export default function GlobalMarketHub() {
     (onlyArt ? 1 : 0) +
     (onlyVerifiedCreator ? 1 : 0) +
     (onlyListed ? 1 : 0) +
+    (onlyWatched ? 1 : 0) +
     (priceMin.trim() ? 1 : 0) +
     (priceMax.trim() ? 1 : 0);
 
@@ -1226,6 +1342,7 @@ export default function GlobalMarketHub() {
             setOnlyArt(false);
             setOnlyVerifiedCreator(false);
             setOnlyListed(false);
+            setOnlyWatched(false);
             setPriceMin("");
             setPriceMax("");
           }}
@@ -1362,7 +1479,7 @@ export default function GlobalMarketHub() {
                         {formatCompactNative(hero.volume24hWei!).display}
                         <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
                         {(() => {
-                          const usd = toUsd(hero.volume24hWei, hero.floorPriceCurrency);
+                          const usd = toUsd(hero.volume24hWei, chainNativeAsset(hero.chainSlug));
                           return usd != null ? <span className="text-white/50">{formatUsdCompact(usd)}</span> : null;
                         })()}
                       </span>
@@ -1370,7 +1487,7 @@ export default function GlobalMarketHub() {
                       {hero.floorPriceWei && (
                         <span className="inline-flex items-center gap-1">
                           {" · "}Floor {formatCompactNative(hero.floorPriceWei).display}
-                          <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
+                          <FloorCurrencyMark collection={hero} />
                         </span>
                       )}
                     </p>
@@ -1449,6 +1566,17 @@ export default function GlobalMarketHub() {
            * stub number, not inline text.
            */}
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setOnlyWatched((value) => !value)}
+              aria-pressed={onlyWatched}
+              aria-label={onlyWatched ? `Showing ${watchlist.size} starred collections` : `Show ${watchlist.size} starred collections`}
+              title={onlyWatched ? `Showing starred collections (${watchlist.size})` : `Show starred collections (${watchlist.size})`}
+              className={`relative grid size-11 shrink-0 place-items-center border text-xl leading-none transition-all hover:-translate-y-0.5 ${onlyWatched ? "border-gold-300 bg-gold-300 text-panel-strong shadow-[0_0_18px_hsl(var(--accent-h)_var(--accent-s)_var(--accent-l-400)_/_45%)]" : "border-gold-300/45 bg-panel-strong text-gold-300 hover:bg-gold-300/10"}`}
+              style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}
+            >
+              <span aria-hidden>★</span>
+            </button>
             {chains.map(([slug, count]) => {
               const active = chainFilter.has(slug);
               const brand = chainBrandColor(slug);
@@ -1597,7 +1725,7 @@ export default function GlobalMarketHub() {
                           onClick={() => toggleWatchlist(rowKey)}
                           aria-pressed={watched}
                           aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-                          className={`text-base leading-none transition-transform duration-150 hover:scale-125 active:scale-95 ${watched ? "text-gold-300" : "text-foreground/25 hover:text-foreground/50"}`}
+                          className={`grid size-8 place-items-center rounded-md border text-base leading-none transition-all duration-150 hover:scale-110 active:scale-95 ${watched ? "border-gold-200 bg-gold-300 text-[#151006] shadow-[0_0_14px_rgba(244,201,93,.55)]" : "border-transparent text-foreground/35 hover:border-gold-300/40 hover:text-gold-200"}`}
                         >
                           {watched ? "★" : "☆"}
                         </button>
@@ -1653,7 +1781,7 @@ export default function GlobalMarketHub() {
                                 return usd != null ? formatUsdCompact(usd) : null;
                               })()}
                             />
-                            <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
+                            <FloorCurrencyMark collection={c} />
                           </span>
                         ) : (
                           <span className="text-foreground/40">—</span>
@@ -1662,6 +1790,13 @@ export default function GlobalMarketHub() {
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? (
                           `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                        ) : c.floorChangeStatus === "collecting-baseline" ? (
+                          <span
+                            className="text-foreground/40"
+                            title="No complete, comparable 24-hour floor observation exists yet. Tracking is active; no change is shown until both endpoints are evidenced."
+                          >
+                            —
+                          </span>
                         ) : (
                           <span title={emptyCellReason(c, "change")}>—</span>
                         )}
@@ -1670,7 +1805,7 @@ export default function GlobalMarketHub() {
                         {(() => {
                           const vol = windowVolumeWei(c, rankingsWindow);
                           if (!vol || vol === "0") return <span title={emptyCellReason(c, "volume")}>—</span>;
-                          const usd = toUsd(vol, c.floorPriceCurrency);
+                          const usd = toUsd(vol, chainNativeAsset(c.chainSlug));
                           return (
                             <span className="inline-flex items-center justify-end gap-1">
                               <NativeAmount wei={vol} usdLabel={usd != null ? formatUsdCompact(usd) : null} />
@@ -1834,7 +1969,7 @@ export default function GlobalMarketHub() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search collection name…"
+          placeholder="Search collections or pieces…"
           className="min-h-10 flex-1 min-w-[10rem] rounded-md border border-line bg-background px-3 text-sm text-foreground placeholder:text-foreground/30 transition-colors focus:border-gold-400/60"
         />
         {/* The grid has no table header to click, unlike the rankings table above -- same shared sortColumn/sortDir state, just a dropdown since there's no header row here. */}
@@ -1879,6 +2014,69 @@ export default function GlobalMarketHub() {
         </aside>
 
         <div className="min-w-0 flex-1">
+          {search.trim().length >= 2 && filtered.length > 0 && (
+            <section className="mb-4 space-y-2" aria-label="Matching collections">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Collections</h3>
+                <span className="text-[0.65rem] text-foreground/45">{filtered.length} matches · best matches first</span>
+              </div>
+              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+                {filtered.slice(0, 12).map((c) => (
+                  <li key={`search:${key(c)}`}>
+                    <Link href={collectionHref(c)} className="dense-card group flex h-full items-center gap-2 p-2 hover:border-line-strong">
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-wood-900">
+                        <CollectionThumb src={c.imageUrl} alt={displayName(c)} width={256} variant="tile" />
+                        <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70">
+                          <ChainIcon chainSlug={c.chainSlug} size={10} />
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-foreground">{displayName(c)}</p>
+                        <p className="truncate text-[0.6rem] text-foreground/45">{chainDisplayName(c.chainSlug)}</p>
+                        {c.totalSupply != null && <p className="text-[0.6rem] text-foreground/45">{c.totalSupply.toLocaleString()} pieces</p>}
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {search.trim().length >= 2 && (tokenSearchLoading || tokenHits.length > 0) && (
+            <section className="mb-4 space-y-2" aria-label="Matching pieces">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Individual pieces</h3>
+                <span className="text-[0.65rem] text-foreground/45">
+                  {tokenSearchLoading ? "Searching indexed pieces…" : `${tokenHits.length} matches`}
+                </span>
+              </div>
+              {tokenHits.length > 0 && (
+                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+                  {tokenHits.slice(0, 12).map((token) => (
+                    <li key={`${token.chainSlug}:${token.collectionSlug}:${token.tokenId}`}>
+                      <Link
+                        href={`/market/multichain/${encodeURIComponent(token.chainSlug)}/${encodeURIComponent(token.collectionSlug)}?q=${encodeURIComponent(token.tokenId)}&show=all`}
+                        className="dense-card group flex h-full flex-col overflow-hidden p-0 hover:border-line-strong"
+                      >
+                        <div className="relative aspect-square bg-wood-900">
+                          <CollectionThumb src={token.imageUrl} alt={token.name || `Token ${token.tokenId}`} width={512} variant="tile" />
+                          <span className="card-overlay absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60">
+                            <ChainIcon chainSlug={token.chainSlug} size={15} />
+                          </span>
+                        </div>
+                        <div className="min-w-0 p-2">
+                          <p className="truncate text-xs font-bold text-foreground">{token.name || `#${token.tokenId}`}</p>
+                          <p className="truncate text-[0.6rem] text-foreground/45">
+                            {chainDisplayName(token.chainSlug)} · #{token.tokenId}
+                            {token.rarityRank ? ` · rank ${token.rarityRank}` : ""}
+                          </p>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {filtered.length === 0 ? (
             <EmptyState
               title="No collections match"
@@ -1888,7 +2086,7 @@ export default function GlobalMarketHub() {
                   : "No tracked collections fit the current chain/feature filters — try clearing a few."
               }
             />
-          ) : (
+          ) : search.trim().length >= 2 ? null : (
             // Density scales with real available width instead of capping at
             // 4 columns forever -- flagged live 2026-08-20 ("no wasted real
             // estate"): a wide desktop monitor was stretching each card far
@@ -1929,6 +2127,11 @@ export default function GlobalMarketHub() {
                       <p className="truncate text-sm font-bold text-foreground" title={displayName(c)}>
                         {displayName(c)}
                       </p>
+                      {ambiguousCollectionNames.has(`${c.chainSlug}:${displayName(c).trim().toLowerCase()}`) && (
+                        <p className="truncate font-mono text-[0.6rem] text-gold-300/70" title={c.contractAddress}>
+                          contract {shortCollectionId(c.contractAddress)}
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1">
                         <span
                           className="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider"

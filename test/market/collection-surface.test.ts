@@ -22,6 +22,10 @@ describe("collection surface", () => {
     }
   });
 
+  it("does not impose RobinWood's supply on every Robinhood collection", () => {
+    assert.equal("catalogCap" in collectionSurface("robinhood"), false);
+  });
+
   it("gives Milady a proven extra and unknown EVM none", () => {
     const milady = catalogArtExtras(
       "eth-mainnet",

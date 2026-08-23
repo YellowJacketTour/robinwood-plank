@@ -34,24 +34,11 @@ export type HeliusSearchItem = {
 };
 
 /**
- * Real quality floor, recalibrated live 2026-08-20 ("you expect me to
- * believe there are 56 thousand solana nfts that arent lp?"): the
- * original exactly-zero filter below was too narrow -- a live random
- * sample of 200 already-tracked rows AFTER that filter was already
- * active found 95% (190/200) still sitting at num_minted <= 50, and
- * every one of a separate hand-checked sample (num_minted 3/10/20/38)
- * was a real, permissionlessly-created Metaplex Core collection with
- * literally zero real trading signal ever (confirmed against
- * plank_multichain_snapshots: 0 of the entire remaining tracked set had
- * ever produced a real floor or volume). MIN_REAL_MEMBER_COUNT=50 is
- * that real observed break point, not a guess -- the sample's next
- * bucket up (51-200) held only 6/200, 201-1000 held 2/200, 1000+ held
- * 2/200, i.e. real collections cluster clearly above 50, spam/test/farm
- * collections cluster clearly below it. Still only skips on a CONFIRMED
- * numeric value, never on a missing/unparseable field -- absence of data
- * is not evidence of low supply.
+ * A confirmed zero-member collection cannot contain a marketable piece.
+ * Small non-zero collections remain valid: activity/ranking can demote spam,
+ * but discovery must not silently erase legitimate editions.
  */
-export const MIN_REAL_MEMBER_COUNT = 50;
+export const MIN_REAL_MEMBER_COUNT = 1;
 
 export function shouldSkipZeroMemberCollection(item: HeliusSearchItem): boolean {
   const n = item.mpl_core_info?.num_minted;

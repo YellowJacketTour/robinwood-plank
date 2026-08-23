@@ -8,11 +8,14 @@
  * problem than EVM's few-thousand-candidate-contract scan).
  *
  * UniSat's own collection registry (v1/collection-indexer/collection/list)
- * sidesteps that entirely: verified live 2026-08-20, this is a real,
- * COMPLETE, paginated catalog -- `total: 2625` real collections, not an
- * estimate, not a curated top-N (unisat-collections.ts's
- * discoverTopCollections is the ranked/curated one; this is the different,
- * exhaustive one). At limit=100/page that's ~27 calls to walk in full,
+ * provides one important venue catalog: verified live 2026-08-20, that
+ * venue reported `total: 2625` collection records. This is complete only
+ * for that observed UniSat registry snapshot. It is NOT the Bitcoin
+ * inscription universe, a protocol-level collection registry, or proof
+ * that every parent/child convention and marketplace catalog is covered.
+ * It is different from the ranked/curated top-N used by
+ * unisat-collections.ts's discoverTopCollections.
+ * discoverTopCollections. At limit=100/page that's ~27 calls to walk in full,
  * genuinely achievable to exhaust completely in minutes rather than the
  * multi-hour-per-chain reality of the EVM backfill.
  *
@@ -27,6 +30,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
+import { reserveProviderCapacity, settleProviderCapacity, unisatBackgroundDayWindow } from "@/lib/market/multichain/control-plane";
 
 const API_BASE = "https://open-api.unisat.io/v1/collection-indexer/collection";
 const PAGE_SIZE = 100;
@@ -52,17 +56,25 @@ function requireApiKey(): string {
 
 async function fetchPage(start: number): Promise<{ total: number; list: UniSatCollectionListEntry[] }> {
   const key = requireApiKey();
-  const res = await fetch(`${API_BASE}/list?start=${start}&limit=${PAGE_SIZE}`, {
-    headers: { authorization: `Bearer ${key}` },
-  });
-  if (!res.ok) {
-    throw new Error(`unisat-collection-list-scan: ${res.status} ${res.statusText} fetching collection/list`);
+  const window = unisatBackgroundDayWindow();
+  if (!(await reserveProviderCapacity("unisat:default", window))) {
+    throw new Error("unisat-collection-list-scan: durable daily ceiling");
   }
-  const body = (await res.json()) as { code: number; msg: string; data: { total: number; list: UniSatCollectionListEntry[] } };
-  if (body.code !== 0) {
-    throw new Error(`unisat-collection-list-scan: API error ${body.code} ${body.msg}`);
+  try {
+    const res = await fetch(`${API_BASE}/list?start=${start}&limit=${PAGE_SIZE}`, {
+      headers: { authorization: `Bearer ${key}` },
+    });
+    if (!res.ok) {
+      throw new Error(`unisat-collection-list-scan: ${res.status} ${res.statusText} fetching collection/list`);
+    }
+    const body = (await res.json()) as { code: number; msg: string; data: { total: number; list: UniSatCollectionListEntry[] } };
+    if (body.code !== 0) {
+      throw new Error(`unisat-collection-list-scan: API error ${body.code} ${body.msg}`);
+    }
+    return body.data;
+  } finally {
+    await settleProviderCapacity("unisat:default", window, 1, true).catch(() => {});
   }
-  return body.data;
 }
 
 async function readStart(): Promise<number> {

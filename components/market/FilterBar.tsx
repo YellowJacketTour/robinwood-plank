@@ -22,6 +22,11 @@ export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "",
 type Props = {
   filters: MarketFilters;
   onChange: (next: MarketFilters) => void;
+  /** Lets collection-specific filters (traits, venue, etc.) participate in
+   * the same visible Clear all action without coupling this shared bar to
+   * their data model. */
+  onClearAll?: () => void;
+  additionalDirty?: boolean;
   /** Count after filtering, shown so an empty grid is never ambiguous. */
   resultCount: number;
   /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
@@ -39,6 +44,8 @@ type Props = {
 export default function FilterBar({
   filters,
   onChange,
+  onClearAll,
+  additionalDirty = false,
   resultCount,
   rarityAvailable,
   orientation = "inline",
@@ -52,7 +59,8 @@ export default function FilterBar({
     filters.minEth !== "" ||
     filters.maxEth !== "" ||
     filters.tier !== "all" ||
-    Boolean(filters.tiers?.length);
+    Boolean(filters.tiers?.length) ||
+    additionalDirty;
 
   if (orientation === "sidebar") {
     return (
@@ -63,7 +71,7 @@ export default function FilterBar({
           </span>
           <button
             type="button"
-            onClick={() => onChange(EMPTY_FILTERS)}
+            onClick={() => (onClearAll ? onClearAll() : onChange(EMPTY_FILTERS))}
             disabled={!dirty}
             className="min-h-9 rounded-md border border-line px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
           >

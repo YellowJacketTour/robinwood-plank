@@ -30,6 +30,15 @@ type CatalogSale = {
   txHash?: string;
 };
 
+type SalesAggregate = {
+  saleCount: number;
+  sales24h: number;
+  pricedSales24h: number;
+  unpricedSales24h: number;
+  volume24hWei: string | null;
+  totalVolumeWei: string | null;
+};
+
 type Range = "24H" | "7D" | "ALL";
 
 const RANGES: Range[] = ["24H", "7D", "ALL"];
@@ -78,6 +87,7 @@ export default function ActivityStats({
     failed: boolean;
   }>({ requestKey: -1, sales: [], failed: false });
   const [range, setRange] = useState<Range>("7D");
+  const [aggregate, setAggregate] = useState<SalesAggregate | null>(null);
   const [referenceNow, setReferenceNow] = useState(0);
   const catalogLoading = catalogState.requestKey !== reloadKey;
   const catalogFailed =
@@ -90,14 +100,15 @@ export default function ActivityStats({
     // This aggregate request is intentionally retried with the catalog. It
     // warms the shared key used by CollectionStats/EventCountdown without
     // inventing aggregate values in this component.
-    void swrJson<{
-      saleCount?: number;
-      highestWei?: string | null;
-    }>("/api/market/sales-stats", {
+    void swrJson<SalesAggregate>("/api/market/sales-stats", {
       ttlMs: 60_000,
       swrMs: 300_000,
       session: true,
-    }).catch(() => {});
+    })
+      .then((data) => {
+        if (!cancelled) setAggregate(data);
+      })
+      .catch(() => {});
 
     swrJson<{ sales?: CatalogSale[] }>("/api/market/sales-history", {
       ttlMs: 60_000,
@@ -198,10 +209,23 @@ export default function ActivityStats({
   const last24h = priced.filter((sale) => sale.t >= dayAgo);
   const sumWei = (rows: typeof priced) =>
     rows.reduce((total, sale) => total + sale.wei, BigInt(0));
-  const totalVolumeWei = sumWei(priced);
-  const volume24hWei = sumWei(last24h);
+  const pricedTotalVolumeWei = sumWei(priced);
+  const pricedVolume24hWei = sumWei(last24h);
+  const safeAggregateWei = (value: string | null | undefined, fallback: bigint) => {
+    try {
+      return value != null ? BigInt(value) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  const totalVolumeWei = safeAggregateWei(aggregate?.totalVolumeWei, pricedTotalVolumeWei);
+  const volume24hWei = safeAggregateWei(aggregate?.volume24hWei, pricedVolume24hWei);
   const averageWei =
-    priced.length > 0 ? totalVolumeWei / BigInt(priced.length) : null;
+    priced.length > 0 ? pricedTotalVolumeWei / BigInt(priced.length) : null;
+  const sales24h = aggregate?.sales24h ?? last24h.length;
+  const totalSales = aggregate?.saleCount ?? priced.length;
+  const has24hVolume = aggregate ? aggregate.volume24hWei != null : priced.length > 0;
+  const hasTotalVolume = aggregate ? aggregate.totalVolumeWei != null : priced.length > 0;
 
   const series = useMemo(() => {
     if (range === "ALL") return priced;
@@ -252,26 +276,36 @@ export default function ActivityStats({
 
   return (
     <div className="space-y-3">
-      <dl className="grid grid-cols-2 gap-2">
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {stat(
           "24h volume",
           waitingForData
             ? "•••"
-            : priced.length > 0
+            : has24hVolume
               ? `${formatTokenAmount(volume24hWei.toString(), 18, 4)} Ξ`
               : "—",
           waitingForData,
-          priced.length > 0 ? volume24hWei : null
+          has24hVolume ? volume24hWei : null
+        )}
+        {stat(
+          "24h sales",
+          waitingForData ? "•••" : historyUnavailable ? "—" : String(sales24h),
+          waitingForData
         )}
         {stat(
           "Total volume",
           waitingForData
             ? "•••"
-            : priced.length > 0
+            : hasTotalVolume
               ? `${formatTokenAmount(totalVolumeWei.toString(), 18, 3)} Ξ`
               : "—",
           waitingForData,
-          priced.length > 0 ? totalVolumeWei : null
+          hasTotalVolume ? totalVolumeWei : null
+        )}
+        {stat(
+          "Total sales",
+          waitingForData ? "•••" : historyUnavailable ? "—" : String(totalSales),
+          waitingForData
         )}
         {stat(
           "Priced sales",

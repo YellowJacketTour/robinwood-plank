@@ -16,6 +16,7 @@ import { parseTokenAmount } from "@/lib/trade";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import EthUsdValue from "@/components/market/EthUsdValue";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
+import CriteriaBidValueHud from "@/components/market/CriteriaBidValueHud";
 
 type Props = {
   account: string | null;
@@ -179,10 +180,6 @@ export default function OfferForm({
   const openReview = () => {
     setError(null);
     setSuccess(null);
-    if (!account) {
-      onConnect?.();
-      return;
-    }
     const wei = parseTokenAmount(priceEth, 18);
     if (wei === null || wei <= BigInt(0)) {
       setError("Enter an amount.");
@@ -326,7 +323,7 @@ export default function OfferForm({
                   onClick={() => void submit()}
                   className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
                 >
-                  {busy ? "Confirm in wallet…" : "Continue to wallet"}
+                  {busy ? "Confirm in wallet…" : account ? "Continue to wallet" : "Connect wallet & continue"}
                 </button>
               </div>
             </div>
@@ -418,6 +415,7 @@ export default function OfferForm({
                 snapshotted into the signed order.
               </p>
             )}
+            <CriteriaBidValueHud offerWei={offerWei} qualifyingIds={qualifyingIds} listings={listings} currencySymbol="WETH" totalFeeBps={collection.royaltyBps + collection.feeBps} />
           </div>
         )}
 
@@ -468,8 +466,6 @@ export default function OfferForm({
         >
           {busy
             ? "Signing…"
-            : !account
-              ? "Connect to build this bid"
             : traitMode
               ? "Review & sign criteria bid"
               : "Review offer"}

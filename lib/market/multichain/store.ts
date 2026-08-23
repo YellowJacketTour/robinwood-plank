@@ -330,6 +330,12 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
      WHERE chain_slug = $1
        AND nft_contract IS NOT NULL
        AND price_wei IS NOT NULL
+       -- Snapshot volume_24h_wei is denominated in the chain's native
+       -- 18-decimal unit. ERC-20 atomic values (often 6 decimals) cannot
+       -- be added to it. Those remain durably preserved in payment_legs
+       -- for USD-normalized aggregation; excluding them here is honest
+       -- and prevents corrupt headline volume until that projection runs.
+       AND currency_token IS NULL
        AND block_timestamp > NOW() - INTERVAL '24 hours'
      GROUP BY LOWER(nft_contract)`,
     [chainSlug]
@@ -392,15 +398,127 @@ export async function updateCollectionFloorOnly(
        sync_error = NULL`,
     [id, floor.floorPriceWei, floor.floorPriceCurrency, floor.floorPriceMarketplace]
   );
+  await recordFloorObservation(chainSlug, contractAddress, {
+    priceAtomic: floor.floorPriceWei,
+    currency: floor.floorPriceCurrency,
+    marketplace: floor.floorPriceMarketplace,
+    listedCount: null,
+    source: "collection-floor-adapter",
+  });
+}
+
+export type FloorChangeObservation = {
+  currentPriceAtomic: string;
+  comparisonPriceAtomic: string;
+  currentObservedAt: string;
+  comparisonObservedAt: string;
+  changePct: number;
+};
+
+/** Persist an exact executable floor without confusing it with a sale price. */
+export async function recordFloorObservation(
+  chainSlug: string,
+  contractAddress: string,
+  observation: {
+    priceAtomic: string | null;
+    currency: string | null;
+    marketplace: string | null;
+    listedCount: number | null;
+    source: string;
+  }
+): Promise<void> {
+  const price = nonzeroWei(observation.priceAtomic);
+  if (!price || !observation.currency || !observation.marketplace) return;
+  const result = await postgresQuery<{ id: number }>(
+    `INSERT INTO plank_collection_floor_observations
+       (collection_id, price_atomic, currency, marketplace, listed_count, source)
+     SELECT id, $3, $4, $5, $6, $7
+     FROM plank_multichain_collections
+     WHERE chain_slug = $1 AND contract_address = $2
+     ON CONFLICT (collection_id, marketplace, observation_bucket) DO UPDATE SET
+       price_atomic = EXCLUDED.price_atomic,
+       currency = EXCLUDED.currency,
+       listed_count = EXCLUDED.listed_count,
+       source = EXCLUDED.source,
+       observed_at = NOW()
+     RETURNING id`,
+    [
+      chainSlug,
+      normalizeContractAddress(chainSlug, contractAddress),
+      price,
+      observation.currency,
+      observation.marketplace,
+      observation.listedCount,
+      observation.source,
+    ]
+  );
+  if (result.rowCount !== 1) {
+    throw new Error(
+      `Cannot record floor observation for untracked collection ${chainSlug}:${contractAddress}.`
+    );
+  }
+}
+
+/**
+ * Compare the latest observation with the closest observation at or before
+ * 24h ago. Returns null until the system has genuinely observed both ends.
+ */
+export async function getObservedFloorChange24h(
+  chainSlug: string,
+  contractAddress: string,
+  marketplace?: string
+): Promise<FloorChangeObservation | null> {
+  const result = await postgresQuery<{
+    current_price: string;
+    comparison_price: string;
+    current_at: string;
+    comparison_at: string;
+  }>(
+    `WITH target AS (
+       SELECT id FROM plank_multichain_collections
+       WHERE chain_slug = $1 AND contract_address = $2
+     ), current_floor AS (
+       SELECT price_atomic, observed_at
+       FROM plank_collection_floor_observations
+       WHERE collection_id = (SELECT id FROM target)
+         AND ($3::text IS NULL OR marketplace = $3)
+       ORDER BY observed_at DESC LIMIT 1
+     ), comparison_floor AS (
+       SELECT price_atomic, observed_at
+       FROM plank_collection_floor_observations
+       WHERE collection_id = (SELECT id FROM target)
+         AND ($3::text IS NULL OR marketplace = $3)
+         AND observed_at <= NOW() - INTERVAL '24 hours'
+       ORDER BY observed_at DESC LIMIT 1
+     )
+     SELECT c.price_atomic::text AS current_price,
+            p.price_atomic::text AS comparison_price,
+            c.observed_at::text AS current_at,
+            p.observed_at::text AS comparison_at
+     FROM current_floor c CROSS JOIN comparison_floor p`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress), marketplace ?? null]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const current = BigInt(row.current_price);
+  const comparison = BigInt(row.comparison_price);
+  if (comparison <= 0n) return null;
+  return {
+    currentPriceAtomic: row.current_price,
+    comparisonPriceAtomic: row.comparison_price,
+    currentObservedAt: row.current_at,
+    comparisonObservedAt: row.comparison_at,
+    changePct: (Number(current - comparison) / Number(comparison)) * 100,
+  };
 }
 
 /** Write a real listed-count and/or total-supply without clobbering the other, or floor. 0 is a real count (nothing listed), null means skip that column. */
 export async function updateCollectionSupplyFields(
   chainSlug: string,
   contractAddress: string,
-  supply: { listedCount: number | null; totalSupply: number | null }
+  supply: { listedCount: number | null; totalSupply: number | null; holderCount?: number | null }
 ): Promise<void> {
-  if (supply.listedCount == null && supply.totalSupply == null) return;
+  if (supply.listedCount == null && supply.totalSupply == null && supply.holderCount == null) return;
   const collection = await postgresQuery<{ id: number }>(
     `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
     [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
@@ -410,12 +528,13 @@ export async function updateCollectionSupplyFields(
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
-     VALUES ($1, NULL, NULL, NULL, $2, $3, NULL, NOW(), NULL)
+     VALUES ($1, NULL, NULL, NULL, $2, $3, $4, NOW(), NULL)
      ON CONFLICT (collection_id) DO UPDATE SET
        total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
        listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
+       holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
        synced_at = NOW()`,
-    [id, supply.totalSupply, supply.listedCount]
+    [id, supply.totalSupply, supply.listedCount, supply.holderCount ?? null]
   );
 }
 
@@ -561,6 +680,64 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
   }));
 }
 
+/** Bounded keyset page for edge-cached market feeds. Unlike the legacy hub
+ * dump, latency and payload size stay constant as the roster grows. */
+export async function listCollectionFeed(input: {
+  limit?: number;
+  afterId?: number | null;
+  chainSlug?: string | null;
+} = {}): Promise<{ collections: CollectionWithSnapshot[]; nextCursor: number | null }> {
+  const limit = Math.min(Math.max(input.limit ?? 60, 1), 100);
+  const clauses = ["c.id > $1"];
+  const params: unknown[] = [Math.max(0, input.afterId ?? 0)];
+  if (input.chainSlug) {
+    params.push(input.chainSlug);
+    clauses.push(`c.chain_slug = $${params.length}`);
+  }
+  params.push(limit + 1);
+  const result = await postgresQuery<CollectionRow & {
+    floor_price_wei: string | null; floor_price_currency: string | null; floor_price_marketplace: string | null;
+    total_supply: string | null; listed_count: number | null; synced_at: string | null; sync_error: string | null;
+    volume_24h_wei: string | null; sales_24h: number | null; volume_7d_wei: string | null; sales_7d: number | null;
+    volume_30d_wei: string | null; sales_30d: number | null; previous_floor_price_wei: string | null;
+    holder_count: number | null; floor_change_pct: number | null;
+  }>(
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url,
+            c.is_vault_backed, c.creator_handle, c.creator_address, c.creator_ens,
+            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count,
+            s.synced_at, s.sync_error, s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d,
+            s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei, s.holder_count, s.floor_change_pct
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY c.id ASC
+     LIMIT $${params.length}`,
+    params
+  );
+  const hasMore = result.rows.length > limit;
+  const rows = result.rows.slice(0, limit);
+  const collections = rows.map((row) => ({
+    ...rowToCollection(row),
+    floorPriceWei: row.floor_price_wei,
+    floorPriceCurrency: row.floor_price_currency,
+    floorPriceMarketplace: row.floor_price_marketplace,
+    totalSupply: row.total_supply == null ? null : Number(row.total_supply),
+    listedCount: row.listed_count,
+    syncedAt: row.synced_at,
+    syncError: row.sync_error,
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
+    previousFloorPriceWei: row.previous_floor_price_wei,
+    holderCount: row.holder_count,
+    floorChangePct: row.floor_change_pct,
+  }));
+  return { collections, nextCursor: hasMore && rows.length ? Number(rows[rows.length - 1].id) : null };
+}
+
 /**
  * Writes a real, freshly-fetched holder count for one collection -- the
  * on-demand path (see fetchHolderCount in alchemy-nft.ts, called from the
@@ -592,14 +769,15 @@ export async function updateHolderCount(chainSlug: string, contractAddress: stri
 export async function getCollectionSupplyStats(
   chainSlug: string,
   contractAddress: string
-): Promise<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null; floorPriceWei: string | null } | null> {
+): Promise<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null; floorPriceWei: string | null; floorPriceCurrency: string | null } | null> {
   const result = await postgresQuery<{
     total_supply: string | null;
     listed_count: number | null;
     holder_count: number | null;
     floor_price_wei: string | null;
+    floor_price_currency: string | null;
   }>(
-    `SELECT s.total_supply, s.listed_count, s.holder_count, s.floor_price_wei
+    `SELECT s.total_supply, s.listed_count, s.holder_count, s.floor_price_wei, s.floor_price_currency
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1 AND c.contract_address = $2
@@ -613,6 +791,7 @@ export async function getCollectionSupplyStats(
     listedCount: row.listed_count,
     holderCount: row.holder_count,
     floorPriceWei: row.floor_price_wei,
+    floorPriceCurrency: row.floor_price_currency,
   };
 }
 

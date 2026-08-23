@@ -44,7 +44,11 @@ export async function listForeignRarityTokens(
   limit: number,
   opts?: { sort?: "id" | "rank" | "rank-desc"; tier?: string | null }
 ): Promise<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>> {
-  const cap = Math.min(Math.max(limit, 1), 2000);
+  // Keep this fallback symmetric with the canonical token projection and
+  // collection surface. The old 2,000 ceiling made a fully indexed 5,876
+  // piece collection appear truncated whenever its projection row was
+  // temporarily unavailable, even though every rarity row already existed.
+  const cap = Math.min(Math.max(limit, 1), 800);
   const sort = opts?.sort ?? "id";
   const tier = opts?.tier?.trim() || null;
   const orderSql =
@@ -143,14 +147,14 @@ export type ForeignTraitIndex = Record<string, Record<string, string[]>>;
 export async function getForeignTraitIndex(
   chainSlug: string,
   collectionSlug: string
-): Promise<{ traitIndex: ForeignTraitIndex | null; sampleSize: number; indexedAt: string | null }> {
-  const result = await postgresQuery<{ trait_index: ForeignTraitIndex | null; sample_size: number; indexed_at: string }>(
-    `SELECT trait_index, sample_size, indexed_at FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+): Promise<{ traitIndex: ForeignTraitIndex | null; sampleSize: number; indexedAt: string | null; partial: boolean }> {
+  const result = await postgresQuery<{ trait_index: ForeignTraitIndex | null; sample_size: number; indexed_at: string; partial: boolean }>(
+    `SELECT trait_index, sample_size, indexed_at, partial FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
     [chainSlug, collectionSlug]
   );
   const row = result.rows[0];
-  if (!row) return { traitIndex: null, sampleSize: 0, indexedAt: null };
-  return { traitIndex: row.trait_index, sampleSize: row.sample_size, indexedAt: row.indexed_at };
+  if (!row) return { traitIndex: null, sampleSize: 0, indexedAt: null, partial: true };
+  return { traitIndex: row.trait_index, sampleSize: row.sample_size, indexedAt: row.indexed_at, partial: row.partial };
 }
 
 /**
@@ -222,11 +226,12 @@ export async function replaceForeignRarity(
         );
       }
       await client.query(
-        `INSERT INTO plank_foreign_rarity_collections (chain_slug, collection_slug, sample_size, trait_index, indexed_at)
-         VALUES ($1, $2, $3, $4, NOW())
+        `INSERT INTO plank_foreign_rarity_collections (chain_slug, collection_slug, sample_size, trait_index, partial, indexed_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT (chain_slug, collection_slug) DO UPDATE SET
-           sample_size = EXCLUDED.sample_size, trait_index = EXCLUDED.trait_index, indexed_at = NOW()`,
-        [chainSlug, key, snapshot.sampleSize, JSON.stringify(traitIndex)]
+           sample_size = EXCLUDED.sample_size, trait_index = EXCLUDED.trait_index,
+           partial = EXCLUDED.partial, indexed_at = NOW()`,
+        [chainSlug, key, snapshot.sampleSize, JSON.stringify(traitIndex), Boolean(snapshot.partial)]
       );
     }
     await client.query("COMMIT");

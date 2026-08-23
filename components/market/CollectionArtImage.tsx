@@ -77,7 +77,7 @@ export default function CollectionArtImage({
       alt={alt}
       fill
       sizes={sizes}
-      className={`object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04] ${pixel ? "[image-rendering:pixelated]" : ""}`}
+      className={`${variant === "hero" ? "object-cover" : "object-contain"} transition-transform duration-300 ease-out group-hover:scale-[1.04] ${pixel ? "[image-rendering:pixelated]" : ""}`}
       unoptimized
       priority={priority}
       loading={priority ? undefined : "lazy"}
