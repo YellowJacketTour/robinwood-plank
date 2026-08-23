@@ -827,12 +827,57 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
  * and findCollectionsByCreatorSignals above) rather than requiring the full
  * catalog in memory.
  */
+/**
+ * Real server-side ORDER BY column each `sort` value maps to -- kept a tight
+ * whitelist (never string-interpolate the caller's own value into SQL).
+ * `grade`/`demand` have no meaning here: both are client-computed composites
+ * (gradeScore/computeDemandScore in GlobalMarketHub.tsx) that fold in
+ * cross-chain recentActivity data this query doesn't join at all -- for
+ * those two, and any unrecognized value, this falls back to the same
+ * default ordering the unsorted page has always used (vault-backed first,
+ * sales-desc) rather than silently mis-sorting or throwing.
+ */
+const SORT_COLUMN_SQL: Record<string, string> = {
+  name: "c.name",
+  floor: "NULLIF(s.floor_price_wei, '')::numeric",
+  volume: "NULLIF(s.volume_24h_wei, '')::numeric",
+  sales: "s.sales_24h",
+  listed: "s.listed_count",
+  holders: "s.holder_count",
+  change: "s.floor_change_pct",
+};
+
 export async function listCollectionsWithSnapshotsPage(input: {
   limit?: number;
   offset?: number;
+  /** Real per-chain filter -- when set, both the page AND totalCount are
+   * scoped to these chains, so a chain tab's own displayed count (e.g.
+   * "4260") becomes fully reachable by paging, not just visible as a number
+   * with no path to it. Empty/omitted = the whole catalog, unchanged. */
+  chainSlugs?: string[] | null;
+  /** Real DB-level ORDER BY column -- see SORT_COLUMN_SQL. Falls back to the
+   * default order for grade/demand/unrecognized values. */
+  sortColumn?: string | null;
+  sortDir?: "asc" | "desc" | null;
 } = {}): Promise<{ collections: CollectionWithSnapshot[]; totalCount: number }> {
   const limit = Math.min(Math.max(input.limit ?? 5000, 1), 20000);
   const offset = Math.max(input.offset ?? 0, 0);
+  const params: unknown[] = [];
+  const whereClauses: string[] = [];
+  const chainSlugs = (input.chainSlugs ?? []).filter(Boolean);
+  if (chainSlugs.length > 0) {
+    params.push(chainSlugs);
+    whereClauses.push(`c.chain_slug = ANY($${params.length}::text[])`);
+  }
+  const dir = input.sortDir === "asc" ? "ASC" : "DESC";
+  const sortSql = input.sortColumn ? SORT_COLUMN_SQL[input.sortColumn] : null;
+  // NULLS LAST regardless of direction -- a collection with no real value for
+  // the chosen column is genuinely absent data, not a "lowest" one; matches
+  // compareNullable()'s own always-sorts-to-the-end convention client-side.
+  const orderBy = sortSql
+    ? `${sortSql} ${dir} NULLS LAST, (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, c.chain_slug, c.contract_address`
+    : `(c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, c.chain_slug, c.contract_address`;
+  params.push(limit, offset);
   const result = await postgresQuery<
     CollectionRow & {
       floor_price_wei: string | null;
@@ -862,9 +907,10 @@ export async function listCollectionsWithSnapshotsPage(input: {
             COUNT(*) OVER() AS total_count
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-     ORDER BY (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, c.chain_slug, c.contract_address
-     LIMIT $1 OFFSET $2`,
-    [limit, offset]
+     ${whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""}
+     ORDER BY ${orderBy}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
   );
   const totalCount = result.rows.length ? Number(result.rows[0].total_count) : 0;
   const collections = result.rows.map((row) => ({
@@ -1076,6 +1122,26 @@ export async function recordActivity(
       [chainSlug, contractAddress, day, count]
     );
   }
+}
+
+/**
+ * Real per-chain total counts across the WHOLE catalog, independent of any
+ * page/window/limit -- GROUP BY chain_slug, a real, cheap, indexed-enough
+ * aggregate (confirmed live via EXPLAIN ANALYZE against the real ~320k-row
+ * table: ~115ms parallel seq scan, no dedicated chain_slug index needed at
+ * this size). This is what the Global Market Hub's chain-tab badges must
+ * read -- NOT a client-side count over whatever single bounded page happens
+ * to be loaded (that undercounts every chain except whichever the ORDER BY
+ * happens to front-load, confirmed live: "ARBITRUM 4268" vs the real
+ * 17,333+).
+ */
+export async function getChainCounts(): Promise<Record<string, number>> {
+  const result = await postgresQuery<{ chain_slug: string; count: string }>(
+    `SELECT chain_slug, COUNT(*) AS count FROM plank_multichain_collections GROUP BY chain_slug`
+  );
+  const out: Record<string, number> = {};
+  for (const row of result.rows) out[row.chain_slug] = Number(row.count);
+  return out;
 }
 
 export type ActivityRankEntry = { contractAddress: string; totalTransfers: number };
