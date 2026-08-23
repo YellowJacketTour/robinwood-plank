@@ -298,9 +298,13 @@ export type GlobalTokenSearchHit = ProjectedCollectionToken & {
 
 /**
  * Searches the shared token projection, never an upstream provider. Exact
- * token ids rank first, then names and ids by prefix. The bounded result set
- * makes this safe for the global market while the projection grows to many
- * millions of rows; empty queries are intentionally rejected by the route.
+ * token ids rank first, then names and ids by prefix; within each relevance
+ * bucket, rows with a real image_url sort ahead of not-yet-enriched rows
+ * (still indexed columns, no extra computation) so a wall of "ART PENDING"
+ * cards doesn't bury real enriched matches -- unenriched rows are never
+ * hidden, only deprioritized. The bounded result set makes this safe for the
+ * global market while the projection grows to many millions of rows; empty
+ * queries are intentionally rejected by the route.
  */
 export async function searchProjectedTokens(input: {
   query: string;
@@ -341,6 +345,7 @@ export async function searchProjectedTokens(input: {
      FROM plank_collection_tokens
      WHERE ${where}
      ORDER BY CASE WHEN token_id = $1 THEN 0 WHEN token_id ILIKE $2 THEN 1 ELSE 2 END,
+       (image_url IS NULL),
        projected_at DESC
      LIMIT $${params.length}`,
     params
