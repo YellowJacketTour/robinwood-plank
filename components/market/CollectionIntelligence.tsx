@@ -27,12 +27,46 @@ function Donut({ rows, label }: { rows: Array<[string, number]>; label: string }
   return <div className="flex min-w-0 items-center gap-3"><div className="grid size-28 shrink-0 place-items-center rounded-full" style={{ background: total ? `conic-gradient(${gradient})` : "rgba(255,255,255,.06)" }}><div className="grid size-16 place-items-center rounded-full bg-panel text-center"><span className="text-lg font-black tabular-nums text-gold-300">{total.toLocaleString()}</span></div></div><div className="min-w-0 space-y-1"><p className="text-[0.58rem] font-black uppercase tracking-wider text-foreground/45">{label}</p>{rows.slice(0, 6).map(([name, value], index) => <div key={name} className="flex items-center gap-1.5 text-[0.65rem]"><span className="size-2 rounded-full" style={{ background: CHART_COLORS[index % CHART_COLORS.length] }}/><span className="min-w-0 flex-1 truncate">{name}</span><span className="tabular-nums text-foreground/55">{total ? pct(value / total * 100) : "0%"}</span></div>)}</div></div>;
 }
 
-function DepthCurve({ prices }: { prices: number[] }) {
-  const sorted = [...prices].filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
-  if (sorted.length < 2) return <div className="grid min-h-40 place-items-center text-xs text-foreground/40">More priced listings are needed for a depth curve.</div>;
-  const cap = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * .95))];
-  const points = sorted.map((price, index) => `${(index / (sorted.length - 1)) * 100},${92 - Math.min(price / cap, 1) * 78}`).join(" ");
-  return <div><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-40 w-full overflow-visible" role="img" aria-label="Cumulative listing depth by relative price"><defs><linearGradient id="depth-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b47cff" stopOpacity=".6"/><stop offset="1" stopColor="#b47cff" stopOpacity="0"/></linearGradient></defs><polygon points={`0,100 ${points} 100,100`} fill="url(#depth-fill)"/><polyline points={points} fill="none" stroke="#f4c95d" strokeWidth="1.6" vectorEffect="non-scaling-stroke"/><line x1="0" y1="92" x2="100" y2="92" stroke="rgba(255,255,255,.18)" strokeWidth=".5" vectorEffect="non-scaling-stroke"/></svg><div className="flex justify-between text-[0.58rem] text-foreground/40"><span>Floor</span><span>95th percentile ask</span></div></div>;
+function formatAtomic18(value: string): string {
+  try {
+    const atomic = BigInt(value);
+    const whole = atomic / 10n ** 18n;
+    const fraction = (atomic % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "").slice(0, 6);
+    return `${whole}${fraction ? `.${fraction}` : ""}`;
+  } catch { return value; }
+}
+
+function DepthCurve({ listings }: { listings: Listing[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const rows = useMemo(() => listings
+    .filter((row) => { try { return BigInt(row.priceWei) > 0n; } catch { return false; } })
+    .sort((a, b) => { const left = BigInt(a.priceWei), right = BigInt(b.priceWei); return left < right ? -1 : left > right ? 1 : 0; }), [listings]);
+  if (rows.length < 2) return <div className="grid min-h-40 place-items-center text-xs text-foreground/40">At least two verified live asks are needed for an ask ladder.</div>;
+  const numeric = rows.map((row) => Number(row.priceWei));
+  const floor = numeric[0];
+  const cap = numeric[Math.min(numeric.length - 1, Math.floor(numeric.length * .95))];
+  const x = (index: number) => 5 + (index / Math.max(1, rows.length - 1)) * 90;
+  const y = (price: number) => 92 - Math.min(price / cap, 1) * 78;
+  const points = numeric.map((price, index) => `${x(index)},${y(price)}`).join(" ");
+  const activeIndex = hovered ?? 0;
+  const active = rows[activeIndex];
+  const premium = floor ? (numeric[activeIndex] / floor - 1) * 100 : 0;
+  const nearest = (clientX: number, element: SVGSVGElement) => {
+    const rect = element.getBoundingClientRect();
+    const chartX = ((clientX - rect.left) / rect.width * 100 - 5) / 90;
+    return Math.max(0, Math.min(rows.length - 1, Math.round(chartX * (rows.length - 1))));
+  };
+  return <div>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-44 w-full touch-none overflow-visible" role="application" aria-label="Inspectable live ask ladder" onPointerMove={(event) => setHovered(nearest(event.clientX, event.currentTarget))} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setHovered(nearest(event.clientX, event.currentTarget)); }} onPointerLeave={() => setHovered(null)}>
+      <defs><linearGradient id="depth-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b47cff" stopOpacity=".6"/><stop offset="1" stopColor="#b47cff" stopOpacity="0"/></linearGradient></defs>
+      <polygon points={`5,100 ${points} 95,100`} fill="url(#depth-fill)"/><polyline points={points} fill="none" stroke="#f4c95d" strokeWidth="1.6" vectorEffect="non-scaling-stroke"/><line x1="5" y1="92" x2="95" y2="92" stroke="rgba(255,255,255,.18)" strokeWidth=".5" vectorEffect="non-scaling-stroke"/>
+      <line x1={x(activeIndex)} x2={x(activeIndex)} y1="8" y2="94" stroke="#fff" strokeDasharray="2 2" opacity=".45" vectorEffect="non-scaling-stroke"/><circle cx={x(activeIndex)} cy={y(numeric[activeIndex])} r="2.2" fill="#fff" stroke="#f4c95d" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+    </svg>
+    <div className="flex justify-between text-[0.58rem] text-foreground/40"><span>Floor ask</span><span>95th-percentile display ceiling</span></div>
+    <div className="mt-2 grid gap-2 rounded-md border border-line bg-panel/75 p-2 text-[0.65rem] sm:grid-cols-2 lg:grid-cols-4">
+      <div><span className="block uppercase text-foreground/40">Token</span><strong className="break-all">#{active.tokenId}</strong></div><div><span className="block uppercase text-foreground/40">Exact ask</span><strong>{formatAtomic18(active.priceWei)} native</strong></div><div><span className="block uppercase text-foreground/40">Depth / premium</span><strong>{activeIndex + 1} asks · {premium.toFixed(1)}%</strong></div><div><span className="block uppercase text-foreground/40">Maker</span><strong className="break-all">{active.maker || "Unavailable"}</strong></div>
+    </div>
+  </div>;
 }
 
 function gini(values: number[]): number {
@@ -106,7 +140,7 @@ export default function CollectionIntelligence(props: {
       {landscape === "space" ? <CollectionEvidenceSpace sales={props.sales}/> : <EvidenceTimeline sales={props.sales} range={timeRange} onRange={setTimeRange}/>} 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} title={`${label}: ${value}`} className="group rounded-lg border border-line bg-background/65 p-3 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/10"><p className="text-[0.58rem] font-black uppercase text-foreground/40">{label}</p><p className="mt-1 break-words font-display text-base text-gold-300">{value}</p></div>)}</div>
       <div className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">
-        <article className="rounded-lg border border-purple-400/35 bg-background/55 p-3 backdrop-blur-sm"><div className="mb-2"><p className="text-[0.58rem] font-black uppercase tracking-wider text-purple-300">Liquidity topology</p><h4 className="font-display text-base text-gold-300">Current cumulative order-book depth</h4><p className="text-[0.62rem] text-foreground/40">This is a current ask distribution—not a time series. Each horizontal step adds a live ask; price is clipped at the 95th percentile.</p></div><DepthCurve prices={listingPrices}/></article>
+        <article className="rounded-lg border border-purple-400/35 bg-background/55 p-3 backdrop-blur-sm"><div className="mb-2"><p className="text-[0.58rem] font-black uppercase tracking-wider text-purple-300">Executable liquidity</p><h4 className="font-display text-base text-gold-300">Ask ladder & floor premium</h4><p className="text-[0.62rem] text-foreground/40">Move or drag across every loaded live ask to inspect its exact token, maker, native price, cumulative depth, and premium to floor. The 95th percentile only bounds the drawing; values remain exact.</p></div><DepthCurve listings={props.listings}/></article>
         <article className="grid gap-4 rounded-lg border border-gold-400/35 bg-background/55 p-3 backdrop-blur-sm sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"><Donut rows={currencyRows} label="Selected sale currency mix"/><Donut rows={rarityRows} label="Indexed rarity composition"/></article>
       </div>
     <div className="grid gap-3 rounded-lg border border-line bg-background/35 p-3 md:grid-cols-2"><Bar label="Supply currently listed" value={listedPct}/><Bar label="Unique-holder coverage" value={holderPct}/><Bar label="Rarity coverage" value={rarityPct}/><Bar label="Transaction provenance" value={provenancePct}/></div>

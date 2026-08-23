@@ -8,11 +8,14 @@
  * problem than EVM's few-thousand-candidate-contract scan).
  *
  * UniSat's own collection registry (v1/collection-indexer/collection/list)
- * sidesteps that entirely: verified live 2026-08-20, this is a real,
- * COMPLETE, paginated catalog -- `total: 2625` real collections, not an
- * estimate, not a curated top-N (unisat-collections.ts's
+ * provides one important venue catalog: verified live 2026-08-20, that
+ * venue reported `total: 2625` collection records. This is complete only
+ * for that observed UniSat registry snapshot. It is NOT the Bitcoin
+ * inscription universe, a protocol-level collection registry, or proof
+ * that every parent/child convention and marketplace catalog is covered.
+ * It is not the curated top-N used by unisat-collections.ts's
  * discoverTopCollections is the ranked/curated one; this is the different,
- * exhaustive one). At limit=100/page that's ~27 calls to walk in full,
+ * discoverTopCollections. At limit=100/page that's ~27 calls to walk in full,
  * genuinely achievable to exhaust completely in minutes rather than the
  * multi-hour-per-chain reality of the EVM backfill.
  *

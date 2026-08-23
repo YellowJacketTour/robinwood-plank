@@ -811,6 +811,7 @@ export default function GlobalMarketHub() {
   // within an effect" lint rule is a false positive for exactly this
   // mount-once, empty-deps-array case; it does not cascade.
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  const [onlyWatched, setOnlyWatched] = useState(() => searchParams.get("starred") === "1");
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("plank:market:watchlist-v1");
@@ -1009,6 +1010,7 @@ export default function GlobalMarketHub() {
     const min = priceMin.trim() ? Number(priceMin) : null;
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
+      if (onlyWatched && !watchlist.has(key(c))) return false;
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (isSpamCollectionTitle(c.name)) return false;
       if (!showShells && isTitleJunkWithoutData(c)) return false;
@@ -1041,7 +1043,7 @@ export default function GlobalMarketHub() {
       if (floorTie !== 0) return floorTie;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, watchlist, showShells, priceMin, priceMax, deadArt]);
 
   /** Catalog grid only — a name query must not blank Live rankings (that table sits above the search box). */
   const filtered = useMemo(() => {
@@ -1052,12 +1054,16 @@ export default function GlobalMarketHub() {
     // it exists (the MUGS collection did exactly that). Chain selection still
     // scopes results; junk-name suppression remains a safety invariant.
     return collections
-      .filter((c) => (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) && !isSpamCollectionTitle(c.name))
+      .filter((c) =>
+        (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) &&
+        (!onlyWatched || watchlist.has(key(c))) &&
+        !isSpamCollectionTitle(c.name)
+      )
       .map((c) => ({ c, score: collectionSearchScore(c, q) }))
       .filter((row) => row.score >= 0)
       .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt))
       .map((row) => row.c);
-  }, [ranked, collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, deadArt]);
+  }, [ranked, collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt]);
 
   useEffect(() => {
     const query = search.trim();
@@ -1086,7 +1092,7 @@ export default function GlobalMarketHub() {
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // URL persistence -- reflects every real filter/sort field above into the
   // query string (router.replace, not push, so filtering doesn't spam
@@ -1105,13 +1111,14 @@ export default function GlobalMarketHub() {
     if (!onlyArt) params.set("art", "0");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
+    if (onlyWatched) params.set("starred", "1");
     if (showShells) params.set("shells", "1");
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract; including them would re-run this on every render for no reason.
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
   // order book, highest 24h volume as the tiebreak -- never a curated/paid
@@ -1246,6 +1253,7 @@ export default function GlobalMarketHub() {
     (onlyArt ? 1 : 0) +
     (onlyVerifiedCreator ? 1 : 0) +
     (onlyListed ? 1 : 0) +
+    (onlyWatched ? 1 : 0) +
     (priceMin.trim() ? 1 : 0) +
     (priceMax.trim() ? 1 : 0);
 
@@ -1339,6 +1347,7 @@ export default function GlobalMarketHub() {
             setOnlyArt(false);
             setOnlyVerifiedCreator(false);
             setOnlyListed(false);
+            setOnlyWatched(false);
             setPriceMin("");
             setPriceMax("");
           }}
@@ -1562,6 +1571,17 @@ export default function GlobalMarketHub() {
            * stub number, not inline text.
            */}
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setOnlyWatched((value) => !value)}
+              aria-pressed={onlyWatched}
+              className={`relative flex min-h-10 items-center gap-2 border px-4 text-xs font-black uppercase tracking-wide transition-all hover:-translate-y-0.5 ${onlyWatched ? "border-gold-300 bg-gold-300 text-[#0c0906] shadow-[0_0_18px_rgba(244,201,93,.45)]" : "border-gold-300/45 text-gold-200 hover:bg-gold-300/10"}`}
+              style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}
+            >
+              <span aria-hidden className="text-lg leading-none">★</span>
+              Starred
+              <span className="font-mono text-[0.65rem] opacity-75">{watchlist.size}</span>
+            </button>
             {chains.map(([slug, count]) => {
               const active = chainFilter.has(slug);
               const brand = chainBrandColor(slug);
@@ -1710,7 +1730,7 @@ export default function GlobalMarketHub() {
                           onClick={() => toggleWatchlist(rowKey)}
                           aria-pressed={watched}
                           aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-                          className={`text-base leading-none transition-transform duration-150 hover:scale-125 active:scale-95 ${watched ? "text-gold-300" : "text-foreground/25 hover:text-foreground/50"}`}
+                          className={`grid size-8 place-items-center rounded-md border text-base leading-none transition-all duration-150 hover:scale-110 active:scale-95 ${watched ? "border-gold-200 bg-gold-300 text-[#151006] shadow-[0_0_14px_rgba(244,201,93,.55)]" : "border-transparent text-foreground/35 hover:border-gold-300/40 hover:text-gold-200"}`}
                         >
                           {watched ? "★" : "☆"}
                         </button>

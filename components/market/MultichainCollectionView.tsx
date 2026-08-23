@@ -2095,7 +2095,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   browseMode === "intelligence" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line-strong text-gold-300 hover:border-gold-400"
                 }`}
               >
-                {browseMode === "intelligence" ? "Art & listings" : "Intelligence"}
+                {browseMode === "intelligence" ? "Art & listings" : "Intel"}
               </button>
               <button
                 type="button"
