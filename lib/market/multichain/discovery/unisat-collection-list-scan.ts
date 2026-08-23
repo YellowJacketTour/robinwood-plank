@@ -13,8 +13,8 @@
  * for that observed UniSat registry snapshot. It is NOT the Bitcoin
  * inscription universe, a protocol-level collection registry, or proof
  * that every parent/child convention and marketplace catalog is covered.
- * It is not the curated top-N used by unisat-collections.ts's
- * discoverTopCollections is the ranked/curated one; this is the different,
+ * It is different from the ranked/curated top-N used by
+ * unisat-collections.ts's discoverTopCollections.
  * discoverTopCollections. At limit=100/page that's ~27 calls to walk in full,
  * genuinely achievable to exhaust completely in minutes rather than the
  * multi-hour-per-chain reality of the EVM backfill.

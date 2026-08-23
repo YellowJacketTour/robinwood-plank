@@ -27,15 +27,6 @@ function Donut({ rows, label }: { rows: Array<[string, number]>; label: string }
   return <div className="flex min-w-0 items-center gap-3"><div className="grid size-28 shrink-0 place-items-center rounded-full" style={{ background: total ? `conic-gradient(${gradient})` : "rgba(255,255,255,.06)" }}><div className="grid size-16 place-items-center rounded-full bg-panel text-center"><span className="text-lg font-black tabular-nums text-gold-300">{total.toLocaleString()}</span></div></div><div className="min-w-0 space-y-1"><p className="text-[0.58rem] font-black uppercase tracking-wider text-foreground/45">{label}</p>{rows.slice(0, 6).map(([name, value], index) => <div key={name} className="flex items-center gap-1.5 text-[0.65rem]"><span className="size-2 rounded-full" style={{ background: CHART_COLORS[index % CHART_COLORS.length] }}/><span className="min-w-0 flex-1 truncate">{name}</span><span className="tabular-nums text-foreground/55">{total ? pct(value / total * 100) : "0%"}</span></div>)}</div></div>;
 }
 
-function formatAtomic18(value: string): string {
-  try {
-    const atomic = BigInt(value);
-    const whole = atomic / 10n ** 18n;
-    const fraction = (atomic % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "").slice(0, 6);
-    return `${whole}${fraction ? `.${fraction}` : ""}`;
-  } catch { return value; }
-}
-
 function DepthCurve({ listings }: { listings: Listing[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const rows = useMemo(() => listings
@@ -64,7 +55,7 @@ function DepthCurve({ listings }: { listings: Listing[] }) {
     </svg>
     <div className="flex justify-between text-[0.58rem] text-foreground/40"><span>Floor ask</span><span>95th-percentile display ceiling</span></div>
     <div className="mt-2 grid gap-2 rounded-md border border-line bg-panel/75 p-2 text-[0.65rem] sm:grid-cols-2 lg:grid-cols-4">
-      <div><span className="block uppercase text-foreground/40">Token</span><strong className="break-all">#{active.tokenId}</strong></div><div><span className="block uppercase text-foreground/40">Exact ask</span><strong>{formatAtomic18(active.priceWei)} native</strong></div><div><span className="block uppercase text-foreground/40">Depth / premium</span><strong>{activeIndex + 1} asks · {premium.toFixed(1)}%</strong></div><div><span className="block uppercase text-foreground/40">Maker</span><strong className="break-all">{active.maker || "Unavailable"}</strong></div>
+      <div><span className="block uppercase text-foreground/40">Token</span><strong className="break-all">#{active.tokenId}</strong></div><div><span className="block uppercase text-foreground/40">Exact stored ask</span><strong className="break-all">{active.priceWei} atomic units</strong></div><div><span className="block uppercase text-foreground/40">Depth / premium</span><strong>{activeIndex + 1} asks · {premium.toFixed(1)}%</strong></div><div><span className="block uppercase text-foreground/40">Maker</span><strong className="break-all">{active.maker || "Unavailable"}</strong></div>
     </div>
   </div>;
 }
