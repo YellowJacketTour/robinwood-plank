@@ -47,6 +47,7 @@ import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft"
 import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
 import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 import { recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { decodeTransferLog, writeTransferLedgerEvents, type RawTransferLog } from "@/lib/market/multichain/discovery/transfer-ledger";
 
 /**
  * Same real-quota text alchemy-nft.ts's isAlchemyQuotaStatus already
@@ -100,7 +101,7 @@ const CHUNK_BLOCKS = 10;
  */
 export const MIN_TRANSFERS_TO_CONSIDER = 2;
 
-type RawLog = { address: string; topics: string[]; blockNumber: string };
+type RawLog = { address: string; topics: string[]; blockNumber: string; transactionHash: string; logIndex: string; data: string };
 
 /**
  * Shared "is this real collectible art, or noise" gate for BOTH discovery
@@ -213,12 +214,21 @@ export async function runEvmDiscoveryScan(input: {
   ]);
 
   const tally = new Map<string, number>();
+  const rawTransferLogs: RawTransferLog[] = [];
   for (const log of logs) {
     const topic0 = log.topics[0]?.toLowerCase();
     if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue; // ERC-20
     if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
     const key = log.address.toLowerCase();
     tally.set(key, (tally.get(key) ?? 0) + 1);
+    rawTransferLogs.push({
+      address: log.address,
+      topics: log.topics,
+      data: log.data,
+      transactionHash: log.transactionHash,
+      logIndex: Number.parseInt(log.logIndex, 16),
+      blockNumber: Number.parseInt(log.blockNumber, 16),
+    });
   }
 
   // Record EVERY contract seen this window, not just discovery candidates --
@@ -227,6 +237,30 @@ export async function runEvmDiscoveryScan(input: {
   // grind across the full dataset that pays off later even for contracts
   // too quiet to cross MIN_TRANSFERS_TO_CONSIDER in any single window.
   await recordActivity(input.chainSlug, tally);
+
+  // The permanent wallet-to-wallet transfer ledger (migration 042,
+  // plank_market_events) -- decode every real Transfer/TransferSingle/
+  // TransferBatch log already fetched above (never discarded after the
+  // tally increment) and write it, excluding anything a real marketplace
+  // fill indexer already captured on the same tx_hash. See
+  // transfer-ledger.ts's own header for the full "why".
+  const decodedTransfers = rawTransferLogs.flatMap((log) => decodeTransferLog(input.chainSlug, log));
+  const uniqueBlocks = [...new Set(decodedTransfers.map((t) => t.blockNumber))];
+  const timestampByBlock = new Map<number, number>();
+  await Promise.all(
+    uniqueBlocks.map(async (blockNumber) => {
+      try {
+        const block = await rpcCall<{ timestamp: string } | null>(input.rpcUrl, "eth_getBlockByNumber", ["0x" + blockNumber.toString(16), false]);
+        if (block?.timestamp) timestampByBlock.set(blockNumber, Number.parseInt(block.timestamp, 16));
+      } catch {
+        // A missing timestamp is honest ("we don't know yet"), never
+        // fabricated as "now" -- same contract seaport-fill-indexer.ts's
+        // own writeFills already documents.
+      }
+    })
+  );
+  for (const t of decodedTransfers) t.blockTimestamp = timestampByBlock.get(t.blockNumber) ?? null;
+  await writeTransferLedgerEvents(decodedTransfers);
 
   // A standards-shaped event is durable identity evidence. Requiring two
   // events in the same tiny scan window permanently missed quiet collections;

@@ -38,6 +38,8 @@ export type MeshSource =
   | "sudoswap-fills-genesis"
   | "rarible-fills"
   | "rarible-fills-genesis"
+  | "cryptokitties-fills"
+  | "cryptokitties-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -154,6 +156,22 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 180,
     notes: "Independent genesis-block-to-head Wyvern v1/v2 fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "cryptokitties-live:eth-mainnet",
+    source: "cryptokitties-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "CryptoKitties SaleClockAuction/SiringClockAuction AuctionSuccessful live cursor; eth-mainnet only, pre-dates Wyvern by ~7 months.",
+  },
+  {
+    id: "cryptokitties-genesis:eth-mainnet",
+    source: "cryptokitties-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head CryptoKitties native-auction fill cursor; never advances the live cursor.",
   },
   {
     id: "foundation-live:eth-mainnet",

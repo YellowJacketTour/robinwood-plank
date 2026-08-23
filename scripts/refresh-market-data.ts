@@ -88,6 +88,7 @@ const explicit = [
   "--hydrate-opensea",
   "--hydrate-bitcoin-membership",
   "--hydrate-solana-membership",
+  "--solana-transfer-ledger",
   "--seaport-fills",
   "--seaport-fills-backfill",
   "--cryptopunks-native-book",
@@ -111,8 +112,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "hydrate-solana-membership", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -623,6 +624,19 @@ async function main(): Promise<void> {
     return `${pages} membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
   });
 
+  // The permanent Bitcoin inscription transfer ledger -- unisat-transfer-
+  // scan.ts's own header for the full "why" (UniSat's real Inscription
+  // Indexer /v1/indexer/inscription/events, forward-only from chain tip,
+  // writes into plank_market_events alongside the EVM/Solana transfer-
+  // ledger writers). Depends on hydrate-bitcoin-membership above for the
+  // tracked inscriptionId set a page of chain-wide events is filtered
+  // against.
+  await step("bitcoin-transfer-ledger", async () => {
+    const { runUnisatTransferScan } = await import("../lib/market/multichain/discovery/unisat-transfer-scan");
+    const result = await runUnisatTransferScan();
+    return `blocks ${result.fromHeight}-${result.toHeight}, ${result.eventsSeen} events seen, ${result.trackedMatches} tracked matches, +${result.written} ledger rows, ${result.skippedMarketplace} marketplace-excluded${result.error ? `, error: ${result.error}` : ""}`;
+  });
+
   // Helius DAS uses a different identity/membership model from EVM and
   // Bitcoin. Advance bounded 1,000-asset pages on every cron pass using the
   // durable fair selector; this is the live parity lane for Solana traits and
@@ -641,6 +655,29 @@ async function main(): Promise<void> {
       if (result.complete) completed += 1;
     }
     return `${pages} DAS membership pages, +${pieces} pieces, ${completed} collection(s) completed`;
+  });
+
+  // The permanent Solana NFT transfer ledger -- helius-transfer-scan.ts's
+  // own header for the full "why" (Helius Enhanced Transactions API,
+  // genesis-forward per real member mint, writes into plank_market_events
+  // alongside the EVM transfer-ledger.ts writer). Depends on
+  // hydrate-solana-membership above for real member mints to walk; a bounded
+  // number of real Helius calls per tick, same "one durable unit of work per
+  // attempt" shape as hydrate-bitcoin-membership/hydrate-solana-membership.
+  await step("solana-transfer-ledger", async () => {
+    const { advanceNextSolanaTransferScan } = await import("../lib/market/multichain/discovery/helius-transfer-scan");
+    const attempts = full ? 10 : 2;
+    let mintsWalked = 0;
+    let written = 0;
+    let oldestReachedCount = 0;
+    for (let i = 0; i < attempts; i++) {
+      const result = await advanceNextSolanaTransferScan(5);
+      if (!result) break;
+      mintsWalked += 1;
+      written += result.written;
+      if (result.oldestReached) oldestReachedCount += 1;
+    }
+    return `${mintsWalked} mint(s) walked, +${written} ledger rows, ${oldestReachedCount} reached genesis`;
   });
 
   // Discovery only creates identities. Keep a separate, tightly bounded
