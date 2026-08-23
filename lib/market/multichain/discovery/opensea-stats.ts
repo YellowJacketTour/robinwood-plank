@@ -266,13 +266,22 @@ export async function fetchOpenSeaCollectionDisplay(
   };
 }
 
-const MAX_LISTING_PAGES = 20;
 const LISTING_PAGE_SIZE = 50;
 
 /**
  * Unique tokens with an active OpenSea listing. Exact only when pagination
  * finishes (no `next`). Truncated walks return null so a partial page is
  * never stored as if it were the full listed count.
+ *
+ * No self-imposed page-count ceiling: the previous MAX_LISTING_PAGES=20 cap
+ * (1,000 tokens max) had no real OpenSea citation and silently returned
+ * null -- "unknown listed count" -- for every collection with more than
+ * 1,000 real active listings, which is exactly the popular-collection case
+ * this stat matters most for. The real spend guard is already
+ * reserveOpenSeaKey's per-key durable daily allowance below (returns null
+ * and this function bails out once real budget is exhausted); pagination
+ * itself always terminates for real data once OpenSea stops returning a
+ * `next` cursor, so an unbounded walk here can't spin forever.
  */
 export async function fetchOpenSeaListedCount(
   slug: string,
@@ -281,7 +290,7 @@ export async function fetchOpenSeaListedCount(
 ): Promise<number | null> {
   const unique = new Set<string>();
   let cursor: string | null = null;
-  for (let page = 0; page < MAX_LISTING_PAGES; page++) {
+  for (;;) {
     const qs = new URLSearchParams({ limit: String(LISTING_PAGE_SIZE) });
     if (openSeaChain) qs.set("chain", openSeaChain);
     if (cursor) qs.set("next", cursor);
@@ -324,7 +333,6 @@ export async function fetchOpenSeaListedCount(
     cursor = body.next ?? null;
     if (!cursor) return unique.size;
   }
-  return null;
 }
 
 export function slugCacheKey(chainSlug: string, contractAddress: string): string {

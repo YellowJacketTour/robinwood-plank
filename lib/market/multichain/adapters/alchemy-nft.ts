@@ -40,15 +40,25 @@ const ALCHEMY_NFT_PROVIDER_ACCOUNT = "alchemy-nft:default";
  * that module only tracks this source's monthly-quota JAIL (see
  * jailAlchemyNftUntilMonthReset below), never a daily call ceiling.
  * rpc-meter.ts also carries no daily/monthly ceiling constant to defer
- * to -- it is pure compute-unit metering with no gate of its own. This is
- * therefore an APPROXIMATED, conservative daily allowance, added purely
- * for cross-process durability on top of the existing monthly jail -- not
- * a claim that 2,000/day is Alchemy's real documented limit. (No longer
- * benchmarked against magiceden-solana's old ceiling -- that entry was
- * removed 2026-08-23 as an unsourced guess against an undocumented
- * endpoint; see source-budget.ts's own comment.)
+ * to -- it is pure compute-unit metering with no gate of its own.
+ *
+ * The real, documented Alchemy constraint for this key is CU-based (the
+ * same 30M CU/month free-tier figure alchemy-key-pool.ts's own
+ * ALCHEMY_DAILY_ALLOWANCE derives from) and is already enforced by the real
+ * monthly-quota jail below (jailAlchemyNftUntilMonthReset, triggered off a
+ * real 429/quota response) -- that is the actual safety valve. The
+ * previous value here (2,000/day) was an APPROXIMATED request-count number
+ * with no real per-request citation, self-admittedly "not a claim that
+ * 2,000/day is Alchemy's real documented limit," yet it still gated real
+ * requests via reserveProviderCapacity below every single day regardless of
+ * whether the real CU quota was anywhere near exhausted. Per the same "no
+ * self-imposed ceiling without a real citation" fix already applied to
+ * ordinalswallet-collection-scan.ts and hydrate-all-collection-art.ts's
+ * magiceden-solana lane, this is now set far above any realistic real
+ * usage so it can never actually block a request -- only the real,
+ * reproduced monthly-quota jail does that now.
  */
-const ALCHEMY_NFT_DAILY_ALLOWANCE = 2_000;
+const ALCHEMY_NFT_DAILY_ALLOWANCE = 100_000_000_000;
 
 function nextUtcMonthStartMs(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);

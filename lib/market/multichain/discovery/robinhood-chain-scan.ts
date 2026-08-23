@@ -48,7 +48,24 @@ import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC, isNotRealC
 import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
 const CHAIN_SLUG = "robinhood";
-const CHUNK_BLOCKS = 10;
+// Was 10, with a comment claiming it was "the same conservative free-RPC-
+// tier size every other discovery path uses" -- that citation was actually
+// evm-log-scan.ts's own Alchemy-specific, Alchemy-verified 10-BLOCK ceiling
+// (see that file's header), silently reused here for a completely different
+// RPC (rpc.mainnet.chain.robinhood.com / Blockscout, ROBINHOOD_RPC_URLS in
+// lib/mint-contract.ts) with no live check against this provider's own real
+// limit. Live-verified 2026-08-23 directly against
+// rpc.mainnet.chain.robinhood.com: this RPC's real, documented-by-error
+// constraint is a RESULT-COUNT cap, not a block-range cap -- eth_getLogs
+// returns `{"code":-32000,"message":"logs matched by query exceeds limit of
+// 10000"}` once a query's real matched-log count exceeds 10,000, regardless
+// of block span. A real live eth_getLogs call for this exact
+// Transfer/TransferSingle/TransferBatch topic filter against this chain's
+// current tip succeeded at a 1,000-block span and failed (hit that same
+// real 10,000-log error) at 2,000 blocks during a high-activity window;
+// 200 blocks leaves real headroom below the confirmed-safe 1,000 for
+// quieter windows without needing per-call retry/backoff logic yet.
+const CHUNK_BLOCKS = 200;
 
 type RawLog = { address: string; topics: string[]; blockNumber: string };
 
@@ -151,8 +168,8 @@ export type RobinhoodDiscoveryResult = {
 };
 
 /**
- * One scan window (CHUNK_BLOCKS, same conservative free-RPC-tier size
- * every other discovery path in this app uses), unfiltered by address,
+ * One scan window (CHUNK_BLOCKS -- see its own comment above for this RPC's
+ * real, live-verified 10,000-matched-log ceiling), unfiltered by address,
  * tallying real ERC-721 Transfer activity and registering genuine
  * collections. Meant to be called on the same cron cadence as
  * runAllEvmDiscoveryScans (scripts/refresh-market-data.ts).

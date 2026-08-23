@@ -533,6 +533,36 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   const images = new Map(items.map((i) => [i.tokenId, i.imageUrl]));
   await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, aliases, images);
 
+  // REAL BUG FIXED 2026-08-23: this used to stop at replaceForeignRarity,
+  // which only writes the AGGREGATE snapshot (plank_foreign_rarity_collections
+  // + trait index -- what the sidebar's "floors by rarity" counts read). It
+  // never wrote the per-token rarity_score/rarity_rank/rarity_tier back onto
+  // plank_collection_tokens the way advanceEvmCollectionMembership (line
+  // ~224) and advanceEvmTokenMetadata (line ~326) already do for their own
+  // paths -- so every card in the grid/detail view (which reads the
+  // plank_collection_tokens projection, not the aggregate snapshot) rendered
+  // with no tier badge for any collection indexed through THIS function.
+  // Generic bug, not chain- or token-standard-specific: this hit Courtyard
+  // (and any other collection large/slow enough to be indexed by this
+  // sampled/paginated walk instead of the verified-sequential-membership
+  // fast path) regardless of ERC-721 vs ERC-1155 or EVM chain. Write the
+  // same per-token page here, preserving whatever membership-completeness
+  // state an independent enumerator (e.g. hypersync-evm-scan.ts) already
+  // established -- this rarity walk's own `partial` reflects only ITS
+  // sample coverage, not the collection's true membership size.
+  if (items.length) {
+    await upsertCollectionTokenProjection(chainSlug, contractAddress, {
+      tokens: [...snapshot.byTokenId.values()].map((token) => ({
+        tokenId: token.tokenId, name: token.name,
+        rarityScore: token.score, rarityRank: token.rank,
+        rarityPercentile: token.percentile, rarityTier: token.tier,
+      })),
+      partial, preservePartial: true,
+      provenance: [OPENSEA_MEMBERSHIP_SOURCE, "bespoke-information-content-rarity"],
+      sourceObservedAt: new Date(),
+    }).catch(() => {});
+  }
+
   return { chainSlug, collectionSlug, contractAddress, tokensIndexed: snapshot.byTokenId.size, partial };
 }
 

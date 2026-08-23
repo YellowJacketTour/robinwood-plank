@@ -355,7 +355,16 @@ export async function scaffoldAllTrackedSolanaCollections(opts?: {
 }): Promise<ScaffoldSolanaResult> {
   const force = opts?.force ?? false;
   const freshDays = opts?.freshDays ?? 7;
-  const delayMs = opts?.delayMs ?? 1000;
+  // Real, documented, cited: Helius's own rate-limit docs
+  // (helius.dev/docs/billing/rate-limits, see helius-key-pool.ts's own
+  // header) define DAS/Enhanced API limits purely as RPS by plan tier --
+  // Free 2 RPS being the worst real case. Unlike UniSat/OrdinalsWallet
+  // above (no documented number at all), this IS a real provider-side
+  // number to pace against: 500ms keeps one scaffold pass at or under 2
+  // RPS even on the Free tier, without over-throttling paid tiers that
+  // allow far more (was 1000ms, twice as conservative as the real floor
+  // requires).
+  const delayMs = opts?.delayMs ?? 500;
   const limit = opts?.limit ?? Infinity;
   const log = opts?.onProgress ?? (() => {});
 

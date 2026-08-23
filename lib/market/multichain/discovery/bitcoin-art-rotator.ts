@@ -27,8 +27,22 @@ import {
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 
-/** Matches source-budget.ts's own DAILY_CEILING entries for these two sources exactly -- this only adds cross-process durability on top, never changes the ceiling. */
-const OW_DAILY_ALLOWANCE = 2_400;
+// OrdinalsWallet (turbo.ordinalswallet.com) is keyless and documents NO rate
+// limit -- same live-confirmed finding as source-budget.ts's own
+// DAILY_CEILING comment for "ordinals-wallet" (deliberately absent from that
+// map). This number is only the required `allowance` parameter for the
+// durable reserveProviderCapacity bookkeeping window (real-usage
+// observability in plank_provider_windows), same pattern as
+// ordinalswallet-collection-scan.ts's own DAILY_ALLOWANCE -- set far above
+// any realistic real usage so it can never actually block a request. The
+// previous value here (2_400) was a stale self-imposed throttle left over
+// from before this session removed ordinals-wallet's ceiling from
+// source-budget.ts; it was never updated to match and was silently blocking
+// real OW lookups once 2,400/day were used.
+const OW_DAILY_ALLOWANCE = 100_000_000_000;
+// Real, current: CoinGecko's free Demo plan cap is 10,000/mo -- matches
+// source-budget.ts's own "coingecko-nft": 8_000 DAILY_CEILING entry exactly
+// (same-day burst guard, not the monthly one).
 const CG_DAILY_ALLOWANCE = 8_000;
 
 const OW = "ordinals-wallet";
@@ -114,6 +128,14 @@ async function tryOrdinalsWallet(slug: string): Promise<{ name: string | null; i
   }
 }
 
+// CoinGecko Demo plan's real documented rate limit is 30 calls/minute
+// (docs.coingecko.com/docs/rate-limit). 2s between real CG calls keeps every
+// call comfortably inside that, without touching OrdinalsWallet lookups
+// (which have no documented limit -- see OW_DAILY_ALLOWANCE above) that make
+// up most of this loop's real traffic.
+const CG_MIN_INTERVAL_MS = 2_000;
+let lastCgCallAt = 0;
+
 async function tryCoinGecko(slug: string): Promise<{ name: string | null; imageUrl: string | null } | "none" | "skip"> {
   if (!(await canUse(CG))) return "skip";
   if (process.env.COINGECKO_API_KEY) {
@@ -132,6 +154,11 @@ async function tryCoinGecko(slug: string): Promise<{ name: string | null; imageU
   const window = utcDayWindow(CG_DAILY_ALLOWANCE);
   const account = "coingecko-nft:default";
   if (!(await reserveProviderCapacity(account, window))) return "skip";
+  const sinceLastCg = Date.now() - lastCgCallAt;
+  if (sinceLastCg < CG_MIN_INTERVAL_MS) {
+    await new Promise((r) => setTimeout(r, CG_MIN_INTERVAL_MS - sinceLastCg));
+  }
+  lastCgCallAt = Date.now();
   let settled = false;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/nfts/${encodeURIComponent(slug)}`, {
@@ -212,7 +239,6 @@ export async function hydrateBitcoinArt(max = 40): Promise<BitcoinArtRotatorResu
     await updateCollectionDisplay(CHAIN, slug, { name: hit.name, imageUrl: hit.imageUrl });
     result.filled += 1;
     result.bySource[src] = (result.bySource[src] ?? 0) + 1;
-    await new Promise((r) => setTimeout(r, 280));
   }
 
   return result;

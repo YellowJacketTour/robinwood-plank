@@ -166,7 +166,17 @@ export async function scaffoldAllTrackedBitcoinCollections(opts?: {
 }): Promise<ScaffoldBitcoinResult> {
   const force = opts?.force ?? false;
   const freshDays = opts?.freshDays ?? 7;
-  const delayMs = opts?.delayMs ?? 1000;
+  // No artificial between-collection pacing here per the same explicit
+  // owner direction already applied to ordinalswallet-rarity-index-
+  // runner.ts's own scaffold loop: source-budget.ts's investigation trail
+  // found no documented per-day OR per-second UniSat number to cite (its
+  // pricing pages are JS-rendered SPAs with no primary rate-limit figure).
+  // The real safety valves are already live and cited elsewhere -- the
+  // durable reserveProviderCapacity("unisat:default", ...) budget above and
+  // the circuit-breaker jail keyed off UniSat's real, reproduced "exceeds
+  // rate limit" 403 (see source-budget.ts's own header). `delayMs` still
+  // exists as a caller-opt-in override but defaults to 0.
+  const delayMs = opts?.delayMs ?? 0;
   // A collection can consume up to MAX_PAGES requests.  An unbounded daily
   // walk therefore cannot respect the provider ceiling; subsequent passes
   // resume from the durable rarity timestamps.
