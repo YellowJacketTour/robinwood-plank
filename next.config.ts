@@ -87,7 +87,22 @@ const nextConfig: NextConfig = {
   // Dev-only: the dev server rejects cross-origin requests by default, which
   // blocks sharing a local preview through a tunnel. Has no effect on
   // production builds — it only widens which origins `next dev` will answer.
-  allowedDevOrigins: ["*.trycloudflare.com"],
+  //
+  // REAL BUG FOUND AND FIXED 2026-08-23: "127.0.0.1" was missing here even
+  // though local dev/testing this whole session (launch scripts, health
+  // checks, this exact conversation's browser verification) hits the app
+  // via http://127.0.0.1:3800, not http://localhost:3800. Confirmed live:
+  // visiting via 127.0.0.1 silently hung every on-demand dynamic import()
+  // (e.g. MarketView.tsx's `await import("@/lib/market/swr-fetch")` inside
+  // its listings-refresh callback) forever with no error and no network
+  // request ever firing -- the real order-book API worked fine when called
+  // directly, and the exact same page worked perfectly via localhost:3800
+  // in the same browser session. This wasn't a code bug in any feature;
+  // it silently broke Buy & Sell (and anything else behind a dynamic
+  // import) for every 127.0.0.1 visitor. See the server's own emitted
+  // warning ("Blocked cross-origin request... add it to allowedDevOrigins")
+  // -- this is that exact fix, applied.
+  allowedDevOrigins: ["*.trycloudflare.com", "127.0.0.1", "localhost"],
   // Minimal, traced Node runtime for the InMotion Docker image.
   // OpenNext can still consume the normal build artifacts on its own branch.
   output: "standalone",
