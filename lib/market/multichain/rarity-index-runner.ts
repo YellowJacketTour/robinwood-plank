@@ -564,7 +564,14 @@ export async function scaffoldAllTrackedCollections(opts?: {
 
     if (!force) {
       const existing = await getForeignTraitIndex(c.chainSlug, slug).catch(() => null);
-      if (existing?.indexedAt) {
+      // REAL BUG FIXED 2026-08-23, same shape as ordinalswallet-rarity-index-
+      // runner.ts's own fix: a prior PARTIAL index (OpenSea pagination cut
+      // short, or a run that only reached a subset of the collection) must
+      // not be shielded behind the freshDays window -- only a genuinely
+      // complete (non-partial) result should suppress a re-attempt.
+      // Otherwise a collection stuck partial the first time it was indexed
+      // stays partial for the entire freshDays window every single pass.
+      if (existing?.indexedAt && existing.partial !== true) {
         const ageDays = (Date.now() - new Date(existing.indexedAt).getTime()) / 86_400_000;
         if (ageDays < freshDays) {
           skippedFresh += 1;

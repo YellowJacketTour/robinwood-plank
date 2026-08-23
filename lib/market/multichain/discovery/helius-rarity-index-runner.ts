@@ -356,7 +356,13 @@ export async function scaffoldAllTrackedSolanaCollections(opts?: {
   for (const c of solana) {
     if (!force) {
       const existing = await getForeignTraitIndex("solana-mainnet", c.contractAddress).catch(() => null);
-      if (existing?.indexedAt) {
+      // REAL BUG FIXED 2026-08-23, same shape as rarity-index-runner.ts's
+      // (EVM) and ordinalswallet-rarity-index-runner.ts's own fix: a prior
+      // PARTIAL index (Helius DAS grouping walk still mid-page, or the
+      // Magic Eden listings fallback which is only ever partial) must not
+      // be shielded behind the freshDays window -- only a genuinely
+      // complete (non-partial) result should suppress a re-attempt.
+      if (existing?.indexedAt && existing.partial !== true) {
         const ageDays = (Date.now() - new Date(existing.indexedAt).getTime()) / 86_400_000;
         if (ageDays < freshDays) {
           skippedFresh += 1;
