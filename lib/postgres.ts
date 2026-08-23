@@ -17,7 +17,23 @@ const REQUIRED_POSTGRES_ENV = [
 ] as const;
 
 function postgresConnectionString(): string | null {
-  return process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim() || null;
+  // Vercel storage integrations have used several names over time. Prefer the
+  // pooled URLs for serverless functions, then fall back to unpooled URLs.
+  const candidates = [
+    "POSTGRES_URL",
+    "DATABASE_URL",
+    "NEON_DATABASE_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "DATABASE_URL_UNPOOLED",
+  ] as const;
+
+  for (const name of candidates) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+
+  return null;
 }
 
 function postgresGlobal(): PostgresGlobal {

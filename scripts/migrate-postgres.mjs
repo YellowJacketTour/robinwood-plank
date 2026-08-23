@@ -35,7 +35,14 @@ const ssl =
     ? false
     : { rejectUnauthorized: sslMode === "verify-ca" || sslMode === "verify-full" };
 
-const connectionString = process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim();
+const connectionString = [
+  "POSTGRES_URL",
+  "DATABASE_URL",
+  "NEON_DATABASE_URL",
+  "POSTGRES_PRISMA_URL",
+  "POSTGRES_URL_NON_POOLING",
+  "DATABASE_URL_UNPOOLED",
+].map((name) => process.env[name]?.trim()).find(Boolean);
 const pool = new Pool({
   ...(connectionString ? { connectionString } : {
     host: required("PGHOST"),
