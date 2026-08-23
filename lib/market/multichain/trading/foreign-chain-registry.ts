@@ -62,7 +62,7 @@
  * address added to a registry.
  */
 
-import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-nft";
+import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-network";
 
 export type ForeignChainConfig = {
   /** Matches lib/market/multichain's chainSlug convention (e.g. alchemy-nft.ts). */

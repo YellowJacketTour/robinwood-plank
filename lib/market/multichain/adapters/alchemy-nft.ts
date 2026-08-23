@@ -17,8 +17,37 @@
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { checkSourceBudget, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+// Dynamically imported (not a top-level import) because control-plane.ts
+// pulls in lib/postgres.ts's real `pg` client, which is server-only --
+// this file is reachable from CLIENT code via foreign-chain-registry.ts ->
+// wallet.ts -> wallet-context.tsx -> app/layout.tsx. A top-level import
+// here leaked `pg` into the browser bundle and broke the client build
+// (real error: "Module not found: Can't resolve 'util/types'" in
+// node_modules/pg/lib/utils.js). A dynamic import inside each async
+// function defers resolution to runtime, server-side only, and never gets
+// bundled for the browser.
+type ControlPlane = typeof import("@/lib/market/multichain/control-plane");
+let controlPlanePromise: Promise<ControlPlane> | null = null;
+function controlPlane(): Promise<ControlPlane> {
+  controlPlanePromise ??= import("@/lib/market/multichain/control-plane");
+  return controlPlanePromise;
+}
 
 const ALCHEMY_NFT_SOURCE = "alchemy-nft";
+const ALCHEMY_NFT_PROVIDER_ACCOUNT = "alchemy-nft:default";
+/**
+ * No DAILY_CEILING entry exists for "alchemy-nft" in source-budget.ts --
+ * that module only tracks this source's monthly-quota JAIL (see
+ * jailAlchemyNftUntilMonthReset below), never a daily call ceiling.
+ * rpc-meter.ts also carries no daily/monthly ceiling constant to defer
+ * to -- it is pure compute-unit metering with no gate of its own. This is
+ * therefore an APPROXIMATED, conservative daily allowance (same order of
+ * magnitude as source-budget.ts's own magiceden-solana=2,000 ceiling),
+ * added purely for cross-process durability on top of the existing
+ * monthly jail -- not a claim that 2,000/day is Alchemy's real documented
+ * limit.
+ */
+const ALCHEMY_NFT_DAILY_ALLOWANCE = 2_000;
 
 function nextUtcMonthStartMs(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
@@ -40,29 +69,14 @@ function isAlchemyQuotaStatus(status: number, bodyText: string): boolean {
   return /monthly capacity|capacity limit exceeded|too many requests|rate limit|quota/i.test(bodyText);
 }
 
-/**
- * Alchemy's network subdomain per chainSlug. This is the ONE place that
- * needs a new line when Alchemy adds NFT API support for another chain --
- * everything else in this adapter is chain-agnostic.
- */
-export const ALCHEMY_NETWORK_SUBDOMAIN: Record<string, string> = {
-  "eth-mainnet": "eth-mainnet",
-  "polygon-mainnet": "polygon-mainnet",
-  "arb-mainnet": "arb-mainnet",
-  "base-mainnet": "base-mainnet",
-  "opt-mainnet": "opt-mainnet",
-  // BNB Smart Chain, Avalanche, zkSync -- confirmed live 2026-08-17 (both
-  // the NFT API subdomain AND the raw Node API /v2/ endpoint responded
-  // correctly, not just DNS-resolved) before being added here.
-  "bnb-mainnet": "bnb-mainnet",
-  "avax-mainnet": "avax-mainnet",
-  "zksync-mainnet": "zksync-mainnet",
-};
-
-/** Exported so other chain-aware callers (e.g. foreign-chain-registry.ts's foreignRpcUrls) can build an Alchemy URL for a different product path without duplicating the demo-key fallback. */
-export function apiKey(): string {
-  return process.env.ALCHEMY_API_KEY?.trim() || "demo";
-}
+// ALCHEMY_NETWORK_SUBDOMAIN and apiKey() now live in alchemy-network.ts --
+// a client-safe, dependency-free file, split out specifically so
+// foreign-chain-registry.ts (client-reachable) never has to import this
+// file (server-only, via control-plane.ts -> lib/postgres.ts's real `pg`
+// client) just to get two pure constants. Re-exported here for any
+// existing caller that still imports them from this file's own path.
+export { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-network";
+import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-network";
 
 function baseUrl(chainSlug: string): string {
   const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chainSlug];
@@ -101,15 +115,28 @@ type AlchemyFloorPriceResponse = {
 
 async function fetchJson<T>(url: string): Promise<T> {
   assertAlchemyNftNotJailed();
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => "");
-    if (isAlchemyQuotaStatus(res.status, bodyText)) {
-      jailAlchemyNftUntilMonthReset();
-    }
-    throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching ${url}`);
+  const { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } = await controlPlane();
+  const window = utcDayWindow(ALCHEMY_NFT_DAILY_ALLOWANCE);
+  if (!(await reserveProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window))) {
+    throw new Error("alchemy-nft: durable daily ceiling");
   }
-  return (await res.json()) as T;
+  let settled = false;
+  try {
+    const res = await fetch(url, { headers: { accept: "application/json" } });
+    await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true);
+    settled = true;
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => "");
+      if (isAlchemyQuotaStatus(res.status, bodyText)) {
+        jailAlchemyNftUntilMonthReset();
+      }
+      throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching ${url}`);
+    }
+    return (await res.json()) as T;
+  } catch (error) {
+    if (!settled) await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    throw error;
+  }
 }
 
 type OwnersForContractResponse = { owners: string[]; pageKey?: string | null };
@@ -269,11 +296,25 @@ export async function fetchSnapshotsBatch(
 
   for (let i = 0; i < contractAddresses.length; i += BATCH_SIZE) {
     const chunk = contractAddresses.slice(i, i + BATCH_SIZE);
-    const res = await fetch(`${base}/getContractMetadataBatch`, {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ contractAddresses: chunk }),
-    });
+    const { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } = await controlPlane();
+    const window = utcDayWindow(ALCHEMY_NFT_DAILY_ALLOWANCE);
+    if (!(await reserveProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window))) {
+      throw new Error("alchemy-nft: durable daily ceiling");
+    }
+    let res: Response;
+    let settled = false;
+    try {
+      res = await fetch(`${base}/getContractMetadataBatch`, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ contractAddresses: chunk }),
+      });
+      await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true);
+      settled = true;
+    } catch (error) {
+      if (!settled) await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+      throw error;
+    }
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       if (isAlchemyQuotaStatus(res.status, bodyText)) {
