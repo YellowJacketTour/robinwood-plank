@@ -457,7 +457,8 @@ function compareByColumn(
   dir: SortDir,
   window: "24h" | "7d" | "30d",
   hasArt: (c: TrackedCollection) => boolean,
-  toUsd: (weiStr: string | null, currency: string | null) => number | null
+  toUsd: (weiStr: string | null, currency: string | null) => number | null,
+  gradeCtx: GradePercentiles
 ): number {
   switch (column) {
     case "name":
@@ -484,7 +485,7 @@ function compareByColumn(
       return compareNullable(collectionDemandScore(a), collectionDemandScore(b), dir);
     case "grade":
     default:
-      return compareNullable(gradeScore(a, hasArt(a), toUsd), gradeScore(b, hasArt(b), toUsd), dir);
+      return compareNullable(gradeScore(a, hasArt(a), toUsd, gradeCtx), gradeScore(b, hasArt(b), toUsd, gradeCtx), dir);
   }
 }
 
@@ -551,48 +552,126 @@ function hasGradeEvidence(c: TrackedCollection): boolean {
 }
 
 /**
- * Log-scale magnitude curve, same shape as activityPoints below: 0 at the
- * floor, `max` points only once `value` reaches `ceilingUsd` (or `ceiling`
- * for a raw count, e.g. listedCount). Anything above the ceiling still caps
- * at `max` -- this isn't trying to rank whales against each other, just to
- * stop a binary "present at all" flag from paying a $0.46 floor the exact
- * same points as a $60,000 floor.
+ * REAL BUG FIXED 2026-08-23 (part 1, superseded below): floor/volume/listed
+ * were pure booleans (any nonzero value = full points) -- a $0.46 floor
+ * scored identically to a $60,000 floor. First fix scaled by magnitude
+ * against a fixed absolute ceiling (e.g. $50,000 floor = full points).
  *
- * REAL BUG FIXED 2026-08-23, flagged live ("low volume low floor low sales
- * collections ranking so high across top grades"): floor/volume/listed
- * were pure booleans (any nonzero value = full points), so a sub-dollar
- * microcap with one listing scored identically on those axes to a blue
- * chip. Confirmed live against the rankings table: Government Toucans
- * ($0.46 floor, $0.49 24h volume, 3 listed) graded A by hitting every
- * boolean flag at once, same as collections with real six-figure volume.
+ * REAL BUG FIXED 2026-08-23 (part 2), flagged live within the hour: fixed
+ * absolute ceilings pitched at literal blue-chip scale ($50k floor/$500k
+ * volume) made the WHOLE letter scale punishing, not just microcaps --
+ * Pudgy Penguins, MAYC, Azuki, Decentraland (all real, actively traded
+ * projects) dropped from A to B alongside the native RobinWood/vault-backed
+ * row, because none of them literally clear $50k floor or $500k daily
+ * volume even though they're genuinely near the top of THIS platform's own
+ * tracked universe. An absolute dollar ceiling can't self-calibrate as the
+ * tracked catalog and market conditions change -- it has to be re-tuned by
+ * hand forever, and it was already visibly wrong within one grading cycle.
+ *
+ * The real, state-of-the-art fix is what credit-score bands, RugCheck/
+ * DeGenScore-style trust ratings, and "graded on a curve" academic ranking
+ * all actually do: score each axis by PERCENTILE within the live population
+ * of currently-tradeable collections, not against a fixed absolute number.
+ * A collection's floor/volume/listed-depth points come from where it
+ * actually sits relative to every other real, executable market this app
+ * tracks right now -- so the scale re-calibrates itself automatically as
+ * coverage grows, and a top-decile collection is always top-decile
+ * regardless of what dollar figure that happens to be this week.
+ *
+ * Dead/zero-liquidity projects are NOT part of this curve at all -- see
+ * hasGradeEvidence() above: only rows with a live listing or a redeemable
+ * vault enter the eligible population in the first place, so a project with
+ * no real market can never be curved up into a passing grade just because
+ * the rest of the population is currently thin.
  */
-function magnitudePoints(value: number, ceiling: number, max: number): number {
-  if (!(value > 0)) return 0;
-  const frac = Math.log10(1 + value) / Math.log10(1 + ceiling);
-  return Math.max(0, Math.min(max, frac * max));
+export type GradePercentiles = {
+  floorPct: (usd: number) => number;
+  volumePct: (usd: number) => number;
+  listedPct: (count: number) => number;
+  /** Percentile (0..1, 1 = best) of a raw composite score within the same eligible population -- this is what actually assigns the letter, i.e. the "curve" itself. */
+  scorePct: (score: number) => number;
+  eligibleCount: number;
+};
+
+function percentileLookup(sortedAsc: number[]): (v: number) => number {
+  if (sortedAsc.length === 0) return () => 0;
+  return (v: number) => {
+    let lo = 0;
+    let hi = sortedAsc.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sortedAsc[mid] <= v) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo / sortedAsc.length;
+  };
+}
+
+/** Raw per-axis magnitude BEFORE the percentile curve is applied -- floor/volume/listed only, the three axes that get curved. */
+function rawGradeMagnitudes(
+  c: TrackedCollection,
+  toUsd: (weiStr: string | null, currency: string | null) => number | null
+): { floorUsd: number; volumeUsd: number; listed: number } {
+  return {
+    floorUsd: toUsd(displayFloorWei(c), c.floorPriceCurrency) ?? 0,
+    volumeUsd: toUsd(c.volume24hWei, chainNativeAsset(c.chainSlug)) ?? 0,
+    listed: c.listedCount ?? 0,
+  };
+}
+
+/** Computed ONCE per collections/price load (see buildGradeContext's call site) -- never per-row, so curving hundreds of rows stays cheap. */
+export function buildGradeContext(
+  collections: TrackedCollection[],
+  toUsd: (weiStr: string | null, currency: string | null) => number | null
+): GradePercentiles {
+  const eligible = collections.filter(hasGradeEvidence);
+  const floors = eligible.map((c) => rawGradeMagnitudes(c, toUsd).floorUsd).sort((a, b) => a - b);
+  const volumes = eligible.map((c) => rawGradeMagnitudes(c, toUsd).volumeUsd).sort((a, b) => a - b);
+  const listedCounts = eligible.map((c) => rawGradeMagnitudes(c, toUsd).listed).sort((a, b) => a - b);
+  const floorPct = percentileLookup(floors);
+  const volumePct = percentileLookup(volumes);
+  const listedPct = percentileLookup(listedCounts);
+
+  // Pass 2: every eligible row's raw composite score, using the SAME
+  // percentile functions gradeBreakdown will use per-row -- this is what
+  // scorePct below curves against, so the final letter is genuinely
+  // relative to this platform's own tracked population, top to bottom.
+  const scorelessCtx: GradePercentiles = { floorPct, volumePct, listedPct, scorePct: () => 0, eligibleCount: eligible.length };
+  const scores = eligible
+    .map((c) => gradeBreakdown(c, hasArtStub(c), toUsd, scorelessCtx).score)
+    .sort((a, b) => a - b);
+  const scorePct = percentileLookup(scores);
+
+  return { floorPct, volumePct, listedPct, scorePct, eligibleCount: eligible.length };
+}
+
+/** buildGradeContext's own pass-2 scoring doesn't know per-row art status (that's a UI-layer signal, not on TrackedCollection) -- art is real either way for a row with grade evidence at all (see isCatalogSourced/hasUsableCells), so this stub treats every eligible row as art-present purely for building the population's score DISTRIBUTION. Real per-row rendering always calls gradeBreakdown with the row's true artOk. */
+function hasArtStub(_c: TrackedCollection): boolean {
+  return true;
 }
 
 function gradeBreakdown(
   c: TrackedCollection,
   artOk: boolean,
-  toUsd: (weiStr: string | null, currency: string | null) => number | null
+  toUsd: (weiStr: string | null, currency: string | null) => number | null,
+  ctx: GradePercentiles
 ): GradeBreakdown {
   const activityPoints = (Math.min(c.recentActivity, 5000) / 5000) * 300;
   const hasCreator = Boolean(c.creatorHandle || c.creatorEns);
   const liveBook = c.listedCount != null && c.listedCount > 0;
-  const floorUsd = toUsd(displayFloorWei(c), c.floorPriceCurrency) ?? 0;
-  const volumeUsd = toUsd(c.volume24hWei, chainNativeAsset(c.chainSlug)) ?? 0;
+  const { floorUsd, volumeUsd, listed } = rawGradeMagnitudes(c, toUsd);
   const vault = Boolean(c.isVaultBacked);
   const home = Boolean(c.isNativeHome);
-  // Ceilings are real, observed blue-chip-tier magnitudes (e.g. BAYC-class
-  // floor/volume, a 1,000+ listing order book) -- not arbitrary round
-  // numbers, so a genuinely deep market still earns full points while a
-  // dust-priced collection with one listing earns a small fraction of them.
+  // Every axis below is scored by PERCENTILE within the live population of
+  // currently-tradeable collections (see buildGradeContext's own header for
+  // why a fixed absolute ceiling was already visibly wrong within an hour
+  // of being shipped) -- top-of-population always earns close to full
+  // points, regardless of what the actual dollar figure happens to be.
   const parts: GradeBreakdown["parts"] = [
     { label: "Has real art", points: artOk ? 400 : 0, max: 400, met: artOk },
-    { label: "Live listed count", points: Math.round(magnitudePoints(c.listedCount ?? 0, 1000, 500)), max: 500, met: liveBook },
-    { label: "Real floor price", points: Math.round(magnitudePoints(floorUsd, 50_000, 400)), max: 400, met: floorUsd > 0 },
-    { label: "Real 24h volume", points: Math.round(magnitudePoints(volumeUsd, 500_000, 400)), max: 400, met: volumeUsd > 0 },
+    { label: "Live listed count (percentile)", points: Math.round(ctx.listedPct(listed) * 500), max: 500, met: liveBook },
+    { label: "Real floor price (percentile)", points: Math.round(ctx.floorPct(floorUsd) * 400), max: 400, met: floorUsd > 0 },
+    { label: "Real 24h volume (percentile)", points: Math.round(ctx.volumePct(volumeUsd) * 400), max: 400, met: volumeUsd > 0 },
     { label: "Recent chain activity", points: Math.round(activityPoints), max: 300, met: c.recentActivity > 0 },
     { label: "Known creator handle/ENS", points: hasCreator ? 50 : 0, max: 50, met: hasCreator },
     { label: "Native RobinWood collection", points: home ? 150 : 0, max: 150, met: home },
@@ -609,17 +688,30 @@ function gradeBreakdown(
 function gradeScore(
   c: TrackedCollection,
   artOk: boolean,
-  toUsd: (weiStr: string | null, currency: string | null) => number | null
+  toUsd: (weiStr: string | null, currency: string | null) => number | null,
+  ctx: GradePercentiles
 ): number | null {
-  const b = gradeBreakdown(c, artOk, toUsd);
+  const b = gradeBreakdown(c, artOk, toUsd, ctx);
   return b.gradable ? b.score : null;
 }
 
-function gradeLetter(breakdown: GradeBreakdown): "A" | "B" | "C" | "D" | null {
+/**
+ * Grading ON A CURVE, literally -- the letter comes from where this row's
+ * score sits in the RANKED DISTRIBUTION of every currently-eligible
+ * collection's score (ctx.scorePct), not a fixed point total. Same real
+ * shape as forced-ranking/percentile grading bands used everywhere from
+ * academic curved grading to credit-score tiers: top ~10% = A, next ~20%
+ * (top 30%) = B, next ~30% (top 60%) = C, everything else that still has
+ * real grade evidence = D. This is what makes the scale self-calibrating --
+ * see buildGradeContext's header for the absolute-ceiling version of this
+ * that broke within an hour of shipping.
+ */
+function gradeLetter(breakdown: GradeBreakdown, ctx: GradePercentiles): "A" | "B" | "C" | "D" | null {
   if (!breakdown.gradable) return null;
-  if (breakdown.score >= 1500) return "A";
-  if (breakdown.score >= 1100) return "B";
-  if (breakdown.score >= 700) return "C";
+  const pct = ctx.scorePct(breakdown.score);
+  if (pct >= 0.9) return "A";
+  if (pct >= 0.7) return "B";
+  if (pct >= 0.4) return "C";
   return "D";
 }
 const GRADE_COLOR: Record<string, string> = {
@@ -679,12 +771,14 @@ function SortableTh({
  * popover: click/focus the badge, see the exact point breakdown gradeScore
  * actually computed for this row, not a generic definition of the letter.
  */
-function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
+function GradeBadge({ breakdown, ctx }: { breakdown: GradeBreakdown; ctx: GradePercentiles }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const letter = gradeLetter(breakdown);
-  const thresholdLabel = letter === "A" ? "≥1500" : letter === "B" ? "≥1100" : letter === "C" ? "≥700" : letter === "D" ? "<700" : "needs floor, listed, volume, or sales";
+  const letter = gradeLetter(breakdown, ctx);
+  const percentileLabel = breakdown.gradable ? `top ${Math.round((1 - ctx.scorePct(breakdown.score)) * 100) || 1}% of ${ctx.eligibleCount} tradeable` : null;
+  const thresholdLabel =
+    letter === "A" ? "top 10% (curve)" : letter === "B" ? "top 30% (curve)" : letter === "C" ? "top 60% (curve)" : letter === "D" ? "bottom 40% (curve)" : "needs a live listing or vault-backed liquidity";
 
   // Real fix for a real bug flagged live twice ("the graded pop up
   // explanations are colliding with backgrounds and nearby text and
@@ -738,7 +832,7 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
               </p>
               <p className="mb-2 text-[0.6rem] text-foreground/35">
                 {letter
-                  ? `${thresholdLabel} points needed for ${letter}. Not a wash-trade or stolen-art score.`
+                  ? `${thresholdLabel} -- ${percentileLabel}. Graded on a curve against every currently tradeable collection, not a fixed point total. Not a wash-trade or stolen-art score.`
                   : "No letter until this collection has executable liquidity: a live listing or a redeemable on-chain vault. Sales history, transfer activity, a floor claim, and artwork alone cannot create a market grade. Not wash-trade or stolen-art detection."}
               </p>
               <ul className="space-y-1">
@@ -1090,6 +1184,12 @@ export default function GlobalMarketHub() {
   const key = (c: TrackedCollection) => `${c.chainSlug}:${c.contractAddress}`;
   const hasArt = (c: TrackedCollection) => Boolean(c.imageUrl) && !deadArt.has(key(c));
 
+  // Built once per collections/price load, reused by every gradeBreakdown/
+  // gradeScore/gradeLetter call this render -- see buildGradeContext's own
+  // header for why this replaced a fixed absolute-ceiling version within
+  // an hour of that version shipping.
+  const gradeCtx = useMemo(() => buildGradeContext(collections, toUsd), [collections, usdPrices]);
+
   // Sorted strictly by real popularity (tracked-collection count), most to
   // least -- flagged live 2026-08-20 ("stack the chains better and by
   // popularity"). ALL_CHAIN_SLUGS_ORDER used to override this with a fixed
@@ -1164,7 +1264,7 @@ export default function GlobalMarketHub() {
       if (home !== 0) return home;
       const book = Number(hasMarketEvidence(b)) - Number(hasMarketEvidence(a));
       if (book !== 0) return book;
-      const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt, toUsd);
+      const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt, toUsd, gradeCtx);
       if (primary !== 0) return primary;
       // Real USD-equivalent tie-break, same conversion as the primary "floor"
       // sort case above -- a raw-wei tie-break would reintroduce the exact
@@ -1222,7 +1322,7 @@ export default function GlobalMarketHub() {
       )
       .map(({ c, fields }) => ({ c, score: scoreSearchFields(fields, q) }))
       .filter((row) => row.score >= 0)
-      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt, toUsd))
+      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt, toUsd, gradeCtx))
       .map((row) => row.c);
   }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices]);
 
@@ -1444,7 +1544,7 @@ export default function GlobalMarketHub() {
     });
     return candidates
       .sort((a, b) => {
-        const g = (gradeScore(b, true, toUsd) ?? 0) - (gradeScore(a, true, toUsd) ?? 0);
+        const g = (gradeScore(b, true, toUsd, gradeCtx) ?? 0) - (gradeScore(a, true, toUsd, gradeCtx) ?? 0);
         if (g !== 0) return g;
         return (collectionDemandScore(b) ?? 0) - (collectionDemandScore(a) ?? 0);
       })
@@ -1772,7 +1872,7 @@ export default function GlobalMarketHub() {
             {/* Immersive large hero: the single highest-graded mover, full art, full stats. */}
             {(() => {
               const hero = topMovers[0];
-              const heroGrade = gradeBreakdown(hero, true, toUsd);
+              const heroGrade = gradeBreakdown(hero, true, toUsd, gradeCtx);
               return (
                 <Link
                   href={collectionHref(hero)}
@@ -1794,7 +1894,7 @@ export default function GlobalMarketHub() {
                       <span className="inline-flex items-center rounded-full bg-gold-400/90 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-wood-950">
                         Top mover
                       </span>
-                      <GradeBadge breakdown={heroGrade} />
+                      <GradeBadge breakdown={heroGrade} ctx={gradeCtx} />
                     </div>
                     <p className="truncate text-2xl font-bold text-white drop-shadow" title={hero.name ?? hero.contractAddress}>
                       {hero.name ?? hero.contractAddress}
@@ -1826,7 +1926,7 @@ export default function GlobalMarketHub() {
             {/* Medium strip: the next 5 graded movers, immersive art tiles, 2-up on mobile. */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2">
               {topMovers.slice(1).map((c) => {
-                const grade = gradeBreakdown(c, true, toUsd);
+                const grade = gradeBreakdown(c, true, toUsd, gradeCtx);
                 return (
                   <Link
                     key={key(c)}
@@ -1844,7 +1944,7 @@ export default function GlobalMarketHub() {
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
                     <div className="relative space-y-0.5 p-2">
-                      <GradeBadge breakdown={grade} />
+                      <GradeBadge breakdown={grade} ctx={gradeCtx} />
                       <p className="truncate text-xs font-bold text-white" title={displayName(c)}>
                         {displayName(c)}
                       </p>
@@ -2174,7 +2274,7 @@ export default function GlobalMarketHub() {
                         )}
                       </td>
                       <td className="px-2 py-2 text-right">
-                        <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd)} />
+                        <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd, gradeCtx)} ctx={gradeCtx} />
                       </td>
                     </tr>
                   );
@@ -2508,7 +2608,7 @@ export default function GlobalMarketHub() {
                       {/* Visible composite grade, always -- gradeScore already drives the "Trending" sort; this makes that grading legible on the card itself instead of staying an invisible sort key. Only shown for a graded (art-present) row. */}
                       {hasArt(c) && (
                         <span className="absolute right-1.5 top-1.5">
-                          <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd)} />
+                          <GradeBadge breakdown={gradeBreakdown(c, hasArt(c), toUsd, gradeCtx)} ctx={gradeCtx} />
                         </span>
                       )}
                     </div>

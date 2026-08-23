@@ -43,6 +43,16 @@ import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+
+/** Same shape /api/market/collection-index (built for Gallery.tsx's art browsing) already returns -- see that route for the real, precomputed, immutable-post-reveal dataset this reuses. */
+type CollectionIndexEntry = {
+  tokenId: number;
+  tokenUri: string;
+  name: string;
+  description: string;
+  imageUri: string;
+  attributes: Array<{ trait_type: string; value: string }>;
+};
 import { invalidateSwr, prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
@@ -284,6 +294,20 @@ export default function MarketView() {
   const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>({});
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
+  // REAL GAP FIXED 2026-08-23, flagged live ("the way plank is wired up it
+  // doesnt bring the full 1542 collection"): Buy & Sell only ever rendered
+  // the live order book (103 of 1,542 currently listed) with no path to
+  // browse the other 1,439 real, minted, unlisted planks -- unlike the
+  // generic foreign-chain collection view (MultichainCollectionView.tsx),
+  // which already has an "All items / Listed only" toggle. The full
+  // 1,542-token dataset already exists server-side (Gallery.tsx's own
+  // /api/market/collection-index primes the exact same dataset for art
+  // browsing) -- it was just never wired into this trading page. Lazy-
+  // fetched only when the toggle is actually flipped to "all", so the
+  // default Buy & Sell load stays exactly as fast as before.
+  const [viewMode, setViewMode] = useState<"listed" | "all">("listed");
+  const [allEntries, setAllEntries] = useState<CollectionIndexEntry[] | null>(null);
+  const [allEntriesLoading, setAllEntriesLoading] = useState(false);
   // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
   // previously kept its own useState populated once via getConnectedAccounts()
   // with no accountsChanged listener, which is why the nav could say
@@ -904,6 +928,37 @@ export default function MarketView() {
     const allowed = clauses.map(([type, value]) => new Set(traitIndex.traits?.[type]?.[value] ?? []));
     return base.filter((listing) => allowed.every((ids) => ids.has(listing.tokenId)));
   }, [listings, filters, rarityMap, selectedTraits, traitIndex]);
+
+  // Lazy-load the full 1,542-token dataset only once the viewer actually
+  // asks for "All items" -- keeps the default Buy & Sell load exactly as
+  // fast as before this toggle existed.
+  useEffect(() => {
+    if (viewMode !== "all" || allEntries || allEntriesLoading) return;
+    let alive = true;
+    setAllEntriesLoading(true);
+    fetch("/api/market/collection-index", { cache: "no-cache" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { entries?: CollectionIndexEntry[] } | null) => {
+        if (!alive) return;
+        setAllEntries(Array.isArray(data?.entries) ? data.entries : []);
+      })
+      .catch(() => {
+        if (alive) setAllEntries([]);
+      })
+      .finally(() => {
+        if (alive) setAllEntriesLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [viewMode, allEntries, allEntriesLoading]);
+
+  /** Real, minted, unlisted planks -- everything in the full catalog that isn't currently a live order. No Buy path: these have no real order behind them, only "View details" / "Make an offer". */
+  const unlistedEntries = useMemo(() => {
+    if (!allEntries) return [];
+    const listedIds = new Set(listings.map((l) => l.tokenId));
+    return allEntries.filter((e) => !listedIds.has(String(e.tokenId)));
+  }, [allEntries, listings]);
   const sortedVisibleListings = useMemo(
     () => sortListings(visibleListings, sort),
     [visibleListings, sort]
@@ -1366,6 +1421,24 @@ export default function MarketView() {
                           Bid by criteria
                         </button>
                       )}
+                      {COLLECTION && !loading && (
+                        <div className="flex min-h-10 shrink-0 items-center gap-0.5 rounded-lg border border-line-strong p-0.5">
+                          {(["listed", "all"] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setViewMode(mode)}
+                              aria-pressed={viewMode === mode}
+                              className={`min-h-8 rounded-md px-2.5 text-xs font-bold transition ${
+                                viewMode === mode ? "bg-gold-400/15 text-gold-300" : "text-foreground/55 hover:text-gold-300"
+                              }`}
+                              title={mode === "all" ? `Browse all ${ROBINWOOD_TOTAL_SUPPLY} planks, not just the ${listings.length} currently listed` : "Only currently-listed planks"}
+                            >
+                              {mode === "all" ? "All items" : "Listed only"}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <label className="flex items-center gap-1.5">
                         <span className="sr-only">Sort listings</span>
                         <select
@@ -1425,6 +1498,56 @@ export default function MarketView() {
                         ) : undefined
                       }
                     />
+                  )}
+                  {viewMode === "all" && !loading && (
+                    <div className="mt-4 border-t border-line pt-4">
+                      <p className="mb-3 text-xs font-bold uppercase tracking-wide text-foreground/50">
+                        {allEntriesLoading
+                          ? "Loading the rest of the collection…"
+                          : `${unlistedEntries.length} more planks (minted, real, not currently listed)`}
+                      </p>
+                      {!allEntriesLoading && unlistedEntries.length > 0 && (
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                          {unlistedEntries.map((entry) => {
+                            const tokenId = String(entry.tokenId);
+                            const rarity = rarityMap.get(tokenId);
+                            return (
+                              <div
+                                key={tokenId}
+                                className="overflow-hidden rounded-xl border border-line bg-wood-900/60 transition hover:border-gold-400/60"
+                              >
+                                <button type="button" onClick={() => openDetail(tokenId)} className="block w-full">
+                                  {/* eslint-disable-next-line @next/next/no-img-element -- same lazy-loaded raw <img> ListingCard's own image cell already uses for plank art */}
+                                  <img src={entry.imageUri} alt={entry.name} loading="lazy" className="aspect-square w-full object-cover" />
+                                </button>
+                                <div className="space-y-1 p-2">
+                                  <p className="truncate text-xs font-bold text-foreground/85">{entry.name}</p>
+                                  <p className="text-[0.65rem] text-foreground/45">
+                                    {rarity ? `${rarity.tier} · Rank ${rarity.rank}` : `#${tokenId}`}
+                                  </p>
+                                  <div className="flex gap-1.5 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => openDetail(tokenId)}
+                                      className="min-h-8 flex-1 rounded-md border border-line-strong text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
+                                    >
+                                      Details
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOfferTarget({ tokenId })}
+                                      className="min-h-8 flex-1 rounded-md border border-gold-400/40 text-[0.65rem] font-bold text-gold-300 hover:border-gold-400"
+                                    >
+                                      Offer
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </MarketBrowseLayout>
               </div>
