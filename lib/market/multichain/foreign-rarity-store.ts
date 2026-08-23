@@ -48,7 +48,7 @@ export async function listForeignRarityTokens(
   // collection surface. The old 2,000 ceiling made a fully indexed 5,876
   // piece collection appear truncated whenever its projection row was
   // temporarily unavailable, even though every rarity row already existed.
-  const cap = Math.min(Math.max(limit, 1), 12000);
+  const cap = Math.min(Math.max(limit, 1), 800);
   const sort = opts?.sort ?? "id";
   const tier = opts?.tier?.trim() || null;
   const orderSql =

@@ -27,7 +27,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 12000);
+  // Bounded response page, not a collection-size limit. Projection cursors
+  // provide lossless traversal for collections of any cardinality.
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 800);
   const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
   const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
   const tier = searchParams.get("tier");

@@ -114,10 +114,10 @@ const COMBINED_OFFER_DISCOUNT_BPS = 1000;
 /** Caps how many "offer the rest" wallet prompts one combined action can trigger -- an unbounded remainder could otherwise turn one click into dozens of signature prompts. */
 const COMBINED_REMAINDER_CAP = 5;
 
-function boundedCatalogTake(raw: string | null, pageSize: number, cap: number): number {
+function boundedCatalogTake(raw: string | null, pageSize: number): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < pageSize) return pageSize;
-  return Math.min(parsed, cap);
+  return parsed;
 }
 
 function parseTierList(raw: string | null): RarityTier[] {
@@ -182,7 +182,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   } | null>(null);
   const surface = collectionSurface(chainSlug);
   const browseStorageKey = `marketplank:browse:v1:${chainSlug}:${collectionSlug.toLowerCase()}`;
-  const [tokenLimit, setTokenLimit] = useState(() => boundedCatalogTake(searchParams.get("take"), surface.catalogPageSize, surface.catalogCap));
+  const [tokenLimit, setTokenLimit] = useState(() => boundedCatalogTake(searchParams.get("take"), surface.catalogPageSize));
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
   const [browseMode, setBrowseMode] = useState<"art" | "intelligence">(() => searchParams.get("view") === "intelligence" ? "intelligence" : "art");
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
@@ -374,39 +374,41 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
-  const fetchCatalogTokens = useCallback(() => {
+  const fetchCatalogTokens = useCallback(async () => {
     const sort =
       listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
     const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
-    const qs = new URLSearchParams({
-      chainSlug,
-      collectionSlug,
-      limit: String(Math.min(surface.catalogCap, tokenLimit)),
-      art: "2",
-      sort,
-    });
-    if (tierFilter) qs.set("tier", tierFilter);
-    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
+    type TokenPage = { tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null;
       animationUrl?: string | null; mediaType?: string | null;
       traits?: Array<{ traitType: string; value: string }> }>;
-      building?: boolean; projectedCount?: number; expectedCount?: number | null; partial?: boolean }>(
-      `/api/market/multichain/tokens?${qs.toString()}`,
-      { ttlMs: 8_000, swrMs: 45_000, session: true }
-    )
-      .then((tok) => {
-        setTokens(tok.tokens ?? []);
-        setCatalogBuilding(Boolean(tok.building));
-        setCatalogMeta(typeof tok.projectedCount === "number" ? {
-          projectedCount: tok.projectedCount,
-          expectedCount: tok.expectedCount ?? null,
-          partial: Boolean(tok.partial),
-        } : null);
-      })
-      .catch(() => {
-        setTokens([]);
-        setCatalogBuilding(false);
-      });
-  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogCap]);
+      nextCursor?: string | null; building?: boolean; projectedCount?: number;
+      expectedCount?: number | null; partial?: boolean };
+    const accumulated: TokenPage["tokens"] = [];
+    let cursor: string | null = null;
+    let last: TokenPage | null = null;
+    try {
+      while (accumulated.length < tokenLimit) {
+        const qs = new URLSearchParams({ chainSlug, collectionSlug,
+          limit: String(Math.min(surface.catalogPageSize, tokenLimit - accumulated.length)), art: "2", sort });
+        if (tierFilter) qs.set("tier", tierFilter);
+        if (cursor) qs.set("cursor", cursor);
+        last = await swrJson<TokenPage>(`/api/market/multichain/tokens?${qs.toString()}`,
+          { ttlMs: 8_000, swrMs: 45_000, session: true });
+        accumulated.push(...(last.tokens ?? []));
+        cursor = last.nextCursor ?? null;
+        if (!cursor || !last.tokens?.length) break;
+      }
+      setTokens(accumulated);
+      setCatalogBuilding(Boolean(last?.building));
+      setCatalogMeta(typeof last?.projectedCount === "number" ? {
+        projectedCount: last.projectedCount, expectedCount: last.expectedCount ?? null,
+        partial: Boolean(last.partial),
+      } : null);
+    } catch {
+      setTokens(accumulated);
+      setCatalogBuilding(false);
+    }
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogPageSize]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -2345,21 +2347,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               })}
             </ul>
           )}
-          {bookFilter === "all" && tokenLimit < surface.catalogCap && (
+          {bookFilter === "all" && (
             catalogMeta?.projectedCount != null
-              ? tokens.length < Math.min(
-                  surface.catalogCap,
-                  catalogMeta.expectedCount ?? catalogMeta.projectedCount
-                )
-              : tokens.length >= Math.min(tokenLimit, surface.catalogCap)
+              ? tokens.length < (catalogMeta.expectedCount ?? catalogMeta.projectedCount)
+              : tokens.length >= tokenLimit
           ) && (
             <div className="mt-3 flex flex-wrap justify-center gap-2">
               <button
                 type="button"
-                onClick={() => setTokenLimit((n) => Math.min(
-                  surface.catalogCap,
-                  Math.max(n, tokens.length) + surface.catalogPageSize
-                ))}
+                onClick={() => setTokenLimit((n) => Math.max(n, tokens.length) + surface.catalogPageSize)}
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
                 Load more
@@ -2367,15 +2363,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </button>
               <button
                 type="button"
-                onClick={() => setTokenLimit(Math.min(
-                  surface.catalogCap,
-                  catalogMeta?.expectedCount ?? catalogMeta?.projectedCount ?? surface.catalogCap
-                ))}
+                onClick={() => setTokenLimit((n) => Math.max(n, tokens.length) + surface.catalogPageSize * 5)}
                 className="min-h-10 rounded-md border border-purple-400/50 px-4 text-xs font-bold text-purple-200 hover:bg-purple-400/10"
               >
                 View all NFTs
                 {catalogMeta
-                  ? ` · ${Math.min(surface.catalogCap, catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()}`
+                  ? ` · ${(catalogMeta.expectedCount ?? catalogMeta.projectedCount).toLocaleString()}`
                   : ""}
               </button>
             </div>

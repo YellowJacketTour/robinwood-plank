@@ -23,7 +23,7 @@ describe("collection surface", () => {
   });
 
   it("does not impose RobinWood's supply on every Robinhood collection", () => {
-    assert.equal(collectionSurface("robinhood").catalogCap, 12000);
+    assert.equal("catalogCap" in collectionSurface("robinhood"), false);
   });
 
   it("gives Milady a proven extra and unknown EVM none", () => {

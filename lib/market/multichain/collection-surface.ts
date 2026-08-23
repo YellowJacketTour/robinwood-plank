@@ -15,7 +15,6 @@
 export type CollectionSurface = {
   chainSlug: string;
   catalogPageSize: number;
-  catalogCap: number;
   bookPageSize: number;
   catalog: string;
   book: string;
@@ -24,10 +23,6 @@ export type CollectionSurface = {
 
 const EVM: Omit<CollectionSurface, "chainSlug"> = {
   catalogPageSize: 400,
-  // Large ERC-721 collections (CryptoPunks, BAYC, etc.) exceed the old
-  // 2,000-row ceiling. Loading remains explicit/incremental in the UI, but
-  // the catalog must be able to reach the platform's supported 12k supply.
-  catalogCap: 12000,
   bookPageSize: 200,
   catalog: "plank_foreign_rarity + OpenSea NFT walk",
   book: "OpenSea listings",
@@ -45,7 +40,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   "solana-mainnet": {
     chainSlug: "solana-mainnet",
     catalogPageSize: 800,
-    catalogCap: 12000,
     bookPageSize: 200,
     catalog: "foreign rarity (Helius DAS) else ME listings/activities",
     book: "Magic Eden listings",
@@ -54,7 +48,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   "bitcoin-mainnet": {
     chainSlug: "bitcoin-mainnet",
     catalogPageSize: 800,
-    catalogCap: 12000,
     bookPageSize: 200,
     catalog: "foreign rarity else OW catalog else UniSat items",
     book: "UniSat auction list",
@@ -63,11 +56,6 @@ export const COLLECTION_SURFACES: Record<string, CollectionSurface> = {
   robinhood: {
     chainSlug: "robinhood",
     catalogPageSize: 400,
-    // Robinhood Chain is not synonymous with the 1,542-piece RobinWood
-    // contract. Community collections such as MUGS are materially larger.
-    // The native collection naturally stops at its indexed supply; this is
-    // only a request ceiling and must never truncate other contracts.
-    catalogCap: 12000,
     bookPageSize: 400,
     catalog: "native rarity + gallery",
     book: "native Seaport + plank.love overlay",
@@ -80,7 +68,6 @@ export function collectionSurface(chainSlug: string): CollectionSurface {
     COLLECTION_SURFACES[chainSlug] ?? {
       chainSlug,
       catalogPageSize: 400,
-      catalogCap: 12000,
       bookPageSize: 200,
       catalog: "rarity index if present",
       book: "chain venue if any",

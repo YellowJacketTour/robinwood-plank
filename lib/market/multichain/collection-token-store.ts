@@ -33,14 +33,16 @@ export function hasCollectionTokenStore(): boolean { return hasPostgresConfig();
 function canonicalCollectionSlug(value: string): string {
   return /^0x[0-9a-f]{40}$/i.test(value) ? value.toLowerCase() : value;
 }
-export function encodeTokenCursor(tokenId: string): string {
-  return Buffer.from(tokenId, "utf8").toString("base64url");
+type TokenCursor = { tokenId: string; rarityRank: number | null };
+export function encodeTokenCursor(tokenId: string, rarityRank: number | null = null): string {
+  return Buffer.from(JSON.stringify({ tokenId, rarityRank } satisfies TokenCursor), "utf8").toString("base64url");
 }
-export function decodeTokenCursor(cursor: string | null | undefined): string | null {
+export function decodeTokenCursor(cursor: string | null | undefined): TokenCursor | null {
   if (!cursor) return null;
   try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    return decoded && encodeTokenCursor(decoded) === cursor ? decoded : null;
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Partial<TokenCursor>;
+    if (typeof parsed.tokenId !== "string" || (parsed.rarityRank != null && !Number.isFinite(parsed.rarityRank))) return null;
+    return { tokenId: parsed.tokenId, rarityRank: parsed.rarityRank == null ? null : Number(parsed.rarityRank) };
   } catch { return null; }
 }
 
@@ -51,8 +53,10 @@ export async function readCollectionTokenProjection(input: {
   // The browser still grows this incrementally (400/800 rows per explicit
   // load), but do not silently truncate a requested projected catalog at
   // 200. That made a healthy, fully materialized DB look incomplete.
-  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 12000);
-  const cursorTokenId = decodeTokenCursor(input.cursor);
+  // This is a transport/DOM page bound, never a catalog ceiling. Every sort
+  // emits a keyset cursor, so callers can traverse an arbitrarily large set.
+  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 800);
+  const cursor = decodeTokenCursor(input.cursor);
   const sort = input.sort ?? "id";
   const tier = input.tier?.trim() || null;
   const state = await postgresQuery<ProjectionRow>(
@@ -65,16 +69,28 @@ export async function readCollectionTokenProjection(input: {
   const params: unknown[] = [input.chainSlug, input.collectionSlug];
   let where = "chain_slug = $1 AND lower(collection_slug) = lower($2)";
   if (tier) { params.push(tier); where += ` AND lower(rarity_tier) = lower($${params.length})`; }
-  if (cursorTokenId && sort === "id") {
-    params.push(cursorTokenId);
-    const cursor = `$${params.length}`;
+  if (cursor && sort === "id") {
+    params.push(cursor.tokenId);
+    const cursorParam = `$${params.length}`;
     where += ` AND (
-      (${cursor} ~ '^[0-9]+$' AND (
-        (token_id ~ '^[0-9]+$' AND token_id::numeric > ${cursor}::numeric)
+      (${cursorParam} ~ '^[0-9]+$' AND (
+        (token_id ~ '^[0-9]+$' AND token_id::numeric > ${cursorParam}::numeric)
         OR token_id !~ '^[0-9]+$'
       ))
-      OR (${cursor} !~ '^[0-9]+$' AND token_id !~ '^[0-9]+$' AND token_id > ${cursor})
+      OR (${cursorParam} !~ '^[0-9]+$' AND token_id !~ '^[0-9]+$' AND token_id > ${cursorParam})
     )`;
+  } else if (cursor && sort !== "id") {
+    params.push(cursor.tokenId);
+    const idParam = `$${params.length}`;
+    if (cursor.rarityRank == null) {
+      where += ` AND rarity_rank IS NULL AND token_id > ${idParam}`;
+    } else {
+      params.push(cursor.rarityRank);
+      const rankParam = `$${params.length}`;
+      where += sort === "rank"
+        ? ` AND (rarity_rank > ${rankParam} OR (rarity_rank = ${rankParam} AND token_id > ${idParam}) OR rarity_rank IS NULL)`
+        : ` AND (rarity_rank < ${rankParam} OR (rarity_rank = ${rankParam} AND token_id > ${idParam}) OR rarity_rank IS NULL)`;
+    }
   }
   const order = sort === "rank" ? "rarity_rank ASC NULLS LAST, token_id ASC"
     : sort === "rank-desc" ? "rarity_rank DESC NULLS LAST, token_id ASC"
@@ -91,8 +107,8 @@ export async function readCollectionTokenProjection(input: {
       traits: normalizeTraits(row.traits),
       rarityScore: row.rarity_score, rarityRank: row.rarity_rank,
       rarityPercentile: row.rarity_percentile, rarityTier: row.rarity_tier })),
-    nextCursor: sort === "id" && rows.rows.length > limit && page.length
-      ? encodeTokenCursor(page[page.length - 1].token_id) : null,
+    nextCursor: rows.rows.length > limit && page.length
+      ? encodeTokenCursor(page[page.length - 1].token_id, page[page.length - 1].rarity_rank) : null,
     projectedCount: Number(meta.projected_count),
     expectedCount: meta.expected_count === null ? null : Number(meta.expected_count),
     partial: meta.partial, provenance: meta.provenance,

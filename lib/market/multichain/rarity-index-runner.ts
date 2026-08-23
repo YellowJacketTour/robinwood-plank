@@ -26,14 +26,6 @@ import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-c
 
 const PAGE_SIZE = 50;
 
-/** First-pass item cap so we never block on Art Blocks / ENS. Ranks recompute as sample grows. */
-export function itemCeiling(supply: number | null): number {
-  if (supply == null || !Number.isFinite(supply) || supply <= 0) return 2_000;
-  if (supply <= 12_000) return Math.ceil(supply);
-  if (supply <= 40_000) return 12_000;
-  return 8_000;
-}
-
 export type RarityIndexBackend = "helius" | "unisat" | "opensea-contract" | "opensea-slug";
 
 /**
@@ -379,7 +371,6 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   }
 
   const supplyHint = typeof collectionMeta?.total_supply === "number" ? collectionMeta.total_supply : null;
-  const cap = itemCeiling(supplyHint ?? null);
   const items: Array<{
     tokenId: string;
     name: string | null;
@@ -388,7 +379,6 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   }> = [];
   let cursor: string | null = null;
   let page = 0;
-  const maxPages = Math.ceil(cap / PAGE_SIZE) + 1;
 
   do {
     const url = new URL(`https://api.opensea.io/api/v2/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts`);
@@ -416,7 +406,7 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     }
     cursor = data.next ?? null;
     page += 1;
-  } while (cursor && page < maxPages && items.length < cap);
+  } while (cursor);
 
   const partial = Boolean(cursor) || (supplyHint != null && items.length < supplyHint);
   const snapshot = { ...computeGenericRaritySnapshot(items), partial };

@@ -41,8 +41,6 @@ import {
 
 const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 1000;
-/** First-pass cap (same philosophy as EVM itemCeiling): ranks recompute as the sample grows. */
-const FIRST_PASS_ITEM_CAP = 12_000;
 
 function apiKey(): string {
   const key = process.env.HELIUS_API_KEY?.trim();
@@ -281,8 +279,7 @@ export async function indexSolanaCollectionRarity(collectionAddress: string): Pr
     let page = 1;
     let lastPageSize = PAGE_SIZE;
 
-    const maxPages = Math.ceil(FIRST_PASS_ITEM_CAP / PAGE_SIZE);
-    while (lastPageSize === PAGE_SIZE && page <= maxPages && items.length < FIRST_PASS_ITEM_CAP) {
+    while (lastPageSize === PAGE_SIZE) {
       const assets = await fetchGroupedPage(mint, page);
       items.push(...assetsToItems(assets));
       lastPageSize = assets.length;
@@ -292,8 +289,7 @@ export async function indexSolanaCollectionRarity(collectionAddress: string): Pr
     if (items.length === 0) {
       throw new Error(`helius-rarity-index-runner: no member NFTs for "${collectionAddress}" (mint ${mint})`);
     }
-    const partial = items.length >= FIRST_PASS_ITEM_CAP || (page > maxPages && lastPageSize === PAGE_SIZE);
-    return persistSolanaSnapshot(mint, items, partial, aliases);
+    return persistSolanaSnapshot(mint, items, false, aliases);
   } catch (primary) {
     const listed = await itemsFromMagicEdenListings(collectionAddress);
     const withTraits = listed.filter((i) => i.traits.length > 0);
