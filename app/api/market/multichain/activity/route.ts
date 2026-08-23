@@ -21,11 +21,22 @@ import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { activityValue } from "@/lib/market/activity-value";
 import { readSeaportFillHistory } from "@/lib/market/multichain/seaport-fill-history";
+import { isCompleteVenueCoverage, venuesForChain } from "@/lib/market/multichain/venue-registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENSEA = "https://api.opensea.io/api/v2";
+
+function venueCoverage(chainSlug: string) {
+  const venues = venuesForChain(chainSlug);
+  return {
+    completeMarketHistory: isCompleteVenueCoverage(venues),
+    venues: venues.map(({ id, label, protocol, versions, capabilities, coverage, notes }) => ({
+      id, label, protocol, versions, capabilities, coverage, notes,
+    })),
+  };
+}
 
 /**
  * How far back a Robinhood-Chain activity read scans, in blocks. There is no
@@ -140,7 +151,7 @@ export async function GET(req: NextRequest) {
         imageUrl: null,
       }));
 
-      return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       return publicError(error, "Failed to load Robinhood-Chain activity");
     }
@@ -185,7 +196,7 @@ export async function GET(req: NextRequest) {
         tokenName: null,
         imageUrl: null,
       })));
-      return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       return publicError(error, "Failed to load Solana activity");
     }
@@ -195,7 +206,7 @@ export async function GET(req: NextRequest) {
   // "bitcoin" branch: no keyless/documented activity-query endpoint was
   // found for UniSat's Marketplace API during this research pass.
   if (isBitcoinChainSlug(chainSlug)) {
-    return NextResponse.json({ events: [] }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ events: [], marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
   }
 
   if (!foreignChainByChainSlug(chainSlug)) {
@@ -210,7 +221,7 @@ export async function GET(req: NextRequest) {
     if (contractAddress) {
       const ledger = await readSeaportFillHistory({ chainSlug, contractAddress, limit });
       if (ledger && ledger.events.length > 0) {
-        return NextResponse.json(ledger, { headers: { "Cache-Control": "no-store" } });
+        return NextResponse.json({ ...ledger, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
       }
     }
     const key = await getOpenSeaApiKey();
@@ -226,7 +237,7 @@ export async function GET(req: NextRequest) {
     // answer, not an error. Marketplank's own native-order activity is a
     // separate concern this route was never wired to anyway.
     if (!chainForSlug.openSeaChain) {
-      return NextResponse.json({ events: [] }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ events: [], marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
     }
     const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
       ? ((await resolveOpenSeaCollectionSlug(chainForSlug.openSeaChain, collectionSlug)) ?? collectionSlug)
@@ -259,6 +270,7 @@ export async function GET(req: NextRequest) {
     })));
     return NextResponse.json({
       events,
+      marketCoverage: venueCoverage(chainSlug),
       coverage: {
         source: "opensea-single-page",
         scope: "opensea-single-page",

@@ -3,6 +3,7 @@ import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -170,7 +171,9 @@ export async function GET(req: Request) {
         floorPriceMarketplace: c.floorPriceMarketplace,
         totalSupply: c.totalSupply,
         listedCount:
-          c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
+          hasUnindexedNativeBook(c.chainSlug, c.contractAddress)
+            ? null
+            : c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
             ? null
             : c.listedCount,
         syncedAt: c.syncedAt,

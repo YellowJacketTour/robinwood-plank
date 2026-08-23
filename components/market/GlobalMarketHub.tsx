@@ -478,15 +478,19 @@ function hasMarketEvidence(c: TrackedCollection): boolean {
   if (c.sales24h != null && c.sales24h > 0) return true;
   return false;
 }
-/** ETH-like grades need a book or volume, not floor+JPEG alone. */
+/**
+ * A missing marketplace adapter is not proof that a collection has no market.
+ * Native-contract collections (CryptoPunks is the canonical example) can have
+ * real fills and asks outside the generic ERC-721 order adapters. Keep the
+ * anti-gaming liquidity requirement, but allow independently observed floor +
+ * sale evidence to make the row gradable while the native book is indexed.
+ */
 function hasGradeEvidence(c: TrackedCollection): boolean {
   if (c.isNativeHome) return true;
-  // A sale history is not executable liquidity. With no live ask and no
-  // redeemable vault, a buyer cannot enter and a holder cannot exit through
-  // this interface; awarding a B/A grade there rewards unverifiable headline
-  // velocity over an actually tradeable market and is easy to game with wash
-  // fills. Historical activity remains visible, but cannot create a grade.
-  return (c.listedCount != null && c.listedCount > 0) || Boolean(c.isVaultBacked);
+  if ((c.listedCount != null && c.listedCount > 0) || c.isVaultBacked) return true;
+  const hasFloor = Boolean(c.floorPriceWei && c.floorPriceWei !== "0");
+  const hasSales = (c.sales24h ?? 0) > 0 || Boolean(c.volume24hWei && c.volume24hWei !== "0");
+  return hasFloor && hasSales;
 }
 
 function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
