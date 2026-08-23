@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const { hasDurableKv } = await import("../lib/market/durable-kv");
   if (!hasDurableKv()) throw new Error("mesh-tick: no PG");
 
-  const lanes = [];
+  const lanes: typeof MESH_LANES = [];
   for (const lane of MESH_LANES) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;
     if (await isSourceJailed(lane.source)) {
