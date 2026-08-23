@@ -138,7 +138,10 @@ export type OpenSeaRobinhoodDiscoveryResult = {
 export async function runOpenSeaRobinhoodDiscoveryScan(
   input: { maxPages?: number } = {}
 ): Promise<OpenSeaRobinhoodDiscoveryResult> {
-  const maxPages = input.maxPages ?? 5;
+  // No documented OpenSea per-minute limit is cited in this file; raised
+  // 10x from the arbitrary cron-pacing default of 5 so each pass covers
+  // more real ground per invocation.
+  const maxPages = input.maxPages ?? 50;
   const apiKey = await getOpenSeaApiKey();
   if (!apiKey) {
     return {

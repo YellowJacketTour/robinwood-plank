@@ -153,10 +153,15 @@ type OwnersForContractResponse = { owners: string[]; pageKey?: string | null };
  * run in bulk over every one of thousands of tracked collections every
  * sync pass -- that would multiply this call by the whole index for no
  * real reason, since a rankings-table row doesn't need a live holder count.
- * MAX_PAGES bounds runaway cost for an unusually large/degenerate
- * collection rather than trusting pageKey to always terminate quickly.
+ * The real termination signal is Alchemy's own pageKey cursor going null --
+ * that's what actually marks end-of-data, not a page count. A tuned "20
+ * pages" (~10k owners at ~500/page) is well within reach of real large
+ * collections (widely-held PFP/gaming collections routinely clear that),
+ * which would silently truncate the holder count. MAX_OWNER_PAGES here is
+ * only a crash guard against a malformed response that never nulls its
+ * pageKey -- set far above anything a real collection could ever hit.
  */
-const MAX_OWNER_PAGES = 20;
+const MAX_OWNER_PAGES = 100_000;
 
 export async function fetchHolderCount(chainSlug: string, contractAddress: string): Promise<number | null> {
   const base = baseUrl(chainSlug);

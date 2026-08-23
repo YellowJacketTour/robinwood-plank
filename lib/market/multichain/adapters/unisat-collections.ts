@@ -49,9 +49,32 @@ import {
   updateCollectionSupplyFields,
   updateHolderCount,
 } from "@/lib/market/multichain/store";
+import { postgresQuery } from "@/lib/postgres";
 
 const API_BASE = "https://open-api.unisat.io/v3/market/collection/auction";
 const PAGE_SIZE = 20; // real, confirmed server-enforced max (exclusiveMaximum 21)
+
+/** Same durable discovery-cursor table/pattern unisat-collection-list-scan.ts
+ * uses -- a distinct key so this ranked-art walk and that registry walk
+ * advance independently. */
+const ART_CURSOR_KEY = "bitcoin-mainnet:collection-art-backfill";
+
+async function readArtStart(): Promise<number> {
+  const result = await postgresQuery<{ last_scanned_block: string }>(
+    `SELECT last_scanned_block FROM plank_multichain_discovery_cursor WHERE chain_slug = $1`,
+    [ART_CURSOR_KEY]
+  );
+  return result.rows[0] ? Number(result.rows[0].last_scanned_block) : 0;
+}
+
+async function writeArtStart(start: number): Promise<void> {
+  await postgresQuery(
+    `INSERT INTO plank_multichain_discovery_cursor (chain_slug, last_scanned_block, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (chain_slug) DO UPDATE SET last_scanned_block = EXCLUDED.last_scanned_block, updated_at = NOW()`,
+    [ART_CURSOR_KEY, start]
+  );
+}
 
 type UniSatCollectionEntry = {
   collectionId: string;
@@ -199,6 +222,14 @@ export const unisatCollectionsAdapter: ChainAdapter = {
  * Walk UniSat's ranked list (has icon + name per page of 20) and write
  * exact-id display. Snapshot fetch of /collection_statistic 500s for many
  * ids; the list endpoint is the working art/name source. Never invents.
+ *
+ * Resumes from a durable cursor in plank_multichain_discovery_cursor (same
+ * table/pattern as unisat-collection-list-scan.ts's readStart/writeStart,
+ * under its own ART_CURSOR_KEY) so repeated cron/supervisor calls actually
+ * advance through the ranked list instead of re-walking the same first
+ * `maxPages * PAGE_SIZE` window every invocation. Wraps back to 0 once the
+ * list end is reached, so subsequent calls re-refresh from the top rather
+ * than stalling forever at the tail.
  */
 export async function backfillUnisatCollectionArt(maxPages = 60): Promise<{
   scanned: number;
@@ -208,7 +239,7 @@ export async function backfillUnisatCollectionArt(maxPages = 60): Promise<{
   let scanned = 0;
   let named = 0;
   let imaged = 0;
-  let start = 0;
+  let start = await readArtStart();
   for (let page = 0; page < maxPages; page++) {
     let data: { list: UniSatCollectionEntry[]; total: number };
     try {
@@ -264,9 +295,13 @@ export async function backfillUnisatCollectionArt(maxPages = 60): Promise<{
       }
     }
     start += PAGE_SIZE;
-    if (data.list.length < PAGE_SIZE || start >= data.total) break;
+    if (data.list.length < PAGE_SIZE || start >= data.total) {
+      start = 0; // reached the end of the ranked list -- wrap and refresh from the top
+      break;
+    }
     await new Promise((r) => setTimeout(r, 1_200));
   }
+  await writeArtStart(start);
   return { scanned, named, imaged };
 }
 

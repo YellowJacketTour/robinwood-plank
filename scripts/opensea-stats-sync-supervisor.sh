@@ -7,13 +7,11 @@
 cd "$(dirname "$0")/.."
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
-DEADLINE=$(( $(date +%s) + 24 * 60 * 60 ))
 ATTEMPT=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== opensea-stats-sync supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
   npx tsx scripts/opensea-stats-sync-pass.mjs
   echo "=== opensea-stats-sync supervisor: pass exited code $? ==="
   sleep 2
 done
-echo "=== opensea-stats-sync supervisor: 24h deadline reached ==="

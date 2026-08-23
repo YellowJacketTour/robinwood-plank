@@ -140,7 +140,12 @@ export type OpenSeaBulkScanResult = {
 export async function runOpenSeaBulkScan(
   input: { chainSlug: string; openSeaChain: string; chainId: number | null; maxPages?: number }
 ): Promise<OpenSeaBulkScanResult> {
-  const maxPages = input.maxPages ?? (input.chainSlug === "eth-mainnet" ? 8 : 4);
+  // No documented OpenSea per-minute limit is cited anywhere in this file;
+  // the real shared-account rate/quota control is reserveProviderCapacity
+  // (see header), not this page count. Raised 10x from arbitrary cron-pacing
+  // defaults (8/4) so each supervisor pass makes real progress instead of
+  // trickling.
+  const maxPages = input.maxPages ?? (input.chainSlug === "eth-mainnet" ? 80 : 40);
   const base: OpenSeaBulkScanResult = {
     chainSlug: input.chainSlug,
     pagesScanned: 0,

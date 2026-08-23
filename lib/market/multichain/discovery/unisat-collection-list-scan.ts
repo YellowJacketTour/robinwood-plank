@@ -110,7 +110,11 @@ export type CollectionListScanResult = {
  * reaches the catalog's own reported total -- the entire real list has
  * been walked, not an estimate. */
 export async function runUnisatCollectionListScan(input: { maxPages?: number } = {}): Promise<CollectionListScanResult> {
-  const maxPages = input.maxPages ?? 10;
+  // No documented UniSat per-minute limit is cited in this file (the real
+  // control is reserveProviderCapacity's durable daily ceiling in
+  // fetchPage above, not this page count). Raised 10x from the arbitrary
+  // cron-pacing default of 10.
+  const maxPages = input.maxPages ?? 100;
   let start = await readStart();
   let total = start; // updated by the first real page fetched
   let pagesWalked = 0;

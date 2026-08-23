@@ -7,6 +7,7 @@
  * this is a background job, never a live per-request compute.
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
@@ -488,6 +489,8 @@ export type ScaffoldAllResult = {
   solanaSkipped: number;
   /** EVM chains this app trades on natively but with no OpenSea integration to scrape (zkSync today) -- distinct from solanaSkipped, which is non-EVM entirely. */
   noOpenSeaSkipped: number;
+  /** Collections owned by a dedicated native-book adapter (CryptoPunks today) -- see NATIVE_BOOK_COLLECTIONS. Never independently re-indexed here. */
+  nativeBookSkipped: number;
   indexed: number;
   skippedFresh: number;
   failed: number;
@@ -526,7 +529,18 @@ export async function scaffoldAllTrackedCollections(opts?: {
   // Logged as its own count, not folded into `solana`, since it's a real,
   // distinct reason: these ARE EVM chains this app trades on natively,
   // just not through OpenSea's orderbook.
-  const evm = all.filter((c) => foreignChainByChainSlug(c.chainSlug)?.openSeaChain).slice(0, limit);
+  // Collections with a dedicated native-book adapter (CryptoPunks today) own
+  // their own rarity/trait snapshot end-to-end -- see
+  // native-market-adapters/cryptopunks.ts's syncCryptoPunksTraits, driven by
+  // the "cryptopunks-native-book" cron step. This generic OpenSea walk must
+  // never independently re-index them: doing so silently overwrote the
+  // CC0-CSV-derived canonical rarity snapshot with an OpenSea-derived one
+  // (same plank_foreign_rarity rows, keyed by contract address), which is
+  // exactly the class of bug migration 045 already had to patch once for
+  // total_supply. hasUnindexedNativeBook matches case-insensitively.
+  const evmAll = all.filter((c) => foreignChainByChainSlug(c.chainSlug)?.openSeaChain);
+  const nativeBookOwned = evmAll.filter((c) => hasUnindexedNativeBook(c.chainSlug, c.contractAddress));
+  const evm = evmAll.filter((c) => !hasUnindexedNativeBook(c.chainSlug, c.contractAddress)).slice(0, limit);
   const noOpenSeaChain = all.filter((c) => foreignChainByChainSlug(c.chainSlug) && !foreignChainByChainSlug(c.chainSlug)?.openSeaChain);
 
   let indexed = 0;
@@ -535,6 +549,9 @@ export async function scaffoldAllTrackedCollections(opts?: {
   const skippedNoOpenSea = noOpenSeaChain.length;
   for (const c of noOpenSeaChain) {
     log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea orderbook for this chain`);
+  }
+  for (const c of nativeBookOwned) {
+    log(`SKIP ${c.chainSlug}:${c.contractAddress} -- owned by a dedicated native-book adapter; OpenSea rarity would overwrite its canonical snapshot`);
   }
 
   for (const c of evm) {
@@ -573,6 +590,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
     evmInScope: evm.length,
     solanaSkipped: solana.length,
     noOpenSeaSkipped: skippedNoOpenSea,
+    nativeBookSkipped: nativeBookOwned.length,
     indexed,
     skippedFresh,
     failed,

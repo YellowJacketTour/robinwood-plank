@@ -19,6 +19,7 @@ import {
   writeSnapshotError,
 } from "@/lib/market/multichain/store";
 import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
+import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
 import type { ChainAdapter } from "@/lib/market/multichain/types";
 
 const ADAPTERS: Record<string, ChainAdapter> = {
@@ -124,6 +125,18 @@ export async function runMultichainSync(input: { maxCollections?: number; chainS
   const result: MultichainSyncResult = { synced: 0, failed: 0, skipped: 0, errors: [] };
 
   for (const collection of collections) {
+    // A dedicated native-book adapter (CryptoPunks today, via the
+    // "cryptopunks-native-book" cron step) already owns this collection's
+    // floor/listing/supply fields end-to-end from its own real order book.
+    // Whatever this row's `adapter` column says, never let the generic
+    // per-adapter sync loop independently overwrite those fields too --
+    // that dual-writer race is exactly what migration 045 had to patch
+    // once already, for total_supply. See rarity-index-runner.ts's
+    // identical guard for the sibling rarity/trait race.
+    if (hasUnindexedNativeBook(collection.chainSlug, collection.contractAddress)) {
+      result.skipped += 1;
+      continue;
+    }
     const adapter = ADAPTERS[collection.adapter];
     if (!adapter) {
       result.skipped += 1;

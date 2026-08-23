@@ -121,7 +121,11 @@ export type OrdinalsWalletCollectionScanResult = {
  * reported `total` -- the entire real list has been walked, not an
  * estimate. */
 export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number } = {}): Promise<OrdinalsWalletCollectionScanResult> {
-  const maxPages = input.maxPages ?? 10;
+  // No documented OrdinalsWallet per-minute limit is cited in this file.
+  // The real catalog is huge (total: 424,319 at 500/page, confirmed live in
+  // the header above), so the old default of 10 pages/call would take
+  // ~85 invocations just to reach the end once. Raised 50x.
+  const maxPages = input.maxPages ?? 500;
   let offset = await readOffset();
   let total = offset;
   let pagesWalked = 0;

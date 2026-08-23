@@ -107,7 +107,9 @@ export type OrdiscanCollectionScanResult = {
  * a page comes back with an empty `data` array -- the real, confirmed
  * end-of-catalog signal, not an estimate. */
 export async function runOrdiscanCollectionScan(input: { maxPages?: number } = {}): Promise<OrdiscanCollectionScanResult> {
-  const maxPages = input.maxPages ?? 10;
+  // No documented Ordiscan per-minute limit is cited in this file. Raised
+  // 10x from the arbitrary cron-pacing default of 10.
+  const maxPages = input.maxPages ?? 100;
   let page = await readPage();
   let pagesWalked = 0;
   let registered = 0;

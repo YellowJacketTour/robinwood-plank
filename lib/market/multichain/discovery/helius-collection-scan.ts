@@ -69,15 +69,33 @@ async function fetchPage(cursor: string | null): Promise<{ items: HeliusSearchIt
   return { items, nextCursor: items.length === PAGE_SIZE ? (body.result?.cursor ?? null) : null };
 }
 
-type StoredCursor = { cursor: string | null; done: boolean };
+type StoredCursor = { cursor: string | null; done: boolean; doneAt?: number };
+
+/**
+ * REAL BUG FIXED 2026-08-23: once a full walk reached `done: true`, this
+ * scanner returned immediately forever (line ~96 below) and never looked
+ * for newly-minted MplCore collections again -- confirmed live, the stored
+ * cursor row's `updated_at` was 2026-08-20 and hadn't moved since, even
+ * with the supervisor loop running continuously. Helius's searchAssets has
+ * no "since" filter to do an incremental catch-up scan, so the only real
+ * option is a periodic full re-walk. 6 hours is arbitrary pacing (no
+ * documented Helius limit says otherwise), chosen so new collections are
+ * caught same-day without re-walking the whole catalog on every single
+ * supervisor tick.
+ */
+const RESCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 async function readCursor(): Promise<StoredCursor> {
   const stored = await durableKv.get<StoredCursor>(CURSOR_KEY);
-  return stored ?? { cursor: null, done: false };
+  if (!stored) return { cursor: null, done: false };
+  if (stored.done && (Date.now() - (stored.doneAt ?? 0)) > RESCAN_INTERVAL_MS) {
+    return { cursor: null, done: false };
+  }
+  return stored;
 }
 
 async function writeCursorValue(cursor: string | null, done: boolean): Promise<void> {
-  await durableKv.set(CURSOR_KEY, { cursor, done } satisfies StoredCursor);
+  await durableKv.set(CURSOR_KEY, { cursor, done, doneAt: done ? Date.now() : undefined } satisfies StoredCursor);
 }
 
 export type HeliusCollectionScanResult = {
@@ -88,7 +106,10 @@ export type HeliusCollectionScanResult = {
 };
 
 export async function runHeliusCollectionScan(input: { maxPages?: number } = {}): Promise<HeliusCollectionScanResult> {
-  const maxPages = input.maxPages ?? 10;
+  // No documented Helius per-minute limit is cited in this file (only the
+  // real per-page size=1000 server timeout above, unrelated to page count).
+  // Raised 10x from the arbitrary cron-pacing default of 10.
+  const maxPages = input.maxPages ?? 100;
   const stored = await readCursor();
   if (stored.done) {
     return { pagesWalked: 0, registered: 0, done: true };

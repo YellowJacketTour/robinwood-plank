@@ -24,37 +24,74 @@ export type HydrateAllArtResult = {
 
 type MeRow = { collectionSymbol?: string; name?: string | null; image?: string | null; cohort?: string | null };
 
+/**
+ * REAL BUG FIXED 2026-08-23: this previously fetched exactly one page
+ * (limit=250, no offset) every call, forever -- hardcoded to whatever the
+ * top 250 Solana collections by 1-day volume happened to be, so Solana
+ * discovery could never grow past that fixed window no matter how many
+ * times the supervisor loop ran. Confirmed live the endpoint DOES support
+ * real offset pagination (offset=250 returns a genuinely different page,
+ * not a repeat) -- there was never a real reason for the single-page cap.
+ * PAGE_LIMIT below is the number of collections requested per page, not a
+ * cap on how many pages are walked; the loop below walks with a real
+ * offset until a short/empty page, so it converges toward the full ranked
+ * catalog rather than a fixed top-250 slice.
+ */
+const PAGE_LIMIT = 250;
+
 export async function hydrateSolanaFromMagicEden(): Promise<{ matched: number; updated: number }> {
   const src = "magiceden-solana";
   if (!checkSourceBudget(src).allowed) return { matched: 0, updated: 0 };
-  const window = utcDayWindow(ME_DAILY_ALLOWANCE);
-  const account = "magiceden-solana:default";
-  if (!(await reserveProviderCapacity(account, window))) return { matched: 0, updated: 0 };
-  let entries: MeRow[] = [];
-  let settled = false;
-  try {
-    const res = await fetch(
-      "https://stats-mainnet.magiceden.io/collection_stats/search/all?window=1d&limit=250&sort=volume&direction=desc",
-      { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) }
-    );
-    await settleProviderCapacity(account, window, 1, true);
-    settled = true;
-    if (res.status === 429 || res.status === 403) {
-      recordSourceFailure(src, true);
-      return { matched: 0, updated: 0 };
-    }
-    if (!res.ok) {
+
+  let matched = 0;
+  let updated = 0;
+  let offset = 0;
+
+  for (;;) {
+    const window = utcDayWindow(ME_DAILY_ALLOWANCE);
+    const account = "magiceden-solana:default";
+    if (!(await reserveProviderCapacity(account, window))) break;
+
+    let entries: MeRow[] = [];
+    let settled = false;
+    try {
+      const res = await fetch(
+        `https://stats-mainnet.magiceden.io/collection_stats/search/all?window=1d&limit=${PAGE_LIMIT}&offset=${offset}&sort=volume&direction=desc`,
+        { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) }
+      );
+      await settleProviderCapacity(account, window, 1, true);
+      settled = true;
+      if (res.status === 429 || res.status === 403) {
+        recordSourceFailure(src, true);
+        break;
+      }
+      if (!res.ok) {
+        recordSourceFailure(src, false);
+        break;
+      }
+      recordSourceSuccess(src);
+      entries = (await res.json()) as MeRow[];
+    } catch {
+      if (!settled) await settleProviderCapacity(account, window, 1, true).catch(() => {});
       recordSourceFailure(src, false);
-      return { matched: 0, updated: 0 };
+      break;
     }
-    recordSourceSuccess(src);
-    entries = (await res.json()) as MeRow[];
-  } catch {
-    if (!settled) await settleProviderCapacity(account, window, 1, true).catch(() => {});
-    recordSourceFailure(src, false);
-    return { matched: 0, updated: 0 };
+
+    if (entries.length === 0) break;
+    offset += entries.length;
+
+    const pageResult = await applyMagicEdenPage(entries);
+    matched += pageResult.matched;
+    updated += pageResult.updated;
+
+    if (entries.length < PAGE_LIMIT) break;
+    if (!checkSourceBudget(src).allowed) break;
   }
 
+  return { matched, updated };
+}
+
+async function applyMagicEdenPage(entries: MeRow[]): Promise<{ matched: number; updated: number }> {
   let matched = 0;
   let updated = 0;
   for (const row of entries) {

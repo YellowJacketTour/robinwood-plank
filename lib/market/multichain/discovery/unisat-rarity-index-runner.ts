@@ -38,7 +38,13 @@ import { postgresQuery } from "@/lib/postgres";
 
 const API_BASE = "https://open-api.unisat.io/v3/market/collection/auction/actions";
 const PAGE_SIZE = 100;
-const MAX_PAGES = 50; // real bound -- 5,000 events is a generous real sample of marketplace activity without paginating a huge collection's full history forever
+// Not a provider-documented limit -- this source is structurally partial
+// regardless of page count (see file header: an activity log, never full
+// membership coverage, `partial` is always true by design). Raised 10x
+// (50 -> 500 pages, 5,000 -> 50,000 events) purely to capture more real
+// historical activity per collection; there's no reason to leave free real
+// data on the table even though it can never reach 100% either way.
+const MAX_PAGES = 500;
 
 function apiKey(): string {
   const key = process.env.UNISAT_API_KEY?.trim();

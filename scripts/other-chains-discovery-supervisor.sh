@@ -2,13 +2,11 @@
 cd "$(dirname "$0")/.."
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
-DEADLINE=$(( $(date +%s) + 24 * 60 * 60 ))
 ATTEMPT=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== other-chains supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
   npx tsx scripts/other-chains-discovery-pass.mjs
   echo "=== other-chains supervisor: pass exited code $? ==="
   sleep 2
 done
-echo "=== other-chains supervisor: 2h deadline reached ==="
