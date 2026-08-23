@@ -242,6 +242,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("plank:wallet-state", {
+        detail: {
+          address,
+          chainId,
+          status,
+          isConnected: status === "connected" && Boolean(address),
+        },
+      })
+    );
+  }, [address, chainId, status]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -292,3 +304,4 @@ export function useWallet(): WalletContextValue {
   }
   return ctx;
 }
+

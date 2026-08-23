@@ -63,3 +63,34 @@ export async function disconnectPlankLoveWallet() {
   // feature route. The main wallet control owns disconnect behavior.
   return getPlankLoveWalletState();
 }
+
+export function subscribePlankLoveWalletState(
+  listener: (state: PlankLoveWalletState) => void
+) {
+  if (typeof window === "undefined") return () => {};
+
+  const handleState = (event: Event) => {
+    const detail = (event as CustomEvent<PlankLoveWalletState>).detail;
+    if (detail) listener(detail);
+  };
+
+  const handleResponse = (event: Event) => {
+    const detail = (event as CustomEvent<{
+      result?: { state?: PlankLoveWalletState };
+    }>).detail;
+
+    if (detail?.result?.state) {
+      listener(detail.result.state);
+    }
+  };
+
+  window.addEventListener("plank:wallet-state", handleState);
+  window.addEventListener("plank:wallet-response", handleResponse);
+
+  void getPlankLoveWalletState().then(listener).catch(() => undefined);
+
+  return () => {
+    window.removeEventListener("plank:wallet-state", handleState);
+    window.removeEventListener("plank:wallet-response", handleResponse);
+  };
+}
