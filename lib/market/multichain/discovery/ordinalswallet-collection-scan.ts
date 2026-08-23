@@ -149,6 +149,7 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
         contractAddress: entry.slug,
         adapter: SOURCE,
         isVaultBacked: false,
+        nameHint: entry.name?.trim() || null,
       });
       const creatorHandle = extractHandleFromTwitterUrl(entry.socials?.twitter);
       if (entry.name || entry.icon || creatorHandle) {

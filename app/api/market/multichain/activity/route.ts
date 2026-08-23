@@ -21,6 +21,7 @@ import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { activityValue } from "@/lib/market/activity-value";
 import { readSeaportFillHistory } from "@/lib/market/multichain/seaport-fill-history";
+import { readLedgerActivity } from "@/lib/market/multichain/ledger-activity";
 import { isCompleteVenueCoverage, venuesForChain } from "@/lib/market/multichain/venue-registry";
 
 export const dynamic = "force-dynamic";
@@ -219,6 +220,69 @@ export async function GET(req: NextRequest) {
       ? collectionSlug
       : tracked?.contractAddress;
     if (contractAddress) {
+      // Real, unioned, multi-venue first-party ledger (transfers + all 8
+      // on-chain fill indexes: Seaport/Wyvern/LooksRare/Blur/X2Y2/
+      // Foundation/Sudoswap/Rarible/CryptoKitties) -- see
+      // ledger-activity.ts's own header. Tried before the Seaport-only
+      // ledger and the OpenSea live-API fallback below: a real multi-venue
+      // union is strictly more complete than either.
+      const unioned = await readLedgerActivity({ chainSlug, contractAddress, limit });
+      if (unioned && unioned.events.length > 0) {
+        // Real per-token art/name/rarity for an "at a glance" feed -- the
+        // EXACT SAME store + call shape listings/route.ts already uses to
+        // enrich the buy/sell grid (readProjectedTokensByIds(chainSlug,
+        // collection.contractAddress, tokenIds), see that route's own
+        // comment: "Joining the sparse book to the canonical projection by
+        // token id prevents every missing image from falling through to
+        // the collection logo"). No new resolution path, no live OpenSea
+        // fetch per row -- one batched DB read against whatever this
+        // collection's background indexer has already projected. A token
+        // this store hasn't indexed yet stays honestly imageless/nameless,
+        // same as an unindexed row in the grid itself.
+        const { readProjectedTokensByIds } = await import("@/lib/market/multichain/collection-token-store");
+        const tokenIds = [...new Set(unioned.events.map((e) => e.tokenId).filter((id): id is string => Boolean(id)))];
+        const projected = await readProjectedTokensByIds(chainSlug, contractAddress, tokenIds).catch(() => new Map());
+
+        // Reshaped onto the same event envelope every other branch in this
+        // route already returns (type/timestamp/transaction/priceWei/...)
+        // so ForeignActivityFeed.tsx needs no per-source special-casing --
+        // `kind`/`venueId` ride along as real extra fields the feed's
+        // color/venue-label map reads directly, not a lossy conversion.
+        const events = unioned.events.map((e) => {
+          const token = e.tokenId ? projected.get(e.tokenId) : undefined;
+          return {
+            type: e.kind,
+            kind: e.kind,
+            venueId: e.venueId,
+            timestamp: e.timestamp,
+            transaction: e.transaction,
+            logIndex: e.logIndex,
+            blockNumber: e.blockNumber,
+            priceWei: e.priceWei,
+            priceSymbol: e.priceSymbol,
+            priceAmount: e.priceAmount,
+            priceUsd: e.priceUsd,
+            from: e.from,
+            to: e.to,
+            tokenId: e.tokenId,
+            tokenName: token?.name ?? null,
+            imageUrl: token?.imageUrl ?? null,
+            // Same real, pre-computed rarity fields the grid's own sort/badge
+            // reads (rarityScore/rarityRank/rarityTier) -- a second, honest
+            // source alongside the client's own /rarity-endpoint Map so a
+            // token indexed only in the token-projection store still shows
+            // its real tier at a glance rather than silently blank.
+            rarityRank: token?.rarityRank ?? null,
+            rarityTier: token?.rarityTier ?? null,
+            batchSize: e.batchSize ?? null,
+            evidenceSource: e.evidenceSource,
+          };
+        });
+        return NextResponse.json(
+          { events, coverage: unioned.coverage, marketCoverage: venueCoverage(chainSlug) },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
       const ledger = await readSeaportFillHistory({ chainSlug, contractAddress, limit });
       if (ledger && ledger.events.length > 0) {
         return NextResponse.json({ ...ledger, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });

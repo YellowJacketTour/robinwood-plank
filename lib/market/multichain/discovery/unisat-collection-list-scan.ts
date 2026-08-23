@@ -139,6 +139,7 @@ export async function runUnisatCollectionListScan(input: { maxPages?: number } =
         contractAddress: entry.collectionId,
         adapter: "unisat-collections",
         isVaultBacked: false,
+        nameHint: entry.name?.trim() || null,
       });
       const creatorHandle = extractHandleFromTwitterUrl(entry.twitter);
       if (creatorHandle) {

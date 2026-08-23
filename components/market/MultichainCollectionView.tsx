@@ -54,6 +54,10 @@ import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { MarketTabRail, MarketTabPanel } from "@/components/market/MarketScaffold";
 import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
+import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
+
+/** Ledger/OpenSea/Magic Eden events all default a missing or unresolved address to this sentinel -- it means "unknown" (e.g. a mint's from-side), not a real repeated wallet, so it must never be treated as a matching pair by computeWashSuspicion(). Same constant lib/market/trending.ts uses server-side for the same reason. */
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 import ChainIcon from "@/components/market/ChainIcon";
 import type { RarityTier } from "@/lib/rarity";
 import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
@@ -1765,6 +1769,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Solana/Bitcoin, where no real collection-wide bids source exists yet.
   const bestOfferWei = offers.length > 0 ? offers.reduce((max, o) => (BigInt(o.priceWei) > BigInt(max) ? o.priceWei : max), offers[0].priceWei) : null;
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
+  /**
+   * Real wash-trade suspicion over the currently-loaded sale window, using
+   * this same page's own real buyer/seller addresses (already fetched for
+   * Activity/Highest-sale above -- no extra request). Only sales with a
+   * real, resolved address on both sides are evaluable; a mint's null/zero
+   * "from" is honestly excluded rather than misread as a repeated wallet.
+   * Surfaced in RarityFloorStrip's header -- see that component for the
+   * cited methodology (lib/market/wash-trade-signal.ts).
+   */
+  const washEvaluableSales: WashCandidateSale[] = saleEvents
+    .filter((e) => e.from && e.to && e.from !== ZERO_ADDRESS && e.to !== ZERO_ADDRESS)
+    .map((e) => ({ txHash: e.transaction ?? "", from: e.from, to: e.to, priceWei: e.priceWei!, timestamp: e.timestamp }));
+  const washSuspicion = washEvaluableSales.length > 0 ? computeWashSuspicion(washEvaluableSales) : null;
   const pricedSaleEvents = saleEvents.filter((e) => e.priceUsd != null);
   const activityVolumeUsd = pricedSaleEvents.length > 0
     ? pricedSaleEvents.reduce((sum, e) => sum + e.priceUsd!, 0)
@@ -2000,6 +2017,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
                 listedTotal={supplyStats?.listedCount ?? null}
                 catalogCounts={countTiers(rarityMap)}
+                washSuspicion={
+                  washSuspicion
+                    ? { ratio: washSuspicion.suspicionRatio, evaluatedTradeCount: washSuspicion.totalTradeCount }
+                    : null
+                }
               />
               </>
             ) : undefined
@@ -2053,8 +2075,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                       : countTiers(rarityMap)[tier] ?? 0,
                   ])
                 )}
-                searchLabel="Find a token"
-                searchPlaceholder="Token ID"
+                searchLabel={isBitcoin ? "Find an inscription" : "Find a token"}
+                searchPlaceholder={isBitcoin ? "Inscription number" : "Token ID"}
                 priceLegend={`Price in ${statCurrencySymbol}`}
               />
 
@@ -2251,6 +2273,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               }))}
               sales={saleEvents}
               historyCoverage={historyCoverage}
+              marketStats={marketStats}
+              listedCount={supplyStats?.listedCount ?? listings.length}
             />
           ) : (
           <>

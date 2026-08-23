@@ -2,10 +2,13 @@
 
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
+import { computeDemandScore, type DemandScoreInput } from "@/lib/market/multichain/demand-score";
+import { shortAddress } from "@/lib/trade";
 
 const CollectionEvidenceSpace = dynamic(() => import("@/components/market/CollectionEvidenceSpace"), { ssr: false, loading: () => <div className="h-72 animate-pulse rounded-xl border border-line bg-background/55" /> });
 
-type Sale = { timestamp?: string | null; tokenId?: string | null; tokenName?: string | null; imageUrl?: string | null; priceAmount?: string | null; priceUsd?: number | null; priceSymbol: string | null; transaction: string | null; from: string | null; to: string | null };
+type Sale = { timestamp?: string | null; tokenId?: string | null; tokenName?: string | null; imageUrl?: string | null; priceWei?: string | null; priceAmount?: string | null; priceUsd?: number | null; priceSymbol: string | null; transaction: string | null; from: string | null; to: string | null };
 type Listing = { priceWei: string; maker?: string | null; tokenId: string };
 type TierCounts = Record<string, number>;
 type HistoryCoverage = { source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null };
@@ -85,6 +88,10 @@ function EvidenceTimeline({ sales, range, onRange }: { sales: Sale[]; range: [nu
 export default function CollectionIntelligence(props: {
   name: string; chain: string; supply: number | null; holders: number | null;
   indexed: number; rarityCovered: number; rarityTiers: TierCounts; listings: Listing[]; sales: Sale[]; artUrls: string[]; historyCoverage?: HistoryCoverage | null;
+  /** Real 24h/7d/30d volume+sales windows from marketStats state (EVM-only today, honestly null on Solana/Bitcoin/Robinhood -- see MultichainCollectionView.tsx's own marketStats comment). Feeds the demand-score momentum term only; every other term degrades gracefully when this is null. */
+  marketStats?: { volume24hWei: string | null; sales24h: number | null; volume7dWei: string | null; sales7d: number | null; volume30dWei: string | null; sales30d: number | null } | null;
+  /** Real listed count from the tracked-collection snapshot, when available -- falls back to listings.length below. */
+  listedCount?: number | null;
 }) {
   const [timeRange, setTimeRange] = useState<[number, number] | null>(null);
   const [landscape, setLandscape] = useState<"space" | "timeline">("space");
@@ -99,7 +106,15 @@ export default function CollectionIntelligence(props: {
   const usdVolume = priced.reduce((sum, sale) => sum + sale.priceUsd!, 0);
   const currencies = [...new Set(scopedSales.map((sale) => sale.priceSymbol).filter(Boolean))];
   const provenancePct = scopedSales.length ? scopedSales.filter((sale) => sale.transaction).length / scopedSales.length * 100 : 0;
-  const selfTrades = scopedSales.filter((sale) => sale.from && sale.to && sale.from.toLowerCase() === sale.to.toLowerCase()).length;
+  // Real wash-trade suspicion (lib/market/wash-trade-signal.ts) -- upgrades
+  // the old bare exact-self-transfer count with the same chain-agnostic
+  // reciprocal-pair round-trip heuristic trending.ts and demand-score.ts
+  // already use, over exactly the scoped (possibly time-selected) sales
+  // this panel is already showing everywhere else.
+  const washCandidates: WashCandidateSale[] = scopedSales
+    .filter((sale) => sale.priceWei != null)
+    .map((sale) => ({ txHash: sale.transaction ?? `${sale.tokenId ?? ""}-${sale.timestamp ?? ""}`, from: sale.from, to: sale.to, priceWei: sale.priceWei!, timestamp: sale.timestamp ?? null }));
+  const washResult = useMemo(() => computeWashSuspicion(washCandidates), [washCandidates]);
   const listingPrices = props.listings.map((listing) => Number(listing.priceWei)).filter((value) => Number.isFinite(value) && value > 0);
   const floor = listingPrices.length ? Math.min(...listingPrices) : 0;
   const depth10 = floor ? listingPrices.filter((value) => value <= floor * 1.1).length : 0;
@@ -107,6 +122,26 @@ export default function CollectionIntelligence(props: {
   const makerGini = gini(makerCounts.map(([, count]) => count));
   const currencyRows = [...new Map(scopedSales.map((sale) => [sale.priceSymbol || "Unknown", 0])).keys()].map((symbol) => [symbol, scopedSales.filter((sale) => (sale.priceSymbol || "Unknown") === symbol).length] as [string, number]);
   const rarityRows = Object.entries(props.rarityTiers).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+  // Real, explainable demand score (lib/market/multichain/demand-score.ts) --
+  // same formula GlobalMarketHub-adjacent surfaces use, surfaced here so
+  // Intel's momentum reading is wash-discounted using THIS collection's own
+  // real per-sale buyer/seller evidence rather than a background job's
+  // possibly-stale ratio.
+  const demandInput: DemandScoreInput = {
+    volume24hWei: props.marketStats?.volume24hWei ?? null,
+    volume7dWei: props.marketStats?.volume7dWei ?? null,
+    volume30dWei: props.marketStats?.volume30dWei ?? null,
+    sales24h: props.marketStats?.sales24h ?? null,
+    sales7d: props.marketStats?.sales7d ?? null,
+    sales30d: props.marketStats?.sales30d ?? null,
+    listedCount: props.listedCount ?? props.listings.length,
+    totalSupply: props.supply,
+    holderCount: props.holders,
+    rankedTokenCount: props.rarityCovered,
+    projectedTokenCount: props.indexed,
+    washSuspicionRatio: washResult.suspicionRatio,
+  };
+  const demandScore = computeDemandScore(demandInput);
   const exportRows = props.sales.map((sale) => ({ collection: props.name, chain: props.chain, transaction: sale.transaction, from: sale.from, to: sale.to, currency: sale.priceSymbol, amount: sale.priceAmount, usd: sale.priceUsd }));
   const download = (kind: "json" | "csv") => {
     const body = kind === "json" ? JSON.stringify(exportRows, null, 2) : ["collection,chain,transaction,from,to,currency,amount,usd", ...exportRows.map((row) => [row.collection, row.chain, row.transaction, row.from, row.to, row.currency, row.amount, row.usd].map((value) => JSON.stringify(value ?? "")).join(","))].join("\n");
@@ -117,11 +152,12 @@ export default function CollectionIntelligence(props: {
     ["USD volume (loaded)", usdVolume ? `$${usdVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "Unpriced"],
     ["Payment currencies", currencies.join(" · ") || "No priced sales"],
     ["Listing-maker concentration", makerHhi ? `${makerHhi.toFixed(0)} HHI` : "Insufficient data"],
-    ["Self-transfer sales", `${selfTrades} flagged`],
+    ["Wash-trade suspicion", washResult.totalTradeCount ? `${washResult.suspiciousTradeCount} / ${washResult.totalTradeCount} trades · ${washResult.selfTransferCount} self-transfer + ${washResult.reciprocalPairCount} reciprocal-pair (${(washResult.suspicionRatio * 100).toFixed(1)}% of volume)` : "No priced trades to score"],
     ["Floor depth (+10%)", `${depth10.toLocaleString()} asks`],
     ["Maker inequality", makerCounts.length ? `${(makerGini * 100).toFixed(1)} Gini` : "Insufficient data"],
     ["Indexed universe", props.indexed.toLocaleString()],
     ["Observed transactions", scopedSales.length.toLocaleString()],
+    ["Demand score", demandScore.gradable ? `${demandScore.score} / 100` : "Insufficient data"],
   ];
   return <section className="relative isolate space-y-3 overflow-hidden rounded-xl border border-line bg-panel p-3" aria-label="Collection intelligence">
     <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>{props.artUrls.slice(0, 4).map((url, index) => <div key={`${url}-${index}`} className="absolute aspect-square w-[38%] max-w-80 rounded-full bg-cover bg-center opacity-[0.04] blur-[2px] saturate-150" style={{ backgroundImage: `linear-gradient(135deg, transparent, rgba(9,6,15,.88)), url(${JSON.stringify(url)})`, right: `${(index % 2) * 42 - 8}%`, top: `${Math.floor(index / 2) * 48 - 12}%`, transform: `rotate(${index % 2 ? 9 : -8}deg) scale(1.15)` }}/>)}</div>
@@ -132,7 +168,7 @@ export default function CollectionIntelligence(props: {
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} title={`${label}: ${value}`} className="group rounded-lg border border-line bg-background/65 p-3 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/10"><p className="text-[0.58rem] font-black uppercase text-foreground/40">{label}</p><p className="mt-1 break-words font-display text-base text-gold-300">{value}</p></div>)}</div>
       <div className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">
         <article className="rounded-lg border border-purple-400/35 bg-background/55 p-3 backdrop-blur-sm"><div className="mb-2"><p className="text-[0.58rem] font-black uppercase tracking-wider text-purple-300">Executable liquidity</p><h4 className="font-display text-base text-gold-300">Ask ladder & floor premium</h4><p className="text-[0.62rem] text-foreground/40">Move or drag across every loaded live ask to inspect its exact token, maker, native price, cumulative depth, and premium to floor. The 95th percentile only bounds the drawing; values remain exact.</p></div><DepthCurve listings={props.listings}/></article>
-        <article className="grid gap-4 rounded-lg border border-gold-400/35 bg-background/55 p-3 backdrop-blur-sm sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"><Donut rows={currencyRows} label="Selected sale currency mix"/><Donut rows={rarityRows} label="Indexed rarity composition"/></article>
+        <article className="grid gap-4 rounded-lg border border-gold-400/35 bg-background/55 p-3 backdrop-blur-sm sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"><Donut rows={currencyRows} label="Selected sale currency mix"/><Donut rows={rarityRows} label="Indexed rarity composition"/><Donut rows={makerCounts.slice(0, 8).map(([addr, count]) => [shortAddress(addr), count] as [string, number])} label={`Live-ask maker share${makerHhi ? ` · ${makerHhi.toFixed(0)} HHI` : ""}`}/></article>
       </div>
     <div className="grid gap-3 rounded-lg border border-line bg-background/35 p-3 md:grid-cols-2"><Bar label="Supply currently listed" value={listedPct}/><Bar label="Unique-holder coverage" value={holderPct}/><Bar label="Rarity coverage" value={rarityPct}/><Bar label="Transaction provenance" value={provenancePct}/></div>
     <div className="grid gap-2 text-[0.62rem] leading-relaxed text-foreground/45 md:grid-cols-3"><p className="rounded-md border border-line p-2"><strong className="text-foreground/70">Liquidity:</strong> depth near floor measures executable choice, while maker HHI/Gini expose whether many cards are controlled by a small set of wallets.</p><p className="rounded-md border border-line p-2"><strong className="text-foreground/70">Provenance:</strong> transaction coverage reports how much observed activity links back to a verifiable chain transaction.</p><p className="rounded-md border border-line p-2"><strong className="text-foreground/70">Limits:</strong> rarity is metadata-dependent; manipulation flags are screening signals, not accusations or investment advice.</p></div>

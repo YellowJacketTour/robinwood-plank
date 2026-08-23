@@ -30,6 +30,63 @@ function normalizeContractAddress(chainSlug: string, contractAddress: string): s
   return isNonEvmChainSlug(chainSlug) ? contractAddress : contractAddress.toLowerCase();
 }
 
+/**
+ * Real bug found live 2026-08-23: three non-EVM discovery adapters
+ * (ordinalswallet-collection-scan.ts, unisat-collection-list-scan.ts,
+ * the magiceden-solana discovery path) each register a collection under
+ * whatever slug string their own upstream API happens to hand back for
+ * the SAME real collection -- confirmed live for 37 groups / 74 rows,
+ * e.g. Bitcoin Ordinals "bitcoin-shrooms" vs "bitcoinshrooms" (both
+ * "Bitcoin Shrooms", same creator site, upstream just registered it
+ * twice under different slugs). A naive fuzzy-slug merge is NOT safe on
+ * its own: the same sweep found ~8-10 pairs that fuzzy-match on slug but
+ * are genuinely different collections (e.g. "foxy" -> "The Foxy Gang" vs
+ * "Foxygon", "sats" -> "SATS" vs "Satributes - Contributors",
+ * "bitcoinpandas" -> "Bitcoin Pandas" vs "Genesis Panz") plus hundreds of
+ * BRC-20 ticker rows that only collide once punctuation is stripped. So
+ * this is gated on BOTH a fuzzy-slug match AND a real name match, scoped
+ * to the same chain+adapter -- EVM chains are untouched (their
+ * case-insensitive contract_address already prevents this duplicate
+ * class entirely, see normalizeContractAddress above).
+ */
+function normalizeSlugForCollision(slug: string): string {
+  return slug.toLowerCase().replace(/[-_\s]+/g, "");
+}
+
+function normalizeNameForCollision(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "");
+}
+
+async function resolveCanonicalContractAddress(input: {
+  chainSlug: string;
+  contractAddress: string;
+  adapter: string;
+  nameHint?: string | null;
+}): Promise<string> {
+  const address = normalizeContractAddress(input.chainSlug, input.contractAddress);
+  if (!isNonEvmChainSlug(input.chainSlug)) return address;
+  const nameHint = input.nameHint?.trim();
+  if (!nameHint) return address;
+  const targetSlugKey = normalizeSlugForCollision(address);
+  const targetNameKey = normalizeNameForCollision(nameHint);
+  if (!targetSlugKey || !targetNameKey) return address;
+  const result = await postgresQuery<{ contract_address: string; name: string | null }>(
+    `SELECT contract_address, name FROM plank_multichain_collections
+     WHERE chain_slug = $1 AND adapter = $2 AND contract_address <> $3 AND name IS NOT NULL`,
+    [input.chainSlug, input.adapter, address]
+  );
+  for (const row of result.rows) {
+    if (normalizeSlugForCollision(row.contract_address) !== targetSlugKey) continue;
+    if (!row.name || normalizeNameForCollision(row.name) !== targetNameKey) continue;
+    // Same chain+adapter, fuzzy-matching slug, exact-matching normalized
+    // name: converge onto the existing row's address instead of creating
+    // a sibling duplicate (SELECT has no explicit ORDER BY, but there's
+    // only ever one such row per real collection once this guard has run).
+    return row.contract_address;
+  }
+  return address;
+}
+
 type CollectionRow = {
   id: number;
   chain_slug: string;
@@ -151,6 +208,15 @@ export async function upsertTrackedCollection(input: {
   contractAddress: string;
   adapter: string;
   isVaultBacked?: boolean;
+  /**
+   * Optional human-readable name from the same discovery response the
+   * contractAddress came from. Non-EVM only: used to gate the fuzzy-slug
+   * collision guard above (resolveCanonicalContractAddress) so a second
+   * discovery pass under a slightly different slug string converges onto
+   * an existing row instead of registering a duplicate. Omit it and this
+   * call behaves exactly as before (no dedup attempted).
+   */
+  nameHint?: string | null;
 }): Promise<number> {
   // Real bug found live 2026-08-23: unconditionally reassigning `adapter`
   // on every conflict let a second discovery source with the same
@@ -168,6 +234,12 @@ export async function upsertTrackedCollection(input: {
   // ordinalswallet-collection-scan.ts) already documented as the
   // *intended* outcome of a same-string collision -- the SQL just didn't
   // implement it yet.
+  const canonicalAddress = await resolveCanonicalContractAddress({
+    chainSlug: input.chainSlug,
+    contractAddress: input.contractAddress,
+    adapter: input.adapter,
+    nameHint: input.nameHint,
+  });
   const result = await postgresQuery<{ id: number }>(
     `INSERT INTO plank_multichain_collections (chain_slug, chain_id, contract_address, adapter, is_vault_backed)
      VALUES ($1, $2, $3, $4, $5)
@@ -176,13 +248,7 @@ export async function upsertTrackedCollection(input: {
        adapter = plank_multichain_collections.adapter,
        is_vault_backed = EXCLUDED.is_vault_backed
      RETURNING id`,
-    [
-      input.chainSlug,
-      input.chainId,
-      normalizeContractAddress(input.chainSlug, input.contractAddress),
-      input.adapter,
-      input.isVaultBacked ?? false,
-    ]
+    [input.chainSlug, input.chainId, canonicalAddress, input.adapter, input.isVaultBacked ?? false]
   );
   return result.rows[0].id;
 }
