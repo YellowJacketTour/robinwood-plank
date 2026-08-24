@@ -1,0 +1,1 @@
+import LiveLounge from "../live-lounge";export const dynamic="force-dynamic";export default async function LiveRoom({params}:{params:Promise<{slug:string}>}){const {slug}=await params;return <LiveLounge slug={slug}/>}

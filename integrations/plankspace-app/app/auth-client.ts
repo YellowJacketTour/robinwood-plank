@@ -19,11 +19,6 @@ async function activeToken(wallet:string){
   return "";
 }
 
-export async function savedWalletProof(wallet:string){
-  const normalized=wallet.toLowerCase(),sessionToken=await activeToken(normalized);
-  return sessionToken?{wallet:normalized,sessionToken}:null;
-}
-
 async function createSession(wallet:string){
   const payload={scope:"plankspace",durationHours:12},hash=await payloadHash(payload),challengeResponse=await fetch("/api/auth/challenge",{
     method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wallet,action:"session:create",resource:wallet,payloadHash:hash}),

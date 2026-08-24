@@ -85,9 +85,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [connectMounted, setConnectMounted] = useState(true);
   const pendingPlankSpaceConnects = useRef<string[]>([]);
   const walletStateRef = useRef({ address, chainId, status });
-  useEffect(() => {
-    walletStateRef.current = { address, chainId, status };
-  }, [address, chainId, status]);
+  // Shared bridge consumers need the newest state synchronously.
+  // eslint-disable-next-line react-hooks/refs
+  walletStateRef.current = { address, chainId, status };
 
   const applyAccounts = useCallback((accounts: string[] | undefined) => {
     const next = accounts?.[0] ?? null;
@@ -194,7 +194,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }));
     };
     const onRequest = (raw: Event) => {
-      const detail = (raw as CustomEvent).detail as { requestId: string; method: string; payload?: { address?: string; message?: string } };
+      const detail = (raw as CustomEvent).detail as { requestId: string; method: string; payload?: { address?: string; message?: string; to?: string; valueHex?: string; chainId?: number } };
       if (!detail?.requestId) return;
       void (async () => {
         try {
@@ -230,6 +230,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             if (detail.payload.address && detail.payload.address.toLowerCase() !== currentAddress.toLowerCase()) throw new Error("Signing wallet does not match the connected profile.");
             const signature = await signWalletMessage(currentAddress, detail.payload.message);
             respond(detail.requestId, { address: currentAddress, signature });
+          } else if (detail.method === "sendNativeTransaction") {
+            const current = walletStateRef.current, payload=detail.payload;
+            if(!current.address||!payload?.to||!payload.valueHex)throw new Error("Connect your Plank.love wallet first.");
+            if(payload.address?.toLowerCase()!==current.address.toLowerCase())throw new Error("Sending wallet does not match the connected Plank.love wallet.");
+            if(payload.chainId&&current.chainId!==payload.chainId)throw new Error(`Switch the connected wallet to chain ${payload.chainId} before tipping.`);
+            if(!/^0x[a-f0-9]{40}$/i.test(payload.to)||!/^0x[0-9a-f]+$/i.test(payload.valueHex)||BigInt(payload.valueHex)<=0n)throw new Error("Invalid tip transaction details.");
+            const provider=getEthereumProvider();if(!provider)throw new Error("Connected wallet provider is unavailable.");
+            const txHash=await provider.request({method:"eth_sendTransaction",params:[{from:current.address,to:payload.to,value:payload.valueHex}]}) as string;
+            respond(detail.requestId,{address:current.address,txHash});
           } else throw new Error("Unsupported wallet request.");
         } catch (e) {
           respond(detail.requestId, undefined, e instanceof Error ? e.message : "Wallet request failed.");

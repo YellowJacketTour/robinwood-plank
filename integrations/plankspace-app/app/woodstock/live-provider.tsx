@@ -1,23 +1,19 @@
 "use client";
-import {createContext,useCallback,useContext,useEffect,useMemo,useRef,useState} from "react";
-
-type Room={slug:string;title:string;jitsiRoom:string};
-type JitsiApi={dispose:()=>void;executeCommand:(command:string,...args:unknown[])=>void;addListener:(event:string,handler:(payload:unknown)=>void)=>void};
-declare global{interface Window{JitsiMeetExternalAPI?:new(domain:string,options:Record<string,unknown>)=>JitsiApi}}
-type LiveContext={room:Room|null;muted:boolean;expanded:boolean;join:(room:Room,displayName:string,role:string)=>void;leave:()=>void;toggleMute:()=>void;setExpanded:(value:boolean)=>void};
-const Context=createContext<LiveContext|null>(null);
-const domain=process.env.NEXT_PUBLIC_JITSI_DOMAIN||"meet.jit.si";
-
-function loadJitsi(){return new Promise<void>((resolve,reject)=>{if(window.JitsiMeetExternalAPI)return resolve();const existing=document.querySelector<HTMLScriptElement>("script[data-plankspace-jitsi]");if(existing){existing.addEventListener("load",()=>resolve(),{once:true});return}const script=document.createElement("script");script.src=`https://${domain}/external_api.js`;script.async=true;script.dataset.plankspaceJitsi="true";script.onload=()=>resolve();script.onerror=()=>reject(new Error("Woodstock audio could not load."));document.head.appendChild(script)})}
-
-export function WoodstockLiveProvider({children}:{children:React.ReactNode}){
- const [room,setRoom]=useState<Room|null>(null),[identity,setIdentity]=useState({displayName:"PlankSpace Listener",role:"listener"}),[muted,setMuted]=useState(true),[expanded,setExpanded]=useState(false),[error,setError]=useState("");
- const mount=useRef<HTMLDivElement>(null),api=useRef<JitsiApi|null>(null);
- const leave=useCallback(()=>{api.current?.dispose();api.current=null;setRoom(null);setExpanded(false);setMuted(true);setError("")},[]);
- const join=useCallback((next:Room,displayName:string,role:string)=>{setIdentity({displayName,role});setRoom(next);setExpanded(true)},[]);
- useEffect(()=>{if(!room||!mount.current)return;let cancelled=false;void loadJitsi().then(()=>{if(cancelled||!mount.current||!window.JitsiMeetExternalAPI)return;api.current?.dispose();api.current=new window.JitsiMeetExternalAPI(domain,{roomName:room.jitsiRoom,parentNode:mount.current,userInfo:{displayName:identity.displayName},width:"100%",height:"100%",configOverwrite:{startWithAudioMuted:identity.role==="listener",startWithVideoMuted:true,prejoinConfig:{enabled:false},disableDeepLinking:true,toolbarButtons:["microphone","hangup","settings","audioonly"]},interfaceConfigOverwrite:{VIDEO_LAYOUT_FIT:"nocrop",MOBILE_APP_PROMO:false,SHOW_JITSI_WATERMARK:false}});api.current.addListener("videoConferenceLeft",leave);setMuted(identity.role==="listener")}).catch(cause=>setError(cause instanceof Error?cause.message:"Woodstock audio failed"));return()=>{cancelled=true}},[identity,leave,room]);
- const toggleMute=useCallback(()=>{api.current?.executeCommand("toggleAudio");setMuted(value=>!value)},[]);
- const value=useMemo(()=>({room,muted,expanded,join,leave,toggleMute,setExpanded}),[room,muted,expanded,join,leave,toggleMute]);
- return <Context.Provider value={value}>{children}{room&&<aside className={`woodstock-mini ${expanded?"expanded":""}`} aria-label="Woodstock persistent audio player"><div className="woodstock-mini-bar"><button onClick={()=>setExpanded(!expanded)} aria-expanded={expanded}>🪵 LIVE</button><a href={`/woodstock/${room.slug}`}>{room.title}</a><button onClick={toggleMute}>{muted?"Unmute":"Mute"}</button><button onClick={leave}>Leave</button></div><div className="woodstock-jitsi" ref={mount}/>{error&&<p role="alert">{error}</p>}</aside>}</Context.Provider>;
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+type Role="host"|"speaker"|"listener";
+type Identity={handle:string;displayName:string;avatarUrl?:string};
+type JitsiApi={executeCommand:(name:string,...args:unknown[])=>void;addListener:(name:string,fn:(event:unknown)=>void)=>void;dispose:()=>void};
+declare global {interface Window {JitsiMeetExternalAPI?:new(domain:string,options:Record<string,unknown>)=>JitsiApi}}
+type LiveContext={room:string;role:Role;joined:boolean;muted:boolean;expanded:boolean;join:(room:string,identity:Identity,role:Role)=>Promise<void>;leave:()=>void;toggleMic:()=>void;setRole:(role:Role)=>void;setExpanded:(value:boolean)=>void;forceMute:()=>void};
+const Context=createContext<LiveContext|null>(null),domain=process.env.NEXT_PUBLIC_JITSI_DOMAIN||"meet.jit.si";
+async function loadJitsi(){if(window.JitsiMeetExternalAPI)return;await new Promise<void>((resolve,reject)=>{const old=document.querySelector<HTMLScriptElement>("script[data-plankspace-jitsi]");if(old){old.addEventListener("load",()=>resolve(),{once:true});old.addEventListener("error",()=>reject(new Error("Jitsi failed to load")),{once:true});return}const el=document.createElement("script");el.src=`https://${domain}/external_api.js`;el.async=true;el.dataset.plankspaceJitsi="1";el.onload=()=>resolve();el.onerror=()=>reject(new Error("Jitsi failed to load"));document.head.appendChild(el)})}
+export function LiveAudioProvider({children}:{children:ReactNode}){
+ const holder=useRef<HTMLDivElement>(null),api=useRef<JitsiApi|null>(null),[room,setRoom]=useState(""),[roleState,setRoleState]=useState<Role>("listener"),[joined,setJoined]=useState(false),[muted,setMuted]=useState(true),[expanded,setExpanded]=useState(false);
+ const forceMute=useCallback(()=>{if(!muted)api.current?.executeCommand("toggleAudio");setMuted(true)},[muted]);
+ const setRole=useCallback((role:Role)=>{setRoleState(role);if(role==="listener")forceMute()},[forceMute]);
+ const leave=useCallback(()=>{api.current?.dispose();api.current=null;setJoined(false);setRoom("");setExpanded(false);setMuted(true)},[]);
+ const join=useCallback(async(nextRoom:string,identity:Identity,role:Role)=>{leave();await loadJitsi();if(!holder.current||!window.JitsiMeetExternalAPI)throw new Error("Audio room could not start");setRoom(nextRoom);setRoleState(role);setExpanded(true);api.current=new window.JitsiMeetExternalAPI(domain,{roomName:nextRoom,parentNode:holder.current,userInfo:{displayName:`@${identity.handle}`,email:""},configOverwrite:{startWithAudioMuted:true,startWithVideoMuted:true,prejoinPageEnabled:false,disableDeepLinking:true,disableSelfView:true,toolbarButtons:[],notifications:[],p2p:{enabled:true}},interfaceConfigOverwrite:{MOBILE_APP_PROMO:false,SHOW_JITSI_WATERMARK:false,SHOW_BRAND_WATERMARK:false,TOOLBAR_ALWAYS_VISIBLE:false}});api.current.addListener("videoConferenceJoined",()=>setJoined(true));api.current.addListener("audioMuteStatusChanged",event=>setMuted(Boolean((event as {muted?:boolean}).muted)));api.current.addListener("readyToClose",leave)},[leave]);
+ const toggleMic=useCallback(()=>{if(roleState!=="listener")api.current?.executeCommand("toggleAudio")},[roleState]);useEffect(()=>()=>api.current?.dispose(),[]);
+ return <Context.Provider value={{room,role:roleState,joined,muted,expanded,join,leave,toggleMic,setRole,setExpanded,forceMute}}>{children}<aside className={`live-audio-stage ${expanded?"expanded":"minimized"}`} aria-label="Woodstock audio stage" hidden={!room}><header><b>Woodstock · {room}</b><span>{joined?"Live audio connected":"Connecting…"}</span><button type="button" onClick={()=>setExpanded(!expanded)}>{expanded?"Minimize":"Open"}</button><button type="button" onClick={leave}>Leave</button></header><div ref={holder} className="jitsi-media"/><footer><button type="button" onClick={toggleMic} disabled={roleState==="listener"}>{roleState==="listener"?"Listener — Grab the Mic first":muted?"Unmute Mic":"Mute Mic"}</button><span>{roleState}</span></footer></aside></Context.Provider>;
 }
-export function useWoodstockLive(){const value=useContext(Context);if(!value)throw new Error("Woodstock provider missing");return value}
+export function useLiveAudio(){const value=useContext(Context);if(!value)throw new Error("useLiveAudio must be used inside LiveAudioProvider");return value}

@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+const jitsiDomain=(process.env.NEXT_PUBLIC_JITSI_DOMAIN||"meet.jit.si").replace(/^https?:\/\//,"").replace(/\/$/,"");
+const jitsiOrigin=`https://${jitsiDomain}`;
+
 /**
  * Security headers + ensure server secrets are never treated as public.
  * UNISWAP_API_KEY must never use the NEXT_PUBLIC_ prefix.
@@ -12,7 +15,7 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+    value: `camera=(), microphone=(self "${jitsiOrigin}"), geolocation=(), interest-cohort=()`,
   },
   {
     key: "Content-Security-Policy",
@@ -24,7 +27,7 @@ const securityHeaders = [
       // console error for every visitor, and analytics that silently never
       // report. Turn the feature off in the Cloudflare dashboard rather than
       // dropping this entry, otherwise the error simply comes back.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com ${jitsiOrigin}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
@@ -37,7 +40,7 @@ const securityHeaders = [
       // players (postMessage-controlled, no provider SDK script — so
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
-      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com",
+      `frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://dexscreener.com https://www.dextools.io https://dextools.io ${jitsiOrigin}`,
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",

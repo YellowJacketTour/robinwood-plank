@@ -7,10 +7,10 @@ export type PlankLoveWalletState = {
   isConnected: boolean;
 };
 
-type Method = "getState" | "connect" | "ensureRobinhoodChain" | "signMessage";
-type Result = { state?: PlankLoveWalletState; signature?: string; address?: string };
+type Method = "getState" | "connect" | "ensureRobinhoodChain" | "signMessage" | "sendNativeTransaction";
+type Result = { state?: PlankLoveWalletState; signature?: string; address?: string; txHash?: string };
 
-function request(method: Method, payload?: { address?: string; message?: string }): Promise<Result> {
+function request(method: Method, payload?: { address?: string; message?: string; to?: string; valueHex?: string; chainId?: number }): Promise<Result> {
   if (typeof window === "undefined") return Promise.reject(new Error("Wallet requests run in the browser."));
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
@@ -57,6 +57,13 @@ export async function signPlankLoveMessage(message: string, address: string) {
   const result = await request("signMessage", { message, address });
   if (!result.signature) throw new Error("Plank.love did not return a signature.");
   return result.signature;
+}
+
+export async function sendPlankLoveNativeTransaction(input:{address:string;to:string;valueHex:string;chainId:number}){
+  if(!/^0x[a-f0-9]{40}$/i.test(input.to)||!/^0x[0-9a-f]+$/i.test(input.valueHex))throw new Error("Invalid tip transaction details.");
+  const result=await request("sendNativeTransaction",input);
+  if(!result.txHash)throw new Error("The wallet did not return a transaction hash.");
+  return result.txHash;
 }
 
 export async function disconnectPlankLoveWallet() {

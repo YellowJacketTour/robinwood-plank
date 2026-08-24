@@ -1,3 +1,3 @@
-import Link from "next/link";
-import LiveDirectory from "./live-directory";
-export default function Woodstock(){return <div className="woodstock-page"><header><Link className="brand" href="/plankspace">plank<span>space</span><sup>β</sup></Link><nav><Link href="/plankspace">Lumberyard</Link><Link href="/browse">Browse Boards</Link><Link href="/profile-editor">My Profile</Link></nav></header><main><section className="woodstock-hero"><small>LIVE SOCIAL AUDIO</small><h1>Woodstock Live</h1><p>Drop into the Grove, listen in, or grab the mic. PlankSpace owns identity and moderation; Jitsi carries the audio.</p></section><LiveDirectory/></main></div>}
+import WoodstockDirectory from "./woodstock-directory";
+export const dynamic="force-dynamic";
+export default function Woodstock(){return <WoodstockDirectory/>}
