@@ -345,6 +345,32 @@ function chainNativeAsset(chainSlug: string): string {
   return "ETH";
 }
 
+/**
+ * Real, color-coded per-row sync-freshness dot -- fixes the same class of
+ * gap fixed in CollectionIntelligence.tsx (server always wrote a real
+ * syncedAt per row -- see plank_multichain_snapshots.synced_at and this
+ * route's own `syncedAt: c.syncedAt` -- but it was threaded onto
+ * TrackedCollection and then never rendered anywhere in this table).
+ * Live DB check 2026-08-24: real, meaningfully-stale spread across the
+ * catalog -- most rows resynced within the last ~30h, but the tail runs
+ * out to ~5 days old (min/max synced_at 2026-08-19 17:12 .. 2026-08-24
+ * 15:24). Thresholds are tuned to that real cadence, not copied from
+ * CollectionIntelligence's 1h/24h: green under 6h (this pass's own
+ * refresh window), amber under 48h (still within one full catalog sweep),
+ * red beyond that or unknown -- a genuinely stale row, not a fabricated
+ * "live" claim.
+ */
+function syncFreshness(syncedAt: string | null): { color: string; title: string } | null {
+  if (!syncedAt) return null;
+  const ts = Date.parse(syncedAt);
+  if (!Number.isFinite(ts)) return null;
+  const ageMs = Date.now() - ts;
+  const ageHours = ageMs / 3_600_000;
+  const color = ageHours < 6 ? "#48d7a4" : ageHours < 48 ? "#f4c95d" : "#ff718b";
+  const label = ageHours < 1 ? "under 1h ago" : ageHours < 48 ? `${Math.round(ageHours)}h ago` : `${Math.round(ageHours / 24)}d ago`;
+  return { color, title: `Synced ${label} (${new Date(ts).toLocaleString()})` };
+}
+
 function shortCollectionId(address: string): string {
   if (address.length <= 14) return address;
   if (address.startsWith("0x")) return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -2223,11 +2249,23 @@ export default function GlobalMarketHub() {
                             <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
                               {displayName(c)}
                             </span>
-                            <span
-                              className="block truncate font-mono text-[0.58rem] text-foreground/40"
-                              title={`Collection id ${c.contractAddress}`}
-                            >
-                              {shortCollectionId(c.contractAddress)}
+                            <span className="flex min-w-0 items-center gap-1">
+                              <span
+                                className="block truncate font-mono text-[0.58rem] text-foreground/40"
+                                title={`Collection id ${c.contractAddress}`}
+                              >
+                                {shortCollectionId(c.contractAddress)}
+                              </span>
+                              {(() => {
+                                const fresh = syncFreshness(c.syncedAt);
+                                return fresh ? (
+                                  <span
+                                    className="inline-block size-1.5 shrink-0 rounded-full"
+                                    style={{ backgroundColor: fresh.color }}
+                                    title={fresh.title}
+                                  />
+                                ) : null;
+                              })()}
                             </span>
                           </span>
                           {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. The title tooltip alone isn't reliably exposed to screen readers, and there's no dedicated column/header for this icon (it rides inside "Collection"), so the accessible label lives on the icon itself via a sr-only span -- same pattern ListingCard.tsx uses for its own icon-only trust badge. */}
