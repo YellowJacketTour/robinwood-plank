@@ -93,6 +93,9 @@ export const profiles = pgTable("plankspace_profiles", {
   themeJson: text("theme_json").notNull().default("{}"),
   layoutJson: text("layout_json").notNull().default("[]"),
   featuredVideo: text("featured_video").notNull().default(""),
+  bannerUrl: text("banner_url").notNull().default(""),
+  mobileCss: text("mobile_css").notNull().default(""),
+  viewCount: integer("view_count").notNull().default(0),
   moderationStatus: text("moderation_status").notNull().default("pending"),
   moderationNote: text("moderation_note").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -169,6 +172,56 @@ export const ownerAccessAttempts = pgTable("plankspace_owner_access_attempts", {
   windowStartedAt: text("window_started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const profileVisits = pgTable("plankspace_profile_visits", {
+  id: serial("id").primaryKey(),
+  profileHandle: text("profile_handle").notNull(),
+  visitorWallet: text("visitor_wallet").notNull(),
+  visitorHandle: text("visitor_handle").notNull(),
+  visitedAt: text("visited_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+},table=>[
+  uniqueIndex("profile_visits_unique").on(table.profileHandle,table.visitorWallet),
+  index("profile_visits_recent_idx").on(table.profileHandle,table.visitedAt),
+]);
+
+export const publications = pgTable("plankspace_publications", {
+  id: serial("id").primaryKey(),
+  authorWallet: text("author_wallet").notNull(),
+  authorHandle: text("author_handle").notNull(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  moderationStatus: text("moderation_status").notNull().default("approved"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+},table=>[index("publications_profile_idx").on(table.authorHandle,table.kind,table.createdAt)]);
+
+export const liveRooms = pgTable("plankspace_live_rooms", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  hostWallet: text("host_wallet").notNull(),
+  hostHandle: text("host_handle").notNull(),
+  jitsiRoom: text("jitsi_room").notNull().unique(),
+  status: text("status").notNull().default("live"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  endedAt: text("ended_at"),
+},table=>[index("live_rooms_status_idx").on(table.status,table.createdAt)]);
+
+export const liveRoomMembers = pgTable("plankspace_live_room_members", {
+  id: serial("id").primaryKey(),
+  roomSlug: text("room_slug").notNull(),
+  wallet: text("wallet").notNull(),
+  handle: text("handle").notNull(),
+  role: text("role").notNull().default("listener"),
+  micStatus: text("mic_status").notNull().default("idle"),
+  active: boolean("active").notNull().default(true),
+  joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+},table=>[
+  uniqueIndex("live_room_members_unique").on(table.roomSlug,table.wallet),
+  index("live_room_members_room_idx").on(table.roomSlug,table.active,table.role),
+]);
+
 export const profileWidgets = pgTable("plankspace_profile_widgets", {
   id: serial("id").primaryKey(),
   ownerWallet: text("owner_wallet").notNull(),
@@ -229,26 +282,4 @@ export const liveRoomMembers = pgTable("plankspace_live_room_members", {
   uniqueIndex("live_room_members_unique").on(table.roomSlug, table.wallet),
   index("live_room_members_room_idx").on(table.roomSlug, table.lastSeenAt),
 ]);
-
-export const profileVisits = pgTable("plankspace_profile_visits", {
-  id: serial("id").primaryKey(),
-  profileHandle: text("profile_handle").notNull(),
-  visitorWallet: text("visitor_wallet").notNull(),
-  visitorHandle: text("visitor_handle").notNull(),
-  visitedAt: text("visited_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-},table=>[
-  uniqueIndex("profile_visits_unique").on(table.profileHandle,table.visitorWallet),
-  index("profile_visits_recent_idx").on(table.profileHandle,table.visitedAt),
-]);
-
-export const publications = pgTable("plankspace_publications", {
-  id: serial("id").primaryKey(),
-  authorWallet: text("author_wallet").notNull(),
-  authorHandle: text("author_handle").notNull(),
-  kind: text("kind").notNull(),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  moderationStatus: text("moderation_status").notNull().default("approved"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-},table=>[index("publications_profile_idx").on(table.authorHandle,table.kind,table.createdAt)]);
 
