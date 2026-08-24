@@ -9,6 +9,9 @@ export type PlankLoveWalletState = {
 
 type Method = "getState" | "connect" | "ensureRobinhoodChain" | "signMessage" | "sendNativeTransaction";
 type Result = { state?: PlankLoveWalletState; signature?: string; address?: string; txHash?: string };
+const LAST_WALLET_KEY="plankspace-last-verified-wallet";
+const cachedWallet=()=>{if(typeof window==="undefined")return "";const value=localStorage.getItem(LAST_WALLET_KEY)||"",normalized=/^0x[a-f0-9]{40}$/i.test(value)?value.toLowerCase():"";return normalized&&localStorage.getItem(`plankspace-session:${normalized}`)?normalized:""};
+const rememberWallet=(address:string)=>{if(typeof window!=="undefined"&&/^0x[a-f0-9]{40}$/i.test(address))localStorage.setItem(LAST_WALLET_KEY,address.toLowerCase())};
 
 function request(method: Method, payload?: { address?: string; message?: string; to?: string; valueHex?: string; chainId?: number }): Promise<Result> {
   if (typeof window === "undefined") return Promise.reject(new Error("Wallet requests run in the browser."));
@@ -31,15 +34,22 @@ function request(method: Method, payload?: { address?: string; message?: string;
   });
 }
 
-export async function getPlankLoveWalletState() {
-  const result = await request("getState");
-  return result.state || { address: null, chainId: null, status: "disconnected", isConnected: false };
+export async function getPlankLoveWalletState():Promise<PlankLoveWalletState> {
+  const result = await request("getState").catch(()=>({} as Result));
+  if(result.state?.address){rememberWallet(result.state.address);return result.state}
+  const address=cachedWallet();
+  return address?{address,chainId:null,status:"connected",isConnected:true}:{ address: null, chainId: null, status: "disconnected", isConnected: false };
 }
 
 export async function connectPlankLoveWallet() {
+  const current=await request("getState").catch(()=>({} as Result)),connected=current.address||current.state?.address;
+  if(connected){rememberWallet(connected);return connected.toLowerCase()}
+  const remembered=cachedWallet();
+  if(remembered)return remembered;
   const result = await request("connect");
   const address = result.address || result.state?.address;
   if (!address) throw new Error("Plank.love did not return a connected wallet.");
+  rememberWallet(address);
   return address.toLowerCase();
 }
 
@@ -79,7 +89,7 @@ export function subscribePlankLoveWalletState(
 
   const handleState = (event: Event) => {
     const detail = (event as CustomEvent<PlankLoveWalletState>).detail;
-    if (detail) listener(detail);
+    if (detail){if(detail.address)rememberWallet(detail.address);listener(detail)}
   };
 
   const handleResponse = (event: Event) => {

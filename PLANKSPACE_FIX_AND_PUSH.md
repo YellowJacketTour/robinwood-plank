@@ -22,6 +22,14 @@
 - Re-audited the completed Widgets/Woodstock update and preserved the complete
   Wallet, Favorite Token, Token Chart, Portfolio, Toss a Chip, and sanitized
   Custom Widget implementation, APIs, manager, rendering, and safety checks.
+- Restored the missing profile spacing/mobile stylesheet import so transparent
+  gaps expose the owner-selected page background between modules.
+- Moved custom page CSS outside the Welcome module so CSS/HTML customization
+  remains active even when Welcome or Custom Space is hidden.
+- Reused the last verified wallet address with its server-validated 12-hour
+  session token, preventing repeated WalletConnect prompts between features.
+- Normalized full-URL or hostname Jitsi settings and added bounded, readable
+  script-load failures for Woodstock.
 
 ## Push from the extracted project folder
 
