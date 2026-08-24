@@ -138,25 +138,44 @@ export async function GET(req: NextRequest) {
   const normalizedCollection = collectionSlug.toLowerCase();
   if (chainSlug === "eth-mainnet" && normalizedCollection === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
     try {
-      const { getCryptoPunksNativeBook, getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
+      const { getCryptoPunksNativeBook, getCryptoPunksNativeBookStats, CRYPTOPUNKS_CONTRACT } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
       const [native, nativeStats] = await Promise.all([
         getCryptoPunksNativeBook(limit),
         getCryptoPunksNativeBookStats(),
       ]);
-      const listings: Listing[] = native.map((offer) => ({
-        id: `cryptopunks-native:${offer.tokenId}`,
-        collectionSlug,
-        tokenId: offer.tokenId,
-        tokenName: `CryptoPunk #${offer.tokenId}`,
-        maker: offer.seller,
-        priceWei: offer.minValue,
-        expiresAt: "9999-12-31T23:59:59.999Z",
-        kind: "fixed",
-        imageUrl: `https://www.larvalabs.com/cryptopunks/cryptopunk${offer.tokenId}.png`,
-        venue: "cryptopunks-native",
-        externalUrl: `https://www.cryptopunks.app/cryptopunks/details/${offer.tokenId}`,
-        foreignChainSlug: chainSlug,
-      }));
+      // REAL BUG FIXED 2026-08-24, flagged live ("listed only tab... never
+      // loaded in"): this branch hardcoded the same dead larvalabs.com
+      // hotlink the sync adapter (native-market-adapters/cryptopunks.ts)
+      // was already fixed to stop using -- a second, independent copy of
+      // the same broken URL that the earlier fix never touched, since this
+      // route never reads from plank_collection_tokens at all for this
+      // path. Join against the same canonical projection the "All items"
+      // tab already reads (readProjectedTokensByIds), which now carries
+      // the real on-chain-proxy image URL, so both tabs show the same real
+      // art instead of "Listed only" silently reverting to a dead host.
+      const { readProjectedTokensByIds } = await import("@/lib/market/multichain/collection-token-store");
+      const projectedPunks = await readProjectedTokensByIds(
+        chainSlug,
+        CRYPTOPUNKS_CONTRACT,
+        native.map((offer) => offer.tokenId)
+      ).catch(() => new Map());
+      const listings: Listing[] = native.map((offer) => {
+        const token = projectedPunks.get(offer.tokenId);
+        return {
+          id: `cryptopunks-native:${offer.tokenId}`,
+          collectionSlug,
+          tokenId: offer.tokenId,
+          tokenName: token?.name ?? `CryptoPunk #${offer.tokenId}`,
+          maker: offer.seller,
+          priceWei: offer.minValue,
+          expiresAt: "9999-12-31T23:59:59.999Z",
+          kind: "fixed",
+          imageUrl: token?.imageUrl ?? `/api/onchain/cryptopunks-image?index=${offer.tokenId}`,
+          venue: "cryptopunks-native",
+          externalUrl: `https://www.cryptopunks.app/cryptopunks/details/${offer.tokenId}`,
+          foreignChainSlug: chainSlug,
+        };
+      });
       const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
       void prioritizeCollectionDemand(chainSlug, normalizedCollection).catch(() => {});
       return NextResponse.json({
