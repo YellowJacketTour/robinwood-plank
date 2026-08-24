@@ -87,6 +87,36 @@ function useFreshnessBadge(freshness: { sourceObservedAt: string | null; project
   return { label, color, title: `Catalog last hydrated ${new Date(ts).toLocaleString()} · underlying data observed ${observed}` };
 }
 
+type OnchainCollectionFacts = { royaltySupported: boolean; royaltyReceiver: string | null; royaltyBps: number | null; dynamicMetadataSupported: boolean | null };
+
+/**
+ * Real, live on-chain fact sheet -- the actual point of wiring the new
+ * on-chain-read modules into Intel: royalty split (ERC-2981) and
+ * dynamic-metadata support (ERC-4906), both a single cheap `eth_call`
+ * each, safe to fetch on a page view (unlike Transfer-log history scans,
+ * which stay a background-job concern). Deliberately fetched once per
+ * collection view, not polled -- these are contract-level facts that
+ * essentially never change mid-session.
+ */
+function useOnchainCollectionFacts(chainSlug: string | null, contractAddress: string | null): OnchainCollectionFacts | null {
+  const [facts, setFacts] = useState<OnchainCollectionFacts | null>(null);
+  useEffect(() => {
+    setFacts(null);
+    if (!chainSlug || !contractAddress || !/^0x[0-9a-fA-F]{40}$/.test(contractAddress)) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/onchain/collection-facts?chainSlug=${encodeURIComponent(chainSlug)}&contractAddress=${contractAddress}`);
+        if (!res.ok || !alive) return;
+        const body = (await res.json()) as OnchainCollectionFacts;
+        if (alive) setFacts(body);
+      } catch { /* a failed live read leaves the card in its honest "unknown" state, never a fabricated one */ }
+    })();
+    return () => { alive = false; };
+  }, [chainSlug, contractAddress]);
+  return facts;
+}
+
 function pct(value: number): string { return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`; }
 function Bar({ value, label }: { value: number; label: string }) {
   return <div><div className="mb-1 flex justify-between gap-2 text-[0.65rem]"><span>{label}</span><span>{pct(value)}</span></div><div className="h-2 overflow-hidden rounded-full bg-foreground/10"><div className="h-full rounded-full bg-gradient-to-r from-gold-500 to-purple-400" style={{ width: pct(value) }} /></div></div>;
@@ -252,11 +282,15 @@ export default function CollectionIntelligence(props: {
    * collection with no projection row yet), never fabricated as "now".
    */
   catalogFreshness?: { sourceObservedAt: string | null; projectedAt: string | null } | null;
+  /** Real chain slug + contract address, EVM only -- feeds the cheap, single-eth_call on-chain fact sheet (royalty split, dynamic-metadata support) below. Omit/null on non-EVM collections; the card degrades to "not applicable" honestly rather than erroring. */
+  chainSlug?: string | null;
+  contractAddress?: string | null;
 }) {
   const [timeRange, setTimeRange] = useState<[number, number] | null>(null);
   const [landscape, setLandscape] = useState<"space" | "timeline" | "network" | "dossier">("space");
   const accent = useProceduralAccent(props.artUrls);
   const freshness = useFreshnessBadge(props.catalogFreshness ?? null);
+  const onchainFacts = useOnchainCollectionFacts(props.chainSlug ?? null, props.contractAddress ?? null);
   const scopedSales = timeRange ? props.sales.filter((sale) => { const time = sale.timestamp ? Date.parse(sale.timestamp) : NaN; return Number.isFinite(time) && time >= timeRange[0] && time <= timeRange[1]; }) : props.sales;
   const listedPct = props.supply ? props.listings.length / props.supply * 100 : 0;
   const holderPct = props.supply && props.holders ? props.holders / props.supply * 100 : 0;
@@ -326,6 +360,14 @@ export default function CollectionIntelligence(props: {
     ["Maker inequality", makerCounts.length ? `${(makerGini * 100).toFixed(1)} Gini` : "Insufficient data"],
     ["Indexed universe", props.indexed.toLocaleString()],
     ["Observed transactions", scopedSales.length.toLocaleString()],
+    ["On-chain royalty (ERC-2981)", onchainFacts
+      ? onchainFacts.royaltySupported && onchainFacts.royaltyBps != null
+        ? `${(onchainFacts.royaltyBps / 100).toFixed(2)}% → ${shortAddress(onchainFacts.royaltyReceiver ?? "")}`
+        : "Not implemented on-chain"
+      : (props.chainSlug && props.contractAddress ? "Reading…" : "Not applicable (non-EVM)")],
+    ["Dynamic metadata (ERC-4906)", onchainFacts
+      ? onchainFacts.dynamicMetadataSupported == null ? "Unknown" : onchainFacts.dynamicMetadataSupported ? "Supported — art/traits can update post-mint" : "Not signaled"
+      : (props.chainSlug && props.contractAddress ? "Reading…" : "Not applicable (non-EVM)")],
   ];
   return <motion.section
     initial={{ opacity: 0, y: 8 }}
