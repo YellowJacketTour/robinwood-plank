@@ -1055,10 +1055,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // hydrate route and, on a real resolved result, patch it into
       // local state so both the open detail view and the grid tile
       // update live, in front of the visitor, without a page reload.
+      //
+      // REAL GAP FIXED 2026-08-24 ("hydration on demand isnt working on
+      // sol collections"): this used to hard-require `!isNonEvm` +
+      // 0x-shaped contract, so a Solana token NEVER triggered any
+      // hydration at all, even though a real Solana resolver now exists
+      // (solana-token-hydrate.ts, DAS-first + on-chain fallback). Solana
+      // uses collectionSlug as-is (its own mint/symbol identity space,
+      // never 0x-shaped) instead of the EVM contractAddress lookup.
       const contractAddress = collection?.contractAddress ?? collectionSlug;
-      if (!token?.imageUrl && !isNonEvm && /^0x[0-9a-fA-F]{40}$/.test(contractAddress)) {
+      const hydrateEligible = isSolana
+        ? Boolean(collectionSlug)
+        : !isNonEvm && /^0x[0-9a-fA-F]{40}$/.test(contractAddress);
+      if (!token?.imageUrl && hydrateEligible) {
         void swrJson<{ resolved: boolean; token?: { tokenId: string; name: string | null; imageUrl: string | null; animationUrl: string | null; mediaType: string | null; traits?: Array<{ traitType: string; value: string }> } }>(
-          `/api/market/multichain/hydrate-token?chainSlug=${chainSlug}&collectionSlug=${contractAddress}&tokenId=${encodeURIComponent(tokenId)}`,
+          `/api/market/multichain/hydrate-token?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(isSolana ? collectionSlug : contractAddress)}&tokenId=${encodeURIComponent(tokenId)}`,
           { ttlMs: 0, swrMs: 0, session: true }
         ).then((res) => {
           if (!res.resolved || !res.token) return;
@@ -1074,7 +1085,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         }).catch(() => {});
       }
     },
-    [tokens, browseAsListing, collection?.contractAddress, collectionSlug, chainSlug, isNonEvm]
+    [tokens, browseAsListing, collection?.contractAddress, collectionSlug, chainSlug, isNonEvm, isSolana]
   );
 
   const openOffer = useCallback(
