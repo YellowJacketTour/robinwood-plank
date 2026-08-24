@@ -262,6 +262,54 @@ export async function advanceNextRobinhoodMembership() {
   return address ? advanceEvmCollectionMembership("robinhood", address, "robinhood") : null;
 }
 
+/**
+ * Real-time, single-token hydration for exactly the piece a visitor just
+ * clicked -- fixes a real gap flagged live 2026-08-24 ("when a user...
+ * clicks a particular piece, we need to intelligently deliver hydration
+ * intelligently to everything theyre exploring immediately"): the
+ * existing per-collection metadata-work queue (readTokenMetadataWork,
+ * consumed by advanceEvmTokenMetadata below) always processes the
+ * OLDEST pending token first -- opening a specific unresolved token's
+ * detail view triggered zero hydration of THAT token, so a visitor could
+ * click into a real piece and see nothing better than the still-empty
+ * grid tile. Reuses the exact same real resolvers (resolveEvmTokenMetadata
+ * -> resolveOpenSeaTokenMetadata fallback) and the exact same persistence
+ * calls (upsertCollectionTokenProjection, writeTokenMetadataResult) the
+ * batch worker uses, just targeted at one specific tokenId instead of
+ * whatever the queue would have picked next -- this token's future queue
+ * turn is also consumed by this call (writeTokenMetadataResult marks it
+ * complete/empty/retry), so the batch worker never redoes the same work.
+ */
+export async function hydrateSpecificToken(
+  chainSlug: string, collectionSlug: string, tokenId: string
+): Promise<{ resolved: boolean; token?: { tokenId: string; name: string | null; imageUrl: string | null; animationUrl: string | null; mediaType: string | null; traits: Array<{ traitType: string; value: string }> } }> {
+  const chain = foreignChainByChainSlug(chainSlug);
+  const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
+  const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
+  if (!rpcUrls.length) return { resolved: false };
+  const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
+  const item = { chainSlug, collectionSlug, tokenId };
+  try {
+    const metadata = await resolveEvmTokenMetadata({ rpcUrls, contractAddress: collectionSlug, tokenId }).catch(async (onchainError) => {
+      if (!openSeaKey || !openSeaChain) throw onchainError;
+      return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain, contractAddress: collectionSlug, tokenId });
+    });
+    if (!metadata || (!metadata.name && !metadata.imageUrl && metadata.traits.length === 0)) {
+      await writeTokenMetadataResult({ ...item, state: "empty" });
+      return { resolved: false };
+    }
+    await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
+      tokens: [{ tokenId, ...metadata }], partial: true,
+      preservePartial: true, provenance: ["on-demand-click-hydration"], sourceObservedAt: new Date(),
+    });
+    await writeTokenMetadataResult({ ...item, state: "complete" });
+    return { resolved: true, token: { tokenId, ...metadata } };
+  } catch (error) {
+    await writeTokenMetadataResult({ ...item, state: "retry", error: error instanceof Error ? error.message : String(error) });
+    return { resolved: false };
+  }
+}
+
 /** Enrich a tiny durable batch from first-party tokenURI metadata. Public
  * requests never perform these RPC/IPFS calls. Missing metadata is recorded
  * honestly; transient failures are retried after a bounded cooldown. */

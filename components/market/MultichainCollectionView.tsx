@@ -1046,8 +1046,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       const token = tokens.find((t) => t.tokenId === tokenId);
       setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name,
         token?.animationUrl, token?.mediaType));
+      // REAL FIX 2026-08-24 ("clicks a particular piece... immediately
+      // deliver hydration to everything they're exploring"): this token
+      // grid never had a per-token on-demand hydration path -- opening a
+      // piece whose metadata never resolved just showed the same empty
+      // tile forever. On a real EVM collection with a genuinely missing
+      // image for the exact clicked token, fire the new single-token
+      // hydrate route and, on a real resolved result, patch it into
+      // local state so both the open detail view and the grid tile
+      // update live, in front of the visitor, without a page reload.
+      const contractAddress = collection?.contractAddress ?? collectionSlug;
+      if (!token?.imageUrl && !isNonEvm && /^0x[0-9a-fA-F]{40}$/.test(contractAddress)) {
+        void swrJson<{ resolved: boolean; token?: { tokenId: string; name: string | null; imageUrl: string | null; animationUrl: string | null; mediaType: string | null; traits?: Array<{ traitType: string; value: string }> } }>(
+          `/api/market/multichain/hydrate-token?chainSlug=${chainSlug}&collectionSlug=${contractAddress}&tokenId=${encodeURIComponent(tokenId)}`,
+          { ttlMs: 0, swrMs: 0, session: true }
+        ).then((res) => {
+          if (!res.resolved || !res.token) return;
+          const resolved = res.token;
+          setTokens((prev) => prev.map((t) => t.tokenId === tokenId
+            ? { ...t, name: resolved.name ?? t.name, imageUrl: resolved.imageUrl ?? t.imageUrl,
+                animationUrl: resolved.animationUrl ?? t.animationUrl, mediaType: resolved.mediaType ?? t.mediaType,
+                traits: resolved.traits ?? t.traits }
+            : t));
+          setDetailsTarget((prev) => prev && prev.tokenId === tokenId
+            ? { ...prev, imageUrl: resolved.imageUrl ?? prev.imageUrl, tokenName: resolved.name ?? prev.tokenName }
+            : prev);
+        }).catch(() => {});
+      }
     },
-    [tokens, browseAsListing]
+    [tokens, browseAsListing, collection?.contractAddress, collectionSlug, chainSlug, isNonEvm]
   );
 
   const openOffer = useCallback(
