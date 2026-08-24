@@ -2485,7 +2485,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </button>
               <button
                 type="button"
-                onClick={() => setTokenLimit((n) => Math.max(n, tokens.length) + surface.catalogPageSize * 5)}
+                onClick={() => {
+                  // REAL BUG FIXED 2026-08-24, flagged live ("the button on
+                  // the left now said load more... the right said view all
+                  // nfts 10,000 again"): this used to add only 5 pages
+                  // (~1,000 items for a 200-per-page collection), not the
+                  // real total the label already claimed -- so clicking it
+                  // never actually reached the full catalog, and the two
+                  // buttons' displayed state fell out of sync with what
+                  // each one actually did. Jump straight to the real
+                  // expected/projected count instead of an arbitrary
+                  // multiple of the page size.
+                  const total = catalogMeta?.expectedCount ?? catalogMeta?.projectedCount ?? tokens.length + surface.catalogPageSize * 5;
+                  setTokenLimit((n) => Math.max(n, tokens.length, total));
+                }}
                 className="min-h-10 rounded-md border border-purple-400/50 px-4 text-xs font-bold text-purple-200 hover:bg-purple-400/10"
               >
                 View all NFTs
