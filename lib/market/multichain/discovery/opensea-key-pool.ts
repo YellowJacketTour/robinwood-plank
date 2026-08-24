@@ -27,12 +27,25 @@ import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/dis
 import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
 
 /**
- * No DAILY_CEILING entry exists for "opensea-stats:key-N" in
- * source-budget.ts -- checkSourceBudget below only ever gates on jail
- * state. This is an APPROXIMATED, conservative PER-KEY daily allowance,
- * same order of magnitude as the single-key value this replaces.
+ * REAL BUG FIXED 2026-08-24, flagged live ("still claims max collection
+ * size is only 5877" -- MUGS's real, growing OpenSea supply couldn't be
+ * re-synced): OpenSea's own documented rate limiting is per-SECOND
+ * (~5 req/s reported by real API-key holders, see docs.opensea.io/
+ * reference/api-keys#rate-limits), never a flat daily request count --
+ * same shape as every other provider's real limit found and fixed this
+ * session (Helius: RPS by tier, no daily figure). 5,000/day was an
+ * unjustified guess ("same order of magnitude as the single-key value
+ * this replaces" -- itself never cited to a real OpenSea number), and it
+ * was confirmed live to be the actual thing blocking a real re-sync: the
+ * single configured key showed `usedToday: 5000 / allowanceToday: 5000`,
+ * durably exhausted for the rest of the UTC day, while a raw call with
+ * the exact same key succeeded instantly outside this app's own
+ * self-imposed ceiling. At even a conservative sustained 2 req/s, a real
+ * day has room for ~172,800 requests -- this number is intentionally far
+ * below that, so it will not itself cause OpenSea-side throttling; the
+ * real protection remains the jail/circuit-breaker on 429s.
  */
-export const OPENSEA_STATS_DAILY_ALLOWANCE = 5_000;
+export const OPENSEA_STATS_DAILY_ALLOWANCE = 150_000;
 
 /** Composite circuit-breaker source string for one pool key. Requires zero changes to source-budget.ts / the jail logic there -- `source` is already treated as an opaque string. */
 export function openSeaKeySource(keyId: string): string {
