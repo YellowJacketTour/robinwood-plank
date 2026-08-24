@@ -15,6 +15,24 @@ const SUPPLY = 10_000;
 const BATCH_SIZE = 200;
 const ATTRIBUTES_CSV = "https://raw.githubusercontent.com/cryptopunksnotdead/punks.attributes/master/original/cryptopunks.csv";
 
+/**
+ * Real image source: Larva Labs' own official on-chain CryptoPunksData
+ * contract (punkImageSvg(uint16), selector 0x74beb047, live-verified via a
+ * direct eth_call), proxied same-origin via
+ * app/api/onchain/cryptopunks-image so a browse page never embeds the raw
+ * ~14-18KB SVG payload in its JSON. Fixed live 2026-08-24: larvalabs.com
+ * itself now durably 429s (real curl reproduction of "Too Many Requests"),
+ * so every hotlinked <img src="larvalabs.com/..."> permanently failed
+ * onError -> "Art pending" for all 10,000 punks, no matter how long a
+ * visitor waited (a hard rate limit, not a transient one). The proxy route
+ * does the actual chain read lazily per-request with an immutable cache
+ * header, so this adapter never needs to batch-read 10,000 SVGs at sync
+ * time at all -- it only needs to emit the URL.
+ */
+function onchainPunkImageUrl(tokenId: number): string {
+  return `/api/onchain/cryptopunks-image?index=${tokenId}`;
+}
+
 const punks = new Interface([
   "function punksOfferedForSale(uint256) view returns (bool isForSale,uint256 punkIndex,address seller,uint256 minValue,address onlySellTo)",
 ]);
@@ -110,7 +128,7 @@ export async function syncCryptoPunksTraits(): Promise<{ indexed: number; traits
       name: `CryptoPunk #${tokenId}`,
       traits,
     });
-    images.set(String(tokenId), `https://www.larvalabs.com/cryptopunks/cryptopunk${tokenId}.png`);
+    images.set(String(tokenId), onchainPunkImageUrl(tokenId));
   }
   if (items.length !== SUPPLY || seen.size !== SUPPLY) {
     throw new Error(`CryptoPunks attributes incomplete: expected ${SUPPLY}, received ${items.length}`);
