@@ -457,16 +457,19 @@ export async function GET(req: NextRequest) {
     try {
       const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
       const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
-      const [unisatResult, owResult, ordnetResult] = await Promise.allSettled([
+      const { fetchSatflowListings, resolveSatflowCollectionStats } = await import("@/lib/market/multichain/adapters/satflow-ordinals");
+      const [unisatResult, owResult, ordnetResult, satflowResult] = await Promise.allSettled([
         process.env.UNISAT_API_KEY
           ? fetchUniSatListings(collectionSlug, Math.min(limit, 20))
           : Promise.resolve([]),
         fetchOrdinalsWalletCatalog(collectionSlug),
         isOrdNetConfigured() ? fetchOrdNetListings(collectionSlug, limit) : Promise.resolve([]),
+        fetchSatflowListings(collectionSlug, limit),
       ]);
       const unisat = unisatResult.status === "fulfilled" ? unisatResult.value : [];
       const ow = owResult.status === "fulfilled" ? owResult.value : { listings: [] };
       const ordnet = ordnetResult.status === "fulfilled" ? ordnetResult.value : [];
+      const satflow = satflowResult.status === "fulfilled" ? satflowResult.value : [];
       const candidates: Listing[] = [
         ...mapBitcoinListings(collectionSlug, chainSlug, unisat, true),
         ...mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
@@ -483,7 +486,54 @@ export async function GET(req: NextRequest) {
           externalUrl: `https://ord.net/inscription/${row.inscriptionId}`,
           foreignChainSlug: chainSlug,
         })),
+        // Satflow -- new venue 2026-08-24 (flagged live: YONDER trades
+        // almost exclusively here, UniSat's own book for it is genuinely
+        // empty). See satflow-ordinals.ts's own header for the real API
+        // vs scrape-fallback distinction; fetchSatflowListings only ever
+        // returns real per-listing rows via the documented API (empty
+        // without a configured key, never a scraped approximation mixed
+        // into individual listing rows).
+        ...satflow.map((row): Listing => ({
+          id: `satflow:${row.inscriptionId}`,
+          collectionSlug,
+          tokenId: row.inscriptionId,
+          maker: row.sellerAddress ?? "unknown",
+          priceWei: ordNetSatsToPriceWei(row.priceSats),
+          expiresAt: "9999-12-31T23:59:59.999Z",
+          kind: "fixed",
+          imageUrl: `https://ordinals.com/content/${row.inscriptionId}`,
+          venue: "satflow",
+          externalUrl: `https://www.satflow.com/ordinals/${collectionSlug}`,
+          foreignChainSlug: chainSlug,
+        })),
       ];
+      // Real, immediate hydration on visit (see this session's standing
+      // "no unpopulated spot" directive): when every listing source above
+      // came back empty but Satflow's own collection page has real,
+      // live floor/listed data (the scrape fallback, or the API-derived
+      // stats when a key exists), persist it now via the same
+      // COALESCE-safe upsert every other floor-only source uses -- never
+      // overwrites a real value from a richer source, only fills a real
+      // gap (see YONDER: UniSat's own book is honestly empty, but a real
+      // floor/listed figure exists on Satflow).
+      if (candidates.length === 0) {
+        const stats = await resolveSatflowCollectionStats(collectionSlug).catch(() => null);
+        if (stats?.floorPriceSats != null) {
+          const { updateCollectionFloorOnly } = await import("@/lib/market/multichain/store");
+          void updateCollectionFloorOnly(chainSlug, collectionSlug, {
+            floorPriceWei: ordNetSatsToPriceWei(stats.floorPriceSats),
+            floorPriceCurrency: "BTC",
+            floorPriceMarketplace: "satflow",
+          }).catch(() => {});
+        }
+        if (stats?.listedCount != null) {
+          const { updateCollectionSupplyFields } = await import("@/lib/market/multichain/store");
+          void updateCollectionSupplyFields(chainSlug, collectionSlug, {
+            listedCount: stats.listedCount,
+            totalSupply: stats.totalSupply,
+          }).catch(() => {});
+        }
+      }
       // One executable economic position per inscription in the grid; retain
       // the cheapest venue while source coverage remains visible below.
       const cheapest = new Map<string, Listing>();

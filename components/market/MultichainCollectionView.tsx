@@ -222,6 +222,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     animationUrl?: string | null; mediaType?: string | null;
     traits?: Array<{ traitType: string; value: string }> }>>([]);
   const [catalogBuilding, setCatalogBuilding] = useState(false);
+  // REAL BUG FIXED 2026-08-24 ("before the collection can first load, the
+  // background looks as if its going to tell users there are no pieces"):
+  // the top-level `loading` skeleton only covers the collection-identity
+  // fetch (load()), not this catalog grid's own separate async fetch
+  // (fetchCatalogTokens below) -- so there was a real window, on every
+  // fresh visit, where `loading` had already flipped false (skeleton
+  // gone) but `tokens` was still `[]` and `catalogBuilding` was still its
+  // default `false`, rendering the real "No items loaded for this
+  // collection yet." empty-state copy for a genuinely-still-loading
+  // catalog. Tracks the FIRST catalog fetch specifically (not every
+  // refetch -- changing filters/sort should not re-trigger the full
+  // skeleton, only the true initial paint should).
+  const [catalogInitialLoading, setCatalogInitialLoading] = useState(true);
   const [catalogMeta, setCatalogMeta] = useState<{
     projectedCount: number;
     expectedCount: number | null;
@@ -472,6 +485,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     } catch {
       setTokens(accumulated);
       setCatalogBuilding(false);
+    } finally {
+      setCatalogInitialLoading(false);
     }
   }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogPageSize]);
 
@@ -612,6 +627,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const id = setInterval(() => void load(), 20_000);
     return () => clearInterval(id);
   }, [load]);
+
+  useEffect(() => {
+    // Only a real navigation to a different collection should bring back
+    // the initial-load skeleton -- a sort/filter change on an already-
+    // loaded collection re-triggers fetchCatalogTokens too (see its own
+    // dependency list) and must not flash the empty state again.
+    setCatalogInitialLoading(true);
+  }, [chainSlug, collectionSlug]);
 
   useEffect(() => {
     void fetchCatalogTokens();
@@ -2424,7 +2447,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </div>
             </div>
           )}
-          {browseItems.length === 0 ? (
+          {browseItems.length === 0 && bookFilter === "all" && catalogInitialLoading && !filtersActive ? (
+            // Real fix for the "collection first loads and briefly claims
+            // it has no pieces" flash: the catalog's own async fetch
+            // hasn't resolved even once yet at this point (tokens is
+            // still []), so this is a genuinely-still-loading state, not
+            // a genuinely-empty one -- render the same immersive skeleton
+            // grid the top-level `loading` gate uses instead of the
+            // "No items loaded" empty-state copy.
+            <SkeletonCardGrid columns="grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" action />
+          ) : browseItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
