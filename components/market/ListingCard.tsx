@@ -25,6 +25,7 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   "ordinals-wallet": "bg-[#F7931A]/15 text-[#F7931A]",
   ordnet: "bg-[#FF6B35]/15 text-[#FF9B73]",
   "cryptopunks-native": "bg-gold-500/15 text-gold-300",
+  satflow: "bg-[#F7931A]/15 text-[#F7931A]",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, formatTokenAmountCompact, shortAddress } from "@/lib/trade";
