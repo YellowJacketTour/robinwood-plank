@@ -458,18 +458,21 @@ export async function GET(req: NextRequest) {
       const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
       const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
       const { fetchSatflowListings, resolveSatflowCollectionStats } = await import("@/lib/market/multichain/adapters/satflow-ordinals");
-      const [unisatResult, owResult, ordnetResult, satflowResult] = await Promise.allSettled([
+      const { fetchOkxOrdinalsListings, fetchOkxCollectionStats } = await import("@/lib/market/multichain/adapters/okx-ordinals");
+      const [unisatResult, owResult, ordnetResult, satflowResult, okxResult] = await Promise.allSettled([
         process.env.UNISAT_API_KEY
           ? fetchUniSatListings(collectionSlug, Math.min(limit, 20))
           : Promise.resolve([]),
         fetchOrdinalsWalletCatalog(collectionSlug),
         isOrdNetConfigured() ? fetchOrdNetListings(collectionSlug, limit) : Promise.resolve([]),
         fetchSatflowListings(collectionSlug, limit),
+        fetchOkxOrdinalsListings(collectionSlug, limit),
       ]);
       const unisat = unisatResult.status === "fulfilled" ? unisatResult.value : [];
       const ow = owResult.status === "fulfilled" ? owResult.value : { listings: [] };
       const ordnet = ordnetResult.status === "fulfilled" ? ordnetResult.value : [];
       const satflow = satflowResult.status === "fulfilled" ? satflowResult.value : [];
+      const okx = okxResult.status === "fulfilled" ? okxResult.value : [];
       const candidates: Listing[] = [
         ...mapBitcoinListings(collectionSlug, chainSlug, unisat, true),
         ...mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
@@ -506,24 +509,46 @@ export async function GET(req: NextRequest) {
           externalUrl: `https://www.satflow.com/ordinals/${collectionSlug}`,
           foreignChainSlug: chainSlug,
         })),
+        // OKX -- new venue 2026-08-24, owner's own explicit follow-up
+        // request after Satflow ("help me get a key for satflow and okx
+        // and weave them elegantly into total solution"). See
+        // okx-ordinals.ts's own header for the real-vs-defensive field
+        // name distinction; returns [] until real OKX credentials
+        // (OKX_API_KEY/OKX_API_SECRET/OKX_API_PASSPHRASE) are configured.
+        ...okx.map((row): Listing => ({
+          id: `okx:${row.inscriptionId}`,
+          collectionSlug,
+          tokenId: row.inscriptionId,
+          maker: row.sellerAddress ?? "unknown",
+          priceWei: ordNetSatsToPriceWei(row.priceSats),
+          expiresAt: "9999-12-31T23:59:59.999Z",
+          kind: "fixed",
+          imageUrl: `https://ordinals.com/content/${row.inscriptionId}`,
+          venue: "okx",
+          externalUrl: `https://web3.okx.com/nft/collection/btc/${collectionSlug}`,
+          foreignChainSlug: chainSlug,
+        })),
       ];
       // Real, immediate hydration on visit (see this session's standing
       // "no unpopulated spot" directive): when every listing source above
-      // came back empty but Satflow's own collection page has real,
-      // live floor/listed data (the scrape fallback, or the API-derived
-      // stats when a key exists), persist it now via the same
+      // came back empty but Satflow's or OKX's own collection stats have
+      // real, live floor/listed data, persist it now via the same
       // COALESCE-safe upsert every other floor-only source uses -- never
       // overwrites a real value from a richer source, only fills a real
       // gap (see YONDER: UniSat's own book is honestly empty, but a real
-      // floor/listed figure exists on Satflow).
+      // floor/listed figure exists on Satflow). Satflow is tried first
+      // (its scrape fallback works today without any credentials at
+      // all); OKX only contributes once real credentials exist.
       if (candidates.length === 0) {
-        const stats = await resolveSatflowCollectionStats(collectionSlug).catch(() => null);
+        const satflowStats = await resolveSatflowCollectionStats(collectionSlug).catch(() => null);
+        const stats = satflowStats ?? (await fetchOkxCollectionStats(collectionSlug).catch(() => null));
+        const marketplace = satflowStats ? "satflow" : "okx";
         if (stats?.floorPriceSats != null) {
           const { updateCollectionFloorOnly } = await import("@/lib/market/multichain/store");
           void updateCollectionFloorOnly(chainSlug, collectionSlug, {
             floorPriceWei: ordNetSatsToPriceWei(stats.floorPriceSats),
             floorPriceCurrency: "BTC",
-            floorPriceMarketplace: "satflow",
+            floorPriceMarketplace: marketplace,
           }).catch(() => {});
         }
         if (stats?.listedCount != null) {
@@ -555,6 +580,8 @@ export async function GET(req: NextRequest) {
               unisat: !process.env.UNISAT_API_KEY ? "credential-missing" : unisatResult.status === "fulfilled" ? "queried" : "upstream-error",
               ordinalsWallet: owResult.status === "fulfilled" ? "catalog-overlay" : "upstream-error",
               ordnet: !isOrdNetConfigured() ? "wallet-session-missing" : ordnetResult.status === "fulfilled" ? "cursor-read" : "upstream-error",
+              satflow: !process.env.SATFLOW_API_KEY ? "credential-missing" : satflowResult.status === "fulfilled" ? "queried" : "upstream-error",
+              okx: !process.env.OKX_API_KEY ? "credential-missing" : okxResult.status === "fulfilled" ? "queried" : "upstream-error",
             },
           },
         },
