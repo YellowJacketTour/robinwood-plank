@@ -17,6 +17,7 @@
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { checkSourceBudget, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { readContractName, readTotalSupply } from "@/lib/market/multichain/discovery/onchain-contract-reads";
 // Dynamically imported (not a top-level import) because control-plane.ts
 // pulls in lib/postgres.ts's real `pg` client, which is server-only --
 // this file is reachable from CLIENT code via foreign-chain-registry.ts ->
@@ -302,11 +303,54 @@ function cleanMetadataString(value: string | null | undefined): string | null {
  */
 const BATCH_SIZE = 100;
 
+/**
+ * REAL FALLBACK, flagged live 2026-08-24 ("a unified system that is not
+ * crippled by alchemy monthly limit"): confirmed the same night that
+ * Alchemy's real monthly quota exhaustion took the WHOLE collection-sync
+ * step to zero across all 8 EVM chains simultaneously, because this
+ * function's only path was a hard throw. Alchemy's collection response
+ * (floor price, curated banner image, OpenSea listing count) genuinely
+ * has no on-chain equivalent -- those stay honestly null here, never
+ * fabricated. `name` and `totalSupply` DO have a real on-chain source
+ * (rpc-provider-pool.ts, free, multi-vendor, no Alchemy dependency), so
+ * this fills in what's real and leaves the rest null rather than
+ * returning nothing for the whole chain.
+ */
+async function onchainFallbackSnapshots(chainSlug: string, contractAddresses: string[]): Promise<Map<string, CollectionSnapshot>> {
+  const results = new Map<string, CollectionSnapshot>();
+  const nativeSymbol = foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ?? "ETH";
+  await Promise.all(
+    contractAddresses.map(async (address) => {
+      const [name, totalSupply] = await Promise.all([
+        readContractName(chainSlug, address).catch(() => null),
+        readTotalSupply(chainSlug, address).catch(() => null),
+      ]);
+      if (name == null && totalSupply == null) return; // real "nothing recoverable" -- leave unset rather than write an empty row
+      results.set(address.toLowerCase(), {
+        name: cleanMetadataString(name),
+        imageUrl: null,
+        externalUrl: null,
+        floorPriceWei: null,
+        floorPriceCurrency: null,
+        floorPriceMarketplace: null,
+        totalSupply,
+        listedCount: null,
+        creatorAddress: null,
+        creatorHandle: null,
+      });
+      void nativeSymbol; // reserved for when a real on-chain floor source exists (none does today -- see this function's own header)
+    })
+  );
+  return results;
+}
+
 export async function fetchSnapshotsBatch(
   chainSlug: string,
   contractAddresses: string[]
 ): Promise<Map<string, CollectionSnapshot>> {
-  assertAlchemyNftNotJailed();
+  if (!checkSourceBudget(ALCHEMY_NFT_SOURCE).allowed) {
+    return onchainFallbackSnapshots(chainSlug, contractAddresses);
+  }
   const base = baseUrl(chainSlug);
   const results = new Map<string, CollectionSnapshot>();
 
@@ -315,7 +359,8 @@ export async function fetchSnapshotsBatch(
     const { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } = await controlPlane();
     const window = utcDayWindow(ALCHEMY_NFT_DAILY_ALLOWANCE);
     if (!(await reserveProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window))) {
-      throw new Error("alchemy-nft: durable daily ceiling");
+      for (const [addr, snap] of await onchainFallbackSnapshots(chainSlug, chunk)) results.set(addr, snap);
+      continue;
     }
     let res: Response;
     let settled = false;
@@ -329,14 +374,17 @@ export async function fetchSnapshotsBatch(
       settled = true;
     } catch (error) {
       if (!settled) await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
-      throw error;
+      void error;
+      for (const [addr, snap] of await onchainFallbackSnapshots(chainSlug, chunk)) results.set(addr, snap);
+      continue;
     }
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       if (isAlchemyQuotaStatus(res.status, bodyText)) {
         jailAlchemyNftUntilMonthReset();
       }
-      throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching getContractMetadataBatch`);
+      for (const [addr, snap] of await onchainFallbackSnapshots(chainSlug, chunk)) results.set(addr, snap);
+      continue;
     }
     const data = (await res.json()) as { contracts: (AlchemyContractMetadata & { address: string })[] };
     for (const metadata of data.contracts ?? []) {
