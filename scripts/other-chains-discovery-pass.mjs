@@ -1,5 +1,6 @@
 import { runRobinhoodChainDiscoveryScan } from "../lib/market/multichain/discovery/robinhood-chain-scan.ts";
 import { runHeliusCollectionScan } from "../lib/market/multichain/discovery/helius-collection-scan.ts";
+import { runMagicEdenCatalogScan } from "../lib/market/multichain/discovery/magiceden-catalog-scan.ts";
 import { runUnisatCollectionListScan } from "../lib/market/multichain/discovery/unisat-collection-list-scan.ts";
 import { runOrdiscanCollectionScan } from "../lib/market/multichain/discovery/ordiscan-collection-scan.ts";
 
@@ -19,9 +20,18 @@ while (Date.now() - started < 1000 * 60 * 3) {
   }
   try {
     const s = await runHeliusCollectionScan({ maxPages: 5 });
-    if (s.registered > 0 || s.done) line.push(`solana:+${s.registered}${s.done ? " DONE" : ""}`);
+    if (s.registered > 0 || s.done) line.push(`solana-core:+${s.registered}${s.done ? " DONE" : ""}`);
   } catch (e) {
     console.log(`[solana-err] ${e instanceof Error ? e.message : e}`);
+  }
+  try {
+    // Exhaustive legacy-standard catalog walk (see magiceden-catalog-scan.ts
+    // header) -- the real long tail helius-collection-scan.ts's Core-only
+    // scope and discoverTopCollections' top-N ranking both structurally miss.
+    const me = await runMagicEdenCatalogScan({ maxPages: 25 });
+    if (me.registered > 0 || me.done) line.push(`solana-catalog:+${me.registered}${me.done ? " DONE" : ""}`);
+  } catch (e) {
+    console.log(`[solana-catalog-err] ${e instanceof Error ? e.message : e}`);
   }
   try {
     const b = await runUnisatCollectionListScan({ maxPages: 5 });
