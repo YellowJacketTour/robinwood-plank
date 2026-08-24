@@ -783,8 +783,29 @@ export async function scaffoldAllTrackedCollections(opts?: {
   for (const c of evm) {
     const slug = await resolveOpenSeaSlug(c.chainSlug, c.contractAddress).catch(() => null);
     if (!slug) {
-      log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea slug; Alchemy rarity is off (monthly cap). Helius/UniSat runners cover SOL/BTC.`);
-      failed += 1;
+      // REAL FIX 2026-08-24, flagged live (a real audit found millions of
+      // tokens across base/opt/avax/arb/bnb/zksync sitting at near-0%
+      // metadata coverage): this used to just give up here, with a STALE,
+      // inaccurate log message -- resolveOpenSeaSlug (opensea-stats.ts)
+      // has zero Alchemy dependency at all, "Alchemy rarity is off" was
+      // simply wrong. The real, free, on-chain-first fallback already
+      // exists (advanceEvmTokenMetadata -> resolveEvmTokenMetadata tries
+      // raw tokenURI() reads before ever touching OpenSea) but was only
+      // ever invoked on-demand via mesh-lane (source=evm-metadata), never
+      // from this always-running background scaffold -- so a collection
+      // with no real OpenSea listing (common: dead/spam contracts,
+      // zkSync entirely since openSeaChain is null there, or a real
+      // collection OpenSea simply hasn't indexed) had NO continuous path
+      // to real metadata at all. Now runs a real, bounded on-chain pass
+      // for exactly this case instead of skipping outright.
+      const batch = await advanceEvmTokenMetadata(c.chainSlug, 25, c.contractAddress).catch(() => null);
+      if (batch && batch.attempted > 0) {
+        log(`ONCHAIN-FALLBACK ${c.chainSlug}:${c.contractAddress} -- no OpenSea slug; hydrated ${batch.complete}/${batch.attempted} via direct tokenURI reads (${batch.empty} empty, ${batch.retry} retry)`);
+        indexed += 1;
+      } else {
+        log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea slug, and no on-chain metadata work available (no pending token rows yet, or contract has no readable tokenURI)`);
+        failed += 1;
+      }
       continue;
     }
 
