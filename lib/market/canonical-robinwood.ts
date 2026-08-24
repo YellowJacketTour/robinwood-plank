@@ -83,8 +83,27 @@ export async function fetchCanonicalRobinwoodActivity(input: {
  * (if unhelpfully) showed a blank 24h floor change instead of a real one.
  * A real browser-shaped User-Agent is enough to clear the WAF rule for
  * this legitimate same-family read.
+ *
+ * REAL GAP ALSO FIXED, flagged live ("how are other collections getting
+ * real feeds ... and our own collection isn't -- unify solutions"): every
+ * OTHER external source in this app (OpenSea, Alchemy, UniSat, Ordiscan,
+ * ...) goes through source-budget.ts's circuit breaker, so a real outage/
+ * block trips a visible, monitored jail. This mirror fetch had none of
+ * that -- when the WAF started blocking it, it silently returned null
+ * forever with zero signal anywhere, for over 22 hours, before being
+ * root-caused by hand. Wiring the exact same checkSourceBudget/
+ * recordSourceSuccess/recordSourceFailure pattern here means the next
+ * failure (a real outage, a WAF rule change, anything) jails visibly and
+ * gets picked up by whatever already watches every other source's
+ * health, instead of degrading invisibly again.
  */
+const MIRROR_SOURCE = "canonical-robinwood-mirror";
+
 async function getJson(url: string): Promise<unknown | null> {
+  const { checkSourceBudget, recordSourceSuccess, recordSourceFailure } = await import(
+    "@/lib/market/multichain/discovery/source-budget"
+  );
+  if (!checkSourceBudget(MIRROR_SOURCE).allowed) return null;
   try {
     const res = await fetch(url, {
       headers: {
@@ -95,9 +114,16 @@ async function getJson(url: string): Promise<unknown | null> {
       signal: AbortSignal.timeout(8_000),
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      recordSourceFailure(MIRROR_SOURCE, res.status === 429 || res.status === 403);
+      console.warn(`canonical-robinwood: mirror fetch ${url} -> HTTP ${res.status}`);
+      return null;
+    }
+    recordSourceSuccess(MIRROR_SOURCE);
     return await res.json();
-  } catch {
+  } catch (error) {
+    recordSourceFailure(MIRROR_SOURCE, false);
+    console.warn(`canonical-robinwood: mirror fetch ${url} failed`, error instanceof Error ? error.message : error);
     return null;
   }
 }
