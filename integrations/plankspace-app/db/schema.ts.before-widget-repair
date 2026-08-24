@@ -1,4 +1,4 @@
-﻿import { sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, serial, text, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const posts = pgTable("plankspace_posts", {
@@ -229,26 +229,3 @@ export const liveRoomMembers = pgTable("plankspace_live_room_members", {
   uniqueIndex("live_room_members_unique").on(table.roomSlug, table.wallet),
   index("live_room_members_room_idx").on(table.roomSlug, table.lastSeenAt),
 ]);
-
-export const profileVisits = pgTable("plankspace_profile_visits", {
-  id: serial("id").primaryKey(),
-  profileHandle: text("profile_handle").notNull(),
-  visitorWallet: text("visitor_wallet").notNull(),
-  visitorHandle: text("visitor_handle").notNull(),
-  visitedAt: text("visited_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-},table=>[
-  uniqueIndex("profile_visits_unique").on(table.profileHandle,table.visitorWallet),
-  index("profile_visits_recent_idx").on(table.profileHandle,table.visitedAt),
-]);
-
-export const publications = pgTable("plankspace_publications", {
-  id: serial("id").primaryKey(),
-  authorWallet: text("author_wallet").notNull(),
-  authorHandle: text("author_handle").notNull(),
-  kind: text("kind").notNull(),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  moderationStatus: text("moderation_status").notNull().default("approved"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-},table=>[index("publications_profile_idx").on(table.authorHandle,table.kind,table.createdAt)]);
-
