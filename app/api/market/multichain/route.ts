@@ -244,11 +244,29 @@ export async function GET(req: Request) {
         floorPriceCurrency: isCryptoPunks && cryptoPunksNativeStats?.floorWei ? "ETH" : c.floorPriceCurrency,
         floorPriceMarketplace: isCryptoPunks && cryptoPunksNativeStats ? "cryptopunks-native" : c.floorPriceMarketplace,
         totalSupply: isCryptoPunks ? 10_000 : c.totalSupply,
+        // REAL BUG FIXED 2026-08-24, flagged live ("the crypto punks grade
+        // is still blank on rankings"): a native-book-owned collection
+        // whose LATEST sync attempt happens to be failing (transient RPC
+        // hiccup, a real one live-reproduced for CryptoPunks specifically
+        // -- plank_market_coverage showed status='error' from 13+ hours
+        // ago) got its listedCount unconditionally nulled here, even
+        // though a real, correct, only-slightly-stale value (1149,
+        // confirmed via direct DB query) already sat in
+        // plank_multichain_snapshots from an earlier successful sync.
+        // hasGradeEvidence() in GlobalMarketHub.tsx requires a non-null
+        // positive listedCount to grade a row at all -- nulling a real
+        // cached number over a transient resync failure is exactly the
+        // same "real failure treated as confirmed-bad" bug already fixed
+        // this session for RobinWood's own listings and the Solana DAS
+        // pool. Now only nulls when there's truly NEVER been a real
+        // value recorded (c.listedCount itself null), falling back to the
+        // last-known-good cached figure otherwise -- a resync failure
+        // degrades to "possibly stale," never "blank."
         listedCount:
           isCryptoPunks && cryptoPunksNativeStats
             ? cryptoPunksNativeStats.listedCount
           : hasUnindexedNativeBook(c.chainSlug, c.contractAddress) && !cryptoPunksNativeBookIndexed
-            ? null
+            ? (c.listedCount ?? null)
             : c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
             ? null
             : c.listedCount,
