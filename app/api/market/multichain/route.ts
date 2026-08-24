@@ -86,8 +86,36 @@ export async function GET(req: Request) {
 
     const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
     const { getListings } = await import("@/lib/market/orders-store");
-    const bySlug = await getListings("robinwood").catch(() => []);
-    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
+    // REAL BUG FIXED 2026-08-24, flagged live (a refresh showed RobinWood's
+    // OWN row with floor "—", listed 0 of 1,542, and its grade correctly
+    // but misleadingly cratering A -> D): getListings() reads real Postgres
+    // (postgresReadOrders) and CAN genuinely throw on a transient
+    // connection/query hiccup -- this exact class of hiccup was directly
+    // observed live elsewhere in this session's own supervisor logs
+    // ("canceling statement due to statement timeout"). A bare
+    // `.catch(() => [])` made that indistinguishable from "the order book
+    // is genuinely empty right now," which then triggered the FULL
+    // canonical-mirror fallback chain below (nativeListed === 0) -- if
+    // that fallback ALSO had a bad moment at the same instant, the row
+    // rendered fully null, producing an honest-looking but wrong D grade
+    // for a real, healthy, 108-listing collection. A transient DB blip
+    // typically clears within milliseconds, so retrying once before
+    // conceding to an empty result eliminates the vast majority of these
+    // false "the book is empty" moments without building a whole
+    // last-known-good cache layer for this route.
+    const getListingsWithRetry = async (slug: string) => {
+      try {
+        return await getListings(slug);
+      } catch {
+        try {
+          return await getListings(slug);
+        } catch {
+          return [];
+        }
+      }
+    };
+    const bySlug = await getListingsWithRetry("robinwood");
+    const byContract = await getListingsWithRetry(NFT_CONTRACT_ADDRESS.toLowerCase());
     const nativeListings = bySlug.length >= byContract.length ? bySlug : byContract;
     let nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
       try {
