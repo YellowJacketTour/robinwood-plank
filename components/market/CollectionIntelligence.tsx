@@ -58,6 +58,35 @@ function useProceduralAccent(artUrls: string[]): string {
   return accent;
 }
 
+/**
+ * Real, color-coded hydration freshness readout -- fixes a real gap
+ * flagged live 2026-08-24 ("intel tabs hydration properly thought
+ * through... stale collection data"): this panel previously had zero
+ * signal for whether the numbers on screen were hydrated a moment ago or
+ * days ago, so real staleness (a slow/backed-up sync lane for a given
+ * chain) was invisible instead of surfaced. Uses `projectedAt` (when this
+ * app's own projection job last wrote the row) as the primary signal --
+ * it's the honest "how old is what you're looking at" answer regardless
+ * of how old the underlying vendor observation was. Green under 1h,
+ * amber under 24h, red beyond that or unknown -- never fabricated as
+ * "live" when there's no real timestamp to back it.
+ */
+function useFreshnessBadge(freshness: { sourceObservedAt: string | null; projectedAt: string | null } | null): { label: string; color: string; title: string } {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => forceTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const ts = freshness?.projectedAt ? Date.parse(freshness.projectedAt) : NaN;
+  if (!Number.isFinite(ts)) return { label: "Freshness unknown", color: "#8b8398", title: "No hydration timestamp is available for this collection yet." };
+  const ageMs = Date.now() - ts;
+  const ageMin = ageMs / 60_000;
+  const label = ageMin < 1 ? "Just now" : ageMin < 60 ? `${Math.round(ageMin)}m ago` : ageMin < 1440 ? `${Math.round(ageMin / 60)}h ago` : `${Math.round(ageMin / 1440)}d ago`;
+  const color = ageMin < 60 ? "#48d7a4" : ageMin < 1440 ? "#f4c95d" : "#ff718b";
+  const observed = freshness?.sourceObservedAt ? new Date(freshness.sourceObservedAt).toLocaleString() : "unknown";
+  return { label, color, title: `Catalog last hydrated ${new Date(ts).toLocaleString()} · underlying data observed ${observed}` };
+}
+
 function pct(value: number): string { return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`; }
 function Bar({ value, label }: { value: number; label: string }) {
   return <div><div className="mb-1 flex justify-between gap-2 text-[0.65rem]"><span>{label}</span><span>{pct(value)}</span></div><div className="h-2 overflow-hidden rounded-full bg-foreground/10"><div className="h-full rounded-full bg-gradient-to-r from-gold-500 to-purple-400" style={{ width: pct(value) }} /></div></div>;
@@ -212,10 +241,22 @@ export default function CollectionIntelligence(props: {
   marketStats?: { volume24hWei: string | null; sales24h: number | null; volume7dWei: string | null; sales7d: number | null; volume30dWei: string | null; sales30d: number | null } | null;
   /** Real listed count from the tracked-collection snapshot, when available -- falls back to listings.length below. */
   listedCount?: number | null;
+  /**
+   * Real hydration timestamps from the same canonical projection the
+   * catalog grid reads (plank_collection_token_projections), threaded
+   * through 2026-08-24 after being silently dropped by the client's
+   * TokenPage type -- see MultichainCollectionView.tsx's own catalogMeta
+   * comment. `sourceObservedAt` is when the underlying vendor/on-chain
+   * data was actually observed; `projectedAt` is when this app's own
+   * projection job last wrote it. Null means genuinely unknown (a
+   * collection with no projection row yet), never fabricated as "now".
+   */
+  catalogFreshness?: { sourceObservedAt: string | null; projectedAt: string | null } | null;
 }) {
   const [timeRange, setTimeRange] = useState<[number, number] | null>(null);
   const [landscape, setLandscape] = useState<"space" | "timeline" | "network" | "dossier">("space");
   const accent = useProceduralAccent(props.artUrls);
+  const freshness = useFreshnessBadge(props.catalogFreshness ?? null);
   const scopedSales = timeRange ? props.sales.filter((sale) => { const time = sale.timestamp ? Date.parse(sale.timestamp) : NaN; return Number.isFinite(time) && time >= timeRange[0] && time <= timeRange[1]; }) : props.sales;
   const listedPct = props.supply ? props.listings.length / props.supply * 100 : 0;
   const holderPct = props.supply && props.holders ? props.holders / props.supply * 100 : 0;
@@ -295,7 +336,7 @@ export default function CollectionIntelligence(props: {
     aria-label="Collection intelligence"
   >
     <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>{props.artUrls.slice(0, 4).map((url, index) => <div key={`${url}-${index}`} className="absolute aspect-square w-[38%] max-w-80 rounded-full bg-cover bg-center opacity-[0.04] blur-[2px] saturate-150" style={{ backgroundImage: `linear-gradient(135deg, transparent, rgba(9,6,15,.88)), url(${JSON.stringify(url)})`, right: `${(index % 2) * 42 - 8}%`, top: `${Math.floor(index / 2) * 48 - 12}%`, transform: `rotate(${index % 2 ? 9 : -8}deg) scale(1.15)` }}/>)}</div>
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-[0.62rem] font-black uppercase tracking-[0.18em]" style={{ color: accent }}>Collection intelligence</p><h3 className="font-display text-lg text-gold-300">Market structure & provenance</h3><p className="text-xs text-foreground/45">Computed only from indexed evidence · loaded-window metrics are labeled, never extrapolated.</p></div><div className="flex gap-1"><button type="button" onClick={() => download("csv")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export CSV</button><button type="button" onClick={() => download("json")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export JSON</button></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-[0.62rem] font-black uppercase tracking-[0.18em]" style={{ color: accent }}>Collection intelligence</p><h3 className="font-display text-lg text-gold-300">Market structure & provenance</h3><p className="text-xs text-foreground/45">Computed only from indexed evidence · loaded-window metrics are labeled, never extrapolated.</p></div><div className="flex items-center gap-2"><span title={freshness.title} className="flex items-center gap-1.5 rounded-full border border-line bg-background/65 px-2 py-1 text-[0.62rem] font-bold" style={{ color: freshness.color }}><span className="size-1.5 shrink-0 rounded-full" style={{ background: freshness.color }} />{freshness.label}</span><div className="flex gap-1"><button type="button" onClick={() => download("csv")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export CSV</button><button type="button" onClick={() => download("json")} className="min-h-9 rounded-md border border-line px-2 py-1 text-xs font-bold">Export JSON</button></div></div></div>
       {props.historyCoverage && <div className="grid gap-2 rounded-lg border border-amber-400/35 bg-amber-500/5 p-2 text-[0.65rem] sm:grid-cols-3" role="status"><div><span className="block font-black uppercase tracking-wider text-foreground/45">Protocol coverage</span><strong>{props.historyCoverage.completeThroughGenesis ? `${props.historyCoverage.scope ?? "source"} chain scan complete` : `${props.historyCoverage.scope ?? "source"} backfill in progress`}</strong><span className="block text-amber-200/75">Total multi-venue market history is not yet complete.</span></div><div><span className="block font-black uppercase tracking-wider text-foreground/45">Evidence ledger</span><strong>{props.sales.length.toLocaleString()} loaded / {props.historyCoverage.indexedEvents.toLocaleString()} indexed</strong></div><div><span className="block font-black uppercase tracking-wider text-foreground/45">Observed span</span><strong>{props.historyCoverage.oldestTimestamp ? new Date(props.historyCoverage.oldestTimestamp).toLocaleDateString() : "Timestamp repair pending"} to {props.historyCoverage.newestTimestamp ? new Date(props.historyCoverage.newestTimestamp).toLocaleDateString() : "now"}</strong></div></div>}
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="Intelligence landscape">
         {([
