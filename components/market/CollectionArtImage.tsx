@@ -49,10 +49,20 @@ export default function CollectionArtImage({
   ].filter((u, i, a) => a.indexOf(u) === i);
   const [idx, setIdx] = useState(0);
   const [failed, setFailed] = useState(false);
+  // Bounded, real retry for a transient upstream failure (e.g. our own
+  // on-chain image proxy hitting a momentarily rate-limited/jailed RPC
+  // provider under scroll-burst load) -- flagged live 2026-08-24: far-down
+  // tiles were stuck permanently at "Art pending" after one failed load,
+  // even though the SAME url would succeed a moment later on a manual
+  // refresh. Exhausting every candidate now retries the full list once
+  // more after a short backoff before giving up for real; a genuinely
+  // dead/poisoned src still fails fast on the second pass.
+  const [retryTick, setRetryTick] = useState(0);
   const extraKey = extras.filter(Boolean).join("|");
   useEffect(() => {
     setIdx(0);
     setFailed(false);
+    setRetryTick(0);
   }, [src, extraKey]);
   const current = candidates[idx] ?? null;
   if (failed || !current || isPoisonedImageSrc(current)) {
@@ -66,7 +76,13 @@ export default function CollectionArtImage({
   }
   const shouldProxy =
     current.startsWith("/api/ipfs/") || current.startsWith("ipfs://") || isIpfsGatewayUrl(current) || orbHost;
-  const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(current), width) || current : current;
+  const baseResolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(current), width) || current : current;
+  // A retry pass appends a real cache-busting query param so the browser
+  // (and any intermediate cache) actually re-issues the request instead of
+  // replaying the same failed response.
+  const resolvedSrc = retryTick > 0
+    ? `${baseResolvedSrc}${baseResolvedSrc.includes("?") ? "&" : "?"}retry=${retryTick}`
+    : baseResolvedSrc;
   const sizes =
     variant === "hero" ? "(min-width: 1024px) 60vw, 100vw" : variant === "thumb" ? "48px" : "(min-width: 1280px) 16vw, 45vw";
   const pixel = isInscriptionArtUrl(current);
@@ -84,6 +100,17 @@ export default function CollectionArtImage({
       onError={() => {
         if (idx + 1 < candidates.length) {
           setIdx(idx + 1);
+          return;
+        }
+        if (retryTick < 1) {
+          // One bounded retry pass, after a short real delay, before
+          // giving up for good -- covers the transient-RPC-jail case
+          // instead of permanently blanking a tile a manual refresh would
+          // have fixed.
+          window.setTimeout(() => {
+            setIdx(0);
+            setRetryTick((n) => n + 1);
+          }, 1500);
           return;
         }
         setFailed(true);
