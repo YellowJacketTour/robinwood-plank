@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS plankspace_live_rooms (
   created_at text NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at text NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Safely upgrade a live-room table created by an earlier Woodstock prototype.
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS title text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS host_wallet text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS host_handle text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_rooms
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'live';
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS jitsi_room text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_rooms ADD COLUMN IF NOT EXISTS created_at text NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE plankspace_live_rooms
+  ADD COLUMN IF NOT EXISTS updated_at text NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS live_rooms_status_idx ON plankspace_live_rooms(status, updated_at);
 
 CREATE TABLE IF NOT EXISTS plankspace_live_room_members (
@@ -57,4 +68,10 @@ CREATE TABLE IF NOT EXISTS plankspace_live_room_members (
   last_seen_at text NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(room_slug, wallet)
 );
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS handle text NOT NULL DEFAULT '';
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'listener';
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS mic_status text NOT NULL DEFAULT 'muted';
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS requested_mic boolean NOT NULL DEFAULT false;
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS removed boolean NOT NULL DEFAULT false;
+ALTER TABLE plankspace_live_room_members ADD COLUMN IF NOT EXISTS last_seen_at text NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS live_room_members_room_idx ON plankspace_live_room_members(room_slug, last_seen_at);
