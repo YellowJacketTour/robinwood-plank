@@ -139,10 +139,42 @@ export async function GET(req: NextRequest) {
   if (chainSlug === "eth-mainnet" && normalizedCollection === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
     try {
       const { getCryptoPunksNativeBook, getCryptoPunksNativeBookStats, CRYPTOPUNKS_CONTRACT } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
-      const [native, nativeStats] = await Promise.all([
-        getCryptoPunksNativeBook(limit),
-        getCryptoPunksNativeBookStats(),
-      ]);
+      // REAL BUG FIXED 2026-08-24: a transient Postgres hiccup on EITHER of
+      // these two reads (same table this session already found failing
+      // transiently for CryptoPunks elsewhere) used to throw the whole
+      // route into the catch below (publicError, no listings, no stats at
+      // all) even though collectionEnvelope() a few lines down has a real,
+      // separately-cached listedCount/floorPriceWei for this exact
+      // collection (getCollectionSupplyStats, backed by
+      // plank_multichain_snapshots, updated on every past successful
+      // native-book sync). A retry-once-then-degrade here matches the
+      // fix already applied to this route's own RobinWood-native getListings
+      // call: eliminate the transient-blip case outright, and only fall
+      // back to the cached snapshot (empty live listings, but real stats)
+      // if it's still failing after that.
+      const readBookAndStats = async () => {
+        try {
+          return await Promise.all([getCryptoPunksNativeBook(limit), getCryptoPunksNativeBookStats()]);
+        } catch {
+          return await Promise.all([getCryptoPunksNativeBook(limit), getCryptoPunksNativeBookStats()]);
+        }
+      };
+      let native: Awaited<ReturnType<typeof getCryptoPunksNativeBook>>;
+      let nativeStats: Awaited<ReturnType<typeof getCryptoPunksNativeBookStats>> | null;
+      try {
+        [native, nativeStats] = await readBookAndStats();
+      } catch {
+        native = [];
+        nativeStats = null;
+      }
+      if (nativeStats == null) {
+        const envelope = await collectionEnvelope(chainSlug, normalizedCollection);
+        return NextResponse.json({
+          collection: { ...envelope, totalSupply: 10_000 },
+          listings: [],
+          listingsUnavailable: "cryptopunks-native-book-unavailable",
+        }, { headers: { "Cache-Control": "no-store" } });
+      }
       // REAL BUG FIXED 2026-08-24, flagged live ("listed only tab... never
       // loaded in"): this branch hardcoded the same dead larvalabs.com
       // hotlink the sync adapter (native-market-adapters/cryptopunks.ts)

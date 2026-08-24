@@ -34,12 +34,26 @@ export async function GET(req: NextRequest) {
     let floorPriceWei = supply?.floorPriceWei ?? null;
     let floorPriceCurrency = supply?.floorPriceCurrency ?? null;
     if (chainSlug === "eth-mainnet" && tracked.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb") {
+      // REAL BUG FIXED 2026-08-24: this call had no .catch at all, unlike
+      // every other live-source read on this route -- a transient Postgres
+      // hiccup here (the same class of failure already fixed this session
+      // for the rankings route's own CryptoPunks branch) threw the WHOLE
+      // route into publicError, discarding the already-fetched, already-
+      // cached `supply` fields (listedCount/floorPriceWei/totalSupply, from
+      // getCollectionSupplyStats above -- itself reading the durable
+      // plank_multichain_snapshots row this native table's own successful
+      // syncs keep updated) instead of falling back to them. Now: only
+      // override the cached values when the native read actually succeeds;
+      // a transient failure keeps showing the last real cached figures
+      // rather than failing the whole collection page.
       const { getCryptoPunksNativeBookStats } = await import("@/lib/market/multichain/native-market-adapters/cryptopunks");
-      const native = await getCryptoPunksNativeBookStats();
+      const native = await getCryptoPunksNativeBookStats().catch(() => null as { listedCount: number; floorWei: string | null } | null);
       totalSupply = 10_000;
-      listedCount = native.listedCount;
-      floorPriceWei = native.floorWei;
-      floorPriceCurrency = native.floorWei == null ? null : "ETH";
+      if (native) {
+        listedCount = native.listedCount;
+        floorPriceWei = native.floorWei;
+        floorPriceCurrency = native.floorWei == null ? null : "ETH";
+      }
     }
     if (isSolanaChainSlug(chainSlug)) {
       const me = await fetch(
