@@ -226,6 +226,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     projectedCount: number;
     expectedCount: number | null;
     partial: boolean;
+    // REAL GAP FIXED 2026-08-24 ("intel tabs hydration properly thought
+    // through... stale collection data"): the server
+    // (readCollectionTokenProjection) has always computed real
+    // sourceObservedAt/projectedAt for every collection, but the client's
+    // TokenPage type silently dropped both before they ever reached the
+    // UI -- so a viewer had no way to tell whether the catalog they were
+    // looking at was hydrated a second ago or three days ago. Threaded
+    // through so CollectionIntelligence can render a real, color-coded
+    // freshness indicator instead of hiding staleness entirely.
+    sourceObservedAt: string | null;
+    projectedAt: string | null;
   } | null>(null);
   const surface = collectionSurface(chainSlug);
   const browseStorageKey = `marketplank:browse:v1:${chainSlug}:${collectionSlug.toLowerCase()}`;
@@ -431,7 +442,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       animationUrl?: string | null; mediaType?: string | null;
       traits?: Array<{ traitType: string; value: string }> }>;
       nextCursor?: string | null; building?: boolean; projectedCount?: number;
-      expectedCount?: number | null; partial?: boolean };
+      expectedCount?: number | null; partial?: boolean;
+      sourceObservedAt?: string | null; projectedAt?: string | null };
     const accumulated: TokenPage["tokens"] = [];
     let cursor: string | null = null;
     let last: TokenPage | null = null;
@@ -452,6 +464,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setCatalogMeta(typeof last?.projectedCount === "number" ? {
         projectedCount: last.projectedCount, expectedCount: last.expectedCount ?? null,
         partial: Boolean(last.partial),
+        sourceObservedAt: last.sourceObservedAt ?? null,
+        projectedAt: last.projectedAt ?? null,
       } : null);
     } catch {
       setTokens(accumulated);
@@ -2275,6 +2289,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               historyCoverage={historyCoverage}
               marketStats={marketStats}
               listedCount={supplyStats?.listedCount ?? listings.length}
+              catalogFreshness={catalogMeta ? { sourceObservedAt: catalogMeta.sourceObservedAt, projectedAt: catalogMeta.projectedAt } : null}
             />
           ) : (
           <>
