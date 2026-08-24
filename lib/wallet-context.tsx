@@ -85,7 +85,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [connectMounted, setConnectMounted] = useState(true);
   const pendingPlankSpaceConnects = useRef<string[]>([]);
   const walletStateRef = useRef({ address, chainId, status });
-  walletStateRef.current = { address, chainId, status };
+  useEffect(() => {
+    walletStateRef.current = { address, chainId, status };
+  }, [address, chainId, status]);
 
   const applyAccounts = useCallback((accounts: string[] | undefined) => {
     const next = accounts?.[0] ?? null;
@@ -180,7 +182,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }));
       }
     },
-    [adoptAccount]
+    [adoptAccount, chainId]
   );
 
   // PlankSpace is a native route in this same Next.js app. It must use this
