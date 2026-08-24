@@ -22,8 +22,18 @@
  */
 import { postgresQuery } from "@/lib/postgres";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
-import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
-import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
+import { checkSourceBudget, readSourceBudget, recordSourceSuccess } from "@/lib/market/multichain/discovery/source-budget";
+import { isSourceJailed, jailRemainingMs, jailSource } from "@/lib/market/multichain/mesh/jail";
+
+/**
+ * How long a real DAS failure (429/quota-shaped error) cools this specific
+ * provider entry off before it's tried again. Same order of magnitude as
+ * other real per-source jails in this app (e.g. mesh/jail.ts's own default
+ * via jailSource's callers elsewhere) -- long enough that a genuinely
+ * exhausted provider stops being retried every 2s, short enough that a
+ * transient blip self-heals same-day.
+ */
+const DAS_FAILURE_JAIL_MS = 5 * 60 * 1000;
 
 /**
  * Same safety-valve reasoning as HELIUS_DAILY_ALLOWANCE in helius-key-pool.ts
@@ -145,8 +155,32 @@ export async function reserveDasSlot(cost = 1, opts?: { priority?: DasPriority }
   return null;
 }
 
+/**
+ * REAL BUG FIXED 2026-08-24, flagged live ("why are collections not
+ * continuously found for solana"): this used to only ever update the
+ * plank_provider_windows capacity counters -- it never called into the
+ * jail system (mesh/jail.ts / source-budget.ts) at all, on success OR
+ * failure. checkSourceBudget()-based candidate ordering in
+ * orderCandidates() only ever READS jail state; with nothing writing to
+ * it, a provider that genuinely 429s on every real call never gets
+ * jailed, so it kept winning selection forever (still had daily-window
+ * "capacity" left, since that ceiling is a separate, unrelated safety
+ * valve -- see DAS_DAILY_ALLOWANCE's own header) while QuickNode/Shyft
+ * sat completely idle (confirmed live: usedToday 0 on both, despite
+ * being configured and healthy) because a failing-but-not-jailed Helius
+ * key was always tried first. Now actually jails a real failure for
+ * DAS_FAILURE_JAIL_MS (durable, cross-process, via jailSource -- so a
+ * fresh supervisor respawn doesn't immediately retry the same dead
+ * provider either) and records a real success, matching every other
+ * real provider pool in this app (alchemy-nft.ts, opensea-key-pool.ts).
+ */
 export async function settleDasSlot(slot: DasSlot, cost = 1, success = true): Promise<void> {
   await settleProviderCapacity(slot.providerAccount, slot.window, cost, success);
+  if (success) {
+    recordSourceSuccess(slot.providerAccount);
+  } else {
+    await jailSource(slot.providerAccount, DAS_FAILURE_JAIL_MS, true);
+  }
 }
 
 export type DasEntryHealth = {
