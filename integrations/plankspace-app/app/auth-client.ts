@@ -37,3 +37,9 @@ export async function walletProof(wallet: string, _action: string, _resource: st
   const normalized=wallet.toLowerCase(),sessionToken=await activeToken(normalized)||await createSession(normalized);
   return {wallet:normalized,sessionToken};
 }
+
+/** Reuse an already-verified wallet session without opening a signing prompt. */
+export async function savedWalletProof(wallet: string) {
+  const normalized=wallet.toLowerCase(),sessionToken=await activeToken(normalized);
+  return sessionToken?{wallet:normalized,sessionToken}:{};
+}
