@@ -225,6 +225,28 @@ export async function GET(req: NextRequest) {
         if (cached && cached.length > 0) {
           openSea = cached;
           openSeaIsPartial = true;
+        } else if (openSeaPage?.listings?.length) {
+          // REAL BUG FIXED 2026-08-23, flagged live ("mugs ... doesnt have
+          // listings from all markets"): a walk that fails on even ONE page
+          // (out of however many a real listing count needs -- likely under
+          // heavy shared-OpenSea-key-pool load from this app's own many
+          // background sync jobs) discarded the ENTIRE result to `[]`, with
+          // no cache to fall back to either (caching only ever happened on a
+          // fully complete walk) -- a real chicken-and-egg trap that could
+          // leave a collection showing zero listings indefinitely even
+          // though real, live, purchasable listings exist (confirmed live:
+          // MUGS by 9mm.Pro genuinely has 231 real active OpenSea listings
+          // on Robinhood Chain -- verified via a direct API call -- while
+          // this route was returning an empty book for it). This partial-
+          // but-real batch is still real, priced, purchasable listings; use
+          // it for display and seed the cache with it so the NEXT
+          // incomplete walk at least has something better than nothing to
+          // fall back to. Never let this partial batch drive a "floor"
+          // CLAIM though (see openSeaIsPartial's existing consumers) -- the
+          // missing pages could still contain a cheaper token.
+          openSea = normaliseOpenSeaListings(openSeaPage.listings);
+          openSeaIsPartial = true;
+          void writeCachedOpenSeaListingsForSlug(openSeaSlug, openSea).catch(() => {});
         }
       }
       const listings = mergeBook(
