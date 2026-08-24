@@ -2290,6 +2290,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               marketStats={marketStats}
               listedCount={supplyStats?.listedCount ?? listings.length}
               catalogFreshness={catalogMeta ? { sourceObservedAt: catalogMeta.sourceObservedAt, projectedAt: catalogMeta.projectedAt } : null}
+              chainSlug={isNonEvm ? null : chainSlug}
+              contractAddress={collection?.contractAddress ?? null}
             />
           ) : (
           <>
