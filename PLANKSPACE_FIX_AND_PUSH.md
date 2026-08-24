@@ -7,12 +7,16 @@
 - Added append-only migration `035_woodstock_live_schema_repair.sql` so databases
   created from the earlier Woodstock prototype gain the fields used by the V1 API.
 - Restored up to eight YouTube links in the profile editor and API.
+- Restored the full eight-slot YouTube editor with separate fields plus add,
+  remove, move-up, and move-down controls.
 - Reconnected the existing playlist player to public profiles.
 - Preserved the existing `featured_video` database column, so no destructive media
   migration is needed and previously saved single-video profiles continue to work.
 - Declared the missing `ethers` and PostgreSQL dependencies used by the new tip API.
 - Restored the saved-session helper used by profile visit tracking and aligned the
   standalone TypeScript target with the BigInt-based tip verification code.
+- Repaired Woodstock lounge response handling so empty/non-JSON server failures
+  no longer crash the client, and live-room actions always return JSON errors.
 
 ## Push from the extracted project folder
 
@@ -23,6 +27,9 @@ git add integrations/plankspace-app/db/schema.ts \
   integrations/plankspace-app/app/api/profiles/route.ts \
   integrations/plankspace-app/app/profile-form.tsx \
   integrations/plankspace-app/app/auth-client.ts \
+  integrations/plankspace-app/app/api/live-rooms/route.ts \
+  integrations/plankspace-app/app/woodstock/live-lounge.tsx \
+  integrations/plankspace-app/app/globals.css \
   'integrations/plankspace-app/app/u/[handle]/page.tsx' \
   integrations/plankspace-app/package.json \
   integrations/plankspace-app/package-lock.json \
