@@ -423,15 +423,38 @@ export async function fetchSnapshotsBatch(
 export const alchemyNftAdapter: ChainAdapter = {
   name: "alchemy-nft",
   async fetchSnapshot({ chainSlug, contractAddress }): Promise<CollectionSnapshot> {
-    const base = baseUrl(chainSlug);
-    const [metadata, floors] = await Promise.all([
-      fetchJson<AlchemyContractMetadata>(
-        `${base}/getContractMetadata?contractAddress=${contractAddress}`
-      ),
-      fetchJson<AlchemyFloorPriceResponse>(
-        `${base}/getFloorPrice?contractAddress=${contractAddress}`
-      ).catch(() => ({}) as AlchemyFloorPriceResponse), // floor pricing is best-effort, metadata is not
-    ]);
+    // REAL FALLBACK, same reasoning as fetchSnapshotsBatch's own header:
+    // this is the path lib/market/multichain/sync.ts's runMultichainSync
+    // actually calls for every already-tracked collection (fetchSnapshotsBatch
+    // is only used by the HyperSync discovery lane for brand-new candidates)
+    // -- so THIS is the function that was returning nothing for every
+    // already-tracked EVM collection while Alchemy's real monthly quota was
+    // exhausted. Checked BEFORE the network calls so a jailed Alchemy never
+    // even attempts them.
+    if (!checkSourceBudget(ALCHEMY_NFT_SOURCE).allowed) {
+      const single = await onchainFallbackSnapshots(chainSlug, [contractAddress]);
+      const fallback = single.get(contractAddress.toLowerCase());
+      if (fallback) return fallback;
+      throw new Error("alchemy-nft: jailed after HTTP 429 (monthly quota) and no on-chain fallback data was recoverable for this contract");
+    }
+    let metadata: AlchemyContractMetadata;
+    let floors: AlchemyFloorPriceResponse;
+    try {
+      const base = baseUrl(chainSlug);
+      [metadata, floors] = await Promise.all([
+        fetchJson<AlchemyContractMetadata>(
+          `${base}/getContractMetadata?contractAddress=${contractAddress}`
+        ),
+        fetchJson<AlchemyFloorPriceResponse>(
+          `${base}/getFloorPrice?contractAddress=${contractAddress}`
+        ).catch(() => ({}) as AlchemyFloorPriceResponse), // floor pricing is best-effort, metadata is not
+      ]);
+    } catch (error) {
+      const single = await onchainFallbackSnapshots(chainSlug, [contractAddress]);
+      const fallback = single.get(contractAddress.toLowerCase());
+      if (fallback) return fallback;
+      throw error; // real on-chain fallback also found nothing recoverable -- surface the real Alchemy error rather than a fabricated empty snapshot
+    }
 
     const floor = pickLowestFloor(floors);
     const totalSupply = metadata.totalSupply != null ? Number(metadata.totalSupply) : null;
