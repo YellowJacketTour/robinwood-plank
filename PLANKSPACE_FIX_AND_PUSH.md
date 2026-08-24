@@ -17,6 +17,11 @@
   standalone TypeScript target with the BigInt-based tip verification code.
 - Repaired Woodstock lounge response handling so empty/non-JSON server failures
   no longer crash the client, and live-room actions always return JSON errors.
+- Restored persistent per-module visibility controls. Every profile module can
+  be shown or hidden without deleting its content or losing its position.
+- Re-audited the completed Widgets/Woodstock update and preserved the complete
+  Wallet, Favorite Token, Token Chart, Portfolio, Toss a Chip, and sanitized
+  Custom Widget implementation, APIs, manager, rendering, and safety checks.
 
 ## Push from the extracted project folder
 
