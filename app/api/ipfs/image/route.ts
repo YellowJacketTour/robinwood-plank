@@ -119,6 +119,12 @@ export async function GET(req: Request) {
     "static.unisat.io",
     "next-cdn.unisat.space",
     "we-assets.pinit.io",
+    // Sibling regional Pinit CDNs -- same ORB shape (200, image/png, no
+    // access-control-allow-origin) confirmed live 2026-08-24, see
+    // ORB_PRONE_ART_HOSTS in lib/ipfs.ts for the full finding.
+    "na-assets.pinit.io",
+    "ap-assets.pinit.io",
+    "curved.pinit.io",
     "coin-images.coingecko.com",
     "creator-hub-prod.s3.us-east-2.amazonaws.com",
     "turbo.ordinalswallet.com",

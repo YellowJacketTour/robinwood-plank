@@ -59,6 +59,16 @@ export const ORB_PRONE_ART_HOSTS = new Set([
   "static.unisat.io",
   "next-cdn.unisat.space",
   "we-assets.pinit.io",
+  // Sibling regional Pinit asset CDNs -- confirmed live 2026-08-24 via
+  // direct curl against real stored image_url rows: same shape as
+  // we-assets.pinit.io (real 200, real image/png, but NO
+  // access-control-allow-origin header), so any in-browser <img>/next/image
+  // load ORB-blocks identically. Affected ~140k plank_collection_tokens
+  // rows across many collections, not just one -- the root cause behind
+  // "almost every collection" showing perpetual "Art pending".
+  "na-assets.pinit.io",
+  "ap-assets.pinit.io",
+  "curved.pinit.io",
   "coin-images.coingecko.com",
   "creator-hub-prod.s3.us-east-2.amazonaws.com",
   "turbo.ordinalswallet.com",
