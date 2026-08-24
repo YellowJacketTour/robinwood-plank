@@ -202,6 +202,52 @@ const UNION_SQL = `
   WHERE chain_slug = $1 AND nft_contract = $2
 `;
 
+/**
+ * Real, free, on-chain-derived holder-count fallback -- reuses the exact
+ * same first-party ledger (transfer-ledger.ts's wallet-transfer writer +
+ * every self-hosted fill indexer) `readLedgerActivity` already unions,
+ * instead of building any new Transfer-log scanning/backfill infra. This
+ * fixes a real gap: `holder_count` in plank_multichain_snapshots has
+ * always come exclusively from Alchemy's getOwnersForContract (see
+ * fetchHolderCount in alchemy-nft.ts) -- the same kind of single-vendor
+ * dependency this session already found and fixed for metadata. When
+ * Alchemy is jailed/exhausted, this gives a real, free alternative.
+ *
+ * HONESTY CAVEAT, stated in the return shape, never hidden: this ledger
+ * only has complete Transfer history for a contract once its own
+ * discovery/backfill scanner has walked back far enough (see this file's
+ * own header and CollectionIntelligence's historyCoverage banner for the
+ * same "not yet complete" signal elsewhere in this app) -- an older,
+ * lightly-tracked contract can undercount real holders if some of its
+ * transfer history was never indexed. `sampleSize` is the real indexed
+ * event count this estimate was computed from, so a caller (or a human)
+ * can judge confidence; this is NEVER written over a real Alchemy value,
+ * only offered as a labeled fallback when Alchemy has none.
+ */
+export async function deriveApproxHolderCountFromLedger(
+  chainSlug: string,
+  contractAddress: string
+): Promise<{ holderCount: number; sampleSize: number } | null> {
+  if (!hasPostgresConfig()) return null;
+  const contract = contractAddress.toLowerCase();
+  const result = await postgresQuery<{ holder_count: string; sample_size: string }>(
+    `WITH events AS (${UNION_SQL}),
+     latest_per_token AS (
+       SELECT DISTINCT ON (token_id) token_id, to_addr
+       FROM events
+       WHERE token_id IS NOT NULL AND to_addr IS NOT NULL
+       ORDER BY token_id, block_number DESC, log_index DESC
+     )
+     SELECT COUNT(DISTINCT to_addr)::text AS holder_count, (SELECT COUNT(*) FROM events)::text AS sample_size
+     FROM latest_per_token`,
+    [chainSlug, contract]
+  );
+  const row = result.rows[0];
+  const holderCount = row ? Number(row.holder_count) : 0;
+  const sampleSize = row ? Number(row.sample_size) : 0;
+  return sampleSize > 0 ? { holderCount, sampleSize } : null;
+}
+
 function currencyMetadata(chainSlug: string, token: string | null) {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!token) return { symbol: chain?.nativeCurrencySymbol ?? "ETH", decimals: 18 };
