@@ -251,6 +251,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     floorPriceWei: string | null;
     floorPriceCurrency: string | null;
   } | null>(null);
+  /** Real, free, on-chain-ledger-derived holder-count estimate -- only ever populated when Alchemy's authoritative count is unavailable, kept separate so it can never be mistaken for or silently substituted as the real figure anywhere. See holder-count/route.ts's own header. */
+  const [holderCountApprox, setHolderCountApprox] = useState<{ count: number; sampleSize: number } | null>(null);
   // Real OpenSea 24h/7d/30d volume/sales (rarity-index-runner.ts, EVM-only
   // -- Solana/Bitcoin/Robinhood-native branches of the listings route always
   // resolve these to null, honestly, since neither Magic Eden's nor
@@ -564,13 +566,23 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // and-forget -- the stat bar just shows "—" until it resolves, same
       // as every other "—" placeholder on this page while data loads.
       if (data.collection.holderCount == null && !isNonEvm) {
-        void swrJson<{ holderCount: number | null }>(
+        void swrJson<{ holderCount: number | null; holderCountApprox?: number | null; holderCountApproxSampleSize?: number | null }>(
           `/api/market/multichain/holder-count?chainSlug=${chainSlug}&contractAddress=${encodeURIComponent(data.collection.contractAddress)}`,
           { ttlMs: 0, swrMs: 0, session: true }
         )
           .then((res) => {
             if (res.holderCount != null) {
               setSupplyStats((prev) => (prev ? { ...prev, holderCount: res.holderCount } : prev));
+            } else if (res.holderCountApprox != null) {
+              // REAL FREE FALLBACK 2026-08-24: Alchemy (the only source for
+              // the authoritative holder_count) is currently failing/
+              // exhausted for real -- this app's own first-party activity
+              // ledger gives a real, on-chain-derived estimate instead of
+              // showing nothing. Kept in a SEPARATE state, never merged
+              // into supplyStats.holderCount, so it can never silently pass
+              // as the authoritative figure anywhere it's consumed
+              // (holderPct math, demand-score input, etc).
+              setHolderCountApprox({ count: res.holderCountApprox, sampleSize: res.holderCountApproxSampleSize ?? 0 });
             }
           })
           .catch(() => {});
@@ -1926,6 +1938,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           {supplyStats.totalSupply != null && supplyStats.totalSupply > 0
             ? ` · ${((supplyStats.holderCount / supplyStats.totalSupply) * 100).toFixed(1)}% of supply`
             : ""}
+        </p>
+      )}
+      {supplyStats?.holderCount == null && holderCountApprox && (
+        <p className="text-[0.65rem] text-amber-300/70" title={`Derived from ${holderCountApprox.sampleSize.toLocaleString()} indexed on-chain events across this app's own activity ledger, not Alchemy's authoritative index -- may undercount an older or lightly-indexed collection.`}>
+          ~{holderCountApprox.count.toLocaleString()} unique holders (on-chain estimate, authoritative count unavailable)
         </p>
       )}
 
