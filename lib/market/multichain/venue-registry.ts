@@ -109,7 +109,38 @@ export const MARKET_VENUES = [
       "was not independently verified this pass and remains out of scope.",
   },
   { id: "magiceden-solana", label: "Magic Eden", family: "solana", protocol: "magiceden", versions: ["current"], capabilities: ["sales", "transfers", "listings", "bids"], coverage: "partial", chainSlugs: ["solana-mainnet"], notes: "Recent API activity exists; program-history and complete book ingestion remain incomplete." },
-  { id: "tensor-solana", label: "Tensor", family: "solana", protocol: "tensor", versions: ["current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program/account decoder and compressed-NFT support required." },
+  {
+    id: "tensor-solana",
+    label: "Tensor",
+    family: "solana",
+    protocol: "tensor",
+    versions: ["current"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "planned",
+    chainSlugs: ["solana-mainnet"],
+    notes:
+      "DISCOVERY/STATS SIDE CONFIRMED BLOCKED 2026-08-24, NOT A GAP -- Tensor's real public GraphQL host " +
+      "is api.mainnet.tensordev.io/graphql (found by direct DNS/HTTP probing; the historically-cited " +
+      "api.tensor.so does not resolve at all -- NXDOMAIN). A live, unauthenticated GET and POST (including " +
+      "a trivial `{__typename}` query) against it both returned a real HTTP 403 with body literally " +
+      "`required x-tensor-api-key in header` (Express app behind Cloudflare, not a WAF/bot challenge -- " +
+      "graphql.tensor.trade, a second candidate host, DID return a Cloudflare bot-challenge 403 instead, " +
+      "confirming the tensordev.io host's plain 403 is the real app-level answer, not edge noise). Tensor's " +
+      "own current docs (https://docs.tensor.trade/trade/api-and-sdk, fetched live 2026-08-24) confirm there " +
+      "is no public/free self-serve key: the page's only instruction is 'Please fill out this form to get " +
+      "access: https://airtable.com/apppFpk6Ul9yiI6sw/pagCBazYyAewboZnT/form' (that Airtable form URL was " +
+      "itself confirmed live, real HTTP 200, not a dead link) -- i.e. manual, gated approval, not a tier " +
+      "this app can obtain and use today. Per this repo's own rule (see looksrare-v2's entry above), no " +
+      "adapter was written against this endpoint: a 403 requiring a key this app does not have is not a " +
+      "verified 200 response to build a decoder against, and guessing the GraphQL schema from memory/old " +
+      "docs would be exactly the fabrication this registry exists to prevent. The existing trading-side file " +
+      "(tensor-solana-trade.ts) is unaffected and unrelated -- it builds unsigned transactions locally from " +
+      "Tensor's own on-chain program IDL (@tensor-foundation/marketplace, @tensor-foundation/whitelist), " +
+      "which needs no hosted API at all, so it was never blocked by this. Remains planned: apply for a real " +
+      "Tensor API key via the Airtable form above, then verify a real 200 response with real fields before " +
+      "writing a discovery/stats adapter; compressed-NFT (bubblegum) support is a separate, still-open " +
+      "requirement noted here regardless of the API-key outcome.",
+  },
   { id: "metaplex-solana", label: "Metaplex programs", family: "solana", protocol: "metaplex", versions: ["auction-house", "bubblegum", "core"], capabilities: ["sales", "transfers"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program-family provenance including compressed and Core assets." },
   { id: "unisat-bitcoin", label: "UniSat", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Membership/listing evidence exists; complete sale history is not yet indexed." },
   { id: "ord-core-bitcoin", label: "Bitcoin Core + ord", family: "bitcoin", protocol: "ord", versions: ["current"], capabilities: ["transfers"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Canonical inscription, satpoint, parent/child, delegate, content, metadata, and transfer foundation. Requires a fully synced txindex Bitcoin Core node plus ord index; it does not define marketplace collections or off-chain books." },
@@ -236,7 +267,33 @@ export const MARKET_VENUES = [
   // family/chainSlug without checking the coverage flag. If Magic Eden ever
   // relaunches a Bitcoin marketplace, re-add it fresh against real,
   // current API evidence rather than resurrecting this entry.
-  { id: "okx-bitcoin", label: "OKX Ordinals", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["sales", "listings"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "External venue coverage; never inferred from a different marketplace." },
+  {
+    id: "okx-bitcoin",
+    label: "OKX Ordinals",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["current"],
+    capabilities: ["listings"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "Adapter code (okx-ordinals.ts) and wiring into the listings route are BUILT and already merged on dev, " +
+      "key-gated -- returns [] honestly and reports 'credential-missing' in bookCoverage.sources.okx until real " +
+      "credentials exist, matching the UniSat/Satflow/ORD.NET pattern. LIVE-VERIFIED 2026-08-24 (direct curl, no " +
+      "key, this pass): GET https://web3.okx.com/api/v5/mktplace/nft/ordinals/collections -> real HTTP 401 " +
+      "{\"msg\":\"Request header OK-ACCESS-KEY AND OK-ACCESS-TOKEN can not all empty \",\"code\":\"50116\"} -- " +
+      "confirms the documented v5 endpoint is real and live (Cloudflare-fronted web3.okx.com, not a dead/404 " +
+      "route) and that there is NO public/keyless tier: auth is checked before any business logic. Also probed " +
+      "https://web3.okx.com/priapi/v1/nft/ordinals/collections (OKX's undocumented internal frontend API) -- " +
+      "real HTTP 200 but a genuinely empty body for every param combination tried; same discipline as the Gamma " +
+      "entry above, an undocumented private backend is not used as a keyless substitute. No OKX_API_KEY/" +
+      "OKX_API_SECRET/OKX_API_PASSPHRASE exists in .env.local or .env.inmotion.example as of this pass (owner " +
+      "reported an API application in progress, not yet issued) -- coverage stays planned, not partial, until a " +
+      "real key lets verifyOkxCredentials() (see okx-ordinals.ts) confirm the actual response field names " +
+      "against live data; the parsing logic's defensive field-name fallbacks are unit-tested but not yet " +
+      "cross-checked against a real 200 body. capabilities is listings-only (not sales) -- no sale/fill history " +
+      "endpoint has been found or verified in OKX's docs, only collection stats + active listings.",
+  },
 ] as const satisfies readonly MarketVenue[];
 
 export function venuesForChain(chainSlug: string): readonly MarketVenue[] {
