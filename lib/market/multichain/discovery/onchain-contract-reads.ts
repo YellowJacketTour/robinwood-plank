@@ -81,6 +81,26 @@ export async function readTotalSupply(chainSlug: string, contractAddress: string
   }
 }
 
+/**
+ * Real, direct `totalSupply()` read for a fungible (ERC20) token, returning
+ * the RAW uint256 as a decimal string -- no Number() conversion (an
+ * 18-decimal token's raw supply routinely exceeds Number.MAX_SAFE_INTEGER)
+ * and no NFT-count-shaped upper bound (readTotalSupply's 100,000,000 cap
+ * above is correct for an NFT collection's token count, meaningless for a
+ * token supply denominated in wei-scale units).
+ */
+export async function readErc20TotalSupplyRaw(chainSlug: string, contractAddress: string): Promise<string | null> {
+  try {
+    const data = ERC721_IFACE.encodeFunctionData("totalSupply", []);
+    const { result } = await rpcCall<string>(chainSlug, "eth_call", [{ to: contractAddress, data }, "latest"]);
+    if (!result || result === "0x") return null;
+    const [decoded] = CODER.decode(["uint256"], result);
+    return (decoded as bigint).toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Real, direct `tokenURI(tokenId)` read -- the actual per-token metadata pointer every ERC721 must implement. */
 export async function readTokenUri(chainSlug: string, contractAddress: string, tokenId: string | number): Promise<string | null> {
   return callString(chainSlug, contractAddress, "tokenURI", [BigInt(tokenId)]);

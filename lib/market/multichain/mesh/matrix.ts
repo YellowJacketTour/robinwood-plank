@@ -62,7 +62,8 @@ export type MeshSource =
   | "archival-frontier"
   | "erc4906-rescan"
   | "ipfs-corroboration"
-  | "fills-reconcile";
+  | "fills-reconcile"
+  | "plank-koth-watch";
 
 export type MeshLane = {
   id: string;
@@ -483,6 +484,20 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["rarity"],
     sliceSec: 30,
     notes: "Bounded, cursor-paginated fills_ever_stored reconciliation against the real per-venue fill tables; display-honesty fix, not a live gate.",
+  },
+  {
+    // Season 2 $PLANK King of the Hill live buy watcher (lib/market/
+    // plank-koth-watch.ts). Not per-collection-chain -- watches Robinhood
+    // Chain's own canonical $PLANK pools directly via Blockscout, cursor-
+    // paginated, own finality-aware cursor. High priority: every real
+    // minute this runs late is a minute the live leaderboard/countdown can
+    // silently lag a real buy that already happened.
+    id: "plank-koth-watch:robinhood",
+    source: "plank-koth-watch",
+    chainSlug: "robinhood",
+    cells: ["rarity"],
+    sliceSec: 20,
+    notes: "Watches canonical $PLANK/WETH and $PLANK/USDG pools for real buys; runs the fraud-gate pipeline before ever feeding a candidate into the KOTH state machine.",
   },
 ];
 
