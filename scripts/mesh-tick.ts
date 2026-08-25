@@ -14,7 +14,57 @@ const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
 const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length);
 
+/**
+ * Light-worker fast path (Unified Mesh Continuum build item #3, deferred
+ * earlier for its own dedicated pass, now built conservatively -- Grok's
+ * own recommendation, docs/marketplank/GROK-FINDINGS-unified-maximal-
+ * hydration-2026-08-26.md: "long-lived workers for tiny I/O jobs, keep
+ * short-lived spawn for heavy/unsafe lanes"). Real cost this fixes: every
+ * spawn() below pays a full Node+tsx cold start even for a 6-token
+ * evm-metadata batch -- these three sources are small, fast, bounded, and
+ * safe to run in-process inside this already-long-lived scheduler.
+ *
+ * Deliberately NOT a general-purpose refactor of every lane onto this
+ * path: heavy/long-running lanes (HyperSync scans, genesis backfills)
+ * keep their own isolated child process -- a crash there must not take
+ * this scheduler down with it, same real crash-isolation reasoning the
+ * spawn-per-job design already has.
+ */
+const LIGHT_SOURCES = new Set(["evm-metadata", "erc4906-rescan", "ipfs-corroboration"]);
+
+async function runLightSourceInProcess(source: string, chain: string, subject?: string | null): Promise<number> {
+  try {
+    if (source === "evm-metadata") {
+      const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
+      const ceiling = subject ? 250 : 75;
+      let attempted = 0;
+      const deadline = Date.now() + 45_000;
+      while (attempted < ceiling && Date.now() < deadline) {
+        const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
+        attempted += batch.attempted;
+        if (batch.attempted === 0) break;
+      }
+      return 0;
+    }
+    if (source === "erc4906-rescan") {
+      const { runMetadataUpdateRescanBatch } = await import("../lib/market/multichain/discovery/erc4906-rescan");
+      await runMetadataUpdateRescanBatch(chain, 5);
+      return 0;
+    }
+    if (source === "ipfs-corroboration") {
+      const { sampleIpfsCorroboration } = await import("../lib/market/multichain/discovery/ipfs-corroboration");
+      await sampleIpfsCorroboration(chain, 25);
+      return 0;
+    }
+    return 1;
+  } catch (error) {
+    console.error(`[mesh-tick] light-worker ${source}:${chain} failed`, error instanceof Error ? error.message : error);
+    return 1;
+  }
+}
+
 function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
+  if (LIGHT_SOURCES.has(source)) return runLightSourceInProcess(source, chain, subject);
   return new Promise((resolve) => {
     const p = spawn(
       process.execPath,
