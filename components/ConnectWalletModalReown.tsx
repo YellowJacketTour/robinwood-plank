@@ -75,6 +75,30 @@ const robinhoodNetwork = defineChain({
   },
 });
 
+/**
+ * Real, live-verified WalletConnect Explorer registry ID for "Robinhood
+ * Wallet" (Robinhood's own Web3 wallet app), confirmed 2026-08-25 via
+ * https://explorer-api.walletconnect.com/v3/wallets?search=robinhood.
+ *
+ * Patrons reported not being able to find it in the connect list. Root
+ * cause: AppKit's wallet picker filters the browsable/searchable list to
+ * wallets whose registry `chains` field overlaps this app's configured
+ * `networks` -- and Robinhood Wallet's own registry listing only declares
+ * eip155:1/10/137/42161/80084/80085 (Ethereum, Optimism, Polygon,
+ * Arbitrum, two Berachain testnets). It does not declare Robinhood Chain
+ * (eip155:4663) -- so despite the name, AppKit legitimately treats it as
+ * "no overlap" and hides it, same as any wallet that hasn't registered
+ * this chain. That's a real gap in Robinhood Wallet's own registry
+ * metadata, not something plank.love's config caused or can fix upstream.
+ *
+ * featuredWalletIds pins a wallet into the list regardless of that
+ * chain-overlap filter -- the wallet itself still supports pairing over
+ * WalletConnect v2 to any EVM chain a session requests (chain declaration
+ * in the registry is a discovery/display hint, not an enforced protocol
+ * limit), so this is a real fix, not a cosmetic one.
+ */
+const ROBINHOOD_WALLET_ID = "8837dd9413b1d9b585ee937d27a816590248386d9dbf59f5cd3422dbbb65683e";
+
 let moduleInitError: string | null = null;
 try {
   const projectId = getReownProjectId();
@@ -95,6 +119,9 @@ try {
     },
     themeMode: REOWN_THEME_MODE,
     themeVariables: REOWN_THEME_VARIABLES,
+    // See ROBINHOOD_WALLET_ID's own comment -- pins Robinhood Wallet past
+    // AppKit's chain-overlap filter, which would otherwise hide it.
+    featuredWalletIds: [ROBINHOOD_WALLET_ID],
     // AppKit's Features type uses its own string unions (SocialProvider,
     // ConnectMethod, ConnectorTypeOrder). Our config is authored as plain
     // literals in lib/wallet-reown.ts so it stays readable and diffable, so
