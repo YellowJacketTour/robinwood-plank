@@ -110,6 +110,18 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] erc4906-rescan", JSON.stringify(await runMetadataUpdateRescanBatch(chain, 5)));
       return;
     }
+    if (source === "fills-reconcile") {
+      const { reconcileFillsBatch } = await import("../lib/market/multichain/discovery/fills-reconcile");
+      // Small batch: real, live-observed contention from a concurrent
+      // anti-wraparound autovacuum on plank_seaport_fills made even a
+      // 10-collection batch take 100s+ (each of 8 real fill-table lookups
+      // per collection can individually hit that table's own statement
+      // timeout under vacuum pressure) -- 3 keeps one invocation's worst
+      // case bounded regardless of what else is contending for the same
+      // table right now.
+      console.log("[mesh-lane] fills-reconcile", JSON.stringify(await reconcileFillsBatch(3)));
+      return;
+    }
     if (source === "ipfs-corroboration") {
       const { sampleIpfsCorroboration } = await import("../lib/market/multichain/discovery/ipfs-corroboration");
       const result = await sampleIpfsCorroboration(chain, 25);

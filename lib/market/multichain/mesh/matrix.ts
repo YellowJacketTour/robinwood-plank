@@ -59,7 +59,8 @@ export type MeshSource =
   | "cryptopunks-native"
   | "archival-frontier"
   | "erc4906-rescan"
-  | "ipfs-corroboration";
+  | "ipfs-corroboration"
+  | "fills-reconcile";
 
 export type MeshLane = {
   id: string;
@@ -465,6 +466,21 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["rarity"],
     sliceSec: 60,
     notes: "Lowest-priority gap-fill for never/rarely-organically-hit collections; self-gated, cross-chain, additive.",
+  },
+  {
+    // Real gap found live 2026-08-26: fills_ever_stored was 0 across every
+    // one of 558,678 tracked collections (no real caller ever set
+    // isFill:true) despite ~79M real fills already indexed across
+    // plank_seaport_fills and 8 other venue tables. Cursor-paginated
+    // through plank_multichain_collections, small bounded batches, own
+    // durable cursor (fills-reconcile.ts) -- same shape as
+    // archival-frontier, cross-chain, not per-chain.
+    id: "fills-reconcile:cross-chain",
+    source: "fills-reconcile",
+    chainSlug: "eth-mainnet",
+    cells: ["rarity"],
+    sliceSec: 30,
+    notes: "Bounded, cursor-paginated fills_ever_stored reconciliation against the real per-venue fill tables; display-honesty fix, not a live gate.",
   },
 ];
 
