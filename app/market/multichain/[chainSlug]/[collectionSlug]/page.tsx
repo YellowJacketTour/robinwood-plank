@@ -3,7 +3,7 @@ import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
 import MultichainCollectionView from "@/components/market/MultichainCollectionView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
-import { MARKET_ENABLED } from "@/lib/constants";
+import { MARKET_ENABLED, GLOBAL_MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
@@ -41,7 +41,8 @@ export default async function MultichainCollectionPage({
 }) {
   const { chainSlug, collectionSlug } = await params;
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
-  const marketEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  const siteWideEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  const marketEnabled = siteWideEnabled && GLOBAL_MARKET_ENABLED;
 
   return (
     <>
