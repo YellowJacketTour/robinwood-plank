@@ -56,6 +56,7 @@ export type MeshSource =
   | "unisat-membership"
   | "helius-membership"
   | "opensea-membership"
+  | "anchored-membership"
   | "cryptopunks-native"
   | "archival-frontier"
   | "erc4906-rescan"

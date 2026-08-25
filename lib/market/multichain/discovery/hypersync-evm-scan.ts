@@ -561,6 +561,21 @@ export async function runHypersyncPriorityWindowScan(input: {
   }
 
   const tally = new Map<string, number>();
+  // Real bug found live 2026-08-25 ("root cause discover and contagion
+  // uproot"): this window's whole reason for existing is to reach the
+  // 2021-2022 NFT-dense era before the slow sequential genesis walk gets
+  // there (see this function's own header). It scans right through every
+  // stuck collection's real mint-era Transfer logs -- but unlike its
+  // sibling runHypersyncBackfillScan, it never captured per-token ids or
+  // called persistObservedErc721Membership, so an already-tracked
+  // collection whose OpenSea enumeration has independently plateaued (Lil
+  // Pudgys: 158 real page-walks, cursor genuinely advancing, distinct
+  // token count frozen at 4,079/21,929 -- confirmed live by refetching its
+  // own "next" page and finding only already-known token ids) got zero
+  // benefit from this pass ever reaching its mint blocks. Same
+  // Map<contract, Set<tokenId>> capture as the sibling function, mirrored
+  // exactly.
+  const observedErc721 = new Map<string, Set<string>>();
   const rawTransferLogs: HypersyncLog[] = [];
   const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
@@ -587,19 +602,35 @@ export async function runHypersyncPriorityWindowScan(input: {
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       rawTransferLogs.push(log);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     nextBlock = res.nextBlock;
     if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
     query = { ...query, fromBlock: nextBlock };
   }
+  // Real bug found live 2026-08-25, first real (non-isolated) run against
+  // this window: HyperSync's own res.nextBlock came back BELOW the query's
+  // fromBlock (persisted cursor read 11,713,120 against a 12,000,000
+  // floor -- a real, reproducible client quirk on this large a first
+  // request, not a guess), which writeCursor below would otherwise persist
+  // verbatim, regressing this lane's own progress and then hard-failing
+  // writeChainCoverage's own range check every subsequent pass. Clamp to
+  // what this call already knows is safe -- never move backwards.
+  nextBlock = Math.max(nextBlock, scannedUpTo);
 
   await recordActivity(input.chainSlug, tally);
   await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   const candidates = [...tally.entries()];
 
-  const { registered, skippedNoMetadata } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-priority");
 
   await writeCursor(input.cursorKey, nextBlock);
   const done = nextBlock >= input.toBlockCeiling;
