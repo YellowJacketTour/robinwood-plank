@@ -104,6 +104,50 @@ async function backfillKnownSupplyIfMissing(chainSlug: string, collectionKey: st
 }
 
 /**
+ * One-time backfill: `collection_archival_stats` was created 2026-08-25
+ * (migration 064), but `plank_collection_tokens` already held real,
+ * legitimately-hydrated tokens from hours of prior background/on-demand
+ * work that predates the ledger. Without this, `tokens_ever_hydrated`
+ * would only ever reflect NEW growth since the ledger's own birth --
+ * live-verified as a real bug: Decentraland showed `tokens_ever_hydrated:
+ * 1` from the ledger while `plank_collection_tokens` already had 8,001
+ * real hydrated rows (name or image_url present) out of a 93,643 supply.
+ *
+ * Seeds the real, already-true count once per collection, honestly:
+ * counts rows with a real name/image already stored, never invents a
+ * number, and only raises `tokens_ever_hydrated` (never lowers it below
+ * whatever real-time counting has already accumulated since the ledger
+ * went live). Safe to re-run -- it's a GREATEST(), not an overwrite.
+ */
+export async function backfillArchivalStatsFromExistingTokens(
+  chainSlug: string,
+  collectionKey: string
+): Promise<{ realHydratedCount: number }> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const result = await postgresQuery<{ real_count: string }>(
+    `SELECT COUNT(*)::text AS real_count FROM plank_collection_tokens
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+       AND (name IS NOT NULL OR image_url IS NOT NULL)`,
+    [chainSlug, normalized]
+  );
+  const realHydratedCount = Number(result.rows[0]?.real_count ?? 0);
+  const now = new Date();
+  await postgresQuery(
+    `INSERT INTO collection_archival_stats (
+       chain_slug, collection_key, tokens_ever_hydrated, fills_ever_stored,
+       first_archived_at, last_archived_at, organic_hits
+     ) VALUES ($1, $2, $3, 0, $4, $4, 0)
+     ON CONFLICT (chain_slug, collection_key) DO UPDATE SET
+       tokens_ever_hydrated = GREATEST(collection_archival_stats.tokens_ever_hydrated, $3),
+       first_archived_at = COALESCE(collection_archival_stats.first_archived_at, $4)`,
+    [chainSlug, normalized, realHydratedCount, now]
+  );
+  await backfillKnownSupplyIfMissing(chainSlug, normalized);
+  await computeArchivalScore(chainSlug, normalized);
+  return { realHydratedCount };
+}
+
+/**
  * Build order item 1: idempotent counter upsert on every real hydrate/fill
  * success. Called AFTER upsertCollectionTokenProjection (or the equivalent
  * fill-store write) succeeds, never before -- these counters must only ever

@@ -352,11 +352,24 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
         empty += 1;
         continue;
       }
+      // Same honest isNewToken check as hydrateSpecificToken's single-click
+      // path -- this bulk background lane is the app's actual highest-
+      // throughput metadata source (mesh-tick runs it continuously), and
+      // until this call the archival ledger only ever advanced from a
+      // real person clicking one token at a time, undercounting the
+      // system's real, already-running work. Real bug found and fixed
+      // 2026-08-25, live-reproduced: collection_archival_stats stayed at
+      // zero rows for collections with thousands of real background-
+      // hydrated tokens.
+      const priorBulkState = await readProjectedTokensByIds(chainSlug, item.collectionSlug, [item.tokenId]).catch(() => new Map());
+      const priorBulkToken = priorBulkState.get(item.tokenId);
+      const wasAlreadyArchivedInBulk = Boolean(priorBulkToken?.name || priorBulkToken?.imageUrl);
       await upsertCollectionTokenProjection(chainSlug, item.collectionSlug, {
         tokens: [{ tokenId: item.tokenId, ...metadata }], partial: true,
         preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
       });
       await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+      await recordArchivalHydration(chainSlug, item.collectionSlug, { isNewToken: !wasAlreadyArchivedInBulk }).catch(() => {});
       complete += 1;
     } catch (error) {
       await writeTokenMetadataResult({ chainSlug, ...item, state: "retry",
