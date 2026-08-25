@@ -27,6 +27,7 @@ import { postgresQuery } from "@/lib/postgres";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
 import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
+import { claimProviderPaceSlot, PROVIDER_PACE_PROFILES } from "@/lib/market/multichain/discovery/provider-pace";
 
 /**
  * No DAILY_CEILING entry exists for "helius:key-N" in source-budget.ts --
@@ -131,12 +132,22 @@ export async function pickHeliusKey(priority: HeliusKeyPriority = "live"): Promi
   return ordered[0] ?? null;
 }
 
+/**
+ * Real per-key pacing (Unified Mesh Continuum build, 2026-08-26): every
+ * current real caller (helius-transfer-scan.ts) uses plain RPC methods
+ * (getSignaturesForAddress), so this paces at the real "10 req/s" RPC tier
+ * -- see provider-pace.ts's "helius-rpc" profile header for the exact
+ * source and for why DAS/getProgramAccounts aren't paced here yet (no real
+ * caller uses them through this pool today).
+ */
 export async function reserveHeliusKey(cost = 1, opts?: { priority?: HeliusKeyPriority }): Promise<HeliusKeySlot | null> {
   const priority = opts?.priority ?? "live";
   const window = utcDayWindow(HELIUS_DAILY_ALLOWANCE);
   const ordered = await orderCandidates(priority, window);
+  const rpcInterval = PROVIDER_PACE_PROFILES["helius-rpc"].minIntervalMs;
 
   for (const candidate of ordered) {
+    if (!(await claimProviderPaceSlot(candidate.providerAccount, rpcInterval).catch(() => true))) continue;
     if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
       return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
     }
