@@ -75,7 +75,7 @@ async function openSeaFetch<T>(path: string): Promise<T | null> {
   if (!key) {
     throw new Error("foreign-orders: no OpenSea API key available (set OPENSEA_API_KEY or let the managed-key cron issue one)");
   }
-  const res = await fetch(`${BASE}${path}`, { headers: { "x-api-key": key, accept: "application/json" } });
+  const res = await fetch(`${BASE}${path}`, { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
   if (res.status === 404) return null; // no order exists -- a real, expected state, not an error
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -93,6 +93,7 @@ async function openSeaPost<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "x-api-key": key, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const responseBody = await res.text().catch(() => "");

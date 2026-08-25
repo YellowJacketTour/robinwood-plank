@@ -192,6 +192,7 @@ export async function buildForeignOffer(input: {
   const res = await fetch("/api/market/multichain/submit-offer", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       openSeaChain: chain.openSeaChain,
       parameters: order.parameters,
@@ -236,6 +237,7 @@ export async function acceptForeignOffer(input: {
   const fulfillRes = await fetch("/api/market/multichain/offer-fulfillment-data", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       chainSlug: input.chainSlug,
       orderHash: input.orderHash,

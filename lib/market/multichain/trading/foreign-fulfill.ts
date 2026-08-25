@@ -98,6 +98,7 @@ async function fetchFulfillmentData(input: { chainSlug: string; orderHash: strin
   const res = await fetch("/api/market/multichain/fulfillment-data", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify(input),
   });
   if (!res.ok) {
@@ -118,6 +119,7 @@ async function fetchFloorListingSummaries(input: {
   const res = await fetch("/api/market/multichain/floor-listings", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify(input),
   });
   if (!res.ok) {
@@ -343,11 +345,11 @@ export type ForeignBuyResult = { txHash: string };
  * treats this as an opaque per-listing identifier regardless of source.
  */
 async function buyRobinhoodListingNow(input: { orderHash: string; collectionSlug: string }): Promise<ForeignBuyResult> {
-  const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(input.orderHash)}&kind=listing`);
+  const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(input.orderHash)}&kind=listing`, { signal: AbortSignal.timeout(15_000) });
   if (!rawOrderRes.ok) throw new Error("This listing is no longer available.");
   const { rawOrder } = (await rawOrderRes.json()) as { rawOrder: unknown };
 
-  const collectionRes = await fetch(`/api/market/native-collection?slug=${encodeURIComponent(input.collectionSlug)}`);
+  const collectionRes = await fetch(`/api/market/native-collection?slug=${encodeURIComponent(input.collectionSlug)}`, { signal: AbortSignal.timeout(15_000) });
   if (!collectionRes.ok) throw new Error("Could not resolve this collection.");
   const { collection } = (await collectionRes.json()) as { collection: import("@/lib/market/types").MarketCollection };
 
@@ -394,6 +396,7 @@ async function buySolanaListingNow(input: {
   const res = await fetch("/api/market/multichain/solana-buy-instruction", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       buyerAddress,
       tokenMint: input.tokenMint,
@@ -433,6 +436,7 @@ export async function listSolanaTokenNow(input: {
   const res = await fetch("/api/market/multichain/solana-sell-instruction", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({ mode: input.mode, sellerAddress, tokenMint: input.tokenMint, priceLamports: input.priceLamports }),
   });
   if (!res.ok) {
@@ -464,6 +468,7 @@ async function buyBitcoinListingNow(input: { auctionId: string; priceSats: strin
   const createRes = await fetch("/api/market/multichain/bitcoin-buy-psbt", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({ address: buyerAddress, auctionId: input.auctionId, bidPriceSats: input.priceSats, pubkey }),
   });
   if (!createRes.ok) {
@@ -492,6 +497,7 @@ async function buyBitcoinListingNow(input: { auctionId: string; priceSats: strin
   const confirmRes = await fetch("/api/market/multichain/bitcoin-confirm-bid", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({ auctionId, bidId, signedPsbtBase64 }),
   });
   if (!confirmRes.ok) {
@@ -636,6 +642,7 @@ export async function sweepSolanaListingsBatched(
       const res = await fetch("/api/market/multichain/solana-buy-instruction", {
         method: "POST",
         headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
         body: JSON.stringify({ buyerAddress, tokenMint: listing.tokenMint, priceLamports: listing.priceLamports }),
       });
       if (!res.ok) throw new Error("fetch failed");
@@ -729,6 +736,7 @@ export async function placeSolanaOfferNow(input: { tokenMint: string; priceLampo
   const res = await fetch("/api/market/multichain/solana-bid-instruction", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({ buyerAddress, tokenMint: input.tokenMint, priceLamports: input.priceLamports }),
   });
   if (!res.ok) {
@@ -760,7 +768,7 @@ export async function placeSolanaOfferNow(input: { tokenMint: string; priceLampo
  * out of scope for this pass.
  */
 async function acceptRobinhoodOfferNowImpl(input: { orderHash: string; collectionSlug: string }): Promise<ForeignBuyResult> {
-  const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(input.orderHash)}&kind=offer`);
+  const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(input.orderHash)}&kind=offer`, { signal: AbortSignal.timeout(15_000) });
   if (!rawOrderRes.ok) throw new Error("This offer is no longer available.");
   const { rawOrder } = (await rawOrderRes.json()) as { rawOrder: unknown };
 
@@ -770,7 +778,7 @@ async function acceptRobinhoodOfferNowImpl(input: { orderHash: string; collectio
   // server-only /api/market/native-collection route instead of importing
   // getCollectionAsync directly (see lib/market/collections-server.ts's
   // header for the exact "dns"-module client-bundle break this avoids).
-  const collectionRes = await fetch(`/api/market/native-collection?slug=${encodeURIComponent(input.collectionSlug)}`);
+  const collectionRes = await fetch(`/api/market/native-collection?slug=${encodeURIComponent(input.collectionSlug)}`, { signal: AbortSignal.timeout(15_000) });
   if (!collectionRes.ok) throw new Error("Could not resolve this collection.");
   const { collection } = (await collectionRes.json()) as { collection: import("@/lib/market/types").MarketCollection };
   if (!collection) throw new Error("Could not resolve this collection.");
@@ -1164,6 +1172,7 @@ export async function buyCrossChainViaAcross(input: {
   const res = await fetch("/api/market/multichain/across-quote", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       originChainId: input.originChainId,
       destinationChainSlug: input.destinationChainSlug,
@@ -1259,6 +1268,7 @@ export async function buyCrossChainViaDeBridge(input: {
   const res = await fetch("/api/market/multichain/debridge-quote", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       executorAddress,
       orderHash: input.orderHash,

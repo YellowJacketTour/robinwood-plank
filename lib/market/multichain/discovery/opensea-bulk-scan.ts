@@ -206,7 +206,11 @@ export async function runOpenSeaBulkScan(
         // carries name + image for this exact contract — same fields
         // Polygon's matic/polygon alias path used. Do not skip registration.
         let snapshot: Awaited<ReturnType<typeof alchemyNftAdapter.fetchSnapshot>> | null = null;
-        if (checkSourceBudget("alchemy-nft").allowed) {
+        // Real fix, 2026-08-25 ("follow through, no shortcuts"): also
+        // check the shared, durable alchemy-account jail -- see sync.ts's
+        // own copy of this comment for the full real gap this closes.
+        const { isAlchemyAccountJailed } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+        if (checkSourceBudget("alchemy-nft").allowed && !(await isAlchemyAccountJailed())) {
           try {
             snapshot = await alchemyNftAdapter.fetchSnapshot({ chainSlug: input.chainSlug, contractAddress });
           } catch {

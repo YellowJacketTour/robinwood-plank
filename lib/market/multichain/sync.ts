@@ -113,12 +113,21 @@ export async function runMultichainSync(input: { maxCollections?: number; chainS
     );
   }
 
-  const alchemyGate = checkSourceBudget("alchemy-nft");
+  // Real fix, 2026-08-25 ("follow through, no shortcuts" -- the flagged
+  // remaining gap from the unified-Alchemy-jail audit): this only checked
+  // the in-memory, per-process "alchemy-nft" state, not the shared,
+  // durable alchemy-account jail every real Alchemy call site now
+  // respects. A real, still-ongoing monthly quota jail set by a DIFFERENT
+  // call site (rpc-provider-pool.ts, evm-log-scan.ts) was invisible here,
+  // so this batch could still schedule alchemyNftAdapter collections that
+  // were provably going to fail immediately downstream anyway.
+  const { isAlchemyAccountJailed } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  const alchemyGateAllowed = checkSourceBudget("alchemy-nft").allowed && !(await isAlchemyAccountJailed());
   const collections = await listCollectionsForSync(input.maxCollections ?? DEFAULT_SYNC_BATCH_SIZE, {
-    skipAdapters: alchemyGate.allowed ? [] : [alchemyNftAdapter.name],
+    skipAdapters: alchemyGateAllowed ? [] : [alchemyNftAdapter.name],
     chainSlug: input.chainSlug,
   });
-  if (!alchemyGate.allowed) {
+  if (!alchemyGateAllowed) {
     console.warn(
       "[multichain-sync] alchemy-nft jailed (monthly 429) — skipping that adapter; OpenSea/CG/ME/UniSat spokes still run"
     );

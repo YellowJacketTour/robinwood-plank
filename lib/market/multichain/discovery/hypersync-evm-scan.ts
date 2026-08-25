@@ -127,7 +127,11 @@ async function registerObservedCandidates(
 ): Promise<{ registered: number; skippedNoMetadata: number; accepted: Set<string> }> {
   let snapshots = new Map<string, Awaited<ReturnType<typeof fetchSnapshotsBatch>> extends Map<string, infer V> ? V : never>();
   const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
-  if (checkSourceBudget("alchemy-nft").allowed) {
+  // Real fix, 2026-08-25 ("follow through, no shortcuts"): also check the
+  // shared, durable alchemy-account jail -- see sync.ts's own copy of
+  // this comment for the full real gap this closes.
+  const { isAlchemyAccountJailed } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  if (checkSourceBudget("alchemy-nft").allowed && !(await isAlchemyAccountJailed())) {
     try {
       snapshots = await fetchSnapshotsBatch(chainSlug, candidates.map(([address]) => address));
     } catch {
