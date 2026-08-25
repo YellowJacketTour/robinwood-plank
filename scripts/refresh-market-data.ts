@@ -91,6 +91,7 @@ const explicit = [
   "--solana-transfer-ledger",
   "--seaport-fills",
   "--seaport-fills-backfill",
+  "--tensor-fills",
   "--cryptopunks-native-book",
   "--robinwood-floor-observation",
   "--own-ranking",
@@ -112,8 +113,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "tensor-fills", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "scaffold-rarity-ordinalswallet", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-ordinalswallet-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "hydrate-opensea", "hydrate-bitcoin-membership", "bitcoin-transfer-ledger", "hydrate-solana-membership", "solana-transfer-ledger", "seaport-fills", "seaport-fills-backfill", "tensor-fills", "looksrare-fills", "looksrare-fills-backfill", "blur-fills", "blur-fills-backfill", "x2y2-fills", "x2y2-fills-backfill", "foundation-fills", "foundation-fills-backfill", "sudoswap-fills", "sudoswap-fills-backfill", "rarible-fills", "rarible-fills-backfill", "cryptopunks-native-book", "robinwood-floor-observation", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -753,6 +754,19 @@ async function main(): Promise<void> {
         : `${chainSlug}: ${result.fromBlock}-${result.toBlock} +${result.fillsWritten}/${result.logsScanned}`);
     }
     return parts.join("; ");
+  });
+
+  // Solana on-chain Tensor SETTLEMENT scanner (read-only sales/activity,
+  // NOT the live order book -- see tensor-settlement-scan.ts's own header
+  // and venue-registry.ts's tensor-solana entry). Same "one durable tick"
+  // shape as the EVM fill scanners above; no HyperSync/EVM chain loop
+  // needed since this scans one Solana program via public RPC directly.
+  await step("tensor-fills", async () => {
+    const { scanTensorSettlements } = await import("../lib/market/multichain/discovery/tensor-settlement-scan");
+    const result = await scanTensorSettlements();
+    return result.error
+      ? `ERR(${result.error.slice(0, 60)})`
+      : `sigs=${result.signaturesScanned} txs=${result.transactionsFetched} +${result.fillsWritten}/${result.fillsFound}`;
   });
 
   // Second real historic marketplace this app indexes directly on-chain --
