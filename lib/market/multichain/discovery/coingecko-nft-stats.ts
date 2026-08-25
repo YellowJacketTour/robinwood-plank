@@ -169,7 +169,7 @@ async function fetchPlatformList(platform: string): Promise<ListItem[]> {
     let res: Response;
     let settled = false;
     try {
-      res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders() });
+      res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders(), signal: AbortSignal.timeout(15_000) });
       await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true);
       settled = true;
     } catch (error) {
@@ -324,7 +324,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
     if (!(await reserveProviderCapacity(CG_PROVIDER_ACCOUNT, window))) break;
     let settled = false;
     try {
-      const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.cgId)}`, { headers: apiHeaders() });
+      const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.cgId)}`, { headers: apiHeaders(), signal: AbortSignal.timeout(15_000) });
       await settleProviderCapacity(CG_PROVIDER_ACCOUNT, window, 1, true);
       settled = true;
       if (!res.ok) {

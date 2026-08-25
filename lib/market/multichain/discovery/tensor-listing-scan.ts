@@ -153,6 +153,7 @@ async function rpcCall<T>(method: string, params: unknown[]): Promise<T> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: "plank-tensor-listing", method, params }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`tensor-listing-scan: HTTP ${res.status} calling ${method}`);
   const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };

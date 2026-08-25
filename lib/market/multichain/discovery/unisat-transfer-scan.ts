@@ -99,7 +99,7 @@ async function fetchEventsPage(start: number, end: number, cursor: number): Prom
   }
   try {
     const url = `${INDEXER_BASE}/events?start=${start}&end=${end}&cursor=${cursor}&size=${PAGE_SIZE}`;
-    const res = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
+    const res = await fetch(url, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
     const text = await res.text().catch(() => "");
     if (!res.ok) throw new Error(`unisat-transfer-scan: ${res.status} ${res.statusText} fetching events -- ${text.slice(0, 200)}`);
     const body = JSON.parse(text) as { code: number; msg: string; data: { total: number; detail: IndexerEvent[] } };
@@ -142,6 +142,7 @@ async function fetchSoldMoves(collectionIds: string[]): Promise<Set<string>> {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
         body: JSON.stringify({ filter: { collectionId, nftType: "collection", event: "Sold" }, start: 0, limit: 500 }),
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) continue;
       const body = (await res.json()) as { code: number; data?: { list: SoldAction[] } };
@@ -179,7 +180,7 @@ async function fetchLastKnownAddresses(inscriptionIds: string[]): Promise<Map<st
 }
 
 async function currentTipHeight(): Promise<number> {
-  const res = await fetch("https://mempool.space/api/blocks/tip/height");
+  const res = await fetch("https://mempool.space/api/blocks/tip/height", { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`unisat-transfer-scan: mempool.space tip height ${res.status}`);
   const text = await res.text();
   const height = Number(text.trim());

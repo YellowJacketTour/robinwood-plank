@@ -90,6 +90,7 @@ async function meFetch<T>(path: string, params: Record<string, string | number>)
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url.toString(), {
     headers: { accept: "application/json", authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

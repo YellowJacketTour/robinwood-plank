@@ -63,7 +63,7 @@ const CACHE_TTL_MS = 60_000;
 
 async function fetchAllCollections(): Promise<LlamaCollection[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.rows;
-  const res = await fetch(COLLECTIONS_URL, { headers: { accept: "application/json" } });
+  const res = await fetch(COLLECTIONS_URL, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`defillama-nft: ${res.status} ${res.statusText} fetching ${COLLECTIONS_URL}`);
   const rows = (await res.json()) as LlamaCollection[];
   cache = { at: Date.now(), rows };
