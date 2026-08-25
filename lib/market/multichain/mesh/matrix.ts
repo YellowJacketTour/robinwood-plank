@@ -58,7 +58,8 @@ export type MeshSource =
   | "opensea-membership"
   | "cryptopunks-native"
   | "archival-frontier"
-  | "erc4906-rescan";
+  | "erc4906-rescan"
+  | "ipfs-corroboration";
 
 export type MeshLane = {
   id: string;
@@ -118,6 +119,14 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["image", "rarity"] as MeshCell[],
     sliceSec: 180,
     notes: "Bounded tokenURI then OpenSea per-token enrichment; completes trait coverage without request-path fan-out.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `ipfs-corroboration:${chainSlug}`,
+    source: "ipfs-corroboration" as const,
+    chainSlug,
+    cells: ["image"] as MeshCell[],
+    sliceSec: 30,
+    notes: "Cross-source corroboration (Grok findings, 2026-08-26): samples ~1% of real IPFS-content-addressed tokens through a second independent gateway to detect gateway-side corruption; never doubles real hydrate traffic.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `erc4906-rescan:${chainSlug}`,
