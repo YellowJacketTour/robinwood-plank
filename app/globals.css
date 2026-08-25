@@ -1205,6 +1205,28 @@ body .nft-modal .nft-modal-body {
   animation: plank-glow 1.4s ease-in-out infinite;
 }
 
+/* Archive-depth fill shimmer -- honest motion only: applied exclusively
+   while useTweenedPercent.ts is actively interpolating between two real
+   fetched values (a genuine growth event), never as a decorative idle
+   loop. Reinforces the "the number is really climbing right now" read
+   the tween itself provides, for the rankings table's compact bars and
+   the detail page's full bar alike. */
+@keyframes archival-shimmer {
+  0% { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
+}
+
+.animate-archival-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: archival-shimmer 1.1s linear infinite;
+}
+
 /* ============================================================
    Market styling/UX polish pass (ListingCard, foreign confirm modals,
    MultichainCollectionView loading/empty states). Tokens only -- see
