@@ -11,59 +11,35 @@
  * OpenSea's own /nfts pagination looping over already-seen tokens,
  * confirmed live), that blind window wastes real scan time walking
  * through blocks the collection PROVABLY could not exist in yet -- it
- * has no code deployed there. A contract's deployment block is a real,
- * immutable, discoverable fact (the first block eth_getCode returns
- * non-empty); anchoring a collection's own membership backfill there
- * instead removes that wasted walk entirely.
+ * has no code deployed there. A contract's earliest Transfer (mint)
+ * block is a real, immutable, discoverable fact; anchoring a
+ * collection's own membership backfill there instead removes that
+ * wasted walk entirely.
  *
- * Binary search over eth_getCode is the only way to discover this for a
- * free public RPC (no vendor exposes contract-creation-block directly at
- * this tier) -- ~24 real eth_call round trips for the whole chain's
- * history, done ONCE per contract ever and cached in
- * plank_contract_deploy_block (migration 071) permanently after that.
+ * REAL PROVIDER CORRECTION, same day: this originally binary-searched
+ * eth_getCode via rpc-provider-pool.ts (~24 historical eth_call round
+ * trips). Live testing found every free public RPC in that pool flatly
+ * refuses archive-state reads at an old block ("Archive requests require
+ * a personal token") -- confirmed live, not guessed -- so all 24 calls
+ * fell through to Alchemy alone every time, guaranteeing repeated real
+ * quota exhaustion. Switched to HyperSync (hypersync-evm-scan.ts's
+ * findEarliestTransferBlock), a wholly separate, address-indexed resource
+ * that answers this in one query with none of that exposure.
  */
-import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
+import { findEarliestTransferBlock } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
 import { postgresQuery } from "@/lib/postgres";
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function hasCodeAt(chainSlug: string, contractAddress: string, block: number): Promise<boolean> {
-  const { result } = await rpcCall<string>(chainSlug, "eth_getCode", [contractAddress, "0x" + block.toString(16)]);
-  return !!result && result !== "0x";
-}
-
-/**
- * Binary search [0, currentHeight] for the first block where the contract's
- * code exists. Small delay between probes -- a real, live-observed 429 from
- * a free public RPC mid-search (2026-08-25) proved a bare ~24-call tight
- * loop can trip a public node's own per-IP limit; 300ms keeps well under
- * that while still finishing in well under a minute.
- */
-async function binarySearchDeployBlock(chainSlug: string, contractAddress: string, currentHeight: number): Promise<number> {
-  let lo = 0;
-  let hi = currentHeight;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    const deployed = await hasCodeAt(chainSlug, contractAddress, mid);
-    if (deployed) hi = mid;
-    else lo = mid + 1;
-    await sleep(300);
-  }
-  return lo;
-}
 
 /**
  * Real, cached deployment-block lookup -- reads plank_contract_deploy_block
- * first (a contract's creation block never changes, so a hit is always
- * valid forever); only binary-searches on a genuine cache miss, and
- * persists the result immediately so no other caller ever repeats the
- * same ~24-call search for the same contract.
+ * first (a contract's earliest mint block never changes, so a hit is
+ * always valid forever); only queries HyperSync on a genuine cache miss,
+ * and persists the result immediately so no other caller ever repeats the
+ * same lookup for the same contract.
  */
 export async function findContractDeployBlock(
   chainSlug: string,
-  contractAddress: string,
-  currentHeight: number
-): Promise<number> {
+  contractAddress: string
+): Promise<number | null> {
   const address = contractAddress.toLowerCase();
   const cached = await postgresQuery<{ deploy_block: string }>(
     `SELECT deploy_block FROM plank_contract_deploy_block WHERE chain_slug = $1 AND contract_address = $2`,
@@ -71,7 +47,8 @@ export async function findContractDeployBlock(
   );
   if (cached.rows[0]) return Number(cached.rows[0].deploy_block);
 
-  const deployBlock = await binarySearchDeployBlock(chainSlug, address, currentHeight);
+  const deployBlock = await findEarliestTransferBlock(chainSlug, address);
+  if (deployBlock == null) return null;
   await postgresQuery(
     `INSERT INTO plank_contract_deploy_block (chain_slug, contract_address, deploy_block)
      VALUES ($1, $2, $3)

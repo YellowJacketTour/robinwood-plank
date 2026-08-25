@@ -40,6 +40,7 @@ import {
 import { ALL_SEAPORT_ADDRESSES } from "@/lib/market/multichain/seaport-deployments";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { isHypersyncAccountJailed, jailHypersyncAccount, isHypersyncQuotaError } from "@/lib/market/multichain/discovery/hypersync-account-jail";
 
 const SOURCE = "hypersync-seaport";
 const CHUNK_BLOCKS = 50_000; // same conservative window hypersync-evm-scan.ts already uses
@@ -51,6 +52,16 @@ const HYPERSYNC_SEAPORT_DAILY_ALLOWANCE = 200_000;
 
 /** One real HyperSync call (getHeight or a query page) reserved/settled durably around it. */
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
+  // Real, shared, cross-lane circuit breaker (hypersync-account-jail.ts) --
+  // see hypersync-evm-scan.ts's own copy of this comment for the full real
+  // incident this fixes (2026-08-25: manual anchored-membership/priority-
+  // window testing exhausted the real shared Envio account; this lane's
+  // OWN in-memory jail is per-process and reset every ~4-minute pass
+  // relaunch, so it kept re-discovering the SAME still-ongoing outage from
+  // scratch instead of ever finding out from a sibling lane).
+  if (await isHypersyncAccountJailed()) {
+    throw new Error("hypersync-seaport-scan: real Envio account-level rate limit active (shared across all HyperSync lanes)");
+  }
   const window = utcDayWindow(HYPERSYNC_SEAPORT_DAILY_ALLOWANCE);
   if (!(await reserveProviderCapacity(HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT, window))) {
     throw new Error("hypersync-seaport-scan: durable daily ceiling");
@@ -63,6 +74,8 @@ async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
     return result;
   } catch (error) {
     if (!settled) await settleProviderCapacity(HYPERSYNC_SEAPORT_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    const message = error instanceof Error ? error.message : String(error);
+    if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
     throw error;
   }
 }
