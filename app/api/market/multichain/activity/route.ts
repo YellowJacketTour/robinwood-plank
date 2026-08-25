@@ -208,7 +208,8 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
       }
       const raw = (await res.json()) as MeActivity[];
-      const events = await Promise.all(raw.map(async (a) => ({
+      const meEvents = await Promise.all(raw.map(async (a) => ({
+        source: "magiceden_live" as const,
         type: a.type === "buyNow" ? "sale" : a.type,
         timestamp: a.blockTime ? new Date(a.blockTime * 1000).toISOString() : null,
         transaction: a.signature,
@@ -224,6 +225,45 @@ export async function GET(req: NextRequest) {
         tokenName: null,
         imageUrl: null,
       })));
+
+      // First-party Tensor SETTLEMENT/activity data -- read-only on-chain
+      // sales this app's own tensor-settlement-scan.ts has indexed, never
+      // Tensor's own (key-gated) live book. Explicitly tagged
+      // source: "onchain_settlement" (see that module's own header) so it
+      // can never be confused with the Magic Eden live-API rows above.
+      // Merged in, not a replacement -- a Solana collection can have real
+      // settlement history on Tensor with nothing from Magic Eden at all.
+      type TensorActivityEvent = { source: "onchain_settlement"; type: "sale"; timestamp: string | null; transaction: string; priceWei: string | null; from: string | null; to: string | null; tokenId: string | null; tokenName: null; imageUrl: null } & Awaited<ReturnType<typeof activityValue>>;
+      let tensorEvents: TensorActivityEvent[] = [];
+      try {
+        const { readTensorSettlementActivity } = await import("@/lib/market/multichain/discovery/tensor-settlement-scan");
+        const tensorFills = await readTensorSettlementActivity({ chainSlug, collectionSlug, limit });
+        tensorEvents = await Promise.all(tensorFills.map(async (f) => ({
+          source: "onchain_settlement" as const,
+          type: "sale" as const,
+          timestamp: f.timestamp,
+          transaction: f.transaction,
+          priceWei: f.priceLamports != null ? (BigInt(f.priceLamports) * BigInt(1_000_000_000)).toString() : null,
+          ...(await activityValue({
+            atomic: f.priceLamports,
+            decimals: 9,
+            symbol: f.priceLamports != null ? "SOL" : null,
+          })),
+          from: f.from,
+          to: f.to,
+          tokenId: f.tokenId,
+          tokenName: null,
+          imageUrl: null,
+        })));
+      } catch {
+        // No Postgres configured, or no settlement history for this
+        // collection's known mints yet -- honest empty, never fatal to the
+        // Magic Eden branch above.
+      }
+
+      const events = [...meEvents, ...tensorEvents]
+        .sort((a, b) => (b.timestamp ?? "").localeCompare(a.timestamp ?? ""))
+        .slice(0, limit);
       return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       return publicError(error, "Failed to load Solana activity");

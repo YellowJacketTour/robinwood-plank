@@ -115,10 +115,18 @@ export const MARKET_VENUES = [
     family: "solana",
     protocol: "tensor",
     versions: ["current"],
-    capabilities: ["sales", "listings", "bids"],
-    coverage: "planned",
+    capabilities: ["sales"],
+    coverage: "partial",
     chainSlugs: ["solana-mainnet"],
     notes:
+      "SETTLEMENT/ACTIVITY DATA ONLY, NO LIVE ORDER BOOK -- 2026-08-24: tensor-settlement-scan.ts reads real, " +
+      "settled buy/takeBid instructions directly off Solana chain state against the real, live-verified Tensor " +
+      "Marketplace program (TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp), decoded with that program's own " +
+      "installed-package instruction discriminators -- no Tensor-hosted API involved. This is READ-ONLY " +
+      "settlement/activity history (capabilities: [\"sales\"] only). It captures NO open listings and NO open " +
+      "bids -- those remain fully gated behind Tensor's own key-required API (see the still-blocked API note " +
+      "below, unchanged). Every fill this scanner writes and every API response that surfaces it carries " +
+      "`source: \"onchain_settlement\"` so it is never confused with Tensor's own official book/stats. " +
       "DISCOVERY/STATS SIDE CONFIRMED BLOCKED 2026-08-24, NOT A GAP -- Tensor's real public GraphQL host " +
       "is api.mainnet.tensordev.io/graphql (found by direct DNS/HTTP probing; the historically-cited " +
       "api.tensor.so does not resolve at all -- NXDOMAIN). A live, unauthenticated GET and POST (including " +
