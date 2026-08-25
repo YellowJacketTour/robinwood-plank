@@ -62,7 +62,16 @@ export async function hydrationJobSources(
     // MAYC's own real, unfinished job got zero turns). Skip enqueueing
     // entirely once real, cheap evidence (one indexed read, no network
     // call) proves there is nothing left to do.
-    const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-backfill");
+    // Real bug found live 2026-08-25 ("this isnt live time updating"):
+    // this used to import from anchored-membership-backfill.ts, whose
+    // top-level imports pull in the whole HyperSync native-binding
+    // dependency chain -- Next.js's dev bundler can't resolve that
+    // binding from an API-route execution context, so every single real
+    // page visit's demand check threw "Cannot find native binding" and
+    // was silently swallowed, meaning this branch always fell through as
+    // if the collection were still incomplete-but-unreachable. Import
+    // the dependency-free module directly instead.
+    const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-status");
     if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "anchored-membership", basePriority: 95 });
     }
