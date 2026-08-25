@@ -141,6 +141,25 @@ async function main(): Promise<void> {
   const { hasDurableKv } = await import("../lib/market/durable-kv");
   if (!hasDurableKv()) throw new Error("mesh-tick: no PG");
 
+  // Real bug found live 2026-08-25 ("doesnt appear to be fast live
+  // filling"): confirmed live 217 collections across every chain were
+  // PINNED at the max viewport-visibility priority (120), most last
+  // actually pinged 30+ real minutes ago -- see demoteStaleVisibleDemand's
+  // own header for the full "why" (a ratchet-only-up field, same shape as
+  // the earlier not_before starvation bug, with nothing to ever bring it
+  // back down once the tab that earned it closes). Left unattended this
+  // permanently starves every real, currently-open detail-page's own
+  // demand (anchored-membership/opensea-stats/etc top out around 95-100)
+  // -- run the correction every real pass, before claiming, so a stuck
+  // backlog never gets more than one pass' worth of head start.
+  try {
+    const { demoteStaleVisibleDemand } = await import("../lib/market/multichain/collection-demand");
+    const { demoted } = await demoteStaleVisibleDemand();
+    if (demoted) console.log(`[mesh-tick] demoted ${demoted} stale-visible job(s) back to background priority`);
+  } catch (error) {
+    console.error("[mesh-tick] demoteStaleVisibleDemand failed", error instanceof Error ? error.message : error);
+  }
+
   const lanes: MeshLane[] = [];
   for (const lane of MESH_LANES) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;

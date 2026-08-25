@@ -155,6 +155,31 @@ const AGING_STEP_MINUTES = 2;
 const AGING_MAX_BOOST = 10;
 
 /**
+ * Real bug found live 2026-08-25 ("doesnt appear to be fast live filling",
+ * MAYC still stuck despite the anchored-membership demand path itself now
+ * working): confirmed live that 217 collections across every chain sat
+ * PINNED at the max VISIBLE_STALE_AGED priority (120) -- most last
+ * actually pinged 34+ real minutes ago (a rankings-page tab opened once
+ * this session, then closed or navigated away). computeVisibilityPriority
+ * has no floor on how long ago `lastVisibleAt` was real: once a
+ * collection ages all the way up to the 120 ceiling, NOTHING in this
+ * mechanism ever brings it back down, even after the client that made it
+ * "visible" is long gone -- and because enqueueDataJob's own conflict
+ * clause is `priority = GREATEST(existing, new)` (a one-way ratchet,
+ * mirroring the EXACT same shape as the `not_before = LEAST(...)`
+ * starvation bug fixed earlier this session for anchored-membership
+ * itself), a stuck-at-120 job can never be out-prioritized by fresh,
+ * real, currently-open-page demand (anchored-membership/opensea-stats/etc
+ * top out around 95-100) -- it wins every single claim tie, forever,
+ * exactly like Lil Pudgys' finished job did before that fix. A visibility
+ * signal this old is not real anymore: a genuinely open tab re-pings far
+ * more often than this (client caps at 1 POST/2.5s), so anything idle
+ * this long has certainly navigated away or closed. Treat it as
+ * background-tier rather than continuing to honor a stale aging boost.
+ */
+const STALE_VISIBILITY_MS = 90_000;
+
+/**
  * Pure aging-boost calculation -- exported and unit-tested on its own
  * (test/market/collection-demand-visibility.test.ts) because it's the one
  * piece of real, non-trivial arithmetic in this whole feature. Mirrors the
@@ -180,6 +205,12 @@ export function computeVisibilityPriority(input: {
   now?: Date;
 }): number {
   const now = input.now ?? new Date();
+  // See STALE_VISIBILITY_MS's own header: a visibility ping this old is not
+  // real signal anymore -- the tab that produced it is almost certainly
+  // closed or navigated away, so this collection is no different from
+  // plain background cadence and must not keep climbing (or holding) an
+  // aged-up priority nothing is actually re-affirming.
+  if (now.getTime() - input.lastVisibleAt.getTime() > STALE_VISIBILITY_MS) return DEMAND_PRIORITY.BACKGROUND;
   const stale = input.lastHydratedAt == null || now.getTime() - input.lastHydratedAt.getTime() > TARGET_FRESH_TTL_MS;
   if (!stale) return DEMAND_PRIORITY.VISIBLE;
   const anchor = input.lastHydratedAt == null ? input.firstVisibleAt : input.lastVisibleAt;
@@ -386,4 +417,52 @@ export async function prioritizeVisibleCollections(
     enqueued += results.filter((r) => r.status === "fulfilled").length;
   }
   return { enqueued };
+}
+
+/**
+ * Active correction pass for the real bug documented on STALE_VISIBILITY_MS
+ * above: computeVisibilityPriority's own stale check only ever runs again
+ * for a key someone is STILL pinging -- a collection nobody has pinged in
+ * a long while never gets recomputed at all, so it needs an explicit sweep
+ * rather than relying on the read path to self-heal. Two real, separate
+ * ratchet-only-up fields need correcting: collection_visibility_demand's
+ * own current_priority (harmless to plain overwrite -- it's a live-state
+ * column, not a conflict-resolution ratchet) and plank_data_jobs.priority
+ * for any STILL-QUEUED job under one of these keys (the actual thing
+ * capable of starving real demand at claim time) -- 'running' jobs are
+ * deliberately left untouched, matching claimDataJob's own lease-expiry
+ * reset discipline of never interrupting in-flight work.
+ *
+ * Cheap and safe to run on every real mesh-tick pass: one indexed read
+ * (chain_slug, last_visible_at) plus, only when it finds anything, one
+ * bounded UPDATE per affected chain's job rows.
+ */
+export async function demoteStaleVisibleDemand(): Promise<{ demoted: number }> {
+  const stale = await postgresQuery<{ chain_slug: string; collection_key: string }>(
+    `UPDATE collection_visibility_demand
+       SET current_priority = $1
+     WHERE last_visible_at < NOW() - ($2 || ' milliseconds')::interval
+       AND current_priority > $1
+     RETURNING chain_slug, collection_key`,
+    [DEMAND_PRIORITY.BACKGROUND, STALE_VISIBILITY_MS]
+  );
+  if (stale.rows.length === 0) return { demoted: 0 };
+  const byChain = new Map<string, string[]>();
+  for (const row of stale.rows) {
+    const list = byChain.get(row.chain_slug) ?? [];
+    list.push(row.collection_key);
+    byChain.set(row.chain_slug, list);
+  }
+  let demoted = 0;
+  for (const [chainSlug, keys] of byChain) {
+    const jobKeyPatterns = keys.map((key) => `demand:%:${chainSlug}:${key}`);
+    const result = await postgresQuery(
+      `UPDATE plank_data_jobs SET priority = $1, updated_at = NOW()
+       WHERE status = 'queued' AND kind = $2 AND priority > $1
+         AND job_key LIKE ANY($3::text[])`,
+      [DEMAND_PRIORITY.BACKGROUND, `mesh-lane:${chainSlug}`, jobKeyPatterns]
+    );
+    demoted += result.rowCount ?? 0;
+  }
+  return { demoted };
 }
