@@ -32,6 +32,13 @@ function normalizeCollectionKey(collectionKey: string): string {
   return /^0x[0-9a-f]{40}$/i.test(collectionKey) ? collectionKey.toLowerCase() : collectionKey;
 }
 
+/** Exported so callers (API routes) can build the exact same map key
+ * getArchivalStatsBatch's rows come back keyed by, without duplicating the
+ * normalization rule above. */
+export function archivalStatsKey(chainSlug: string, collectionKey: string): string {
+  return `${chainSlug}:${normalizeCollectionKey(collectionKey)}`;
+}
+
 export type ArchivalScoreMethod = "supply_ratio" | "unknown_supply";
 
 /**
@@ -341,6 +348,135 @@ export async function tryClaimArchivalFrontierRun(now: Date = new Date()): Promi
  * real user-triggered work -- same enqueueDataJob mechanism, same real
  * per-chain job sources as every other demand path in this file.
  */
+// ---------------------------------------------------------------------------
+// API exposure -- collection_archival_stats was backend-only until this
+// (docs/marketplank/GROK-FINDINGS-immersive-hydration-visualization-
+// 2026-08-25.md, "Build decision" section: neither GlobalMarketHub's
+// rankings response nor the collection-detail route exposed archival_score/
+// tokens_ever_hydrated/score_method per collection). Everything below is a
+// read-only, best-effort projection of the same ledger the functions above
+// write to -- never a second source of truth, never a write path.
+// ---------------------------------------------------------------------------
+
+export type ArchivalApiShape = {
+  archivalScore: number | null;
+  scoreMethod: ArchivalScoreMethod | "hits_only";
+  tokensEverHydrated: number | null;
+  knownSupply: number | null;
+  lastArchivedAt: string | null;
+  /** Present only where the caller opted into the extra plank_data_jobs
+   * lookup (see getArchivalStatsForCollection) -- omitted, never false, for
+   * a batched rankings-list lookup that skipped the check entirely. */
+  jobProcessing?: boolean;
+};
+
+type RawArchivalStatsRow = {
+  chain_slug: string;
+  collection_key: string;
+  known_supply: string | null;
+  tokens_ever_hydrated: string | number | null;
+  archival_score: string | number | null;
+  score_method: string | null;
+  last_archived_at: Date | string | null;
+};
+
+/**
+ * Pure row -> API-shape mapper, unit-tested on its own
+ * (test/market/archival-ledger.test.ts) because it is the one place a bug
+ * could silently reshape or fabricate a value on the way out to the client.
+ * A missing row (no archival activity recorded yet for this collection)
+ * maps to all-nulls -- never a fabricated 0 or "unknown_supply" is still an
+ * honest, real score_method value, not a placeholder.
+ */
+export function toArchivalApiShape(row: RawArchivalStatsRow | null | undefined): ArchivalApiShape | null {
+  if (!row) return null;
+  const scoreMethod = (row.score_method as ArchivalScoreMethod | null) ?? "unknown_supply";
+  return {
+    archivalScore: row.archival_score != null ? Number(row.archival_score) : null,
+    scoreMethod,
+    tokensEverHydrated: row.tokens_ever_hydrated != null ? Number(row.tokens_ever_hydrated) : null,
+    knownSupply: row.known_supply != null ? Number(row.known_supply) : null,
+    lastArchivedAt:
+      row.last_archived_at == null
+        ? null
+        : row.last_archived_at instanceof Date
+          ? row.last_archived_at.toISOString()
+          : new Date(row.last_archived_at).toISOString(),
+  };
+}
+
+/**
+ * Single-collection lookup for the collection-detail route -- one indexed
+ * read (chain_slug, collection_key is this table's real primary key) plus,
+ * cheaply, a real "is a job processing this collection right now" check
+ * against plank_data_jobs.status = 'running' (the same table/status
+ * control-plane.ts's own claimDataJob/finishDataJob use). Both queries are
+ * trivial on a single-collection page; batching this same jobProcessing
+ * check across a 5000-row rankings response would not be (see
+ * getArchivalStatsBatch's own header for why that route skips it).
+ */
+export async function getArchivalStatsForCollection(
+  chainSlug: string,
+  collectionKey: string
+): Promise<ArchivalApiShape | null> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const [statsResult, jobResult] = await Promise.all([
+    postgresQuery<RawArchivalStatsRow>(
+      `SELECT chain_slug, collection_key, known_supply::text, tokens_ever_hydrated::text,
+              archival_score::text, score_method, last_archived_at
+       FROM collection_archival_stats
+       WHERE chain_slug = $1 AND collection_key = $2`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [] as RawArchivalStatsRow[] })),
+    postgresQuery<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM plank_data_jobs
+         WHERE status = 'running' AND chain_slug = $1 AND subject = $2
+       ) AS exists`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [{ exists: false }] })),
+  ]);
+  const shape = toArchivalApiShape(statsResult.rows[0] ?? null);
+  if (!shape) return null;
+  return { ...shape, jobProcessing: jobResult.rows[0]?.exists === true };
+}
+
+/**
+ * Batched lookup for the rankings list route -- ONE query for the whole
+ * page (up to 5000 rows per route.ts's own bound) via `= ANY($1::text[])`
+ * pairs matched back up client-side, rather than one query per collection.
+ * Deliberately does NOT check plank_data_jobs here: a per-row "is this
+ * collection's job running right now" lookup would mean joining or querying
+ * against up to 5000 subjects on every rankings page load, and unlike the
+ * single-collection route this response is already the single largest
+ * regular read this app serves (see route.ts's own header on why it's
+ * capped/paginated at all). jobProcessing is left undefined for every row
+ * from this path -- HydrationPlankChip already treats undefined the same as
+ * false (idle), so this only ever costs the "processing" glow, never a
+ * wrong or fabricated answer.
+ */
+export async function getArchivalStatsBatch(
+  pairs: Array<{ chainSlug: string; collectionKey: string }>
+): Promise<Map<string, ArchivalApiShape>> {
+  const out = new Map<string, ArchivalApiShape>();
+  if (pairs.length === 0) return out;
+  const chainSlugs = pairs.map((p) => p.chainSlug);
+  const normalizedKeys = pairs.map((p) => normalizeCollectionKey(p.collectionKey));
+  const result = await postgresQuery<RawArchivalStatsRow>(
+    `SELECT s.chain_slug, s.collection_key, s.known_supply::text, s.tokens_ever_hydrated::text,
+            s.archival_score::text, s.score_method, s.last_archived_at
+     FROM collection_archival_stats s
+     JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
+       ON s.chain_slug = want.chain_slug AND s.collection_key = want.collection_key`,
+    [chainSlugs, normalizedKeys]
+  ).catch(() => ({ rows: [] as RawArchivalStatsRow[] }));
+  for (const row of result.rows) {
+    const shape = toArchivalApiShape(row);
+    if (shape) out.set(`${row.chain_slug}:${row.collection_key}`, shape);
+  }
+  return out;
+}
+
 export async function runArchivalFrontierLane(): Promise<{ ran: boolean; enqueued: number; candidates: ArchivalFrontierCandidate[] }> {
   const claimed = await tryClaimArchivalFrontierRun();
   if (!claimed) return { ran: false, enqueued: 0, candidates: [] };

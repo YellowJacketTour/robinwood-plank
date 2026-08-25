@@ -57,6 +57,7 @@ import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
 import DataSourceChip from "@/components/market/DataSourceChip";
+import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
 import { isCoverageCtaDegraded, coverageCtaReason, type CollectionCoverageInfo } from "@/lib/market/multichain/collection-coverage";
 
 /** Ledger/OpenSea/Magic Eden events all default a missing or unresolved address to this sentinel -- it means "unknown" (e.g. a mint's from-side), not a real repeated wallet, so it must never be treated as a matching pair by computeWashSuspicion(). Same constant lib/market/trending.ts uses server-side for the same reason. */
@@ -287,6 +288,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [listingsUnavailable, setListingsUnavailable] = useState<string | null>(null);
   /** Real venue-registry lookup for this collection (see primaryVenueForCollection in lib/market/multichain/venue-registry.ts, threaded through /api/market/multichain/collection's own response) -- which venue this page's floor/listed numbers actually come from, and how complete that venue's coverage is. Null until the identity fetch resolves, or if this chain has no registered venue at all. */
   const [primaryVenue, setPrimaryVenue] = useState<CollectionCoverageInfo | null>(null);
+  /** Real collection_archival_stats read, threaded through /api/market/multichain/collection's own response (see archival-ledger.ts's "API exposure" section) -- null until the identity fetch resolves, or if this collection has never been through a real hydrate write yet. Never fabricated. */
+  const [archival, setArchival] = useState<{
+    archivalScore: number | null;
+    scoreMethod: string;
+    tokensEverHydrated: number | null;
+    knownSupply: number | null;
+    lastArchivedAt: string | null;
+    jobProcessing: boolean;
+  } | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -527,6 +537,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           floorPriceWei?: string | null;
           floorPriceCurrency?: string | null;
           primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
+          archival?: {
+            archivalScore: number | null;
+            scoreMethod: string;
+            tokensEverHydrated: number | null;
+            knownSupply: number | null;
+            lastArchivedAt: string | null;
+            jobProcessing: boolean;
+          } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
         ttlMs: 30_000,
@@ -624,6 +642,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           ? { venueId: data.collection.primaryVenue.id, venueLabel: data.collection.primaryVenue.label, coverage: data.collection.primaryVenue.coverage }
           : null
       );
+      setArchival(data.collection.archival ?? null);
       setMarketStats({
         volume24hWei: data.collection.volume24hWei,
         sales24h: data.collection.sales24h,
@@ -2020,6 +2039,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </dd>
         </div>
       </dl>
+      {archival && (
+        <ArchivalDepthBar
+          archivalScore={archival.archivalScore}
+          scoreMethod={archival.scoreMethod}
+          tokensEverHydrated={archival.tokensEverHydrated}
+          knownSupply={archival.knownSupply}
+          pulseKey={archival.lastArchivedAt}
+        />
+      )}
       {supplyStats?.holderCount != null && (
         <p className="text-[0.65rem] text-foreground/45">
           Unique holders {supplyStats.holderCount.toLocaleString()}

@@ -5,6 +5,7 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { hasUnindexedNativeBook, primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
+import { getArchivalStatsBatch, archivalStatsKey } from "@/lib/market/multichain/archival-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -229,6 +230,17 @@ export async function GET(req: Request) {
       }
     }
 
+    // Real collection_archival_stats read (see archival-ledger.ts's own
+    // "API exposure" header) -- ONE batched query for the whole page rather
+    // than one query per collection. jobProcessing is deliberately omitted
+    // on this route (see getArchivalStatsBatch's header): checking
+    // plank_data_jobs.status='running' per-row would mean querying against
+    // up to 5000 subjects on every rankings load; that check is only cheap
+    // enough on the single-collection detail route, so it lives there.
+    const archivalByKey = await getArchivalStatsBatch(
+      collections.map((c) => ({ chainSlug: c.chainSlug, collectionKey: c.contractAddress }))
+    ).catch(() => new Map());
+
     const mapped = collections.map((c) => {
       const isCryptoPunks = c.chainSlug === "eth-mainnet"
         && c.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb";
@@ -323,6 +335,17 @@ export async function GET(req: Request) {
         // came from, never guessed client-side. Null only when this
         // chain has no registered venue at all.
         primaryVenue: primaryVenueForCollection(c.chainSlug, c.floorPriceMarketplace ?? c.adapter ?? null),
+        archival: (() => {
+          const a = archivalByKey.get(archivalStatsKey(c.chainSlug, c.contractAddress));
+          if (!a) return null;
+          return {
+            archivalScore: a.archivalScore,
+            scoreMethod: a.scoreMethod,
+            tokensEverHydrated: a.tokensEverHydrated,
+            knownSupply: a.knownSupply,
+            lastArchivedAt: a.lastArchivedAt,
+          };
+        })(),
         });
     });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
