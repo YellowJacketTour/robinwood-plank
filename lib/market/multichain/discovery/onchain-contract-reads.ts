@@ -33,6 +33,7 @@ const ERC721_IFACE = new Interface([
   "function contractURI() view returns (string)",
   "function royaltyInfo(uint256 tokenId, uint256 salePrice) view returns (address receiver, uint256 royaltyAmount)",
   "function ownerOf(uint256 tokenId) view returns (address)",
+  "function tokenByIndex(uint256 index) view returns (uint256)",
   "function balanceOf(address owner) view returns (uint256)",
   "function isApprovedForAll(address owner, address operator) view returns (bool)",
   "function getApproved(uint256 tokenId) view returns (address)",
@@ -130,6 +131,25 @@ export async function readOwnerOf(chainSlug: string, contractAddress: string, to
     if (!result || result === "0x") return null;
     const [decoded] = CODER.decode(["address"], result);
     return String(decoded);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Real, direct `tokenByIndex(index)` read -- ERC721Enumerable's own exact
+ * "the real token ID that lives at this index, 0..totalSupply()-1" lookup.
+ * Confirmed live 2026-08-25 against MAYC's real deployed contract (real
+ * eth_call, real non-revert result for index 0). Reverts (extension not
+ * implemented) return null, same discipline as readOwnerOf.
+ */
+export async function readTokenByIndex(chainSlug: string, contractAddress: string, index: number): Promise<string | null> {
+  try {
+    const data = ERC721_IFACE.encodeFunctionData("tokenByIndex", [BigInt(index)]);
+    const { result } = await rpcCall<string>(chainSlug, "eth_call", [{ to: contractAddress, data }, "latest"]);
+    if (!result || result === "0x") return null;
+    const [decoded] = CODER.decode(["uint256"], result);
+    return (decoded as bigint).toString();
   } catch {
     return null;
   }

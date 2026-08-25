@@ -75,6 +75,19 @@ export async function hydrationJobSources(
     if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "anchored-membership", basePriority: 95 });
     }
+    // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
+    // then froze"): a SEPARATE, cheap completion check -- deliberately
+    // NOT nested under anchored-membership's own flag above. The two
+    // scans have independent completion criteria (this one's cursor vs
+    // known_supply; anchored-membership's own provenance/transfer-ledger
+    // backfill vs the real chain tip), so gating one on the other's flag
+    // could stop real, still-useful work early. See token-index-probe.ts's
+    // own header for why this exists alongside anchored-membership rather
+    // than replacing it.
+    const { isTokenIndexProbeComplete } = await import("@/lib/market/multichain/discovery/token-index-probe");
+    if (!(await isTokenIndexProbeComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "token-index-probe", basePriority: 96 });
+    }
     if (chainSlug === "eth-mainnet" && normalized === CRYPTOPUNKS_CONTRACT) {
       list.push({ source: "cryptopunks-native", basePriority: 100 });
     }
