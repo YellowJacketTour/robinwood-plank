@@ -17,7 +17,7 @@ function normalizeCollectionKey(collectionKey: string): string {
  * same job set) can share this list instead of re-deriving the chain
  * branching a second time and risking the two falling out of sync.
  */
-function hydrationJobSources(
+export function hydrationJobSources(
   chainSlug: string,
   normalized: string
 ): Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }> {
@@ -78,8 +78,27 @@ export async function prioritizeCollectionDemand(chainSlug: string, collectionKe
  * "real" or more "indexed" than the venue actually proves it to be.
  */
 export const DEMAND_PRIORITY = {
+  /** Opportunistic Archival Ledger cold frontier (docs/marketplank/GROK-
+   * FINDINGS-sustainable-archival-mining-2026-08-25.md, build order item 4)
+   * -- the lowest tier that exists. Strictly below BACKGROUND so a
+   * never-visited collection's gap-fill hydrate can never compete with or
+   * starve plain scheduled cadence, let alone anything attention-driven. */
+  ARCHIVAL_FRONTIER: 10,
+  /** Demand admission hardening (build order item 3): a collection key this
+   * app has never resolved into plank_multichain_collections before. Above
+   * ARCHIVAL_FRONTIER (an unknown key is still real, unconfirmed visitor
+   * interest, more actionable than pure gap-fill) but strictly below
+   * BACKGROUND, so junk/unresolved keys can never edge out real scheduled
+   * cadence, let alone anything attention-driven. */
+  UNKNOWN_KEY: 15,
   /** Existing background/mesh cadence (e.g. scheduled catalog re-syncs). Always the floor -- attention must win without needing to literally starve the mesh (aging + caps below prevent permanent lockout of anything). */
   BACKGROUND: 50,
+  /** Opportunistic Archival Ledger bounded sibling-token expansion (build
+   * order item 2): a successful single-token hydrate opportunistically
+   * nudges this collection's own pending-metadata lane a little sooner,
+   * deliberately below every real visitor-facing tier (DETAIL_PAGE/VISIBLE/
+   * PREDICT_NEXT) so amplification never outranks a real click. */
+  SIBLING_EXPAND: 70,
   /** Existing single-collection "someone opened this exact page" path (prioritizeCollectionDemand's own basePriority values, 96-100) lives in this band. */
   DETAIL_PAGE: 95,
   /** A collection currently intersecting the viewport, not yet stale past its own target freshness TTL. */
@@ -184,6 +203,39 @@ export function expandRankAdjacency(visibleKeys: string[], pageOrder: string[], 
 type VisibilityRow = { first_visible_at: Date; last_visible_at: Date; last_hydrated_at: Date | null };
 
 /**
+ * Demand admission hardening (docs/marketplank/GROK-FINDINGS-sustainable-
+ * archival-mining-2026-08-25.md section C / build order item 3): a
+ * malicious or careless client can send arbitrary junk strings as
+ * "collectionKeys." Keys already present in this app's own tracked-
+ * collections registry (plank_multichain_collections -- populated only by
+ * real discovery/scaffold paths, never by this route) are trusted at
+ * normal priority; anything else is an UNKNOWN key that has never resolved
+ * against a real source through this app before, and is only ever admitted
+ * at a low, capped priority -- it can still eventually become tracked (a
+ * genuinely new, real collection someone opens for the first time), but it
+ * never gets to skip the line ahead of already-known demand.
+ */
+export async function partitionKnownCollectionKeys(
+  chainSlug: string,
+  keys: string[]
+): Promise<{ known: Set<string>; unknown: Set<string> }> {
+  const known = new Set<string>();
+  const unknown = new Set<string>();
+  if (keys.length === 0) return { known, unknown };
+  const rows = await postgresQuery<{ contract_address: string }>(
+    `SELECT contract_address FROM plank_multichain_collections
+     WHERE chain_slug = $1 AND contract_address = ANY($2::text[])`,
+    [chainSlug, keys]
+  );
+  const trackedSet = new Set(rows.rows.map((r) => r.contract_address));
+  for (const key of keys) {
+    if (trackedSet.has(key)) known.add(key);
+    else unknown.add(key);
+  }
+  return { known, unknown };
+}
+
+/**
  * Entry point for the viewport-visibility signal (POST /api/market/
  * multichain/visibility-demand). Dedupes/caps `collectionKeys` (the actually
  * intersecting subset), optionally expands with cheap same-chain rank
@@ -228,41 +280,61 @@ export async function prioritizeVisibleCollections(
     allKeys = dedupeAndCapKeys([...visible, ...neighbors], MAX_EXPANDED_KEYS);
   }
 
+  // Demand admission hardening (build order item 3): partition once up
+  // front so the per-key loop below can cap unknown keys' priority AND
+  // skip their durable collection_visibility_demand row -- an unknown key
+  // never gets to accumulate "visible_hits"/aging state until it has
+  // actually resolved into the real tracked-collections registry through
+  // the normal discovery path.
+  const { known: knownKeys } = await partitionKnownCollectionKeys(chainSlug, allKeys).catch(
+    () => ({ known: new Set<string>(), unknown: new Set<string>() })
+  );
+
   const now = new Date();
   let enqueued = 0;
   for (const normalized of allKeys) {
     const isCore = visibleSet.has(normalized);
+    const isKnown = knownKeys.has(normalized);
     let priority: number = isCore ? DEMAND_PRIORITY.VISIBLE : DEMAND_PRIORITY.PREDICT_NEXT;
-    try {
-      if (isCore) {
-        const existing = await postgresQuery<VisibilityRow>(
-          `SELECT first_visible_at, last_visible_at, last_hydrated_at
-             FROM collection_visibility_demand
-            WHERE chain_slug = $1 AND collection_key = $2`,
-          [chainSlug, normalized]
+    if (isKnown) {
+      try {
+        if (isCore) {
+          const existing = await postgresQuery<VisibilityRow>(
+            `SELECT first_visible_at, last_visible_at, last_hydrated_at
+               FROM collection_visibility_demand
+              WHERE chain_slug = $1 AND collection_key = $2`,
+            [chainSlug, normalized]
+          );
+          const prior = existing.rows[0];
+          priority = computeVisibilityPriority({
+            lastHydratedAt: prior?.last_hydrated_at ?? null,
+            firstVisibleAt: prior?.first_visible_at ?? now,
+            lastVisibleAt: prior?.last_visible_at ?? now,
+            now,
+          });
+        }
+        await postgresQuery(
+          `INSERT INTO collection_visibility_demand (chain_slug, collection_key, current_priority)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (chain_slug, collection_key) DO UPDATE SET
+             last_visible_at = NOW(),
+             visible_hits = collection_visibility_demand.visible_hits + 1,
+             current_priority = EXCLUDED.current_priority`,
+          [chainSlug, normalized, priority]
         );
-        const prior = existing.rows[0];
-        priority = computeVisibilityPriority({
-          lastHydratedAt: prior?.last_hydrated_at ?? null,
-          firstVisibleAt: prior?.first_visible_at ?? now,
-          lastVisibleAt: prior?.last_visible_at ?? now,
-          now,
-        });
+      } catch {
+        // Best-effort bookkeeping: an aging-row write failure must never block
+        // the real mesh enqueue below (same "side-channel, not source of
+        // truth" discipline freshness-budget.ts's own recordProviderCall uses)
+        // -- fall back to the un-aged base priority computed above.
       }
-      await postgresQuery(
-        `INSERT INTO collection_visibility_demand (chain_slug, collection_key, current_priority)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (chain_slug, collection_key) DO UPDATE SET
-           last_visible_at = NOW(),
-           visible_hits = collection_visibility_demand.visible_hits + 1,
-           current_priority = EXCLUDED.current_priority`,
-        [chainSlug, normalized, priority]
-      );
-    } catch {
-      // Best-effort bookkeeping: an aging-row write failure must never block
-      // the real mesh enqueue below (same "side-channel, not source of
-      // truth" discipline freshness-budget.ts's own recordProviderCall uses)
-      // -- fall back to the un-aged base priority computed above.
+    } else {
+      // Unknown key: never write the durable visibility/aging row, and cap
+      // priority regardless of what the visible/predict-next tiers above
+      // would have granted -- this is the anti-poisoning gap the findings
+      // doc's section 5/C called out (a malicious client forcing hydration
+      // of junk keys must not out-rank real, already-known demand).
+      priority = DEMAND_PRIORITY.UNKNOWN_KEY;
     }
 
     const jobs = hydrationJobSources(chainSlug, normalized).map(({ source }) => ({

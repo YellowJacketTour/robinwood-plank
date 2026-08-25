@@ -13,7 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { rateLimit } from "@/lib/security";
-import { prioritizeVisibleCollections } from "@/lib/market/multichain/collection-demand";
+import { prioritizeVisibleCollections, partitionKnownCollectionKeys, dedupeAndCapKeys } from "@/lib/market/multichain/collection-demand";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -62,6 +62,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ accepted: 0, enqueued: 0 }, { headers: { "Cache-Control": "no-store" } });
   }
   const order = asStringArray(pageOrder).slice(0, MAX_PAGE_ORDER);
+
+  // Demand admission hardening (docs/marketplank/GROK-FINDINGS-sustainable-
+  // archival-mining-2026-08-25.md section C / build order item 3): a
+  // request that names even one key never seen in this app's own tracked-
+  // collections registry gets a much tighter per-IP budget than plain
+  // visibility pings -- prioritizeVisibleCollections itself also caps that
+  // key's mesh priority (DEMAND_PRIORITY.UNKNOWN_KEY) and skips its durable
+  // aging row, but the two checks are independent: this stops a client from
+  // even repeatedly TRYING junk keys, regardless of how low their eventual
+  // priority would be.
+  const { unknown } = await partitionKnownCollectionKeys(chainSlug, dedupeAndCapKeys(merged, MAX_KEYS)).catch(
+    () => ({ known: new Set<string>(), unknown: new Set<string>() })
+  );
+  if (unknown.size > 0) {
+    const tightened = rateLimit(req, { key: "market-multichain-visibility-demand-unknown-key", limit: 8, windowMs: 60_000 });
+    if (tightened) return tightened;
+  }
 
   try {
     const result = await prioritizeVisibleCollections(chainSlug, merged, {

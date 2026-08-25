@@ -213,6 +213,11 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] heal", JSON.stringify(await sanitizeUnknownZeros()));
       return;
     }
+    if (source === "archival-frontier") {
+      const { runArchivalFrontierLane } = await import("../lib/market/multichain/archival-ledger");
+      console.log("[mesh-lane] archival-frontier", JSON.stringify(await runArchivalFrontierLane()));
+      return;
+    }
     console.log(`[mesh-lane] no runner for source=${source}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
