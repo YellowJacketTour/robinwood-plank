@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
     const data = await getOrRefresh<{ counts?: Record<string, Record<string, number>> }>(
       `opensea-traits:${collectionSlug}`,
-      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000 },
+      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "opensea" },
       async () => {
         // Throw, don't return null/{} -- a transient upstream failure must
         // never poison the cache with a false "no traits" result (same

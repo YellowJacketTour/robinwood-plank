@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
       const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
       const stats = await getOrRefresh<{ uniqueHolders?: number; listedCount?: number } | null>(
         `magiceden-stats:${chainSlug}:${collectionSlug}`,
-        { softTtlMs: 60_000, hardTtlMs: 10 * 60_000 },
+        { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "magiceden" },
         async () => {
           // Throw, don't return null, on failure -- getOrRefresh only
           // writes to cache on a resolved value, so a thrown error here

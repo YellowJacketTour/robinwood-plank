@@ -669,7 +669,7 @@ export async function GET(req: NextRequest) {
       fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit }),
       getOrRefresh<OpenSeaCollectionMeta | null>(
         `opensea-collection-meta:${chain.openSeaChain}:${openSeaSlug}`,
-        { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000 },
+        { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
         async () => {
           const meta = await openSeaJson<OpenSeaCollectionMeta>(`/collections/${encodeURIComponent(openSeaSlug)}`, key);
           if (!meta) throw new Error(`opensea collection meta unavailable for ${openSeaSlug}`);
@@ -736,7 +736,7 @@ export async function GET(req: NextRequest) {
       distinctTokenIds.map(async (tokenId) => {
         const nft = await getOrRefresh<OpenSeaNft | null>(
           `opensea-nft-art:${chain.openSeaChain}:${contractAddress.toLowerCase()}:${tokenId}`,
-          { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000 },
+          { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
           async () => {
             const result = await openSeaJson<OpenSeaNft>(`/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, key);
             if (!result) throw new Error(`opensea nft art unavailable for ${contractAddress}/${tokenId}`);

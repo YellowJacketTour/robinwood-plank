@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
           specificTokenIds.map(async (tokenId) => {
             const data = await getOrRefresh<OpenSeaNft | null>(
               `opensea-nft-art:${chain.openSeaChain}:${lowerContract}:${tokenId}`,
-              { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000 },
+              { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
               async () => {
                 const res = await fetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, {
                   headers: { "x-api-key": key, accept: "application/json" },
