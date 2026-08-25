@@ -177,10 +177,19 @@ function ReownModalInner({ open, onClose, onConnected }: Props) {
   // themeVariables above) whenever this surface is asked to open. AppKit
   // renders its overlay itself (appended to <body> by createAppKit) —
   // there is no local modal markup to render here.
+  //
+  // BUG FIXED 2026-08-25 ("popped up grey" reports, patron possibly still
+  // holding an already-connected session): this always forced `view:
+  // "Connect"` regardless of current connection state. AppKit's Connect
+  // view expects to run with no active session -- opening it while
+  // isConnected is already true (a restored session from a prior visit)
+  // is not a state it renders correctly, and reproduces as a blank/grey
+  // overlay rather than the wallet picker. Route to the Account view
+  // instead when a session already exists.
   useEffect(() => {
     if (!open) return;
-    void openAppKitModal({ view: "Connect" });
-  }, [open, openAppKitModal]);
+    void openAppKitModal({ view: isConnected ? "Account" : "Connect" });
+  }, [open, isConnected, openAppKitModal]);
 
   // Keep lib/wallet.ts's provider selection and WalletConnect-active signal
   // in sync with whatever AppKit's Ethers adapter currently reports.
