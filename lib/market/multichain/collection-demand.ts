@@ -17,10 +17,10 @@ function normalizeCollectionKey(collectionKey: string): string {
  * same job set) can share this list instead of re-deriving the chain
  * branching a second time and risking the two falling out of sync.
  */
-export function hydrationJobSources(
+export async function hydrationJobSources(
   chainSlug: string,
   normalized: string
-): Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }> {
+): Promise<Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }>> {
   const list: Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }> = [];
   if (isBitcoinChainSlug(chainSlug)) {
     list.push({ source: "unisat-membership", basePriority: 98 }, { source: "unisat-rarity", basePriority: 97 });
@@ -49,8 +49,23 @@ export function hydrationJobSources(
       // this self-limits via its own real done-check and the shared
       // HyperSync circuit breaker -- it is never wasted work, only ever
       // real, additional coverage a plain OpenSea walk cannot reach.
-      { source: "anchored-membership", basePriority: 95 }
     );
+    // Real bug found live 2026-08-25 ("no sync, no progress" on MAYC
+    // despite max priority): once wired in unconditionally, an ALREADY-
+    // COMPLETE collection's anchored-membership job kept getting
+    // senselessly re-enqueued on every repeat page visit -- and because
+    // its not_before was pinned to the earliest moment it was ever
+    // enqueued (enqueueDataJob's own LEAST() ratchet), it PERMANENTLY won
+    // every priority tie over every other, genuinely incomplete
+    // collection's real work, forever (confirmed live: Lil Pudgys'
+    // finished job claimed exclusively for 50+ minutes straight while
+    // MAYC's own real, unfinished job got zero turns). Skip enqueueing
+    // entirely once real, cheap evidence (one indexed read, no network
+    // call) proves there is nothing left to do.
+    const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-backfill");
+    if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "anchored-membership", basePriority: 95 });
+    }
     if (chainSlug === "eth-mainnet" && normalized === CRYPTOPUNKS_CONTRACT) {
       list.push({ source: "cryptopunks-native", basePriority: 100 });
     }
@@ -65,7 +80,7 @@ export function hydrationJobSources(
  */
 export async function prioritizeCollectionDemand(chainSlug: string, collectionKey: string): Promise<void> {
   const normalized = normalizeCollectionKey(collectionKey);
-  const jobs = hydrationJobSources(chainSlug, normalized).map(({ source, basePriority }) => ({
+  const jobs = (await hydrationJobSources(chainSlug, normalized)).map(({ source, basePriority }) => ({
     jobKey: `demand:${source}:${chainSlug}:${normalized}`,
     kind: `mesh-lane:${chainSlug}`,
     source,
@@ -350,7 +365,7 @@ export async function prioritizeVisibleCollections(
       priority = DEMAND_PRIORITY.UNKNOWN_KEY;
     }
 
-    const jobs = hydrationJobSources(chainSlug, normalized).map(({ source }) => ({
+    const jobs = (await hydrationJobSources(chainSlug, normalized)).map(({ source }) => ({
       jobKey: `demand:${source}:${chainSlug}:${normalized}`,
       kind: `mesh-lane:${chainSlug}`,
       source,

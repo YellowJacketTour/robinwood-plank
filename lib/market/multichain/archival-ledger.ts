@@ -302,7 +302,7 @@ export async function maybeExpandSiblingTokens(
   const pending = await readTokenMetadataWork(chainSlug, SIBLING_EXPANSION_BATCH_SIZE, normalized).catch(() => []);
   const siblingTokenIds = pending.map((item) => item.tokenId);
 
-  const jobs = hydrationJobSources(chainSlug, normalized).map(({ source }) => ({
+  const jobs = (await hydrationJobSources(chainSlug, normalized)).map(({ source }) => ({
     jobKey: `demand:${source}:${chainSlug}:${normalized}`,
     kind: `mesh-lane:${chainSlug}`,
     source,
@@ -682,7 +682,7 @@ export async function runArchivalFrontierLane(): Promise<{ ran: boolean; enqueue
   const candidates = await selectArchivalFrontierBatch();
   let enqueued = 0;
   for (const candidate of candidates) {
-    const jobs = hydrationJobSources(candidate.chainSlug, candidate.collectionKey).map(({ source }) => ({
+    const jobs = (await hydrationJobSources(candidate.chainSlug, candidate.collectionKey)).map(({ source }) => ({
       jobKey: `demand:${source}:${candidate.chainSlug}:${candidate.collectionKey}`,
       kind: `mesh-lane:${candidate.chainSlug}`,
       source,
