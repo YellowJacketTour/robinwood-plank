@@ -67,6 +67,7 @@ async function fetchViaDasOnce(mintAddress: string): Promise<HeliusAssetDetail |
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method: "getAsset", params: { id: mintAddress } }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { result?: HeliusAssetDetail; error?: unknown };

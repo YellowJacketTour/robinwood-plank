@@ -134,7 +134,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   }
   let settled = false;
   try {
-    const res = await fetch(url, { headers: { accept: "application/json" } });
+    const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
     await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true);
     settled = true;
     if (!res.ok) {
@@ -369,6 +369,7 @@ export async function fetchSnapshotsBatch(
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify({ contractAddresses: chunk }),
+        signal: AbortSignal.timeout(15_000),
       });
       await settleProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window, 1, true);
       settled = true;

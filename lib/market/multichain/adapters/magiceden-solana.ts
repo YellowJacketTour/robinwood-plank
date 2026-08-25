@@ -45,7 +45,7 @@ type MagicEdenRankedEntry = {
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
+  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     throw new Error(`magiceden-solana: ${res.status} ${res.statusText} fetching ${url}`);
   }

@@ -63,6 +63,7 @@ async function fetchPage(start: number): Promise<{ total: number; list: UniSatCo
   try {
     const res = await fetch(`${API_BASE}/list?start=${start}&limit=${PAGE_SIZE}`, {
       headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
       throw new Error(`unisat-collection-list-scan: ${res.status} ${res.statusText} fetching collection/list`);

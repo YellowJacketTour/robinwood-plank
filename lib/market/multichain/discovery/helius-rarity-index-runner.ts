@@ -150,6 +150,7 @@ async function fetchGroupedPageWithTotal(collectionAddress: string, page: number
         method: "searchAssets",
         params: { grouping: ["collection", collectionAddress], page, limit: PAGE_SIZE },
       }),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status} via ${slot.provider}`);
     const body = (await res.json()) as {

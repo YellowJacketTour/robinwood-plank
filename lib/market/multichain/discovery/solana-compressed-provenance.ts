@@ -202,6 +202,7 @@ export async function readSolanaAssetProvenance(assetId: string): Promise<Solana
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method: "getAsset", params: { id: assetId } }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
       throw new Error(`solana-compressed-provenance: HTTP ${res.status} calling getAsset via ${slot.provider}`);

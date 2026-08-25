@@ -83,6 +83,7 @@ export async function fetchRawTransactionWitness(
   try {
     const res = await fetch(`https://mempool.space/api/tx/${txid}`, {
       headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
 

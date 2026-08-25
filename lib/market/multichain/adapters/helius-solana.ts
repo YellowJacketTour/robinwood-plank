@@ -76,6 +76,7 @@ async function rpc<T>(method: string, params: Record<string, unknown>, priority:
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "plank", method, params }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`helius-solana: HTTP ${res.status} calling ${method} via ${slot.provider}`);
     const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
