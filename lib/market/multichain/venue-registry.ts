@@ -149,7 +149,30 @@ export const MARKET_VENUES = [
       "writing a discovery/stats adapter; compressed-NFT (bubblegum) support is a separate, still-open " +
       "requirement noted here regardless of the API-key outcome.",
   },
-  { id: "metaplex-solana", label: "Metaplex programs", family: "solana", protocol: "metaplex", versions: ["auction-house", "bubblegum", "core"], capabilities: ["sales", "transfers"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program-family provenance including compressed and Core assets." },
+  {
+    id: "metaplex-solana",
+    label: "Metaplex programs",
+    family: "solana",
+    protocol: "metaplex",
+    versions: ["auction-house", "bubblegum", "core"],
+    capabilities: ["transfers"],
+    coverage: "partial",
+    chainSlugs: ["solana-mainnet"],
+    notes:
+      "CORRECTED 2026-08-25 (this entry claimed a registry fix in an earlier commit message that never " +
+      "actually landed -- fixing it for real now). Confirmed live via real getAsset/searchAssets calls " +
+      "against the existing multi-provider DAS pool (solana-das-pool.ts, no new RPC infra needed): both " +
+      "Bubblegum compressed NFTs and Metaplex Core assets already return full ownership " +
+      "(owner/delegate/frozen/ownership_model) and provenance data (Bubblegum compression proof -- tree, " +
+      "leaf_id, seq, data_hash, creator_hash, asset_hash; Core plugin state e.g. royalties/edition) through " +
+      "the same DAS contract this app already calls -- see solana-compressed-provenance.ts. Capabilities " +
+      "narrowed to transfers only (ownership/ownership-history), NOT sales/bids: full transfer/burn EVENT " +
+      "HISTORY (as opposed to current-state ownership) needs getSignaturesForAsset, a Helius-proprietary DAS " +
+      "extension confirmed unsupported on QuickNode (\"Method not found\") and unverifiable on Helius itself " +
+      "this session (every pooled key returned \"max usage reached\"). Also confirmed live: solana-das-pool.ts's " +
+      "own header previously claimed Shyft was live for DAS -- Shyft's real getAsset response is " +
+      "{\"error\":\"BadRequest\",\"message\":\"DAS RPC method not supported\"}, corrected in that file's header too.",
+  },
   { id: "unisat-bitcoin", label: "UniSat", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Membership/listing evidence exists; complete sale history is not yet indexed." },
   { id: "ord-core-bitcoin", label: "Bitcoin Core + ord", family: "bitcoin", protocol: "ord", versions: ["current"], capabilities: ["transfers"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Canonical inscription, satpoint, parent/child, delegate, content, metadata, and transfer foundation. Requires a fully synced txindex Bitcoin Core node plus ord index; it does not define marketplace collections or off-chain books." },
   { id: "ordiscan-bitcoin", label: "Ordiscan", family: "bitcoin", protocol: "ordinals-indexer", versions: ["v1"], capabilities: ["transfers", "listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Collection discovery and per-collection market snapshots are wired; low API allowance prevents treating it as the sole exhaustive inscription lane." },
