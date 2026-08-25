@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_LINKS } from "@/lib/constants";
@@ -13,6 +12,7 @@ import {
 } from "@/components/woodamp/WoodAmpChip";
 import ThemeAccentPicker from "@/components/ThemeAccentPicker";
 import MarketMenu from "@/components/market/MarketMenu";
+import { BrandMark } from "@/components/BrandMark";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -293,14 +293,7 @@ export default function Nav() {
             onClick={() => closeMenu()}
             className="flex min-w-0 shrink-0 items-center gap-2 font-display text-lg text-gold-300 lg:text-[1.35rem]"
           >
-            <Image
-              src="/images/plank-logo.webp"
-              alt=""
-              width={28}
-              height={40}
-              className="h-8 w-auto"
-              priority
-            />
+            <BrandMark size={28} className="h-8 w-8 shrink-0 text-gold-400" />
             <span className="truncate">RobinWood</span>
             <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
           </Link>
