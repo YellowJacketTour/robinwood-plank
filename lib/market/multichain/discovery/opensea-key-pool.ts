@@ -182,12 +182,63 @@ export async function pickOpenSeaKey(priority: OpenSeaKeyPriority = "live"): Pro
   return ordered[0] ?? null;
 }
 
+/**
+ * Real minimum spacing between calls on ONE key: 600/hour (the real
+ * documented OpenSea limit, see this file's own 2026-08-25 header note) ==
+ * one call every 6 seconds. This is the actual fix for the gap that same
+ * note already flagged as a TODO and left unbuilt "under time pressure":
+ * the daily ceiling alone lets many concurrent callers (viewport-hydration
+ * demand + the mesh-tick supervisor's own concurrency=6) burst well past
+ * the true 600/hour rate in seconds, each burst 429 triggering a full
+ * 20-minute jailSource() cool-down (scripts/mesh-lane.ts's own handler) --
+ * live-reproduced 2026-08-26 (repeated "OpenSea 429 enumerating ...
+ * Rate limit exceeded" -> 20min jail -> repeat cycles, most of that time
+ * spent in dead jail windows rather than real throughput). A small safety
+ * margin (6.2s, not 6.0s) keeps this app's own pacing a hair under the
+ * vendor's exact edge rather than racing it.
+ */
+const OPENSEA_MIN_CALL_INTERVAL_MS = 6_200;
+
+/**
+ * Atomic, durable, cross-process claim of the next allowed call slot for
+ * one key -- every real caller (across every spawned mesh-lane child
+ * process) shares this via plank_kv_values, so the real call RATE stays
+ * paced under 600/hour even though the calls themselves happen from dozens
+ * of independent short-lived processes with no shared in-memory state.
+ * `GREATEST(existing next-slot, now)` means a caller who finds the key
+ * already paced past `now` gets pushed to (that later slot + interval),
+ * never allowed to catch up early -- a burst of N simultaneous claimants
+ * gets spread N*interval apart, not let through together.
+ */
+async function claimOpenSeaPaceSlot(providerAccount: string): Promise<boolean> {
+  // plank_kv_values.value is jsonb (not text) -- store/read the epoch-ms
+  // slot as a JSON number via to_jsonb()/#>>'{}', real column type
+  // confirmed live 2026-08-26 before shipping this (an earlier ::bigint
+  // cast draft would have thrown "column is of type jsonb" on every call).
+  const key = `plank:market:pace-next:${providerAccount}`;
+  const nowMs = Date.now();
+  const result = await postgresQuery<{ claimed_at: string }>(
+    `INSERT INTO plank_kv_values (key_name, value, updated_at)
+     VALUES ($1, to_jsonb(($2::bigint + $3::bigint)), now())
+     ON CONFLICT (key_name) DO UPDATE SET
+       value = to_jsonb(GREATEST((plank_kv_values.value#>>'{}')::bigint, $2::bigint) + $3::bigint),
+       updated_at = now()
+     RETURNING ((value#>>'{}')::bigint - $3::bigint)::text AS claimed_at`,
+    [key, String(nowMs), String(OPENSEA_MIN_CALL_INTERVAL_MS)]
+  );
+  const claimedAt = Number(result.rows[0]?.claimed_at ?? nowMs);
+  return claimedAt <= nowMs;
+}
+
 export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKeyPriority }): Promise<OpenSeaKeySlot | null> {
   const priority = opts?.priority ?? "live";
   const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
   const ordered = await orderCandidates(priority, window);
 
   for (const candidate of ordered) {
+    // Pace BEFORE reserving daily capacity -- a candidate that isn't ready
+    // yet should never consume a reservation it won't use.
+    if (!(await claimOpenSeaPaceSlot(candidate.providerAccount).catch(() => true))) continue;
     if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
       return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
     }
