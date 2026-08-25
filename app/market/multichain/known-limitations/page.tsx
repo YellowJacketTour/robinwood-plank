@@ -9,7 +9,14 @@ import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
-import { MARKET_VENUES, type MarketFamily, type MarketCoverage } from "@/lib/market/multichain/venue-registry";
+import {
+  MARKET_VENUES,
+  COVERAGE_LABEL,
+  COVERAGE_ORDER,
+  COVERAGE_STYLE,
+  type MarketFamily,
+  type MarketCoverage,
+} from "@/lib/market/multichain/venue-registry";
 
 /**
  * Public, honest known-limitations page for the Global (cross-chain)
@@ -31,27 +38,6 @@ export const metadata: Metadata = createPageMetadata({
   path: "/market/multichain/known-limitations",
   keywords: ["Marketplank", "known limitations", "coverage status"],
 });
-
-const COVERAGE_LABEL: Record<MarketCoverage, string> = {
-  indexed: "Indexed",
-  partial: "Partial",
-  planned: "Planned — not built yet",
-  unavailable: "Unavailable",
-};
-
-const COVERAGE_ORDER: Record<MarketCoverage, number> = {
-  indexed: 0,
-  partial: 1,
-  planned: 2,
-  unavailable: 3,
-};
-
-const COVERAGE_STYLE: Record<MarketCoverage, string> = {
-  indexed: "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
-  partial: "border-amber-500/50 bg-amber-500/10 text-amber-300",
-  planned: "border-line-strong bg-panel text-foreground/60",
-  unavailable: "border-rose-500/40 bg-rose-500/10 text-rose-300",
-};
 
 const FAMILY_LABEL: Record<MarketFamily, string> = {
   evm: "EVM chains",

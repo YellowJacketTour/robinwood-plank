@@ -309,6 +309,75 @@ export function venuesForChain(chainSlug: string): readonly MarketVenue[] {
   return MARKET_VENUES.filter((venue) => venue.family === family && (venue.chainSlugs.length === 0 || venue.chainSlugs.includes(chainSlug as never)));
 }
 
+/**
+ * Single source of truth for how a coverage level reads to a viewer --
+ * label + color. Originally inline in
+ * app/market/multichain/known-limitations/page.tsx; pulled up here so the
+ * inline per-row/per-collection "source chip" (DataSourceChip.tsx, see
+ * Issue 4 of docs/marketplank/GROK-FINDINGS-biggest-issues-unified-
+ * vision-2026-08-25.md) uses the EXACT same colors/labels as that page
+ * instead of a second, driftable copy.
+ */
+export const COVERAGE_LABEL: Record<MarketCoverage, string> = {
+  indexed: "Indexed",
+  partial: "Partial",
+  planned: "Planned — not built yet",
+  unavailable: "Unavailable",
+};
+
+export const COVERAGE_ORDER: Record<MarketCoverage, number> = {
+  indexed: 0,
+  partial: 1,
+  planned: 2,
+  unavailable: 3,
+};
+
+export const COVERAGE_STYLE: Record<MarketCoverage, string> = {
+  indexed: "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
+  partial: "border-amber-500/50 bg-amber-500/10 text-amber-300",
+  planned: "border-line-strong bg-panel text-foreground/60",
+  unavailable: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+};
+
+/** Short, non-alarming label for a partial/planned/unavailable venue's inline chip -- distinct from COVERAGE_LABEL's fuller known-limitations-page copy, which reads fine in a table but is too long for a dense row/chip. */
+export const COVERAGE_SHORT_LABEL: Record<MarketCoverage, string> = {
+  indexed: "live",
+  partial: "partial book",
+  planned: "not yet built",
+  unavailable: "unavailable",
+};
+
+export function venueById(id: string): MarketVenue | null {
+  return MARKET_VENUES.find((v) => v.id === id) ?? null;
+}
+
+/**
+ * The single venue whose coverage best describes what a viewer is actually
+ * looking at for one collection's displayed floor/listed numbers --
+ * resolution order: (1) an exact venue id match (adapter or
+ * floorPriceMarketplace, when the collection row/route already knows which
+ * venue produced its numbers), (2) for a chain with exactly one candidate
+ * venue, that venue, (3) otherwise the WORST (least-complete) coverage
+ * among the chain's real candidate venues -- worst-case, not best-case, is
+ * the honest default when this app can't yet name the single exact venue
+ * behind a number, since a viewer would rather be warned about the weakest
+ * source in the mix than reassured by the strongest. Returns null only when
+ * no venue at all is registered for the chain (nothing to report).
+ */
+export function primaryVenueForCollection(
+  chainSlug: string,
+  candidateId?: string | null
+): MarketVenue | null {
+  if (candidateId) {
+    const exact = venueById(candidateId);
+    if (exact) return exact;
+  }
+  const venues = venuesForChain(chainSlug);
+  if (venues.length === 0) return null;
+  if (venues.length === 1) return venues[0];
+  return venues.slice().sort((a, b) => COVERAGE_ORDER[b.coverage] - COVERAGE_ORDER[a.coverage])[0];
+}
+
 export function isCompleteVenueCoverage(venues: readonly MarketVenue[]): boolean {
   return venues.length > 0 && venues.every((venue) => venue.coverage === "indexed");
 }

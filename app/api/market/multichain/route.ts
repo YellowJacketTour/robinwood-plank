@@ -3,7 +3,7 @@ import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshotsPage, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
-import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
+import { hasUnindexedNativeBook, primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 
 export const dynamic = "force-dynamic";
@@ -209,6 +209,7 @@ export async function GET(req: Request) {
           ? "collecting-baseline"
           : null,
       isNativeHome: true,
+      primaryVenue: primaryVenueForCollection("robinhood", "marketplank"),
     };
 
     let cryptoPunksNativeBookIndexed = false;
@@ -315,6 +316,13 @@ export async function GET(req: Request) {
               : null,
         floorChangeEvidence: null,
         isNativeHome: false,
+        // Real venue-registry lookup (Issue 4, inline completeness UX --
+        // see docs/marketplank/GROK-FINDINGS-biggest-issues-unified-
+        // vision-2026-08-25.md) -- resolved server-side from the same
+        // c.adapter/floorPriceMarketplace this row's own numbers actually
+        // came from, never guessed client-side. Null only when this
+        // chain has no registered venue at all.
+        primaryVenue: primaryVenueForCollection(c.chainSlug, c.floorPriceMarketplace ?? c.adapter ?? null),
         });
     });
     const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
