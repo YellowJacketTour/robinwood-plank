@@ -104,6 +104,26 @@ export async function GET(req: NextRequest) {
         if (idx && idx.sampleSize > 0) totalSupply = idx.sampleSize;
       }
     }
+    // Real fix, 2026-08-25 ("obviously unacceptable... simpler
+    // contagion"): a max-observed-token-id-based known_supply inference
+    // can overstate the real total for a collection with genuine gaps in
+    // its id range (confirmed live: OpenSea's own API returns "Item with
+    // identifier 5 not found" for a real Lil Pudgys id our own inference
+    // assumed existed) -- permanently capping the displayed score below
+    // 100% even once every real token is captured. Real on-chain
+    // totalSupply() is authoritative ground truth; singleflight-cached
+    // (long TTL -- this changes on human timescales at most) so this
+    // costs one real chain read per collection per cache window, not per
+    // page view, matching every other live upstream call on this route.
+    const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+    await getOrRefresh<number | null>(
+      `known-supply-correction:${chainSlug}:${tracked.contractAddress.toLowerCase()}`,
+      { softTtlMs: 30 * 60_000, hardTtlMs: 24 * 60 * 60_000 },
+      async () => {
+        const { correctKnownSupplyFromChain } = await import("@/lib/market/multichain/archival-ledger");
+        return correctKnownSupplyFromChain(chainSlug, tracked.contractAddress);
+      }
+    ).catch(() => null);
     // Real collection_archival_stats read (see archival-ledger.ts's own
     // "API exposure" header) -- a single indexed lookup plus a cheap
     // plank_data_jobs 'running' check, both trivial at single-collection
