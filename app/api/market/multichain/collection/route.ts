@@ -7,6 +7,7 @@ import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStat
 import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { publicError, rateLimit } from "@/lib/security";
 import { primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
+import { getArchivalStatsForCollection } from "@/lib/market/multichain/archival-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -103,6 +104,11 @@ export async function GET(req: NextRequest) {
         if (idx && idx.sampleSize > 0) totalSupply = idx.sampleSize;
       }
     }
+    // Real collection_archival_stats read (see archival-ledger.ts's own
+    // "API exposure" header) -- a single indexed lookup plus a cheap
+    // plank_data_jobs 'running' check, both trivial at single-collection
+    // scale. Null/omitted (not fabricated) when no ledger row exists yet.
+    const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug).catch(() => null);
     return NextResponse.json(
       {
         collection: {
@@ -126,6 +132,16 @@ export async function GET(req: NextRequest) {
           // vision-2026-08-25.md) -- resolved server-side from this
           // collection's own recorded adapter, never guessed client-side.
           primaryVenue: primaryVenueForCollection(chainSlug, tracked.adapter ?? null),
+          archival: archival
+            ? {
+                archivalScore: archival.archivalScore,
+                scoreMethod: archival.scoreMethod,
+                tokensEverHydrated: archival.tokensEverHydrated,
+                knownSupply: archival.knownSupply,
+                lastArchivedAt: archival.lastArchivedAt,
+                jobProcessing: archival.jobProcessing ?? false,
+              }
+            : null,
         },
       },
       { headers: { "Cache-Control": "no-store" } }

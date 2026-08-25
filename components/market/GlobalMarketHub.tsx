@@ -18,6 +18,7 @@ import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
 import DataSourceChip from "@/components/market/DataSourceChip";
+import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlankChip";
 import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
 
 const CollectionThumb = CollectionArtImage;
@@ -145,6 +146,16 @@ type TrackedCollection = {
   isNativeHome?: boolean;
   /** Real venue-registry lookup (see primaryVenueForCollection in lib/market/multichain/venue-registry.ts) -- which venue this row's floor/listed numbers actually come from, and how complete that venue's coverage is. Null only when this chain has no registered venue at all. */
   primaryVenue?: { id: string; label: string; coverage: MarketCoverage } | null;
+  /** Real collection_archival_stats read (see archival-ledger.ts's "API exposure" section). Null/omitted when this collection has never been through a real hydrate write yet -- never fabricated. jobProcessing is intentionally not computed on this rankings route (see getArchivalStatsBatch's header on the per-row cost). */
+  archival?: {
+    archivalScore: number | null;
+    scoreMethod: string;
+    tokensEverHydrated: number | null;
+    knownSupply: number | null;
+    lastArchivedAt: string | null;
+    /** Never populated on this rankings response (see getArchivalStatsBatch's own header) -- always undefined here, kept only so the field lines up with the collection-detail route's richer shape. */
+    jobProcessing?: boolean;
+  } | null;
 };
 
 type GlobalTokenHit = {
@@ -2266,8 +2277,17 @@ export default function GlobalMarketHub() {
                             </span>
                           </div>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
-                              {displayName(c)}
+                            <span className="flex min-w-0 items-center gap-1">
+                              <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
+                                {displayName(c)}
+                              </span>
+                              {c.archival && (
+                                <HydrationPlankChip
+                                  active={c.archival.jobProcessing === true}
+                                  pulseKey={c.archival.lastArchivedAt}
+                                  label={`${displayName(c)} archival`}
+                                />
+                              )}
                             </span>
                             <span className="flex min-w-0 items-center gap-1">
                               <span
