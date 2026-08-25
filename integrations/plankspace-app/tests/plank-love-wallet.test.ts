@@ -1,85 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("delegates connection and signing to the exact Plank.love parent origin", async () => {
-  const sent: Array<Record<string, unknown>> = [];
-  let onMessage: ((event: MessageEvent<unknown>) => void) | undefined;
-  const parent = {
-    postMessage(message: Record<string, unknown>, origin: string) {
-      sent.push({ ...message, targetOrigin: origin });
-    },
-  };
-  const fakeWindow = {
-    parent,
-    addEventListener(type: string, listener: (event: MessageEvent<unknown>) => void) {
-      if (type === "message") onMessage = listener;
-    },
-  };
+class TestCustomEvent<T=unknown> extends Event {
+  detail:T;
+  constructor(type:string,init:{detail:T}){super(type);this.detail=init.detail}
+}
 
-  Object.assign(globalThis, {
-    window: fakeWindow,
-    document: { referrer: "https://plank.love/plankspace" },
-    sessionStorage: { getItem(){ return null; }, setItem(){} },
+test("delegates connection and signing to the mounted Plank.love wallet provider", async () => {
+  const sent:Array<{requestId:string;method:string;payload?:Record<string,unknown>}>=[];
+  const windowTarget=new EventTarget() as EventTarget&typeof globalThis;
+  Object.assign(windowTarget,{setTimeout,clearTimeout});
+  const storage=new Map<string,string>();
+  const localStorage={getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)};
+  Object.assign(globalThis,{window:windowTarget,CustomEvent:TestCustomEvent,localStorage});
+
+  windowTarget.addEventListener("plank:wallet-request",raw=>{
+    const detail=(raw as TestCustomEvent<{requestId:string;method:string;payload?:Record<string,unknown>}>).detail;
+    sent.push(detail);
+    const result=detail.method==="getState"?{state:{address:null,chainId:null,status:"disconnected",isConnected:false}}:detail.method==="connect"?{address:"0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d"}:detail.method==="signMessage"?{signature:"0xsigned"}:{};
+    queueMicrotask(()=>windowTarget.dispatchEvent(new TestCustomEvent("plank:wallet-response",{detail:{requestId:detail.requestId,result}})));
   });
 
-  const bridge = await import("../app/plank-love-wallet");
-  assert.equal(sent[0]?.type, "wallet:ready");
-  assert.equal(sent[0]?.targetOrigin, "https://plank.love");
+  const wallet=await import("../app/plank-love-wallet");
+  assert.equal(await wallet.connectPlankLoveWallet(),"0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d");
+  assert.deepEqual(sent.map(item=>item.method),["getState","connect"]);
 
-  const connectPromise = bridge.connectPlankLoveWallet();
-  const connectRequest = sent.at(-1);
-  assert.equal(connectRequest?.method, "connect");
-  let settled = false;
-  void connectPromise.finally(() => { settled = true; });
-  onMessage?.({
-    origin: "https://attacker.example",
-    source: parent,
-    data: {
-      source: "plank-love-wallet-v1",
-      type: "wallet:response",
-      requestId: connectRequest?.requestId,
-      result: { state: { address: "0xdead", chainId: 1, status: "connected", isConnected: true } },
-    },
-  } as unknown as MessageEvent<unknown>);
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(settled, false);
-  onMessage?.({
-    origin: "https://plank.love",
-    source: parent,
-    data: {
-      source: "plank-love-wallet-v1",
-      type: "wallet:response",
-      requestId: connectRequest?.requestId,
-      result: {
-        state: {
-          address: "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d",
-          chainId: 4663,
-          status: "connected",
-          isConnected: true,
-        },
-      },
-    },
-  } as unknown as MessageEvent<unknown>);
-  assert.equal(
-    await connectPromise,
-    "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d"
-  );
-
-  const signPromise = bridge.signPlankLoveMessage(
-    "PlankSpace wallet verification\nSite: https://plank.love/plankspace",
-    "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d"
-  );
-  const signRequest = sent.at(-1);
-  assert.equal(signRequest?.method, "signMessage");
-  onMessage?.({
-    origin: "https://plank.love",
-    source: parent,
-    data: {
-      source: "plank-love-wallet-v1",
-      type: "wallet:response",
-      requestId: signRequest?.requestId,
-      result: { signature: "0xsigned" },
-    },
-  } as unknown as MessageEvent<unknown>);
-  assert.equal(await signPromise, "0xsigned");
+  const message="PlankSpace wallet verification\nSite: https://plank.love/plankspace\nSafety: This is only a login signature and cannot move funds.";
+  assert.equal(await wallet.signPlankLoveMessage(message,"0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d"),"0xsigned");
+  assert.equal(sent.at(-1)?.method,"signMessage");
 });

@@ -9,7 +9,7 @@ import { readApiJson } from "./api-client";
 import WidgetManager from "./widgets/widget-manager";
 
 type FormState={handle:string;displayName:string;bio:string;hobbies:string;interests:string;music:string;heroes:string;lookingToMeet:string;avatarUrl:string;avatarData?:string;mood:string;moodText:string;featuredVideo:string;customHtml:string};
-type ThemeState={template:string;pageBackground:string;panelBackground:string;textColor:string;linkColor:string;headingColor:string;accentColor:string;fontFamily:string;showTop8:any};
+type ThemeState={template:string;pageBackground:string;panelBackground:string;textColor:string;linkColor:string;headingColor:string;accentColor:string;fontFamily:string;showTop8:boolean};
 const blank:FormState={handle:"",displayName:"",bio:"",hobbies:"",interests:"",music:"",heroes:"",lookingToMeet:"",avatarUrl:"",avatarData:"",mood:"feeling board",moodText:"holding down the lumberyard.",featuredVideo:"",customHtml:""};
 const defaultTheme:ThemeState={template:"lounge",pageBackground:"#24130b",panelBackground:"#f2dfbe",textColor:"#2b160d",linkColor:"#6e2b0e",headingColor:"#fff0cf",accentColor:"#e4862a",fontFamily:"Verdana",showTop8:true};
 const modules=["welcome","status","music","video","game","custom","collection","about","friends","widgets","feed","comments"];

@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable @next/next/no-location-assign-relative-destination */
 import Link from "next/link";import { useEffect,useState } from "react";import { walletProof } from "../auth-client";import { connectPlankLoveWallet,getPlankLoveWalletState } from "../plank-love-wallet";
 type Room={slug:string;title:string;description:string;hostHandle:string;participantCount:number};
 export default function WoodstockDirectory(){
