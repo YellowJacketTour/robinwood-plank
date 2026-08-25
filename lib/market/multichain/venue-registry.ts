@@ -115,7 +115,31 @@ export const MARKET_VENUES = [
   { id: "ord-core-bitcoin", label: "Bitcoin Core + ord", family: "bitcoin", protocol: "ord", versions: ["current"], capabilities: ["transfers"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Canonical inscription, satpoint, parent/child, delegate, content, metadata, and transfer foundation. Requires a fully synced txindex Bitcoin Core node plus ord index; it does not define marketplace collections or off-chain books." },
   { id: "ordiscan-bitcoin", label: "Ordiscan", family: "bitcoin", protocol: "ordinals-indexer", versions: ["v1"], capabilities: ["transfers", "listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Collection discovery and per-collection market snapshots are wired; low API allowance prevents treating it as the sole exhaustive inscription lane." },
   { id: "ordinalswallet-bitcoin", label: "Ordinals Wallet", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Keyless exact-slug membership/art catalog is wired. Complete book, offer, and historical execution ingestion are not proven." },
-  { id: "bestinslot-bitcoin", label: "Best in Slot", family: "bitcoin", protocol: "ordinals-aggregator", versions: ["v3"], capabilities: ["sales", "transfers", "listings"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Official API exposes collections, inscriptions, holders, activity, and venue-specific listing prices. Listings/sales/activity require Pro or Dedicated access and therefore cannot be represented as free coverage." },
+  {
+    id: "bestinslot-bitcoin",
+    label: "Best in Slot",
+    family: "bitcoin",
+    protocol: "ordinals-aggregator",
+    versions: ["v3"],
+    capabilities: ["sales", "transfers", "listings"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "RE-VERIFIED 2026-08-24 -- STATUS WORSENED, NOT JUST STILL PRO-GATED: the Pro/Dedicated-tier gating " +
+      "this note previously described no longer applies because the entire hosted API has been retired. " +
+      "https://docs.bestinslot.xyz/api-reference/overview (real Mintlify docs, fetched live) states verbatim: " +
+      "\"This API has been retired. The hosted endpoints at api.bestinslot.xyz are no longer operated, and new " +
+      "API keys are not being issued,\" and directs integrators to \"Run OPI (Open Protocol Indexer) instead " +
+      "-- our open-source, self-hosted indexer for BRC-20, Bitmap and SNS, with a REST API per module.\" " +
+      "Confirmed by direct request: https://api.bestinslot.xyz/v3/collection/info?slug=bitcoin-frogs returned " +
+      "a real HTTP 301 to https://carrier.fleets.eu/... -- the api.bestinslot.xyz hostname has been repointed " +
+      "away from Best in Slot entirely, to an unrelated third-party 'Fleet Portal' logistics product (HTTP 200 " +
+      "confirmed at that destination, a real live site, just not Best in Slot's). There is therefore no live " +
+      "hosted endpoint left to call at any tier, free or paid -- collections/inscriptions/holders are not " +
+      "reachable either. OPI is a self-hosted indexer (you run your own Postgres+indexer against your own " +
+      "Bitcoin node), not a free hosted API this app could call -- out of scope for a keyless/low-friction " +
+      "adapter of this repo's existing pattern. Remains planned, now for a stronger reason than before.",
+  },
   { id: "ordnet-bitcoin", label: "ORD.NET", family: "bitcoin", protocol: "ordinals-market", versions: ["v1"], capabilities: ["sales", "listings", "bids"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Authenticated, cursor-exhaustive listings adapter is wired. Sales, membership, offers, and PSBT execution remain explicit capability gaps until their durable lanes are enabled. Authentication requires a wallet challenge and a payment address holding 0.01 BTC." },
   {
     id: "gamma-bitcoin",
@@ -149,7 +173,28 @@ export const MARKET_VENUES = [
       "rendered-browser network capture of an authenticated/partner session before any code is written against it -- never scrape " +
       "UI HTML into canonical evidence, and never guess at a private API's schema from memory.",
   },
-  { id: "ordzaar-bitcoin", label: "Ordzaar", family: "bitcoin", protocol: "ordinals-market", versions: ["historical", "current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Distinct PSBT marketplace lane. No verified public server API contract is currently wired; data must retain venue and order identity." },
+  {
+    id: "ordzaar-bitcoin",
+    label: "Ordzaar",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["historical", "current"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "RE-VERIFIED 2026-08-24, STILL BLOCKED: ordzaar.com resolves (HTTP 200, real live site) and describes " +
+      "itself as \"The next-generation Bitcoin Ordinals Launchpad\" -- mint/launchpad focused, not the PSBT " +
+      "order-book marketplace this entry's capabilities imply. Every plausible API/docs subdomain tried " +
+      "(api.ordzaar.com, docs.ordzaar.com, app.ordzaar.com) failed to resolve/connect at all (curl exit 35 / " +
+      "connection failure, not even a TLS handshake -- these hosts do not exist). No links to API docs or " +
+      "developer resources appear anywhere on the live ordzaar.com page. GitHub org github.com/ordzaar (9 " +
+      "public repos checked) has ordit-sdk (a client-side wallet/PSBT-construction SDK, not a server order-" +
+      "book API), ord-connect (a React wallet-connect kit), and odinswap-api-docs (empty/placeholder repo, no " +
+      "README on main), none of which document a public marketplace listings/sales REST contract. Conclusion " +
+      "unchanged from the prior pass: no verified public server API contract exists for Ordzaar's marketplace " +
+      "side. Data must retain venue and order identity if this is ever wired via a private/partner API.",
+  },
   // Magic Eden's Bitcoin/Ordinals marketplace (retired 2026-06-30) was
   // removed outright 2026-08-25 rather than kept as an "unavailable" entry
   // -- confirmed zero references anywhere else in the codebase (no adapter,
