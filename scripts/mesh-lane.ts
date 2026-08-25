@@ -216,6 +216,17 @@ async function main(): Promise<void> {
       if (!result.done) process.exitCode = 2;
       return;
     }
+    if (source === "plank-koth-watch") {
+      const { runPlankKothWatch } = await import("../lib/market/plank-koth-watch");
+      const result = await runPlankKothWatch();
+      console.log("[mesh-lane] plank-koth-watch", JSON.stringify(result));
+      // Same exit-code-2 self-requeue pattern as anchored-membership above:
+      // `done: false` means a real, unfinalized (or unscanned-this-pass)
+      // buy is still waiting, so mesh-tick should reclaim this lane again
+      // promptly rather than waiting for its own next scheduled cadence.
+      if (!result.done) process.exitCode = 2;
+      return;
+    }
     if (source === "coingecko-nft") {
       const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
       console.log("[mesh-lane] cg", JSON.stringify(await runCoinGeckoNftStats(chain, 15)));
