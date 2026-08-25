@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { chainDisplayName, FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import ChainIcon from "@/components/market/ChainIcon";
+import { GLOBAL_MARKET_ENABLED } from "@/lib/constants";
 
 const CHAINS = [
   "robinhood",
@@ -63,7 +64,7 @@ export default function MarketMenu({ className, active, onNavigate, variant = "r
       }
     >
       <p className="mb-2 text-[0.58rem] font-black uppercase tracking-wider text-foreground/45">Marketplank</p>
-      <div className="grid gap-1.5 sm:grid-cols-2">
+      <div className={GLOBAL_MARKET_ENABLED ? "grid gap-1.5 sm:grid-cols-2" : "grid gap-1.5"}>
         <Link
           href="/market"
           className="flex min-h-12 items-center gap-2.5 rounded-md border border-line px-3 py-2 text-sm font-bold text-gold-300 hover:border-gold-400"
@@ -75,42 +76,51 @@ export default function MarketMenu({ className, active, onNavigate, variant = "r
             <span className="block text-[0.62rem] font-semibold text-foreground/50">Native book</span>
           </span>
         </Link>
-        <Link
-          href="/market/multichain"
-          className="flex min-h-12 items-center gap-2.5 rounded-md border border-line px-3 py-2 text-sm font-bold text-gold-300 hover:border-gold-400"
-          onClick={go}
-        >
-          <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center text-gold-300"
-            aria-hidden
-          >
-            <svg viewBox="0 0 24 24" width={28} height={28} fill="none" className="block">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-              <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M3.5 12h17" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M5.2 7.5h13.6M5.2 16.5h13.6" stroke="currentColor" strokeWidth="1.35" />
-            </svg>
-          </span>
-          <span className="leading-tight">
-            Global
-            <span className="block text-[0.62rem] font-semibold text-foreground/50">Every chain</span>
-          </span>
-        </Link>
-      </div>
-      <p className="mb-1.5 mt-3 text-[0.58rem] font-black uppercase tracking-wider text-foreground/45">Chains</p>
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-        {CHAINS.map((slug) => (
+        {GLOBAL_MARKET_ENABLED && (
           <Link
-            key={slug}
-            href={slug === "robinhood" ? "/market" : `/market/multichain?chains=${encodeURIComponent(slug)}`}
-            className="flex min-h-11 items-center gap-2 rounded-md border border-line px-2 py-1.5 text-left text-[0.7rem] font-bold text-foreground/80 hover:border-gold-400 hover:text-gold-300"
+            href="/market/multichain"
+            className="flex min-h-12 items-center gap-2.5 rounded-md border border-line px-3 py-2 text-sm font-bold text-gold-300 hover:border-gold-400"
             onClick={go}
           >
-            <ChainIcon chainSlug={slug} size={22} className="shrink-0" />
-            <span className="min-w-0 truncate">{chainDisplayName(slug)}</span>
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center text-gold-300"
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" width={28} height={28} fill="none" className="block">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+                <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M3.5 12h17" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M5.2 7.5h13.6M5.2 16.5h13.6" stroke="currentColor" strokeWidth="1.35" />
+              </svg>
+            </span>
+            <span className="leading-tight">
+              Global
+              <span className="block text-[0.62rem] font-semibold text-foreground/50">Every chain</span>
+            </span>
           </Link>
-        ))}
+        )}
       </div>
+      {/* Global multichain surface stays unlinked from nav until
+          GLOBAL_MARKET_ENABLED flips true -- RobinWood's own book is already
+          live and unaffected. See lib/constants.ts's header on the flag. */}
+      {GLOBAL_MARKET_ENABLED && (
+        <>
+          <p className="mb-1.5 mt-3 text-[0.58rem] font-black uppercase tracking-wider text-foreground/45">Chains</p>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {CHAINS.map((slug) => (
+              <Link
+                key={slug}
+                href={slug === "robinhood" ? "/market" : `/market/multichain?chains=${encodeURIComponent(slug)}`}
+                className="flex min-h-11 items-center gap-2 rounded-md border border-line px-2 py-1.5 text-left text-[0.7rem] font-bold text-foreground/80 hover:border-gold-400 hover:text-gold-300"
+                onClick={go}
+              >
+                <ChainIcon chainSlug={slug} size={22} className="shrink-0" />
+                <span className="min-w-0 truncate">{chainDisplayName(slug)}</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 

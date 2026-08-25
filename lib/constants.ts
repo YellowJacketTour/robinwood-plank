@@ -250,6 +250,19 @@ export const MARKET_ENABLED =
   process.env.NEXT_PUBLIC_MARKET_ENABLED?.trim().toLowerCase() === "true";
 
 /**
+ * The cross-chain "Global" market surface (/market/multichain and every
+ * chain it aggregates) -- a separate, HARD OFF by default switch from
+ * MARKET_ENABLED. RobinWood's own single-collection market can be (and, in
+ * production as of 2026-08-24, already is) live via MARKET_ENABLED while
+ * this stays false: "merge and prep the deploy, but don't unveil the global
+ * marketplace yet." Gates both the /market/multichain* pages and the
+ * MarketMenu nav's "Global"/per-chain links -- flip
+ * NEXT_PUBLIC_GLOBAL_MARKET_ENABLED=true only when ready to show it.
+ */
+export const GLOBAL_MARKET_ENABLED =
+  process.env.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED?.trim().toLowerCase() === "true";
+
+/**
  * Seaport 1.6's canonical CREATE2 deployment address — identical bytecode on
  * every EVM chain it's deployed to, byte-for-byte the same contract OpenSea,
  * Trail of Bits, and Code4rena audited. Confirmed live AND verified on
