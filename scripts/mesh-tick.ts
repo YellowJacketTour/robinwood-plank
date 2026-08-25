@@ -178,8 +178,29 @@ async function main(): Promise<void> {
       await recordLaneClaim(laneKey);
       console.log(`[mesh-tick] start ${job.jobKey}`);
       const code = await runLane(job.source, job.chainSlug, job.subject);
-      await finishDataJob(job, code === 0 ? undefined : `lane exited ${code}`);
-      await recordLaneOutcome(laneKey, code === 0);
+      // Exit code 2 is a real, deliberate "succeeded, but more real work
+      // remains" signal (see mesh-lane.ts's anchored-membership handler) --
+      // never a failure. finishDataJob first (its own unconditional status
+      // UPDATE, matched by id/lease_owner, must land before any re-enqueue
+      // or it would silently overwrite the re-enqueue's 'queued' status
+      // right back to 'succeeded'), then re-enqueue the identical job key
+      // so mesh-tick keeps picking this collection back up pass after pass
+      // until its own real completion signal (`done: true`) actually fires
+      // -- fixes a real bug live 2026-08-25: a bounded-window job that
+      // finished one slice and returned was marked terminally 'succeeded'
+      // and never claimed again, despite real remaining work.
+      const isPartial = code === 2;
+      await finishDataJob(job, code === 0 || isPartial ? undefined : `lane exited ${code}`);
+      if (isPartial) {
+        await enqueueDataJob({
+          jobKey: job.jobKey,
+          kind: job.kind,
+          source: job.source,
+          chainSlug: job.chainSlug,
+          subject: job.subject ?? null,
+        }).catch(() => {});
+      }
+      await recordLaneOutcome(laneKey, code === 0 || isPartial);
       console.log(`[mesh-tick] end ${job.jobKey} exit=${code}`);
     }
   }

@@ -57,6 +57,7 @@ import { decodeTransferLog, writeTransferLedgerEvents, type RawTransferLog, type
 import { writeCollectionCell, writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
+import { isHypersyncAccountJailed, jailHypersyncAccount, isHypersyncQuotaError } from "@/lib/market/multichain/discovery/hypersync-account-jail";
 
 const HYPERSYNC_EVM_PROVIDER_ACCOUNT = "hypersync-evm:default";
 /**
@@ -242,6 +243,15 @@ function hypersyncUrl(chainId: number): string {
 
 /** One real HyperSync call (getHeight or a query page) reserved/settled durably around it -- never reserves per logical scan, only per actual outbound request. */
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
+  // Real, shared, cross-lane circuit breaker (hypersync-account-jail.ts) --
+  // checked BEFORE this lane's own logical daily reservation, so a real
+  // Envio account-level 429 discovered by ANY hypersync lane (genesis-
+  // seaport-backfill, anchored-membership, priority-window, ...) is
+  // respected here immediately, instead of this lane needing its own
+  // independent failed call to find out the same real outage is ongoing.
+  if (await isHypersyncAccountJailed()) {
+    throw new Error("hypersync-evm-scan: real Envio account-level rate limit active (shared across all HyperSync lanes)");
+  }
   const window = utcDayWindow(HYPERSYNC_EVM_DAILY_ALLOWANCE);
   if (!(await reserveProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window))) {
     throw new Error("hypersync-evm-scan: durable daily ceiling");
@@ -254,8 +264,43 @@ async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
     return result;
   } catch (error) {
     if (!settled) await settleProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    const message = error instanceof Error ? error.message : String(error);
+    if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
     throw error;
   }
+}
+
+/**
+ * Real fix, 2026-08-25: contract-deploy-block.ts originally binary-searched
+ * eth_getCode across ~24 historical blocks via rpc-provider-pool.ts. Live
+ * testing found every free public RPC in that pool (publicnode, drpc)
+ * flatly REFUSES archive-state calls at an old block ("Archive requests
+ * require a personal token") -- confirmed live, not guessed -- so every
+ * single one of those 24 calls fell through to Alchemy alone, guaranteeing
+ * repeated real quota exhaustion for every contract this ever ran for.
+ * HyperSync is a wholly separate, address-indexed resource already proven
+ * fast for full-history log scans all night -- a single query filtered to
+ * this one contract's own address, from genesis, asking for just the
+ * first log, finds its real earliest Transfer (mint) block directly, with
+ * none of the Alchemy exposure above.
+ */
+export async function findEarliestTransferBlock(
+  chainSlug: string,
+  contractAddress: string
+): Promise<number | null> {
+  const chainId = EVM_CHAIN_ID[chainSlug];
+  if (!chainId) return null;
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+  const query: Query = {
+    fromBlock: 0,
+    logs: [{ address: [contractAddress], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    fieldSelection: { log: ["BlockNumber"] },
+    maxNumLogs: 1,
+  };
+  const res = await withHypersyncReservation(() => client.get(query));
+  const first = res.data.logs[0];
+  return first?.blockNumber ?? null;
 }
 
 /**

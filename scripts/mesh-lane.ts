@@ -177,6 +177,24 @@ async function main(): Promise<void> {
       const { runAnchoredMembershipBackfill } = await import("../lib/market/multichain/discovery/anchored-membership-backfill");
       const result = await runAnchoredMembershipBackfill(chain, subject);
       console.log("[mesh-lane] anchored-membership", JSON.stringify(result));
+      // Real bug found live 2026-08-25 ("stuck on 60.04 since coming
+      // back"): one call only advances a bounded slice of the real
+      // 300,000-block anchor window (Lil Pudgys' first real run moved
+      // exactly 387 blocks) -- `done` only goes true once the WHOLE
+      // window is walked. This is a one-off demand enqueue, not a
+      // standing MESH_LANES entry mesh-tick.ts re-queues every pass on
+      // its own, so a job that finishes one slice and returns was marked
+      // 'succeeded' and permanently dropped from the queue -- real,
+      // confirmed progress, then silence forever after.
+      //
+      // Exit code 2 (not a DB write here) signals "succeeded, but more
+      // real work remains" to mesh-tick.ts's worker loop, which re-enqueues
+      // the same job key AFTER finishDataJob's own unconditional status
+      // update -- doing the re-enqueue from inside THIS process instead
+      // would race finishDataJob's later UPDATE (matched by id/lease_owner,
+      // unconditional) and get silently overwritten back to 'succeeded'
+      // with no future pickup.
+      if (!result.done) process.exitCode = 2;
       return;
     }
     if (source === "coingecko-nft") {

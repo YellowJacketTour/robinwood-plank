@@ -38,9 +38,12 @@ export async function runAnchoredMembershipBackfill(
   contractAddress: string
 ): Promise<AnchoredBackfillResult> {
   const address = contractAddress.toLowerCase();
+  const deployBlock = await findContractDeployBlock(chainSlug, address);
+  if (deployBlock == null) {
+    throw new Error(`anchored-membership: no real Transfer activity found for ${chainSlug}:${address} -- nothing to anchor to yet`);
+  }
   const { result: heightHex } = await rpcCall<string>(chainSlug, "eth_blockNumber", []);
   const currentHeight = parseInt(heightHex, 16);
-  const deployBlock = await findContractDeployBlock(chainSlug, address, currentHeight);
   const toBlockCeiling = Math.min(currentHeight, deployBlock + ANCHOR_WINDOW_BLOCKS);
 
   const scan = await runHypersyncPriorityWindowScan({
