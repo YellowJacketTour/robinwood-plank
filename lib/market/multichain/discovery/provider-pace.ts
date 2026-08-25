@@ -40,9 +40,29 @@ export type PaceProfile = {
 };
 
 /** Real, live-reconfirmed provider pace profiles. Empty entries are
- * deliberately absent rather than filled with an unverified guess. */
+ * deliberately absent rather than filled with an unverified guess.
+ *
+ * Helius entries independently reconfirmed 2026-08-26 by direct fetch of
+ * helius.dev/docs/billing/rate-limits (Free plan): RPC 10 req/s, DAS &
+ * Enhanced APIs 2 req/s, getProgramAccounts 5 req/s -- matches this app's
+ * own prior finding cited in helius-key-pool.ts's header (2026-08-23,
+ * "Free 2 RPS / Developer 10 RPS..." for DAS specifically). Only
+ * "helius-rpc" is wired to a real caller today (helius-transfer-scan.ts's
+ * getSignaturesForAddress, a plain RPC method, not DAS or GPA) -- the
+ * other two are registered for when a real DAS/GPA caller exists, not
+ * gating anything yet.
+ *
+ * Alchemy's real number (300 CU/s, token-bucket, 10s rolling window, up
+ * to 3,000 CU burst -- confirmed live 2026-08-26 via alchemy.com/docs/
+ * reference/throughput) is NOT registered here: this module only
+ * implements the min_interval_ms mode, and a flat minimum-spacing pace
+ * would misrepresent a real token-bucket/burst-capacity limit (undercounts
+ * real available burst headroom). Needs its own token_bucket mode, built
+ * and DB-verified the same way min_interval_ms was, not approximated.
+ */
 export const PROVIDER_PACE_PROFILES: Record<string, PaceProfile> = {
   "opensea-stats": { minIntervalMs: 6_200 },
+  "helius-rpc": { minIntervalMs: 110 }, // 10 req/s + small safety margin
 };
 
 /**
