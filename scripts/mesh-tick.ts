@@ -63,20 +63,78 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
   }
 }
 
-function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
-  if (LIGHT_SOURCES.has(source)) return runLightSourceInProcess(source, chain, subject);
+/**
+ * Hard ceiling on ANY single lane, light or spawned. Real root cause found
+ * live 2026-08-25: a light-source in-process call (evm-metadata:arb-mainnet)
+ * hung well past its own internal 45s "deadline" -- that deadline is only
+ * checked BETWEEN loop iterations inside runLightSourceInProcess, so one
+ * hung await inside a single iteration (a network call with no timeout of
+ * its own, several layers down) defeats it entirely. worker()'s sequential
+ * `await runLane(...)` had NO outer bound at all, so that one hang froze
+ * the whole single-threaded scheduler -- every other lane, including
+ * demand-priority live jobs for a collection someone is actively looking
+ * at, starves silently and indefinitely. Same exposure for a spawned lane
+ * whose child process wedges: `p.on("exit")` never fires without a kill.
+ * 90s is a real, deliberate margin above the light-source path's own 45s
+ * budget, not a guess -- large enough that a genuinely slow-but-progressing
+ * lane never gets killed mid-work, small enough that no lane can ever
+ * block the scheduler for more than one real "unit" of sequential delay.
+ */
+const LANE_TIMEOUT_MS = 90_000;
+
+function withTimeout(promise: Promise<number>, ms: number, label: string): Promise<number> {
   return new Promise((resolve) => {
-    const p = spawn(
-      process.execPath,
-      // The scheduler process is the environment boundary. Children inherit
-      // its production/local environment; hard-coding .env.local here made a
-      // correctly configured production tick fail before a lane could run.
-      ["--import", "tsx", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
-        ...(subject ? [`--subject=${subject}`] : [])],
-      { cwd: process.cwd(), stdio: "inherit", shell: false }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.error(`[mesh-tick] lane ${label} exceeded ${ms}ms -- treating as failed, unblocking scheduler`);
+      resolve(1);
+    }, ms);
+    promise.then(
+      (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(code);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(1);
+      }
     );
-    p.on("exit", (code) => resolve(code ?? 1));
   });
+}
+
+function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
+  const label = `${source}:${chain}`;
+  if (LIGHT_SOURCES.has(source)) return withTimeout(runLightSourceInProcess(source, chain, subject), LANE_TIMEOUT_MS, label);
+  return withTimeout(
+    new Promise((resolve) => {
+      const p = spawn(
+        process.execPath,
+        // The scheduler process is the environment boundary. Children inherit
+        // its production/local environment; hard-coding .env.local here made a
+        // correctly configured production tick fail before a lane could run.
+        ["--import", "tsx", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
+          ...(subject ? [`--subject=${subject}`] : [])],
+        { cwd: process.cwd(), stdio: "inherit", shell: false }
+      );
+      let killed = false;
+      const timer = setTimeout(() => {
+        killed = true;
+        p.kill("SIGKILL");
+      }, LANE_TIMEOUT_MS - 1_000);
+      p.on("exit", (code) => {
+        clearTimeout(timer);
+        resolve(killed ? 1 : code ?? 1);
+      });
+    }),
+    LANE_TIMEOUT_MS,
+    label
+  );
 }
 
 async function main(): Promise<void> {

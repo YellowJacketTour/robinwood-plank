@@ -161,6 +161,24 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
       return;
     }
+    if (source === "anchored-membership") {
+      // Real fix, 2026-08-25 ("if we have ability to track any collections
+      // mint then we should auto detect that and anchor it as that
+      // collections provenance trail seed... no need to work through
+      // blocks it cant physically exist in"): for a collection whose own
+      // OpenSea enumeration has provably plateaued (its /nfts pagination
+      // looping over already-seen tokens -- Lil Pudgys confirmed live),
+      // this walks HyperSync starting at the contract's REAL deployment
+      // block (binary-searched via eth_getCode, cached forever) instead of
+      // the blind shared 12M-15.5M "boom era" window that includes every
+      // block the contract provably could not exist in yet. subject must
+      // be a real 0x contract -- this is never a background-sweep source.
+      if (!/^0x[0-9a-f]{40}$/i.test(subject)) throw new Error("anchored-membership requires a real contract subject");
+      const { runAnchoredMembershipBackfill } = await import("../lib/market/multichain/discovery/anchored-membership-backfill");
+      const result = await runAnchoredMembershipBackfill(chain, subject);
+      console.log("[mesh-lane] anchored-membership", JSON.stringify(result));
+      return;
+    }
     if (source === "coingecko-nft") {
       const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
       console.log("[mesh-lane] cg", JSON.stringify(await runCoinGeckoNftStats(chain, 15)));
