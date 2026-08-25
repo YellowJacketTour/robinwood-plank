@@ -488,22 +488,33 @@ export async function getArchivalStatsBatch(
  * wired up but the rankings route always sent jobProcessing as undefined,
  * so the chip could never actually light up there.
  */
+export type JobProcessingInfo = {
+  /** Real plank_data_jobs.source of whichever running job for this
+   * collection was seen first (a collection can have several concurrent
+   * job rows -- e.g. "opensea-membership" + "evm-metadata" -- this is a
+   * real one of them, not a synthesized composite). Never fabricated: this
+   * IS the same source enqueueDataJob/hydrationJobSources use to name real
+   * mesh-lane work. */
+  source: string;
+};
+
 export async function getJobProcessingBatch(
   pairs: Array<{ chainSlug: string; collectionKey: string }>
-): Promise<Map<string, boolean>> {
-  const out = new Map<string, boolean>();
+): Promise<Map<string, JobProcessingInfo>> {
+  const out = new Map<string, JobProcessingInfo>();
   if (pairs.length === 0) return out;
   const chainSlugs = pairs.map((p) => p.chainSlug);
   const normalizedKeys = pairs.map((p) => normalizeCollectionKey(p.collectionKey));
-  const result = await postgresQuery<{ chain_slug: string; subject: string }>(
-    `SELECT DISTINCT j.chain_slug, j.subject
+  const result = await postgresQuery<{ chain_slug: string; subject: string; source: string }>(
+    `SELECT DISTINCT ON (j.chain_slug, j.subject) j.chain_slug, j.subject, j.source
      FROM plank_data_jobs j
      JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
        ON j.chain_slug = want.chain_slug AND j.subject = want.collection_key
-     WHERE j.status = 'running'`,
+     WHERE j.status = 'running'
+     ORDER BY j.chain_slug, j.subject, j.priority DESC`,
     [chainSlugs, normalizedKeys]
-  ).catch(() => ({ rows: [] as Array<{ chain_slug: string; subject: string }> }));
-  for (const row of result.rows) out.set(`${row.chain_slug}:${row.subject}`, true);
+  ).catch(() => ({ rows: [] as Array<{ chain_slug: string; subject: string; source: string }> }));
+  for (const row of result.rows) out.set(`${row.chain_slug}:${row.subject}`, { source: row.source });
   return out;
 }
 

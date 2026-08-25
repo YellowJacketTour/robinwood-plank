@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const map = await getJobProcessingBatch(pairs);
-    const jobProcessing: Record<string, boolean> = {};
+    const jobProcessing: Record<string, { source: string }> = {};
     for (const [key, value] of map) jobProcessing[key] = value;
     return NextResponse.json({ jobProcessing }, { headers: { "Cache-Control": "no-store" } });
   } catch {

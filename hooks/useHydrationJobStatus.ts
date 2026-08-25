@@ -18,8 +18,10 @@ import { useEffect, useRef, useState } from "react";
 const POLL_MS = 8_000;
 const STATUS_URL = "/api/market/multichain/hydration-status";
 
-export function useHydrationJobStatus(composites: string[], enabled = true): Record<string, boolean> {
-  const [status, setStatus] = useState<Record<string, boolean>>({});
+export type JobProcessingInfo = { source: string };
+
+export function useHydrationJobStatus(composites: string[], enabled = true): Record<string, JobProcessingInfo> {
+  const [status, setStatus] = useState<Record<string, JobProcessingInfo>>({});
   const keysRef = useRef<string[]>(composites);
   keysRef.current = composites;
 
@@ -46,7 +48,7 @@ export function useHydrationJobStatus(composites: string[], enabled = true): Rec
           body: JSON.stringify({ pairs }),
         });
         if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { jobProcessing?: Record<string, boolean> };
+        const data = (await res.json()) as { jobProcessing?: Record<string, JobProcessingInfo> };
         if (!cancelled) setStatus(data.jobProcessing ?? {});
       } catch {
         // Best-effort live indicator only -- a dropped poll just means the
