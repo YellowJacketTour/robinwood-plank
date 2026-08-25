@@ -93,16 +93,44 @@ export const ALCHEMY_CU_COST: Record<string, number> = {
  * through together. Direct successor to opensea-key-pool.ts's
  * claimOpenSeaPaceSlot, generalized to any pacing key/interval.
  */
-export async function claimProviderPaceSlot(paceKey: string, minIntervalMs: number): Promise<boolean> {
+/**
+ * REAL, SEVERE bug found and fixed live 2026-08-26: the original version
+ * of this function had no ceiling on how far into the future
+ * `next_slot_at_ms` could drift. Under sustained real overload (this
+ * app's actual situation with a single OpenSea key serving every chain's
+ * opensea-membership + opensea-stats lanes at once, all sharing one
+ * account-wide pace key by design), EVERY claim attempt -- successful or
+ * not -- advances the shared slot by another full interval via
+ * `GREATEST(existing, now) + interval`. With real demand vastly exceeding
+ * real capacity, this compounds without bound: a caller from hours ago
+ * that never came back to redeem its reserved slot still permanently
+ * blocks every future caller behind it. Live-reproduced: this key's
+ * `next_slot_at_ms` had drifted to ~382 hours (15.9 DAYS) in the future,
+ * permanently denying every real claim regardless of priority -- a
+ * demand-priority "live" request for a specific, actively-viewed
+ * collection still failed 11 consecutive real attempts over several
+ * minutes before this was found.
+ *
+ * Fix: `next_slot_at_ms` is now hard-capped at `now + maxBacklogMs`
+ * (default 10x the interval). Once the real backlog reaches that ceiling,
+ * additional claims are denied immediately (fail fast) rather than
+ * reserving an ever-more-distant phantom slot -- under sustained
+ * overload, excess demand is dropped, not queued forever.
+ */
+export async function claimProviderPaceSlot(paceKey: string, minIntervalMs: number, maxBacklogMs?: number): Promise<boolean> {
   const nowMs = Date.now();
+  const backlogCeilingMs = maxBacklogMs ?? minIntervalMs * 10;
   const result = await postgresQuery<{ claimed_at: string }>(
     `INSERT INTO provider_pace_state (pace_key, next_slot_at_ms, updated_at)
      VALUES ($1, $2::bigint + $3::bigint, now())
      ON CONFLICT (pace_key) DO UPDATE SET
-       next_slot_at_ms = GREATEST(provider_pace_state.next_slot_at_ms, $2::bigint) + $3::bigint,
+       next_slot_at_ms = LEAST(
+         GREATEST(provider_pace_state.next_slot_at_ms, $2::bigint) + $3::bigint,
+         $2::bigint + $4::bigint
+       ),
        updated_at = now()
      RETURNING (next_slot_at_ms - $3::bigint)::text AS claimed_at`,
-    [paceKey, nowMs, minIntervalMs]
+    [paceKey, nowMs, minIntervalMs, backlogCeilingMs]
   );
   const claimedAt = Number(result.rows[0]?.claimed_at ?? nowMs);
   return claimedAt <= nowMs;
