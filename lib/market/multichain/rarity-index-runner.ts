@@ -26,6 +26,7 @@ import {
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata, resolveMetadataFromUri } from "@/lib/market/multichain/discovery/evm-token-metadata";
 import { batchReadTokenUris } from "@/lib/market/multichain/discovery/evm-multicall";
+import { needsBodyFetch, pointerFingerprint } from "@/lib/market/multichain/hash-first-hydrate";
 import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
 import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/multichain/archival-ledger";
 
@@ -350,23 +351,70 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   // resolveEvmTokenMetadata path below unchanged, which already retries
   // across every configured RPC URL and both selectors.
   const batchUriByKey = new Map<string, string>();
-  try {
-    const batched = await batchReadTokenUris(
-      rpcUrls[0],
-      work.map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }))
-    );
-    for (const r of batched) {
-      if (r.uri) batchUriByKey.set(`${r.contractAddress}:${r.tokenId}`, r.uri);
+  // Real bug found and fixed during live verification 2026-08-26: this
+  // only ever tried rpcUrls[0] (Alchemy), with no fallback -- when that
+  // key is exhausted (real, live, currently true: "Monthly capacity limit
+  // exceeded"), the whole batch pre-pass silently failed every round and
+  // every item fell through to the slower per-item path. Now tries each
+  // configured RPC URL in order, same resilience the per-item readUri
+  // path already has.
+  for (const rpcUrl of rpcUrls) {
+    try {
+      const batched = await batchReadTokenUris(
+        rpcUrl,
+        work.map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }))
+      );
+      for (const r of batched) {
+        if (r.uri) batchUriByKey.set(`${r.contractAddress}:${r.tokenId}`, r.uri);
+      }
+      break;
+    } catch {
+      // Try the next configured RPC URL; if every one fails, the per-item
+      // fallback path below covers this batch entirely on its own.
     }
-  } catch {
-    // Best-effort only -- the per-item fallback path covers this batch
-    // entirely on its own if the multicall itself fails.
   }
-  let complete = 0, empty = 0, retry = 0;
+  // Hash-First Multi-Source Hydration Doctrine (Grok findings, 2026-08-26):
+  // bulk-read each item's STORED pointer fingerprint (only ever set by a
+  // prior successful run of this same function, below) so an item being
+  // re-processed (e.g. reset to 'pending' by a real ERC-4906
+  // MetadataUpdate re-verification pass -- see onchain-metadata-
+  // reverify.ts) can skip the real IPFS/Arweave body fetch entirely when
+  // the on-chain pointer PROVABLY hasn't changed (content-addressing, not
+  // a guess -- see hash-first-hydrate.ts's own header).
+  const storedFpByKey = new Map<string, string>();
+  if (work.length > 0) {
+    const fpResult = await postgresQuery<{ collection_slug: string; token_id: string; pointer_fp: string }>(
+      `SELECT t.collection_slug, t.token_id, t.pointer_fp
+       FROM plank_collection_tokens t
+       JOIN UNNEST($2::text[], $3::text[]) AS want(collection_slug, token_id)
+         ON t.collection_slug = want.collection_slug AND t.token_id = want.token_id
+       WHERE t.chain_slug = $1 AND t.pointer_fp IS NOT NULL`,
+      [chainSlug, work.map((w) => w.collectionSlug), work.map((w) => w.tokenId)]
+    ).catch(() => ({ rows: [] as Array<{ collection_slug: string; token_id: string; pointer_fp: string }> }));
+    for (const row of fpResult.rows) storedFpByKey.set(`${row.collection_slug}:${row.token_id}`, row.pointer_fp);
+  }
+  let complete = 0, empty = 0, retry = 0, cidSkipped = 0;
   const errors: string[] = [];
   for (const item of work) {
     try {
-      const batchedUri = batchUriByKey.get(`${item.collectionSlug}:${item.tokenId}`);
+      const itemKey = `${item.collectionSlug}:${item.tokenId}`;
+      const batchedUri = batchUriByKey.get(itemKey);
+
+      if (batchedUri) {
+        const gate = needsBodyFetch(batchedUri, storedFpByKey.get(itemKey) ?? null);
+        if (!gate.fetch) {
+          // Real content-addressing proof the body is unchanged -- keep
+          // the existing row exactly as-is, just clear it out of the
+          // pending/retry work queue. Never a fabricated "nothing new"
+          // when we can't actually prove it (see needsBodyFetch's own
+          // honesty note on the weaker `http` pointer kind).
+          await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+          cidSkipped += 1;
+          complete += 1;
+          continue;
+        }
+      }
+
       const metadata = await (batchedUri
         ? resolveMetadataFromUri(batchedUri)
         : resolveEvmTokenMetadata({ rpcUrls, contractAddress: item.collectionSlug, tokenId: item.tokenId })
@@ -397,6 +445,18 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
         preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
       });
       await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+      // Store the real pointer fingerprint for a future re-verification
+      // pass to compare against -- only possible when we actually know the
+      // exact URI used (the Multicall3 batch path), never guessed for the
+      // per-token fallback path.
+      if (batchedUri) {
+        const { fp } = pointerFingerprint(batchedUri);
+        await postgresQuery(
+          `UPDATE plank_collection_tokens SET pointer_fp = $4, pointer_uri = $5
+           WHERE chain_slug = $1 AND collection_slug = $2 AND token_id = $3`,
+          [chainSlug, item.collectionSlug, item.tokenId, fp, batchedUri]
+        ).catch(() => {});
+      }
       await recordArchivalHydration(chainSlug, item.collectionSlug, { isNewToken: !wasAlreadyArchivedInBulk }).catch(() => {});
       complete += 1;
     } catch (error) {
@@ -438,7 +498,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
     });
     rarityFinalized += 1;
   }
-  return { attempted: work.length, complete, empty, retry, rarityFinalized, errors };
+  return { attempted: work.length, complete, empty, retry, rarityFinalized, cidSkipped, errors };
 }
 
 export async function advanceRobinhoodTokenMetadata(limit = 6) {

@@ -105,6 +105,11 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized }));
       return;
     }
+    if (source === "erc4906-rescan") {
+      const { runMetadataUpdateRescanBatch } = await import("../lib/market/multichain/discovery/erc4906-rescan");
+      console.log("[mesh-lane] erc4906-rescan", JSON.stringify(await runMetadataUpdateRescanBatch(chain, 5)));
+      return;
+    }
     if (source === "unisat-rarity") {
       const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
       console.log("[mesh-lane] unisat-rarity", JSON.stringify(await scaffoldAllTrackedBitcoinCollections({ limit: 1, delayMs: 0 })));

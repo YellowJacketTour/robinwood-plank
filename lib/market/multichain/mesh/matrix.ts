@@ -57,7 +57,8 @@ export type MeshSource =
   | "helius-membership"
   | "opensea-membership"
   | "cryptopunks-native"
-  | "archival-frontier";
+  | "archival-frontier"
+  | "erc4906-rescan";
 
 export type MeshLane = {
   id: string;
@@ -117,6 +118,14 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["image", "rarity"] as MeshCell[],
     sliceSec: 180,
     notes: "Bounded tokenURI then OpenSea per-token enrichment; completes trait coverage without request-path fan-out.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `erc4906-rescan:${chainSlug}`,
+    source: "erc4906-rescan" as const,
+    chainSlug,
+    cells: ["image", "rarity"] as MeshCell[],
+    sliceSec: 60,
+    notes: "Hash-First doctrine's real trigger: real ERC-4906 MetadataUpdate events reset exactly the affected tokens for re-verification; advanceEvmTokenMetadata's CID-skip then decides per-token whether a real body re-fetch is actually needed.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-discovery:${chainSlug}`,
