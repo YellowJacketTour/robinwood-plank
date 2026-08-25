@@ -547,7 +547,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
-        ttlMs: 30_000,
+        // Real bug found live 2026-08-25: this page's own load() is polled
+        // every 20s (see the setInterval below), but ttlMs here was 30s --
+        // LONGER than the poll interval, so most polls were guaranteed
+        // cache hits returning stale data with zero network call, not a
+        // "live" refresh at all. Archive-depth (and every other stat this
+        // fetch carries) must always reflect a real, current backend read
+        // on every poll tick for a live-time integrity product to mean
+        // anything. ttlMs now below the poll interval so every tick is a
+        // genuine fetch; swrMs left generous so a slow/failed request still
+        // shows the last real value instead of a loading flash.
+        ttlMs: 15_000,
         swrMs: 120_000,
         session: true,
       });
