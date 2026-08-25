@@ -456,7 +456,7 @@ export async function getArchivalStatsForCollection(
   collectionKey: string
 ): Promise<ArchivalApiShape | null> {
   const normalized = normalizeCollectionKey(collectionKey);
-  const [statsResult, jobResult, liveResult] = await Promise.all([
+  const [statsResult, jobResult, liveResult, maxIdResult] = await Promise.all([
     postgresQuery<RawArchivalStatsRow>(
       `SELECT chain_slug, collection_key, known_supply::text, tokens_ever_hydrated::text,
               archival_score::text, score_method, last_archived_at
@@ -486,16 +486,43 @@ export async function getArchivalStatsForCollection(
        WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
       [chainSlug, normalized]
     ).catch(() => ({ rows: [] as Array<{ projected_count: number }> })),
+    // Real bug found live 2026-08-25: a real, HyperSync-verified Transfer
+    // log for token id 22221 exists for a collection whose known_supply
+    // was recorded as 21929 -- confirmed genuine (corroborated by OpenSea's
+    // own record of the same token, real name and all), not a decode
+    // error. On-chain supply can grow (or simply be recorded wrong from
+    // day one) after known_supply is first captured; a stale, too-small
+    // known_supply silently CAPS the displayed score at 100% via
+    // scoreFromCounts' own Math.min(1, ...) long before real coverage is
+    // complete, hiding the truth instead of surfacing it. Real evidence
+    // (the actual max token id ever observed) can only ever prove
+    // known_supply was an UNDERcount, never an overcount, so this is a
+    // one-directional ratchet-up, matching the same "never fabricate,
+    // only correct toward more truth" discipline as the projected_count
+    // fix above.
+    postgresQuery<{ max_id: number | null }>(
+      `SELECT max(token_id::int) AS max_id FROM plank_collection_tokens
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id ~ '^[0-9]+$'`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [] as Array<{ max_id: number | null }> })),
   ]);
   const shape = toArchivalApiShape(statsResult.rows[0] ?? null);
   if (!shape) return null;
   const liveCount = liveResult.rows[0]?.projected_count ?? null;
   if (liveCount != null && (shape.tokensEverHydrated == null || liveCount > shape.tokensEverHydrated)) {
-    const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, liveCount);
     shape.tokensEverHydrated = liveCount;
-    shape.archivalScore = archivalScore;
-    shape.scoreMethod = scoreMethod;
   }
+  const observedMaxId = maxIdResult.rows[0]?.max_id ?? null;
+  if (observedMaxId != null && observedMaxId + 1 > (shape.knownSupply ?? 0)) {
+    shape.knownSupply = observedMaxId + 1;
+    await postgresQuery(
+      `UPDATE collection_archival_stats SET known_supply = $3 WHERE chain_slug = $1 AND collection_key = $2`,
+      [chainSlug, normalized, shape.knownSupply]
+    ).catch(() => {});
+  }
+  const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, shape.tokensEverHydrated ?? 0);
+  shape.archivalScore = archivalScore;
+  shape.scoreMethod = scoreMethod;
   return { ...shape, jobProcessing: jobResult.rows[0]?.exists === true };
 }
 
