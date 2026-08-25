@@ -200,7 +200,16 @@ export const MARKET_VENUES = [
       "hosted endpoint left to call at any tier, free or paid -- collections/inscriptions/holders are not " +
       "reachable either. OPI is a self-hosted indexer (you run your own Postgres+indexer against your own " +
       "Bitcoin node), not a free hosted API this app could call -- out of scope for a keyless/low-friction " +
-      "adapter of this repo's existing pattern. Remains planned, now for a stronger reason than before.",
+      "adapter of this repo's existing pattern. Remains planned, now for a stronger reason than before. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections Best in Slot used to cover MAY " +
+      "now be partially recoverable via bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "reads real, confirmed Bitcoin transactions from mempool.space's free public API for inscriptions this " +
+      "app already tracks and infers a real settlement price from the transaction's own vin/vout shape -- see " +
+      "that file's header and migration 062_bitcoin_onchain_settlements.sql. This is a distinct, honestly-" +
+      "labeled `source: \"onchain_settlement\"` heuristic (confidence-graded, sale-vs-transfer is NOT always " +
+      "certain -- see the file header), not a resurrection of Best in Slot's own aggregator/API, and it covers " +
+      "only inscriptions this app has already observed transfer at least once via unisat-transfer-scan.ts, not " +
+      "Best in Slot's full historical catalog.",
   },
   {
     id: "ordnet-bitcoin",
@@ -266,7 +275,14 @@ export const MARKET_VENUES = [
       "only; there is no API reference). Conclusion: same outcome as OKX in unisat-ordinals-trade.ts -- a real, evidenced blocker, " +
       "not a search-effort gap. Gamma may still be real and buildable, but needs direct contact with Gamma dev support or a " +
       "rendered-browser network capture of an authenticated/partner session before any code is written against it -- never scrape " +
-      "UI HTML into canonical evidence, and never guess at a private API's schema from memory.",
+      "UI HTML into canonical evidence, and never guess at a private API's schema from memory. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections Gamma lists MAY now be partially " +
+      "recoverable via the free, keyless bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "infers real settlement prices from mempool.space's public transaction data for inscriptions this app " +
+      "already tracks -- see that file's header and migration 062_bitcoin_onchain_settlements.sql. This is " +
+      "entirely distinct from, and does not unblock, Gamma's still-private live listings/order-book backend " +
+      "described above; it is labeled `source: \"onchain_settlement\"` and never presented as a Gamma-sourced " +
+      "number.",
   },
   {
     id: "ordzaar-bitcoin",
@@ -323,7 +339,15 @@ export const MARKET_VENUES = [
       "real key lets verifyOkxCredentials() (see okx-ordinals.ts) confirm the actual response field names " +
       "against live data; the parsing logic's defensive field-name fallbacks are unit-tested but not yet " +
       "cross-checked against a real 200 body. capabilities is listings-only (not sales) -- no sale/fill history " +
-      "endpoint has been found or verified in OKX's docs, only collection stats + active listings.",
+      "endpoint has been found or verified in OKX's docs, only collection stats + active listings. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections OKX lists MAY now be partially " +
+      "recoverable via the free, keyless bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "infers real settlement prices from mempool.space's public transaction data for inscriptions this app " +
+      "already tracks -- see that file's header and migration 062_bitcoin_onchain_settlements.sql. This is " +
+      "entirely distinct from, and does not unblock, OKX's still key-gated live listings API described above; " +
+      "it is labeled `source: \"onchain_settlement\"`, never `okx`, and cannot attribute a settlement to OKX " +
+      "specifically (an on-chain spend carries no marketplace identity) -- it only ever confirms that some " +
+      "real settlement happened for an inscription, wherever it was listed.",
   },
 ] as const satisfies readonly MarketVenue[];
 
