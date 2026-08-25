@@ -57,6 +57,7 @@ export type MeshSource =
   | "helius-membership"
   | "opensea-membership"
   | "anchored-membership"
+  | "token-index-probe"
   | "cryptopunks-native"
   | "archival-frontier"
   | "erc4906-rescan"

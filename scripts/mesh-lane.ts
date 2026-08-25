@@ -197,6 +197,25 @@ async function main(): Promise<void> {
       if (!result.done) process.exitCode = 2;
       return;
     }
+    if (source === "token-index-probe") {
+      // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
+      // then froze"): anchored-membership was confirmed NOT deadlocked,
+      // just genuinely slow closing the final gap because it must replay
+      // every real historical Transfer log, most of which are resales of
+      // already-known tokens -- see token-index-probe.ts's own header.
+      // ERC721Enumerable's tokenByIndex(i) reads the real token ID at
+      // each index directly from current contract state, exact and
+      // dramatically cheaper, once known_supply is chain-confirmed. Runs
+      // alongside anchored-membership rather than replacing it (some real
+      // contracts don't implement Enumerable -- this self-detects and
+      // no-ops for those, done=true on the very first call).
+      if (!/^0x[0-9a-f]{40}$/i.test(subject)) throw new Error("token-index-probe requires a real contract subject");
+      const { runTokenIndexProbe } = await import("../lib/market/multichain/discovery/token-index-probe");
+      const result = await runTokenIndexProbe(chain, subject);
+      console.log("[mesh-lane] token-index-probe", JSON.stringify(result));
+      if (!result.done) process.exitCode = 2;
+      return;
+    }
     if (source === "coingecko-nft") {
       const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
       console.log("[mesh-lane] cg", JSON.stringify(await runCoinGeckoNftStats(chain, 15)));
