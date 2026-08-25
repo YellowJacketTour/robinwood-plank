@@ -14,15 +14,6 @@ import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { findContractDeployBlock } from "@/lib/market/multichain/discovery/contract-deploy-block";
 import { runAddressScopedMembershipScan } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
 
-/**
- * Generous mint+early-secondary-market window past deployment -- most
- * collections fully mint out within days to a few weeks; 300,000 blocks
- * (~45 days at eth-mainnet's ~13s/block) covers a genuinely slow public
- * mint plus the immediate post-mint trading burst without still being a
- * blind multi-million-block walk.
- */
-const ANCHOR_WINDOW_BLOCKS = 300_000;
-
 export type AnchoredBackfillResult = {
   chainSlug: string;
   contractAddress: string;
@@ -44,7 +35,16 @@ export async function runAnchoredMembershipBackfill(
   }
   const { result: heightHex } = await rpcCall<string>(chainSlug, "eth_blockNumber", []);
   const currentHeight = parseInt(heightHex, 16);
-  const toBlockCeiling = Math.min(currentHeight, deployBlock + ANCHOR_WINDOW_BLOCKS);
+  // Real fix, 2026-08-25 ("this should reach 100% but has stopped"): a
+  // fixed 300,000-block window past deploy stopped a real, legitimate
+  // collection's own history 45 days short of full coverage -- every
+  // future call recomputed the SAME fixed ceiling and immediately reported
+  // done:true forever once reached, permanently freezing real, incomplete
+  // coverage. Address-scoped scanning is proven fast (118,787 real blocks
+  // in 33.5s live 2026-08-25) -- no need for an artificial cap that made
+  // sense for the old, unfiltered global scan but not this one. Walk all
+  // the way to the real current chain tip instead.
+  const toBlockCeiling = currentHeight;
 
   const scan = await runAddressScopedMembershipScan({
     chainSlug,
