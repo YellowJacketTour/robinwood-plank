@@ -44,8 +44,32 @@ import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/ja
  * day has room for ~172,800 requests -- this number is intentionally far
  * below that, so it will not itself cause OpenSea-side throttling; the
  * real protection remains the jail/circuit-breaker on 429s.
+ *
+ * CORRECTED AGAIN 2026-08-25, real bug live-reproduced this time (not
+ * guessed): the "~5 req/s" figure above is stale. `freshness-budget.ts`
+ * independently re-checked OpenSea's actual current free-tier docs
+ * (docs.opensea.io/reference/api-keys) while building the Freshness
+ * Budget Controller and found the real, current documented limit is
+ * "600 requests/hour" per key -- roughly 0.17 req/s, ~30x lower than
+ * this file's own "~5 req/s" assumption. That mismatch is the direct,
+ * confirmed cause of a real global opensea-membership/opensea-stats jail
+ * observed live 2026-08-25 (viewport-hydration demand + the newly-
+ * running mesh-tick supervisor together generated enough real request
+ * volume to blow through the true 600/hour ceiling in minutes, well
+ * before this 150,000/day figure would ever trip), which then blocked
+ * ALL chains' metadata/stats hydration for the cooldown period (the jail
+ * key has no chain suffix -- OpenSea's limit is account-wide, not
+ * per-chain). No hourly window primitive exists yet in control-plane.ts
+ * (only `utcDayWindow`) -- rather than build one under time pressure,
+ * this daily ceiling is corrected downward to match the real number
+ * (600/hour x 24 = 14,400/day) so the existing daily gate actually
+ * engages before the real vendor limit does, instead of after.
+ * TODO: a real `utcHourWindow` gate would still be the more precise fix
+ * (a burst early in the UTC day can still exceed 600/hour under this
+ * daily-only ceiling) -- not built here, flagged honestly instead of
+ * silently left as today's "5 req/s" fiction.
  */
-export const OPENSEA_STATS_DAILY_ALLOWANCE = 150_000;
+export const OPENSEA_STATS_DAILY_ALLOWANCE = 14_400;
 
 /** Composite circuit-breaker source string for one pool key. Requires zero changes to source-budget.ts / the jail logic there -- `source` is already treated as an opaque string. */
 export function openSeaKeySource(keyId: string): string {
