@@ -65,14 +65,31 @@ function nextUtcMonthStartMs(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
 }
 
-function jailAlchemyNftUntilMonthReset(): void {
+/**
+ * Real bug found live 2026-08-25 ("hunt for lessons-learned recurrences"):
+ * this only ever jailed the in-memory, per-process source-budget.ts state
+ * -- for a MONTHLY quota, that resets uselessly on every process restart
+ * (the same real HyperSync incident already fixed once tonight). Also
+ * updates the durable, SHARED alchemy-account jail (alchemy-account-
+ * jail.ts) every real Alchemy call site in this app now checks, so a real
+ * detected quota failure here is immediately visible to rpc-provider-
+ * pool.ts's own separate per-chain Alchemy usage too, instead of each
+ * silo needing its own independent failed call to find out.
+ */
+async function jailAlchemyNftUntilMonthReset(): Promise<void> {
   recordSourceFailure(ALCHEMY_NFT_SOURCE, true, Math.max(60_000, nextUtcMonthStartMs() - Date.now()));
+  const { jailAlchemyAccountUntilMonthReset } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  await jailAlchemyAccountUntilMonthReset().catch(() => {});
 }
 
-function assertAlchemyNftNotJailed(): void {
+async function assertAlchemyNftNotJailed(): Promise<void> {
   const gate = checkSourceBudget(ALCHEMY_NFT_SOURCE);
   if (!gate.allowed) {
     throw new Error(`alchemy-nft: jailed after HTTP 429 (monthly quota); skipping`);
+  }
+  const { isAlchemyAccountJailed } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  if (await isAlchemyAccountJailed()) {
+    throw new Error("alchemy-nft: real Alchemy account-level quota jail active (shared across all Alchemy call sites); skipping");
   }
 }
 
@@ -126,7 +143,7 @@ type AlchemyFloorPriceResponse = {
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
-  assertAlchemyNftNotJailed();
+  await assertAlchemyNftNotJailed();
   const { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } = await controlPlane();
   const window = utcDayWindow(ALCHEMY_NFT_DAILY_ALLOWANCE);
   if (!(await reserveProviderCapacity(ALCHEMY_NFT_PROVIDER_ACCOUNT, window))) {
@@ -140,7 +157,7 @@ async function fetchJson<T>(url: string): Promise<T> {
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       if (isAlchemyQuotaStatus(res.status, bodyText)) {
-        jailAlchemyNftUntilMonthReset();
+        await jailAlchemyNftUntilMonthReset();
       }
       throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching ${url}`);
     }
@@ -382,7 +399,7 @@ export async function fetchSnapshotsBatch(
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       if (isAlchemyQuotaStatus(res.status, bodyText)) {
-        jailAlchemyNftUntilMonthReset();
+        await jailAlchemyNftUntilMonthReset();
       }
       for (const [addr, snap] of await onchainFallbackSnapshots(chainSlug, chunk)) results.set(addr, snap);
       continue;

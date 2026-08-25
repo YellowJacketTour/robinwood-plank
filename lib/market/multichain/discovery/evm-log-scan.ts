@@ -487,6 +487,15 @@ export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> 
         // to the clean skip branch above instead of repeating this network
         // round trip once per chain, forever.
         recordSourceFailure(key.providerAccount, true, Math.max(60_000, nextUtcMonthStartMs() - Date.now()));
+        // Real bug found live 2026-08-25 ("hunt for lessons-learned
+        // recurrences"): this jails only THIS specific pool key -- a real
+        // third silo alongside alchemy-nft.ts's and rpc-provider-pool.ts's
+        // own separate Alchemy jails, all three of which can hit the exact
+        // same real account quota. Also set the shared, durable account
+        // jail so a real detected exhaustion here is immediately visible
+        // to those other two real call sites too.
+        const { jailAlchemyAccountUntilMonthReset } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+        await jailAlchemyAccountUntilMonthReset().catch(() => {});
       }
       results.push({
         chainSlug,
