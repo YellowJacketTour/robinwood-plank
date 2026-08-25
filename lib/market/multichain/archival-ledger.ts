@@ -27,6 +27,12 @@ import { enqueueDataJob } from "@/lib/market/multichain/control-plane";
 import { hydrationJobSources, DEMAND_PRIORITY } from "@/lib/market/multichain/collection-demand";
 import { getCollectionSupplyStats } from "@/lib/market/multichain/store";
 import { readTokenMetadataWork } from "@/lib/market/multichain/collection-token-store";
+import {
+  nextHydrateDelayMs,
+  ARCHIVAL_RECRAWL_BASE_TTL_MS,
+  ARCHIVAL_RECRAWL_MIN_TTL_MS,
+  ARCHIVAL_RECRAWL_MAX_TTL_MS,
+} from "@/lib/market/multichain/adaptive-recrawl";
 
 function normalizeCollectionKey(collectionKey: string): string {
   return /^0x[0-9a-f]{40}$/i.test(collectionKey) ? collectionKey.toLowerCase() : collectionKey;
@@ -169,18 +175,41 @@ export async function recordArchivalHydration(
   const now = new Date();
   const tokensDelta = opts?.isNewToken ? 1 : 0;
   const fillsDelta = opts?.isFill ? 1 : 0;
+  // Adaptive recrawl (Unified Mesh Continuum build item #4): honest binary
+  // change detection reusing this exact isNewToken/isFill signal -- no new
+  // fingerprinting, no invented volatility score. Read-then-compute-then-
+  // write (one extra round trip vs. folding the formula into SQL) so
+  // nextHydrateDelayMs stays the single real source of truth for the
+  // backoff curve instead of a second, driftable copy in SQL.
+  const changed = tokensDelta > 0 || fillsDelta > 0;
+  const priorResult = await postgresQuery<{ consecutive_unchanged: number }>(
+    `SELECT consecutive_unchanged FROM collection_archival_stats WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized]
+  );
+  const priorConsecutiveUnchanged = priorResult.rows[0]?.consecutive_unchanged ?? 0;
+  const consecutiveUnchanged = changed ? 0 : priorConsecutiveUnchanged + 1;
+  const delayMs = nextHydrateDelayMs({
+    baseTtlMs: ARCHIVAL_RECRAWL_BASE_TTL_MS,
+    minTtlMs: ARCHIVAL_RECRAWL_MIN_TTL_MS,
+    maxTtlMs: ARCHIVAL_RECRAWL_MAX_TTL_MS,
+    consecutiveUnchanged,
+    changed,
+  });
+  const nextDueAt = new Date(now.getTime() + delayMs);
   await postgresQuery(
     `INSERT INTO collection_archival_stats (
        chain_slug, collection_key, tokens_ever_hydrated, fills_ever_stored,
-       first_archived_at, last_archived_at, organic_hits
-     ) VALUES ($1, $2, $3, $4, $5, $5, 1)
+       first_archived_at, last_archived_at, organic_hits, consecutive_unchanged, next_due_at
+     ) VALUES ($1, $2, $3, $4, $5, $5, 1, $6, $7)
      ON CONFLICT (chain_slug, collection_key) DO UPDATE SET
        tokens_ever_hydrated = collection_archival_stats.tokens_ever_hydrated + $3,
        fills_ever_stored = collection_archival_stats.fills_ever_stored + $4,
        first_archived_at = COALESCE(collection_archival_stats.first_archived_at, $5),
        last_archived_at = $5,
-       organic_hits = collection_archival_stats.organic_hits + 1`,
-    [chainSlug, normalized, tokensDelta, fillsDelta, now]
+       organic_hits = collection_archival_stats.organic_hits + 1,
+       consecutive_unchanged = $6,
+       next_due_at = $7`,
+    [chainSlug, normalized, tokensDelta, fillsDelta, now, consecutiveUnchanged, nextDueAt]
   );
   await backfillKnownSupplyIfMissing(chainSlug, normalized);
   await computeArchivalScore(chainSlug, normalized);
@@ -312,8 +341,15 @@ export async function selectArchivalFrontierBatch(
 ): Promise<ArchivalFrontierCandidate[]> {
   const bounded = Math.min(Math.max(Math.trunc(limit), 1), 25);
   const result = await postgresQuery<{ chain_slug: string; collection_key: string }>(
+    // Adaptive recrawl (build item #4): a collection whose last real
+    // hydration found nothing new is backed off past next_due_at, freeing
+    // this cold-frontier lane's real budget for collections genuinely
+    // worth re-checking instead of repeatedly re-selecting one that just
+    // proved stable. NULL next_due_at (never hydrated at all) stays
+    // immediately eligible -- this never delays a collection's FIRST pass.
     `SELECT chain_slug, collection_key FROM collection_archival_stats
-     WHERE organic_hits = 0 OR archival_score IS NULL OR archival_score < $2
+     WHERE (organic_hits = 0 OR archival_score IS NULL OR archival_score < $2)
+       AND (next_due_at IS NULL OR next_due_at <= now())
      ORDER BY last_archived_at ASC NULLS FIRST, organic_hits ASC
      LIMIT $1`,
     [bounded, ARCHIVAL_FRONTIER_LOW_SCORE_THRESHOLD]

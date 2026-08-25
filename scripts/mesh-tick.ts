@@ -58,6 +58,7 @@ async function main(): Promise<void> {
   if (lanes.length === 0) return;
   const claimKinds = [...new Set(lanes.map((lane) => `mesh-lane:${lane.chainSlug}`))];
   async function worker(): Promise<void> {
+    const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
     while (true) {
       const job = await claimDataJob(claimKinds);
       if (!job) break;
@@ -65,9 +66,12 @@ async function main(): Promise<void> {
         await finishDataJob(job, "mesh lane has no chain slug");
         continue;
       }
+      const laneKey = `${job.source}:${job.chainSlug}`;
+      await recordLaneClaim(laneKey);
       console.log(`[mesh-tick] start ${job.jobKey}`);
       const code = await runLane(job.source, job.chainSlug, job.subject);
       await finishDataJob(job, code === 0 ? undefined : `lane exited ${code}`);
+      await recordLaneOutcome(laneKey, code === 0);
       console.log(`[mesh-tick] end ${job.jobKey} exit=${code}`);
     }
   }
