@@ -48,7 +48,7 @@ export async function fulfillMarketplankNativeOrder(
   /** TRAIT-criteria offers only -- the concrete token id + Merkle proof from assertAcceptableTraitOffer (lib/market/seaport.ts). Never construct ad hoc. */
   considerationCriteria?: InputCriteria[]
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
-  const res = await fetch(`/api/market/native-order?id=${encodeURIComponent(orderId)}&kind=${kind}`);
+  const res = await fetch(`/api/market/native-order?id=${encodeURIComponent(orderId)}&kind=${kind}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.message || `Could not load order ${orderId}.`);
@@ -77,7 +77,7 @@ export async function fulfillMarketplankNativeBundleOrder(
   chainSlug: string,
   bundleId: string
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
-  const res = await fetch(`/api/market/native-bundle-order?id=${encodeURIComponent(bundleId)}`);
+  const res = await fetch(`/api/market/native-bundle-order?id=${encodeURIComponent(bundleId)}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.message || `Could not load bundle ${bundleId}.`);
@@ -107,7 +107,7 @@ export async function fulfillMarketplankNativeSwapOrder(
   chainSlug: string,
   swapId: string
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
-  const res = await fetch(`/api/market/native-swap-order?id=${encodeURIComponent(swapId)}`);
+  const res = await fetch(`/api/market/native-swap-order?id=${encodeURIComponent(swapId)}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.message || `Could not load swap ${swapId}.`);
