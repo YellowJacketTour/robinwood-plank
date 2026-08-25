@@ -10,6 +10,14 @@ export type ArchivalDepthBarProps = {
   knownSupply?: number | null;
   /** Real event: score increased -- triggers fill emphasis once */
   pulseKey?: string | number | null;
+  /** Thin, label-less inline variant for a rankings row -- same real fill
+   * width + glow-on-update motion as the full detail-page bar, just sized
+   * to sit next to a collection name instead of stacking a whole section.
+   * Woven onto every row with a known score (2026-08-25, "live time motion
+   * and visual effect progress bar for any and all collections") so the
+   * whole rankings table reflects real backend hydration progress live,
+   * not just the one collection a visitor has open. */
+  compact?: boolean;
   className?: string;
 };
 
@@ -26,6 +34,7 @@ export function ArchivalDepthBar({
   tokensEverHydrated = null,
   knownSupply = null,
   pulseKey = null,
+  compact = false,
   className = "",
 }: ArchivalDepthBarProps) {
   const reduced = usePrefersReducedMotion();
@@ -40,6 +49,44 @@ export function ArchivalDepthBar({
       : tokensEverHydrated != null
         ? `Archive depth - ${tokensEverHydrated.toLocaleString()} tokens stored - supply unknown`
         : "Archive depth - not yet measured";
+
+  if (compact) {
+    // Nothing to show for a genuinely unmeasured collection -- never a
+    // fabricated empty bar implying 0% when the real answer is "unknown".
+    if (!known) return null;
+    return (
+      <span
+        className={["inline-flex h-1.5 w-10 shrink-0 items-center", className].join(" ")}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct ?? undefined}
+        aria-valuetext={summary}
+        aria-label={summary}
+        title={summary}
+      >
+        <span
+          className={[
+            "relative h-1 w-full overflow-hidden rounded-full",
+            "bg-[linear-gradient(180deg,#3d2412,#5c3a1e)]",
+          ].join(" ")}
+        >
+          <span
+            key={pulseKey ?? "fill"}
+            className={[
+              "absolute inset-y-0 left-0 rounded-full",
+              "bg-[linear-gradient(90deg,#c4a574,#8b5a2b)]",
+              !reduced ? "transition-[width] duration-700 ease-out" : "",
+              !reduced && pulseKey != null ? "animate-plank-glow" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      </span>
+    );
+  }
 
   return (
     <div className={["w-full", className].join(" ")}>
