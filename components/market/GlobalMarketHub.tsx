@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { computeDemandScore } from "@/lib/market/multichain/demand-score";
+import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
@@ -1628,6 +1629,18 @@ export default function GlobalMarketHub() {
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
 
+  // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
+  // viewport-predictive-hydration-2026-08-25.md): whatever the visitor is
+  // actually looking at right now (rankings rows, top-mover cards) gets
+  // first claim on limited free-tier mesh hydration. `pageOrder` is the
+  // full ranked order (composite chainSlug:contractAddress keys, capped)
+  // so the server can cheaply expand +/-2 rank neighbors of whatever's
+  // visible -- see useVisibleCollectionDemand's own header for why this
+  // never bypasses singleflight-cache/freshness-budget or calls a
+  // third-party provider directly.
+  const visibilityPageOrder = useMemo(() => ranked.slice(0, 200).map(key), [ranked]);
+  useVisibleCollectionDemand({ context: "rankings", pageOrder: visibilityPageOrder });
+
   const hydratedKey = useRef("");
   useEffect(() => {
     if (loading || rankings.length === 0) return;
@@ -1947,6 +1960,7 @@ export default function GlobalMarketHub() {
               return (
                 <Link
                   href={collectionHref(hero)}
+                  data-collection-key={key(hero)}
                   className="dense-card group relative flex min-h-[15rem] flex-col justify-end overflow-hidden p-0 transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold sm:min-h-[18rem]"
                 >
                   <div className="absolute inset-0">
@@ -2002,6 +2016,7 @@ export default function GlobalMarketHub() {
                   <Link
                     key={key(c)}
                     href={collectionHref(c)}
+                    data-collection-key={key(c)}
                     className="group relative flex min-h-[6.5rem] flex-col justify-end overflow-hidden rounded-lg border border-line transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold"
                   >
                     <div className="absolute inset-0">
@@ -2214,6 +2229,7 @@ export default function GlobalMarketHub() {
                   return (
                     <tr
                       key={rowKey}
+                      data-collection-key={rowKey}
                       className="row-enter border-b border-line/60 transition-colors last:border-0 hover:bg-foreground/5"
                       style={{ "--row-delay": `${Math.min(i, 12) * 20}ms` } as CSSProperties}
                     >

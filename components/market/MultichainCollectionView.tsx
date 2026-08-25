@@ -41,6 +41,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency, nativeCurrencySymbol } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -290,6 +291,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
+  // viewport-predictive-hydration-2026-08-25.md): reinforces this exact
+  // collection's own mesh priority while its page stays open/visible, on
+  // top of the one-shot prioritizeCollectionDemand call load() already
+  // fires on mount. This page has no separate "related collections" or
+  // "movers" rail today (only its OWN token grid, which isn't a set of
+  // OTHER collections) -- so unlike GlobalMarketHub's multi-row rankings
+  // table, there is exactly one composite key to observe here, attached to
+  // this component's own root element below.
+  useVisibleCollectionDemand({ context: "detail" });
 
   // SMART SEARCH / FILTER -- point-and-click, no page reload, applies
   // instantly to whatever is already loaded. Token-id search matches
@@ -1912,7 +1924,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const floorUsd = (weiStr: string | null): number | null => toUsd(weiStr, floorCurrencySymbol);
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
