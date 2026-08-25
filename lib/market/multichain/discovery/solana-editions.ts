@@ -92,8 +92,21 @@ const SOLANA_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
   "https://api.mainnet-beta.solana.com";
 
+// Same real fix as solana-metaplex-reads.ts's own header (2026-08-26):
+// @solana/web3.js's Connection has built-in retry-on-429 that bypasses this
+// app's own circuit breaker entirely -- disableRetryOnRateLimit fails fast
+// instead of paying its real ~7.5s worst-case per call, and jailOnRateLimit
+// below engages the shared circuit breaker so later calls in the same
+// batch skip fast too.
 function getConnection(): Connection {
-  return new Connection(SOLANA_RPC_URL, "confirmed");
+  return new Connection(SOLANA_RPC_URL, { commitment: "confirmed", disableRetryOnRateLimit: true });
+}
+
+async function jailOnRateLimit(error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/429|too many requests|rate limit/i.test(message)) return;
+  const { jailSource } = await import("@/lib/market/multichain/mesh/jail");
+  await jailSource("helius-solana", 20 * 60_000, true).catch(() => {});
 }
 
 /** Real, live Token Metadata program id -- same one used by every legacy Metaplex NFT on Solana. */
@@ -176,7 +189,8 @@ export async function readEditionInfo(mint: string): Promise<SolanaEditionInfo |
     }
 
     return null; // a real account exists at this PDA but isn't a recognized edition Key -- honest null, not a guess
-  } catch {
+  } catch (error) {
+    await jailOnRateLimit(error);
     return null;
   }
 }
@@ -248,7 +262,8 @@ export async function readMetaplexCoreAsset(assetAddress: string): Promise<Solan
     const uri = data.subarray(offset, offset + uriLen).toString("utf-8");
 
     return { owner, updateAuthority, name, uri };
-  } catch {
+  } catch (error) {
+    await jailOnRateLimit(error);
     return null;
   }
 }
