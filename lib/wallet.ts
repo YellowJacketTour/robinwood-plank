@@ -10,6 +10,7 @@ import {
 } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { getPreferredWalletProvider, isWalletConnectActive } from "@/lib/wallet-connect";
+import { FOREIGN_SEAPORT_ADDRESS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -266,6 +267,92 @@ export async function ensureRobinhoodChain(): Promise<void> {
         ? `Still on chain ${after}. In Rabby → Networks → Robinhood Chain (${CHAIN.id}). Then “I switched — continue” (no new QR).`
         : `Switch wallet network to Robinhood Chain (chain ${CHAIN.id}).`
     );
+  }
+}
+
+/**
+ * Metadata needed to prompt a wallet to add/switch to a chain it may not
+ * already know about — the EIP-3085 wallet_addEthereumChain shape, kept
+ * minimal to exactly what that call needs.
+ */
+export type ChainSwitchTarget = {
+  chainId: number;
+  name: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+};
+
+/**
+ * Generalized version of switchToRobinhoodChain/ensureRobinhoodChain, for
+ * ANY target chain -- parameterized rather than duplicated, reusing the
+ * exact same battle-tested WalletConnect-timeout + wallet_addEthereumChain
+ * fallback logic (this app has real, documented wallet quirks around chain
+ * switching; a naive from-scratch version for foreign chains would have
+ * silently regressed all of that). Additive: switchToRobinhoodChain and
+ * ensureRobinhoodChain above are untouched, still the Robinhood-Chain path.
+ */
+export async function ensureChain(target: ChainSwitchTarget): Promise<void> {
+  let id: number;
+  try {
+    id = await getChainId();
+  } catch {
+    throw new Error("Could not read wallet network. Close modal, reconnect once.");
+  }
+  if (id === target.chainId) return;
+
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const chainIdHex = `0x${target.chainId.toString(16)}`;
+
+  const switchReq = () =>
+    provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] });
+
+  const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+    Promise.race([
+      p,
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Network switch timed out")), ms)),
+    ]);
+
+  try {
+    await withTimeout(switchReq() as Promise<unknown>, isWalletConnectActive() ? 3000 : 12_000);
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    if (code === 4902 || code === -32603 || code === -32601) {
+      try {
+        await withTimeout(
+          provider.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: chainIdHex,
+                chainName: target.name,
+                nativeCurrency: { name: target.nativeCurrencySymbol, symbol: target.nativeCurrencySymbol, decimals: 18 },
+                rpcUrls: [target.rpcUrl],
+                blockExplorerUrls: [target.blockExplorerUrl],
+              },
+            ],
+          }) as Promise<unknown>,
+          isWalletConnectActive() ? 4000 : 15_000
+        );
+        await withTimeout(switchReq() as Promise<unknown>, 3000).catch(() => {});
+      } catch {
+        throw new Error(
+          isWalletConnectActive()
+            ? `Switch Rabby network to ${target.name} (chain ${target.chainId}), then retry.`
+            : `Add/switch to ${target.name} (chain ${target.chainId}) in your wallet, then retry.`
+        );
+      }
+    } else if (isWalletConnectActive()) {
+      throw new Error(`Switch Rabby network to ${target.name} (chain ${target.chainId}), then retry.`);
+    } else {
+      throw err;
+    }
+  }
+
+  const after = await getChainId();
+  if (after !== target.chainId) {
+    throw new Error(`Switch wallet network to ${target.name} (chain ${target.chainId}).`);
   }
 }
 
@@ -549,6 +636,56 @@ export function assertSafeSwapDestination(to: string, kind: string) {
 }
 
 /**
+ * assertSafeSwapDestination's foreign-chain sibling, for the Marketplank-
+ * native listing feature. NOT the same allowlist as MARKET_DESTINATIONS
+ * above -- that Set is a build-time constant of Robinhood-chain-only
+ * addresses (curated MARKET_COLLECTIONS, Robinhood's own Seaport/WETH), so
+ * a foreign collection's contract address would never be in it even though
+ * the transaction itself is entirely legitimate.
+ *
+ * Preserves the same security property (an explicit, small, contextually-
+ * justified allowlist -- never an open "any address goes"): the only
+ * destinations permitted for one foreign-chain market transaction are
+ * Seaport's canonical address (same on every chain), that chain's real
+ * offer currency (if this send is offer-related), and the ONE collection
+ * contract address the caller explicitly names for THIS listing/buy/
+ * approval -- passed in per-call by the caller, never read from a static,
+ * open-ended list, since foreign collections number in the thousands and
+ * are not curated the way MARKET_COLLECTIONS is.
+ */
+export function assertSafeForeignMarketDestination(
+  to: string,
+  chainSlug: string,
+  /**
+   * The collection contract(s) this action sequence is for. A single
+   * string for every existing single-collection flow (listing, offer,
+   * same-collection bundle); an array for a SWAP, which can span multiple
+   * distinct NFT contracts on both its offer and consideration sides (see
+   * lib/market/order-validation.ts's validateSwapOrder) -- each needs its
+   * own approval transaction reaching that SPECIFIC contract, not just
+   * "the one collection." Still an explicit, closed allowlist either way;
+   * widening to accept a set does not loosen what gets through, it only
+   * lets the set legitimately contain more than one real address.
+   */
+  contractAddress: string | string[]
+): void {
+  const lower = to.toLowerCase();
+  const contractAddresses = Array.isArray(contractAddress) ? contractAddress : [contractAddress];
+  const allowed = new Set([
+    FOREIGN_SEAPORT_ADDRESS.toLowerCase(),
+    ...contractAddresses.map((a) => a.toLowerCase()),
+  ]);
+  const offerCurrency = foreignOfferCurrency(chainSlug);
+  if (offerCurrency) allowed.add(offerCurrency.toLowerCase());
+  if (!allowed.has(lower)) {
+    throw new Error(
+      `Blocked unsafe foreign-chain marketplace target. Transactions for this listing only go to Seaport, ` +
+        `this chain's offer currency, or the collection contract(s) "${contractAddresses.join(", ")}" themselves.`
+    );
+  }
+}
+
+/**
  * Build + send a tx with RH-chain-aware gas.
  *
  * CRITICAL:
@@ -682,6 +819,133 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     }
   }
   throw new Error(humanizeTxError(lastMsg, kind));
+}
+
+export type SendForeignTxOpts = {
+  to: string;
+  from: string;
+  data: string;
+  value?: string;
+  chainSlug: string;
+  chainId: number;
+  chainName: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+  /** The collection contract(s) this transaction is for -- see assertSafeForeignMarketDestination's own doc comment on the single-vs-array distinction. */
+  contractAddress: string | string[];
+};
+
+/**
+ * sendTransaction's foreign-chain sibling, for the Marketplank-native
+ * listing feature (buildListing/buildOffer/fulfillOrder's approval and
+ * fulfillment broadcasts on a foreign EVM chain). Deliberately a SEPARATE
+ * function, not a chainSlug parameter added to sendTransaction: that
+ * function's `ensureRobinhoodChain()` + `isRobinhoodChainId` + the
+ * build-time MARKET_DESTINATIONS allowlist are all Robinhood-chain-specific
+ * by design (this app "never bridges to Ethereum" for its EXISTING flows,
+ * an intentional security property this function must not weaken) -- a
+ * missed/defaulted chain parameter on the original function would be a real
+ * way to accidentally widen what it accepts. Same gas-resolution/simulate/
+ * retry logic as sendTransaction, parameterized by the target chain instead
+ * of hardcoded to it.
+ */
+export async function sendForeignTransaction(tx: SendForeignTxOpts): Promise<string> {
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+
+  await ensureChain({
+    chainId: tx.chainId,
+    name: tx.chainName,
+    nativeCurrencySymbol: tx.nativeCurrencySymbol,
+    rpcUrl: tx.rpcUrl,
+    blockExplorerUrl: tx.blockExplorerUrl,
+  });
+  const chainId = await getChainId();
+  if (chainId !== tx.chainId) {
+    throw new Error(`Wrong network (chain ${chainId}). Switch to ${tx.chainName} (${tx.chainId}).`);
+  }
+
+  assertSafeForeignMarketDestination(tx.to, tx.chainSlug, tx.contractAddress);
+
+  const base: Record<string, string> = {
+    to: tx.to,
+    from: tx.from,
+    data: tx.data,
+  };
+  if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
+    const v = parseQuantity(tx.value);
+    if (v !== null && v > BigInt(0)) {
+      base.value = `0x${v.toString(16)}`;
+    } else if (
+      typeof tx.value === "string" &&
+      tx.value.startsWith("0x") &&
+      tx.value !== "0x" &&
+      tx.value !== "0x0"
+    ) {
+      base.value = tx.value;
+    }
+  }
+
+  // Same hard-fail-before-broadcast discipline as sendTransaction: simulate
+  // first, never send a tx that will revert. Market sends (listing
+  // approvals, fulfillment) always simulate here -- there is no bare
+  // "approve" fast path the way sendTransaction has, since a foreign
+  // approval is exactly as consequential as any other foreign market send.
+  const sim = await simulateTransaction({
+    to: base.to,
+    from: base.from,
+    data: base.data,
+    value: base.value,
+  });
+  if (!sim.ok) {
+    throw new Error(`${sim.message} — no tx was sent (your ETH is still in the wallet except prior gas).`);
+  }
+  let gasLimit = (sim.gasEstimate * BigInt(180)) / BigInt(100);
+  if (gasLimit < MIN_APPROVE_GAS) gasLimit = MIN_APPROVE_GAS;
+  if (gasLimit > BigInt(12_000_000)) gasLimit = BigInt(12_000_000);
+
+  const fees = await mergeFeeFields(provider, null, null, null);
+
+  // Re-assert chain immediately before broadcast (TOCTOU: user can switch
+  // networks after simulation).
+  const chainIdAgain = await getChainId();
+  if (chainIdAgain !== tx.chainId) {
+    throw new Error(`Wrong network (chain ${chainIdAgain}). Switch back to ${tx.chainName} before confirming.`);
+  }
+
+  const gasHex = `0x${gasLimit.toString(16)}`;
+  const attempts: Record<string, string>[] = [
+    { ...base, gas: gasHex, gasLimit: gasHex, ...fees },
+    { ...base, gas: gasHex, ...fees },
+  ];
+
+  let lastMsg = "Transaction rejected.";
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      return (await provider.request({
+        method: "eth_sendTransaction",
+        params: [attempts[i]],
+      })) as string;
+    } catch (err) {
+      const msg =
+        (err as { message?: string; shortMessage?: string })?.shortMessage ||
+        (err as { message?: string })?.message ||
+        "Transaction rejected.";
+      lastMsg = msg;
+      if (/user rejected|denied|4001/i.test(msg)) {
+        throw new Error("Transaction cancelled in wallet.");
+      }
+      if (
+        /TRANSFER_FAILED|insufficient funds|exceeds balance|allowance|TRANSFER_FROM|execution reverted|STF|Too little received|Too much requested|INSUFFICIENT/i.test(
+          msg
+        )
+      ) {
+        throw new Error(humanizeTxError(msg, "market"));
+      }
+    }
+  }
+  throw new Error(humanizeTxError(lastMsg, "market"));
 }
 
 function humanizeTxError(msg: string, kind: string): string {

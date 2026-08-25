@@ -82,6 +82,21 @@ function blobToSnapshot(b: CompactBlob): RaritySnapshot {
       traits: [],
     });
   }
+  // topRarest isn't persisted in CompactBlob (see its own comment), so it
+  // must be re-derived here on every KV read the same way computeRaritySnapshot
+  // builds it in lib/rarity.ts: one token per rank group, rarest (lowest
+  // rank) first, capped at 12. Found live 2026-08-19 -- this function
+  // previously hardcoded topRarest to [], which silently starved every
+  // caller of it (e.g. GlobalMarketHub's home-chain card art) on every
+  // request served from cache, i.e. almost all of them.
+  const topRarest: number[] = [];
+  const seenRanks = new Set<number>();
+  for (const r of [...byTokenId.values()].sort((a, c) => a.rank - c.rank)) {
+    if (seenRanks.has(r.rank)) continue;
+    seenRanks.add(r.rank);
+    topRarest.push(r.tokenId);
+    if (topRarest.length >= 12) break;
+  }
   return {
     sampleSize: b.sampleSize,
     scoredCount: b.scoredCount,
@@ -90,7 +105,7 @@ function blobToSnapshot(b: CompactBlob): RaritySnapshot {
     traitOrder: [],
     histogram: [],
     tierCounts,
-    topRarest: [],
+    topRarest,
     uniqueBases: 0,
     holoYes: 0,
     holoPct: 0,

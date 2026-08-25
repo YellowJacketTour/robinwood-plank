@@ -181,7 +181,17 @@ export async function ensureOpenSeaKey(): Promise<KeyEnsureResult> {
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (!stored) {
+    // Re-read rather than trusting the `stored` captured at the top of this
+    // function: if another process (another Passenger worker, another cron
+    // overlap) successfully wrote a real key while THIS call was in flight,
+    // `stored` here is stale-null even though a good key now exists. Writing
+    // the empty placeholder unconditionally on stale-null was a real bug --
+    // confirmed live 2026-08-17, two ensureOpenSeaKey() calls close together
+    // clobbered a just-issued valid key with this placeholder. Only seed the
+    // placeholder (so openSeaKeyStatus has something sane to report on a
+    // true first-ever failure) if a FRESH read still finds nothing.
+    const freshlyStored = await readStored();
+    if (!freshlyStored) {
       await writeStored({
         apiKey: "",
         expiresAt: new Date(0).toISOString(),
@@ -214,8 +224,16 @@ export async function openSeaKeyStatus(): Promise<{
  * GET an OpenSea endpoint. Returns null rather than throwing on any failure:
  * OpenSea being unreachable must never blank Marketplank's own numbers.
  */
-export async function openSeaGet<T>(path: string): Promise<T | null> {
-  const key = await getOpenSeaApiKey();
+/**
+ * `apiKeyOverride` is purely additive: omit it (every existing caller) and
+ * this is exactly the old single-key behavior. Live, user-facing routes
+ * (listings/route.ts) pass a key selected from the multi-key pool
+ * (opensea-key-pool.ts) here so interactive page loads land on the
+ * least-loaded real key instead of always the one `getOpenSeaApiKey()`
+ * returns.
+ */
+export async function openSeaGet<T>(path: string, apiKeyOverride?: string | null): Promise<T | null> {
+  const key = apiKeyOverride ?? (await getOpenSeaApiKey());
   if (!key) return null;
   try {
     const res = await fetch(`${BASE}${path}`, {
@@ -340,15 +358,89 @@ export type OpenSeaListing = {
 
 export async function fetchOpenSeaListings(
   slug: string,
-  limit = 50
+  limit = 50,
+  cursor?: string | null,
+  apiKeyOverride?: string | null
 ): Promise<{ listings?: OpenSeaListing[]; next?: string } | null> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("next", cursor);
   return openSeaGet(
-    `/listings/collection/${encodeURIComponent(slug)}/all?limit=${limit}`
+    `/listings/collection/${encodeURIComponent(slug)}/all?${params.toString()}`,
+    apiKeyOverride
   );
+}
+
+/**
+ * Walk the venue cursor instead of allowing one API page to redefine a
+ * collection's listed universe. The bound is a transport safety ceiling, not
+ * a claim of completeness: callers receive `complete: false` if it is hit.
+ */
+export async function fetchAllOpenSeaListings(
+  slug: string,
+  options?: { maxListings?: number; pageSize?: number; apiKeyOverride?: string | null }
+): Promise<{ listings: OpenSeaListing[]; complete: boolean }> {
+  const maxListings = Math.min(Math.max(options?.maxListings ?? 10_000, 1), 50_000);
+  const pageSize = Math.min(Math.max(options?.pageSize ?? 100, 1), 100);
+  const listings: OpenSeaListing[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await fetchOpenSeaListings(slug, Math.min(pageSize, maxListings - listings.length), cursor, options?.apiKeyOverride);
+    if (!page) return { listings, complete: false };
+    listings.push(...(page.listings ?? []));
+    const next = page.next?.trim() || null;
+    if (!next) return { listings: listings.slice(0, maxListings), complete: true };
+    if (seenCursors.has(next)) return { listings: listings.slice(0, maxListings), complete: false };
+    seenCursors.add(next);
+    cursor = next;
+  } while (listings.length < maxListings);
+  return { listings: listings.slice(0, maxListings), complete: false };
 }
 
 /** Cached, normalised OpenSea listings. No TTL — see migration 003. */
 export const OPENSEA_LISTINGS_KV = "plank:market:opensea-listings-v1";
+
+/**
+ * Per-collection last-known-good OpenSea book, keyed by OpenSea collection
+ * slug. Distinct from OPENSEA_LISTINGS_KV above, which is hardcoded to the
+ * single OPENSEA_COLLECTION_SLUG (Marketplank's own collection) — every
+ * OTHER Robinhood-Chain collection routed through fetchAllOpenSeaListings
+ * (see multichain/listings/route.ts) had no cache at all, so a single
+ * transient rate-limit/timeout mid-cursor-walk (increasingly likely with
+ * multiple background supervisors sharing the OpenSea key pool) zeroed the
+ * OpenSea contribution to that poll's merged book outright — even though a
+ * moment earlier a different request's walk succeeded. This is the fallback
+ * so a real complete walk's result survives one bad poll.
+ */
+function openSeaCollectionCacheKey(slug: string): string {
+  return `plank:market:opensea-listings-by-slug-v1:${slug}`;
+}
+
+/** Last real, complete OpenSea walk for this collection slug, if any. */
+export async function readCachedOpenSeaListingsForSlug(
+  slug: string
+): Promise<NormalisedOpenSeaListing[] | null> {
+  if (!hasDurableKv()) return null;
+  try {
+    const rows = await kv.get<NormalisedOpenSeaListing[]>(openSeaCollectionCacheKey(slug));
+    return rows ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a real, complete OpenSea walk for this collection slug for future incomplete-walk fallback. */
+export async function writeCachedOpenSeaListingsForSlug(
+  slug: string,
+  normalised: NormalisedOpenSeaListing[]
+): Promise<void> {
+  if (!hasDurableKv()) return;
+  try {
+    await kv.set(openSeaCollectionCacheKey(slug), normalised);
+  } catch {
+    /* best-effort; next complete walk retries */
+  }
+}
 
 /**
  * Alias of the shared foreign-listing shape (lib/market/foreign-listings.ts).
@@ -437,8 +529,8 @@ export async function readOpenSeaListings(): Promise<NormalisedOpenSeaListing[]>
  * nothing — an outage should shrink the visible market, not empty it.
  */
 export async function refreshOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
-  const page = await fetchOpenSeaListings(OPENSEA_COLLECTION_SLUG, 100);
-  if (!page?.listings?.length) return readOpenSeaListings();
+  const page = await fetchAllOpenSeaListings(OPENSEA_COLLECTION_SLUG);
+  if (!page.complete || !page.listings.length) return readOpenSeaListings();
   const normalised = normaliseOpenSeaListings(page.listings);
   if (normalised.length === 0) return readOpenSeaListings();
   if (hasDurableKv()) {

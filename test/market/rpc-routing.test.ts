@@ -127,3 +127,48 @@ test("a healthy-again URL is retried once its cooldown is respected by a fresh b
     restore();
   }
 });
+
+test("a monthly-quota error opens immediately but only one fallback call is spent", async () => {
+  clearRpcCache();
+  const exhausted = "https://fake-monthly-quota.test/rpc";
+  const healthy = "https://fake-monthly-fallback.test/rpc";
+  const hitCounts = new Map<string, number>();
+  const { restore } = installFetch(async (url) => {
+    hitCounts.set(url, (hitCounts.get(url) ?? 0) + 1);
+    if (url === exhausted) {
+      return new Response(JSON.stringify({ error: { code: -32000, message: "Monthly capacity limit exceeded" } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ result: "0xok" }), { status: 200 });
+  });
+  try {
+    await rpcCall("eth_call", [{ to: "0xquota", data: "0x01" }, "latest"], { urls: [exhausted, healthy] });
+    await rpcCall("eth_call", [{ to: "0xquota", data: "0x02" }, "latest"], { urls: [exhausted, healthy] });
+    assert.equal(hitCounts.get(exhausted), 1, "known exhausted capacity must not be probed for every request");
+    assert.equal(hitCounts.get(healthy), 2);
+  } finally {
+    restore();
+  }
+});
+
+test("an archive-log rejection does not exile a provider from head reads", async () => {
+  clearRpcCache();
+  const restricted = "https://fake-archive-restricted.test/rpc";
+  const fallback = "https://fake-archive-fallback.test/rpc";
+  const methods: string[] = [];
+  const { restore } = installFetch(async (url, init) => {
+    const method = (JSON.parse(String(init.body)) as { method: string }).method;
+    methods.push(`${url}:${method}`);
+    if (url === restricted && method === "eth_getLogs") {
+      return new Response(JSON.stringify({ error: { code: -32000, message: "Archive requests require a personal token" } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ result: method === "eth_getLogs" ? [] : "0x123" }), { status: 200 });
+  });
+  try {
+    await rpcCall("eth_getLogs", [{ fromBlock: "0x1", toBlock: "0x2" }], { urls: [restricted, fallback] });
+    const head = await rpcCall("eth_blockNumber", [], { urls: [restricted, fallback] });
+    assert.equal(head, "0x123");
+    assert.ok(methods.includes(`${restricted}:eth_blockNumber`), "method-specific log incompatibility must not block cheap head reads");
+  } finally {
+    restore();
+  }
+});

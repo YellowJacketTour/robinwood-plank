@@ -52,6 +52,59 @@ function rawGatewayUrl(uri: string, gateway: string): string {
   return `${gateway}${encoded}`;
 }
 
+/** Hosts that fail in-browser with ORB/CORS when loaded as raw <img>/next/image. Same-origin proxy only. */
+export const ORB_PRONE_ART_HOSTS = new Set([
+  "ordinals.com",
+  "www.ordinals.com",
+  "static.unisat.io",
+  "next-cdn.unisat.space",
+  "we-assets.pinit.io",
+  // Sibling regional Pinit asset CDNs -- confirmed live 2026-08-24 via
+  // direct curl against real stored image_url rows: same shape as
+  // we-assets.pinit.io (real 200, real image/png, but NO
+  // access-control-allow-origin header), so any in-browser <img>/next/image
+  // load ORB-blocks identically. Affected ~140k plank_collection_tokens
+  // rows across many collections, not just one -- the root cause behind
+  // "almost every collection" showing perpetual "Art pending".
+  "na-assets.pinit.io",
+  "ap-assets.pinit.io",
+  "curved.pinit.io",
+  "coin-images.coingecko.com",
+  "creator-hub-prod.s3.us-east-2.amazonaws.com",
+  "turbo.ordinalswallet.com",
+  "media.ordinalswallet.com",
+  "cdn.ordinalswallet.com",
+  "ord-mirror.magiceden.dev",
+]);
+
+/**
+ * True only for URLs the /api/ipfs/image proxy's own SSRF allowlist will
+ * actually accept (mirrors app/api/ipfs/image/route.ts's ALLOWED_HOSTS).
+ * Used client-side to decide whether a raw http(s) URL is safe to route
+ * through resolveIpfsUrl: wrapping an arbitrary URL (e.g. an OpenSea/Alchemy
+ * CDN image on i.seadn.io, which loads fine directly) would just get a 400
+ * back from the proxy and turn a working image into a broken one. Only
+ * known public IPFS gateway hosts -- the ones actually seen to trip
+ * ERR_BLOCKED_BY_RESPONSE/ORB in a real browser -- get proxied; everything
+ * else is left as-is, unproxied, exactly like it renders today.
+ */
+export function isIpfsGatewayUrl(uri: string): boolean {
+  if (!uri) return false;
+  try {
+    const u = new URL(uri);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    const gatewayHosts = IPFS_GATEWAYS.map((g) => new URL(g).hostname.toLowerCase());
+    if (gatewayHosts.includes(host)) return true;
+    // CID subdomain gateways, e.g. bafy....ipfs.dweb.link
+    if (/\.ipfs\.(dweb\.link|nftstorage\.link|w3s\.link|4everland\.io)$/i.test(host)) return true;
+    if (ORB_PRONE_ART_HOSTS.has(host)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveIpfsUrl(
   uri: string,
   gateway: string = IPFS_GATEWAYS[0],
@@ -72,19 +125,55 @@ export function resolveIpfsUrl(
 }
 
 /**
- * Ask the image proxy for a width-tiered thumbnail (256 / 512 / 1024 — the
- * route rounds up and ignores anything else). Only applies to our own
+ * Ask the image proxy for a width-tiered thumbnail (256 / 512 / 1024 / 2048 — the
+ * route rounds up and ignores anything else). Hero uses 2048. Only applies to our own
  * /api/ipfs/image URLs; data: URIs, static assets, and raw URLs pass
  * through untouched. Full-res art in a ~200px grid cell was the single
  * biggest transfer cost on /market.
  */
+/**
+ * Real, confirmed upstream data bug (see alchemy-nft.ts's own
+ * cleanMetadataString for the live-verified source): some third-party NFT
+ * metadata carries the LITERAL 4-character string "null" instead of a real
+ * null for an image field. alchemy-nft.ts now sanitizes this at write time
+ * for newly-discovered collections, but this app already has real rows in
+ * Postgres from BEFORE that fix, and every OTHER image field this app
+ * reads (listing art, per-token art from OpenSea/Alchemy/Magic Eden
+ * responses) is a second real place the same poison can appear. Treated
+ * here, at the one shared "prepare a URL to hand to <Image>" chokepoint,
+ * so every caller's own `|| fallback` logic works correctly against it
+ * instead of every call site needing its own guard.
+ */
+function isPoisonedUrlString(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return trimmed === "" || trimmed === "null" || trimmed === "undefined";
+}
+
 export function withImageWidth(url: string | null | undefined, width: number): string {
-  if (!url) return url ?? "";
+  if (!url || isPoisonedUrlString(url)) return "";
   if (!url.startsWith("/api/ipfs/image?")) return url;
   // cv is a cache generation: responses are cached immutable for a year, so
   // when a resize bug ships broken bytes (cv=2 busted the SharedArrayBuffer
   // incident), bumping it re-keys every client cache at once.
-  return `${url}&w=${width}&cv=2`;
+  return `${url}&w=${width}&cv=3`;
+}
+
+/**
+ * Return the original media bytes for a single, focused artwork surface.
+ * Dense grids deliberately use `withImageWidth`, which turns animated files
+ * into a complete first-frame poster. Detail views use this helper so the one
+ * selected GIF/WebP may animate without making every off-screen card decode
+ * at once. Existing width/cache parameters are removed defensively because
+ * projected URLs can already contain a thumbnail variant.
+ */
+export function withOriginalMedia(url: string | null | undefined): string {
+  if (!url || isPoisonedUrlString(url)) return "";
+  if (!url.startsWith("/api/ipfs/image?")) return url;
+  const [path, rawQuery = ""] = url.split("?", 2);
+  const query = new URLSearchParams(rawQuery);
+  query.delete("w");
+  query.set("cv", "3");
+  return `${path}?${query.toString()}`;
 }
 
 export function ipfsGatewayCandidates(uri: string): string[] {
@@ -128,16 +217,33 @@ export type NftMetadata = {
   name?: string;
   description?: string;
   image?: string;
+  animation_url?: string;
+  animationUrl?: string;
+  media_type?: string;
   attributes?: NftAttribute[];
 };
+
+/** A browser-playable original URL for focused video/audio-backed NFT art. */
+export function resolveOriginalMediaUrl(uri: string | null | undefined): string {
+  if (!uri || isPoisonedUrlString(uri)) return "";
+  if (uri.startsWith("data:") || uri.startsWith("blob:")) return uri;
+  if (uri.startsWith("/api/ipfs/image?")) {
+    const query = new URLSearchParams(uri.split("?", 2)[1] ?? "");
+    return query.get("uri") ?? "";
+  }
+  if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+  return rawGatewayUrl(uri, IPFS_GATEWAYS[0]);
+}
 
 function isUsableMetadata(data: NftMetadata | null | undefined): data is NftMetadata {
   if (!data || typeof data !== "object") return false;
   const image = typeof data.image === "string" ? data.image.trim() : "";
+  const animation = typeof (data.animation_url ?? data.animationUrl) === "string"
+    ? (data.animation_url ?? data.animationUrl)!.trim() : "";
   const attrs = Array.isArray(data.attributes) ? data.attributes : [];
   const name = typeof data.name === "string" ? data.name.trim() : "";
   // Need at least image or traits — bare name is not enough
-  return Boolean(image || attrs.length > 0 || name);
+  return Boolean(image || animation || attrs.length > 0 || name);
 }
 
 async function fetchJsonFromUrl(

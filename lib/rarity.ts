@@ -198,15 +198,15 @@ export function tierGlow(tier: RarityTier): string {
   const c = tierColor(tier);
   switch (tier) {
     case "Legendary":
-      return `0 0 0 2px ${c}, 0 0 16px 3px ${c}80, 0 0 28px 6px ${c}40`;
+      return `0 0 0 1px ${c}99, 0 0 10px 1px ${c}55`;
     case "Epic":
-      return `0 0 0 1.5px ${c}, 0 0 10px 2px ${c}66`;
+      return `0 0 0 1px ${c}88, 0 0 8px 1px ${c}40`;
     case "Rare":
-      return `0 0 0 1.5px ${c}, 0 0 6px 1px ${c}4d`;
+      return `0 0 0 1px ${c}77, 0 0 6px 1px ${c}33`;
     case "Uncommon":
-      return `0 0 0 1px ${c}88`;
+      return `0 0 0 1px ${c}66, 0 0 4px 1px ${c}28`;
     default:
-      return `0 0 0 1px ${c}33`;
+      return `0 0 0 1px ${c}55`;
   }
 }
 
@@ -242,15 +242,12 @@ export function tierCardStyle(
 ): { backgroundImage?: string; borderColor?: string } & Record<string, string> {
   const c = tierColor(tier);
   const holoIntensity = { "--holo-intensity": String(tierHoloIntensity(tier)) };
-  if (tier === "Common") return holoIntensity;
+  if (tier === "Common") {
+    return { borderColor: `${c}66`, ...holoIntensity };
+  }
   return {
-    // backgroundImage, not the `background` shorthand: a card's own dark
-    // base color usually comes from a CSS class's `background-color` (or
-    // `background` shorthand), and this needs to layer a tint ON TOP of
-    // that, not replace it. Setting only backgroundImage inline leaves the
-    // class's background-color intact underneath.
-    backgroundImage: `linear-gradient(160deg, ${c}14, transparent 65%)`,
-    borderColor: `${c}40`,
+    backgroundImage: `linear-gradient(160deg, ${c}12, transparent 70%)`,
+    borderColor: `${c}88`,
     ...holoIntensity,
   };
 }
@@ -298,7 +295,7 @@ export function pickCanonicalTraits(
   return out;
 }
 
-function informationContent(frequency: number): number {
+export function informationContent(frequency: number): number {
   if (frequency <= 0) return 0;
   // bits
   return -Math.log2(frequency);

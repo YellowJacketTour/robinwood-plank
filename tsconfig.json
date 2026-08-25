@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
@@ -40,6 +40,14 @@
     "scripts/deploy-vault-v3.ts",
     "scripts/local-v3-setup.ts",
     "scripts/local-topup.ts",
-    "scripts/deploy-and-seed-v3.ts"
+    "scripts/deploy-and-seed-v3.ts",
+    "scripts/deploy-casino.ts",
+    "scripts/local-casino-setup.ts",
+    "scripts/local-crash-v2-setup.ts",
+    "scripts/local-derby-setup.ts",
+    "scripts/test-rig.ts",
+    "scripts/testnet-casino-setup.ts",
+    "scripts/verify-foreign-fee-router-fork.ts",
+    "types/ethers-contracts"
   ]
 }

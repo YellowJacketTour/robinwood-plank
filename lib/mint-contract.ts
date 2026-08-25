@@ -5,6 +5,11 @@ export const NFT_CONTRACT_ADDRESS =
   process.env.NEXT_PUBLIC_NFT_CONTRACT_ADDRESS ||
   "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156";
 
+/** Fixed RobinWood mint size — same figure MarketView uses for "Items". */
+export const ROBINWOOD_TOTAL_SUPPLY = 1542;
+
+export const ROBINWOOD_X_HANDLE = "RobinWoodPlank";
+
 export const ROBINHOOD_CHAIN_ID = 4663;
 export const ROBINHOOD_CHAIN_HEX_ID = "0x1237";
 

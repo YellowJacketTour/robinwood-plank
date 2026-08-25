@@ -47,10 +47,62 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Arbitrary NFT CDNs (OpenSea seadn, Magic Eden, Ordinals, IPFS gateways).
+  // ListingCard also marks remote art unoptimized; this keep next/image from
+  // crashing the whole collection page when a fallback uses collection.image.
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**.seadn.io" },
+      { protocol: "https", hostname: "i.seadn.io" },
+      { protocol: "https", hostname: "i2c.seadn.io" },
+      { protocol: "https", hostname: "openseauserdata.com" },
+      { protocol: "https", hostname: "**.openseauserdata.com" },
+      { protocol: "https", hostname: "img.seadn.io" },
+      { protocol: "https", hostname: "**.magiceden.dev" },
+      { protocol: "https", hostname: "**.magiceden.io" },
+      { protocol: "https", hostname: "arweave.net" },
+      { protocol: "https", hostname: "**.arweave.net" },
+      { protocol: "https", hostname: "ipfs.io" },
+      { protocol: "https", hostname: "**.ipfs.io" },
+      { protocol: "https", hostname: "nftstorage.link" },
+      { protocol: "https", hostname: "**.nftstorage.link" },
+      { protocol: "https", hostname: "ordinals.com" },
+      { protocol: "https", hostname: "www.ordinals.com" },
+      { protocol: "https", hostname: "turbo.ordinalswallet.com" },
+      { protocol: "https", hostname: "media.ordinalswallet.com" },
+      { protocol: "https", hostname: "cdn.ordinalswallet.com" },
+      { protocol: "https", hostname: "static.unisat.io" },
+      { protocol: "https", hostname: "next-cdn.unisat.space" },
+      { protocol: "https", hostname: "we-assets.pinit.io" },
+      { protocol: "https", hostname: "coin-images.coingecko.com" },
+      { protocol: "https", hostname: "www.miladymaker.net" },
+      { protocol: "https", hostname: "miladymaker.net" },
+      { protocol: "https", hostname: "ord-mirror.magiceden.dev" },
+      { protocol: "https", hostname: "creator-hub-prod.s3.us-east-2.amazonaws.com" },
+      { protocol: "https", hostname: "**.alchemy.com" },
+      { protocol: "https", hostname: "**.cloudinary.com" },
+      { protocol: "https", hostname: "lh3.googleusercontent.com" },
+    ],
+  },
   // Dev-only: the dev server rejects cross-origin requests by default, which
   // blocks sharing a local preview through a tunnel. Has no effect on
   // production builds — it only widens which origins `next dev` will answer.
-  allowedDevOrigins: ["*.trycloudflare.com"],
+  //
+  // REAL BUG FOUND AND FIXED 2026-08-23: "127.0.0.1" was missing here even
+  // though local dev/testing this whole session (launch scripts, health
+  // checks, this exact conversation's browser verification) hits the app
+  // via http://127.0.0.1:3800, not http://localhost:3800. Confirmed live:
+  // visiting via 127.0.0.1 silently hung every on-demand dynamic import()
+  // (e.g. MarketView.tsx's `await import("@/lib/market/swr-fetch")` inside
+  // its listings-refresh callback) forever with no error and no network
+  // request ever firing -- the real order-book API worked fine when called
+  // directly, and the exact same page worked perfectly via localhost:3800
+  // in the same browser session. This wasn't a code bug in any feature;
+  // it silently broke Buy & Sell (and anything else behind a dynamic
+  // import) for every 127.0.0.1 visitor. See the server's own emitted
+  // warning ("Blocked cross-origin request... add it to allowedDevOrigins")
+  // -- this is that exact fix, applied.
+  allowedDevOrigins: ["*.trycloudflare.com", "127.0.0.1", "localhost"],
   // Minimal, traced Node runtime for the InMotion Docker image.
   // OpenNext can still consume the normal build artifacts on its own branch.
   output: "standalone",
@@ -191,6 +243,40 @@ const nextConfig: NextConfig = {
             value: "public, max-age=10, s-maxage=30, stale-while-revalidate=120",
           },
         ],
+      },
+      // Precomputed by scripts/refresh-market-data.ts --multichain on the
+      // existing cron (lib/market/multichain/sync.ts), never live-fetched
+      // per request -- a 2-minute browser/CDN cache costs nothing and keeps
+      // this endpoint from ever becoming a per-visitor hit against Postgres,
+      // let alone the underlying rate-limited third-party NFT APIs.
+      {
+        source: "/api/market/multichain",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=120, s-maxage=300, stale-while-revalidate=600",
+          },
+        ],
+      },
+      {
+        source: "/api/market/multichain/collection",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=120, stale-while-revalidate=600" }],
+      },
+      {
+        source: "/api/market/multichain/feed",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=300, stale-while-revalidate=1800" }],
+      },
+      {
+        source: "/api/market/multichain/holder-count",
+        headers: [{ key: "Cache-Control", value: "public, max-age=60, s-maxage=600, stale-while-revalidate=3600" }],
+      },
+      {
+        source: "/api/market/multichain/rarity",
+        headers: [{ key: "Cache-Control", value: "public, max-age=30, s-maxage=300, stale-while-revalidate=3600" }],
+      },
+      {
+        source: "/api/market/multichain/trait-index",
+        headers: [{ key: "Cache-Control", value: "public, max-age=60, s-maxage=600, stale-while-revalidate=3600" }],
       },
       {
         source: "/api/ipfs/image",

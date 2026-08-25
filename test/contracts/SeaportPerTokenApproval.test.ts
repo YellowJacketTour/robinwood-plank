@@ -142,7 +142,11 @@ describe("Seaport 1.6 per-token approval fillability (REAL deployed bytecode)", 
     salt: bigint
   ) {
     const counter: bigint = await seaport.getCounter(offererAddr);
-    const now = Math.floor(Date.now() / 1000);
+    // EVM block.timestamp, not wall clock -- other test files advance the
+    // shared EVM clock via time.increaseTo, so a wall-clock deadline can
+    // land in the EVM's past and expire the order (Seaport InvalidTime).
+    const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+    const now = Number(latestBlock.timestamp);
     const parameters = {
       offerer: offererAddr,
       zone: ZERO_ADDRESS,
@@ -196,7 +200,11 @@ describe("Seaport 1.6 per-token approval fillability (REAL deployed bytecode)", 
     salt: bigint
   ) {
     const counter: bigint = await seaport.getCounter(offererAddr);
-    const now = Math.floor(Date.now() / 1000);
+    // EVM block.timestamp, not wall clock -- other test files advance the
+    // shared EVM clock via time.increaseTo, so a wall-clock deadline can
+    // land in the EVM's past and expire the order (Seaport InvalidTime).
+    const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+    const now = Number(latestBlock.timestamp);
     const parameters = {
       offerer: offererAddr,
       zone: ZERO_ADDRESS,

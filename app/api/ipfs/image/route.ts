@@ -32,7 +32,7 @@ const MAX_BYTES = 15 * 1024 * 1024; // sane ceiling — this collection's art is
  * immutable cache can't be exploded with arbitrary variant keys. Requests
  * round UP to the nearest tier (a 180px grid cell asks for 256).
  */
-const WIDTH_TIERS = [256, 512, 1024] as const;
+const WIDTH_TIERS = [256, 512, 1024, 2048] as const;
 
 function resolveWidthTier(raw: string | null): number | null {
   if (!raw) return null;
@@ -49,7 +49,9 @@ function resolveWidthTier(raw: string | null): number | null {
  * (e.g. the Cloudflare Worker runtime has no native binary), corrupt bytes,
  * unsupported format — returns null and the caller serves the original
  * bytes; a resize must never turn a working image into a 500.
- * GIFs are excluded upstream so animation survives.
+ * Animated inputs intentionally become a complete first-frame poster. Dense
+ * catalog surfaces must not download and decode dozens of full animations at
+ * once; the focused detail surface requests the original bytes without `w`.
  */
 async function tryResize(buf: ArrayBuffer, width: number): Promise<ArrayBuffer | null> {
   try {
@@ -94,6 +96,57 @@ export async function GET(req: Request) {
     "dweb.link",
     "4everland.io",
     "cloudflare-ipfs.com",
+    // Non-IPFS art CDNs that server-side resolveIpfsUrl() (lib/ipfs.ts) also
+    // wraps in this proxy unconditionally for any http(s) image URL -- this
+    // route is the one same-origin chokepoint for ALL third-party art, not
+    // only IPFS. Confirmed live 2026-08-19: real DB rows already stored as
+    // /api/ipfs/image?uri=https://arweave.net/... (Solana/Arweave-hosted
+    // art), .../ordinals.com/content/... (Bitcoin ordinal inscriptions),
+    // .../static.unisat.io and .../next-cdn.unisat.space (Unisat collection
+    // art), and .../we-assets.pinit.io (Bitcoin/Pinit-hosted art) were all
+    // 400ing here because their hosts weren't allowlisted -- turning working
+    // upstream art into a permanently broken image for every viewer, on
+    // every load, forever (unlike a raw-gateway CORS/ORB failure, there's no
+    // "load it directly instead" fallback once a value is stored proxied).
+    // img.reservoir.tools is deliberately NOT added: confirmed dead
+    // (ERR_NAME_NOT_RESOLVED, Reservoir shut down its public infra in 2025 —
+    // see defillama-nft.ts and GlobalMarketHub.tsx's own notes), so it's
+    // correctly left to fail closed to the placeholder instead of wasting a
+    // fetch on a host that can never resolve.
+    "arweave.net",
+    "ordinals.com",
+    "www.ordinals.com",
+    "static.unisat.io",
+    "next-cdn.unisat.space",
+    "we-assets.pinit.io",
+    // Sibling regional Pinit CDNs -- same ORB shape (200, image/png, no
+    // access-control-allow-origin) confirmed live 2026-08-24, see
+    // ORB_PRONE_ART_HOSTS in lib/ipfs.ts for the full finding.
+    "na-assets.pinit.io",
+    "ap-assets.pinit.io",
+    "curved.pinit.io",
+    "coin-images.coingecko.com",
+    "creator-hub-prod.s3.us-east-2.amazonaws.com",
+    "turbo.ordinalswallet.com",
+    "media.ordinalswallet.com",
+    "cdn.ordinalswallet.com",
+    "ord-mirror.magiceden.dev",
+    "www.miladymaker.net",
+    "miladymaker.net",
+  ]);
+  // Only the original path-style IPFS gateways require a literal "/ipfs/"
+  // segment in the path below. The non-IPFS CDN hosts added above serve
+  // content directly off the root path (e.g. arweave.net/<txid>,
+  // ordinals.com/content/<id>) and must NOT be held to that IPFS-specific
+  // shape.
+  const PATH_STYLE_IPFS_HOSTS = new Set([
+    "gateway.pinata.cloud",
+    "ipfs.io",
+    "nftstorage.link",
+    "w3s.link",
+    "dweb.link",
+    "4everland.io",
+    "cloudflare-ipfs.com",
   ]);
   function isAllowedHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
@@ -109,7 +162,7 @@ export async function GET(req: Request) {
       if (u.protocol !== "https:") return false;
       if (!isAllowedHost(u.hostname)) return false;
       // Path-style gateways need /ipfs/; subdomain style may not.
-      if (ALLOWED_HOSTS.has(u.hostname.toLowerCase()) && !u.pathname.includes("/ipfs/")) {
+      if (PATH_STYLE_IPFS_HOSTS.has(u.hostname.toLowerCase()) && !u.pathname.includes("/ipfs/")) {
         return false;
       }
       return true;
@@ -178,10 +231,11 @@ export async function GET(req: Request) {
           continue;
         }
       }
-      // Width-tiered thumbnail: full-res art in a 200px grid cell was tens
-      // of MB per page. Skip GIFs (resizing drops animation) and fall back
-      // to the original bytes on any resize failure.
-      if (widthTier && (ct === "image/png" || ct === "image/jpeg" || ct === "image/webp")) {
+      // Width-tiered poster: full-res art in a 200px grid cell was tens of MB
+      // per page. GIF/WebP animation is flattened to its complete first frame
+      // here on purpose; only the selected detail view requests original
+      // motion. This bounds both transfer and concurrent browser decoders.
+      if (widthTier && (ct === "image/png" || ct === "image/jpeg" || ct === "image/webp" || ct === "image/gif")) {
         const resized = await tryResize(buf, widthTier);
         if (resized) return cachedBinary(resized, "image/webp", "immutable");
       }

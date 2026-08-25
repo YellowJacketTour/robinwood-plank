@@ -12,6 +12,7 @@ import { useMemo, useRef, useState } from "react";
 import { parseEther } from "ethers";
 import {
   quoteBuy,
+  quoteEthForExactShares,
   quoteSell,
   quoteAddLiquidity,
   quoteRemoveLiquidity,
@@ -134,15 +135,32 @@ export default function V3SwapPanel({
       : snap.redeemFeeWei + snap.targetPremiumWei
     : BigInt(0);
   const cartTotal = feeEach * BigInt(cart.size);
+  const redeemQuantity = action === "redeem" ? (redeemMode === "random" ? 1 : cart.size) : 0;
+  const redeemSharesRequired = SHARE_UNIT * BigInt(redeemQuantity);
+  const redeemShareShortfall = snap && redeemSharesRequired > snap.shareBalance
+    ? redeemSharesRequired - snap.shareBalance
+    : BigInt(0);
+  const redeemTopUpWei = snap ? quoteEthForExactShares(redeemShareShortfall, snap) : null;
+  const redeemNativeFee = snap
+    ? (snap.redeemFeeWei + (redeemMode === "specific" ? snap.targetPremiumWei : BigInt(0))) * BigInt(redeemQuantity)
+    : BigInt(0);
 
   const submit = () => {
     if (!snap || !address) return;
-    if (action === "buy") return run(() => v3Buy(address, amtWei, snap, slipBps));
+    if (action === "buy") return run(() => v3Buy(address, amtWei, snap, slipBps, vaultAddress));
     if (action === "sell") return run(() => v3Sell(address, amtWei, snap, slipBps));
     if (action === "deposit") return run(() => v3DepositMany(address, cartIds, snap, vaultAddress));
     if (action === "redeem") {
-      if (redeemMode === "random") return run(() => v3RandomRedeem(address, snap, vaultAddress, setStatus));
-      return run(() => v3RedeemTargetMany(address, cartIds, snap, vaultAddress));
+      return run(async () => {
+        if (redeemShareShortfall > BigInt(0)) {
+          if (redeemTopUpWei == null) throw new Error("The vault pool cannot supply the missing shares right now.");
+          setStatus(`Buying ${formatUnits(redeemShareShortfall, 4)} missing shares…`);
+          await v3Buy(address, redeemTopUpWei, snap, 0, vaultAddress);
+          setStatus("Shares acquired. Confirm the redemption…");
+        }
+        if (redeemMode === "random") return v3RandomRedeem(address, snap, vaultAddress, setStatus);
+        return v3RedeemTargetMany(address, cartIds, snap, vaultAddress);
+      });
     }
     if (action === "lp" && lpMode === "add") return run(() => v3AddLiquidity(address, amtWei, snap, slipBps));
     if (action === "lp" && lpMode === "remove") return run(() => v3RemoveLiquidity(address, amtWei, snap, slipBps));
@@ -256,9 +274,26 @@ export default function V3SwapPanel({
                 redeemMode === m ? "bg-gold-500 text-[#261105]" : "text-cream-muted hover:text-cream"
               }`}
             >
-              {m === "random" ? `Random · ${snap ? formatUnits(snap.redeemFeeWei, 3) : "…"} Ξ` : `Specific · ${snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei, 3) : "…"} Ξ`}
+              {m === "random" ? "Random · 1 share" : "Specific · 1 share / NFT"}
             </button>
           ))}
+        </div>
+      )}
+
+      {action === "redeem" && snap && (
+        <div className="mt-3 rounded-xl border border-line bg-wood-950 p-3 text-[0.72rem] text-cream-muted">
+          <div className="flex justify-between"><span>Shares required</span><b className="tabular-nums text-cream">{formatUnits(redeemSharesRequired, 4)} vROBIN</b></div>
+          <div className="mt-1 flex justify-between"><span>Your shares</span><b className="tabular-nums text-cream">{formatUnits(snap.shareBalance, 4)} vROBIN</b></div>
+          <div className="mt-1 flex justify-between"><span>Native fee</span><b className="tabular-nums text-cream">{formatUnits(redeemNativeFee, 5)} Ξ</b></div>
+          {redeemShareShortfall > BigInt(0) && (
+            <div className="mt-2 rounded-lg border border-amber-400/35 bg-amber-500/10 px-2.5 py-2 text-amber-100">
+              Short {formatUnits(redeemShareShortfall, 4)} shares
+              {redeemTopUpWei != null
+                ? ` · instant top-up quote ${formatUnits(redeemTopUpWei, 6)} Ξ`
+                : " · insufficient pool depth for an automatic top-up"}
+              . Missing shares are bought only when you execute.
+            </div>
+          )}
         </div>
       )}
 
@@ -401,7 +436,11 @@ export default function V3SwapPanel({
               : action === "deposit"
                 ? cart.size ? `Deposit ${cart.size} plank${cart.size === 1 ? "" : "s"} · ${formatUnits(cartTotal, 4)} Ξ` : "Select planks to deposit"
                 : action === "redeem"
-                  ? redeemMode === "random" ? "Redeem a random plank" : cart.size ? `Redeem ${cart.size} plank${cart.size === 1 ? "" : "s"} · ${formatUnits(cartTotal, 4)} Ξ` : "Select planks to redeem"
+                  ? redeemMode === "random"
+                    ? redeemShareShortfall > BigInt(0) ? "Top up shares & redeem random plank" : "Redeem random plank · 1 share"
+                    : cart.size
+                      ? `${redeemShareShortfall > BigInt(0) ? "Top up & redeem" : "Redeem"} ${cart.size} plank${cart.size === 1 ? "" : "s"} · ${formatUnits(redeemSharesRequired, 2)} shares`
+                      : "Select planks to redeem"
                   : lpMode === "add" ? "Add liquidity" : "Remove liquidity"}
         </button>
       ) : (

@@ -25,6 +25,7 @@
 
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
+import { loadAlchemyKeyPool, reserveAlchemyKey, settleAlchemyKey, type AlchemyKeyPriority } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 
 /**
  * Alchemy's network slug for Robinhood Chain mainnet (chain 4663, an Arbitrum
@@ -33,24 +34,13 @@ import { fetchTokenInstances } from "@/lib/market/blockscout";
  */
 const DEFAULT_NETWORK = "robinhood-mainnet";
 
-function alchemyKey(): string | null {
-  const key = process.env.ALCHEMY_API_KEY?.trim();
-  return key && key.length > 0 ? key : null;
-}
-
 function alchemyNetwork(): string {
   return process.env.ALCHEMY_NETWORK?.trim() || DEFAULT_NETWORK;
 }
 
-/** True when a key is configured. Every caller must have a keyless fallback. */
+/** True when at least one real key (single ALCHEMY_API_KEY or the ALCHEMY_API_KEYS pool) is configured. Every caller must have a keyless fallback. */
 export function hasAlchemyNft(): boolean {
-  return alchemyKey() !== null;
-}
-
-function nftBaseUrl(): string | null {
-  const key = alchemyKey();
-  if (!key) return null;
-  return `https://${alchemyNetwork()}.g.alchemy.com/nft/v3/${key}`;
+  return loadAlchemyKeyPool().length > 0;
 }
 
 /**
@@ -65,20 +55,24 @@ type NftEndpoint =
   | "getNFTsForContract"
   | "getNFTMetadata";
 
+/** Reserves+settles a FRESH pool key on every call (not once per run), same real per-attempt behavior as OpenSea's/Helius's pools -- see alchemy-key-pool.ts's header for why this still has real value even though Alchemy's own capacity is account-wide, not per-key. */
 async function alchemyNftGet<T>(
   endpoint: NftEndpoint,
   params: Record<string, string>,
-  timeoutMs = 20_000
+  timeoutMs = 20_000,
+  priority: AlchemyKeyPriority = "live"
 ): Promise<T> {
-  const base = nftBaseUrl();
-  if (!base) throw new Error("ALCHEMY_API_KEY is not set");
+  const slot = await reserveAlchemyKey(1, { priority });
+  if (!slot) throw new Error("Alchemy NFT: no key available (pool exhausted/jailed, or ALCHEMY_API_KEY not set)");
 
+  const base = `https://${alchemyNetwork()}.g.alchemy.com/nft/v3/${slot.apiKey}`;
   const qs = new URLSearchParams(params).toString();
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   // Counted before the await: a call that times out or 429s is still billed.
   recordRpc(`alchemy_${endpoint}`);
+  let ok = false;
   try {
     const res = await fetch(`${base}/${endpoint}?${qs}`, {
       headers: { Accept: "application/json" },
@@ -86,9 +80,11 @@ async function alchemyNftGet<T>(
       cache: "no-store",
     });
     if (!res.ok) throw new Error(`Alchemy NFT ${endpoint} HTTP ${res.status}`);
+    ok = true;
     return (await res.json()) as T;
   } finally {
     clearTimeout(timer);
+    await settleAlchemyKey(slot, 1, ok);
   }
 }
 

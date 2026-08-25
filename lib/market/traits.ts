@@ -13,6 +13,7 @@ export type TraitIndexResponse = {
   totalSupply: number | null;
   scanned: number;
   /** traitType → value → token-id list; null until the scan completes. */
+  /** Verified token ids; may be partial while complete=false. */
   traits: Record<string, Record<string, string[]>> | null;
   /** Token id → verified collection rank; null if rarity data is unavailable. */
   rankings: Record<string, number> | null;

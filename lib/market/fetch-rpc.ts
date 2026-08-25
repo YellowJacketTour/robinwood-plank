@@ -11,6 +11,7 @@ import {
 } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
+import { foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -39,33 +40,61 @@ function vaultRpcUrls(): string[] {
  */
 const BREAKER_THRESHOLD = 3;
 const BREAKER_COOLDOWN_MS = 30_000;
-const breakerState = new Map<string, { failures: number; openUntil: number }>();
+const QUOTA_COOLDOWN_MS = 15 * 60_000;
+const breakerState = new Map<string, { failures: number; openUntil: number; latencyMs?: number }>();
 
-function recordUrlFailure(url: string): void {
-  const s = breakerState.get(url) ?? { failures: 0, openUntil: 0 };
+function breakerKey(url: string, method?: string): string {
+  // Archive/range rejection is method-specific. A provider that cannot serve
+  // historical logs may still be perfectly healthy for eth_call/head reads.
+  return method === "eth_getLogs" ? `${url}\u0000${method}` : url;
+}
+
+function recordUrlFailure(url: string, method?: string, message = ""): void {
+  const key = breakerKey(url, method);
+  const s = breakerState.get(key) ?? { failures: 0, openUntil: 0 };
   s.failures += 1;
-  if (s.failures >= BREAKER_THRESHOLD) {
+  if (/monthly capacity|quota exceeded|capacity limit/i.test(message)) {
+    s.openUntil = Date.now() + QUOTA_COOLDOWN_MS;
+  } else if (/archive requests|block range|range.*limit|too many blocks/i.test(message)) {
+    s.openUntil = Date.now() + QUOTA_COOLDOWN_MS;
+  } else if (s.failures >= BREAKER_THRESHOLD || /429|rate limit|too many requests/i.test(message)) {
     s.openUntil = Date.now() + BREAKER_COOLDOWN_MS;
   }
-  breakerState.set(url, s);
+  breakerState.set(key, s);
 }
 
-function recordUrlSuccess(url: string): void {
-  breakerState.set(url, { failures: 0, openUntil: 0 });
+function recordUrlSuccess(url: string, method?: string, latencyMs?: number): void {
+  const key = breakerKey(url, method);
+  const previous = breakerState.get(key);
+  const smoothed = latencyMs == null ? previous?.latencyMs : previous?.latencyMs == null
+    ? latencyMs
+    : Math.round(previous.latencyMs * 0.8 + latencyMs * 0.2);
+  breakerState.set(key, { failures: 0, openUntil: 0, latencyMs: smoothed });
 }
 
-function isUrlBreakerOpen(url: string): boolean {
-  const s = breakerState.get(url);
+function isUrlBreakerOpen(url: string, method?: string): boolean {
+  const s = breakerState.get(breakerKey(url, method));
   return Boolean(s && s.openUntil > Date.now());
 }
 
-/** Drop URLs whose breaker is currently open, unless that would leave nothing
- *  to try — an all-open list means every endpoint is currently believed dead,
- *  and attempting anyway (and possibly resetting a breaker on success) beats
- *  refusing to even try. */
-function availableUrls(urls: string[]): string[] {
-  const open = urls.filter((u) => !isUrlBreakerOpen(u));
-  return open.length > 0 ? open : urls;
+/** Drop URLs whose breaker is currently open. If every endpoint is open, probe
+ * only the one whose cooldown expires first; retrying the whole failed pool on
+ * every request would recreate the rate-limit storm the breaker prevents. */
+function availableUrls(urls: string[], method?: string): string[] {
+  const open = urls.filter((u) => !isUrlBreakerOpen(u, method));
+  const candidates = open.length > 0
+    ? open
+    : [...urls].sort((a, b) =>
+        (breakerState.get(breakerKey(a, method))?.openUntil ?? 0) -
+        (breakerState.get(breakerKey(b, method))?.openUntil ?? 0)
+      ).slice(0, 1);
+  // Preserve configured priority until observations exist; then prefer the
+  // faster healthy endpoint without parallel-racing and multiplying spend.
+  return candidates
+    .map((url, index) => ({ url, index, latency: breakerState.get(breakerKey(url, method))?.latencyMs }))
+    .sort((a, b) => a.latency == null && b.latency == null ? a.index - b.index
+      : a.latency == null ? 1 : b.latency == null ? -1 : a.latency - b.latency)
+    .map((entry) => entry.url);
 }
 
 async function postRpc(
@@ -79,6 +108,7 @@ async function postRpc(
   // Counted before the await: a call that times out or 429s is still billed.
   // Only the keyed provider bills — the public Robinhood endpoints are free.
   if (isMeteredRpcUrl(url)) recordRpc(method);
+  const startedAt = Date.now();
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -93,17 +123,19 @@ async function postRpc(
       cache: "no-store",
     });
     if (res.status === 429) {
-      recordUrlFailure(url);
+      recordUrlFailure(url, method, `HTTP 429`);
       return { error: { message: `HTTP 429 ${url}`, code: 429 } };
     }
     if (!res.ok) {
-      recordUrlFailure(url);
+      recordUrlFailure(url, method, `HTTP ${res.status}`);
       return { error: { message: `HTTP ${res.status} ${url}`, code: res.status } };
     }
-    recordUrlSuccess(url);
-    return (await res.json()) as RpcResult<unknown>;
+    const payload = (await res.json()) as RpcResult<unknown>;
+    if (payload.error) recordUrlFailure(url, method, payload.error.message ?? "RPC error");
+    else recordUrlSuccess(url, method, Date.now() - startedAt);
+    return payload;
   } catch (error) {
-    recordUrlFailure(url);
+    recordUrlFailure(url, method, error instanceof Error ? error.message : String(error));
     throw error;
   } finally {
     clearTimeout(timer);
@@ -131,7 +163,7 @@ async function rpcCallUncached<T = unknown>(
   // Prefer official RH RPC; Blockscout is last-resort and rate-limits hard.
   // availableUrls skips an endpoint whose breaker is open (repeated recent
   // 429s/failures) rather than burning another round-trip on it.
-  for (const url of availableUrls(opts?.urls ?? vaultRpcUrls())) {
+  for (const url of availableUrls(opts?.urls ?? vaultRpcUrls(), method)) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const data = await postRpc(url, method, params, timeoutMs);
@@ -183,7 +215,7 @@ export async function ethCallFree(to: string, data: string): Promise<string> {
   const params = [{ to, data }, "latest"];
   return withRpcCache("eth_call", params, async () => {
     const errors: string[] = [];
-    for (const url of availableUrls(FREE_RPC_URLS)) {
+    for (const url of availableUrls(FREE_RPC_URLS, "eth_call")) {
       try {
         const data_ = await postRpc(url, "eth_call", params, 8_000);
         if (data_.error) {
@@ -196,6 +228,78 @@ export async function ethCallFree(to: string, data: string): Promise<string> {
       }
     }
     throw new Error(`Free eth_call failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
+/**
+ * eth_call over a FOREIGN chain's free/keyed RPC (foreignRpcUrls), still
+ * cached and coalesced -- the chain-parameterized sibling of ethCallFree
+ * above, for the Marketplank-native foreign-chain listing feature's
+ * on-chain ownership check (a native listing must confirm the seller
+ * actually owns the token on the chain THEY'RE listing on, not Robinhood
+ * Chain). Deliberately a NEW function rather than adding a chainSlug
+ * parameter to ethCallFree/ethCall/rpcCall: those also serve Robinhood-chain
+ * vault reads that must never accidentally be pointed at the wrong chain by
+ * a missed/defaulted parameter -- see this file's own header on why
+ * vaultRpcUrls() stays hardcoded to SERVER_RPC_URLS.
+ */
+export async function ethCallForeignFree(chainSlug: string, to: string, data: string): Promise<string> {
+  // The real JSON-RPC wire params (sent to postRpc) MUST stay the clean
+  // [{to,data}, "latest"] shape -- injecting chainSlug there would leak into
+  // the actual eth_call request body. chainSlug is folded into the CACHE
+  // key only (cacheParams), via method: "eth_call" so cacheTtlMs's switch
+  // still matches its real "eth_call" case (LATEST_MS) instead of silently
+  // falling through to the unknown-method default of 0 (no caching at all)
+  // the way a synthetic method name like "eth_call:base-mainnet" would.
+  const wireParams = [{ to, data }, "latest"];
+  const cacheParams = [{ to, data, chainSlug }, "latest"];
+  return withRpcCache("eth_call", cacheParams, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(foreignRpcUrls(chainSlug), "eth_call")) {
+      try {
+        const data_ = await postRpc(url, "eth_call", wireParams, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Foreign eth_call (${chainSlug}) failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
+/**
+ * eth_getCode over a FOREIGN chain -- ethCallForeignFree's sibling, needed
+ * for lib/market/signature.ts's Rpc interface (its EIP-1271 contract-wallet
+ * check calls .getCode() to decide whether to do an ecrecover or an
+ * eth_call). Same cross-chain cache-collision fix as ethCallForeignFree:
+ * chainSlug rides in the cache-key params only, never the real wire request
+ * (an address existing as a contract on one chain but an EOA on another is
+ * a real, plausible collision this must not conflate -- getting this wrong
+ * for a SIGNATURE VERIFICATION read is a real security bug, not just a
+ * staleness one).
+ */
+export async function ethGetCodeForeignFree(chainSlug: string, address: string): Promise<string> {
+  const wireParams = [address, "latest"];
+  const cacheParams = [address, "latest", chainSlug];
+  return withRpcCache("eth_getCode", cacheParams, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(foreignRpcUrls(chainSlug), "eth_getCode")) {
+      try {
+        const data_ = await postRpc(url, "eth_getCode", wireParams, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Foreign eth_getCode (${chainSlug}) failed: ${errors.slice(-2).join(" | ")}`);
   });
 }
 
@@ -238,7 +342,7 @@ export async function ethCallMany(
     params: paramsFor(c),
   }));
 
-  for (const url of availableUrls(urls)) {
+  for (const url of availableUrls(urls, "eth_call")) {
     if (url.includes("blockscout.com")) continue; // no batches / rate limits
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);

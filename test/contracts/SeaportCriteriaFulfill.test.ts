@@ -138,7 +138,15 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
    * whose identifierOrCriteria is the trait snapshot's Merkle root. */
   async function signedTraitBid(salt: bigint) {
     const counter: bigint = await seaport.getCounter(bidderAddr);
-    const now = Math.floor(Date.now() / 1000);
+    // Base the order's endTime on the EVM's block.timestamp, NOT wall
+    // clock. Other test files advance the shared EVM clock via
+    // time.increaseTo (e.g. the airdrop/crash epoch-close jumps), so a
+    // wall-clock deadline could already be in the EVM's past by the time
+    // this suite runs -- which expired the order and reverted the fill,
+    // an order-dependent flake. Reading the chain's own clock makes this
+    // deadline correct regardless of how far prior tests advanced time.
+    const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+    const now = Number(latestBlock.timestamp);
     const parameters = {
       offerer: bidderAddr,
       zone: ZERO_ADDRESS,

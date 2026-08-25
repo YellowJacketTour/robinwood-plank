@@ -1,0 +1,85 @@
+#!/bin/bash
+# Single, idempotent entry point for every long-running local process this
+# repo needs (dev server + all 6 supervisor loops). REAL PROBLEM THIS FIXES:
+# every prior launch this session used a bare `nohup ... &` with no PID
+# tracking, so a re-launch after a crash/restart had no way to know whether
+# a previous instance was still alive -- risking either an orphaned zombie
+# process nobody kills, or (if launched twice) two copies of the same
+# supervisor racing on the same real API keys/DB rows. This script tracks
+# every process's real PID in a pidfile, checks real liveness (not just
+# file existence -- a stale pidfile from a crashed process must not block
+# a fresh launch) before starting anything, and never starts a second copy
+# of something already running.
+cd "$(dirname "$0")/.."
+PIDDIR="/c/tmp/plank-pids"
+mkdir -p "$PIDDIR" /c/tmp/plank-supervisor-logs
+
+is_alive() {
+  local pid="$1"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+launch_if_dead() {
+  local name="$1"
+  local cmd="$2"
+  local pidfile="$PIDDIR/$name.pid"
+  local log="/c/tmp/plank-supervisor-logs/$name.log"
+  if [ -f "$pidfile" ] && is_alive "$(cat "$pidfile")"; then
+    echo "[$name] already running (pid $(cat "$pidfile")), skipping"
+    return
+  fi
+  rm -f "$pidfile"
+  # REAL INCIDENT 2026-08-23: a plain `> "$log" 2>&1` redirect let one
+  # supervisor's log grow to 28.1 GB unattended, filling the drive to 8GB
+  # free. Every long-running process's output is now piped through
+  # _rotate-log.sh, which hard-caps each log at 50MB regardless of cause.
+  #
+  # REAL INCIDENT 2026-08-23 (part 2), found while wiring in new Solana DAS
+  # keys: `cmd | rotate-log.sh &` backgrounds the whole PIPELINE, and bash's
+  # `$!` after that only ever captures the PID of the pipeline's LAST stage
+  # (rotate-log.sh) -- a PIPE SIBLING of `bash -c "$cmd"`, not its parent.
+  # taskkill //T on that tracked PID therefore tree-kills only rotate-log.sh
+  # and its own descendants, never reaching the real supervisor loop or its
+  # tsx children at all. Confirmed live: 4 full overlapping generations of
+  # refresh-market-data.ts (going back to an 11:42 launch) were all still
+  # running simultaneously, every prior "stop and relaunch" this session
+  # having silently added one more on top instead of replacing the last.
+  # Fixed with `> >(...)` process substitution: this backgrounds ONLY
+  # `bash -c "$cmd"` under nohup (so $! is its real PID, correctly
+  # tree-killable), with rotate-log.sh living downstream of a pipe that
+  # closes -- and rotate-log.sh exits on EOF -- the moment the real process
+  # dies, so it never needs separate tracking.
+  nohup bash -c "$cmd" > >(bash scripts/_rotate-log.sh "$log" 50) 2>&1 &
+  local newpid=$!
+  disown
+  echo "$newpid" > "$pidfile"
+  echo "[$name] launched, pid $newpid"
+}
+
+# REAL BUG FIXED 2026-08-23: `next dev` forks through bash -> npx -> node ->
+# cmd.exe -> the real listening node.exe, so bash's own $! only ever
+# captures an intermediate wrapper PID that exits almost immediately once
+# it hands off -- is_alive() on that PID is always false a moment later,
+# so launch_if_dead's guard never actually worked for this one entry and
+# every re-run started a second real dev server, racing for the same port
+# (confirmed live: a second launch DID fire; the only reason it didn't
+# leave two live servers is the OS's own port-bind collision killed the
+# loser -- real luck, not a real guard). Checking the actual LISTENING
+# port instead of a PID is the correct, robust liveness check for this
+# specific process (unlike the bash supervisor loops below, which stay in
+# one long-lived `while true` process and are correctly PID-trackable).
+if netstat -ano 2>/dev/null | grep -q ":3800.*LISTENING"; then
+  echo "[devserver] already listening on 3800, skipping"
+else
+  nohup bash -c "npx next dev -p 3800" > >(bash scripts/_rotate-log.sh "/c/tmp/plank-supervisor-logs/devserver.log" 50) 2>&1 &
+  disown
+  echo "[devserver] launched (port-checked)"
+fi
+launch_if_dead "refresh-market-data-supervisor" "bash scripts/refresh-market-data-supervisor.sh"
+launch_if_dead "other-chains-discovery-supervisor" "bash scripts/other-chains-discovery-supervisor.sh"
+launch_if_dead "evm-hypersync-backfill-supervisor" "bash scripts/evm-hypersync-backfill-supervisor.sh"
+launch_if_dead "genesis-seaport-backfill-supervisor" "bash scripts/genesis-seaport-backfill-supervisor.sh"
+launch_if_dead "coingecko-nft-stats-sync-supervisor" "bash scripts/coingecko-nft-stats-sync-supervisor.sh"
+launch_if_dead "opensea-stats-sync-supervisor" "bash scripts/opensea-stats-sync-supervisor.sh"
+
+echo "=== all checks done ==="

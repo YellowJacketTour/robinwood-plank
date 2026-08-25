@@ -1,0 +1,125 @@
+/**
+ * Fulfills a Marketplank-native listing/offer on a foreign EVM chain --
+ * step 3 of the plan. Deliberately a SEPARATE file from foreign-fulfill.ts:
+ * that file's connectedRouter()/buyNow() is a DIFFERENT mechanism (fulfills
+ * a THIRD-PARTY OpenSea order via MarketplankForeignFeeRouter, an
+ * undeployed, out-of-scope contract -- every FOREIGN_FEE_ROUTER_ADDRESS
+ * entry is null). Mixing the two in one file risks a future edit
+ * accidentally routing a native fulfill through a router that doesn't
+ * exist. This path is the "plain, direct call to Seaport's canonical
+ * contract, no wrapper contract" one: fetch the raw signed order, switch
+ * chains, then call seaport.ts's now chain-parameterized fulfillOrder()
+ * directly -- no new fulfillment logic beyond what already exists for
+ * Robinhood Chain, just a different `chain` argument.
+ */
+import { fulfillOrder, type FulfillableOrder, type SeaportChain } from "@/lib/market/seaport";
+import type { InputCriteria } from "@opensea/seaport-js/lib/types";
+import {
+  FOREIGN_SEAPORT_ADDRESS,
+  chainDisplayName,
+  foreignChainByChainSlug,
+  foreignRpcUrls,
+} from "@/lib/market/multichain/trading/foreign-chain-registry";
+
+function seaportChainFor(chainSlug: string): SeaportChain {
+  const chain = foreignChainByChainSlug(chainSlug);
+  if (!chain) throw new Error(`native-fulfill: "${chainSlug}" is not a supported foreign chain.`);
+  return {
+    chainSlug,
+    chainId: chain.chainId,
+    chainName: chainDisplayName(chainSlug),
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
+    rpcUrl: foreignRpcUrls(chainSlug)[0],
+    blockExplorerUrl: chain.blockExplorerUrl,
+    seaportAddress: FOREIGN_SEAPORT_ADDRESS,
+  };
+}
+
+/**
+ * Fetches the real signed order by id (the same server-only proxy route
+ * Robinhood-chain fulfillment already uses -- native-order/route.ts is
+ * chain-agnostic by construction, see its own header) and fulfills it
+ * directly against Seaport on the target foreign chain.
+ */
+export async function fulfillMarketplankNativeOrder(
+  chainSlug: string,
+  orderId: string,
+  kind: "listing" | "offer",
+  /** TRAIT-criteria offers only -- the concrete token id + Merkle proof from assertAcceptableTraitOffer (lib/market/seaport.ts). Never construct ad hoc. */
+  considerationCriteria?: InputCriteria[]
+): Promise<{ order: unknown | null; txHashes: string[] }> {
+  const res = await fetch(`/api/market/native-order?id=${encodeURIComponent(orderId)}&kind=${kind}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `Could not load order ${orderId}.`);
+  }
+  const { rawOrder } = (await res.json()) as { rawOrder: FulfillableOrder };
+
+  const { getEthereumProvider } = await import("@/lib/wallet");
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const accountAddress = accounts[0];
+  if (!accountAddress) throw new Error("No connected account.");
+
+  return fulfillOrder(rawOrder, accountAddress, considerationCriteria, seaportChainFor(chainSlug));
+}
+
+/**
+ * Fulfills a Marketplank-native BUNDLE listing (roadmap item #7). Reuses
+ * fulfillOrder UNCHANGED -- Seaport's own fulfillOrder doesn't care how
+ * many offer items one order has, so a 2-item bundle and a 10-item one are
+ * fulfilled by the exact same call a single-item listing already uses.
+ * Only the raw-order source route differs (bundles live in their own
+ * table, see lib/market/bundle-orders-store.ts).
+ */
+export async function fulfillMarketplankNativeBundleOrder(
+  chainSlug: string,
+  bundleId: string
+): Promise<{ order: unknown | null; txHashes: string[] }> {
+  const res = await fetch(`/api/market/native-bundle-order?id=${encodeURIComponent(bundleId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `Could not load bundle ${bundleId}.`);
+  }
+  const { rawOrder } = (await res.json()) as { rawOrder: FulfillableOrder };
+
+  const { getEthereumProvider } = await import("@/lib/wallet");
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const accountAddress = accounts[0];
+  if (!accountAddress) throw new Error("No connected account.");
+
+  return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
+}
+
+/**
+ * Fulfills a Marketplank-native SWAP/OTC listing. Reuses fulfillOrder
+ * UNCHANGED, same reasoning as the bundle fulfillment above -- Seaport's
+ * fulfillOrder doesn't care how many offer/consideration items an order
+ * has or how many distinct contracts they span; seaport.ts's own
+ * erc721ContractsOf (see fulfillOrder's own implementation) already
+ * derives the FULL set of contracts a swap touches for the foreign-chain
+ * destination allowlist, so no swap-specific branching is needed here.
+ */
+export async function fulfillMarketplankNativeSwapOrder(
+  chainSlug: string,
+  swapId: string
+): Promise<{ order: unknown | null; txHashes: string[] }> {
+  const res = await fetch(`/api/market/native-swap-order?id=${encodeURIComponent(swapId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `Could not load swap ${swapId}.`);
+  }
+  const { rawOrder } = (await res.json()) as { rawOrder: FulfillableOrder };
+
+  const { getEthereumProvider } = await import("@/lib/wallet");
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const accountAddress = accounts[0];
+  if (!accountAddress) throw new Error("No connected account.");
+
+  return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
+}

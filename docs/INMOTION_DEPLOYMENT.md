@@ -594,6 +594,31 @@ tail -n 50 "$HOME/plank.tanggang.life/logs/market-refresh.log"
 Expect `[refresh] backend=postgres` — if it says anything else, the cron is not
 seeing the same storage the app reads, and its writes will be invisible.
 
+### Multichain convergence mesh (required)
+
+The refresh worker above maintains the original RobinWood snapshots. It does
+**not** replace the source-by-chain mesh that discovers and advances EVM,
+Robinhood community, Solana, and Bitcoin/Ordinals catalogs. Run the mesh on a
+separate non-overlapping lock; without this cron there is no unattended
+convergence guarantee and visitor demand jobs remain queued.
+
+```cron
+*/5 * * * * cd /home/CPANEL_USER/plank.tanggang.life/current && /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-mesh.lock /ABSOLUTE/NPX/BIN tsx --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production scripts/mesh-tick.ts --limit=6 >> /home/CPANEL_USER/plank.tanggang.life/logs/market-mesh.log 2>&1
+```
+
+The tick isolates every source × chain lane, inherits the scheduler's
+production environment, persists cursors/jobs in PostgreSQL, and skips jailed
+providers without erasing sourced cells. Verify both progress and failures:
+
+```bash
+tail -n 100 "$HOME/plank.tanggang.life/logs/market-mesh.log"
+```
+
+Expect `[mesh-tick] ... live lanes queued`, per-lane `start`/`end` records, and
+`pass done`. A cron entry is a liveness precondition, not proof of completeness:
+provider capability gaps remain visible as empty/stale cells and must never be
+converted to zero or synthetic data.
+
 ### RPC budget
 
 `GET /api/market/rpc-usage` reports outbound JSON-RPC calls and compute units

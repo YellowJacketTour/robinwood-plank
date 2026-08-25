@@ -59,7 +59,21 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
     let pinnedToken: bigint | null = null;
     let lastOpWasLpRemove = false;
     let k: bigint | null = null;
-    let counts = { lpAdd: 0, lpRemove: 0, buy: 0, sell: 0, redeem: 0, forfeit: 0 };
+    let counts = {
+      lpAdd: 0,
+      lpRemove: 0,
+      buy: 0,
+      sell: 0,
+      redeem: 0,
+      forfeit: 0,
+      depositMany: 0,
+      redeemMany: 0,
+    };
+    // Best-effort off-chain mirror of what's currently held, so depositMany /
+    // redeemTargetMany can build real batches instead of pure blind guesses.
+    // It's allowed to drift (e.g. we don't always know which token a random
+    // claim resolved to) — chain state via check() is the actual ground truth.
+    let heldTokens: number[] = [];
 
     const mintTo = async (who: any) => {
       const id = nextId++;
@@ -107,6 +121,7 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
     for (let i = 0; i < 6; i++) {
       const id = await mintTo(alice);
       await vault.connect(alice).deposit(id, { value: MINT_FEE });
+      heldTokens.push(id);
     }
     await vault.connect(alice).transfer(treasury.address, SHARE_UNIT * 3n);
     await vault.connect(treasury).seedShares(SHARE_UNIT * 3n, { value: ethers.parseEther("4") });
@@ -115,19 +130,25 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
 
     for (let step = 0; step < 140; step++) {
       const who = actors[Math.floor(rand() * actors.length)];
-      const op = Math.floor(rand() * 10);
+      const op = Math.floor(rand() * 12);
       lastOpWasLpRemove = false;
       try {
         if (op === 0) {
           const id = await mintTo(who);
           await vault.connect(who).deposit(id, { value: MINT_FEE });
+          heldTokens.push(id);
         } else if (op === 1) {
           await vault.connect(who).requestRandomRedeem({ value: REDEEM_FEE });
         } else if (op === 2) {
           if (rand() < 0.8) await relayPendingRound(vault, beacon, step);
           const r = await vault.pendingRequester();
+          const [isPinned, drawnTok] = await vault.pendingDraw();
           await vault.connect(who).claimRandomRedeemFor(r);
           counts.redeem++;
+          if (isPinned) {
+            const i = heldTokens.indexOf(Number(drawnTok));
+            if (i >= 0) heldTokens.splice(i, 1);
+          }
         } else if (op === 3) {
           await vault.connect(who).buyShares(0n, { value: ethers.parseEther("0.05") });
           counts.buy++;
@@ -161,8 +182,66 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
           const held: bigint = await vault.heldTokenCount();
           const target = 1 + Math.floor(rand() * Number(held === 0n ? 1n : held) * 2);
           await vault.connect(who).redeemTarget(target, { value: REDEEM_FEE + PREMIUM });
+          const ti = heldTokens.indexOf(target);
+          if (ti >= 0) heldTokens.splice(ti, 1);
         } else if (op === 8) {
           await vault.connect(who).withdrawFees();
+        } else if (op === 9) {
+          // depositMany — batch size varies across the full legal range,
+          // deliberately including sizes right at/near MAX_BATCH (50) and a
+          // few just over it (expected BadBatch revert).
+          const roll = rand();
+          let n: number;
+          if (roll < 0.15) n = 1 + Math.floor(rand() * 3); // 1-3
+          else if (roll < 0.7) n = 4 + Math.floor(rand() * 12); // 4-15
+          else if (roll < 0.92) n = 45 + Math.floor(rand() * 6); // 45-50
+          else n = 51 + Math.floor(rand() * 5); // 51-55, over MAX_BATCH
+          const ids: number[] = [];
+          for (let i = 0; i < n; i++) ids.push(await mintTo(who));
+          await vault.connect(who).depositMany(ids, { value: MINT_FEE * BigInt(n) });
+          heldTokens.push(...ids);
+          counts.depositMany++;
+        } else if (op === 10) {
+          // redeemTargetMany — batch-redeem N specific held tokens. Sometimes
+          // first put a pending pinned redeem in flight so the batch lands
+          // concurrently with (or right after) it, per the review's flagged
+          // untested interaction.
+          if (rand() < 0.35 && (await vault.pendingRequester()) === ethers.ZeroAddress) {
+            try {
+              const setupWho = actors[Math.floor(rand() * actors.length)];
+              await vault.connect(setupWho).requestRandomRedeem({ value: REDEEM_FEE });
+              if (rand() < 0.6) await relayPendingRound(vault, beacon, step);
+            } catch {
+              // Setup revert is fine — we still attempt the batch below.
+            }
+          }
+          const roll = rand();
+          let n: number;
+          if (roll < 0.2) n = 1 + Math.floor(rand() * 3); // 1-3
+          else if (roll < 0.75) n = 4 + Math.floor(rand() * 12); // 4-15
+          else if (roll < 0.94) n = 45 + Math.floor(rand() * 6); // 45-50
+          else n = 51 + Math.floor(rand() * 5); // 51-55, over MAX_BATCH
+          // Pull from what we believe is actually held; pad with guesses
+          // (same spirit as op 7) once the tracked pool runs dry — those
+          // guesses are expected to legitimately revert the whole batch.
+          const pool = [...heldTokens];
+          const ids: number[] = [];
+          for (let i = 0; i < n; i++) {
+            if (pool.length > 0) {
+              const idx = Math.floor(rand() * pool.length);
+              ids.push(pool.splice(idx, 1)[0]);
+            } else {
+              ids.push(1 + Math.floor(rand() * nextId));
+            }
+          }
+          await vault
+            .connect(who)
+            .redeemTargetMany(ids, { value: (REDEEM_FEE + PREMIUM) * BigInt(n) });
+          for (const id of ids) {
+            const i = heldTokens.indexOf(id);
+            if (i >= 0) heldTokens.splice(i, 1);
+          }
+          counts.redeemMany++;
         } else {
           await networkHelpers.mine(1);
           await networkHelpers.time.increase(1 + Math.floor(rand() * 40_000));
@@ -183,7 +262,16 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
     return counts;
   }
 
-  const totals = { lpAdd: 0, lpRemove: 0, buy: 0, sell: 0, redeem: 0, forfeit: 0 };
+  const totals = {
+    lpAdd: 0,
+    lpRemove: 0,
+    buy: 0,
+    sell: 0,
+    redeem: 0,
+    forfeit: 0,
+    depositMany: 0,
+    redeemMany: 0,
+  };
   for (const seed of [1, 7, 12345, 98765]) {
     it(`holds every invariant over 140 random ops (seed ${seed})`, async () => {
       const c = await run(seed);
@@ -196,5 +284,7 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
     expect(totals.lpRemove, "remove liquidity").to.be.greaterThan(0);
     expect(totals.buy + totals.sell, "trades").to.be.greaterThan(0);
     expect(totals.redeem, "random redeems").to.be.greaterThan(0);
+    expect(totals.depositMany, "depositMany").to.be.greaterThan(0);
+    expect(totals.redeemMany, "redeemTargetMany").to.be.greaterThan(0);
   });
 });

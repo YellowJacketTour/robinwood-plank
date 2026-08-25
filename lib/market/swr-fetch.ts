@@ -39,6 +39,62 @@ function sessionSet(key: string, data: unknown) {
   }
 }
 
+// --- IndexedDB persistence -------------------------------------------------
+// sessionStorage only survives the tab's lifetime. IndexedDB additionally
+// survives full browser restarts, so a repeat visit to the same collection
+// (even after quitting the browser) gets an instant, real first paint from
+// the last-known-good response before any network round-trip completes —
+// classic persisted stale-while-revalidate, not a GPU/network speed claim.
+const IDB_DB_NAME = "plank-swr-cache";
+const IDB_STORE = "kv";
+const IDB_MAX_AGE_MS = 24 * 60 * 60 * 1000; // stale ceiling for instant paint only
+
+let idbOpenPromise: Promise<IDBDatabase | null> | null = null;
+
+function idbOpen(): Promise<IDBDatabase | null> {
+  if (typeof window === "undefined" || !("indexedDB" in window)) return Promise.resolve(null);
+  if (idbOpenPromise) return idbOpenPromise;
+  idbOpenPromise = new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return idbOpenPromise;
+}
+
+async function idbGet(key: string): Promise<{ at: number; data: unknown } | null> {
+  const db = await idbOpen();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve((req.result as { at: number; data: unknown }) ?? null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function idbSet(key: string, data: unknown): Promise<void> {
+  const db = await idbOpen();
+  if (!db) return;
+  try {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put({ at: Date.now(), data }, key);
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 export type SwrOptions = {
   /** Serve from memory without network when younger than this. */
   ttlMs?: number;
@@ -102,6 +158,23 @@ export async function swrJson<T>(url: string, opts: SwrOptions = {}): Promise<T>
     }
   }
 
+  // Cold memory + no fresh session entry (new tab after a browser restart) —
+  // fall back to IndexedDB. Allowed to be older than swrMs since this is a
+  // last-known-good instant paint, not a "fresh enough to skip refetch"
+  // claim; a background refresh always still fires.
+  if (!entry && useSession) {
+    const idb = await idbGet(url);
+    if (idb && now - idb.at < IDB_MAX_AGE_MS && (!isGood || isGood(idb.data))) {
+      entry = { at: idb.at, data: idb.data, inflight: null };
+      memory.set(url, entry);
+      entry.inflight = fetchAndStore(url, useSession, isGood).finally(() => {
+        const e = memory.get(url);
+        if (e) e.inflight = null;
+      });
+      return idb.data as T;
+    }
+  }
+
   if (entry?.inflight) return entry.inflight as Promise<T>;
 
   const inflight = fetchAndStore(url, useSession, isGood);
@@ -134,7 +207,10 @@ async function fetchAndStore(
     throw new Error(`Unusable response for ${url}`);
   }
   memory.set(url, { at: Date.now(), data, inflight: null });
-  if (useSession) sessionSet(url, data);
+  if (useSession) {
+    sessionSet(url, data);
+    void idbSet(url, data);
+  }
   return data;
 }
 
@@ -146,9 +222,43 @@ export function prefetchJson(url: string, opts?: SwrOptions): void {
 export function invalidateSwr(urlPrefix?: string): void {
   if (!urlPrefix) {
     memory.clear();
-    return;
+  } else {
+    for (const key of memory.keys()) {
+      if (key.startsWith(urlPrefix)) memory.delete(key);
+    }
   }
-  for (const key of memory.keys()) {
-    if (key.startsWith(urlPrefix)) memory.delete(key);
+  if (typeof window === "undefined") return;
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k?.startsWith("plank-swr:")) continue;
+      if (!urlPrefix || k.includes(urlPrefix)) drop.push(k);
+    }
+    for (const k of drop) sessionStorage.removeItem(k);
+  } catch {
+    /* private mode / quota */
+  }
+  void idbInvalidate(urlPrefix);
+}
+
+async function idbInvalidate(urlPrefix?: string): Promise<void> {
+  const db = await idbOpen();
+  if (!db) return;
+  try {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+    if (!urlPrefix) {
+      store.clear();
+      return;
+    }
+    const req = store.getAllKeys();
+    req.onsuccess = () => {
+      for (const key of req.result) {
+        if (typeof key === "string" && key.includes(urlPrefix)) store.delete(key);
+      }
+    };
+  } catch {
+    /* private mode / quota */
   }
 }

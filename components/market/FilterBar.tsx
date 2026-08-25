@@ -22,6 +22,11 @@ export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "",
 type Props = {
   filters: MarketFilters;
   onChange: (next: MarketFilters) => void;
+  /** Lets collection-specific filters (traits, venue, etc.) participate in
+   * the same visible Clear all action without coupling this shared bar to
+   * their data model. */
+  onClearAll?: () => void;
+  additionalDirty?: boolean;
   /** Count after filtering, shown so an empty grid is never ambiguous. */
   resultCount: number;
   /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
@@ -29,22 +34,33 @@ type Props = {
   orientation?: "inline" | "sidebar";
   /** Listed count per tier — shown beside each rarity checkbox (mockup). */
   tierCounts?: Partial<Record<RarityTier, number>>;
+  /** Native copy says "Find a plank"; foreign collections pass "Find a token". */
+  searchLabel?: string;
+  searchPlaceholder?: string;
+  /** Native copy says "Price in ETH"; foreign collections pass the chain's unit. */
+  priceLegend?: string;
 };
 
 export default function FilterBar({
   filters,
   onChange,
+  onClearAll,
+  additionalDirty = false,
   resultCount,
   rarityAvailable,
   orientation = "inline",
   tierCounts,
+  searchLabel = "Find a plank",
+  searchPlaceholder = "Token ID",
+  priceLegend = "Price in ETH",
 }: Props) {
   const dirty =
     filters.query !== "" ||
     filters.minEth !== "" ||
     filters.maxEth !== "" ||
     filters.tier !== "all" ||
-    Boolean(filters.tiers?.length);
+    Boolean(filters.tiers?.length) ||
+    additionalDirty;
 
   if (orientation === "sidebar") {
     return (
@@ -55,7 +71,7 @@ export default function FilterBar({
           </span>
           <button
             type="button"
-            onClick={() => onChange(EMPTY_FILTERS)}
+            onClick={() => (onClearAll ? onClearAll() : onChange(EMPTY_FILTERS))}
             disabled={!dirty}
             className="min-h-9 rounded-md border border-line px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
           >
@@ -67,7 +83,7 @@ export default function FilterBar({
             htmlFor="market-token-filter"
             className="mb-2 block text-[0.62rem] font-black uppercase tracking-wider text-gold-300"
           >
-            Find a plank
+            {searchLabel}
           </label>
           <input
             id="market-token-filter"
@@ -75,14 +91,14 @@ export default function FilterBar({
             inputMode="numeric"
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
-            placeholder="Token ID"
+            placeholder={searchPlaceholder}
             className="min-h-11 w-full rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
           />
         </div>
 
         <fieldset>
           <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
-            Price in ETH
+            {priceLegend}
           </legend>
           <div className="grid grid-cols-2 gap-2">
             <input

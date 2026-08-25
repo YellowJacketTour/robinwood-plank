@@ -25,7 +25,9 @@ import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
 import EventCountdown from "@/components/market/EventCountdown";
+import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import CollectionStats from "@/components/market/CollectionStats";
+import { ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
@@ -36,9 +38,35 @@ import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
 import WethBalance from "@/components/market/WethBalance";
 import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/FilterBar";
+import TraitFacetFilters from "@/components/market/TraitFacetFilters";
+import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { countTiers } from "@/lib/market/rarity-lookup";
+import CollectionIntelligence from "@/components/market/CollectionIntelligence";
+
+/** Structurally matches CollectionIntelligence's own (unexported) Sale type -- see that component. Built from /api/market/activity's real permanent-ledger events, kind==="sale" only. */
+type IntelSale = {
+  timestamp?: string | null;
+  tokenId?: string | null;
+  priceWei?: string | null;
+  priceUsd?: number | null;
+  priceSymbol: string | null;
+  transaction: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+/** Same shape /api/market/collection-index (built for Gallery.tsx's art browsing) already returns -- see that route for the real, precomputed, immutable-post-reveal dataset this reuses. */
+type CollectionIndexEntry = {
+  tokenId: number;
+  tokenUri: string;
+  name: string;
+  description: string;
+  imageUri: string;
+  attributes: Array<{ trait_type: string; value: string }>;
+};
 import { invalidateSwr, prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
@@ -50,12 +78,15 @@ import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import EthUsdValue from "@/components/market/EthUsdValue";
 import {
+  isCrossChainBuyable,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
+  venueLabel,
   type Listing,
   type MarketTab,
   type Offer,
 } from "@/lib/market/types";
+import { chainDisplayName, FOREIGN_FEE_BPS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import dynamic from "next/dynamic";
 
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
@@ -229,7 +260,7 @@ function readUrlState(): { tab: MarketTab | null; item: string | null } {
 }
 
 /** RobinWood's fixed supply — shown as "Items" in the stats strip. */
-const TOTAL_SUPPLY = 1542;
+const TOTAL_SUPPLY = ROBINWOOD_TOTAL_SUPPLY;
 
 type WithOrder<T> = T & { rawOrder: unknown };
 
@@ -273,8 +304,37 @@ export default function MarketView() {
   // without the request burst.
   const [visitedTabs, setVisitedTabs] = useState<Set<MarketTab>>(() => new Set(["buy-sell"]));
   const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
+  const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
+  const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>({});
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
+  // REAL GAP FIXED 2026-08-23, flagged live ("the way plank is wired up it
+  // doesnt bring the full 1542 collection"): Buy & Sell only ever rendered
+  // the live order book (103 of 1,542 currently listed) with no path to
+  // browse the other 1,439 real, minted, unlisted planks -- unlike the
+  // generic foreign-chain collection view (MultichainCollectionView.tsx),
+  // which already has an "All items / Listed only" toggle. The full
+  // 1,542-token dataset already exists server-side (Gallery.tsx's own
+  // /api/market/collection-index primes the exact same dataset for art
+  // browsing) -- it was just never wired into this trading page. Lazy-
+  // fetched only when the toggle is actually flipped to "all", so the
+  // default Buy & Sell load stays exactly as fast as before.
+  const [viewMode, setViewMode] = useState<"listed" | "all">("listed");
+  const [allEntries, setAllEntries] = useState<CollectionIndexEntry[] | null>(null);
+  const [allEntriesLoading, setAllEntriesLoading] = useState(false);
+
+  // REAL GAP FIXED 2026-08-23, flagged live ("we dont have intel on planks
+  // when its like the only one with for sure everything ... what happened
+  // to intelligence agency feature richness"): every foreign-chain
+  // collection (MultichainCollectionView.tsx) already has an Intel toggle
+  // driving CollectionIntelligence -- wash-trade suspicion, demand score,
+  // maker concentration, rarity/holder/listed coverage -- but the native
+  // RobinWood collection, this app's own flagship, never had it wired in
+  // at all. Same lazy-load-on-demand pattern as the all-items toggle above.
+  const [browseMode, setBrowseMode] = useState<"art" | "intelligence">("art");
+  const [intelSales, setIntelSales] = useState<IntelSale[] | null>(null);
+  const [intelLoading, setIntelLoading] = useState(false);
+  const [intelHolders, setIntelHolders] = useState<number | null>(null);
   // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
   // previously kept its own useState populated once via getConnectedAccounts()
   // with no accountsChanged listener, which is why the nav could say
@@ -298,6 +358,21 @@ export default function MarketView() {
     listing: WithOrder<Listing>;
     verifiedPriceWei: string;
   } | null>(null);
+  /**
+   * Separate from buyTarget on purpose: a cross-chain listing's price comes
+   * from OpenSea's own consideration data, never from
+   * lib/market/order-validation.ts's validateListingOrder (which assumes a
+   * Robinhood-Chain-shaped order and would reject or misread a foreign
+   * one). Keeping this state and its confirm flow distinct means the native
+   * path in handleBuy/confirmBuy is never touched by this addition.
+   */
+  const [foreignBuyTarget, setForeignBuyTarget] = useState<{
+    listing: Listing;
+    priceWei: string;
+    feeBps: number;
+    chainLabel: string;
+  } | null>(null);
+  const [foreignBuyBusy, setForeignBuyBusy] = useState(false);
   const [acceptTarget, setAcceptTarget] = useState<{
     offer: WithOrder<Listing>;
     /** Seller NET proceeds in WETH wei, re-derived from the signed order. */
@@ -318,6 +393,19 @@ export default function MarketView() {
   const [ownedTokenIds, setOwnedTokenIds] = useState<Set<string> | undefined>(undefined);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!COLLECTION) return;
+    let cancelled = false;
+    const load = () => fetchTraitIndex(COLLECTION!).then((index) => {
+      if (!cancelled) setTraitIndex(index);
+    }).catch(() => {
+      if (!cancelled) setTraitIndex({ collection: COLLECTION!.slug, complete: false, building: false, totalSupply: null, scanned: 0, traits: null, rankings: null });
+    });
+    void load();
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!COLLECTION) return;
@@ -551,8 +639,22 @@ export default function MarketView() {
         setError(MARKETPLANK_RELIST_MESSAGE);
         return;
       }
-      const who = await requireAccount();
-      if (!who) return;
+      if (isCrossChainBuyable(listing)) {
+        // Branch out BEFORE any Robinhood-Chain-specific derivation below --
+        // validateListingOrder assumes a Robinhood-Chain order shape and
+        // would misread or reject a foreign one. Price shown here is the
+        // listing's own summary data; the REAL, fresh, fulfillable price is
+        // re-derived from fetchListingFulfillmentData at confirm time (see
+        // confirmForeignBuy), same "never trust cached order data" rule
+        // foreign-fulfill.ts's own header documents.
+        setForeignBuyTarget({
+          listing,
+          priceWei: listing.priceWei,
+          feeBps: FOREIGN_FEE_BPS,
+          chainLabel: `${chainDisplayName(listing.foreignChainSlug!)} via ${venueLabel(listing)}`,
+        });
+        return;
+      }
       try {
         const full = listings.find((l) => l.id === listing.id);
         if (!full) throw new Error("Listing no longer available.");
@@ -575,11 +677,12 @@ export default function MarketView() {
         setError(e instanceof Error ? e.message : "Could not open this listing.");
       }
     },
-    [listings, requireAccount]
+    [listings]
   );
 
   const confirmBuy = useCallback(async () => {
-    if (!buyTarget || !account) return;
+    if (!buyTarget) return;
+    if (!account) { handleConnect(); return; }
     setError(null);
     try {
       setStatus("Confirm in wallet…");
@@ -603,7 +706,43 @@ export default function MarketView() {
     } finally {
       setStatus(null);
     }
-  }, [buyTarget, account, refresh]);
+  }, [buyTarget, account, refresh, handleConnect]);
+
+  /**
+   * Foreign-chain counterpart to confirmBuy. Deliberately does not touch
+   * loadSeaport/fulfillOrder (the Robinhood-Chain native path) at all --
+   * routes through foreign-fulfill.ts's buyForeignListingNow, which
+   * re-fetches a genuinely fresh, fulfillable signed order from OpenSea
+   * with the connected wallet's own address immediately before building
+   * the transaction (see that module's header for why cached order data is
+   * never trusted), switches the wallet to the target chain if needed, and
+   * calls MarketplankForeignFeeRouter directly.
+   */
+  const confirmForeignBuy = useCallback(async () => {
+    if (!foreignBuyTarget) return;
+    if (!account) { handleConnect(); return; }
+    setError(null);
+    try {
+      setForeignBuyBusy(true);
+      setStatus("Confirm in wallet…");
+      const { buyForeignListingNow } = await import(
+        "@/lib/market/multichain/trading/foreign-fulfill"
+      );
+      await buyForeignListingNow({
+        chainSlug: foreignBuyTarget.listing.foreignChainSlug!,
+        orderHash: foreignBuyTarget.listing.foreignOrderHash!,
+      });
+      setForeignBuyTarget(null);
+      setStatus("Purchase confirmed.");
+      await refresh();
+    } catch (e) {
+      console.error("Cross-chain buy failed:", e);
+      setError(e instanceof Error ? e.message : "Cross-chain purchase failed.");
+    } finally {
+      setForeignBuyBusy(false);
+      setStatus(null);
+    }
+  }, [foreignBuyTarget, account, refresh, handleConnect]);
 
   /**
    * Opens the sweep checkout. The plan arrives already validated (planSweep
@@ -613,16 +752,15 @@ export default function MarketView() {
   const handleSweep = useCallback(
     async (plan: SweepPlan) => {
       setError(null);
-      const who = await requireAccount();
-      if (!who) return;
       if (plan.items.length === 0) return;
       setSweepTarget(plan);
     },
-    [requireAccount]
+    []
   );
 
   const confirmSweep = useCallback(async () => {
-    if (!sweepTarget || !account || sweeping || !COLLECTION) return; // busy lock
+    if (!sweepTarget || sweeping || !COLLECTION) return; // busy lock
+    if (!account) { handleConnect(); return; }
     setError(null);
     try {
       setSweeping(true);
@@ -639,16 +777,11 @@ export default function MarketView() {
       setSweeping(false);
       setStatus(null);
     }
-  }, [sweepTarget, account, sweeping, refresh]);
+  }, [sweepTarget, account, sweeping, refresh, handleConnect]);
 
-  const handleOffer = useCallback(
-    async (listing: Listing) => {
-      const who = await requireAccount();
-      if (!who) return;
-      setOfferTarget({ tokenId: listing.tokenId });
-    },
-    [requireAccount]
-  );
+  const handleOffer = useCallback((listing: Listing) => {
+    setOfferTarget({ tokenId: listing.tokenId });
+  }, []);
 
   /**
    * Opens the accept-offer checkout. Mirrors handleBuy exactly: the order is
@@ -815,10 +948,86 @@ export default function MarketView() {
   // Derived book data is memoized on its actual inputs: this component
   // re-renders on every countdown tick and poll update, and the BigInt
   // filter/sort/floor passes were re-running each time.
-  const visibleListings = useMemo(
-    () => applyFilters(listings, filters, rarityMap),
-    [listings, filters, rarityMap]
-  );
+  const visibleListings = useMemo(() => {
+    const base = applyFilters(listings, filters, rarityMap);
+    const clauses = Object.entries(selectedTraits).filter(([, value]) => Boolean(value));
+    if (clauses.length === 0 || !traitIndex?.traits) return base;
+    const allowed = clauses.map(([type, value]) => new Set(traitIndex.traits?.[type]?.[value] ?? []));
+    return base.filter((listing) => allowed.every((ids) => ids.has(listing.tokenId)));
+  }, [listings, filters, rarityMap, selectedTraits, traitIndex]);
+
+  // Lazy-load the full 1,542-token dataset only once the viewer actually
+  // asks for "All items" -- keeps the default Buy & Sell load exactly as
+  // fast as before this toggle existed.
+  useEffect(() => {
+    if (viewMode !== "all" || allEntries || allEntriesLoading) return;
+    let alive = true;
+    setAllEntriesLoading(true);
+    fetch("/api/market/collection-index", { cache: "no-cache" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { entries?: CollectionIndexEntry[] } | null) => {
+        if (!alive) return;
+        setAllEntries(Array.isArray(data?.entries) ? data.entries : []);
+      })
+      .catch(() => {
+        if (alive) setAllEntries([]);
+      })
+      .finally(() => {
+        if (alive) setAllEntriesLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [viewMode, allEntries, allEntriesLoading]);
+
+  /** Real, minted, unlisted planks -- everything in the full catalog that isn't currently a live order. No Buy path: these have no real order behind them, only "View details" / "Make an offer". */
+  const unlistedEntries = useMemo(() => {
+    if (!allEntries) return [];
+    const listedIds = new Set(listings.map((l) => l.tokenId));
+    return allEntries.filter((e) => !listedIds.has(String(e.tokenId)));
+  }, [allEntries, listings]);
+
+  // Lazy-load Intel's real sale history + holder count + ETH/USD reference
+  // only once a viewer actually opens the Intel panel -- same reasoning as
+  // the all-items fetch above.
+  useEffect(() => {
+    if (browseMode !== "intelligence" || intelSales || intelLoading) return;
+    let alive = true;
+    setIntelLoading(true);
+    Promise.all([
+      fetch("/api/market/activity?full=1", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+      fetch("/api/market/holders", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+      fetch("/api/market/eth-price", { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+    ])
+      .then(([activityData, holdersData, ethPriceData]: [{ events?: Array<{ kind: string; tokenId: string; from: string; to: string; priceWei: string | null; txHash: string; timestamp: string | null }> } | null, { holders?: number | null } | null, { ethUsd?: number | null } | null]) => {
+        if (!alive) return;
+        const ethUsd = ethPriceData?.ethUsd ?? null;
+        const events = Array.isArray(activityData?.events) ? activityData.events : [];
+        const sales: IntelSale[] = events
+          .filter((e) => e.kind === "sale")
+          .map((e) => ({
+            timestamp: e.timestamp,
+            tokenId: e.tokenId,
+            priceWei: e.priceWei,
+            priceUsd: e.priceWei != null && ethUsd != null ? (Number(e.priceWei) / 1e18) * ethUsd : null,
+            priceSymbol: "ETH",
+            transaction: e.txHash,
+            from: e.from,
+            to: e.to,
+          }));
+        setIntelSales(sales);
+        setIntelHolders(typeof holdersData?.holders === "number" ? holdersData.holders : null);
+      })
+      .catch(() => {
+        if (alive) setIntelSales([]);
+      })
+      .finally(() => {
+        if (alive) setIntelLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [browseMode, intelSales, intelLoading]);
   const sortedVisibleListings = useMemo(
     () => sortListings(visibleListings, sort),
     [visibleListings, sort]
@@ -927,13 +1136,14 @@ export default function MarketView() {
         </p>
       )}
 
-      {offerTarget && account && COLLECTION && (
+      {offerTarget && COLLECTION && (
         <OfferForm
           account={account}
           collection={COLLECTION}
           tokenId={offerTarget.tokenId}
           traitMode={offerTarget.trait}
           listings={listings}
+          onConnect={handleConnect}
           onClose={() => setOfferTarget(null)}
           onSubmitted={() => {
             setOfferTarget(null);
@@ -1151,6 +1361,22 @@ export default function MarketView() {
         />
       )}
 
+      {foreignBuyTarget && COLLECTION && (
+        <BuyConfirm
+          listing={foreignBuyTarget.listing}
+          collection={COLLECTION}
+          verifiedPriceWei={foreignBuyTarget.priceWei}
+          busy={foreignBuyBusy}
+          error={error}
+          onConfirm={confirmForeignBuy}
+          onCancel={() => {
+            setError(null);
+            setForeignBuyTarget(null);
+          }}
+          crossChain={{ chainLabel: foreignBuyTarget.chainLabel, feeBps: foreignBuyTarget.feeBps }}
+        />
+      )}
+
       {/* Every tab below stays mounted once first visited instead of
           unmounting on switch — a tab you've already opened snaps back
           instantly (its data, images, and any live connections are still
@@ -1166,6 +1392,13 @@ export default function MarketView() {
               labelled={false}
             >
               <div className="space-y-3">
+                {/* Quiet link, not a headline -- same precedent as
+                    /floorboards' own footer/hint-only entry point
+                    (docs/surface-contracts.md). The fixed six-tab rail
+                    cannot gain a seventh tab for this, so the global
+                    multichain market gets a small text link here instead
+                    of new tab-rail real estate. */}
+                <MarketBreadcrumb variant="native" />
                 <EventCountdown />
                 {COLLECTION && (
                   <CollectionStats
@@ -1192,14 +1425,47 @@ export default function MarketView() {
                       : `${visibleListings.length} ${visibleListings.length === 1 ? "Plank" : "Planks"} on the market`
                   }
                   filters={
-                    <FilterBar
-                      filters={filters}
-                      onChange={setFilters}
-                      resultCount={loading ? 0 : visibleListings.length}
-                      rarityAvailable={rarityMap.size > 0}
-                      orientation="sidebar"
-                      tierCounts={tierListedCounts}
-                    />
+                    <>
+                      {COLLECTION && !loading && (
+                        <div className="mb-3">
+                          <p className="mb-1 text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Show</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(["listed", "all"] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setViewMode(mode)}
+                                aria-pressed={viewMode === mode}
+                                className={`min-h-8 rounded-md border px-2.5 text-xs font-bold ${
+                                  viewMode === mode ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-line text-foreground/55 hover:text-gold-300"
+                                }`}
+                                title={mode === "all" ? `Browse all ${ROBINWOOD_TOTAL_SUPPLY} planks, not just the ${listings.length} currently listed` : "Only currently-listed planks"}
+                              >
+                                {mode === "all" ? "All items" : "Listed only"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <FilterBar
+                        filters={filters}
+                        onChange={setFilters}
+                        resultCount={loading ? 0 : visibleListings.length}
+                        rarityAvailable={rarityMap.size > 0}
+                        orientation="sidebar"
+                        tierCounts={tierListedCounts}
+                        additionalDirty={Object.values(selectedTraits).some(Boolean)}
+                        onClearAll={() => { setFilters(EMPTY_FILTERS); setSelectedTraits({}); }}
+                      />
+                      <TraitFacetFilters
+                        counts={traitIndex?.traits ? Object.fromEntries(Object.entries(traitIndex.traits).map(([type, values]) => [type, Object.fromEntries(Object.entries(values).map(([value, ids]) => [value, ids.length]))])) : null}
+                        selected={selectedTraits}
+                        onChange={setSelectedTraits}
+                        building={!traitIndex?.complete && Boolean(traitIndex?.building || traitIndex?.scanned)}
+                        scanned={traitIndex?.scanned}
+                        totalSupply={traitIndex?.totalSupply}
+                      />
+                    </>
                   }
                   lead={
                     !loading && rarityMap.size > 0 && listings.length > 0 ? (
@@ -1222,6 +1488,18 @@ export default function MarketView() {
                       {COLLECTION && !loading && (
                         <button
                           type="button"
+                          onClick={() => setBrowseMode((m) => (m === "art" ? "intelligence" : "art"))}
+                          aria-pressed={browseMode === "intelligence"}
+                          className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                            browseMode === "intelligence" ? "border-purple-400 bg-purple-500/15 text-purple-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                          }`}
+                        >
+                          {browseMode === "intelligence" ? "Art & listings" : "Intel"}
+                        </button>
+                      )}
+                      {COLLECTION && !loading && (
+                        <button
+                          type="button"
                           onClick={() => setSweepOpen((v) => !v)}
                           aria-pressed={sweepOpen}
                           aria-controls="sweep-planner"
@@ -1238,10 +1516,7 @@ export default function MarketView() {
                       {COLLECTION && !loading && (
                         <button
                           type="button"
-                          onClick={async () => {
-                            const who = await requireAccount();
-                            if (who) setOfferTarget({ trait: true });
-                          }}
+                          onClick={() => setOfferTarget({ trait: true })}
                           className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                           title="Bid on any plank matching trait, rarity, or combo"
                         >
@@ -1265,6 +1540,22 @@ export default function MarketView() {
                     </>
                   }
                 >
+                  {browseMode === "intelligence" ? (
+                    <CollectionIntelligence
+                      name={COLLECTION?.name ?? "RobinWood"}
+                      chain="Robinhood Chain"
+                      supply={ROBINWOOD_TOTAL_SUPPLY}
+                      holders={intelHolders}
+                      indexed={rarityMap.size}
+                      rarityCovered={rarityMap.size}
+                      rarityTiers={countTiers(rarityMap)}
+                      artUrls={listings.map((l) => l.imageUrl).filter((url): url is string => Boolean(url))}
+                      listings={listings.map((l) => ({ priceWei: l.priceWei, maker: l.maker, tokenId: l.tokenId }))}
+                      sales={intelSales ?? []}
+                      listedCount={listings.length}
+                    />
+                  ) : (
+                  <>
                   {COLLECTION && !loading && sweepOpen && (
                     <div
                       id="sweep-planner"
@@ -1307,6 +1598,58 @@ export default function MarketView() {
                         ) : undefined
                       }
                     />
+                  )}
+                  {viewMode === "all" && !loading && (
+                    <div className="mt-4 border-t border-line pt-4">
+                      <p className="mb-3 text-xs font-bold uppercase tracking-wide text-foreground/50">
+                        {allEntriesLoading
+                          ? "Loading the rest of the collection…"
+                          : `${unlistedEntries.length} more planks (minted, real, not currently listed)`}
+                      </p>
+                      {!allEntriesLoading && unlistedEntries.length > 0 && (
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                          {unlistedEntries.map((entry) => {
+                            const tokenId = String(entry.tokenId);
+                            const rarity = rarityMap.get(tokenId);
+                            return (
+                              <div
+                                key={tokenId}
+                                className="overflow-hidden rounded-xl border border-line bg-wood-900/60 transition hover:border-gold-400/60"
+                              >
+                                <button type="button" onClick={() => openDetail(tokenId)} className="block w-full">
+                                  {/* eslint-disable-next-line @next/next/no-img-element -- same lazy-loaded raw <img> ListingCard's own image cell already uses for plank art */}
+                                  <img src={entry.imageUri} alt={entry.name} loading="lazy" className="aspect-square w-full object-cover" />
+                                </button>
+                                <div className="space-y-1 p-2">
+                                  <p className="truncate text-xs font-bold text-foreground/85">{entry.name}</p>
+                                  <p className="text-[0.65rem] text-foreground/45">
+                                    {rarity ? `${rarity.tier} · Rank ${rarity.rank}` : `#${tokenId}`}
+                                  </p>
+                                  <div className="flex gap-1.5 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => openDetail(tokenId)}
+                                      className="min-h-8 flex-1 rounded-md border border-line-strong text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
+                                    >
+                                      Details
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOfferTarget({ tokenId })}
+                                      className="min-h-8 flex-1 rounded-md border border-gold-400/40 text-[0.65rem] font-bold text-gold-300 hover:border-gold-400"
+                                    >
+                                      Offer
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  </>
                   )}
                 </MarketBrowseLayout>
               </div>

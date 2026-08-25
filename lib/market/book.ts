@@ -7,8 +7,18 @@ import type { Listing, ListingVenue } from "@/lib/market/types";
 /**
  * Where a foreign row links to, per venue. Adding a marketplace means adding
  * a line here and nothing else in this file.
+ *
+ * Partial, not Record<ListingVenue, ...>: this map only ever needs to cover
+ * the venues that actually flow through THIS RobinWood-native merge path
+ * (readOpenSeaListings/readPulpListings, both scoped to RobinWood's own
+ * collection). magiceden/unisat listings never reach mergeBook -- they come
+ * from the separate multichain listings route
+ * (app/api/market/multichain/listings/route.ts), which already stamps its
+ * own externalUrl per row. The lookup below already fails soft with a
+ * warning for any venue with no entry, so a Partial here is honest about
+ * that, not a functional change.
  */
-const EXTERNAL_URL: Record<ListingVenue, (contract: string, tokenId: string) => string> = {
+const EXTERNAL_URL: Partial<Record<ListingVenue, (contract: string, tokenId: string) => string>> = {
   opensea: openSeaTokenUrl,
   pulp: pulpTokenUrl,
 };
@@ -48,7 +58,8 @@ export function mergeBook(
    * own. (PulpMarket's is additionally a relative path on their own image
    * proxy, so it would hotlink and bypass our same-origin proxy contract.)
    */
-  imageByTokenId?: Map<string, string> | Record<string, string>
+  imageByTokenId?: Map<string, string> | Record<string, string>,
+  contractAddress = NFT_CONTRACT_ADDRESS
 ): Listing[] {
   const lookupImage = (tokenId: string): string | undefined => {
     if (!imageByTokenId) return undefined;
@@ -116,7 +127,7 @@ export function mergeBook(
       expiresAt: t.expiresAt ?? new Date(Date.now() + 365 * 86_400_000).toISOString(),
       kind: "fixed",
       venue: t.venue,
-      externalUrl: externalUrlFor(NFT_CONTRACT_ADDRESS, tokenId),
+      externalUrl: externalUrlFor(contractAddress, tokenId),
       // Ours first (already resolved at listing time), then our own index.
       ...(() => {
         const img = existing?.imageUrl || lookupImage(tokenId);

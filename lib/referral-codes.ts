@@ -74,7 +74,7 @@ function requireConfigured(): void {
  * This wallet's code if it already has one, WITHOUT allocating.
  *
  * Exists so a read endpoint can stay a read. Allocation used to happen
- * inside /api/referral/me, which meant querying any address minted a row —
+ * inside /api/referral/me, which meant querying any address created a row —
  * an unauthenticated public GET that writes, and one an attacker can point
  * at an enumerated list of wallets to grow the table indefinitely.
  */

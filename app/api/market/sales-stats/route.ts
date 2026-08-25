@@ -73,6 +73,40 @@ export async function GET(req: Request) {
       );
     }
 
+    const { fetchCanonicalRobinwoodStats } = await import("@/lib/market/canonical-robinwood");
+    const canonical = await fetchCanonicalRobinwoodStats({
+      hostHeader: req.headers.get("host"),
+    });
+    if (canonical && canonical.saleCount > 0) {
+      const fromLive: LedgerSalesStats = {
+        ...stats,
+        saleCount: canonical.saleCount,
+        sales24h: canonical.sales24h,
+        pricedSales24h: canonical.pricedSales24h,
+        unpricedSales24h: canonical.unpricedSales24h,
+        volume24hWei: canonical.volume24hWei,
+        sales7d: canonical.sales7d,
+        volume7dWei: canonical.volume7dWei,
+        sales30d: canonical.sales30d,
+        volume30dWei: canonical.volume30dWei,
+        highestWei: canonical.highestWei,
+        highestTokenId: canonical.highestTokenId,
+        highestTxHash: canonical.highestTxHash,
+        highestPlatform: canonical.highestPlatform,
+        totalVolumeWei: canonical.totalVolumeWei,
+        royaltyPaidCount: canonical.saleCount,
+      };
+      return publicJson(
+        payloadFor(fromLive, {
+          royaltyRequired: false,
+          source: "canonical-live",
+          cached: false,
+          origin: canonical.origin,
+          note: "Local ledger is empty; figures are the public plank.love sales-stats for RobinWood (not invented).",
+        })
+      );
+    }
+
     // Fresh read came back empty. If we have a real cached answer that
     // isn't ancient, prefer it over presenting an empty/zeroed page.
     if (cache && Date.now() - cache.at < STALE_GRACE_MS) {
