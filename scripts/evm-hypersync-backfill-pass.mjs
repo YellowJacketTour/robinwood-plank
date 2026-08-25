@@ -7,6 +7,8 @@ import { EVM_CHAIN_ID } from "../lib/market/multichain/discovery/evm-log-scan.ts
 // rounds of in-flight work (cursors persist in Postgres regardless), and
 // starting fresh each pass avoids whatever memory growth might have
 // contributed to the earlier segfault under a long-lived single process.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const chains = Object.keys(EVM_CHAIN_ID);
 const started = Date.now();
 let round = 0;
@@ -28,5 +30,13 @@ while (Date.now() - started < 1000 * 60 * 3) {
     }
   }
   console.log(`round ${round}: ${line.join(" ") || "(no new candidates)"}`);
+  // Real safety net, same class of fix as genesis-seaport-backfill-pass.mjs's
+  // 2026-08-25 disk-fill incident: runHypersyncDiscoveryScan/
+  // runHypersyncBackfillScan can both return near-instantly (a jailed
+  // "alchemy-nft" checkSourceBudget short-circuit, no real network I/O) --
+  // this loop had zero per-round delay, so it could spin identically fast
+  // during any real jail window. A small unconditional sleep bounds worst-
+  // case log/round volume regardless of why a round did no real work.
+  await sleep(500);
 }
 process.exit(0);

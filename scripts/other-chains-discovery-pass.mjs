@@ -7,6 +7,7 @@ import { runOrdiscanCollectionScan } from "../lib/market/multichain/discovery/or
 // Keeps Robinhood Chain, Solana, and Bitcoin actively covered too -- the
 // EVM supervisor loop only covers the 8 EVM chains, so these three were
 // going stale otherwise. Same 3-minute bounded pass, clean exit pattern.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const started = Date.now();
 let round = 0;
 while (Date.now() - started < 1000 * 60 * 3) {
@@ -46,5 +47,9 @@ while (Date.now() - started < 1000 * 60 * 3) {
     console.log(`[ordiscan-err] ${e instanceof Error ? e.message : e}`);
   }
   console.log(`round ${round}: ${line.join(" ") || "(no new candidates)"}`);
+  // Same safety net as evm-hypersync-backfill-pass.mjs -- these five real
+  // scan functions can each short-circuit near-instantly under their own
+  // real jail/budget checks, and this loop had zero per-round delay.
+  await sleep(500);
 }
 process.exit(0);
