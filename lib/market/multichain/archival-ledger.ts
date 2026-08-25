@@ -442,6 +442,50 @@ export function toArchivalApiShape(row: RawArchivalStatsRow | null | undefined):
 }
 
 /**
+ * Real bug found live 2026-08-25 ("this is obviously unacceptable and
+ * likely a simpler contagion"): the max-observed-token-id+1 self-
+ * correction (above) assumed token ids are densely packed with no real
+ * gaps -- false for Lil Pudgys and likely any collection with genuinely
+ * un-minted ids in its range (confirmed live: token id 5 returns
+ * "Item with identifier 5 not found" from OpenSea's own authoritative
+ * API -- it was never minted at all, not missed by our own hydration).
+ * That flawed assumption inflated known_supply past the real total,
+ * permanently capping the displayed score below 100% even once every
+ * REAL token was captured (confirmed: real on-chain totalSupply() =
+ * 21,931, and this app's own row count for the collection = 21,931 --
+ * an exact match, i.e. already-complete real coverage being reported as
+ * incomplete purely from a wrong denominator).
+ *
+ * This is deliberately NOT called automatically by getArchivalStatsForCollection
+ * (this module's own header: "never talks to a third-party provider" --
+ * a real on-chain RPC read is a different trust boundary than an
+ * inferred DB aggregate, so the CALLER opts in, same pattern the
+ * collection-detail route already uses for CryptoPunks' own native-book
+ * chain read). REPLACES known_supply outright (not a ratchet-up) when a
+ * real totalSupply() succeeds -- it is the authoritative ground truth
+ * for how many tokens exist, strictly more trustworthy than any id-based
+ * inference. Never touches known_supply on a revert/null (most non-
+ * Enumerable contracts) -- the existing max-id ratchet-up stays the
+ * fallback for those.
+ */
+export async function correctKnownSupplyFromChain(chainSlug: string, collectionKey: string): Promise<number | null> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const { readTotalSupply } = await import("@/lib/market/multichain/discovery/onchain-contract-reads");
+  const realSupply = await readTotalSupply(chainSlug, normalized).catch(() => null);
+  if (realSupply == null) return null;
+  // known_supply_chain_confirmed=TRUE stops getArchivalStatsForCollection's
+  // own max-observed-id ratchet-up from immediately re-inflating this back
+  // past the real value on the very next read (see this function's own
+  // header, and migration 072).
+  await postgresQuery(
+    `UPDATE collection_archival_stats SET known_supply = $3, known_supply_chain_confirmed = TRUE
+     WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized, realSupply]
+  ).catch(() => {});
+  return realSupply;
+}
+
+/**
  * Single-collection lookup for the collection-detail route -- one indexed
  * read (chain_slug, collection_key is this table's real primary key) plus,
  * cheaply, a real "is a job processing this collection right now" check
@@ -457,13 +501,13 @@ export async function getArchivalStatsForCollection(
 ): Promise<ArchivalApiShape | null> {
   const normalized = normalizeCollectionKey(collectionKey);
   const [statsResult, jobResult, liveResult, maxIdResult] = await Promise.all([
-    postgresQuery<RawArchivalStatsRow>(
+    postgresQuery<RawArchivalStatsRow & { known_supply_chain_confirmed: boolean }>(
       `SELECT chain_slug, collection_key, known_supply::text, tokens_ever_hydrated::text,
-              archival_score::text, score_method, last_archived_at
+              archival_score::text, score_method, last_archived_at, known_supply_chain_confirmed
        FROM collection_archival_stats
        WHERE chain_slug = $1 AND collection_key = $2`,
       [chainSlug, normalized]
-    ).catch(() => ({ rows: [] as RawArchivalStatsRow[] })),
+    ).catch(() => ({ rows: [] as Array<RawArchivalStatsRow & { known_supply_chain_confirmed: boolean }> })),
     postgresQuery<{ exists: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM plank_data_jobs
@@ -512,8 +556,16 @@ export async function getArchivalStatsForCollection(
   if (liveCount != null && (shape.tokensEverHydrated == null || liveCount > shape.tokensEverHydrated)) {
     shape.tokensEverHydrated = liveCount;
   }
+  // Real fix, 2026-08-25: once a real on-chain totalSupply() has confirmed
+  // known_supply (correctKnownSupplyFromChain, called by the collection
+  // route before this), skip the id-inference ratchet entirely -- it
+  // would otherwise immediately re-inflate known_supply past that real,
+  // authoritative value on this very read, using a gap-blind assumption
+  // already proven wrong (a real, un-minted token id inside the observed
+  // range -- confirmed live via OpenSea's own "not found" response).
+  const chainConfirmed = statsResult.rows[0]?.known_supply_chain_confirmed === true;
   const observedMaxId = maxIdResult.rows[0]?.max_id ?? null;
-  if (observedMaxId != null && observedMaxId + 1 > (shape.knownSupply ?? 0)) {
+  if (!chainConfirmed && observedMaxId != null && observedMaxId + 1 > (shape.knownSupply ?? 0)) {
     shape.knownSupply = observedMaxId + 1;
     await postgresQuery(
       `UPDATE collection_archival_stats SET known_supply = $3 WHERE chain_slug = $1 AND collection_key = $2`,
