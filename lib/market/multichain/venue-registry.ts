@@ -393,9 +393,24 @@ export const COVERAGE_ORDER: Record<MarketCoverage, number> = {
   unavailable: 3,
 };
 
+/**
+ * `partial` is deliberately styled the SAME quiet/neutral way as `planned`,
+ * not as an amber warning: checked 2026-08-26 against MARKET_VENUES itself
+ * -- `partial` is the coverage level for nearly every real venue in this
+ * registry (OpenSea/Seaport, Wyvern, CryptoPunks, Blur, LooksRare, Magic
+ * Eden, UniSat, Ordiscan, Ordinals Wallet -- everything except this app's
+ * own first-party `marketplank` venue). An amber alarm chip on what is
+ * actually this product's normal baseline coverage misapplies severity
+ * (this file's own "severity should match real risk, not apply uniformly"
+ * rule, from Grok's biggest-issues brief) -- it read as most rows being
+ * broken when they were not. Real user feedback, live 2026-08-26: "i dont
+ * like partial book" on a rankings page where 8 of 10 rows carried it.
+ * `unavailable` (a venue that is provably dead/unreachable, e.g. X2Y2)
+ * remains the only coverage level that should look alarming.
+ */
 export const COVERAGE_STYLE: Record<MarketCoverage, string> = {
   indexed: "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
-  partial: "border-amber-500/50 bg-amber-500/10 text-amber-300",
+  partial: "border-line-strong bg-panel text-foreground/60",
   planned: "border-line-strong bg-panel text-foreground/60",
   unavailable: "border-rose-500/40 bg-rose-500/10 text-rose-300",
 };
@@ -403,7 +418,7 @@ export const COVERAGE_STYLE: Record<MarketCoverage, string> = {
 /** Short, non-alarming label for a partial/planned/unavailable venue's inline chip -- distinct from COVERAGE_LABEL's fuller known-limitations-page copy, which reads fine in a table but is too long for a dense row/chip. */
 export const COVERAGE_SHORT_LABEL: Record<MarketCoverage, string> = {
   indexed: "live",
-  partial: "partial book",
+  partial: "multi-venue",
   planned: "not yet built",
   unavailable: "unavailable",
 };

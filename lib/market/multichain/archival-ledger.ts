@@ -477,6 +477,36 @@ export async function getArchivalStatsBatch(
   return out;
 }
 
+/**
+ * Batched "is a real job processing this collection right now" check for a
+ * SMALL, caller-bounded set of pairs (the rankings table's currently
+ * rendered page, up to rankingsShowCount/100 -- never the full up-to-5000
+ * API response getArchivalStatsBatch itself already declines to check this
+ * against). One UNNEST-joined query regardless of pair count, same shape as
+ * getArchivalStatsBatch. Real fix for "i cant tell if any of the
+ * collections are hydrating" (live 2026-08-26): HydrationPlankChip was
+ * wired up but the rankings route always sent jobProcessing as undefined,
+ * so the chip could never actually light up there.
+ */
+export async function getJobProcessingBatch(
+  pairs: Array<{ chainSlug: string; collectionKey: string }>
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  if (pairs.length === 0) return out;
+  const chainSlugs = pairs.map((p) => p.chainSlug);
+  const normalizedKeys = pairs.map((p) => normalizeCollectionKey(p.collectionKey));
+  const result = await postgresQuery<{ chain_slug: string; subject: string }>(
+    `SELECT DISTINCT j.chain_slug, j.subject
+     FROM plank_data_jobs j
+     JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
+       ON j.chain_slug = want.chain_slug AND j.subject = want.collection_key
+     WHERE j.status = 'running'`,
+    [chainSlugs, normalizedKeys]
+  ).catch(() => ({ rows: [] as Array<{ chain_slug: string; subject: string }> }));
+  for (const row of result.rows) out.set(`${row.chain_slug}:${row.subject}`, true);
+  return out;
+}
+
 export async function runArchivalFrontierLane(): Promise<{ ran: boolean; enqueued: number; candidates: ArchivalFrontierCandidate[] }> {
   const claimed = await tryClaimArchivalFrontierRun();
   if (!claimed) return { ran: false, enqueued: 0, candidates: [] };

@@ -8,6 +8,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { computeDemandScore } from "@/lib/market/multichain/demand-score";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
+import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
@@ -1652,6 +1653,15 @@ export default function GlobalMarketHub() {
   const visibilityPageOrder = useMemo(() => ranked.slice(0, 200).map(key), [ranked]);
   useVisibleCollectionDemand({ context: "rankings", pageOrder: visibilityPageOrder });
 
+  // Live hydrating indicator for HydrationPlankChip: getArchivalStatsBatch
+  // (the rankings API route this page consumes) deliberately never checks
+  // plank_data_jobs across its own up-to-5000-row response (too costly at
+  // that scale -- see that function's own header). `rankings` below is
+  // already the small, bounded, currently-rendered slice (10-100 rows, per
+  // the "Show" control), so polling it directly here is cheap and safe.
+  const rankingsKeys = useMemo(() => rankings.map(key), [rankings]);
+  const jobProcessingByKey = useHydrationJobStatus(rankingsKeys);
+
   const hydratedKey = useRef("");
   useEffect(() => {
     if (loading || rankings.length === 0) return;
@@ -2283,7 +2293,7 @@ export default function GlobalMarketHub() {
                               </span>
                               {c.archival && (
                                 <HydrationPlankChip
-                                  active={c.archival.jobProcessing === true}
+                                  active={jobProcessingByKey[rowKey] === true}
                                   pulseKey={c.archival.lastArchivedAt}
                                   label={`${displayName(c)} archival`}
                                 />
