@@ -14,23 +14,21 @@ import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { findContractDeployBlock } from "@/lib/market/multichain/discovery/contract-deploy-block";
 import { runAddressScopedMembershipScan } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
 import { postgresQuery } from "@/lib/postgres";
+import { isAnchoredMembershipComplete } from "@/lib/market/multichain/discovery/anchored-membership-status";
 
 /**
- * Real, cheap "is there any real work left" check -- see this file's own
- * header on the real bug this closes (an already-complete collection's
- * job kept winning every priority tie over genuinely incomplete work,
- * forever, because it was cheap enough to keep getting re-enqueued and
- * re-claimed on every repeat page visit). ONE indexed read, no real
- * network call, so callers (hydrationJobSources) can skip enqueueing
- * entirely for a collection already known complete.
+ * Real bug found live 2026-08-25 ("this isnt live time updating"): the
+ * cheap completion check used to live in THIS file, whose top-level
+ * imports (hypersync-evm-scan.ts -> @envio-dev/hypersync-client, a
+ * native NAPI binding) Next.js's dev bundler cannot resolve in an API
+ * route's execution context ("Cannot find native binding", thrown and
+ * silently swallowed on every real page visit). Moved to
+ * anchored-membership-status.ts, which has zero HyperSync dependency, so
+ * every real page visit's demand check no longer drags this file's own
+ * heavy import chain into the live request path. Re-exported here so
+ * this file's own short-circuit below still reads naturally.
  */
-export async function isAnchoredMembershipComplete(chainSlug: string, contractAddress: string): Promise<boolean> {
-  const result = await postgresQuery<{ anchored_membership_complete: boolean }>(
-    `SELECT anchored_membership_complete FROM plank_contract_deploy_block WHERE chain_slug = $1 AND contract_address = $2`,
-    [chainSlug, contractAddress.toLowerCase()]
-  );
-  return result.rows[0]?.anchored_membership_complete === true;
-}
+export { isAnchoredMembershipComplete } from "@/lib/market/multichain/discovery/anchored-membership-status";
 
 export type AnchoredBackfillResult = {
   chainSlug: string;

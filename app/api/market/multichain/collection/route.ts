@@ -27,7 +27,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
     const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
-    void prioritizeCollectionDemand(chainSlug, tracked.contractAddress).catch(() => {});
+    // Real bug found live 2026-08-25 ("this isnt live time updating"):
+    // this silently swallowed EVERY real error with no logging at all --
+    // a genuine failure here (the exact symptom reported: a real page
+    // visit never re-enqueuing real, incomplete work) was completely
+    // invisible, indistinguishable from "nothing needed doing." A demand
+    // signal is best-effort by design (never worth failing the page
+    // over), but best-effort must still mean "logged and moved on," never
+    // "silently vanished."
+    void prioritizeCollectionDemand(chainSlug, tracked.contractAddress).catch((error) => {
+      console.error(
+        `[collection-route] prioritizeCollectionDemand failed for ${chainSlug}:${tracked.contractAddress}:`,
+        error instanceof Error ? error.message : error
+      );
+    });
     const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
     const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
     let holderCount = supply?.holderCount ?? null;
