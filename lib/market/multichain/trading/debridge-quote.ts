@@ -165,7 +165,7 @@ export async function quoteDeBridgeCrossChainPurchase(input: {
     dlnHook: JSON.stringify(dlnHook),
   });
 
-  const res = await fetch(`${DEBRIDGE_API}/dln/order/create-tx?${params.toString()}`);
+  const res = await fetch(`${DEBRIDGE_API}/dln/order/create-tx?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(`debridge-quote: ${res.status} ${body.errorMessage ?? body.errorId ?? "unknown error"}`);

@@ -121,6 +121,7 @@ async function unisatFetch<T>(path: string, body: Record<string, unknown>): Prom
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
     });
     const text = await res.text().catch(() => "");
     if (res.status === 403 || res.status === 429 || text.includes("rate limit")) {

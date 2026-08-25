@@ -69,6 +69,11 @@ const KNOWN_BUILD_FROZEN: Record<string, string[]> = {
   // constant, not a runtime kill switch.
   "market/multichain/discovery/solana-editions.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
   "market/multichain/discovery/solana-metaplex-reads.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
+  // Same build-frozen public Solana RPC endpoint convention -- see this
+  // file's own header for the citation (solana-metaplex-reads.ts's own
+  // SOLANA_RPC_URL constant). Not a runtime kill switch.
+  "market/multichain/discovery/tensor-settlement-scan.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
+  "market/multichain/discovery/tensor-listing-scan.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
   "constants.ts": [
     "NEXT_PUBLIC_DEV_LOCAL_CHAIN",
     "NEXT_PUBLIC_DEV_LOCAL_RPC",

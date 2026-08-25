@@ -71,12 +71,26 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   }
 
   if (isSolanaChainSlug(chainSlug)) {
-    const me = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(contractAddress)}/stats`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(12_000),
-    }).catch(() => null);
-    if (!me?.ok) return false;
-    const stats = (await me.json()) as { listedCount?: number; uniqueHolders?: number; floorPrice?: number | null };
+    // REAL DUPLICATE OF THE SAME BUG collection/route.ts's Magic Eden stats
+    // fetch was fixed for: this call had zero caching, and is the exact
+    // same upstream endpoint keyed the exact same way -- so this now shares
+    // that route's own cache key/TTL rather than getting an independent
+    // (and independently uncoalesced) cache entry. See singleflight-cache.ts's
+    // own header for the coalescing/stale-while-revalidate mechanism.
+    const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+    const stats = await getOrRefresh<{ listedCount?: number; uniqueHolders?: number; floorPrice?: number | null } | null>(
+      `magiceden-stats:${chainSlug}:${contractAddress}`,
+      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "magiceden" },
+      async () => {
+        const me = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(contractAddress)}/stats`, {
+          headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!me.ok) throw new Error(`magiceden stats HTTP ${me.status}`);
+        return (await me.json()) as { listedCount?: number; uniqueHolders?: number; floorPrice?: number | null };
+      }
+    ).catch(() => null);
+    if (!stats) return false;
     if (typeof stats.listedCount === "number") {
       await updateCollectionSupplyFields("solana-mainnet", contractAddress, {
         listedCount: stats.listedCount,
@@ -166,24 +180,44 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   const openSeaApiKey = osChain ? (await pickOpenSeaKey("live"))?.apiKey ?? null : null;
   if (!osChain || !openSeaApiKey) return filled;
 
-  const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {
-    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
-    signal: AbortSignal.timeout(12_000),
-  }).catch(() => null);
-  if (!ident?.ok) return filled;
-  const slug = ((await ident.json()) as { collection?: string }).collection;
+  // Contract->slug identity is effectively immutable (same reasoning as
+  // resolveOpenSeaCollectionSlug elsewhere) -- a long soft TTL means a
+  // collection hydrated repeatedly (this route is invoked per-row from a
+  // hub page view) resolves its slug once, not on every hydrate call.
+  const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+  const identKey = `opensea-collection-identity:${osChain}:${contractAddress.toLowerCase()}`;
+  const slug = await getOrRefresh<string | null>(
+    identKey,
+    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
+    async () => {
+      const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {
+        headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!ident.ok) throw new Error(`opensea identity HTTP ${ident.status}`);
+      return ((await ident.json()) as { collection?: string }).collection ?? null;
+    }
+  ).catch(() => null);
   if (!slug) return filled;
 
   const osHeaders = { "x-api-key": openSeaApiKey, accept: "application/json" };
-  const statsRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}/stats`, {
-    headers: osHeaders,
-    signal: AbortSignal.timeout(12_000),
-  }).catch(() => null);
-  if (statsRes?.ok) {
-    const stats = (await statsRes.json()) as {
-      total?: { num_owners?: number; floor_price?: number; listed_count?: number };
-      intervals?: Array<{ interval: string; volume?: number; sales?: number }>;
-    };
+  type OpenSeaCollectionStats = {
+    total?: { num_owners?: number; floor_price?: number; listed_count?: number };
+    intervals?: Array<{ interval: string; volume?: number; sales?: number }>;
+  };
+  const stats = await getOrRefresh<OpenSeaCollectionStats | null>(
+    `opensea-collection-stats:${osChain}:${slug}`,
+    { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "opensea" },
+    async () => {
+      const statsRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}/stats`, {
+        headers: osHeaders,
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!statsRes.ok) throw new Error(`opensea collection stats HTTP ${statsRes.status}`);
+      return (await statsRes.json()) as OpenSeaCollectionStats;
+    }
+  ).catch(() => null);
+  if (stats) {
     const oneDay = stats.intervals?.find((i) => i.interval === "one_day");
     const sevenDay = stats.intervals?.find((i) => i.interval === "seven_day");
     const thirtyDay = stats.intervals?.find((i) => i.interval === "thirty_day");
@@ -253,16 +287,25 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     }
   }
 
-  const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
-    headers: osHeaders,
-    signal: AbortSignal.timeout(12_000),
-  }).catch(() => null);
-  if (metaRes?.ok) {
-    const meta = (await metaRes.json()) as {
-      name?: string;
-      image_url?: string;
-      total_supply?: number | null;
-    };
+  type OpenSeaCollectionMeta = { name?: string; image_url?: string; total_supply?: number | null };
+  // Same key namespace listings/route.ts's collectionMeta fetch uses --
+  // both resolve the identical OpenSea /collections/{slug} identity/name/
+  // image payload for the same collection, keyed on the same resolved slug,
+  // so a page view and a hub hydrate call share one cache entry instead of
+  // each maintaining an independent (and independently uncoalesced) copy.
+  const meta = await getOrRefresh<OpenSeaCollectionMeta | null>(
+    `opensea-collection-meta:${osChain}:${slug}`,
+    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
+    async () => {
+      const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
+        headers: osHeaders,
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!metaRes.ok) throw new Error(`opensea collection meta HTTP ${metaRes.status}`);
+      return (await metaRes.json()) as OpenSeaCollectionMeta;
+    }
+  ).catch(() => null);
+  if (meta) {
     if (meta.name || meta.image_url) {
       await updateCollectionDisplay(chainSlug, contractAddress, {
         name: meta.name ?? null,

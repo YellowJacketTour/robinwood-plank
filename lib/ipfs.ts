@@ -180,6 +180,18 @@ export function ipfsGatewayCandidates(uri: string): string[] {
   if (!uri) return [];
   if (uri.startsWith("data:")) return [uri];
 
+  // Real gap found and fixed 2026-08-26 (Hash-First Multi-Source Hydration
+  // Doctrine, docs/marketplank/GROK-FINDINGS-intelligence-agency-maximal-
+  // vision-2026-08-26.md): a real `ar://<txid>` pointer (Arweave's own
+  // protocol scheme, real and citable -- arweave.net's own docs) fell
+  // through to the raw-IPFS-gateway branch below with no translation,
+  // producing garbage URLs like "https://gateway.pinata.cloud/ipfs/ar://<txid>".
+  // arweave.net is itself a real, free, keyless HTTP gateway for any
+  // Arweave transaction id -- same on-chain-pointer-to-free-gateway shape
+  // as ipfs://, just a single real host, not a rotation.
+  const arweaveMatch = uri.match(/^ar:\/\/([a-zA-Z0-9_-]+)/i);
+  if (arweaveMatch?.[1]) return [`https://arweave.net/${arweaveMatch[1]}`];
+
   // Already an http(s) URL — still try gateway rewrites if it looks like /ipfs/.
   // These stay RAW external URLs on purpose: this function is also called
   // server-side by app/api/ipfs/image/route.ts to get the real gateway

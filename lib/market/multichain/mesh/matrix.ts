@@ -56,7 +56,12 @@ export type MeshSource =
   | "unisat-membership"
   | "helius-membership"
   | "opensea-membership"
-  | "cryptopunks-native";
+  | "anchored-membership"
+  | "cryptopunks-native"
+  | "archival-frontier"
+  | "erc4906-rescan"
+  | "ipfs-corroboration"
+  | "fills-reconcile";
 
 export type MeshLane = {
   id: string;
@@ -116,6 +121,22 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["image", "rarity"] as MeshCell[],
     sliceSec: 180,
     notes: "Bounded tokenURI then OpenSea per-token enrichment; completes trait coverage without request-path fan-out.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `ipfs-corroboration:${chainSlug}`,
+    source: "ipfs-corroboration" as const,
+    chainSlug,
+    cells: ["image"] as MeshCell[],
+    sliceSec: 30,
+    notes: "Cross-source corroboration (Grok findings, 2026-08-26): samples ~1% of real IPFS-content-addressed tokens through a second independent gateway to detect gateway-side corruption; never doubles real hydrate traffic.",
+  })),
+  ...HYPERSYNC_EVM.map((chainSlug) => ({
+    id: `erc4906-rescan:${chainSlug}`,
+    source: "erc4906-rescan" as const,
+    chainSlug,
+    cells: ["image", "rarity"] as MeshCell[],
+    sliceSec: 60,
+    notes: "Hash-First doctrine's real trigger: real ERC-4906 MetadataUpdate events reset exactly the affected tokens for re-verification; advanceEvmTokenMetadata's CID-skip then decides per-token whether a real body re-fetch is actually needed.",
   })),
   ...HYPERSYNC_EVM.map((chainSlug) => ({
     id: `hypersync-discovery:${chainSlug}`,
@@ -428,6 +449,39 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders"],
     sliceSec: 60,
     notes: "getListings(robinwood) + plank.love overlay. Never invent floor.",
+  },
+  {
+    // Opportunistic Archival Ledger cold frontier (docs/marketplank/GROK-
+    // FINDINGS-sustainable-archival-mining-2026-08-25.md, build order item
+    // 4). Not chain-specific -- runArchivalFrontierLane() itself selects a
+    // small cross-chain batch of never/rarely-archived collections from
+    // collection_archival_stats and enqueues their REAL per-chain hydration
+    // job kinds at DEMAND_PRIORITY.ARCHIVAL_FRONTIER, strictly below plain
+    // background cadence. This lane's own job just runs that selector; it
+    // never calls a third-party provider directly. Self-gated to run at
+    // most once every ARCHIVAL_FRONTIER_MIN_INTERVAL_MS via the durable
+    // archival_frontier_runs singleton row, so most ticks are a no-op.
+    id: "archival-frontier:cross-chain",
+    source: "archival-frontier",
+    chainSlug: "eth-mainnet",
+    cells: ["rarity"],
+    sliceSec: 60,
+    notes: "Lowest-priority gap-fill for never/rarely-organically-hit collections; self-gated, cross-chain, additive.",
+  },
+  {
+    // Real gap found live 2026-08-26: fills_ever_stored was 0 across every
+    // one of 558,678 tracked collections (no real caller ever set
+    // isFill:true) despite ~79M real fills already indexed across
+    // plank_seaport_fills and 8 other venue tables. Cursor-paginated
+    // through plank_multichain_collections, small bounded batches, own
+    // durable cursor (fills-reconcile.ts) -- same shape as
+    // archival-frontier, cross-chain, not per-chain.
+    id: "fills-reconcile:cross-chain",
+    source: "fills-reconcile",
+    chainSlug: "eth-mainnet",
+    cells: ["rarity"],
+    sliceSec: 30,
+    notes: "Bounded, cursor-paginated fills_ever_stored reconciliation against the real per-venue fill tables; display-honesty fix, not a live gate.",
   },
 ];
 

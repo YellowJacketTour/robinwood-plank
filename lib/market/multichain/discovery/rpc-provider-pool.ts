@@ -128,8 +128,20 @@ export async function rpcCall<T = unknown>(
   // may not serve).
   const ordered = [...providers].sort((a, b) => (a.id === "alchemy" ? 1 : 0) - (b.id === "alchemy" ? 1 : 0));
 
+  // Real bug found live 2026-08-25 ("hunt for lessons-learned
+  // recurrences"): this pool's own per-chain Alchemy jail (provider.source
+  // = `rpc-pool:<chain>:alchemy`, one per EVM chain) was siloed from
+  // alchemy-nft.ts's separate real Alchemy usage, even though both hit
+  // the exact same real account/API key. A real detected quota failure on
+  // one was invisible to the other. Checked once here (not once per
+  // provider iteration) since it only ever matters for the "alchemy"
+  // entry in `ordered`.
+  const { isAlchemyAccountJailed, jailAlchemyAccountUntilMonthReset } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  const alchemyAccountJailed = await isAlchemyAccountJailed();
+
   let lastError: unknown = null;
   for (const provider of ordered) {
+    if (provider.id === "alchemy" && alchemyAccountJailed) continue;
     if (!checkSourceBudget(provider.source).allowed) continue;
     try {
       const res = await fetch(provider.url, {
@@ -140,6 +152,7 @@ export async function rpcCall<T = unknown>(
       });
       if (!res.ok) {
         recordSourceFailure(provider.source, res.status === 429);
+        if (provider.id === "alchemy" && res.status === 429) await jailAlchemyAccountUntilMonthReset().catch(() => {});
         lastError = new Error(`rpc-provider-pool: ${provider.id} HTTP ${res.status} for ${method} on ${chainSlug}`);
         continue;
       }

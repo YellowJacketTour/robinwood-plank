@@ -30,13 +30,28 @@ export async function GET(req: NextRequest) {
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }
-    const res = await fetch(`https://api.opensea.io/api/v2/traits/${encodeURIComponent(collectionSlug)}`, {
-      headers: { "x-api-key": key, accept: "application/json" },
-    });
-    if (!res.ok) {
-      return NextResponse.json({ error: `OpenSea ${res.status}` }, { status: 502 });
-    }
-    const data = (await res.json()) as { counts?: Record<string, Record<string, number>> };
+    // Live user-facing route with no caching at all -- every Details-view
+    // open hit OpenSea's traits endpoint directly. Same class of bug as the
+    // Magic Eden stats fetch fixed in collection/route.ts; wrapped in the
+    // same getOrRefresh singleflight/stale-while-revalidate helper (see its
+    // own header). Trait-value counts move on human timescales, not
+    // per-second -- same TTLs as the collection-stats site.
+    const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+    const data = await getOrRefresh<{ counts?: Record<string, Record<string, number>> }>(
+      `opensea-traits:${collectionSlug}`,
+      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "opensea" },
+      async () => {
+        // Throw, don't return null/{} -- a transient upstream failure must
+        // never poison the cache with a false "no traits" result (same
+        // discipline as every other getOrRefresh fetcher in this codebase).
+        const res = await fetch(`https://api.opensea.io/api/v2/traits/${encodeURIComponent(collectionSlug)}`, {
+          headers: { "x-api-key": key, accept: "application/json" },
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!res.ok) throw new Error(`OpenSea traits HTTP ${res.status}`);
+        return (await res.json()) as { counts?: Record<string, Record<string, number>> };
+      }
+    );
     return NextResponse.json({ counts: data.counts ?? {} }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to load multichain traits");

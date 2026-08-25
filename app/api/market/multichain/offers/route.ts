@@ -166,13 +166,28 @@ export async function GET(req: NextRequest) {
       const firstWithContract = rawOffers.find((o) => o.contractAddress);
       const contractAddress = firstWithContract?.contractAddress;
       if (contractAddress) {
+        // Same per-token art cache namespace listings/route.ts uses (both
+        // fetch the identical OpenSea NFT-by-token endpoint, immutable
+        // identity data) -- a token whose art was already resolved while
+        // rendering the listings grid is served here with zero upstream
+        // call, and vice versa.
+        const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+        type OpenSeaNft = { nft?: { name?: string; image_url?: string } };
+        const lowerContract = contractAddress.toLowerCase();
         await Promise.all(
           specificTokenIds.map(async (tokenId) => {
-            const res = await fetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, {
-              headers: { "x-api-key": key, accept: "application/json" },
-            });
-            if (!res.ok) return;
-            const data = (await res.json()) as { nft?: { name?: string; image_url?: string } };
+            const data = await getOrRefresh<OpenSeaNft | null>(
+              `opensea-nft-art:${chain.openSeaChain}:${lowerContract}:${tokenId}`,
+              { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
+              async () => {
+                const res = await fetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, {
+                  headers: { "x-api-key": key, accept: "application/json" },
+                });
+                if (!res.ok) throw new Error(`opensea nft art HTTP ${res.status}`);
+                return (await res.json()) as OpenSeaNft;
+              }
+            ).catch(() => null);
+            if (!data) return;
             artByToken.set(tokenId, { imageUrl: data.nft?.image_url ?? null, name: data.nft?.name ?? null });
           })
         );

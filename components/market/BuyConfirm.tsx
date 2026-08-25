@@ -31,6 +31,19 @@ type Props = {
    * wallet is currently connected to.
    */
   crossChain?: { chainLabel: string; feeBps: number };
+  /**
+   * Present only when this collection's book is backed by a venue whose
+   * venue-registry coverage is partial/planned/unavailable (see
+   * isCoverageCtaDegraded in lib/market/multichain/collection-coverage.ts)
+   * -- Issue 4 of docs/marketplank/GROK-FINDINGS-biggest-issues-unified-
+   * vision-2026-08-25.md: "if fulfill path is canary or book is
+   * settlement-only, secondary button style + one-line reason." Swaps the
+   * primary gold "Buy now" button for a de-emphasized secondary style and
+   * shows the honest one-line reason underneath it. Never disables or
+   * blocks the action -- that would be a functional regression beyond
+   * what this prop is for.
+   */
+  coverageNotice?: string | null;
 };
 
 /**
@@ -50,6 +63,7 @@ export default function BuyConfirm({
   onConfirm,
   onCancel,
   crossChain,
+  coverageNotice,
 }: Props) {
   const crossChainFeeWei = crossChain
     ? (BigInt(verifiedPriceWei) * BigInt(crossChain.feeBps)) / BigInt(10_000)
@@ -158,10 +172,17 @@ export default function BuyConfirm({
           type="button"
           disabled={busy}
           onClick={onConfirm}
-          className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+          className={
+            coverageNotice
+              ? "min-h-12 w-full rounded-lg border border-amber-500/50 bg-transparent text-sm font-bold text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-50"
+              : "min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+          }
         >
           {busy ? "Confirm in wallet…" : "Buy now"}
         </button>
+        {coverageNotice && (
+          <p className="text-center text-[0.62rem] text-amber-300/80">{coverageNotice}</p>
+        )}
       </div>
     </div>
   );

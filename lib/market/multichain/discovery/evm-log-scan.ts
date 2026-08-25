@@ -132,10 +132,21 @@ export function isNotRealCollectibleArt(name: string | null, imageUrl: string | 
 }
 
 export async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
+  // Real fix, 2026-08-25 ("build the researched state of the art never
+  // fail" for the activity/fills pipeline): this fetch had NO timeout at
+  // all -- the same unguarded-hang class of bug found and fixed twice
+  // already tonight in mesh-tick.ts and evm-hypersync-backfill-pass.mjs,
+  // just one level deeper here, in the shared RPC call every one of the 8
+  // real marketplace-protocol fill indexers (Seaport/Blur/Wyvern/X2Y2/
+  // Foundation/Sudoswap/Rarible/CryptoKitties) uses underneath
+  // seaport-fill-indexer.ts et al. A dead/hanging RPC endpoint here could
+  // stall whichever lane called it for as long as the connection stayed
+  // open. Matches rpc-provider-pool.ts's own already-proven 15s bound.
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
+    signal: AbortSignal.timeout(15_000),
   });
   const json = (await res.json()) as { result?: T; error?: { message: string } };
   if (json.error) {
@@ -476,6 +487,15 @@ export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> 
         // to the clean skip branch above instead of repeating this network
         // round trip once per chain, forever.
         recordSourceFailure(key.providerAccount, true, Math.max(60_000, nextUtcMonthStartMs() - Date.now()));
+        // Real bug found live 2026-08-25 ("hunt for lessons-learned
+        // recurrences"): this jails only THIS specific pool key -- a real
+        // third silo alongside alchemy-nft.ts's and rpc-provider-pool.ts's
+        // own separate Alchemy jails, all three of which can hit the exact
+        // same real account quota. Also set the shared, durable account
+        // jail so a real detected exhaustion here is immediately visible
+        // to those other two real call sites too.
+        const { jailAlchemyAccountUntilMonthReset } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+        await jailAlchemyAccountUntilMonthReset().catch(() => {});
       }
       results.push({
         chainSlug,

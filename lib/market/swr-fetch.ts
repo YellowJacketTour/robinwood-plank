@@ -198,7 +198,18 @@ async function fetchAndStore(
     cache: "no-store",
     headers: { Accept: "application/json" },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  if (!res.ok) {
+    // BUG FIXED 2026-08-25: a transient HTTP error (a 429 from our own
+    // per-route rate limiter, a momentary 5xx) used to throw unconditionally,
+    // which surfaced as an uncaught runtime error/crash overlay for any
+    // caller that awaited this without its own catch -- same
+    // transient-failure-must-not-discard-cache discipline already applied
+    // to the singleflight cache. Fall back to the last-good cached value
+    // when one exists; only throw when there's truly nothing to serve.
+    const prev = memory.get(url);
+    if (prev?.data !== undefined) return prev.data;
+    throw new Error(`HTTP ${res.status} ${url}`);
+  }
   const data = await res.json();
   // Never poison SWR with a "bad" payload (e.g. empty held list from a blip).
   if (isGood && !isGood(data)) {

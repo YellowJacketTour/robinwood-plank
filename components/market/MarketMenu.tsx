@@ -119,6 +119,13 @@ export default function MarketMenu({ className, active, onNavigate, variant = "r
               </Link>
             ))}
           </div>
+          <Link
+            href="/market/multichain/known-limitations"
+            className="mt-2 block text-center text-[0.62rem] font-bold text-foreground/50 underline decoration-dotted hover:text-gold-300"
+            onClick={go}
+          >
+            Known limitations by chain →
+          </Link>
         </>
       )}
     </div>

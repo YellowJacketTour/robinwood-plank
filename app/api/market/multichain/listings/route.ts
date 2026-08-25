@@ -399,26 +399,45 @@ export async function GET(req: NextRequest) {
         token?: { name?: string; image?: string; collectionName?: string; attributes?: Array<{ trait_type: string; value: string }> };
       };
       const pageSize = 20;
-      const raw: MeListing[] = [];
-      const seenMint = new Set<string>();
-      for (let offset = 0; offset < limit; offset += pageSize) {
-        const res = await fetch(
-          `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${pageSize}&offset=${offset}`,
-          { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
-        );
-        if (!res.ok) {
-          if (raw.length === 0) return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
-          break;
+      // Real gap found live 2026-08-25 ("many visitors one fingerprint"
+      // audit): this whole paginated fetch ran raw, on every single
+      // request, with zero coalescing -- N concurrent visitors browsing
+      // this same collection's listings each independently hammered Magic
+      // Eden with their own full pagination loop. Wrapped in the same
+      // getOrRefresh singleflight/SWR mechanism every other live upstream
+      // call in this file already uses. Short soft TTL (real order book,
+      // changes as people list/buy) still collapses any real concurrent
+      // burst into one upstream walk; keyed on (collectionSlug, limit) so
+      // the common "default page size" case coalesces across visitors even
+      // when a few request a deeper page.
+      const { getOrRefresh: getOrRefreshMe } = await import("@/lib/market/multichain/singleflight-cache");
+      const raw = await getOrRefreshMe<MeListing[]>(
+        `magiceden-listings:${collectionSlug}:${limit}`,
+        { softTtlMs: 15_000, hardTtlMs: 2 * 60_000, provider: "magiceden" },
+        async () => {
+          const rows: MeListing[] = [];
+          const seenMint = new Set<string>();
+          for (let offset = 0; offset < limit; offset += pageSize) {
+            const res = await fetch(
+              `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${pageSize}&offset=${offset}`,
+              { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
+            );
+            if (!res.ok) {
+              if (rows.length === 0) throw new Error(`Magic Eden ${res.status}`);
+              break;
+            }
+            const page = (await res.json()) as MeListing[];
+            if (!Array.isArray(page) || page.length === 0) break;
+            for (const row of page) {
+              if (!row.tokenMint || seenMint.has(row.tokenMint)) continue;
+              seenMint.add(row.tokenMint);
+              rows.push(row);
+            }
+            if (page.length < pageSize) break;
+          }
+          return rows;
         }
-        const page = (await res.json()) as MeListing[];
-        if (!Array.isArray(page) || page.length === 0) break;
-        for (const row of page) {
-          if (!row.tokenMint || seenMint.has(row.tokenMint)) continue;
-          seenMint.add(row.tokenMint);
-          raw.push(row);
-        }
-        if (page.length < pageSize) break;
-      }
+      );
       const listings: Listing[] = raw
         .filter((l) => l.tokenMint && typeof l.price === "number")
         .map((l) => {
@@ -653,12 +672,29 @@ export async function GET(req: NextRequest) {
         ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
         : collectionSlug;
 
+    // REAL BUG: this collection-identity call had no caching at all --
+    // every visible-page render of a foreign-EVM collection re-fetched
+    // OpenSea's /collections/{slug} endpoint, live, uncoalesced. Same class
+    // of bug as the Magic Eden stats fetch fixed in collection/route.ts.
+    // Shares the SAME cache key namespace hydrate-stats/route.ts's own
+    // collection-meta fetch uses (both resolve the identical endpoint for
+    // the same collection, keyed on the same resolved slug) so a page view
+    // and a background hydrate call coalesce into one upstream call, not two
+    // independent caches. Name/image/contract mapping change on human
+    // timescales at most.
+    type OpenSeaCollectionMeta = { name?: string; image_url?: string; contracts?: Array<{ address: string; chain: string }> };
+    const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
     const [rawOrders, collectionMeta] = await Promise.all([
       fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit }),
-      openSeaJson<{ name?: string; image_url?: string; contracts?: Array<{ address: string; chain: string }> }>(
-        `/collections/${encodeURIComponent(openSeaSlug)}`,
-        key
-      ),
+      getOrRefresh<OpenSeaCollectionMeta | null>(
+        `opensea-collection-meta:${chain.openSeaChain}:${openSeaSlug}`,
+        { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
+        async () => {
+          const meta = await openSeaJson<OpenSeaCollectionMeta>(`/collections/${encodeURIComponent(openSeaSlug)}`, key);
+          if (!meta) throw new Error(`opensea collection meta unavailable for ${openSeaSlug}`);
+          return meta;
+        }
+      ).catch(() => null),
     ]);
 
     // ONE CARD PER TOKEN, CHEAPEST WINS.
@@ -708,11 +744,24 @@ export async function GET(req: NextRequest) {
       ...new Set(orders.map((o) => o.parameters.offer[0]?.identifierOrCriteria).filter(Boolean) as string[]),
     ].slice(0, MAX_ART_LOOKUPS);
 
+    // Per-token art was fetched live on every page render with no caching --
+    // a token's name/image/traits are effectively immutable (metadata
+    // doesn't change once minted), so this is a pure loss: every visitor to
+    // a popular collection re-paid the same OpenSea NFT lookup for the same
+    // tokens. Long TTL is safe here specifically because it's identity/art
+    // data, not price data.
+    type OpenSeaNft = { nft?: { name?: string; image_url?: string; traits?: Array<{ trait_type: string; value: string }> } };
     const artEntries = await Promise.all(
       distinctTokenIds.map(async (tokenId) => {
-        const nft = await openSeaJson<{
-          nft?: { name?: string; image_url?: string; traits?: Array<{ trait_type: string; value: string }> };
-        }>(`/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, key);
+        const nft = await getOrRefresh<OpenSeaNft | null>(
+          `opensea-nft-art:${chain.openSeaChain}:${contractAddress.toLowerCase()}:${tokenId}`,
+          { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
+          async () => {
+            const result = await openSeaJson<OpenSeaNft>(`/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, key);
+            if (!result) throw new Error(`opensea nft art unavailable for ${contractAddress}/${tokenId}`);
+            return result;
+          }
+        ).catch(() => null);
         return [
           tokenId,
           {

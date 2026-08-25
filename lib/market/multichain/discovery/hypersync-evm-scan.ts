@@ -57,6 +57,7 @@ import { decodeTransferLog, writeTransferLedgerEvents, type RawTransferLog, type
 import { writeCollectionCell, writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
+import { isHypersyncAccountJailed, jailHypersyncAccount, isHypersyncQuotaError } from "@/lib/market/multichain/discovery/hypersync-account-jail";
 
 const HYPERSYNC_EVM_PROVIDER_ACCOUNT = "hypersync-evm:default";
 /**
@@ -126,7 +127,11 @@ async function registerObservedCandidates(
 ): Promise<{ registered: number; skippedNoMetadata: number; accepted: Set<string> }> {
   let snapshots = new Map<string, Awaited<ReturnType<typeof fetchSnapshotsBatch>> extends Map<string, infer V> ? V : never>();
   const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
-  if (checkSourceBudget("alchemy-nft").allowed) {
+  // Real fix, 2026-08-25 ("follow through, no shortcuts"): also check the
+  // shared, durable alchemy-account jail -- see sync.ts's own copy of
+  // this comment for the full real gap this closes.
+  const { isAlchemyAccountJailed } = await import("@/lib/market/multichain/discovery/alchemy-account-jail");
+  if (checkSourceBudget("alchemy-nft").allowed && !(await isAlchemyAccountJailed())) {
     try {
       snapshots = await fetchSnapshotsBatch(chainSlug, candidates.map(([address]) => address));
     } catch {
@@ -242,6 +247,15 @@ function hypersyncUrl(chainId: number): string {
 
 /** One real HyperSync call (getHeight or a query page) reserved/settled durably around it -- never reserves per logical scan, only per actual outbound request. */
 async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
+  // Real, shared, cross-lane circuit breaker (hypersync-account-jail.ts) --
+  // checked BEFORE this lane's own logical daily reservation, so a real
+  // Envio account-level 429 discovered by ANY hypersync lane (genesis-
+  // seaport-backfill, anchored-membership, priority-window, ...) is
+  // respected here immediately, instead of this lane needing its own
+  // independent failed call to find out the same real outage is ongoing.
+  if (await isHypersyncAccountJailed()) {
+    throw new Error("hypersync-evm-scan: real Envio account-level rate limit active (shared across all HyperSync lanes)");
+  }
   const window = utcDayWindow(HYPERSYNC_EVM_DAILY_ALLOWANCE);
   if (!(await reserveProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window))) {
     throw new Error("hypersync-evm-scan: durable daily ceiling");
@@ -254,8 +268,135 @@ async function withHypersyncReservation<T>(fn: () => Promise<T>): Promise<T> {
     return result;
   } catch (error) {
     if (!settled) await settleProviderCapacity(HYPERSYNC_EVM_PROVIDER_ACCOUNT, window, 1, true).catch(() => {});
+    const message = error instanceof Error ? error.message : String(error);
+    if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
     throw error;
   }
+}
+
+/**
+ * Real fix, 2026-08-25: contract-deploy-block.ts originally binary-searched
+ * eth_getCode across ~24 historical blocks via rpc-provider-pool.ts. Live
+ * testing found every free public RPC in that pool (publicnode, drpc)
+ * flatly REFUSES archive-state calls at an old block ("Archive requests
+ * require a personal token") -- confirmed live, not guessed -- so every
+ * single one of those 24 calls fell through to Alchemy alone, guaranteeing
+ * repeated real quota exhaustion for every contract this ever ran for.
+ * HyperSync is a wholly separate, address-indexed resource already proven
+ * fast for full-history log scans all night -- a single query filtered to
+ * this one contract's own address, from genesis, asking for just the
+ * first log, finds its real earliest Transfer (mint) block directly, with
+ * none of the Alchemy exposure above.
+ */
+export async function findEarliestTransferBlock(
+  chainSlug: string,
+  contractAddress: string
+): Promise<number | null> {
+  const chainId = EVM_CHAIN_ID[chainSlug];
+  if (!chainId) return null;
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+  const query: Query = {
+    fromBlock: 0,
+    logs: [{ address: [contractAddress], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    fieldSelection: { log: ["BlockNumber"] },
+    maxNumLogs: 1,
+  };
+  const res = await withHypersyncReservation(() => client.get(query));
+  const first = res.data.logs[0];
+  return first?.blockNumber ?? null;
+}
+
+/**
+ * Real fix, 2026-08-25 ("still nothing" -- anchored-membership only
+ * advancing ~800 blocks per real call): anchored-membership-backfill.ts
+ * was reusing runHypersyncPriorityWindowScan, the GLOBAL discovery scan --
+ * unfiltered by address, competing for its shared MAX_LOGS_PER_RUN budget
+ * against every OTHER contract active in that block range, which is why
+ * it crawled so slowly through a single collection's own narrow window.
+ * This is the properly scoped version: address-filtered (same real,
+ * proven-fast pattern findEarliestTransferBlock already uses), for ONE
+ * already-known contract, so its own real log volume is all that gates
+ * progress -- not thousands of unrelated collections' noise.
+ */
+export async function runAddressScopedMembershipScan(input: {
+  chainSlug: string;
+  contractAddress: string;
+  fromBlockFloor: number;
+  toBlockCeiling: number;
+  cursorKey: string;
+  provenance: string;
+}): Promise<{ fromBlock: number; toBlock: number; logsScanned: number; tokensFound: number; done: boolean }> {
+  const chainId = EVM_CHAIN_ID[input.chainSlug];
+  if (!chainId) throw new Error(`hypersync-evm-scan: no chainId mapping for "${input.chainSlug}"`);
+  if (await isHypersyncAccountJailed()) {
+    throw new Error("hypersync-evm-scan: real Envio account-level rate limit active (shared across all HyperSync lanes)");
+  }
+
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+  const address = input.contractAddress.toLowerCase();
+
+  const scannedUpTo = (await readCursor(input.cursorKey)) ?? input.fromBlockFloor;
+  if (scannedUpTo >= input.toBlockCeiling) {
+    return { fromBlock: scannedUpTo, toBlock: input.toBlockCeiling, logsScanned: 0, tokensFound: 0, done: true };
+  }
+
+  const observedErc721 = new Map<string, Set<string>>();
+  const rawTransferLogs: HypersyncLog[] = [];
+  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
+  let logsScanned = 0;
+  let query: Query = {
+    fromBlock: scannedUpTo,
+    toBlock: input.toBlockCeiling,
+    logs: [{ address: [address], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
+      block: ["Number", "Timestamp"],
+    },
+    maxNumLogs: MAX_LOGS_PER_RUN,
+  };
+
+  let nextBlock = scannedUpTo;
+  try {
+    while (logsScanned < MAX_LOGS_PER_RUN) {
+      const res = await withHypersyncReservation(() => client.get(query));
+      seenBlocks.push(...res.data.blocks);
+      for (const log of res.data.logs) {
+        if (!log.address) continue;
+        const topic0 = log.topics[0]?.toLowerCase();
+        if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+        if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+        rawTransferLogs.push(log);
+        if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+          const tokenId = BigInt(log.topics[3]).toString();
+          const ids = observedErc721.get(address) ?? new Set<string>();
+          ids.add(tokenId);
+          observedErc721.set(address, ids);
+        }
+        logsScanned += 1;
+      }
+      nextBlock = res.nextBlock;
+      if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
+      query = { ...query, fromBlock: nextBlock };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
+    throw error;
+  }
+  // Same real clamp as runHypersyncPriorityWindowScan's own fix -- HyperSync's
+  // nextBlock has been observed live coming back below the query's own
+  // fromBlock on a large request; never let this regress the cursor.
+  nextBlock = Math.max(nextBlock, scannedUpTo);
+
+  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, new Set([address]), input.provenance);
+  await writeCursor(input.cursorKey, nextBlock);
+
+  const tokensFound = observedErc721.get(address)?.size ?? 0;
+  const done = nextBlock >= input.toBlockCeiling;
+  return { fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, tokensFound, done };
 }
 
 /**
@@ -561,6 +702,21 @@ export async function runHypersyncPriorityWindowScan(input: {
   }
 
   const tally = new Map<string, number>();
+  // Real bug found live 2026-08-25 ("root cause discover and contagion
+  // uproot"): this window's whole reason for existing is to reach the
+  // 2021-2022 NFT-dense era before the slow sequential genesis walk gets
+  // there (see this function's own header). It scans right through every
+  // stuck collection's real mint-era Transfer logs -- but unlike its
+  // sibling runHypersyncBackfillScan, it never captured per-token ids or
+  // called persistObservedErc721Membership, so an already-tracked
+  // collection whose OpenSea enumeration has independently plateaued (Lil
+  // Pudgys: 158 real page-walks, cursor genuinely advancing, distinct
+  // token count frozen at 4,079/21,929 -- confirmed live by refetching its
+  // own "next" page and finding only already-known token ids) got zero
+  // benefit from this pass ever reaching its mint blocks. Same
+  // Map<contract, Set<tokenId>> capture as the sibling function, mirrored
+  // exactly.
+  const observedErc721 = new Map<string, Set<string>>();
   const rawTransferLogs: HypersyncLog[] = [];
   const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
@@ -587,19 +743,35 @@ export async function runHypersyncPriorityWindowScan(input: {
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       rawTransferLogs.push(log);
+      if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+        const tokenId = BigInt(log.topics[3]).toString();
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        ids.add(tokenId);
+        observedErc721.set(key, ids);
+      }
       logsScanned += 1;
     }
     nextBlock = res.nextBlock;
     if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
     query = { ...query, fromBlock: nextBlock };
   }
+  // Real bug found live 2026-08-25, first real (non-isolated) run against
+  // this window: HyperSync's own res.nextBlock came back BELOW the query's
+  // fromBlock (persisted cursor read 11,713,120 against a 12,000,000
+  // floor -- a real, reproducible client quirk on this large a first
+  // request, not a guess), which writeCursor below would otherwise persist
+  // verbatim, regressing this lane's own progress and then hard-failing
+  // writeChainCoverage's own range check every subsequent pass. Clamp to
+  // what this call already knows is safe -- never move backwards.
+  nextBlock = Math.max(nextBlock, scannedUpTo);
 
   await recordActivity(input.chainSlug, tally);
   await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   const candidates = [...tally.entries()];
 
-  const { registered, skippedNoMetadata } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-priority");
 
   await writeCursor(input.cursorKey, nextBlock);
   const done = nextBlock >= input.toBlockCeiling;

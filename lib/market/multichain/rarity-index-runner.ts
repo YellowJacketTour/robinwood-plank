@@ -17,14 +17,18 @@ import { postgresQuery } from "@/lib/postgres";
 import {
   readCollectionMembershipCursor,
   readProjectedRarityInputs,
+  readProjectedTokensByIds,
   upsertCollectionTokenProjection,
   writeCollectionMembershipCursor,
   readTokenMetadataWork,
   writeTokenMetadataResult,
 } from "@/lib/market/multichain/collection-token-store";
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
-import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata, resolveMetadataFromUri } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { batchReadTokenUris } from "@/lib/market/multichain/discovery/evm-multicall";
+import { needsBodyFetch, pointerFingerprint } from "@/lib/market/multichain/hash-first-hydrate";
 import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
+import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/multichain/archival-ledger";
 
 const PAGE_SIZE = 50;
 
@@ -68,8 +72,23 @@ export type ReservedFetchResult =
   | { ok: false; exhausted: true }
   | { ok: false; exhausted: false; status: number | null; detail: string };
 
-async function reservedBackgroundFetch(url: string): Promise<ReservedFetchResult> {
-  const slot = await reserveOpenSeaKey(1, { priority: "background" });
+/**
+ * Real fix, 2026-08-26: this function's own name/every prior caller
+ * assumed "background" always -- but `advanceEvmCollectionMembership`
+ * (called from here) is ALSO the exact function a demand-priority mesh
+ * job runs for a specific `subject` a real visitor is actively viewing
+ * (mesh-lane.ts's own `/^0x.../.test(subject)` branch). Live-reproduced:
+ * with a single OpenSea key, every consumer sharing the flat "background"
+ * priority meant demand-driven traffic lost every pace-slot attempt to
+ * background sweep competition, even spaced further apart than the real
+ * pace interval itself. `priority` now defaults to "background" (safe,
+ * unchanged behavior for every existing bare-sweep caller) but a caller
+ * that knows it's serving a real, specific, currently-viewed subject can
+ * pass "live" to get real precedence -- see opensea-key-pool.ts's
+ * BACKGROUND_SKIP_RATE for how that precedence is actually enforced.
+ */
+async function reservedBackgroundFetch(url: string, priority: "live" | "background" = "background"): Promise<ReservedFetchResult> {
+  const slot = await reserveOpenSeaKey(1, { priority });
   if (!slot) return { ok: false, exhausted: true };
   let res: Response;
   let settled = false;
@@ -163,7 +182,8 @@ export async function advanceVerifiedSequentialMembership(chainSlug: string, con
 export async function advanceEvmCollectionMembership(
   chainSlug: string,
   contractAddress: string,
-  openSeaChainOverride?: string
+  openSeaChainOverride?: string,
+  priority: "live" | "background" = "background"
 ) {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
@@ -175,7 +195,7 @@ export async function advanceEvmCollectionMembership(
   // page available on this run. The sequential cursor remains unchanged and
   // will retry; provider pagination continues as additive evidence.
   await advanceVerifiedSequentialMembership(chainSlug, contractAddress).catch(() => null);
-  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, openSeaChain);
+  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, openSeaChain, priority);
   if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress} (no OpenSea key with capacity, or the collection genuinely has no slug)`);
   const checkpoint = await readCollectionMembershipCursor(chainSlug, contractAddress, OPENSEA_MEMBERSHIP_SOURCE);
   const url = new URL(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}/nfts`);
@@ -183,7 +203,7 @@ export async function advanceEvmCollectionMembership(
   if (checkpoint?.cursor) url.searchParams.set("next", checkpoint.cursor);
   const observedAt = new Date();
   try {
-    const fetched = await reservedBackgroundFetch(url.toString());
+    const fetched = await reservedBackgroundFetch(url.toString(), priority);
     if (!fetched.ok) {
       throw new Error(fetched.exhausted
         ? `OpenSea pool exhausted/jailed enumerating ${contractAddress}`
@@ -290,6 +310,16 @@ export async function hydrateSpecificToken(
   const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
   const item = { chainSlug, collectionSlug, tokenId };
   try {
+    // Opportunistic Archival Ledger (docs/marketplank/GROK-FINDINGS-
+    // sustainable-archival-mining-2026-08-25.md): read whether this exact
+    // token was already archived BEFORE this hydrate, so a successful write
+    // below can honestly report isNewToken to recordArchivalHydration --
+    // tokens_ever_hydrated must count distinct tokens, not every re-hydrate.
+    const priorState = await readProjectedTokensByIds(chainSlug, collectionSlug, [tokenId]);
+    const wasAlreadyArchived = (() => {
+      const prior = priorState.get(tokenId);
+      return !!prior && (!!prior.name || !!prior.imageUrl || prior.traits.length > 0);
+    })();
     const metadata = await resolveEvmTokenMetadata({ rpcUrls, contractAddress: collectionSlug, tokenId }).catch(async (onchainError) => {
       if (!openSeaKey || !openSeaChain) throw onchainError;
       return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain, contractAddress: collectionSlug, tokenId });
@@ -303,6 +333,11 @@ export async function hydrateSpecificToken(
       preservePartial: true, provenance: ["on-demand-click-hydration"], sourceObservedAt: new Date(),
     });
     await writeTokenMetadataResult({ ...item, state: "complete" });
+    // Counter updates + bounded sibling expansion run AFTER the real write
+    // above succeeds -- best-effort bookkeeping that must never fail this
+    // request even if it errors.
+    await recordArchivalHydration(chainSlug, collectionSlug, { isNewToken: !wasAlreadyArchived }).catch(() => {});
+    await maybeExpandSiblingTokens(chainSlug, collectionSlug).catch(() => {});
     return { resolved: true, token: { tokenId, ...metadata } };
   } catch (error) {
     await writeTokenMetadataResult({ ...item, state: "retry", error: error instanceof Error ? error.message : String(error) });
@@ -320,12 +355,86 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   if (!rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
   const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
   const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
-  let complete = 0, empty = 0, retry = 0;
+  // Multicall3 batch pre-pass (Unified Mesh Continuum / intelligence-agency
+  // build, 2026-08-26 -- see GROK-FINDINGS-intelligence-agency-maximal-
+  // vision-2026-08-26.md, "likely highest unbuilt EVM leverage"): one real
+  // RPC call resolves tokenURI for every item in this batch at once,
+  // instead of each item paying its own RPC round-trip. Live-verified
+  // against real Pudgy Penguins token ids before shipping (cross-checked
+  // byte-for-byte against the existing single-call path). Best-effort: any
+  // item the batch doesn't resolve (ERC1155, non-standard contract, a
+  // genuine RPC hiccup) falls through to the existing per-token
+  // resolveEvmTokenMetadata path below unchanged, which already retries
+  // across every configured RPC URL and both selectors.
+  const batchUriByKey = new Map<string, string>();
+  // Real bug found and fixed during live verification 2026-08-26: this
+  // only ever tried rpcUrls[0] (Alchemy), with no fallback -- when that
+  // key is exhausted (real, live, currently true: "Monthly capacity limit
+  // exceeded"), the whole batch pre-pass silently failed every round and
+  // every item fell through to the slower per-item path. Now tries each
+  // configured RPC URL in order, same resilience the per-item readUri
+  // path already has.
+  for (const rpcUrl of rpcUrls) {
+    try {
+      const batched = await batchReadTokenUris(
+        rpcUrl,
+        work.map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }))
+      );
+      for (const r of batched) {
+        if (r.uri) batchUriByKey.set(`${r.contractAddress}:${r.tokenId}`, r.uri);
+      }
+      break;
+    } catch {
+      // Try the next configured RPC URL; if every one fails, the per-item
+      // fallback path below covers this batch entirely on its own.
+    }
+  }
+  // Hash-First Multi-Source Hydration Doctrine (Grok findings, 2026-08-26):
+  // bulk-read each item's STORED pointer fingerprint (only ever set by a
+  // prior successful run of this same function, below) so an item being
+  // re-processed (e.g. reset to 'pending' by a real ERC-4906
+  // MetadataUpdate re-verification pass -- see onchain-metadata-
+  // reverify.ts) can skip the real IPFS/Arweave body fetch entirely when
+  // the on-chain pointer PROVABLY hasn't changed (content-addressing, not
+  // a guess -- see hash-first-hydrate.ts's own header).
+  const storedFpByKey = new Map<string, string>();
+  if (work.length > 0) {
+    const fpResult = await postgresQuery<{ collection_slug: string; token_id: string; pointer_fp: string }>(
+      `SELECT t.collection_slug, t.token_id, t.pointer_fp
+       FROM plank_collection_tokens t
+       JOIN UNNEST($2::text[], $3::text[]) AS want(collection_slug, token_id)
+         ON t.collection_slug = want.collection_slug AND t.token_id = want.token_id
+       WHERE t.chain_slug = $1 AND t.pointer_fp IS NOT NULL`,
+      [chainSlug, work.map((w) => w.collectionSlug), work.map((w) => w.tokenId)]
+    ).catch(() => ({ rows: [] as Array<{ collection_slug: string; token_id: string; pointer_fp: string }> }));
+    for (const row of fpResult.rows) storedFpByKey.set(`${row.collection_slug}:${row.token_id}`, row.pointer_fp);
+  }
+  let complete = 0, empty = 0, retry = 0, cidSkipped = 0;
   const errors: string[] = [];
   for (const item of work) {
     try {
-      const metadata = await resolveEvmTokenMetadata({ rpcUrls,
-        contractAddress: item.collectionSlug, tokenId: item.tokenId }).catch(async (onchainError) => {
+      const itemKey = `${item.collectionSlug}:${item.tokenId}`;
+      const batchedUri = batchUriByKey.get(itemKey);
+
+      if (batchedUri) {
+        const gate = needsBodyFetch(batchedUri, storedFpByKey.get(itemKey) ?? null);
+        if (!gate.fetch) {
+          // Real content-addressing proof the body is unchanged -- keep
+          // the existing row exactly as-is, just clear it out of the
+          // pending/retry work queue. Never a fabricated "nothing new"
+          // when we can't actually prove it (see needsBodyFetch's own
+          // honesty note on the weaker `http` pointer kind).
+          await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+          cidSkipped += 1;
+          complete += 1;
+          continue;
+        }
+      }
+
+      const metadata = await (batchedUri
+        ? resolveMetadataFromUri(batchedUri)
+        : resolveEvmTokenMetadata({ rpcUrls, contractAddress: item.collectionSlug, tokenId: item.tokenId })
+      ).catch(async (onchainError) => {
           if (!openSeaKey || !openSeaChain) throw onchainError;
           return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain,
             contractAddress: item.collectionSlug, tokenId: item.tokenId });
@@ -335,11 +444,36 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
         empty += 1;
         continue;
       }
+      // Same honest isNewToken check as hydrateSpecificToken's single-click
+      // path -- this bulk background lane is the app's actual highest-
+      // throughput metadata source (mesh-tick runs it continuously), and
+      // until this call the archival ledger only ever advanced from a
+      // real person clicking one token at a time, undercounting the
+      // system's real, already-running work. Real bug found and fixed
+      // 2026-08-25, live-reproduced: collection_archival_stats stayed at
+      // zero rows for collections with thousands of real background-
+      // hydrated tokens.
+      const priorBulkState = await readProjectedTokensByIds(chainSlug, item.collectionSlug, [item.tokenId]).catch(() => new Map());
+      const priorBulkToken = priorBulkState.get(item.tokenId);
+      const wasAlreadyArchivedInBulk = Boolean(priorBulkToken?.name || priorBulkToken?.imageUrl);
       await upsertCollectionTokenProjection(chainSlug, item.collectionSlug, {
         tokens: [{ tokenId: item.tokenId, ...metadata }], partial: true,
         preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
       });
       await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
+      // Store the real pointer fingerprint for a future re-verification
+      // pass to compare against -- only possible when we actually know the
+      // exact URI used (the Multicall3 batch path), never guessed for the
+      // per-token fallback path.
+      if (batchedUri) {
+        const { fp } = pointerFingerprint(batchedUri);
+        await postgresQuery(
+          `UPDATE plank_collection_tokens SET pointer_fp = $4, pointer_uri = $5
+           WHERE chain_slug = $1 AND collection_slug = $2 AND token_id = $3`,
+          [chainSlug, item.collectionSlug, item.tokenId, fp, batchedUri]
+        ).catch(() => {});
+      }
+      await recordArchivalHydration(chainSlug, item.collectionSlug, { isNewToken: !wasAlreadyArchivedInBulk }).catch(() => {});
       complete += 1;
     } catch (error) {
       await writeTokenMetadataResult({ chainSlug, ...item, state: "retry",
@@ -380,7 +514,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
     });
     rarityFinalized += 1;
   }
-  return { attempted: work.length, complete, empty, retry, rarityFinalized, errors };
+  return { attempted: work.length, complete, empty, retry, rarityFinalized, cidSkipped, errors };
 }
 
 export async function advanceRobinhoodTokenMetadata(limit = 6) {
@@ -656,12 +790,13 @@ function sleep(ms: number): Promise<void> {
 async function resolveOpenSeaSlug(
   chainSlug: string,
   contractAddress: string,
-  openSeaChainOverride?: string
+  openSeaChainOverride?: string,
+  priority: "live" | "background" = "background"
 ): Promise<string | null> {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
   if (!openSeaChain) return null;
-  const fetched = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`);
+  const fetched = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`, priority);
   if (!fetched.ok) return null;
   const res = fetched.res;
   const data = (await res.json()) as { collection?: string };

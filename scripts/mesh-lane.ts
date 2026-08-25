@@ -105,6 +105,30 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized }));
       return;
     }
+    if (source === "erc4906-rescan") {
+      const { runMetadataUpdateRescanBatch } = await import("../lib/market/multichain/discovery/erc4906-rescan");
+      console.log("[mesh-lane] erc4906-rescan", JSON.stringify(await runMetadataUpdateRescanBatch(chain, 5)));
+      return;
+    }
+    if (source === "fills-reconcile") {
+      const { reconcileFillsBatch } = await import("../lib/market/multichain/discovery/fills-reconcile");
+      // Small batch: real, live-observed contention from a concurrent
+      // anti-wraparound autovacuum on plank_seaport_fills made even a
+      // 10-collection batch take 100s+ (each of 8 real fill-table lookups
+      // per collection can individually hit that table's own statement
+      // timeout under vacuum pressure) -- 3 keeps one invocation's worst
+      // case bounded regardless of what else is contending for the same
+      // table right now.
+      console.log("[mesh-lane] fills-reconcile", JSON.stringify(await reconcileFillsBatch(3)));
+      return;
+    }
+    if (source === "ipfs-corroboration") {
+      const { sampleIpfsCorroboration } = await import("../lib/market/multichain/discovery/ipfs-corroboration");
+      const result = await sampleIpfsCorroboration(chain, 25);
+      if (result.drifted.length > 0) console.log("[mesh-lane] ipfs-corroboration DRIFT DETECTED", JSON.stringify(result.drifted));
+      console.log("[mesh-lane] ipfs-corroboration", JSON.stringify(result));
+      return;
+    }
     if (source === "unisat-rarity") {
       const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
       console.log("[mesh-lane] unisat-rarity", JSON.stringify(await scaffoldAllTrackedBitcoinCollections({ limit: 1, delayMs: 0 })));
@@ -125,10 +149,52 @@ async function main(): Promise<void> {
     }
     if (source === "opensea-membership") {
       const { advanceEvmCollectionMembership, advanceNextTrackedEvmMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      // Real fix, 2026-08-26: a specific `subject` here means a real,
+      // demand-priority job for a collection an actual visitor is looking
+      // at right now (vs. the bare background-sweep branch, which just
+      // cycles through whatever's next) -- "live" priority now gets real
+      // precedence over background-sweep competition for the shared
+      // OpenSea pace slot (see opensea-key-pool.ts's BACKGROUND_SKIP_RATE).
       const result = /^0x[0-9a-f]{40}$/i.test(subject)
-        ? await advanceEvmCollectionMembership(chain, subject)
+        ? await advanceEvmCollectionMembership(chain, subject, undefined, "live")
         : await advanceNextTrackedEvmMembership(chain);
       console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
+      return;
+    }
+    if (source === "anchored-membership") {
+      // Real fix, 2026-08-25 ("if we have ability to track any collections
+      // mint then we should auto detect that and anchor it as that
+      // collections provenance trail seed... no need to work through
+      // blocks it cant physically exist in"): for a collection whose own
+      // OpenSea enumeration has provably plateaued (its /nfts pagination
+      // looping over already-seen tokens -- Lil Pudgys confirmed live),
+      // this walks HyperSync starting at the contract's REAL deployment
+      // block (binary-searched via eth_getCode, cached forever) instead of
+      // the blind shared 12M-15.5M "boom era" window that includes every
+      // block the contract provably could not exist in yet. subject must
+      // be a real 0x contract -- this is never a background-sweep source.
+      if (!/^0x[0-9a-f]{40}$/i.test(subject)) throw new Error("anchored-membership requires a real contract subject");
+      const { runAnchoredMembershipBackfill } = await import("../lib/market/multichain/discovery/anchored-membership-backfill");
+      const result = await runAnchoredMembershipBackfill(chain, subject);
+      console.log("[mesh-lane] anchored-membership", JSON.stringify(result));
+      // Real bug found live 2026-08-25 ("stuck on 60.04 since coming
+      // back"): one call only advances a bounded slice of the real
+      // 300,000-block anchor window (Lil Pudgys' first real run moved
+      // exactly 387 blocks) -- `done` only goes true once the WHOLE
+      // window is walked. This is a one-off demand enqueue, not a
+      // standing MESH_LANES entry mesh-tick.ts re-queues every pass on
+      // its own, so a job that finishes one slice and returns was marked
+      // 'succeeded' and permanently dropped from the queue -- real,
+      // confirmed progress, then silence forever after.
+      //
+      // Exit code 2 (not a DB write here) signals "succeeded, but more
+      // real work remains" to mesh-tick.ts's worker loop, which re-enqueues
+      // the same job key AFTER finishDataJob's own unconditional status
+      // update -- doing the re-enqueue from inside THIS process instead
+      // would race finishDataJob's later UPDATE (matched by id/lease_owner,
+      // unconditional) and get silently overwritten back to 'succeeded'
+      // with no future pickup.
+      if (!result.done) process.exitCode = 2;
       return;
     }
     if (source === "coingecko-nft") {
@@ -211,6 +277,11 @@ async function main(): Promise<void> {
     if (source === "native-robinwood") {
       const { sanitizeUnknownZeros } = await import("../lib/market/multichain/store");
       console.log("[mesh-lane] heal", JSON.stringify(await sanitizeUnknownZeros()));
+      return;
+    }
+    if (source === "archival-frontier") {
+      const { runArchivalFrontierLane } = await import("../lib/market/multichain/archival-ledger");
+      console.log("[mesh-lane] archival-frontier", JSON.stringify(await runArchivalFrontierLane()));
       return;
     }
     console.log(`[mesh-lane] no runner for source=${source}`);

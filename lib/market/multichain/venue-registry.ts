@@ -109,14 +109,156 @@ export const MARKET_VENUES = [
       "was not independently verified this pass and remains out of scope.",
   },
   { id: "magiceden-solana", label: "Magic Eden", family: "solana", protocol: "magiceden", versions: ["current"], capabilities: ["sales", "transfers", "listings", "bids"], coverage: "partial", chainSlugs: ["solana-mainnet"], notes: "Recent API activity exists; program-history and complete book ingestion remain incomplete." },
-  { id: "tensor-solana", label: "Tensor", family: "solana", protocol: "tensor", versions: ["current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program/account decoder and compressed-NFT support required." },
-  { id: "metaplex-solana", label: "Metaplex programs", family: "solana", protocol: "metaplex", versions: ["auction-house", "bubblegum", "core"], capabilities: ["sales", "transfers"], coverage: "planned", chainSlugs: ["solana-mainnet"], notes: "Program-family provenance including compressed and Core assets." },
+  {
+    id: "tensor-solana",
+    label: "Tensor",
+    family: "solana",
+    protocol: "tensor",
+    versions: ["current"],
+    capabilities: ["sales", "listings"],
+    coverage: "partial",
+    chainSlugs: ["solana-mainnet"],
+    notes:
+      "LISTINGS UPDATE 2026-08-25 -- \"listings\" restored to capabilities, but read the fine print: this is " +
+      "an HONEST split between two genuinely different things. (1) Tensor's off-chain ranked/aggregated " +
+      "GraphQL stats -- floor rank, volume, curated book views -- remain CONFIRMED KEY-GATED and UNAVAILABLE " +
+      "(see the still-blocked API finding below, unchanged since 2026-08-24; this app has no key and will not " +
+      "guess that schema). (2) Tensor's ACTIVE LISTINGS as real, ordinary, public ON-CHAIN ACCOUNTS -- " +
+      "tensor-listing-scan.ts now reads these directly via a real `getProgramAccounts` call against the same " +
+      "live Tensor Marketplace program, filtered on the real `ListState` account discriminator read from the " +
+      "installed @tensor-foundation/marketplace package. A real call against api.mainnet-beta.solana.com on " +
+      "2026-08-25 returned 115,370 real, decodable ListState accounts with real owner/assetId/amount/expiry " +
+      "fields (no timeout, no rate-limit hit for this query shape) -- see tensor-listing-scan.ts's own header " +
+      "for the exact sampled values. This is now NO-KEY-NEEDED live listing coverage, with completeness = " +
+      "\"whatever this app's chosen public RPC's own getProgramAccounts index currently returns\" -- not " +
+      "Tensor's own internal index, and not re-verified against Tensor's official ranked UI. Every listing " +
+      "surfaced this way is labeled `source: \"tensor_onchain_list_state\"`, never presented as an official " +
+      "Tensor stats claim. SETTLEMENT/ACTIVITY DATA -- 2026-08-24: tensor-settlement-scan.ts reads real," +
+      "settled buy/takeBid instructions directly off Solana chain state against the real, live-verified Tensor " +
+      "Marketplace program (TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp), decoded with that program's own " +
+      "installed-package instruction discriminators -- no Tensor-hosted API involved. This is READ-ONLY " +
+      "settlement/activity history (capabilities: [\"sales\"] only). It captures NO open listings and NO open " +
+      "bids -- those remain fully gated behind Tensor's own key-required API (see the still-blocked API note " +
+      "below, unchanged). Every fill this scanner writes and every API response that surfaces it carries " +
+      "`source: \"onchain_settlement\"` so it is never confused with Tensor's own official book/stats. " +
+      "DISCOVERY/STATS SIDE CONFIRMED BLOCKED 2026-08-24, NOT A GAP -- Tensor's real public GraphQL host " +
+      "is api.mainnet.tensordev.io/graphql (found by direct DNS/HTTP probing; the historically-cited " +
+      "api.tensor.so does not resolve at all -- NXDOMAIN). A live, unauthenticated GET and POST (including " +
+      "a trivial `{__typename}` query) against it both returned a real HTTP 403 with body literally " +
+      "`required x-tensor-api-key in header` (Express app behind Cloudflare, not a WAF/bot challenge -- " +
+      "graphql.tensor.trade, a second candidate host, DID return a Cloudflare bot-challenge 403 instead, " +
+      "confirming the tensordev.io host's plain 403 is the real app-level answer, not edge noise). Tensor's " +
+      "own current docs (https://docs.tensor.trade/trade/api-and-sdk, fetched live 2026-08-24) confirm there " +
+      "is no public/free self-serve key: the page's only instruction is 'Please fill out this form to get " +
+      "access: https://airtable.com/apppFpk6Ul9yiI6sw/pagCBazYyAewboZnT/form' (that Airtable form URL was " +
+      "itself confirmed live, real HTTP 200, not a dead link) -- i.e. manual, gated approval, not a tier " +
+      "this app can obtain and use today. Per this repo's own rule (see looksrare-v2's entry above), no " +
+      "adapter was written against this endpoint: a 403 requiring a key this app does not have is not a " +
+      "verified 200 response to build a decoder against, and guessing the GraphQL schema from memory/old " +
+      "docs would be exactly the fabrication this registry exists to prevent. The existing trading-side file " +
+      "(tensor-solana-trade.ts) is unaffected and unrelated -- it builds unsigned transactions locally from " +
+      "Tensor's own on-chain program IDL (@tensor-foundation/marketplace, @tensor-foundation/whitelist), " +
+      "which needs no hosted API at all, so it was never blocked by this. Remains planned: apply for a real " +
+      "Tensor API key via the Airtable form above, then verify a real 200 response with real fields before " +
+      "writing a discovery/stats adapter; compressed-NFT (bubblegum) support is a separate, still-open " +
+      "requirement noted here regardless of the API-key outcome.",
+  },
+  {
+    id: "metaplex-solana",
+    label: "Metaplex programs",
+    family: "solana",
+    protocol: "metaplex",
+    versions: ["auction-house", "bubblegum", "core"],
+    capabilities: ["transfers"],
+    coverage: "partial",
+    chainSlugs: ["solana-mainnet"],
+    notes:
+      "CORRECTED 2026-08-25 (this entry claimed a registry fix in an earlier commit message that never " +
+      "actually landed -- fixing it for real now). Confirmed live via real getAsset/searchAssets calls " +
+      "against the existing multi-provider DAS pool (solana-das-pool.ts, no new RPC infra needed): both " +
+      "Bubblegum compressed NFTs and Metaplex Core assets already return full ownership " +
+      "(owner/delegate/frozen/ownership_model) and provenance data (Bubblegum compression proof -- tree, " +
+      "leaf_id, seq, data_hash, creator_hash, asset_hash; Core plugin state e.g. royalties/edition) through " +
+      "the same DAS contract this app already calls -- see solana-compressed-provenance.ts. Capabilities " +
+      "narrowed to transfers only (ownership/ownership-history), NOT sales/bids: full transfer/burn EVENT " +
+      "HISTORY (as opposed to current-state ownership) needs getSignaturesForAsset, a Helius-proprietary DAS " +
+      "extension confirmed unsupported on QuickNode (\"Method not found\") and unverifiable on Helius itself " +
+      "this session (every pooled key returned \"max usage reached\"). Also confirmed live: solana-das-pool.ts's " +
+      "own header previously claimed Shyft was live for DAS -- Shyft's real getAsset response is " +
+      "{\"error\":\"BadRequest\",\"message\":\"DAS RPC method not supported\"}, corrected in that file's header too.",
+  },
   { id: "unisat-bitcoin", label: "UniSat", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Membership/listing evidence exists; complete sale history is not yet indexed." },
   { id: "ord-core-bitcoin", label: "Bitcoin Core + ord", family: "bitcoin", protocol: "ord", versions: ["current"], capabilities: ["transfers"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Canonical inscription, satpoint, parent/child, delegate, content, metadata, and transfer foundation. Requires a fully synced txindex Bitcoin Core node plus ord index; it does not define marketplace collections or off-chain books." },
   { id: "ordiscan-bitcoin", label: "Ordiscan", family: "bitcoin", protocol: "ordinals-indexer", versions: ["v1"], capabilities: ["transfers", "listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Collection discovery and per-collection market snapshots are wired; low API allowance prevents treating it as the sole exhaustive inscription lane." },
   { id: "ordinalswallet-bitcoin", label: "Ordinals Wallet", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["listings"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Keyless exact-slug membership/art catalog is wired. Complete book, offer, and historical execution ingestion are not proven." },
-  { id: "bestinslot-bitcoin", label: "Best in Slot", family: "bitcoin", protocol: "ordinals-aggregator", versions: ["v3"], capabilities: ["sales", "transfers", "listings"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Official API exposes collections, inscriptions, holders, activity, and venue-specific listing prices. Listings/sales/activity require Pro or Dedicated access and therefore cannot be represented as free coverage." },
-  { id: "ordnet-bitcoin", label: "ORD.NET", family: "bitcoin", protocol: "ordinals-market", versions: ["v1"], capabilities: ["sales", "listings", "bids"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Authenticated, cursor-exhaustive listings adapter is wired. Sales, membership, offers, and PSBT execution remain explicit capability gaps until their durable lanes are enabled. Authentication requires a wallet challenge and a payment address holding 0.01 BTC." },
+  {
+    id: "bestinslot-bitcoin",
+    label: "Best in Slot",
+    family: "bitcoin",
+    protocol: "ordinals-aggregator",
+    versions: ["v3"],
+    capabilities: ["sales", "transfers", "listings"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "RE-VERIFIED 2026-08-24 -- STATUS WORSENED, NOT JUST STILL PRO-GATED: the Pro/Dedicated-tier gating " +
+      "this note previously described no longer applies because the entire hosted API has been retired. " +
+      "https://docs.bestinslot.xyz/api-reference/overview (real Mintlify docs, fetched live) states verbatim: " +
+      "\"This API has been retired. The hosted endpoints at api.bestinslot.xyz are no longer operated, and new " +
+      "API keys are not being issued,\" and directs integrators to \"Run OPI (Open Protocol Indexer) instead " +
+      "-- our open-source, self-hosted indexer for BRC-20, Bitmap and SNS, with a REST API per module.\" " +
+      "Confirmed by direct request: https://api.bestinslot.xyz/v3/collection/info?slug=bitcoin-frogs returned " +
+      "a real HTTP 301 to https://carrier.fleets.eu/... -- the api.bestinslot.xyz hostname has been repointed " +
+      "away from Best in Slot entirely, to an unrelated third-party 'Fleet Portal' logistics product (HTTP 200 " +
+      "confirmed at that destination, a real live site, just not Best in Slot's). There is therefore no live " +
+      "hosted endpoint left to call at any tier, free or paid -- collections/inscriptions/holders are not " +
+      "reachable either. OPI is a self-hosted indexer (you run your own Postgres+indexer against your own " +
+      "Bitcoin node), not a free hosted API this app could call -- out of scope for a keyless/low-friction " +
+      "adapter of this repo's existing pattern. Remains planned, now for a stronger reason than before. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections Best in Slot used to cover MAY " +
+      "now be partially recoverable via bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "reads real, confirmed Bitcoin transactions from mempool.space's free public API for inscriptions this " +
+      "app already tracks and infers a real settlement price from the transaction's own vin/vout shape -- see " +
+      "that file's header and migration 062_bitcoin_onchain_settlements.sql. This is a distinct, honestly-" +
+      "labeled `source: \"onchain_settlement\"` heuristic (confidence-graded, sale-vs-transfer is NOT always " +
+      "certain -- see the file header), not a resurrection of Best in Slot's own aggregator/API, and it covers " +
+      "only inscriptions this app has already observed transfer at least once via unisat-transfer-scan.ts, not " +
+      "Best in Slot's full historical catalog.",
+  },
+  {
+    id: "ordnet-bitcoin",
+    label: "ORD.NET",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["v1"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "partial",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "Authenticated, cursor-exhaustive listings adapter is wired (GET /listings). RE-VERIFIED 2026-08-24, " +
+      "CONFIRMED BLOCKED, NOT A GAP: sales, membership, offers, and PSBT execution cannot be closed without " +
+      "a real, funded mainnet wallet -- checked developers.ord.net's actual OpenAPI 3.1 contract " +
+      "(https://developers.ord.net/openapi.json) plus its llms.txt summary and reference/authentication page, " +
+      "then confirmed by hand with direct unauthenticated probes against the live API " +
+      "(https://ord.net/api/v1): GET /sales and GET /collection-stats/floors -- the two candidate read-only " +
+      "endpoints that in principle don't need a live trading session -- both returned a real HTTP 401 " +
+      "{\"error\":\"Bearer session token required\"}, identical to every other endpoint. The OpenAPI spec's " +
+      "global `security: [{bearerAuth: []}]` confirms this is deliberate and API-wide, not a per-endpoint " +
+      "oversight: only POST /auth/challenge and POST /auth/verify are unauthenticated (security: []), and " +
+      "per developers.ord.net/reference/authentication/, /auth/verify only issues a bearer token when the " +
+      "verified payment address holds 0.01 BTC confirmed (403 otherwise, 503 if the funding check is " +
+      "temporarily unavailable); tokens then last 1 hour. So sales history (GET /sales, real and documented -- " +
+      "cursor-paginated, saleType internal/external, collectionSlug filter) and offers (per-inscription " +
+      "GET /inscriptions/{id}/offers, GET /inscriptions/{id}/offers/history, GET /me/offers, and the full " +
+      "buyer/seller/counter-offer PSBT lifecycle under /collection/:slug/offers/* and " +
+      "/inscriptions/:id/offers/*) are real, fully documented, already-existing API capabilities -- the gap is " +
+      "not a missing/undocumented endpoint, it is that ORD.NET has no keyless or low-balance read lane at all. " +
+      "PSBT execution (listing/purchase/offer preflight+submit) additionally requires a wallet able to produce " +
+      "real BIP-322 signatures and sign real PSBTs, i.e. genuine live BTC custody, not just an authenticated " +
+      "session. Picking this up requires a human operator wallet holding >=0.01 BTC confirmed at its payment " +
+      "address (see the auth flow -- POST /auth/challenge then POST /auth/verify with a BIP-322 simple " +
+      "signature) -- this cannot be provisioned or worked around from here.",
+  },
   {
     id: "gamma-bitcoin",
     label: "Gamma Ordinals",
@@ -147,16 +289,184 @@ export const MARKET_VENUES = [
       "only; there is no API reference). Conclusion: same outcome as OKX in unisat-ordinals-trade.ts -- a real, evidenced blocker, " +
       "not a search-effort gap. Gamma may still be real and buildable, but needs direct contact with Gamma dev support or a " +
       "rendered-browser network capture of an authenticated/partner session before any code is written against it -- never scrape " +
-      "UI HTML into canonical evidence, and never guess at a private API's schema from memory.",
+      "UI HTML into canonical evidence, and never guess at a private API's schema from memory. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections Gamma lists MAY now be partially " +
+      "recoverable via the free, keyless bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "infers real settlement prices from mempool.space's public transaction data for inscriptions this app " +
+      "already tracks -- see that file's header and migration 062_bitcoin_onchain_settlements.sql. This is " +
+      "entirely distinct from, and does not unblock, Gamma's still-private live listings/order-book backend " +
+      "described above; it is labeled `source: \"onchain_settlement\"` and never presented as a Gamma-sourced " +
+      "number.",
   },
-  { id: "ordzaar-bitcoin", label: "Ordzaar", family: "bitcoin", protocol: "ordinals-market", versions: ["historical", "current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Distinct PSBT marketplace lane. No verified public server API contract is currently wired; data must retain venue and order identity." },
-  { id: "magiceden-bitcoin", label: "Magic Eden Ordinals (historical)", family: "bitcoin", protocol: "ordinals-market", versions: ["retired-2026-06-30"], capabilities: ["sales", "listings", "bids"], coverage: "unavailable", chainSlugs: ["bitcoin-mainnet"], notes: "Historical decoder target only. Magic Eden discontinued its Bitcoin marketplace and Bitcoin API on 2026-06-30; never use it as a live-book dependency." },
-  { id: "okx-bitcoin", label: "OKX Ordinals", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["sales", "listings"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "External venue coverage; never inferred from a different marketplace." },
+  {
+    id: "ordzaar-bitcoin",
+    label: "Ordzaar",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["historical", "current"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "RE-VERIFIED 2026-08-24, STILL BLOCKED: ordzaar.com resolves (HTTP 200, real live site) and describes " +
+      "itself as \"The next-generation Bitcoin Ordinals Launchpad\" -- mint/launchpad focused, not the PSBT " +
+      "order-book marketplace this entry's capabilities imply. Every plausible API/docs subdomain tried " +
+      "(api.ordzaar.com, docs.ordzaar.com, app.ordzaar.com) failed to resolve/connect at all (curl exit 35 / " +
+      "connection failure, not even a TLS handshake -- these hosts do not exist). No links to API docs or " +
+      "developer resources appear anywhere on the live ordzaar.com page. GitHub org github.com/ordzaar (9 " +
+      "public repos checked) has ordit-sdk (a client-side wallet/PSBT-construction SDK, not a server order-" +
+      "book API), ord-connect (a React wallet-connect kit), and odinswap-api-docs (empty/placeholder repo, no " +
+      "README on main), none of which document a public marketplace listings/sales REST contract. Conclusion " +
+      "unchanged from the prior pass: no verified public server API contract exists for Ordzaar's marketplace " +
+      "side. Data must retain venue and order identity if this is ever wired via a private/partner API.",
+  },
+  // Magic Eden's Bitcoin/Ordinals marketplace (retired 2026-06-30) was
+  // removed outright 2026-08-25 rather than kept as an "unavailable" entry
+  // -- confirmed zero references anywhere else in the codebase (no adapter,
+  // no sync path, nothing reads this id), so keeping it around was pure
+  // landmine risk for a future venue-iteration refactor that globs by
+  // family/chainSlug without checking the coverage flag. If Magic Eden ever
+  // relaunches a Bitcoin marketplace, re-add it fresh against real,
+  // current API evidence rather than resurrecting this entry.
+  {
+    id: "okx-bitcoin",
+    label: "OKX Ordinals",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["current"],
+    capabilities: ["listings"],
+    coverage: "planned",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "Adapter code (okx-ordinals.ts) and wiring into the listings route are BUILT and already merged on dev, " +
+      "key-gated -- returns [] honestly and reports 'credential-missing' in bookCoverage.sources.okx until real " +
+      "credentials exist, matching the UniSat/Satflow/ORD.NET pattern. LIVE-VERIFIED 2026-08-24 (direct curl, no " +
+      "key, this pass): GET https://web3.okx.com/api/v5/mktplace/nft/ordinals/collections -> real HTTP 401 " +
+      "{\"msg\":\"Request header OK-ACCESS-KEY AND OK-ACCESS-TOKEN can not all empty \",\"code\":\"50116\"} -- " +
+      "confirms the documented v5 endpoint is real and live (Cloudflare-fronted web3.okx.com, not a dead/404 " +
+      "route) and that there is NO public/keyless tier: auth is checked before any business logic. Also probed " +
+      "https://web3.okx.com/priapi/v1/nft/ordinals/collections (OKX's undocumented internal frontend API) -- " +
+      "real HTTP 200 but a genuinely empty body for every param combination tried; same discipline as the Gamma " +
+      "entry above, an undocumented private backend is not used as a keyless substitute. No OKX_API_KEY/" +
+      "OKX_API_SECRET/OKX_API_PASSPHRASE exists in .env.local or .env.inmotion.example as of this pass (owner " +
+      "reported an API application in progress, not yet issued) -- coverage stays planned, not partial, until a " +
+      "real key lets verifyOkxCredentials() (see okx-ordinals.ts) confirm the actual response field names " +
+      "against live data; the parsing logic's defensive field-name fallbacks are unit-tested but not yet " +
+      "cross-checked against a real 200 body. capabilities is listings-only (not sales) -- no sale/fill history " +
+      "endpoint has been found or verified in OKX's docs, only collection stats + active listings. " +
+      "SFUI NOTE ADDED 2026-08-24: settlement/activity data for collections OKX lists MAY now be partially " +
+      "recoverable via the free, keyless bitcoin-settlement-scan.ts (lib/market/multichain/discovery/), which " +
+      "infers real settlement prices from mempool.space's public transaction data for inscriptions this app " +
+      "already tracks -- see that file's header and migration 062_bitcoin_onchain_settlements.sql. This is " +
+      "entirely distinct from, and does not unblock, OKX's still key-gated live listings API described above; " +
+      "it is labeled `source: \"onchain_settlement\"`, never `okx`, and cannot attribute a settlement to OKX " +
+      "specifically (an on-chain spend carries no marketplace identity) -- it only ever confirms that some " +
+      "real settlement happened for an inscription, wherever it was listed.",
+  },
 ] as const satisfies readonly MarketVenue[];
 
 export function venuesForChain(chainSlug: string): readonly MarketVenue[] {
   const family: MarketFamily = chainSlug.startsWith("solana") ? "solana" : chainSlug.startsWith("bitcoin") ? "bitcoin" : "evm";
   return MARKET_VENUES.filter((venue) => venue.family === family && (venue.chainSlugs.length === 0 || venue.chainSlugs.includes(chainSlug as never)));
+}
+
+/**
+ * Single source of truth for how a coverage level reads to a viewer --
+ * label + color. Originally inline in
+ * app/market/multichain/known-limitations/page.tsx; pulled up here so the
+ * inline per-row/per-collection "source chip" (DataSourceChip.tsx, see
+ * Issue 4 of docs/marketplank/GROK-FINDINGS-biggest-issues-unified-
+ * vision-2026-08-25.md) uses the EXACT same colors/labels as that page
+ * instead of a second, driftable copy.
+ */
+export const COVERAGE_LABEL: Record<MarketCoverage, string> = {
+  indexed: "Indexed",
+  partial: "Partial",
+  planned: "Planned — not built yet",
+  unavailable: "Unavailable",
+};
+
+export const COVERAGE_ORDER: Record<MarketCoverage, number> = {
+  indexed: 0,
+  partial: 1,
+  planned: 2,
+  unavailable: 3,
+};
+
+/**
+ * `partial` is deliberately styled the SAME quiet/neutral way as `planned`,
+ * not as an amber warning: checked 2026-08-26 against MARKET_VENUES itself
+ * -- `partial` is the coverage level for nearly every real venue in this
+ * registry (OpenSea/Seaport, Wyvern, CryptoPunks, Blur, LooksRare, Magic
+ * Eden, UniSat, Ordiscan, Ordinals Wallet -- everything except this app's
+ * own first-party `marketplank` venue). An amber alarm chip on what is
+ * actually this product's normal baseline coverage misapplies severity
+ * (this file's own "severity should match real risk, not apply uniformly"
+ * rule, from Grok's biggest-issues brief) -- it read as most rows being
+ * broken when they were not. Real user feedback, live 2026-08-26: "i dont
+ * like partial book" on a rankings page where 8 of 10 rows carried it.
+ * `unavailable` (a venue that is provably dead/unreachable, e.g. X2Y2)
+ * remains the only coverage level that should look alarming.
+ */
+export const COVERAGE_STYLE: Record<MarketCoverage, string> = {
+  indexed: "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
+  partial: "border-line-strong bg-panel text-foreground/60",
+  planned: "border-line-strong bg-panel text-foreground/60",
+  unavailable: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+};
+
+/** Short, non-alarming label for a partial/planned/unavailable venue's inline chip -- distinct from COVERAGE_LABEL's fuller known-limitations-page copy, which reads fine in a table but is too long for a dense row/chip. */
+export const COVERAGE_SHORT_LABEL: Record<MarketCoverage, string> = {
+  indexed: "live",
+  partial: "multi-venue",
+  planned: "not yet built",
+  unavailable: "unavailable",
+};
+
+export function venueById(id: string): MarketVenue | null {
+  return MARKET_VENUES.find((v) => v.id === id) ?? null;
+}
+
+/**
+ * The single venue whose coverage best describes what a viewer is actually
+ * looking at for one collection's displayed floor/listed numbers --
+ * resolution order: (1) an exact venue id match (adapter or
+ * floorPriceMarketplace, when the collection row/route already knows which
+ * venue produced its numbers), (2) for a chain with exactly one LIVE
+ * candidate venue, that venue, (3) otherwise the WORST (least-complete)
+ * coverage among the chain's LIVE candidate venues -- worst-case, not
+ * best-case, is the honest default when this app can't yet name the single
+ * exact venue behind a number, since a viewer would rather be warned about
+ * the weakest source in the mix than reassured by the strongest.
+ *
+ * BUG FIXED 2026-08-25: "worst-case" must exclude `coverage: "unavailable"`
+ * venues from this fallback -- a permanently dead/retired marketplace
+ * (X2Y2, shut down April 2025) is not "a weak source in the mix," it
+ * produced NONE of the displayed numbers. Without this exclusion, X2Y2
+ * won the worst-case sort for every eth-mainnet collection with no exact
+ * venue match, showing an "X2Y2 UNAVAILABLE" badge on collections (MAYC,
+ * CryptoPunks, Decentraland, ...) that never had anything to do with
+ * X2Y2. Only fall through to an unavailable venue if literally every
+ * registered venue for the chain is unavailable (nothing live to report
+ * at all, which is itself the honest answer at that point).
+ *
+ * Returns null only when no venue at all is registered for the chain
+ * (nothing to report).
+ */
+export function primaryVenueForCollection(
+  chainSlug: string,
+  candidateId?: string | null
+): MarketVenue | null {
+  if (candidateId) {
+    const exact = venueById(candidateId);
+    if (exact) return exact;
+  }
+  const venues = venuesForChain(chainSlug);
+  if (venues.length === 0) return null;
+  const live = venues.filter((v) => v.coverage !== "unavailable");
+  const pool = live.length > 0 ? live : venues;
+  if (pool.length === 1) return pool[0];
+  return pool.slice().sort((a, b) => COVERAGE_ORDER[b.coverage] - COVERAGE_ORDER[a.coverage])[0];
 }
 
 export function isCompleteVenueCoverage(venues: readonly MarketVenue[]): boolean {

@@ -170,7 +170,19 @@ export async function listCollectionsForSync(
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      ${where}
-     ORDER BY s.synced_at ASC NULLS FIRST
+     -- Real fix, 2026-08-25 ("most frequented collections being handled
+     -- extremely efficiently"): this queue used to be pure staleness
+     -- (oldest-synced-first) with zero regard for real activity -- a dead,
+     -- zero-volume collection got the exact same background cadence as a
+     -- top-100-by-sales one. sales_24h (a plain integer, real and already
+     -- chain-agnostic-comparable, unlike volume_24h_wei's native-unit
+     -- mismatch across chains) backdates a collection's EFFECTIVE
+     -- staleness by its own real recent activity, so a busy collection
+     -- looks more "overdue" and gets synced more often -- while every
+     -- collection's real synced_at clock still advances normally
+     -- underneath, so nothing is ever truly starved, only synced less
+     -- often. Same self-maintaining-queue design as before, just weighted.
+     ORDER BY (COALESCE(s.synced_at, 'epoch'::timestamptz) - (LEAST(COALESCE(s.sales_24h, 0), 500) * INTERVAL '1 minute')) ASC
      LIMIT $${params.length}`,
     params
   );

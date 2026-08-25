@@ -268,6 +268,36 @@ export const GLOBAL_MARKET_ENABLED =
   process.env.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED?.trim().toLowerCase() === "true";
 
 /**
+ * Bounded Blast-Radius Canary (BBRC) -- see
+ * docs/marketplank/GROK-FINDINGS-biggest-issues-unified-vision-2026-08-25.md
+ * Issue 1 and lib/market/multichain/trading/canary-limits.ts.
+ *
+ * HARD OFF by default and, unlike MARKET_ENABLED/GLOBAL_MARKET_ENABLED above,
+ * deliberately NOT a NEXT_PUBLIC_ variable: this gates a security posture
+ * (a real-money cap check), not a marketing reveal, so it must stay a true
+ * kill switch. Per test/market/server-feature-flags.test.ts's documented
+ * trap, a NEXT_PUBLIC_* flag read on the server gets INLINED into the built
+ * bundle at whatever value the deploy's build environment happened to have
+ * -- flipping the env var afterward silently does nothing without a full
+ * rebuild + redeploy. A server-only name (no NEXT_PUBLIC_ prefix) is never
+ * inlined, so it can be changed by restarting the running process with a
+ * new env value -- no rebuild required, same operational win the referral
+ * kill-switch note above describes. (Like every other flag in this file it
+ * is still read once into a module-level constant at process start, not
+ * re-read per request -- the distinction that matters here is deploy-time,
+ * not request-time.)
+ *
+ * AS OF THIS COMMIT THIS FLAG HAS NO CONSUMER: canary-limits.ts checks it,
+ * but canary-limits.ts is not called from any live trading/fulfillment code
+ * path yet (see that file's header). Flipping this true today changes
+ * nothing observable. It exists now so the eventual wiring step is a
+ * one-line call-site change, not a flag-design decision made under
+ * pressure.
+ */
+export const FOREIGN_TRADE_CANARY_ENABLED =
+  process.env.FOREIGN_TRADE_CANARY_ENABLED?.trim().toLowerCase() === "true";
+
+/**
  * Seaport 1.6's canonical CREATE2 deployment address — identical bytecode on
  * every EVM chain it's deployed to, byte-for-byte the same contract OpenSea,
  * Trail of Bits, and Code4rena audited. Confirmed live AND verified on

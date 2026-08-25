@@ -161,7 +161,7 @@ export async function quoteCrossChainPurchase(input: {
   feeQuoteUrl.searchParams.set("inputToken", originToken);
   feeQuoteUrl.searchParams.set("outputToken", destToken);
   feeQuoteUrl.searchParams.set("amount", input.inputAmount);
-  const feeRes = await fetch(feeQuoteUrl.toString());
+  const feeRes = await fetch(feeQuoteUrl.toString(), { signal: AbortSignal.timeout(15_000) });
   if (!feeRes.ok) {
     throw new Error(`across-quote: Across suggested-fees ${feeRes.status}`);
   }

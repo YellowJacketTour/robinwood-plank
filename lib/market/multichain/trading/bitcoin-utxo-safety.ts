@@ -103,6 +103,7 @@ async function indexerGet<T>(path: string): Promise<T> {
   const key = requireApiKey();
   const res = await fetch(`${indexerBase()}${path}`, {
     headers: { accept: "application/json", authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     throw new Error(`bitcoin-utxo-safety: ${res.status} ${res.statusText} on ${path}`);

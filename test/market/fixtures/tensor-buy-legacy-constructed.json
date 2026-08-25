@@ -1,0 +1,54 @@
+{
+  "_disclosure": "CONSTRUCTED, NOT CAPTURED -- see tensor-settlement-scan.test.ts's own header. Uses the REAL BUY_LEGACY_DISCRIMINATOR byte sequence (447f2b08d41ff972, read from the installed @tensor-foundation/marketplace package) and the REAL buyLegacy account ordering verified from that package's buyLegacy.d.ts (feeVault, buyer, buyerTa, listTa, listState, mint, owner, payer, ...). Pubkeys and lamport amounts are synthetic placeholders standing in for a real trade; this session's live RPC sampling (~326 real transactions against the real Tensor Marketplace program) did not surface a real buyLegacy/takeBid* settlement within its rate-limit budget -- disclosed rather than presented as captured.",
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "blockTime": 1787624266,
+    "slot": 441530500,
+    "transaction": {
+      "message": {
+        "accountKeys": [
+          "FeeVaultAddr1111111111111111111111111111111",
+          "BuyerAddr111111111111111111111111111111111",
+          "BuyerTaAddr11111111111111111111111111111111",
+          "ListTaAddr111111111111111111111111111111111",
+          "ListStateAddr11111111111111111111111111111",
+          "MintAddr11111111111111111111111111111111",
+          "OwnerAddr111111111111111111111111111111111",
+          "PayerAddr111111111111111111111111111111111",
+          "RentDestinationAddr111111111111111111111111",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+          "TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp",
+          "11111111111111111111111111111111"
+        ],
+        "instructions": [
+          {
+            "programId": "TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp",
+            "accounts": [
+              "FeeVaultAddr1111111111111111111111111111111",
+              "BuyerAddr111111111111111111111111111111111",
+              "BuyerTaAddr11111111111111111111111111111111",
+              "ListTaAddr111111111111111111111111111111111",
+              "ListStateAddr11111111111111111111111111111",
+              "MintAddr11111111111111111111111111111111",
+              "OwnerAddr111111111111111111111111111111111",
+              "PayerAddr111111111111111111111111111111111",
+              "RentDestinationAddr111111111111111111111111",
+              "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+              "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+              "TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp",
+              "11111111111111111111111111111111"
+            ],
+            "data": "3qnGEUcRWqJPktmiBqHWpFV4b"
+          }
+        ]
+      }
+    },
+    "meta": {
+      "err": null,
+      "preBalances": [1000000000, 8000000000, 0, 0, 3855840, 0, 3000000000, 6000000000, 1141443, 1, 1, 1, 1],
+      "postBalances": [1050000000, 5950000000, 0, 0, 0, 0, 5000000000, 5999995000, 3141443, 1, 1, 1, 1]
+    }
+  }
+}

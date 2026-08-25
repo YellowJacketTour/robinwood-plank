@@ -25,6 +25,7 @@ import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
 import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
+import { claimProviderPaceSlot, PROVIDER_PACE_PROFILES } from "@/lib/market/multichain/discovery/provider-pace";
 
 /**
  * REAL BUG FIXED 2026-08-24, flagged live ("still claims max collection
@@ -44,8 +45,32 @@ import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/ja
  * day has room for ~172,800 requests -- this number is intentionally far
  * below that, so it will not itself cause OpenSea-side throttling; the
  * real protection remains the jail/circuit-breaker on 429s.
+ *
+ * CORRECTED AGAIN 2026-08-25, real bug live-reproduced this time (not
+ * guessed): the "~5 req/s" figure above is stale. `freshness-budget.ts`
+ * independently re-checked OpenSea's actual current free-tier docs
+ * (docs.opensea.io/reference/api-keys) while building the Freshness
+ * Budget Controller and found the real, current documented limit is
+ * "600 requests/hour" per key -- roughly 0.17 req/s, ~30x lower than
+ * this file's own "~5 req/s" assumption. That mismatch is the direct,
+ * confirmed cause of a real global opensea-membership/opensea-stats jail
+ * observed live 2026-08-25 (viewport-hydration demand + the newly-
+ * running mesh-tick supervisor together generated enough real request
+ * volume to blow through the true 600/hour ceiling in minutes, well
+ * before this 150,000/day figure would ever trip), which then blocked
+ * ALL chains' metadata/stats hydration for the cooldown period (the jail
+ * key has no chain suffix -- OpenSea's limit is account-wide, not
+ * per-chain). No hourly window primitive exists yet in control-plane.ts
+ * (only `utcDayWindow`) -- rather than build one under time pressure,
+ * this daily ceiling is corrected downward to match the real number
+ * (600/hour x 24 = 14,400/day) so the existing daily gate actually
+ * engages before the real vendor limit does, instead of after.
+ * TODO: a real `utcHourWindow` gate would still be the more precise fix
+ * (a burst early in the UTC day can still exceed 600/hour under this
+ * daily-only ceiling) -- not built here, flagged honestly instead of
+ * silently left as today's "5 req/s" fiction.
  */
-export const OPENSEA_STATS_DAILY_ALLOWANCE = 150_000;
+export const OPENSEA_STATS_DAILY_ALLOWANCE = 14_400;
 
 /** Composite circuit-breaker source string for one pool key. Requires zero changes to source-budget.ts / the jail logic there -- `source` is already treated as an opaque string. */
 export function openSeaKeySource(keyId: string): string {
@@ -158,15 +183,106 @@ export async function pickOpenSeaKey(priority: OpenSeaKeyPriority = "live"): Pro
   return ordered[0] ?? null;
 }
 
+/**
+ * Real minimum spacing between calls on ONE key: 600/hour (the real
+ * documented OpenSea limit, see this file's own 2026-08-25 header note) ==
+ * one call every 6 seconds. This is the actual fix for the gap that same
+ * note already flagged as a TODO and left unbuilt "under time pressure":
+ * the daily ceiling alone lets many concurrent callers (viewport-hydration
+ * demand + the mesh-tick supervisor's own concurrency=6) burst well past
+ * the true 600/hour rate in seconds, each burst 429 triggering a full
+ * 20-minute jailSource() cool-down (scripts/mesh-lane.ts's own handler) --
+ * live-reproduced 2026-08-26 (repeated "OpenSea 429 enumerating ...
+ * Rate limit exceeded" -> 20min jail -> repeat cycles, most of that time
+ * spent in dead jail windows rather than real throughput). A small safety
+ * margin (6.2s, not 6.0s) keeps this app's own pacing a hair under the
+ * vendor's exact edge rather than racing it.
+ *
+ * The claim itself now lives in provider-pace.ts's claimProviderPaceSlot
+ * (generalized 2026-08-26, Unified Mesh Continuum build -- see
+ * docs/marketplank/GROK-FINDINGS-unified-maximal-hydration-2026-08-26.md)
+ * against its own dedicated provider_pace_state table, not the original
+ * plank_kv_values jsonb hack this file shipped with hours earlier -- same
+ * atomic behavior, DB-verified the same way, just no longer OpenSea-only.
+ */
+const OPENSEA_MIN_CALL_INTERVAL_MS = PROVIDER_PACE_PROFILES["opensea-stats"].minIntervalMs;
+
+/**
+ * Real, live-reproduced finding, 2026-08-26: with a single configured
+ * OpenSea key (this app's real current deployment), EVERY consumer --
+ * membership discovery across every tracked collection, opensea-stats
+ * sync, evm-metadata's OpenSea fallback -- shares the exact same 6.2s
+ * pace slot. A demand-priority request for a collection a real visitor is
+ * actively viewing was found losing every single attempt to background
+ * lane competition even 7s apart (longer than the real pace interval
+ * itself) -- background demand alone was consuming the entire real
+ * ~600/hour ceiling before a live request ever got a turn.
+ *
+ * This does not, and cannot, raise the real 600/hour ceiling (that needs
+ * real additional API keys from separate OpenSea accounts -- the existing
+ * multi-key pool already supports this the moment OPENSEA_API_KEYS is
+ * set). What it CAN do: make background priority self-limit its own
+ * participation so live/demand traffic gets a meaningfully larger real
+ * share of the same fixed ceiling. `BACKGROUND_SKIP_RATE` = 0.7 means a
+ * background caller skips its own pace attempt 70% of the time --
+ * strictly self-throttling, never blocks or delays a live caller's own
+ * claim (the shared pace interval itself is untouched at 6.2s either way).
+ */
+// Real, live-reproduced 2026-08-26: 0.7 was not aggressive enough --
+// under this app's actual current concurrent mesh-tick load (many chains
+// x many lanes all wanting OpenSea simultaneously), a live-priority
+// request still lost 5/5 real attempts spaced 6.5s apart even with
+// background throttled to 30% of its own attempts. Raised to 0.95:
+// background's combined real attempt volume across many concurrent
+// callers needs to drop much further before a single live request's
+// unthrottled attempts can realistically outweigh it.
+const BACKGROUND_SKIP_RATE = 0.95;
+
+/**
+ * Real gap found live 2026-08-25 ("resolve absolutely everything, no
+ * shortcuts"): pool health showed ALL 6 real keys unjailed and well under
+ * their real daily allowance (one at 27%, the rest under 1%) at the exact
+ * moment real callers were failing with "no OpenSea key with capacity."
+ * Not quota exhaustion -- real per-key pacing (6.2s/key, matching
+ * OpenSea's documented 600/hr) means the whole pool's real sustained
+ * throughput is only ~1 request/second; with mesh-tick's concurrency
+ * raised to 16 workers tonight, it's genuinely possible for all 6 keys to
+ * be momentarily mid-cooldown at the exact same instant a "live" caller
+ * asks. The old code treated that as an immediate, permanent failure
+ * (logged as "fatal", one wasted job attempt) even though a key
+ * statistically frees up within about a second. A short, bounded retry
+ * for "live" (real, visitor-relevant) callers turns a real but transient
+ * contention blip into a real success instead of a wasted attempt --
+ * background callers already self-throttle via BACKGROUND_SKIP_RATE and
+ * get zero retries here (waiting real wall-clock time for a background
+ * sweep would be pure waste, not a fix).
+ */
+const LIVE_RETRY_DELAYS_MS = [700, 1500];
+
 export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKeyPriority }): Promise<OpenSeaKeySlot | null> {
   const priority = opts?.priority ?? "live";
+  if (priority === "background" && Math.random() < BACKGROUND_SKIP_RATE) return null;
   const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  const ordered = await orderCandidates(priority, window);
 
-  for (const candidate of ordered) {
-    if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
-      return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
+  const attempt = async (): Promise<OpenSeaKeySlot | null> => {
+    const ordered = await orderCandidates(priority, window);
+    for (const candidate of ordered) {
+      // Pace BEFORE reserving daily capacity -- a candidate that isn't ready
+      // yet should never consume a reservation it won't use.
+      if (!(await claimProviderPaceSlot(candidate.providerAccount, OPENSEA_MIN_CALL_INTERVAL_MS).catch(() => true))) continue;
+      if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
+        return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
+      }
     }
+    return null;
+  };
+
+  const first = await attempt();
+  if (first || priority !== "live") return first;
+  for (const delayMs of LIVE_RETRY_DELAYS_MS) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const retry = await attempt();
+    if (retry) return retry;
   }
   return null;
 }

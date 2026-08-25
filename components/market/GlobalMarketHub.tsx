@@ -7,6 +7,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { computeDemandScore } from "@/lib/market/multichain/demand-score";
+import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
+import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
@@ -16,6 +18,10 @@ import CurrencyIcon from "@/components/market/CurrencyIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
+import DataSourceChip from "@/components/market/DataSourceChip";
+import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlankChip";
+import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
+import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
 
 const CollectionThumb = CollectionArtImage;
 
@@ -140,6 +146,18 @@ type TrackedCollection = {
   holderCount: number | null;
   /** True only for the injected RobinWood native book row — links to /market, not /market/multichain. */
   isNativeHome?: boolean;
+  /** Real venue-registry lookup (see primaryVenueForCollection in lib/market/multichain/venue-registry.ts) -- which venue this row's floor/listed numbers actually come from, and how complete that venue's coverage is. Null only when this chain has no registered venue at all. */
+  primaryVenue?: { id: string; label: string; coverage: MarketCoverage } | null;
+  /** Real collection_archival_stats read (see archival-ledger.ts's "API exposure" section). Null/omitted when this collection has never been through a real hydrate write yet -- never fabricated. jobProcessing is intentionally not computed on this rankings route (see getArchivalStatsBatch's header on the per-row cost). */
+  archival?: {
+    archivalScore: number | null;
+    scoreMethod: string;
+    tokensEverHydrated: number | null;
+    knownSupply: number | null;
+    lastArchivedAt: string | null;
+    /** Never populated on this rankings response (see getArchivalStatsBatch's own header) -- always undefined here, kept only so the field lines up with the collection-detail route's richer shape. */
+    jobProcessing?: boolean;
+  } | null;
 };
 
 type GlobalTokenHit = {
@@ -1088,17 +1106,21 @@ export default function GlobalMarketHub() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadCollections = async () => {
       try {
-        // The collection index changes on a discover/sync cadence measured
-        // in minutes, not seconds -- a longer ttl than the per-collection
-        // listings view is correct here, not lazier caching.
-        // isGood: never let a stale/empty index response lock out a real
-        // one for the full 10-minute swr window -- same stale-poisons-
-        // cache fix needed twice already this session (MultichainCollectionView's
-        // rarity fetch, ForeignOfferForm's trait-index fetch).
+        // Real fix, 2026-08-25 ("live time motion and visual effect
+        // progress bar woven for any and all collections"): this fetch
+        // used to run exactly once on mount with no refresh at all -- every
+        // row's real archival_score (and the HydrationPlankChip/archive-
+        // depth bar driven by it) froze at whatever it was on page load,
+        // even while the real backend kept hydrating in the background
+        // (confirmed live the same night: one collection's real score
+        // climbed 19% -> 33%+ with zero visible change on this page).
+        // ttlMs now below the poll interval below so every tick is a
+        // genuine fetch, matching the same fix already applied to the
+        // per-collection detail page's own identity/archival fetch.
         const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number }>("/api/market/multichain?v=index-3", {
-          ttlMs: 60_000,
+          ttlMs: 15_000,
           swrMs: 600_000,
           session: true,
           isGood: (d) => {
@@ -1150,9 +1172,12 @@ export default function GlobalMarketHub() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void loadCollections();
+    const id = setInterval(() => void loadCollections(), 20_000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, []);
 
@@ -1542,6 +1567,43 @@ export default function GlobalMarketHub() {
     return () => observer.disconnect();
   }, [filtered.length, gridVisibleCount, loadMoreCollections, scopeHasMoreServerData]);
 
+  // Real fix, 2026-08-25 ("is sitting on the home page hydrating top ranked
+  // collections with priority?"): the real demand-signal endpoint
+  // (/api/market/multichain/visibility-demand, prioritizeVisibleCollections)
+  // has existed since the viewport-predictive-hydration build, but nothing
+  // on this page ever called it -- the only IntersectionObserver here drives
+  // infinite-scroll paging, not priority signaling. A visitor sitting on
+  // the rankings page was giving the mesh queue zero real signal beyond
+  // whatever a single detail-page click provides. Reports the top 20 rows
+  // per chain in TODAY's actual rendered order (whatever sort/filter is
+  // active) every 20s while this page is open -- real, current "what a
+  // visitor is actually looking at right now," not a fixed list.
+  useEffect(() => {
+    const topPerChain = new Map<string, string[]>();
+    for (const c of filtered) {
+      const arr = topPerChain.get(c.chainSlug) ?? [];
+      if (arr.length < 20) arr.push(c.contractAddress);
+      topPerChain.set(c.chainSlug, arr);
+    }
+    if (topPerChain.size === 0) return;
+    const postVisibility = () => {
+      for (const [chainSlug, keys] of topPerChain) {
+        fetch("/api/market/multichain/visibility-demand", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chainSlug, keys, context: "rankings" }),
+        }).catch(() => {
+          // Best-effort demand signal -- a failed POST just means this
+          // batch's rows age normally through background cadence instead
+          // of jumping the queue; never blocks or errors the page.
+        });
+      }
+    };
+    postVisibility();
+    const id = setInterval(postVisibility, 20_000);
+    return () => clearInterval(id);
+  }, [filtered]);
+
   // Prime the buffer as soon as a single chain tab is chosen (or on first
   // mount for the unfiltered "all chains" scope), instead of waiting for a
   // scroll that may never happen because the sentinel itself couldn't
@@ -1623,6 +1685,27 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
+
+  // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
+  // viewport-predictive-hydration-2026-08-25.md): whatever the visitor is
+  // actually looking at right now (rankings rows, top-mover cards) gets
+  // first claim on limited free-tier mesh hydration. `pageOrder` is the
+  // full ranked order (composite chainSlug:contractAddress keys, capped)
+  // so the server can cheaply expand +/-2 rank neighbors of whatever's
+  // visible -- see useVisibleCollectionDemand's own header for why this
+  // never bypasses singleflight-cache/freshness-budget or calls a
+  // third-party provider directly.
+  const visibilityPageOrder = useMemo(() => ranked.slice(0, 200).map(key), [ranked]);
+  useVisibleCollectionDemand({ context: "rankings", pageOrder: visibilityPageOrder });
+
+  // Live hydrating indicator for HydrationPlankChip: getArchivalStatsBatch
+  // (the rankings API route this page consumes) deliberately never checks
+  // plank_data_jobs across its own up-to-5000-row response (too costly at
+  // that scale -- see that function's own header). `rankings` below is
+  // already the small, bounded, currently-rendered slice (10-100 rows, per
+  // the "Show" control), so polling it directly here is cheap and safe.
+  const rankingsKeys = useMemo(() => rankings.map(key), [rankings]);
+  const jobProcessingByKey = useHydrationJobStatus(rankingsKeys);
 
   const hydratedKey = useRef("");
   useEffect(() => {
@@ -1943,6 +2026,7 @@ export default function GlobalMarketHub() {
               return (
                 <Link
                   href={collectionHref(hero)}
+                  data-collection-key={key(hero)}
                   className="dense-card group relative flex min-h-[15rem] flex-col justify-end overflow-hidden p-0 transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold sm:min-h-[18rem]"
                 >
                   <div className="absolute inset-0">
@@ -1998,6 +2082,7 @@ export default function GlobalMarketHub() {
                   <Link
                     key={key(c)}
                     href={collectionHref(c)}
+                    data-collection-key={key(c)}
                     className="group relative flex min-h-[6.5rem] flex-col justify-end overflow-hidden rounded-lg border border-line transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold"
                   >
                     <div className="absolute inset-0">
@@ -2210,6 +2295,7 @@ export default function GlobalMarketHub() {
                   return (
                     <tr
                       key={rowKey}
+                      data-collection-key={rowKey}
                       className="row-enter border-b border-line/60 transition-colors last:border-0 hover:bg-foreground/5"
                       style={{ "--row-delay": `${Math.min(i, 12) * 20}ms` } as CSSProperties}
                     >
@@ -2246,8 +2332,29 @@ export default function GlobalMarketHub() {
                             </span>
                           </div>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
-                              {displayName(c)}
+                            <span className="flex min-w-0 items-center gap-1">
+                              <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
+                                {displayName(c)}
+                              </span>
+                              {c.archival && (
+                                <HydrationPlankChip
+                                  active={jobProcessingByKey[rowKey] != null}
+                                  source={jobProcessingByKey[rowKey]?.source}
+                                  progress={c.archival.archivalScore}
+                                  pulseKey={c.archival.lastArchivedAt}
+                                  label={`${displayName(c)} archival`}
+                                />
+                              )}
+                              {c.archival && (
+                                <ArchivalDepthBar
+                                  compact
+                                  archivalScore={c.archival.archivalScore}
+                                  scoreMethod={c.archival.scoreMethod}
+                                  tokensEverHydrated={c.archival.tokensEverHydrated}
+                                  knownSupply={c.archival.knownSupply}
+                                  pulseKey={c.archival.lastArchivedAt}
+                                />
+                              )}
                             </span>
                             <span className="flex min-w-0 items-center gap-1">
                               <span
@@ -2279,15 +2386,25 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-gold-300">
                         {displayFloorWei(c) ? (
-                          <span className="inline-flex items-center justify-end gap-1">
-                            <NativeAmount
-                              wei={displayFloorWei(c)!}
-                              usdLabel={(() => {
-                                const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
-                                return usd != null ? formatUsdCompact(usd) : null;
-                              })()}
-                            />
-                            <FloorCurrencyMark collection={c} />
+                          <span className="inline-flex flex-col items-end gap-0.5">
+                            <span className="inline-flex items-center justify-end gap-1">
+                              <NativeAmount
+                                wei={displayFloorWei(c)!}
+                                usdLabel={(() => {
+                                  const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
+                                  return usd != null ? formatUsdCompact(usd) : null;
+                                })()}
+                              />
+                              <FloorCurrencyMark collection={c} />
+                            </span>
+                            {c.primaryVenue && (
+                              <DataSourceChip
+                                venueLabel={c.primaryVenue.label}
+                                venueId={c.primaryVenue.id}
+                                coverage={c.primaryVenue.coverage}
+                                asOf={c.syncedAt}
+                              />
+                            )}
                           </span>
                         ) : (
                           <span className="text-foreground/40">—</span>
@@ -2717,12 +2834,15 @@ export default function GlobalMarketHub() {
                         )}
                       </div>
                       {displayFloorWei(c) && (
-                        <p className="text-xs text-foreground/50">
+                        <p className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/50">
                           Floor {formatCompactNative(displayFloorWei(c)!).display}
                           {displayChangePct(c) != null && (
-                            <span className={`ml-1.5 font-bold ${displayChangePct(c)! >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            <span className={`font-bold ${displayChangePct(c)! >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                               {displayChangePct(c)! >= 0 ? "▲" : "▼"} {Math.abs(displayChangePct(c)!).toFixed(1)}%
                             </span>
+                          )}
+                          {c.primaryVenue && (
+                            <DataSourceChip venueLabel={c.primaryVenue.label} venueId={c.primaryVenue.id} coverage={c.primaryVenue.coverage} asOf={c.syncedAt} />
                           )}
                         </p>
                       )}

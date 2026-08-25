@@ -41,6 +41,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency, nativeCurrencySymbol } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -55,6 +56,9 @@ import { MarketTabRail, MarketTabPanel } from "@/components/market/MarketScaffol
 import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
+import DataSourceChip from "@/components/market/DataSourceChip";
+import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
+import { isCoverageCtaDegraded, coverageCtaReason, type CollectionCoverageInfo } from "@/lib/market/multichain/collection-coverage";
 
 /** Ledger/OpenSea/Magic Eden events all default a missing or unresolved address to this sentinel -- it means "unknown" (e.g. a mint's from-side), not a real repeated wallet, so it must never be treated as a matching pair by computeWashSuspicion(). Same constant lib/market/trending.ts uses server-side for the same reason. */
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -282,10 +286,32 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [listingsUnavailable, setListingsUnavailable] = useState<string | null>(null);
+  /** Real venue-registry lookup for this collection (see primaryVenueForCollection in lib/market/multichain/venue-registry.ts, threaded through /api/market/multichain/collection's own response) -- which venue this page's floor/listed numbers actually come from, and how complete that venue's coverage is. Null until the identity fetch resolves, or if this chain has no registered venue at all. */
+  const [primaryVenue, setPrimaryVenue] = useState<CollectionCoverageInfo | null>(null);
+  /** Real collection_archival_stats read, threaded through /api/market/multichain/collection's own response (see archival-ledger.ts's "API exposure" section) -- null until the identity fetch resolves, or if this collection has never been through a real hydrate write yet. Never fabricated. */
+  const [archival, setArchival] = useState<{
+    archivalScore: number | null;
+    scoreMethod: string;
+    tokensEverHydrated: number | null;
+    knownSupply: number | null;
+    lastArchivedAt: string | null;
+    jobProcessing: boolean;
+  } | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
+  // viewport-predictive-hydration-2026-08-25.md): reinforces this exact
+  // collection's own mesh priority while its page stays open/visible, on
+  // top of the one-shot prioritizeCollectionDemand call load() already
+  // fires on mount. This page has no separate "related collections" or
+  // "movers" rail today (only its OWN token grid, which isn't a set of
+  // OTHER collections) -- so unlike GlobalMarketHub's multi-row rankings
+  // table, there is exactly one composite key to observe here, attached to
+  // this component's own root element below.
+  useVisibleCollectionDemand({ context: "detail" });
 
   // SMART SEARCH / FILTER -- point-and-click, no page reload, applies
   // instantly to whatever is already loaded. Token-id search matches
@@ -510,9 +536,28 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           holderCount: number | null;
           floorPriceWei?: string | null;
           floorPriceCurrency?: string | null;
+          primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
+          archival?: {
+            archivalScore: number | null;
+            scoreMethod: string;
+            tokensEverHydrated: number | null;
+            knownSupply: number | null;
+            lastArchivedAt: string | null;
+            jobProcessing: boolean;
+          } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
-        ttlMs: 30_000,
+        // Real bug found live 2026-08-25: this page's own load() is polled
+        // every 20s (see the setInterval below), but ttlMs here was 30s --
+        // LONGER than the poll interval, so most polls were guaranteed
+        // cache hits returning stale data with zero network call, not a
+        // "live" refresh at all. Archive-depth (and every other stat this
+        // fetch carries) must always reflect a real, current backend read
+        // on every poll tick for a live-time integrity product to mean
+        // anything. ttlMs now below the poll interval so every tick is a
+        // genuine fetch; swrMs left generous so a slow/failed request still
+        // shows the last real value instead of a loading flash.
+        ttlMs: 15_000,
         swrMs: 120_000,
         session: true,
       });
@@ -602,6 +647,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           })
           .catch(() => {});
       }
+      setPrimaryVenue(
+        data.collection.primaryVenue
+          ? { venueId: data.collection.primaryVenue.id, venueLabel: data.collection.primaryVenue.label, coverage: data.collection.primaryVenue.coverage }
+          : null
+      );
+      setArchival(data.collection.archival ?? null);
       setMarketStats({
         volume24hWei: data.collection.volume24hWei,
         sales24h: data.collection.sales24h,
@@ -1902,7 +1953,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const floorUsd = (weiStr: string | null): number | null => toUsd(weiStr, floorCurrencySymbol);
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
@@ -1946,6 +1997,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             {floorWei ? <>{formatTokenAmount(floorWei, 18, 4)} <span className="font-sans text-[0.58rem] font-black text-foreground/55">{floorCurrencySymbol}</span></> : "—"}
             {floorWei && floorUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(floorUsd(floorWei)!)}</span>}
           </dd>
+          {primaryVenue && (
+            <div className="mt-1 flex justify-center">
+              <DataSourceChip venueLabel={primaryVenue.venueLabel} coverage={primaryVenue.coverage} />
+            </div>
+          )}
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Items</dt>
@@ -1993,6 +2049,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </dd>
         </div>
       </dl>
+      {archival && (
+        <ArchivalDepthBar
+          archivalScore={archival.archivalScore}
+          scoreMethod={archival.scoreMethod}
+          tokensEverHydrated={archival.tokensEverHydrated}
+          knownSupply={archival.knownSupply}
+          pulseKey={archival.lastArchivedAt}
+        />
+      )}
       {supplyStats?.holderCount != null && (
         <p className="text-[0.65rem] text-foreground/45">
           Unique holders {supplyStats.holderCount.toLocaleString()}
@@ -3177,6 +3242,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             setBuyTarget(null);
           }}
           crossChain={{ chainLabel: `${chainDisplayName(chainSlug)} via ${venueLabel(buyTarget)}`, feeBps: FOREIGN_FEE_BPS }}
+          coverageNotice={primaryVenue && isCoverageCtaDegraded(primaryVenue.coverage) ? coverageCtaReason(primaryVenue) : null}
         />
       )}
 
