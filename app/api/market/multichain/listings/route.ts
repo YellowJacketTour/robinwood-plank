@@ -399,26 +399,45 @@ export async function GET(req: NextRequest) {
         token?: { name?: string; image?: string; collectionName?: string; attributes?: Array<{ trait_type: string; value: string }> };
       };
       const pageSize = 20;
-      const raw: MeListing[] = [];
-      const seenMint = new Set<string>();
-      for (let offset = 0; offset < limit; offset += pageSize) {
-        const res = await fetch(
-          `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${pageSize}&offset=${offset}`,
-          { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
-        );
-        if (!res.ok) {
-          if (raw.length === 0) return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
-          break;
+      // Real gap found live 2026-08-25 ("many visitors one fingerprint"
+      // audit): this whole paginated fetch ran raw, on every single
+      // request, with zero coalescing -- N concurrent visitors browsing
+      // this same collection's listings each independently hammered Magic
+      // Eden with their own full pagination loop. Wrapped in the same
+      // getOrRefresh singleflight/SWR mechanism every other live upstream
+      // call in this file already uses. Short soft TTL (real order book,
+      // changes as people list/buy) still collapses any real concurrent
+      // burst into one upstream walk; keyed on (collectionSlug, limit) so
+      // the common "default page size" case coalesces across visitors even
+      // when a few request a deeper page.
+      const { getOrRefresh: getOrRefreshMe } = await import("@/lib/market/multichain/singleflight-cache");
+      const raw = await getOrRefreshMe<MeListing[]>(
+        `magiceden-listings:${collectionSlug}:${limit}`,
+        { softTtlMs: 15_000, hardTtlMs: 2 * 60_000, provider: "magiceden" },
+        async () => {
+          const rows: MeListing[] = [];
+          const seenMint = new Set<string>();
+          for (let offset = 0; offset < limit; offset += pageSize) {
+            const res = await fetch(
+              `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${pageSize}&offset=${offset}`,
+              { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
+            );
+            if (!res.ok) {
+              if (rows.length === 0) throw new Error(`Magic Eden ${res.status}`);
+              break;
+            }
+            const page = (await res.json()) as MeListing[];
+            if (!Array.isArray(page) || page.length === 0) break;
+            for (const row of page) {
+              if (!row.tokenMint || seenMint.has(row.tokenMint)) continue;
+              seenMint.add(row.tokenMint);
+              rows.push(row);
+            }
+            if (page.length < pageSize) break;
+          }
+          return rows;
         }
-        const page = (await res.json()) as MeListing[];
-        if (!Array.isArray(page) || page.length === 0) break;
-        for (const row of page) {
-          if (!row.tokenMint || seenMint.has(row.tokenMint)) continue;
-          seenMint.add(row.tokenMint);
-          raw.push(row);
-        }
-        if (page.length < pageSize) break;
-      }
+      );
       const listings: Listing[] = raw
         .filter((l) => l.tokenMint && typeof l.price === "number")
         .map((l) => {
