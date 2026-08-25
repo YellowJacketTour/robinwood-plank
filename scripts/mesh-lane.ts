@@ -110,6 +110,13 @@ async function main(): Promise<void> {
       console.log("[mesh-lane] erc4906-rescan", JSON.stringify(await runMetadataUpdateRescanBatch(chain, 5)));
       return;
     }
+    if (source === "ipfs-corroboration") {
+      const { sampleIpfsCorroboration } = await import("../lib/market/multichain/discovery/ipfs-corroboration");
+      const result = await sampleIpfsCorroboration(chain, 25);
+      if (result.drifted.length > 0) console.log("[mesh-lane] ipfs-corroboration DRIFT DETECTED", JSON.stringify(result.drifted));
+      console.log("[mesh-lane] ipfs-corroboration", JSON.stringify(result));
+      return;
+    }
     if (source === "unisat-rarity") {
       const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
       console.log("[mesh-lane] unisat-rarity", JSON.stringify(await scaffoldAllTrackedBitcoinCollections({ limit: 1, delayMs: 0 })));
