@@ -80,7 +80,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
     const stats = await getOrRefresh<{ listedCount?: number; uniqueHolders?: number; floorPrice?: number | null } | null>(
       `magiceden-stats:${chainSlug}:${contractAddress}`,
-      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000 },
+      { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "magiceden" },
       async () => {
         const me = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(contractAddress)}/stats`, {
           headers: { accept: "application/json" },
@@ -188,7 +188,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   const identKey = `opensea-collection-identity:${osChain}:${contractAddress.toLowerCase()}`;
   const slug = await getOrRefresh<string | null>(
     identKey,
-    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000 },
+    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
     async () => {
       const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {
         headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
@@ -207,7 +207,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   };
   const stats = await getOrRefresh<OpenSeaCollectionStats | null>(
     `opensea-collection-stats:${osChain}:${slug}`,
-    { softTtlMs: 60_000, hardTtlMs: 10 * 60_000 },
+    { softTtlMs: 60_000, hardTtlMs: 10 * 60_000, provider: "opensea" },
     async () => {
       const statsRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}/stats`, {
         headers: osHeaders,
@@ -295,7 +295,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   // each maintaining an independent (and independently uncoalesced) copy.
   const meta = await getOrRefresh<OpenSeaCollectionMeta | null>(
     `opensea-collection-meta:${osChain}:${slug}`,
-    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000 },
+    { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
     async () => {
       const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
         headers: osHeaders,
