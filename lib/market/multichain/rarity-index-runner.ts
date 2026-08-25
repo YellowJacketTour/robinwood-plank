@@ -24,7 +24,8 @@ import {
   writeTokenMetadataResult,
 } from "@/lib/market/multichain/collection-token-store";
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
-import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata, resolveMetadataFromUri } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { batchReadTokenUris } from "@/lib/market/multichain/discovery/evm-multicall";
 import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
 import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/multichain/archival-ledger";
 
@@ -337,12 +338,39 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   if (!rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
   const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
   const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
+  // Multicall3 batch pre-pass (Unified Mesh Continuum / intelligence-agency
+  // build, 2026-08-26 -- see GROK-FINDINGS-intelligence-agency-maximal-
+  // vision-2026-08-26.md, "likely highest unbuilt EVM leverage"): one real
+  // RPC call resolves tokenURI for every item in this batch at once,
+  // instead of each item paying its own RPC round-trip. Live-verified
+  // against real Pudgy Penguins token ids before shipping (cross-checked
+  // byte-for-byte against the existing single-call path). Best-effort: any
+  // item the batch doesn't resolve (ERC1155, non-standard contract, a
+  // genuine RPC hiccup) falls through to the existing per-token
+  // resolveEvmTokenMetadata path below unchanged, which already retries
+  // across every configured RPC URL and both selectors.
+  const batchUriByKey = new Map<string, string>();
+  try {
+    const batched = await batchReadTokenUris(
+      rpcUrls[0],
+      work.map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }))
+    );
+    for (const r of batched) {
+      if (r.uri) batchUriByKey.set(`${r.contractAddress}:${r.tokenId}`, r.uri);
+    }
+  } catch {
+    // Best-effort only -- the per-item fallback path covers this batch
+    // entirely on its own if the multicall itself fails.
+  }
   let complete = 0, empty = 0, retry = 0;
   const errors: string[] = [];
   for (const item of work) {
     try {
-      const metadata = await resolveEvmTokenMetadata({ rpcUrls,
-        contractAddress: item.collectionSlug, tokenId: item.tokenId }).catch(async (onchainError) => {
+      const batchedUri = batchUriByKey.get(`${item.collectionSlug}:${item.tokenId}`);
+      const metadata = await (batchedUri
+        ? resolveMetadataFromUri(batchedUri)
+        : resolveEvmTokenMetadata({ rpcUrls, contractAddress: item.collectionSlug, tokenId: item.tokenId })
+      ).catch(async (onchainError) => {
           if (!openSeaKey || !openSeaChain) throw onchainError;
           return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain,
             contractAddress: item.collectionSlug, tokenId: item.tokenId });

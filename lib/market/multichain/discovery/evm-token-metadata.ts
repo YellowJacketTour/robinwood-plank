@@ -49,11 +49,11 @@ async function readUri(rpcUrls: string[], contractAddress: string, tokenId: stri
   return null;
 }
 
-export async function resolveEvmTokenMetadata(input: {
-  rpcUrls: string[]; contractAddress: string; tokenId: string;
-}): Promise<ResolvedEvmTokenMetadata | null> {
-  const uri = await readUri(input.rpcUrls, input.contractAddress, input.tokenId);
-  if (!uri) return null;
+/** The body-fetch+decode half of resolveEvmTokenMetadata, split out so the
+ * Multicall3 batch path (evm-multicall.ts's batchReadTokenUris, which
+ * already resolves the on-chain URI for many tokens in one RPC call) can
+ * share it instead of duplicating this decode logic. */
+export async function resolveMetadataFromUri(uri: string): Promise<ResolvedEvmTokenMetadata | null> {
   const metadata = await fetchNftMetadata(uri);
   const traits = (metadata.attributes ?? []).flatMap((attribute) => {
     const traitType = typeof attribute.trait_type === "string" ? attribute.trait_type.trim() : "";
@@ -67,6 +67,14 @@ export async function resolveEvmTokenMetadata(input: {
   const name = typeof metadata.name === "string" ? metadata.name.trim() : "";
   return { name: name || null, imageUrl: image ? resolveIpfsUrl(image) : null,
     animationUrl: animation || null, mediaType: metadata.media_type?.trim() || null, traits };
+}
+
+export async function resolveEvmTokenMetadata(input: {
+  rpcUrls: string[]; contractAddress: string; tokenId: string;
+}): Promise<ResolvedEvmTokenMetadata | null> {
+  const uri = await readUri(input.rpcUrls, input.contractAddress, input.tokenId);
+  if (!uri) return null;
+  return resolveMetadataFromUri(uri);
 }
 
 /** Provider enrichment fallback for contracts whose metadata is not exposed
