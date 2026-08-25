@@ -32,12 +32,29 @@ export async function GET() {
     const { openSeaKeyStatus } = await import("@/lib/market/opensea");
     const openSea = await openSeaKeyStatus().catch(() => null);
 
+    // Presence-only booleans -- never the values themselves. Lets us verify
+    // a deploy actually has the config the new code expects (added 2026-08-24
+    // ahead of the dev->master catch-up merge, PR #112) without ever SSHing
+    // in to read shared/.env.production by hand.
+    const envKeys = {
+      RPC_URL: Boolean(process.env.RPC_URL?.trim()),
+      ENVIO_API_TOKEN: Boolean(process.env.ENVIO_API_TOKEN?.trim()),
+      HELIUS_API_KEY: Boolean(process.env.HELIUS_API_KEY?.trim()),
+      SOLANA_RPC_URL: Boolean(process.env.SOLANA_RPC_URL?.trim()),
+      MAGICEDEN_API_KEY: Boolean(process.env.MAGICEDEN_API_KEY?.trim()),
+      UNISAT_API_KEY: Boolean(process.env.UNISAT_API_KEY?.trim()),
+      ORDISCAN_API_KEY: Boolean(process.env.ORDISCAN_API_KEY?.trim()),
+      GLOBAL_MARKET_ENABLED:
+        process.env.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED?.trim().toLowerCase() === "true",
+    };
+
     return publicJson({
       ok: true,
       storage: backend,
       version: process.env.DEPLOYMENT_VERSION || "unknown",
       serverNow: new Date().toISOString(),
       ...(openSea ? { openSeaKey: openSea } : {}),
+      envKeys,
     });
   } catch {
     return publicJson(
