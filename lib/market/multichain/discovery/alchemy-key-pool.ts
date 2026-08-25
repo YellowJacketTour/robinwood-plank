@@ -39,6 +39,7 @@ import { postgresQuery } from "@/lib/postgres";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
 import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
+import { claimTokenBucketSlot, ALCHEMY_TOKEN_BUCKET_PROFILE, ALCHEMY_CU_COST } from "@/lib/market/multichain/discovery/provider-pace";
 
 /**
  * No DAILY_CEILING entry exists for "alchemy:key-N" in source-budget.ts --
@@ -137,12 +138,32 @@ export async function pickAlchemyKey(priority: AlchemyKeyPriority = "live"): Pro
   return ordered[0] ?? null;
 }
 
-export async function reserveAlchemyKey(cost = 1, opts?: { priority?: AlchemyKeyPriority }): Promise<AlchemyKeySlot | null> {
+/**
+ * Real token-bucket pacing (Unified Mesh Continuum build, 2026-08-26):
+ * 300 CU/s account-wide, real per-method CU costs -- see provider-pace.ts's
+ * ALCHEMY_TOKEN_BUCKET_PROFILE/ALCHEMY_CU_COST headers for the live
+ * citations. `rpcMethod` defaults to "eth_call" (this pool's one real
+ * current caller, lib/market/alchemy-nft.ts, only ever calls eth_call);
+ * an unrecognized method falls back to the eth_call cost rather than
+ * inventing a number for a method this app hasn't looked up yet.
+ */
+export async function reserveAlchemyKey(
+  cost = 1,
+  opts?: { priority?: AlchemyKeyPriority; rpcMethod?: string }
+): Promise<AlchemyKeySlot | null> {
   const priority = opts?.priority ?? "live";
   const window = utcDayWindow(ALCHEMY_DAILY_ALLOWANCE);
   const ordered = await orderCandidates(priority, window);
+  const cuCost = ALCHEMY_CU_COST[opts?.rpcMethod ?? "eth_call"] ?? ALCHEMY_CU_COST.eth_call;
 
   for (const candidate of ordered) {
+    const paced = await claimTokenBucketSlot(
+      candidate.providerAccount,
+      ALCHEMY_TOKEN_BUCKET_PROFILE.capacity,
+      ALCHEMY_TOKEN_BUCKET_PROFILE.refillPerSec,
+      cuCost
+    ).catch(() => true);
+    if (!paced) continue;
     if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
       return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
     }
