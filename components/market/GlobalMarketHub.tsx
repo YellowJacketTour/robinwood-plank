@@ -1567,6 +1567,43 @@ export default function GlobalMarketHub() {
     return () => observer.disconnect();
   }, [filtered.length, gridVisibleCount, loadMoreCollections, scopeHasMoreServerData]);
 
+  // Real fix, 2026-08-25 ("is sitting on the home page hydrating top ranked
+  // collections with priority?"): the real demand-signal endpoint
+  // (/api/market/multichain/visibility-demand, prioritizeVisibleCollections)
+  // has existed since the viewport-predictive-hydration build, but nothing
+  // on this page ever called it -- the only IntersectionObserver here drives
+  // infinite-scroll paging, not priority signaling. A visitor sitting on
+  // the rankings page was giving the mesh queue zero real signal beyond
+  // whatever a single detail-page click provides. Reports the top 20 rows
+  // per chain in TODAY's actual rendered order (whatever sort/filter is
+  // active) every 20s while this page is open -- real, current "what a
+  // visitor is actually looking at right now," not a fixed list.
+  useEffect(() => {
+    const topPerChain = new Map<string, string[]>();
+    for (const c of filtered) {
+      const arr = topPerChain.get(c.chainSlug) ?? [];
+      if (arr.length < 20) arr.push(c.contractAddress);
+      topPerChain.set(c.chainSlug, arr);
+    }
+    if (topPerChain.size === 0) return;
+    const postVisibility = () => {
+      for (const [chainSlug, keys] of topPerChain) {
+        fetch("/api/market/multichain/visibility-demand", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chainSlug, keys, context: "rankings" }),
+        }).catch(() => {
+          // Best-effort demand signal -- a failed POST just means this
+          // batch's rows age normally through background cadence instead
+          // of jumping the queue; never blocks or errors the page.
+        });
+      }
+    };
+    postVisibility();
+    const id = setInterval(postVisibility, 20_000);
+    return () => clearInterval(id);
+  }, [filtered]);
+
   // Prime the buffer as soon as a single chain tab is chosen (or on first
   // mount for the unfiltered "all chains" scope), instead of waiting for a
   // scroll that may never happen because the sentinel itself couldn't
