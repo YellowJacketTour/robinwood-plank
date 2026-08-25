@@ -2,6 +2,7 @@
 
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 import { useTweenedPercent } from "./useTweenedPercent";
+import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 export type ArchivalDepthBarProps = {
   /** 0..1 when score_method is supply_ratio; null if unknown */
@@ -11,6 +12,25 @@ export type ArchivalDepthBarProps = {
   knownSupply?: number | null;
   /** Real event: score increased -- triggers fill emphasis once */
   pulseKey?: string | number | null;
+  /** This collection's chain, for the active-fill color surge below. */
+  chainSlug?: string | null;
+  /** Real event: a plank_data_jobs row is hydrating THIS collection right
+   * now (see hooks/useHydrationJobStatus.ts's fast 8s poll) -- distinct
+   * from `growing` below, which only fires once a newly fetched
+   * archivalScore has actually risen. `active` is the real-time "the mesh
+   * is working on this collection at this instant" signal; `growing` is
+   * the after-the-fact "and that work already produced a higher number"
+   * signal. Real fix, 2026-08-25 ("progress bar should surge the color of
+   * the respective chain when actively filling, then resolve back to
+   * wood orange when resting"): previously the bar only ever rendered the
+   * wood/amber gradient, with no visual distinction between "the mesh is
+   * actively working on this exact collection" and "idle" -- surging to
+   * the collection's own real chain brand color while `active` is true
+   * gives a genuine, honest signal (never fabricated -- straight from a
+   * real running plank_data_jobs row) instead of a uniform color that
+   * can't tell a visitor whether anything is happening right now.
+   */
+  active?: boolean;
   /** Thin, label-less inline variant for a rankings row -- same real fill
    * width + glow-on-update motion as the full detail-page bar, just sized
    * to sit next to a collection name instead of stacking a whole section.
@@ -46,6 +66,8 @@ export function ArchivalDepthBar({
   tokensEverHydrated = null,
   knownSupply = null,
   pulseKey = null,
+  chainSlug = null,
+  active = false,
   compact = false,
   className = "",
 }: ArchivalDepthBarProps) {
@@ -56,6 +78,7 @@ export function ArchivalDepthBar({
   const displayPct = tweenedPct ?? rawPct;
   const growing = known && tweenedPct != null && rawPct != null && Math.abs(tweenedPct - rawPct) > 0.01;
   const pctLabel = displayPct != null ? displayPct.toFixed(2) : null;
+  const surgeColor = active && chainSlug ? chainBrandColor(chainSlug) : null;
 
   const summary =
     known && knownSupply != null && tokensEverHydrated != null
@@ -87,14 +110,19 @@ export function ArchivalDepthBar({
         >
           <span
             className={[
-              "absolute inset-y-0 left-0 rounded-full",
-              "bg-[linear-gradient(90deg,#c4a574,#8b5a2b)]",
+              "absolute inset-y-0 left-0 rounded-full transition-[background] duration-700",
+              surgeColor ? "" : "bg-[linear-gradient(90deg,#c4a574,#8b5a2b)]",
               !reduced && pulseKey != null ? "animate-plank-glow" : "",
               !reduced && growing ? "animate-archival-shimmer" : "",
             ]
               .filter(Boolean)
               .join(" ")}
-            style={{ width: `${displayPct}%` }}
+            style={{
+              width: `${displayPct}%`,
+              background: surgeColor
+                ? `linear-gradient(90deg, ${surgeColor}, color-mix(in srgb, ${surgeColor} 60%, black))`
+                : undefined,
+            }}
           />
         </span>
       </span>
@@ -131,14 +159,20 @@ export function ArchivalDepthBar({
         {known && (
           <div
             className={[
-              "absolute inset-y-0 left-0",
-              "bg-[linear-gradient(180deg,#c4a574_0%,#8b5a2b_45%,#6b4226_100%)]",
+              "absolute inset-y-0 left-0 transition-[background] duration-700",
+              surgeColor ? "" : "bg-[linear-gradient(180deg,#c4a574_0%,#8b5a2b_45%,#6b4226_100%)]",
               "shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]",
               !reduced && pulseKey != null ? "animate-plank-glow" : "",
+              !reduced && active ? "animate-archival-surge" : "",
             ]
               .filter(Boolean)
               .join(" ")}
-            style={{ width: `${displayPct}%` }}
+            style={{
+              width: `${displayPct}%`,
+              background: surgeColor
+                ? `linear-gradient(180deg, color-mix(in srgb, ${surgeColor} 85%, white) 0%, ${surgeColor} 45%, color-mix(in srgb, ${surgeColor} 60%, black) 100%)`
+                : undefined,
+            }}
           >
             {!reduced && growing && (
               <span aria-hidden className="absolute inset-0 animate-archival-shimmer" />
