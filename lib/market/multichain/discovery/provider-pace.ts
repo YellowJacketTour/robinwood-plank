@@ -31,7 +31,7 @@
  * circuit breaker in source-budget.ts / mesh/jail.ts still applies
  * regardless).
  */
-import { postgresQuery } from "@/lib/postgres";
+import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 
 export type PaceProfile = {
   /** Real documented minimum spacing between calls, in ms (e.g. OpenSea's
@@ -63,6 +63,25 @@ export type PaceProfile = {
 export const PROVIDER_PACE_PROFILES: Record<string, PaceProfile> = {
   "opensea-stats": { minIntervalMs: 6_200 },
   "helius-rpc": { minIntervalMs: 110 }, // 10 req/s + small safety margin
+};
+
+/** Real, live-reconfirmed Alchemy token-bucket profile: 300 CU/s, ~10s
+ * rolling window, up to 3,000 CU burst -- alchemy.com/docs/reference/
+ * throughput, confirmed live 2026-08-26. A small safety margin (280, not
+ * 300) keeps this app's own pacing a hair under the vendor's exact edge.
+ * `cost` is per-call and provided by the caller (most `eth_call`/
+ * `eth_getLogs` reads cost more than 1 CU each -- see Alchemy's own
+ * pricing table; callers should pass the real documented cost for the
+ * specific method, not assume 1). */
+export const ALCHEMY_TOKEN_BUCKET_PROFILE = { capacity: 2_800, refillPerSec: 280 };
+
+/** Real, documented per-method Compute Unit costs -- alchemy.com/docs/
+ * reference/compute-unit-costs, confirmed live 2026-08-26. Never a guessed
+ * flat "1" per call; a caller must name the real method to get the real
+ * cost, same discipline as every other provider number in this file. */
+export const ALCHEMY_CU_COST: Record<string, number> = {
+  eth_call: 26,
+  eth_getLogs: 60,
 };
 
 /**
@@ -99,4 +118,57 @@ export async function claimRegisteredPaceSlot(source: string): Promise<boolean> 
   const profile = PROVIDER_PACE_PROFILES[source];
   if (!profile) return true;
   return claimProviderPaceSlot(source, profile.minIntervalMs).catch(() => true);
+}
+
+/**
+ * Token-bucket pacing -- for a provider documented as a rate-OVER-A-WINDOW
+ * rather than a flat minimum interval (Alchemy's real "300 CU/s, ~10s
+ * rolling window, up to 3,000 CU burst" -- confirmed live 2026-08-26 via
+ * alchemy.com/docs/reference/throughput). A flat min-interval pace would
+ * misrepresent this: it would either throttle far below the real burst
+ * capacity (if paced to the steady-state rate) or let a burst through with
+ * no smoothing at all (if not paced at all) -- neither matches the real
+ * vendor semantics.
+ *
+ * Uses a real transaction with `SELECT ... FOR UPDATE` row-level locking,
+ * NOT a single UPSERT-with-CTE statement: a first draft tried to do the
+ * refill-then-deduct in one INSERT...ON CONFLICT DO UPDATE chained through
+ * a CTE, and hit a real, live-reproduced PostgreSQL behavior before it
+ * ever shipped -- a data-modifying CTE's freshly INSERTed row is NOT
+ * visible to a sibling UPDATE against the same table in the same
+ * statement (both operate against the snapshot as of the start of the
+ * statement, not each other's writes) -- confirmed live via a direct
+ * `UPDATE 0` on the very first claim for a brand-new key. `FOR UPDATE`
+ * inside an explicit transaction is the standard, correct pattern for
+ * this exact class of problem and avoids that gotcha entirely.
+ */
+export async function claimTokenBucketSlot(
+  paceKey: string,
+  capacity: number,
+  refillPerSec: number,
+  cost: number
+): Promise<boolean> {
+  return withPostgresTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO provider_pace_state (pace_key, tokens, last_refill_at, next_slot_at_ms, updated_at)
+       VALUES ($1, $2, now(), 0, now())
+       ON CONFLICT (pace_key) DO NOTHING`,
+      [paceKey, capacity]
+    );
+    const { rows } = await client.query<{ tokens: string; last_refill_at: string }>(
+      `SELECT tokens, last_refill_at FROM provider_pace_state WHERE pace_key = $1 FOR UPDATE`,
+      [paceKey]
+    );
+    const row = rows[0];
+    if (!row) return false; // should be unreachable given the INSERT above, fail closed if it ever is
+    const elapsedSec = Math.max(0, (Date.now() - new Date(row.last_refill_at).getTime()) / 1000);
+    const refilled = Math.min(capacity, Number(row.tokens) + elapsedSec * refillPerSec);
+    const allowed = refilled >= cost;
+    const newTokens = allowed ? refilled - cost : refilled;
+    await client.query(
+      `UPDATE provider_pace_state SET tokens = $2, last_refill_at = now(), updated_at = now() WHERE pace_key = $1`,
+      [paceKey, newTokens]
+    );
+    return allowed;
+  });
 }
