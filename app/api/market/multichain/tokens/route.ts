@@ -198,7 +198,26 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * Real gap found live 2026-08-25 ("many visitors one fingerprint" audit):
+ * this is the token-grid fetch rendered on every collection page load --
+ * likely THIS app's single highest-traffic surface -- and it ran raw, on
+ * every request, with zero coalescing across all three chains (OpenSea/
+ * Magic Eden/UniSat). N concurrent visitors on the same popular collection
+ * each independently paid the full real upstream cost. Wrapped in the same
+ * getOrRefresh singleflight/SWR mechanism the rest of this app's live
+ * routes already use.
+ */
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
+  const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+  return getOrRefresh<CollectionToken[]>(
+    `opensea-tokens:${openSeaChain}:${contractOrSlug.toLowerCase()}:${limit}`,
+    { softTtlMs: 30_000, hardTtlMs: 5 * 60_000, provider: "opensea" },
+    () => openSeaTokensUncached(openSeaChain, contractOrSlug, limit)
+  );
+}
+
+async function openSeaTokensUncached(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
   const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
   if (!key) return [];
   const chainPath = openSeaChain === "matic" ? "matic" : openSeaChain;
@@ -245,6 +264,15 @@ async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit
 }
 
 async function solanaTokens(symbol: string, limit: number): Promise<CollectionToken[]> {
+  const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+  return getOrRefresh<CollectionToken[]>(
+    `magiceden-tokens:${symbol}:${limit}`,
+    { softTtlMs: 30_000, hardTtlMs: 5 * 60_000, provider: "magiceden" },
+    () => solanaTokensUncached(symbol, limit)
+  );
+}
+
+async function solanaTokensUncached(symbol: string, limit: number): Promise<CollectionToken[]> {
   const nftsRes = await fetch(
     `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/listings?offset=0&limit=${limit}`,
     { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
@@ -291,6 +319,15 @@ function mapUniSatItems(list: UniSatItem[]): CollectionToken[] {
 }
 
 async function bitcoinTokens(collectionId: string, limit: number): Promise<CollectionToken[]> {
+  const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+  return getOrRefresh<CollectionToken[]>(
+    `unisat-tokens:${collectionId}:${limit}`,
+    { softTtlMs: 30_000, hardTtlMs: 5 * 60_000, provider: "unisat" },
+    () => bitcoinTokensUncached(collectionId, limit)
+  );
+}
+
+async function bitcoinTokensUncached(collectionId: string, limit: number): Promise<CollectionToken[]> {
   const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
   const ow = await fetchOrdinalsWalletCatalog(collectionId).catch(() => ({ tokens: [] as CollectionToken[] }));
   if (ow.tokens.length > 0) return ow.tokens.slice(0, limit);
