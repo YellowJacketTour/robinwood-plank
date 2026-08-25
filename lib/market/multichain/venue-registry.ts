@@ -115,11 +115,25 @@ export const MARKET_VENUES = [
     family: "solana",
     protocol: "tensor",
     versions: ["current"],
-    capabilities: ["sales"],
+    capabilities: ["sales", "listings"],
     coverage: "partial",
     chainSlugs: ["solana-mainnet"],
     notes:
-      "SETTLEMENT/ACTIVITY DATA ONLY, NO LIVE ORDER BOOK -- 2026-08-24: tensor-settlement-scan.ts reads real, " +
+      "LISTINGS UPDATE 2026-08-25 -- \"listings\" restored to capabilities, but read the fine print: this is " +
+      "an HONEST split between two genuinely different things. (1) Tensor's off-chain ranked/aggregated " +
+      "GraphQL stats -- floor rank, volume, curated book views -- remain CONFIRMED KEY-GATED and UNAVAILABLE " +
+      "(see the still-blocked API finding below, unchanged since 2026-08-24; this app has no key and will not " +
+      "guess that schema). (2) Tensor's ACTIVE LISTINGS as real, ordinary, public ON-CHAIN ACCOUNTS -- " +
+      "tensor-listing-scan.ts now reads these directly via a real `getProgramAccounts` call against the same " +
+      "live Tensor Marketplace program, filtered on the real `ListState` account discriminator read from the " +
+      "installed @tensor-foundation/marketplace package. A real call against api.mainnet-beta.solana.com on " +
+      "2026-08-25 returned 115,370 real, decodable ListState accounts with real owner/assetId/amount/expiry " +
+      "fields (no timeout, no rate-limit hit for this query shape) -- see tensor-listing-scan.ts's own header " +
+      "for the exact sampled values. This is now NO-KEY-NEEDED live listing coverage, with completeness = " +
+      "\"whatever this app's chosen public RPC's own getProgramAccounts index currently returns\" -- not " +
+      "Tensor's own internal index, and not re-verified against Tensor's official ranked UI. Every listing " +
+      "surfaced this way is labeled `source: \"tensor_onchain_list_state\"`, never presented as an official " +
+      "Tensor stats claim. SETTLEMENT/ACTIVITY DATA -- 2026-08-24: tensor-settlement-scan.ts reads real," +
       "settled buy/takeBid instructions directly off Solana chain state against the real, live-verified Tensor " +
       "Marketplace program (TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp), decoded with that program's own " +
       "installed-package instruction discriminators -- no Tensor-hosted API involved. This is READ-ONLY " +
