@@ -769,6 +769,21 @@ async function main(): Promise<void> {
       : `sigs=${result.signaturesScanned} txs=${result.transactionsFetched} +${result.fillsWritten}/${result.fillsFound}`;
   });
 
+  // Solana on-chain Tensor ACTIVE-LISTING scanner (real getProgramAccounts
+  // read of live ListState accounts -- see tensor-listing-scan.ts's own
+  // header and venue-registry.ts's updated tensor-solana entry). This is a
+  // full-snapshot scan, not incremental, so the module itself self-throttles
+  // to roughly once per MIN_SCAN_INTERVAL_MS regardless of how often this
+  // step runs -- safe to call every tick like every other scanner here.
+  await step("tensor-listings", async () => {
+    const { scanTensorListings } = await import("../lib/market/multichain/discovery/tensor-listing-scan");
+    const result = await scanTensorListings();
+    if (result.skipped) return "skipped(throttled)";
+    return result.error
+      ? `ERR(${result.error.slice(0, 60)})`
+      : `accounts=${result.accountsFetched} decoded=${result.listingsDecoded} +${result.listingsWritten} reaped=${result.listingsReaped}`;
+  });
+
   // Second real historic marketplace this app indexes directly on-chain --
   // LooksRare v1 TakerAsk/TakerBid, same dual-cursor live/genesis pattern as
   // the Seaport steps above. See hypersync-looksrare-scan.ts's own header
