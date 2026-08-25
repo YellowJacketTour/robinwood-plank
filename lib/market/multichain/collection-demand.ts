@@ -36,7 +36,20 @@ export function hydrationJobSources(
     list.push(
       { source: "opensea-membership", basePriority: 98 },
       { source: "evm-metadata", basePriority: 97 },
-      { source: "opensea-stats", basePriority: 96 }
+      { source: "opensea-stats", basePriority: 96 },
+      // Real gap found live 2026-08-25 ("while i visit this page there is
+      // still no live sync"): a collection whose OpenSea enumeration has
+      // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
+      // looping over already-seen tokens) got ZERO benefit from a page
+      // visit -- opensea-membership above just re-ran the same already-
+      // stuck walk every time. anchored-membership was only ever
+      // manually enqueued via a one-off script, never part of the real
+      // page-visit demand set. Cheap to include unconditionally: once a
+      // contract's deploy block is cached (one real HyperSync call, ever)
+      // this self-limits via its own real done-check and the shared
+      // HyperSync circuit breaker -- it is never wasted work, only ever
+      // real, additional coverage a plain OpenSea walk cannot reach.
+      { source: "anchored-membership", basePriority: 95 }
     );
     if (chainSlug === "eth-mainnet" && normalized === CRYPTOPUNKS_CONTRACT) {
       list.push({ source: "cryptopunks-native", basePriority: 100 });
