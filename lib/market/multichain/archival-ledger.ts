@@ -456,7 +456,7 @@ export async function getArchivalStatsForCollection(
   collectionKey: string
 ): Promise<ArchivalApiShape | null> {
   const normalized = normalizeCollectionKey(collectionKey);
-  const [statsResult, jobResult] = await Promise.all([
+  const [statsResult, jobResult, liveResult] = await Promise.all([
     postgresQuery<RawArchivalStatsRow>(
       `SELECT chain_slug, collection_key, known_supply::text, tokens_ever_hydrated::text,
               archival_score::text, score_method, last_archived_at
@@ -471,9 +471,31 @@ export async function getArchivalStatsForCollection(
        ) AS exists`,
       [chainSlug, normalized]
     ).catch(() => ({ rows: [{ exists: false }] })),
+    // Real fix, 2026-08-25 ("truly instant updating live everywhere"): this
+    // ledger's own tokens_ever_hydrated column only advances when a write
+    // path explicitly calls recordArchivalHit -- confirmed live it can
+    // silently stop tracking real growth (Lil Pudgys: stuck reporting
+    // 4,079 while plank_collection_token_projections' own projected_count,
+    // updated on every real token write with no separate increment step to
+    // forget, had already reached 7,000+). projected_count is the true
+    // live count; take whichever is larger so this route can never report
+    // less than what's actually stored, regardless of whether the ledger's
+    // own increment path is current.
+    postgresQuery<{ projected_count: number }>(
+      `SELECT projected_count FROM plank_collection_token_projections
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [] as Array<{ projected_count: number }> })),
   ]);
   const shape = toArchivalApiShape(statsResult.rows[0] ?? null);
   if (!shape) return null;
+  const liveCount = liveResult.rows[0]?.projected_count ?? null;
+  if (liveCount != null && (shape.tokensEverHydrated == null || liveCount > shape.tokensEverHydrated)) {
+    const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, liveCount);
+    shape.tokensEverHydrated = liveCount;
+    shape.archivalScore = archivalScore;
+    shape.scoreMethod = scoreMethod;
+  }
   return { ...shape, jobProcessing: jobResult.rows[0]?.exists === true };
 }
 
@@ -498,17 +520,38 @@ export async function getArchivalStatsBatch(
   if (pairs.length === 0) return out;
   const chainSlugs = pairs.map((p) => p.chainSlug);
   const normalizedKeys = pairs.map((p) => normalizeCollectionKey(p.collectionKey));
-  const result = await postgresQuery<RawArchivalStatsRow>(
-    `SELECT s.chain_slug, s.collection_key, s.known_supply::text, s.tokens_ever_hydrated::text,
-            s.archival_score::text, s.score_method, s.last_archived_at
-     FROM collection_archival_stats s
-     JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
-       ON s.chain_slug = want.chain_slug AND s.collection_key = want.collection_key`,
-    [chainSlugs, normalizedKeys]
-  ).catch(() => ({ rows: [] as RawArchivalStatsRow[] }));
+  const [result, liveResult] = await Promise.all([
+    postgresQuery<RawArchivalStatsRow>(
+      `SELECT s.chain_slug, s.collection_key, s.known_supply::text, s.tokens_ever_hydrated::text,
+              s.archival_score::text, s.score_method, s.last_archived_at
+       FROM collection_archival_stats s
+       JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
+         ON s.chain_slug = want.chain_slug AND s.collection_key = want.collection_key`,
+      [chainSlugs, normalizedKeys]
+    ).catch(() => ({ rows: [] as RawArchivalStatsRow[] })),
+    // Same real gap as getArchivalStatsForCollection above, applied to the
+    // whole rankings page in one bounded join instead of per-row queries.
+    postgresQuery<{ chain_slug: string; collection_slug: string; projected_count: number }>(
+      `SELECT p.chain_slug, p.collection_slug, p.projected_count
+       FROM plank_collection_token_projections p
+       JOIN UNNEST($1::text[], $2::text[]) AS want(chain_slug, collection_key)
+         ON p.chain_slug = want.chain_slug AND lower(p.collection_slug) = lower(want.collection_key)`,
+      [chainSlugs, normalizedKeys]
+    ).catch(() => ({ rows: [] as Array<{ chain_slug: string; collection_slug: string; projected_count: number }> })),
+  ]);
+  const liveByKey = new Map<string, number>();
+  for (const row of liveResult.rows) liveByKey.set(`${row.chain_slug}:${row.collection_slug.toLowerCase()}`, row.projected_count);
   for (const row of result.rows) {
     const shape = toArchivalApiShape(row);
-    if (shape) out.set(`${row.chain_slug}:${row.collection_key}`, shape);
+    if (!shape) continue;
+    const liveCount = liveByKey.get(`${row.chain_slug}:${row.collection_key.toLowerCase()}`) ?? null;
+    if (liveCount != null && (shape.tokensEverHydrated == null || liveCount > shape.tokensEverHydrated)) {
+      const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, liveCount);
+      shape.tokensEverHydrated = liveCount;
+      shape.archivalScore = archivalScore;
+      shape.scoreMethod = scoreMethod;
+    }
+    out.set(`${row.chain_slug}:${row.collection_key}`, shape);
   }
   return out;
 }
