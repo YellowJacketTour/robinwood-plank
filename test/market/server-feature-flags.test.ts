@@ -62,11 +62,26 @@ const KNOWN_BUILD_FROZEN: Record<string, string[]> = {
   // Seaport's EIP-712 domain depends on (see the export's own header in
   // foreign-chain-registry.ts).
   "market/multichain/trading/foreign-chain-registry.ts": ["NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRIDE"],
+  // Same build-frozen, client-side Solana Connection endpoint as
+  // solana-transfer.ts/foreign-fulfill.ts above -- these two on-chain
+  // fallback readers (used by the Solana click-hydration path, see
+  // solana-token-hydrate.ts) share the identical NEXT_PUBLIC_SOLANA_RPC_URL
+  // constant, not a runtime kill switch.
+  "market/multichain/discovery/solana-editions.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
+  "market/multichain/discovery/solana-metaplex-reads.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
   "constants.ts": [
     "NEXT_PUBLIC_DEV_LOCAL_CHAIN",
     "NEXT_PUBLIC_DEV_LOCAL_RPC",
     "NEXT_PUBLIC_DRAND_BEACON_ADDRESS",
     "NEXT_PUBLIC_GASLESS_ENABLED",
+    // Same build-frozen tradeoff as NEXT_PUBLIC_MARKET_ENABLED right below --
+    // deliberately accepted here too (2026-08-25): unlike referrals/MoonPay
+    // (see this file's third test), an accidental production flip of the
+    // global marketplace is not the kind of incident that needs a
+    // without-a-deploy kill switch -- toggling it is always a deliberate,
+    // reviewed deploy either way. Flipping it for real requires a rebuild,
+    // same as MARKET_ENABLED always has.
+    "NEXT_PUBLIC_GLOBAL_MARKET_ENABLED",
     "NEXT_PUBLIC_MARKET_ENABLED",
     "NEXT_PUBLIC_MARKET_VAULT_ADDRESS",
     "NEXT_PUBLIC_MARKET_VAULT_ADDRESSES",

@@ -256,8 +256,13 @@ export const MARKET_ENABLED =
  * production as of 2026-08-24, already is) live via MARKET_ENABLED while
  * this stays false: "merge and prep the deploy, but don't unveil the global
  * marketplace yet." Gates both the /market/multichain* pages and the
- * MarketMenu nav's "Global"/per-chain links -- flip
- * NEXT_PUBLIC_GLOBAL_MARKET_ENABLED=true only when ready to show it.
+ * MarketMenu nav's "Global"/per-chain links.
+ *
+ * BUILD-FROZEN, same as MARKET_ENABLED (see test/market/server-feature-flags
+ * .test.ts's header): Next.js inlines NEXT_PUBLIC_* into the server bundle
+ * whenever the deploy's build step defines it, so flipping this for real
+ * requires a rebuild + redeploy with NEXT_PUBLIC_GLOBAL_MARKET_ENABLED=true
+ * set -- not a live env-var edit against an already-built release.
  */
 export const GLOBAL_MARKET_ENABLED =
   process.env.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED?.trim().toLowerCase() === "true";
