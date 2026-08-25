@@ -1,0 +1,318 @@
+/**
+ * Opportunistic Archival Ledger -- docs/marketplank/GROK-FINDINGS-
+ * sustainable-archival-mining-2026-08-25.md, build order items 1, 2 and 4.
+ *
+ * This module never talks to a third-party provider and never writes a
+ * fabricated fact. It only:
+ *  - counts real, already-successful hydrate/fill writes per collection
+ *    (recordArchivalHydration, called AFTER a real
+ *    upsertCollectionTokenProjection succeeds -- never before), and
+ *  - scores completeness honestly (computeArchivalScore /
+ *    scoreFromCounts): a real ratio when known_supply is a real positive
+ *    number, otherwise NULL. Never a made-up percentage.
+ *  - bounds sibling-token fan-out per collection per hour
+ *    (reserveSiblingExpansionSlot / nextSiblingExpansionBucket), and
+ *  - selects the cold-frontier batch (selectArchivalFrontierBatch) for
+ *    scripts/mesh-lane.ts's `archival-frontier` source.
+ *
+ * Every DB-touching function here is best-effort bookkeeping: a failure
+ * must never block or fail the real hydrate/enqueue call sites that call
+ * it (same "side-channel, not source of truth" discipline collection-
+ * demand.ts's own visibility-row writes already follow) -- callers wrap
+ * these in .catch(() => {}) rather than letting an archival-stats bug take
+ * down a real hydrate response.
+ */
+import { postgresQuery } from "@/lib/postgres";
+import { enqueueDataJob } from "@/lib/market/multichain/control-plane";
+import { hydrationJobSources, DEMAND_PRIORITY } from "@/lib/market/multichain/collection-demand";
+import { getCollectionSupplyStats } from "@/lib/market/multichain/store";
+import { readTokenMetadataWork } from "@/lib/market/multichain/collection-token-store";
+
+function normalizeCollectionKey(collectionKey: string): string {
+  return /^0x[0-9a-f]{40}$/i.test(collectionKey) ? collectionKey.toLowerCase() : collectionKey;
+}
+
+export type ArchivalScoreMethod = "supply_ratio" | "unknown_supply";
+
+/**
+ * Pure scoring rule (docs/marketplank/GROK-FINDINGS-sustainable-archival-
+ * mining-2026-08-25.md section B, "Score (fail-closed)"), exported and
+ * unit-tested on its own (test/market/archival-ledger.test.ts) because it
+ * is the one place a bug could fabricate a completeness percentage.
+ *
+ * If known_supply is a real positive finite number:
+ *   score = min(1, tokens_ever_hydrated / known_supply), method='supply_ratio'.
+ * Otherwise: score stays null, method='unknown_supply'. NEVER invent a %.
+ */
+export function scoreFromCounts(
+  knownSupply: number | null,
+  tokensEverHydrated: number
+): { archivalScore: number | null; scoreMethod: ArchivalScoreMethod } {
+  if (knownSupply != null && Number.isFinite(knownSupply) && knownSupply > 0) {
+    const hydrated = Number.isFinite(tokensEverHydrated) && tokensEverHydrated > 0 ? tokensEverHydrated : 0;
+    return { archivalScore: Math.min(1, hydrated / knownSupply), scoreMethod: "supply_ratio" };
+  }
+  return { archivalScore: null, scoreMethod: "unknown_supply" };
+}
+
+type StatsRow = { known_supply: string | null; tokens_ever_hydrated: string };
+
+/** DB-wired wrapper around scoreFromCounts -- reads the row's own counters,
+ * recomputes, and persists. Never called with client-supplied numbers. */
+export async function computeArchivalScore(
+  chainSlug: string,
+  collectionKey: string
+): Promise<{ archivalScore: number | null; scoreMethod: ArchivalScoreMethod }> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const result = await postgresQuery<StatsRow>(
+    `SELECT known_supply::text, tokens_ever_hydrated::text FROM collection_archival_stats
+     WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized]
+  );
+  const row = result.rows[0];
+  const knownSupply = row?.known_supply != null ? Number(row.known_supply) : null;
+  const tokensEverHydrated = row ? Number(row.tokens_ever_hydrated) : 0;
+  const { archivalScore, scoreMethod } = scoreFromCounts(knownSupply, tokensEverHydrated);
+  await postgresQuery(
+    `UPDATE collection_archival_stats SET archival_score = $3, score_method = $4
+     WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized, archivalScore, scoreMethod]
+  );
+  return { archivalScore, scoreMethod };
+}
+
+/**
+ * Best-effort, opportunistic known_supply backfill: only ever writes a real
+ * positive number this app already computed elsewhere (plank_multichain_
+ * snapshots.total_supply via getCollectionSupplyStats), and only when the
+ * column is still null -- never overwrites an existing value, never invents
+ * one. Failures are swallowed; known_supply simply stays null and scoring
+ * stays honestly 'unknown_supply'.
+ */
+async function backfillKnownSupplyIfMissing(chainSlug: string, collectionKey: string): Promise<void> {
+  try {
+    const supply = await getCollectionSupplyStats(chainSlug, collectionKey);
+    if (supply?.totalSupply == null || !Number.isFinite(supply.totalSupply) || supply.totalSupply <= 0) return;
+    await postgresQuery(
+      `UPDATE collection_archival_stats SET known_supply = $3
+       WHERE chain_slug = $1 AND collection_key = $2 AND known_supply IS NULL`,
+      [chainSlug, normalizeCollectionKey(collectionKey), Math.trunc(supply.totalSupply)]
+    );
+  } catch {
+    /* best-effort only -- scoring stays 'unknown_supply' until this succeeds */
+  }
+}
+
+/**
+ * Build order item 1: idempotent counter upsert on every real hydrate/fill
+ * success. Called AFTER upsertCollectionTokenProjection (or the equivalent
+ * fill-store write) succeeds, never before -- these counters must only ever
+ * reflect writes that actually landed.
+ */
+export async function recordArchivalHydration(
+  chainSlug: string,
+  collectionKey: string,
+  opts?: { isNewToken?: boolean; isFill?: boolean }
+): Promise<void> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const now = new Date();
+  const tokensDelta = opts?.isNewToken ? 1 : 0;
+  const fillsDelta = opts?.isFill ? 1 : 0;
+  await postgresQuery(
+    `INSERT INTO collection_archival_stats (
+       chain_slug, collection_key, tokens_ever_hydrated, fills_ever_stored,
+       first_archived_at, last_archived_at, organic_hits
+     ) VALUES ($1, $2, $3, $4, $5, $5, 1)
+     ON CONFLICT (chain_slug, collection_key) DO UPDATE SET
+       tokens_ever_hydrated = collection_archival_stats.tokens_ever_hydrated + $3,
+       fills_ever_stored = collection_archival_stats.fills_ever_stored + $4,
+       first_archived_at = COALESCE(collection_archival_stats.first_archived_at, $5),
+       last_archived_at = $5,
+       organic_hits = collection_archival_stats.organic_hits + 1`,
+    [chainSlug, normalized, tokensDelta, fillsDelta, now]
+  );
+  await backfillKnownSupplyIfMissing(chainSlug, normalized);
+  await computeArchivalScore(chainSlug, normalized);
+}
+
+// ---------------------------------------------------------------------------
+// Build order item 2: bounded sibling-token expansion.
+// ---------------------------------------------------------------------------
+
+/** Small, deliberately conservative caps -- "bounded, budget-respecting, not
+ * unbounded fan-out" per the findings doc's explicit constraint. */
+export const MAX_SIBLING_EXPANSIONS_PER_HOUR = 3;
+export const SIBLING_EXPANSION_BATCH_SIZE = 4;
+
+/**
+ * Pure hour-bucket budget logic, unit-tested on its own
+ * (test/market/archival-ledger.test.ts): at most
+ * MAX_SIBLING_EXPANSIONS_PER_HOUR sibling-expansion triggers per collection
+ * per rolling hour. A bucket older than one hour resets to a fresh bucket
+ * starting now (mirrors collection-demand.ts's own aging-bucket style).
+ */
+export function nextSiblingExpansionBucket(input: {
+  bucketStart: Date | null;
+  countInBucket: number;
+  now: Date;
+}): { allowed: boolean; newBucketStart: Date; newCount: number } {
+  const bucketAgeMs = input.bucketStart ? input.now.getTime() - input.bucketStart.getTime() : Number.POSITIVE_INFINITY;
+  if (bucketAgeMs >= 60 * 60_000) {
+    return { allowed: true, newBucketStart: input.now, newCount: 1 };
+  }
+  if (input.countInBucket < MAX_SIBLING_EXPANSIONS_PER_HOUR) {
+    return { allowed: true, newBucketStart: input.bucketStart as Date, newCount: input.countInBucket + 1 };
+  }
+  return { allowed: false, newBucketStart: input.bucketStart as Date, newCount: input.countInBucket };
+}
+
+/** DB-wired budget reservation: read-modify-write the row's own hour-bucket
+ * columns. A best-effort check, not a hard distributed lock -- a rare race
+ * under concurrent hydrates can only ever let one or two EXTRA sibling
+ * batches (still bounded to a handful of tokens) through, never unbounded
+ * fan-out. */
+async function reserveSiblingExpansionSlot(chainSlug: string, collectionKey: string): Promise<boolean> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const now = new Date();
+  const result = await postgresQuery<{ sibling_expansions_hour_bucket: Date | null; sibling_expansions_in_bucket: number }>(
+    `SELECT sibling_expansions_hour_bucket, sibling_expansions_in_bucket
+     FROM collection_archival_stats WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized]
+  );
+  const row = result.rows[0];
+  const decision = nextSiblingExpansionBucket({
+    bucketStart: row?.sibling_expansions_hour_bucket ?? null,
+    countInBucket: row?.sibling_expansions_in_bucket ?? 0,
+    now,
+  });
+  if (!decision.allowed) return false;
+  await postgresQuery(
+    `UPDATE collection_archival_stats
+       SET sibling_expansions_hour_bucket = $3, sibling_expansions_in_bucket = $4
+     WHERE chain_slug = $1 AND collection_key = $2`,
+    [chainSlug, normalized, decision.newBucketStart, decision.newCount]
+  );
+  return true;
+}
+
+/**
+ * On a successful single-token hydrate, opportunistically widen capture:
+ * if this collection's hourly sibling-expansion budget allows, boost the
+ * priority of this collection's already-queued hydration lane (the SAME
+ * mesh/enqueueDataJob path prioritizeCollectionDemand uses) to
+ * DEMAND_PRIORITY.SIBLING_EXPAND -- LOWER than a real visible/detail-page
+ * request, so the next mesh tick naturally picks up a bounded page of this
+ * collection's own already-known pending token ids (readTokenMetadataWork
+ * already returns the collection's real, already-tracked token rows still
+ * missing metadata -- never client-supplied trait/sibling data).
+ *
+ * This never calls a third-party provider directly; it only nudges the
+ * priority of real, already-existing job kinds so a real mesh worker picks
+ * this collection's pending siblings up a little sooner than plain
+ * background cadence would.
+ */
+export async function maybeExpandSiblingTokens(
+  chainSlug: string,
+  collectionKey: string
+): Promise<{ expanded: boolean; siblingTokenIds: string[] }> {
+  const normalized = normalizeCollectionKey(collectionKey);
+  const reserved = await reserveSiblingExpansionSlot(chainSlug, normalized);
+  if (!reserved) return { expanded: false, siblingTokenIds: [] };
+
+  const pending = await readTokenMetadataWork(chainSlug, SIBLING_EXPANSION_BATCH_SIZE, normalized).catch(() => []);
+  const siblingTokenIds = pending.map((item) => item.tokenId);
+
+  const jobs = hydrationJobSources(chainSlug, normalized).map(({ source }) => ({
+    jobKey: `demand:${source}:${chainSlug}:${normalized}`,
+    kind: `mesh-lane:${chainSlug}`,
+    source,
+    chainSlug,
+    subject: normalized,
+    priority: DEMAND_PRIORITY.SIBLING_EXPAND,
+  }));
+  await Promise.allSettled(jobs.map((job) => enqueueDataJob(job)));
+  return { expanded: true, siblingTokenIds };
+}
+
+// ---------------------------------------------------------------------------
+// Build order item 4: cold frontier selection.
+// ---------------------------------------------------------------------------
+
+export const ARCHIVAL_FRONTIER_LOW_SCORE_THRESHOLD = 0.05;
+export const ARCHIVAL_FRONTIER_BATCH_SIZE = 5;
+/** "Run at most once every N minutes" -- the lowest-priority, most-patient
+ * part of this system deliberately does not run every tick. */
+export const ARCHIVAL_FRONTIER_MIN_INTERVAL_MS = 30 * 60_000;
+
+export type ArchivalFrontierCandidate = { chainSlug: string; collectionKey: string };
+
+/**
+ * "Pick collections with organic_hits = 0 OR archival_score IS NULL OR
+ * archival_score < threshold, least-recently-archived / never-archived
+ * first" (findings doc section D). Reads only collection_archival_stats --
+ * a collection that has never once been hydrated (no row here at all) is
+ * intentionally NOT covered by this query; item 4 explicitly scopes the
+ * cold frontier to collections this ledger already knows about (rows are
+ * created the first time ANY real hydrate touches a collection, which for
+ * every tracked collection happens quickly via the existing demand paths).
+ */
+export async function selectArchivalFrontierBatch(
+  limit: number = ARCHIVAL_FRONTIER_BATCH_SIZE
+): Promise<ArchivalFrontierCandidate[]> {
+  const bounded = Math.min(Math.max(Math.trunc(limit), 1), 25);
+  const result = await postgresQuery<{ chain_slug: string; collection_key: string }>(
+    `SELECT chain_slug, collection_key FROM collection_archival_stats
+     WHERE organic_hits = 0 OR archival_score IS NULL OR archival_score < $2
+     ORDER BY last_archived_at ASC NULLS FIRST, organic_hits ASC
+     LIMIT $1`,
+    [bounded, ARCHIVAL_FRONTIER_LOW_SCORE_THRESHOLD]
+  );
+  return result.rows.map((row) => ({ chainSlug: row.chain_slug, collectionKey: row.collection_key }));
+}
+
+/**
+ * Durable "last ran at" gate (its own singleton row, migration 064) so the
+ * cold-frontier lane runs at most once every ARCHIVAL_FRONTIER_MIN_INTERVAL_MS
+ * regardless of how often mesh-tick itself runs. Atomic claim: only the
+ * caller that successfully advances last_run_at gets to actually run.
+ */
+export async function tryClaimArchivalFrontierRun(now: Date = new Date()): Promise<boolean> {
+  const result = await postgresQuery<{ claimed: boolean }>(
+    `INSERT INTO archival_frontier_runs (id, last_run_at) VALUES (true, $1)
+     ON CONFLICT (id) DO UPDATE SET last_run_at = $1
+     WHERE archival_frontier_runs.last_run_at IS NULL
+        OR $1 - archival_frontier_runs.last_run_at >= INTERVAL '1 millisecond' * $2
+     RETURNING TRUE AS claimed`,
+    [now, ARCHIVAL_FRONTIER_MIN_INTERVAL_MS]
+  );
+  return result.rows[0]?.claimed === true;
+}
+
+/**
+ * Build order item 4's actual mesh work: gated by tryClaimArchivalFrontierRun
+ * (so this only ever fires at most once per ARCHIVAL_FRONTIER_MIN_INTERVAL_MS
+ * across every mesh-tick invocation), select a small never/rarely-archived
+ * batch and enqueue their existing hydration job kinds at a priority LOWER
+ * than DEMAND_PRIORITY.BACKGROUND so this can never compete with or starve
+ * real user-triggered work -- same enqueueDataJob mechanism, same real
+ * per-chain job sources as every other demand path in this file.
+ */
+export async function runArchivalFrontierLane(): Promise<{ ran: boolean; enqueued: number; candidates: ArchivalFrontierCandidate[] }> {
+  const claimed = await tryClaimArchivalFrontierRun();
+  if (!claimed) return { ran: false, enqueued: 0, candidates: [] };
+  const candidates = await selectArchivalFrontierBatch();
+  let enqueued = 0;
+  for (const candidate of candidates) {
+    const jobs = hydrationJobSources(candidate.chainSlug, candidate.collectionKey).map(({ source }) => ({
+      jobKey: `demand:${source}:${candidate.chainSlug}:${candidate.collectionKey}`,
+      kind: `mesh-lane:${candidate.chainSlug}`,
+      source,
+      chainSlug: candidate.chainSlug,
+      subject: candidate.collectionKey,
+      priority: DEMAND_PRIORITY.ARCHIVAL_FRONTIER,
+    }));
+    const results = await Promise.allSettled(jobs.map((job) => enqueueDataJob(job)));
+    enqueued += results.filter((r) => r.status === "fulfilled").length;
+  }
+  return { ran: true, enqueued, candidates };
+}

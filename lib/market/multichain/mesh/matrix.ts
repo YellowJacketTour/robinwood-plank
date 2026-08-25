@@ -56,7 +56,8 @@ export type MeshSource =
   | "unisat-membership"
   | "helius-membership"
   | "opensea-membership"
-  | "cryptopunks-native";
+  | "cryptopunks-native"
+  | "archival-frontier";
 
 export type MeshLane = {
   id: string;
@@ -428,6 +429,24 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders"],
     sliceSec: 60,
     notes: "getListings(robinwood) + plank.love overlay. Never invent floor.",
+  },
+  {
+    // Opportunistic Archival Ledger cold frontier (docs/marketplank/GROK-
+    // FINDINGS-sustainable-archival-mining-2026-08-25.md, build order item
+    // 4). Not chain-specific -- runArchivalFrontierLane() itself selects a
+    // small cross-chain batch of never/rarely-archived collections from
+    // collection_archival_stats and enqueues their REAL per-chain hydration
+    // job kinds at DEMAND_PRIORITY.ARCHIVAL_FRONTIER, strictly below plain
+    // background cadence. This lane's own job just runs that selector; it
+    // never calls a third-party provider directly. Self-gated to run at
+    // most once every ARCHIVAL_FRONTIER_MIN_INTERVAL_MS via the durable
+    // archival_frontier_runs singleton row, so most ticks are a no-op.
+    id: "archival-frontier:cross-chain",
+    source: "archival-frontier",
+    chainSlug: "eth-mainnet",
+    cells: ["rarity"],
+    sliceSec: 60,
+    notes: "Lowest-priority gap-fill for never/rarely-organically-hit collections; self-gated, cross-chain, additive.",
   },
 ];
 

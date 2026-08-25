@@ -17,6 +17,7 @@ import { postgresQuery } from "@/lib/postgres";
 import {
   readCollectionMembershipCursor,
   readProjectedRarityInputs,
+  readProjectedTokensByIds,
   upsertCollectionTokenProjection,
   writeCollectionMembershipCursor,
   readTokenMetadataWork,
@@ -25,6 +26,7 @@ import {
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
 import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
+import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/multichain/archival-ledger";
 
 const PAGE_SIZE = 50;
 
@@ -290,6 +292,16 @@ export async function hydrateSpecificToken(
   const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
   const item = { chainSlug, collectionSlug, tokenId };
   try {
+    // Opportunistic Archival Ledger (docs/marketplank/GROK-FINDINGS-
+    // sustainable-archival-mining-2026-08-25.md): read whether this exact
+    // token was already archived BEFORE this hydrate, so a successful write
+    // below can honestly report isNewToken to recordArchivalHydration --
+    // tokens_ever_hydrated must count distinct tokens, not every re-hydrate.
+    const priorState = await readProjectedTokensByIds(chainSlug, collectionSlug, [tokenId]);
+    const wasAlreadyArchived = (() => {
+      const prior = priorState.get(tokenId);
+      return !!prior && (!!prior.name || !!prior.imageUrl || prior.traits.length > 0);
+    })();
     const metadata = await resolveEvmTokenMetadata({ rpcUrls, contractAddress: collectionSlug, tokenId }).catch(async (onchainError) => {
       if (!openSeaKey || !openSeaChain) throw onchainError;
       return resolveOpenSeaTokenMetadata({ apiKey: openSeaKey, openSeaChain, contractAddress: collectionSlug, tokenId });
@@ -303,6 +315,11 @@ export async function hydrateSpecificToken(
       preservePartial: true, provenance: ["on-demand-click-hydration"], sourceObservedAt: new Date(),
     });
     await writeTokenMetadataResult({ ...item, state: "complete" });
+    // Counter updates + bounded sibling expansion run AFTER the real write
+    // above succeeds -- best-effort bookkeeping that must never fail this
+    // request even if it errors.
+    await recordArchivalHydration(chainSlug, collectionSlug, { isNewToken: !wasAlreadyArchived }).catch(() => {});
+    await maybeExpandSiblingTokens(chainSlug, collectionSlug).catch(() => {});
     return { resolved: true, token: { tokenId, ...metadata } };
   } catch (error) {
     await writeTokenMetadataResult({ ...item, state: "retry", error: error instanceof Error ? error.message : String(error) });

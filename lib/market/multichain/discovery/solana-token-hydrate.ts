@@ -27,7 +27,8 @@
 import { reserveDasSlot, settleDasSlot } from "@/lib/market/multichain/discovery/solana-das-pool";
 import { readTokenMetadata } from "@/lib/market/multichain/discovery/solana-metaplex-reads";
 import { readMetaplexCoreAsset } from "@/lib/market/multichain/discovery/solana-editions";
-import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
+import { upsertCollectionTokenProjection, readProjectedTokensByIds } from "@/lib/market/multichain/collection-token-store";
+import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/multichain/archival-ledger";
 
 type HeliusAssetDetail = {
   content?: {
@@ -90,6 +91,15 @@ async function fetchViaDas(mintAddress: string): Promise<HeliusAssetDetail | nul
 export async function hydrateSpecificSolanaToken(
   chainSlug: string, collectionSlug: string, mintAddress: string
 ): Promise<SolanaTokenHydrateResult> {
+  // Opportunistic Archival Ledger (docs/marketplank/GROK-FINDINGS-
+  // sustainable-archival-mining-2026-08-25.md): same "was this exact token
+  // already archived" pre-check as hydrateSpecificToken's EVM counterpart,
+  // so recordArchivalHydration below can honestly count distinct tokens.
+  const priorState = await readProjectedTokensByIds(chainSlug, collectionSlug, [mintAddress]).catch(() => new Map());
+  const wasAlreadyArchived = (() => {
+    const prior = priorState.get(mintAddress);
+    return !!prior && (!!prior.name || !!prior.imageUrl || prior.traits.length > 0);
+  })();
   const das = await fetchViaDas(mintAddress);
   if (das) {
     const name = das.content?.metadata?.name?.trim() || null;
@@ -106,6 +116,8 @@ export async function hydrateSpecificSolanaToken(
         partial: true, preservePartial: true,
         provenance: ["on-demand-click-hydration-das"], sourceObservedAt: new Date(),
       });
+      await recordArchivalHydration(chainSlug, collectionSlug, { isNewToken: !wasAlreadyArchived }).catch(() => {});
+      await maybeExpandSiblingTokens(chainSlug, collectionSlug).catch(() => {});
       return { resolved: true, token: { tokenId: mintAddress, name, imageUrl, animationUrl: null, mediaType: null, traits } };
     }
   }
@@ -120,5 +132,7 @@ export async function hydrateSpecificSolanaToken(
     partial: true, preservePartial: true,
     provenance: ["on-demand-click-hydration-onchain"], sourceObservedAt: new Date(),
   });
+  await recordArchivalHydration(chainSlug, collectionSlug, { isNewToken: !wasAlreadyArchived }).catch(() => {});
+  await maybeExpandSiblingTokens(chainSlug, collectionSlug).catch(() => {});
   return { resolved: true, token: { tokenId: mintAddress, name, imageUrl: null, animationUrl: null, mediaType: null, traits: [] } };
 }
