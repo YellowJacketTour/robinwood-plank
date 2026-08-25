@@ -20,6 +20,7 @@ import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-p
 import CollectionArtImage from "@/components/market/CollectionArtImage";
 import DataSourceChip from "@/components/market/DataSourceChip";
 import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlankChip";
+import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
 import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
 
 const CollectionThumb = CollectionArtImage;
@@ -1105,17 +1106,21 @@ export default function GlobalMarketHub() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadCollections = async () => {
       try {
-        // The collection index changes on a discover/sync cadence measured
-        // in minutes, not seconds -- a longer ttl than the per-collection
-        // listings view is correct here, not lazier caching.
-        // isGood: never let a stale/empty index response lock out a real
-        // one for the full 10-minute swr window -- same stale-poisons-
-        // cache fix needed twice already this session (MultichainCollectionView's
-        // rarity fetch, ForeignOfferForm's trait-index fetch).
+        // Real fix, 2026-08-25 ("live time motion and visual effect
+        // progress bar woven for any and all collections"): this fetch
+        // used to run exactly once on mount with no refresh at all -- every
+        // row's real archival_score (and the HydrationPlankChip/archive-
+        // depth bar driven by it) froze at whatever it was on page load,
+        // even while the real backend kept hydrating in the background
+        // (confirmed live the same night: one collection's real score
+        // climbed 19% -> 33%+ with zero visible change on this page).
+        // ttlMs now below the poll interval below so every tick is a
+        // genuine fetch, matching the same fix already applied to the
+        // per-collection detail page's own identity/archival fetch.
         const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number }>("/api/market/multichain?v=index-3", {
-          ttlMs: 60_000,
+          ttlMs: 15_000,
           swrMs: 600_000,
           session: true,
           isGood: (d) => {
@@ -1167,9 +1172,12 @@ export default function GlobalMarketHub() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void loadCollections();
+    const id = setInterval(() => void loadCollections(), 20_000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, []);
 
@@ -2298,6 +2306,16 @@ export default function GlobalMarketHub() {
                                   progress={c.archival.archivalScore}
                                   pulseKey={c.archival.lastArchivedAt}
                                   label={`${displayName(c)} archival`}
+                                />
+                              )}
+                              {c.archival && (
+                                <ArchivalDepthBar
+                                  compact
+                                  archivalScore={c.archival.archivalScore}
+                                  scoreMethod={c.archival.scoreMethod}
+                                  tokensEverHydrated={c.archival.tokensEverHydrated}
+                                  knownSupply={c.archival.knownSupply}
+                                  pulseKey={c.archival.lastArchivedAt}
                                 />
                               )}
                             </span>
