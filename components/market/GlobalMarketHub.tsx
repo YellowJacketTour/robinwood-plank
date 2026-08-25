@@ -2293,7 +2293,9 @@ export default function GlobalMarketHub() {
                               </span>
                               {c.archival && (
                                 <HydrationPlankChip
-                                  active={jobProcessingByKey[rowKey] === true}
+                                  active={jobProcessingByKey[rowKey] != null}
+                                  source={jobProcessingByKey[rowKey]?.source}
+                                  progress={c.archival.archivalScore}
                                   pulseKey={c.archival.lastArchivedAt}
                                   label={`${displayName(c)} archival`}
                                 />
@@ -2343,6 +2345,7 @@ export default function GlobalMarketHub() {
                             {c.primaryVenue && (
                               <DataSourceChip
                                 venueLabel={c.primaryVenue.label}
+                                venueId={c.primaryVenue.id}
                                 coverage={c.primaryVenue.coverage}
                                 asOf={c.syncedAt}
                               />
@@ -2784,7 +2787,7 @@ export default function GlobalMarketHub() {
                             </span>
                           )}
                           {c.primaryVenue && (
-                            <DataSourceChip venueLabel={c.primaryVenue.label} coverage={c.primaryVenue.coverage} asOf={c.syncedAt} />
+                            <DataSourceChip venueLabel={c.primaryVenue.label} venueId={c.primaryVenue.id} coverage={c.primaryVenue.coverage} asOf={c.syncedAt} />
                           )}
                         </p>
                       )}
