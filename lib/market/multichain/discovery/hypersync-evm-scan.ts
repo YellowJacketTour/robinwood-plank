@@ -304,6 +304,98 @@ export async function findEarliestTransferBlock(
 }
 
 /**
+ * Real fix, 2026-08-25 ("still nothing" -- anchored-membership only
+ * advancing ~800 blocks per real call): anchored-membership-backfill.ts
+ * was reusing runHypersyncPriorityWindowScan, the GLOBAL discovery scan --
+ * unfiltered by address, competing for its shared MAX_LOGS_PER_RUN budget
+ * against every OTHER contract active in that block range, which is why
+ * it crawled so slowly through a single collection's own narrow window.
+ * This is the properly scoped version: address-filtered (same real,
+ * proven-fast pattern findEarliestTransferBlock already uses), for ONE
+ * already-known contract, so its own real log volume is all that gates
+ * progress -- not thousands of unrelated collections' noise.
+ */
+export async function runAddressScopedMembershipScan(input: {
+  chainSlug: string;
+  contractAddress: string;
+  fromBlockFloor: number;
+  toBlockCeiling: number;
+  cursorKey: string;
+  provenance: string;
+}): Promise<{ fromBlock: number; toBlock: number; logsScanned: number; tokensFound: number; done: boolean }> {
+  const chainId = EVM_CHAIN_ID[input.chainSlug];
+  if (!chainId) throw new Error(`hypersync-evm-scan: no chainId mapping for "${input.chainSlug}"`);
+  if (await isHypersyncAccountJailed()) {
+    throw new Error("hypersync-evm-scan: real Envio account-level rate limit active (shared across all HyperSync lanes)");
+  }
+
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+  const address = input.contractAddress.toLowerCase();
+
+  const scannedUpTo = (await readCursor(input.cursorKey)) ?? input.fromBlockFloor;
+  if (scannedUpTo >= input.toBlockCeiling) {
+    return { fromBlock: scannedUpTo, toBlock: input.toBlockCeiling, logsScanned: 0, tokensFound: 0, done: true };
+  }
+
+  const observedErc721 = new Map<string, Set<string>>();
+  const rawTransferLogs: HypersyncLog[] = [];
+  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
+  let logsScanned = 0;
+  let query: Query = {
+    fromBlock: scannedUpTo,
+    toBlock: input.toBlockCeiling,
+    logs: [{ address: [address], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
+      block: ["Number", "Timestamp"],
+    },
+    maxNumLogs: MAX_LOGS_PER_RUN,
+  };
+
+  let nextBlock = scannedUpTo;
+  try {
+    while (logsScanned < MAX_LOGS_PER_RUN) {
+      const res = await withHypersyncReservation(() => client.get(query));
+      seenBlocks.push(...res.data.blocks);
+      for (const log of res.data.logs) {
+        if (!log.address) continue;
+        const topic0 = log.topics[0]?.toLowerCase();
+        if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
+        if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+        rawTransferLogs.push(log);
+        if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
+          const tokenId = BigInt(log.topics[3]).toString();
+          const ids = observedErc721.get(address) ?? new Set<string>();
+          ids.add(tokenId);
+          observedErc721.set(address, ids);
+        }
+        logsScanned += 1;
+      }
+      nextBlock = res.nextBlock;
+      if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
+      query = { ...query, fromBlock: nextBlock };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
+    throw error;
+  }
+  // Same real clamp as runHypersyncPriorityWindowScan's own fix -- HyperSync's
+  // nextBlock has been observed live coming back below the query's own
+  // fromBlock on a large request; never let this regress the cursor.
+  nextBlock = Math.max(nextBlock, scannedUpTo);
+
+  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
+  await persistObservedErc721Membership(input.chainSlug, observedErc721, new Set([address]), input.provenance);
+  await writeCursor(input.cursorKey, nextBlock);
+
+  const tokensFound = observedErc721.get(address)?.size ?? 0;
+  const done = nextBlock >= input.toBlockCeiling;
+  return { fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, tokensFound, done };
+}
+
+/**
  * Scans forward from the stored cursor using HyperSync, tallies ERC-721-
  * shaped Transfer activity by contract (identical candidate logic to
  * evm-log-scan.ts's runEvmDiscoveryScan), and registers anything crossing
