@@ -12,7 +12,7 @@
  */
 import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { findContractDeployBlock } from "@/lib/market/multichain/discovery/contract-deploy-block";
-import { runHypersyncPriorityWindowScan } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
+import { runAddressScopedMembershipScan } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
 
 /**
  * Generous mint+early-secondary-market window past deployment -- most
@@ -46,11 +46,13 @@ export async function runAnchoredMembershipBackfill(
   const currentHeight = parseInt(heightHex, 16);
   const toBlockCeiling = Math.min(currentHeight, deployBlock + ANCHOR_WINDOW_BLOCKS);
 
-  const scan = await runHypersyncPriorityWindowScan({
+  const scan = await runAddressScopedMembershipScan({
     chainSlug,
+    contractAddress: address,
     fromBlockFloor: deployBlock,
     toBlockCeiling,
     cursorKey: `anchored:${chainSlug}:${address}`,
+    provenance: "hypersync-transfer-anchored",
   });
 
   return {
@@ -58,7 +60,7 @@ export async function runAnchoredMembershipBackfill(
     contractAddress: address,
     deployBlock,
     toBlock: scan.toBlock,
-    registered: scan.registered,
+    registered: scan.tokensFound,
     logsScanned: scan.logsScanned,
     done: scan.done,
   };
