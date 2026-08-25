@@ -150,7 +150,14 @@ export const MARKET_VENUES = [
       "UI HTML into canonical evidence, and never guess at a private API's schema from memory.",
   },
   { id: "ordzaar-bitcoin", label: "Ordzaar", family: "bitcoin", protocol: "ordinals-market", versions: ["historical", "current"], capabilities: ["sales", "listings", "bids"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "Distinct PSBT marketplace lane. No verified public server API contract is currently wired; data must retain venue and order identity." },
-  { id: "magiceden-bitcoin", label: "Magic Eden Ordinals (historical)", family: "bitcoin", protocol: "ordinals-market", versions: ["retired-2026-06-30"], capabilities: ["sales", "listings", "bids"], coverage: "unavailable", chainSlugs: ["bitcoin-mainnet"], notes: "Historical decoder target only. Magic Eden discontinued its Bitcoin marketplace and Bitcoin API on 2026-06-30; never use it as a live-book dependency." },
+  // Magic Eden's Bitcoin/Ordinals marketplace (retired 2026-06-30) was
+  // removed outright 2026-08-25 rather than kept as an "unavailable" entry
+  // -- confirmed zero references anywhere else in the codebase (no adapter,
+  // no sync path, nothing reads this id), so keeping it around was pure
+  // landmine risk for a future venue-iteration refactor that globs by
+  // family/chainSlug without checking the coverage flag. If Magic Eden ever
+  // relaunches a Bitcoin marketplace, re-add it fresh against real,
+  // current API evidence rather than resurrecting this entry.
   { id: "okx-bitcoin", label: "OKX Ordinals", family: "bitcoin", protocol: "ordinals-market", versions: ["current"], capabilities: ["sales", "listings"], coverage: "planned", chainSlugs: ["bitcoin-mainnet"], notes: "External venue coverage; never inferred from a different marketplace." },
 ] as const satisfies readonly MarketVenue[];
 

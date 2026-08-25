@@ -56,12 +56,36 @@ export async function GET(req: NextRequest) {
       }
     }
     if (isSolanaChainSlug(chainSlug)) {
-      const me = await fetch(
-        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/stats`,
-        { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }
+      // REAL BUG FIXED 2026-08-25 (alpha-readiness audit, HIGH: "rate-limit
+      // assumptions look built for a single-developer dev loop"): this call
+      // had ZERO caching -- every single page view of a Solana collection
+      // hit Magic Eden's live stats endpoint directly, uncoalesced. Under
+      // concurrent public traffic, N visitors on the same collection made N
+      // upstream calls. Wrapped in getOrRefresh -- see its own header for
+      // the singleflight + stale-while-revalidate mechanism (Facebook
+      // memcache leases / RFC 5861), backed by a Postgres advisory lock so
+      // multiple server processes also coalesce, not just concurrent
+      // requests within one.
+      const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
+      const stats = await getOrRefresh<{ uniqueHolders?: number; listedCount?: number } | null>(
+        `magiceden-stats:${chainSlug}:${collectionSlug}`,
+        { softTtlMs: 60_000, hardTtlMs: 10 * 60_000 },
+        async () => {
+          // Throw, don't return null, on failure -- getOrRefresh only
+          // writes to cache on a resolved value, so a thrown error here
+          // never poisons the cache with a false "no stats" result that
+          // would then get served as real for up to hardTtlMs. Same
+          // transient-failure-must-not-overwrite-cache discipline as this
+          // session's earlier CryptoPunks fixes.
+          const me = await fetch(
+            `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/stats`,
+            { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }
+          );
+          if (!me.ok) throw new Error(`magiceden stats HTTP ${me.status}`);
+          return (await me.json()) as { uniqueHolders?: number; listedCount?: number };
+        }
       ).catch(() => null);
-      if (me?.ok) {
-        const stats = (await me.json()) as { uniqueHolders?: number; listedCount?: number };
+      if (stats) {
         if (typeof stats.uniqueHolders === "number" && Number.isFinite(stats.uniqueHolders)) {
           holderCount = stats.uniqueHolders;
           await updateHolderCount(chainSlug, collectionSlug, holderCount).catch(() => {});
