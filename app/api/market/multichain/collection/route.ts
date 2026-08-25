@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStats, updateHolderCount } from "@/lib/market/multichain/store";
 import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { publicError, rateLimit } from "@/lib/security";
+import { primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -120,6 +121,11 @@ export async function GET(req: NextRequest) {
           sales7d: marketStats?.sales7d ?? null,
           volume30dWei: marketStats?.volume30dWei ?? null,
           sales30d: marketStats?.sales30d ?? null,
+          // Real venue-registry lookup (Issue 4, inline completeness UX --
+          // see docs/marketplank/GROK-FINDINGS-biggest-issues-unified-
+          // vision-2026-08-25.md) -- resolved server-side from this
+          // collection's own recorded adapter, never guessed client-side.
+          primaryVenue: primaryVenueForCollection(chainSlug, tracked.adapter ?? null),
         },
       },
       { headers: { "Cache-Control": "no-store" } }

@@ -16,6 +16,8 @@ import CurrencyIcon from "@/components/market/CurrencyIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
+import DataSourceChip from "@/components/market/DataSourceChip";
+import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
 
 const CollectionThumb = CollectionArtImage;
 
@@ -140,6 +142,8 @@ type TrackedCollection = {
   holderCount: number | null;
   /** True only for the injected RobinWood native book row — links to /market, not /market/multichain. */
   isNativeHome?: boolean;
+  /** Real venue-registry lookup (see primaryVenueForCollection in lib/market/multichain/venue-registry.ts) -- which venue this row's floor/listed numbers actually come from, and how complete that venue's coverage is. Null only when this chain has no registered venue at all. */
+  primaryVenue?: { id: string; label: string; coverage: MarketCoverage } | null;
 };
 
 type GlobalTokenHit = {
@@ -2279,15 +2283,24 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-gold-300">
                         {displayFloorWei(c) ? (
-                          <span className="inline-flex items-center justify-end gap-1">
-                            <NativeAmount
-                              wei={displayFloorWei(c)!}
-                              usdLabel={(() => {
-                                const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
-                                return usd != null ? formatUsdCompact(usd) : null;
-                              })()}
-                            />
-                            <FloorCurrencyMark collection={c} />
+                          <span className="inline-flex flex-col items-end gap-0.5">
+                            <span className="inline-flex items-center justify-end gap-1">
+                              <NativeAmount
+                                wei={displayFloorWei(c)!}
+                                usdLabel={(() => {
+                                  const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
+                                  return usd != null ? formatUsdCompact(usd) : null;
+                                })()}
+                              />
+                              <FloorCurrencyMark collection={c} />
+                            </span>
+                            {c.primaryVenue && (
+                              <DataSourceChip
+                                venueLabel={c.primaryVenue.label}
+                                coverage={c.primaryVenue.coverage}
+                                asOf={c.syncedAt}
+                              />
+                            )}
                           </span>
                         ) : (
                           <span className="text-foreground/40">—</span>
@@ -2717,12 +2730,15 @@ export default function GlobalMarketHub() {
                         )}
                       </div>
                       {displayFloorWei(c) && (
-                        <p className="text-xs text-foreground/50">
+                        <p className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/50">
                           Floor {formatCompactNative(displayFloorWei(c)!).display}
                           {displayChangePct(c) != null && (
-                            <span className={`ml-1.5 font-bold ${displayChangePct(c)! >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            <span className={`font-bold ${displayChangePct(c)! >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                               {displayChangePct(c)! >= 0 ? "▲" : "▼"} {Math.abs(displayChangePct(c)!).toFixed(1)}%
                             </span>
+                          )}
+                          {c.primaryVenue && (
+                            <DataSourceChip venueLabel={c.primaryVenue.label} coverage={c.primaryVenue.coverage} asOf={c.syncedAt} />
                           )}
                         </p>
                       )}
