@@ -238,19 +238,51 @@ const OPENSEA_MIN_CALL_INTERVAL_MS = PROVIDER_PACE_PROFILES["opensea-stats"].min
 // unthrottled attempts can realistically outweigh it.
 const BACKGROUND_SKIP_RATE = 0.95;
 
+/**
+ * Real gap found live 2026-08-25 ("resolve absolutely everything, no
+ * shortcuts"): pool health showed ALL 6 real keys unjailed and well under
+ * their real daily allowance (one at 27%, the rest under 1%) at the exact
+ * moment real callers were failing with "no OpenSea key with capacity."
+ * Not quota exhaustion -- real per-key pacing (6.2s/key, matching
+ * OpenSea's documented 600/hr) means the whole pool's real sustained
+ * throughput is only ~1 request/second; with mesh-tick's concurrency
+ * raised to 16 workers tonight, it's genuinely possible for all 6 keys to
+ * be momentarily mid-cooldown at the exact same instant a "live" caller
+ * asks. The old code treated that as an immediate, permanent failure
+ * (logged as "fatal", one wasted job attempt) even though a key
+ * statistically frees up within about a second. A short, bounded retry
+ * for "live" (real, visitor-relevant) callers turns a real but transient
+ * contention blip into a real success instead of a wasted attempt --
+ * background callers already self-throttle via BACKGROUND_SKIP_RATE and
+ * get zero retries here (waiting real wall-clock time for a background
+ * sweep would be pure waste, not a fix).
+ */
+const LIVE_RETRY_DELAYS_MS = [700, 1500];
+
 export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKeyPriority }): Promise<OpenSeaKeySlot | null> {
   const priority = opts?.priority ?? "live";
   if (priority === "background" && Math.random() < BACKGROUND_SKIP_RATE) return null;
   const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
-  const ordered = await orderCandidates(priority, window);
 
-  for (const candidate of ordered) {
-    // Pace BEFORE reserving daily capacity -- a candidate that isn't ready
-    // yet should never consume a reservation it won't use.
-    if (!(await claimProviderPaceSlot(candidate.providerAccount, OPENSEA_MIN_CALL_INTERVAL_MS).catch(() => true))) continue;
-    if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
-      return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
+  const attempt = async (): Promise<OpenSeaKeySlot | null> => {
+    const ordered = await orderCandidates(priority, window);
+    for (const candidate of ordered) {
+      // Pace BEFORE reserving daily capacity -- a candidate that isn't ready
+      // yet should never consume a reservation it won't use.
+      if (!(await claimProviderPaceSlot(candidate.providerAccount, OPENSEA_MIN_CALL_INTERVAL_MS).catch(() => true))) continue;
+      if (await reserveProviderCapacity(candidate.providerAccount, window, cost)) {
+        return { id: candidate.id, apiKey: candidate.apiKey, providerAccount: candidate.providerAccount, window };
+      }
     }
+    return null;
+  };
+
+  const first = await attempt();
+  if (first || priority !== "live") return first;
+  for (const delayMs of LIVE_RETRY_DELAYS_MS) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const retry = await attempt();
+    if (retry) return retry;
   }
   return null;
 }
