@@ -140,7 +140,40 @@ export const MARKET_VENUES = [
       "Bitcoin node), not a free hosted API this app could call -- out of scope for a keyless/low-friction " +
       "adapter of this repo's existing pattern. Remains planned, now for a stronger reason than before.",
   },
-  { id: "ordnet-bitcoin", label: "ORD.NET", family: "bitcoin", protocol: "ordinals-market", versions: ["v1"], capabilities: ["sales", "listings", "bids"], coverage: "partial", chainSlugs: ["bitcoin-mainnet"], notes: "Authenticated, cursor-exhaustive listings adapter is wired. Sales, membership, offers, and PSBT execution remain explicit capability gaps until their durable lanes are enabled. Authentication requires a wallet challenge and a payment address holding 0.01 BTC." },
+  {
+    id: "ordnet-bitcoin",
+    label: "ORD.NET",
+    family: "bitcoin",
+    protocol: "ordinals-market",
+    versions: ["v1"],
+    capabilities: ["sales", "listings", "bids"],
+    coverage: "partial",
+    chainSlugs: ["bitcoin-mainnet"],
+    notes:
+      "Authenticated, cursor-exhaustive listings adapter is wired (GET /listings). RE-VERIFIED 2026-08-24, " +
+      "CONFIRMED BLOCKED, NOT A GAP: sales, membership, offers, and PSBT execution cannot be closed without " +
+      "a real, funded mainnet wallet -- checked developers.ord.net's actual OpenAPI 3.1 contract " +
+      "(https://developers.ord.net/openapi.json) plus its llms.txt summary and reference/authentication page, " +
+      "then confirmed by hand with direct unauthenticated probes against the live API " +
+      "(https://ord.net/api/v1): GET /sales and GET /collection-stats/floors -- the two candidate read-only " +
+      "endpoints that in principle don't need a live trading session -- both returned a real HTTP 401 " +
+      "{\"error\":\"Bearer session token required\"}, identical to every other endpoint. The OpenAPI spec's " +
+      "global `security: [{bearerAuth: []}]` confirms this is deliberate and API-wide, not a per-endpoint " +
+      "oversight: only POST /auth/challenge and POST /auth/verify are unauthenticated (security: []), and " +
+      "per developers.ord.net/reference/authentication/, /auth/verify only issues a bearer token when the " +
+      "verified payment address holds 0.01 BTC confirmed (403 otherwise, 503 if the funding check is " +
+      "temporarily unavailable); tokens then last 1 hour. So sales history (GET /sales, real and documented -- " +
+      "cursor-paginated, saleType internal/external, collectionSlug filter) and offers (per-inscription " +
+      "GET /inscriptions/{id}/offers, GET /inscriptions/{id}/offers/history, GET /me/offers, and the full " +
+      "buyer/seller/counter-offer PSBT lifecycle under /collection/:slug/offers/* and " +
+      "/inscriptions/:id/offers/*) are real, fully documented, already-existing API capabilities -- the gap is " +
+      "not a missing/undocumented endpoint, it is that ORD.NET has no keyless or low-balance read lane at all. " +
+      "PSBT execution (listing/purchase/offer preflight+submit) additionally requires a wallet able to produce " +
+      "real BIP-322 signatures and sign real PSBTs, i.e. genuine live BTC custody, not just an authenticated " +
+      "session. Picking this up requires a human operator wallet holding >=0.01 BTC confirmed at its payment " +
+      "address (see the auth flow -- POST /auth/challenge then POST /auth/verify with a BIP-322 simple " +
+      "signature) -- this cannot be provisioned or worked around from here.",
+  },
   {
     id: "gamma-bitcoin",
     label: "Gamma Ordinals",
