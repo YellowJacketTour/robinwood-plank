@@ -71,8 +71,37 @@ export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 );
 
+/**
+ * Real bug found and fixed live 2026-08-26: `@solana/web3.js`'s own
+ * `Connection` has BUILT-IN retry-on-429 logic (up to 5 attempts, 500ms/
+ * 1000ms/2000ms/4000ms backoff, logging "Server responded with 429...
+ * Retrying after Xms delay") that this app never knew about or gated --
+ * it bypasses this app's own real circuit breaker entirely, since it
+ * lives inside the library, one level below anywhere this app's code can
+ * intercept it. Live-reproduced: a real, sustained Solana public-RPC
+ * rate-limit condition made a single mesh-lane invocation (adapter-sync,
+ * up to 80 collections) burn real minutes retrying the exact same doomed
+ * call across every collection in the batch -- 452+ real logged retries
+ * for one pass, with every individual read still swallowing the eventual
+ * failure into a silent, honest-looking `return null` (see readTokenMetadata's
+ * own catch below), so no exception ever reached the caller for
+ * checkSourceBudget/jailSource to act on either.
+ * `disableRetryOnRateLimit: true` makes a 429 fail immediately instead of
+ * paying that real ~7.5s worst-case per call; the catch blocks below now
+ * also detect a real rate-limit condition specifically and jail this
+ * source so every LATER call in the same batch (via sync.ts's own
+ * checkSourceBudget gate) skips fast instead of repeating the same
+ * doomed attempt.
+ */
 function getConnection(): Connection {
-  return new Connection(SOLANA_RPC_URL, "confirmed");
+  return new Connection(SOLANA_RPC_URL, { commitment: "confirmed", disableRetryOnRateLimit: true });
+}
+
+async function jailOnRateLimit(error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/429|too many requests|rate limit/i.test(message)) return;
+  const { jailSource } = await import("@/lib/market/multichain/mesh/jail");
+  await jailSource("helius-solana", 20 * 60_000, true).catch(() => {});
 }
 
 /**
@@ -213,7 +242,8 @@ export async function readTokenMetadata(mint: string): Promise<SolanaTokenMetada
       primarySaleHappened,
       isMutable,
     };
-  } catch {
+  } catch (error) {
+    await jailOnRateLimit(error);
     return null; // malformed/short account data or an RPC hiccup is a normal, honest "couldn't read it" -- never a hard error
   }
 }
@@ -260,7 +290,8 @@ export async function readSplTokenOwner(mint: string): Promise<string | null> {
       if (info?.owner && Number(info?.tokenAmount?.uiAmount ?? 0) > 0) return info.owner;
     }
     return null; // no outstanding holder found -- burned, or not actually minted
-  } catch {
+  } catch (error) {
+    await jailOnRateLimit(error);
     return null;
   }
 }

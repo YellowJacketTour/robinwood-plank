@@ -18,7 +18,8 @@ import {
   writeSnapshot,
   writeSnapshotError,
 } from "@/lib/market/multichain/store";
-import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
+import { checkSourceBudget, recordSourceFailure, recordSourceSuccess } from "@/lib/market/multichain/discovery/source-budget";
+import { jailSource } from "@/lib/market/multichain/mesh/jail";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
 import type { ChainAdapter } from "@/lib/market/multichain/types";
 
@@ -147,6 +148,26 @@ export async function runMultichainSync(input: { maxCollections?: number; chainS
       });
       continue;
     }
+    // Real, unifying fix, 2026-08-26: this per-collection try/catch used to
+    // swallow every real error identically -- including a real, detected
+    // rate-limit/quota condition, which means "every remaining collection
+    // in this batch for the SAME adapter will fail the exact same way,"
+    // not "just this one collection had a problem." Every OTHER real
+    // provider in this app (OpenSea, Alchemy, Helius) already engages the
+    // shared circuit breaker (checkSourceBudget/jailSource) the instant a
+    // real 429/quota error is detected -- this loop never did, so a
+    // rate-limited adapter (live-reproduced: Solana's public RPC via
+    // @solana/web3.js's own Connection, 452+ real "Server responded with
+    // 429" retries logged) burned real minutes retrying the same doomed
+    // call across up to `maxCollections` more collections before this
+    // single mesh-lane invocation ever returned. Checking checkSourceBudget
+    // BEFORE each call, and jailing on a real detected quota error, brings
+    // this path to the same fail-fast discipline every other provider
+    // already has.
+    if (!checkSourceBudget(adapter.name).allowed) {
+      result.skipped += 1;
+      continue;
+    }
     try {
       await pace(adapter.name);
       const snapshot = await adapter.fetchSnapshot({
@@ -154,9 +175,20 @@ export async function runMultichainSync(input: { maxCollections?: number; chainS
         contractAddress: collection.contractAddress,
       });
       await writeSnapshot(collection.id, snapshot);
+      recordSourceSuccess(adapter.name);
       result.synced += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const isQuotaError = /429|403|rate limit|quota|too many requests/i.test(message);
+      recordSourceFailure(adapter.name, isQuotaError);
+      if (isQuotaError) {
+        // Same 20-minute real cool-down every other provider's own
+        // rate-limit detection uses (mesh-lane.ts's generic catch-all) --
+        // stops THIS adapter specifically from being retried again for the
+        // rest of this batch AND the next several mesh-tick passes,
+        // without affecting other adapters' collections in the same batch.
+        await jailSource(adapter.name, 20 * 60_000, true).catch(() => {});
+      }
       await writeSnapshotError(collection.id, message);
       result.failed += 1;
       result.errors.push({
