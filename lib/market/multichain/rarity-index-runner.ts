@@ -72,8 +72,23 @@ export type ReservedFetchResult =
   | { ok: false; exhausted: true }
   | { ok: false; exhausted: false; status: number | null; detail: string };
 
-async function reservedBackgroundFetch(url: string): Promise<ReservedFetchResult> {
-  const slot = await reserveOpenSeaKey(1, { priority: "background" });
+/**
+ * Real fix, 2026-08-26: this function's own name/every prior caller
+ * assumed "background" always -- but `advanceEvmCollectionMembership`
+ * (called from here) is ALSO the exact function a demand-priority mesh
+ * job runs for a specific `subject` a real visitor is actively viewing
+ * (mesh-lane.ts's own `/^0x.../.test(subject)` branch). Live-reproduced:
+ * with a single OpenSea key, every consumer sharing the flat "background"
+ * priority meant demand-driven traffic lost every pace-slot attempt to
+ * background sweep competition, even spaced further apart than the real
+ * pace interval itself. `priority` now defaults to "background" (safe,
+ * unchanged behavior for every existing bare-sweep caller) but a caller
+ * that knows it's serving a real, specific, currently-viewed subject can
+ * pass "live" to get real precedence -- see opensea-key-pool.ts's
+ * BACKGROUND_SKIP_RATE for how that precedence is actually enforced.
+ */
+async function reservedBackgroundFetch(url: string, priority: "live" | "background" = "background"): Promise<ReservedFetchResult> {
+  const slot = await reserveOpenSeaKey(1, { priority });
   if (!slot) return { ok: false, exhausted: true };
   let res: Response;
   let settled = false;
@@ -167,7 +182,8 @@ export async function advanceVerifiedSequentialMembership(chainSlug: string, con
 export async function advanceEvmCollectionMembership(
   chainSlug: string,
   contractAddress: string,
-  openSeaChainOverride?: string
+  openSeaChainOverride?: string,
+  priority: "live" | "background" = "background"
 ) {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
@@ -179,7 +195,7 @@ export async function advanceEvmCollectionMembership(
   // page available on this run. The sequential cursor remains unchanged and
   // will retry; provider pagination continues as additive evidence.
   await advanceVerifiedSequentialMembership(chainSlug, contractAddress).catch(() => null);
-  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, openSeaChain);
+  const slug = await resolveOpenSeaSlug(chainSlug, contractAddress, openSeaChain, priority);
   if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${contractAddress} (no OpenSea key with capacity, or the collection genuinely has no slug)`);
   const checkpoint = await readCollectionMembershipCursor(chainSlug, contractAddress, OPENSEA_MEMBERSHIP_SOURCE);
   const url = new URL(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}/nfts`);
@@ -187,7 +203,7 @@ export async function advanceEvmCollectionMembership(
   if (checkpoint?.cursor) url.searchParams.set("next", checkpoint.cursor);
   const observedAt = new Date();
   try {
-    const fetched = await reservedBackgroundFetch(url.toString());
+    const fetched = await reservedBackgroundFetch(url.toString(), priority);
     if (!fetched.ok) {
       throw new Error(fetched.exhausted
         ? `OpenSea pool exhausted/jailed enumerating ${contractAddress}`
@@ -774,12 +790,13 @@ function sleep(ms: number): Promise<void> {
 async function resolveOpenSeaSlug(
   chainSlug: string,
   contractAddress: string,
-  openSeaChainOverride?: string
+  openSeaChainOverride?: string,
+  priority: "live" | "background" = "background"
 ): Promise<string | null> {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
   if (!openSeaChain) return null;
-  const fetched = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`);
+  const fetched = await reservedBackgroundFetch(`https://api.opensea.io/api/v2/chain/${openSeaChain}/contract/${contractAddress}`, priority);
   if (!fetched.ok) return null;
   const res = fetched.res;
   const data = (await res.json()) as { collection?: string };

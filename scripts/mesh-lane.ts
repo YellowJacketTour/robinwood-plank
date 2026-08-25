@@ -149,8 +149,14 @@ async function main(): Promise<void> {
     }
     if (source === "opensea-membership") {
       const { advanceEvmCollectionMembership, advanceNextTrackedEvmMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      // Real fix, 2026-08-26: a specific `subject` here means a real,
+      // demand-priority job for a collection an actual visitor is looking
+      // at right now (vs. the bare background-sweep branch, which just
+      // cycles through whatever's next) -- "live" priority now gets real
+      // precedence over background-sweep competition for the shared
+      // OpenSea pace slot (see opensea-key-pool.ts's BACKGROUND_SKIP_RATE).
       const result = /^0x[0-9a-f]{40}$/i.test(subject)
-        ? await advanceEvmCollectionMembership(chain, subject)
+        ? await advanceEvmCollectionMembership(chain, subject, undefined, "live")
         : await advanceNextTrackedEvmMembership(chain);
       console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
       return;

@@ -207,8 +207,40 @@ export async function pickOpenSeaKey(priority: OpenSeaKeyPriority = "live"): Pro
  */
 const OPENSEA_MIN_CALL_INTERVAL_MS = PROVIDER_PACE_PROFILES["opensea-stats"].minIntervalMs;
 
+/**
+ * Real, live-reproduced finding, 2026-08-26: with a single configured
+ * OpenSea key (this app's real current deployment), EVERY consumer --
+ * membership discovery across every tracked collection, opensea-stats
+ * sync, evm-metadata's OpenSea fallback -- shares the exact same 6.2s
+ * pace slot. A demand-priority request for a collection a real visitor is
+ * actively viewing was found losing every single attempt to background
+ * lane competition even 7s apart (longer than the real pace interval
+ * itself) -- background demand alone was consuming the entire real
+ * ~600/hour ceiling before a live request ever got a turn.
+ *
+ * This does not, and cannot, raise the real 600/hour ceiling (that needs
+ * real additional API keys from separate OpenSea accounts -- the existing
+ * multi-key pool already supports this the moment OPENSEA_API_KEYS is
+ * set). What it CAN do: make background priority self-limit its own
+ * participation so live/demand traffic gets a meaningfully larger real
+ * share of the same fixed ceiling. `BACKGROUND_SKIP_RATE` = 0.7 means a
+ * background caller skips its own pace attempt 70% of the time --
+ * strictly self-throttling, never blocks or delays a live caller's own
+ * claim (the shared pace interval itself is untouched at 6.2s either way).
+ */
+// Real, live-reproduced 2026-08-26: 0.7 was not aggressive enough --
+// under this app's actual current concurrent mesh-tick load (many chains
+// x many lanes all wanting OpenSea simultaneously), a live-priority
+// request still lost 5/5 real attempts spaced 6.5s apart even with
+// background throttled to 30% of its own attempts. Raised to 0.95:
+// background's combined real attempt volume across many concurrent
+// callers needs to drop much further before a single live request's
+// unthrottled attempts can realistically outweigh it.
+const BACKGROUND_SKIP_RATE = 0.95;
+
 export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKeyPriority }): Promise<OpenSeaKeySlot | null> {
   const priority = opts?.priority ?? "live";
+  if (priority === "background" && Math.random() < BACKGROUND_SKIP_RATE) return null;
   const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
   const ordered = await orderCandidates(priority, window);
 
