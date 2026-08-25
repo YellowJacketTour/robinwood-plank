@@ -14,8 +14,18 @@ import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
  * server. It never guesses forward past the latest real number, and it
  * always lands exactly on that real number -- the motion is a real
  * interpolation of already-true data, not invented growth.
+ *
+ * Real bug found live 2026-08-25 ("isnt showing the live growing piece by
+ * piece level hydration"): the old 4s duration finished the tween long
+ * before the next real fetch landed -- every caller here polls on a 20s
+ * cadence (MultichainCollectionView's collection fetch, GlobalMarketHub's
+ * rankings fetch), so the bar sat visibly static for the remaining ~16s
+ * of every cycle, reading as dead between updates even though the real
+ * backend kept advancing underneath. Default raised to just under that
+ * real poll interval so the interpolation is still actively in motion
+ * right up to the moment the next real value arrives.
  */
-export function useTweenedPercent(target: number | null, durationMs = 4_000): number | null {
+export function useTweenedPercent(target: number | null, durationMs = 19_000): number | null {
   const reduced = usePrefersReducedMotion();
   const [displayed, setDisplayed] = useState<number | null>(target);
   const fromRef = useRef<number | null>(target);

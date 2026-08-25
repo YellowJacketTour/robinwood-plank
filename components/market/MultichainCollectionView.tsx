@@ -70,6 +70,7 @@ import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
 import { displayMugsName } from "@/lib/market/multichain/mugs-display";
+import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 
 type ForeignOffer = {
   orderHash: string;
@@ -204,6 +205,14 @@ function bookCoverageNote(sources: Record<string, string> | undefined | null): s
 }
 
 export default function MultichainCollectionView({ chainSlug, collectionSlug }: Props) {
+  // Real fix, 2026-08-25 ("progress bar should surge the color of the
+  // respective chain when actively filling"): the archival stats fetch
+  // below only polls every 20s, so its own `jobProcessing` flag is too
+  // stale to drive a real-time "is the mesh working on this right now"
+  // visual -- reuse the same fast (8s) live poll GlobalMarketHub's
+  // rankings table already uses for its own per-row hydration chip.
+  const thisCollectionJobStatus = useHydrationJobStatus([`${chainSlug}:${collectionSlug}`]);
+  const isActivelyHydrating = thisCollectionJobStatus[`${chainSlug}:${collectionSlug}`] != null;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2056,6 +2065,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           tokensEverHydrated={archival.tokensEverHydrated}
           knownSupply={archival.knownSupply}
           pulseKey={archival.lastArchivedAt}
+          chainSlug={chainSlug}
+          active={isActivelyHydrating}
         />
       )}
       {supplyStats?.holderCount != null && (
