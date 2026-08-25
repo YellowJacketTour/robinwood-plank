@@ -205,7 +205,29 @@ async function main(): Promise<void> {
     }
   }
   const n = Math.min(limit, Math.max(1, lanes.length));
-  await Promise.all(Array.from({ length: n }, () => worker()));
+  // Real bug found live 2026-08-25 ("resolve absolutely everything, no
+  // shortcuts"): all N workers previously started their first claim in
+  // the same instant. Real per-key OpenSea pacing (6.2s/key, 6 keys) caps
+  // real sustained pool throughput at ~1 request/second -- a startup
+  // burst of up to 16 simultaneous claims (mesh-tick's own concurrency,
+  // raised tonight) could exceed OpenSea's real per-second ceiling before
+  // the pacing/jail circuit breaker even had a chance to spread them out,
+  // confirmed live: a fresh restart tripped a real 429 jail on
+  // opensea-stats/opensea-membership within seconds, even though the pool
+  // was healthy and well under its daily quota moments before. Staggering
+  // each worker's start by a small, real, incremental delay spreads the
+  // initial claim burst out instead of firing all of them in the same
+  // instant -- the jail/pacing circuit breaker still protects against any
+  // REAL sustained overuse; this only removes the artificial, avoidable
+  // burst mesh-tick's own startup was creating.
+  const workers = Array.from({ length: n }, (_, i) => {
+    const startDelayMs = i * 150;
+    return (async () => {
+      if (startDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, startDelayMs));
+      return worker();
+    })();
+  });
+  await Promise.all(workers);
   console.log("[mesh-tick] pass done");
 }
 
