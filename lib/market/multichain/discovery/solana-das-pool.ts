@@ -95,6 +95,15 @@ export function loadDasPool(): DasEntry[] {
 
   // Shyft: DAS JSON-RPC lives at rpc.shyft.to with the key as an api_key
   // query param -- confirmed live against Shyft's own docs 2026-08-23.
+  // CORRECTION, live-verified 2026-08-24 (see solana-compressed-provenance.ts's
+  // file header): this environment's real SHYFT_API_KEY returned a real
+  // {"error":"BadRequest","message":"DAS RPC method not supported"} for
+  // BOTH getAsset and getSignaturesForAsset against known-good real asset
+  // ids on this exact URL -- i.e. this key/plan does not actually serve
+  // the DAS contract. Left wired rather than removed (a different
+  // key/plan may genuinely support it, and jail/budget already fail
+  // closed per-entry on a real 400), but do not assume Shyft coverage is
+  // proven until a real 200 is seen from it directly.
   const shyftKey = process.env.SHYFT_API_KEY?.trim();
   if (shyftKey) {
     entries.push({ id: "shyft:default", provider: "shyft", url: `https://rpc.shyft.to/?api_key=${shyftKey}`, providerAccount: "shyft:default" });
