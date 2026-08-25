@@ -417,13 +417,26 @@ export function venueById(id: string): MarketVenue | null {
  * looking at for one collection's displayed floor/listed numbers --
  * resolution order: (1) an exact venue id match (adapter or
  * floorPriceMarketplace, when the collection row/route already knows which
- * venue produced its numbers), (2) for a chain with exactly one candidate
- * venue, that venue, (3) otherwise the WORST (least-complete) coverage
- * among the chain's real candidate venues -- worst-case, not best-case, is
- * the honest default when this app can't yet name the single exact venue
- * behind a number, since a viewer would rather be warned about the weakest
- * source in the mix than reassured by the strongest. Returns null only when
- * no venue at all is registered for the chain (nothing to report).
+ * venue produced its numbers), (2) for a chain with exactly one LIVE
+ * candidate venue, that venue, (3) otherwise the WORST (least-complete)
+ * coverage among the chain's LIVE candidate venues -- worst-case, not
+ * best-case, is the honest default when this app can't yet name the single
+ * exact venue behind a number, since a viewer would rather be warned about
+ * the weakest source in the mix than reassured by the strongest.
+ *
+ * BUG FIXED 2026-08-25: "worst-case" must exclude `coverage: "unavailable"`
+ * venues from this fallback -- a permanently dead/retired marketplace
+ * (X2Y2, shut down April 2025) is not "a weak source in the mix," it
+ * produced NONE of the displayed numbers. Without this exclusion, X2Y2
+ * won the worst-case sort for every eth-mainnet collection with no exact
+ * venue match, showing an "X2Y2 UNAVAILABLE" badge on collections (MAYC,
+ * CryptoPunks, Decentraland, ...) that never had anything to do with
+ * X2Y2. Only fall through to an unavailable venue if literally every
+ * registered venue for the chain is unavailable (nothing live to report
+ * at all, which is itself the honest answer at that point).
+ *
+ * Returns null only when no venue at all is registered for the chain
+ * (nothing to report).
  */
 export function primaryVenueForCollection(
   chainSlug: string,
@@ -435,8 +448,10 @@ export function primaryVenueForCollection(
   }
   const venues = venuesForChain(chainSlug);
   if (venues.length === 0) return null;
-  if (venues.length === 1) return venues[0];
-  return venues.slice().sort((a, b) => COVERAGE_ORDER[b.coverage] - COVERAGE_ORDER[a.coverage])[0];
+  const live = venues.filter((v) => v.coverage !== "unavailable");
+  const pool = live.length > 0 ? live : venues;
+  if (pool.length === 1) return pool[0];
+  return pool.slice().sort((a, b) => COVERAGE_ORDER[b.coverage] - COVERAGE_ORDER[a.coverage])[0];
 }
 
 export function isCompleteVenueCoverage(venues: readonly MarketVenue[]): boolean {
