@@ -35,6 +35,29 @@
  * single guessed shape. verifyOkxCredentials() below MUST be run once a
  * real key exists (see its own header) before trusting this adapter's
  * output in production -- this is flagged, not silently assumed correct.
+ *
+ * LIVE-VERIFIED 2026-08-24 (direct curl, no key, this session):
+ *   GET https://web3.okx.com/api/v5/mktplace/nft/ordinals/collections
+ *   -> HTTP 401 {"msg":"Request header OK-ACCESS-KEY AND OK-ACCESS-TOKEN
+ *      can not all empty ","code":"50116"}
+ * This is real, personally-observed evidence -- stronger than the doc-
+ * search snippets above -- that (a) this exact path is live and real
+ * (Cloudflare-fronted web3.okx.com, not a 404/dead route), and (b) there
+ * is NO public/keyless tier: the very first thing the server checks
+ * before touching business logic is auth headers. No OKX_API_KEY/
+ * OKX_API_SECRET/OKX_API_PASSPHRASE is configured in this environment as
+ * of this pass (checked .env.local and .env.inmotion.example -- neither
+ * defines any OKX_* name), so the real response BODY/field shape below
+ * remains unconfirmed -- this is a genuine, reportable blocker, not
+ * something to work around by guessing. Also tried
+ * https://web3.okx.com/priapi/v1/nft/ordinals/collections (OKX's
+ * internal frontend API, not a documented public endpoint) -- it
+ * returns a real HTTP 200 but a genuinely empty body for every param
+ * combination tried (no method/param shape found that returns data).
+ * Undocumented and unstable by nature, so -- same discipline as the
+ * Gamma finding elsewhere in this registry -- it is NOT used as a
+ * keyless substitute here; only the documented, key-gated v5 endpoint
+ * above is integrated.
  */
 import { createHmac } from "node:crypto";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
@@ -100,12 +123,14 @@ export type OkxListing = {
  * parsing is defensive (see this file's header) since the exact response
  * shape isn't live-confirmed yet.
  */
-export async function fetchOkxOrdinalsListings(collectionSlug: string, limit = 50): Promise<OkxListing[]> {
-  const body = await okxRequest<{ code?: string; data?: unknown }>(
-    "POST",
-    "/api/v5/mktplace/nft/ordinals/listings",
-    { collectionSlug, slug: collectionSlug, limit }
-  );
+/**
+ * Pure normalization step, split out from fetchOkxOrdinalsListings so it is
+ * unit-testable without a real network call/real credentials -- see
+ * test/market/okx-ordinals.test.ts. Field names are defensive (see this
+ * file's header: OKX's own docs index gives the primary names, but no
+ * real 200 response has ever been observed to confirm them byte-for-byte).
+ */
+export function parseOkxListingsResponse(body: { code?: string; data?: unknown } | null, limit: number): OkxListing[] {
   if (!body) return [];
   const dataRaw = body.data;
   const items: unknown[] = Array.isArray(dataRaw)
@@ -131,15 +156,30 @@ export async function fetchOkxOrdinalsListings(collectionSlug: string, limit = 5
   return out.slice(0, limit);
 }
 
+export async function fetchOkxOrdinalsListings(collectionSlug: string, limit = 50): Promise<OkxListing[]> {
+  const body = await okxRequest<{ code?: string; data?: unknown }>(
+    "POST",
+    "/api/v5/mktplace/nft/ordinals/listings",
+    { collectionSlug, slug: collectionSlug, limit }
+  );
+  return parseOkxListingsResponse(body, limit);
+}
+
 export type OkxCollectionStats = {
   floorPriceSats: number | null;
   listedCount: number | null;
   totalSupply: number | null;
 };
 
-/** Real collection-level stats via GET /ordinals/collections, filtered client-side to the matching slug. Same honest-null discipline; field names are defensive for the same reason as fetchOkxOrdinalsListings. */
-export async function fetchOkxCollectionStats(collectionSlug: string): Promise<OkxCollectionStats | null> {
-  const body = await okxRequest<{ code?: string; data?: unknown }>("GET", "/api/v5/mktplace/nft/ordinals/collections");
+/**
+ * Pure normalization step, split out from fetchOkxCollectionStats so it is
+ * unit-testable without a real network call/real credentials -- see
+ * test/market/okx-ordinals.test.ts.
+ */
+export function parseOkxCollectionStatsResponse(
+  body: { code?: string; data?: unknown } | null,
+  collectionSlug: string
+): OkxCollectionStats | null {
   if (!body) return null;
   const dataRaw = body.data;
   const items: unknown[] = Array.isArray(dataRaw)
@@ -159,6 +199,12 @@ export async function fetchOkxCollectionStats(collectionSlug: string): Promise<O
     listedCount: Number.isFinite(Number(listedRaw)) ? Number(listedRaw) : null,
     totalSupply: Number.isFinite(Number(supplyRaw)) ? Number(supplyRaw) : null,
   };
+}
+
+/** Real collection-level stats via GET /ordinals/collections, filtered client-side to the matching slug. Same honest-null discipline; field names are defensive for the same reason as fetchOkxOrdinalsListings. */
+export async function fetchOkxCollectionStats(collectionSlug: string): Promise<OkxCollectionStats | null> {
+  const body = await okxRequest<{ code?: string; data?: unknown }>("GET", "/api/v5/mktplace/nft/ordinals/collections");
+  return parseOkxCollectionStatsResponse(body, collectionSlug);
 }
 
 /**
