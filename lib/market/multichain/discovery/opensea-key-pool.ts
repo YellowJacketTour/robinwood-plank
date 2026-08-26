@@ -327,11 +327,27 @@ export async function getPoolHealth(): Promise<OpenSeaPoolHealth> {
   const pool = await loadOpenSeaKeyPool();
   const window = utcDayWindow(OPENSEA_STATS_DAILY_ALLOWANCE);
   const usage = await loadTodayUsage(pool.map((e) => e.providerAccount), window);
+  // Real bug found live 2026-08-26 ("make it increment now" investigation):
+  // a real 429 jails the BARE, account-wide source names ("opensea-stats",
+  // "opensea-membership" -- see mesh-lane.ts's own catch block, jailSource
+  // called on `providerSource`), never the per-key composite strings
+  // ("opensea-stats:key-0" etc.) this function was checking. This health
+  // check reported every key "healthy" (0 jailed) through the ENTIRE real
+  // 429 lockout this session hit -- the actual gate (mesh-lane.ts's own
+  // top-level isSourceJailed check) was correctly blocking real work the
+  // whole time; only this diagnostic view was blind to it. Check the real,
+  // shared account-wide jail once and reflect it across every key -- a
+  // jailed account blocks every key in it, not just one.
+  const accountJailed = await isSourceJailed("opensea-stats");
+  const accountJailRemainingMs = accountJailed ? await jailRemainingMs("opensea-stats") : 0;
   const keys: OpenSeaKeyHealth[] = await Promise.all(
     pool.map(async (entry) => {
       const processState = readSourceBudget(entry.providerAccount);
-      const durableJailed = await isSourceJailed(entry.providerAccount);
-      const durableJailRemainingMs = durableJailed ? await jailRemainingMs(entry.providerAccount) : 0;
+      const perKeyJailed = await isSourceJailed(entry.providerAccount);
+      const durableJailed = accountJailed || perKeyJailed;
+      const durableJailRemainingMs = durableJailed
+        ? Math.max(accountJailRemainingMs, perKeyJailed ? await jailRemainingMs(entry.providerAccount) : 0)
+        : 0;
       return {
         id: entry.id,
         providerAccount: entry.providerAccount,
