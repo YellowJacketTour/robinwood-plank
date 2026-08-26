@@ -938,10 +938,11 @@ jobs:
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
-          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+          ssh -v -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
-          set -euo pipefail
+          echo "REACHED REMOTE SHELL"
+          set -euxo pipefail
           app_dir="$1"
           node_bin="$2"
           case "$app_dir" in
