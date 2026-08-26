@@ -14,7 +14,9 @@
  * when the re-evaluation actually confirmed a sale for that same wallet.
  */
 import { postgresQuery, hasPostgresConfig } from "../lib/postgres";
-import { evaluatePlankKothCandidate } from "../lib/market/plank-koth-candidate";
+import { evaluatePlankKothCandidate, isPlankTransfer } from "../lib/market/plank-koth-candidate";
+import { fetchTransaction, fetchTxTokenTransfers } from "../lib/market/blockscout";
+import { isCanonicalPlankPool } from "../lib/market/plank-pools";
 
 /**
  * Real bug found live 2026-08-26: the original version of this script
@@ -43,14 +45,21 @@ import { evaluatePlankKothCandidate } from "../lib/market/plank-koth-candidate";
  * full concurrency. Bounded batches keep the real speedup without
  * drowning the one upstream dependency everything here reads from.
  */
-const CONCURRENCY = 5;
+const CONCURRENCY = 2;
+const BATCH_DELAY_MS = 1_000;
 
 async function main(): Promise<void> {
   if (!hasPostgresConfig()) {
     throw new Error("reprocess-plank-koth-review-queue: no PostgreSQL configured");
   }
+  // Real diagnostic pass, added 2026-08-26: capped to a small sample first
+  // (via KOTH_REPROCESS_LIMIT) to get a fast, clear read on whether
+  // Blockscout lookups are genuinely failing from this production host,
+  // before committing another 10-minute run to the full backlog.
+  const limit = Number(process.env.KOTH_REPROCESS_LIMIT ?? "10");
   const pending = await postgresQuery<{ tx_hash: string; wallet: string | null }>(
-    `SELECT DISTINCT tx_hash, wallet FROM plank_koth_review_queue WHERE status = 'pending'`
+    `SELECT DISTINCT tx_hash, wallet FROM plank_koth_review_queue WHERE status = 'pending' LIMIT $1`,
+    [limit]
   );
   console.log(`[reprocess] ${pending.rows.length} pending review-queue tx hashes to re-evaluate (concurrency=${CONCURRENCY})`);
 
@@ -59,6 +68,27 @@ async function main(): Promise<void> {
     const batch = pending.rows.slice(i, i + CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (row) => {
+        // Real diagnostic, added 2026-08-26: evaluatePlankKothCandidate's own
+        // "not_a_buy" fallback fires both for a genuine non-buy AND for a
+        // silently-swallowed Blockscout lookup failure (fetchTransaction/
+        // fetchTxTokenTransfers both catch-and-return null/[] internally --
+        // see blockscout.ts). Confirmed live: this same tx hash resolves a
+        // real recipient when fetched fresh from an unrelated IP, but comes
+        // back not_a_buy when run from this production host -- independently
+        // re-fetch here so a real lookup failure is visible in this log
+        // instead of looking identical to "genuinely not a buy."
+        const [rawTx, rawTransfers] = await Promise.all([fetchTransaction(row.tx_hash), fetchTxTokenTransfers(row.tx_hash)]);
+        if (!rawTx) {
+          console.log(`[reprocess] ${row.tx_hash} DIAG: fetchTransaction returned null (lookup failed)`);
+        } else if (rawTx.status !== "ok") {
+          console.log(`[reprocess] ${row.tx_hash} DIAG: tx.status=${rawTx.status}`);
+        } else if (rawTransfers.length === 0) {
+          console.log(`[reprocess] ${row.tx_hash} DIAG: fetchTxTokenTransfers returned [] (lookup failed or genuinely no transfers)`);
+        } else if (!rawTransfers.some((t) => isPlankTransfer(t) && t.from?.hash && isCanonicalPlankPool(t.from.hash))) {
+          console.log(`[reprocess] ${row.tx_hash} DIAG: ${rawTransfers.length} real transfers fetched, none is a canonical-pool PLANK leg`);
+        } else {
+          console.log(`[reprocess] ${row.tx_hash} DIAG: ${rawTransfers.length} real transfers fetched, a real canonical-pool PLANK leg IS present`);
+        }
         const outcome = await evaluatePlankKothCandidate(row.tx_hash).catch((error) => {
           console.error(`[reprocess] ${row.tx_hash} -> ERROR`, error instanceof Error ? error.message : error);
           return null;
@@ -77,6 +107,7 @@ async function main(): Promise<void> {
       })
     );
     results.push(...batchResults);
+    if (i + CONCURRENCY < pending.rows.length) await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
   }
   const confirmed = results.filter((r) => r === "confirmed").length;
   console.log(`[reprocess] done: ${confirmed} confirmed, ${results.length - confirmed} still flagged/rejected/not-a-buy/errored`);
