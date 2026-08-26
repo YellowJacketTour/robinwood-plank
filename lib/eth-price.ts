@@ -97,12 +97,28 @@ export function formatEth3(wei: string | bigint | number | undefined | null): st
   }
 }
 
+/**
+ * Real bug found live 2026-08-26 (KOTH RPC-rewrite): the old milli-ETH-
+ * truncation approach (`w / WEI_PER_MILLI`, integer BigInt division)
+ * silently rounds ANY amount under 0.001 ETH down to exactly 0 -- at a
+ * real ~$2,470/ETH price, that's every real payment under ~$2.47. This
+ * pipeline confirmed a real production buy (tx 0x92f5e14f...6c91c, real
+ * 0.0000202 ETH paid) getting misclassified as "$0 paid, no real value
+ * resolved" purely from this truncation, not from anything wrong with the
+ * transaction itself. Split into whole-ETH (BigInt division, no precision
+ * loss even for huge aggregates) and fractional-wei (safely fits in a
+ * float, since it's always < 1e18) parts instead -- never truncates a
+ * real small amount to zero, and doesn't lose whole-ETH precision either.
+ */
 export function ethWeiToNumber(wei: string | bigint | undefined | null): number {
   try {
-    const w = typeof wei === "bigint" ? wei : BigInt(wei ?? 0);
-    // Keep milli-ETH precision for USD math without float wei loss on huge values
-    const milli = Number(w / WEI_PER_MILLI); // eth * 1000
-    return milli / 1000;
+    const raw = typeof wei === "bigint" ? wei : BigInt(wei ?? 0);
+    const negative = raw < 0n;
+    const w = negative ? -raw : raw;
+    const whole = w / WEI_PER_ETH;
+    const frac = w % WEI_PER_ETH;
+    const value = Number(whole) + Number(frac) / Number(WEI_PER_ETH);
+    return negative ? -value : value;
   } catch {
     return 0;
   }
