@@ -308,7 +308,11 @@ export default function PlankKothBoard() {
               </p>
             </div>
           ) : (
-            <p className="mt-2 text-sm text-foreground/50">No qualifying buy yet — be the first.</p>
+            <p className="mt-2 text-sm text-foreground/50">
+              {launched
+                ? "No qualifying buy yet — be the first."
+                : "Buys don't count until the event goes live — the timer above shows launch."}
+            </p>
           )}
         </div>
 
@@ -349,7 +353,7 @@ export default function PlankKothBoard() {
         </p>
         {leaderboard.length === 0 ? (
           <p className="rounded-lg border border-line-strong bg-wood-900/20 p-4 text-center text-sm text-foreground/50">
-            No confirmed buys yet.
+            {launched ? "No confirmed buys yet." : "Buys don't count until the event goes live."}
           </p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-line-strong">
