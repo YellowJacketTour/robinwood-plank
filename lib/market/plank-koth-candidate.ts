@@ -139,10 +139,25 @@ async function writeReviewQueue(input: {
   reason: string;
   evidence: Record<string, unknown>;
 }): Promise<void> {
+  // Real bug found live 2026-08-26: ON CONFLICT DO NOTHING meant a tx
+  // re-evaluated under later-fixed classification logic never updated its
+  // stored reason -- confirmed live, a transaction correctly resolving a
+  // recipient/value-paid under the RPC-rewrite still showed its old,
+  // pre-fix "no value paid"/"round-trip" reason from months earlier,
+  // making the queue's own "reason" column lie about current reality.
+  // Refresh on conflict, but ONLY while still 'pending' -- never overwrite
+  // a row a human has already resolved (approved/rejected).
   await postgresQuery(
     `INSERT INTO plank_koth_review_queue (tx_hash, wallet, eth_paid_wei, plank_amount, block_number, reason, evidence)
      VALUES ($1, $2, $3::numeric, $4::numeric, $5, $6, $7::jsonb)
-     ON CONFLICT (tx_hash) DO NOTHING`,
+     ON CONFLICT (tx_hash) DO UPDATE SET
+       wallet = COALESCE(EXCLUDED.wallet, plank_koth_review_queue.wallet),
+       eth_paid_wei = COALESCE(EXCLUDED.eth_paid_wei, plank_koth_review_queue.eth_paid_wei),
+       plank_amount = COALESCE(EXCLUDED.plank_amount, plank_koth_review_queue.plank_amount),
+       block_number = COALESCE(EXCLUDED.block_number, plank_koth_review_queue.block_number),
+       reason = EXCLUDED.reason,
+       evidence = EXCLUDED.evidence
+     WHERE plank_koth_review_queue.status = 'pending'`,
     [input.txHash, input.wallet, input.ethPaidWei, input.plankAmount, input.blockNumber, input.reason, JSON.stringify(input.evidence)]
   );
   // Unified intelligence layer v1 (docs/marketplank/GROK-FINDINGS-unified-
