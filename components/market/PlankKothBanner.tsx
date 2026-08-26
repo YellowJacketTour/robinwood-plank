@@ -58,7 +58,7 @@ export default function PlankKothBanner() {
   const displayLeader = state?.finalized ? state.winner : state?.leadingBuy;
   const prizeAmount = useMemo(
     () => (state?.prize?.plankAmount ? formatPlankAmount(state.prize.plankAmount) : null),
-    [state?.prize?.plankAmount]
+    [state]
   );
 
   if (!state?.available || target == null) return null;
@@ -68,16 +68,26 @@ export default function PlankKothBanner() {
   return (
     <Link
       href="/season2"
-      className="group flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold-500/40 bg-[linear-gradient(160deg,rgba(180,140,40,0.14),theme(colors.panel))] px-3 py-2.5 transition-colors hover:border-gold-400/70"
+      className="group flex flex-col gap-2 rounded-xl border border-gold-500/40 bg-[linear-gradient(160deg,rgba(180,140,40,0.14),theme(colors.panel))] px-3 py-2.5 transition-colors hover:border-gold-400/70 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
     >
+      {/* Real fix, 2026-08-26 ("mobile optimized layout... cutting off
+          information"): this used to force the leader-info line onto the
+          SAME row as the countdown timer, with `truncate` on the info
+          line and `shrink-0` reserving the timer's own width -- on a real
+          phone-width viewport the timer's fixed width left too little
+          room, silently ellipsis-cutting the leader's real PLANK amount/
+          USD value/wallet. Stacked vertically below `sm`, each line gets
+          the full viewport width and nothing needs to truncate; the
+          horizontal one-row layout only kicks in once there's genuinely
+          enough width for both to coexist. */}
       <div className="flex min-w-0 items-center gap-2.5">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line-strong bg-wood-900 text-base">
           👑
         </div>
         <div className="min-w-0 leading-tight">
-          <p className="flex items-center gap-1.5 truncate text-[0.72rem] font-bold text-gold-300">
+          <p className="flex items-center gap-1.5 text-[0.72rem] font-bold text-gold-300 sm:truncate">
             {isLive && (
-              <span className="relative flex h-1.5 w-1.5" aria-hidden>
+              <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden>
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
               </span>
@@ -85,20 +95,20 @@ export default function PlankKothBanner() {
             Season 2 · Biggest Buyer Board
           </p>
           {launched && displayLeader ? (
-            <p className="truncate text-[0.68rem] text-foreground/70">
+            <p className="text-[0.68rem] text-foreground/70 sm:truncate">
               Leading: {formatPlankAmount(displayLeader.plankAmount).abbreviated} PLANK ·{" "}
               {displayLeader.usdValueAtBuy != null ? formatUsd(displayLeader.usdValueAtBuy) : "—"} ·{" "}
               {displayLeader.wallet ? shortAddress(displayLeader.wallet) : "—"}
             </p>
           ) : (
-            <p className="truncate text-[0.68rem] text-foreground/55">
+            <p className="text-[0.68rem] text-foreground/55 sm:truncate">
               {prizeAmount ? `Prize: ${prizeAmount.abbreviated} PLANK` : "Get ready"} — tap for the full board
             </p>
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="text-right leading-tight" role="timer" aria-live="off">
+      <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+        <div className="leading-tight" role="timer" aria-live="off">
           <p className="text-[0.55rem] font-bold uppercase tracking-wider text-foreground/45">
             {state.finalized ? "Closed" : launched ? "Closes in" : "Launches in"}
           </p>
