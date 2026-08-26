@@ -20,14 +20,16 @@
  *     -> CONFIRMED candidates get a permanent plank_koth_leaderboard row
  *        and are offered to offerPlankKothCandidate
  */
-import { fetchTxTokenTransfers, fetchTransaction, fetchAddressTransactions, type BlockscoutTxTokenTransfer } from "@/lib/market/blockscout";
-import { isCanonicalPlankPool, plankPoolByAddress } from "@/lib/market/plank-pools";
+import { fetchTxTokenTransfers, fetchAddressTransactions, type BlockscoutTxTokenTransfer } from "@/lib/market/blockscout";
+import { isCanonicalPlankPool, CANONICAL_PLANK_POOLS } from "@/lib/market/plank-pools";
 import { classifyWallet, getBadSeverity } from "@/lib/boards-store";
 import { getWalletSignals } from "@/lib/market/wallet-signals";
 import { getEthUsdPrice, weiToUsd } from "@/lib/eth-price";
 import { postgresQuery } from "@/lib/postgres";
 import { offerPlankKothCandidate, type PlankKothSale } from "@/lib/market/plank-koth";
 import { CONTRACT_ADDRESS as PLANK_CONTRACT } from "@/lib/constants";
+import { fetchReceiptRpc, fetchTransactionRpc, canonicalPoolAddressesLower } from "@/lib/market/plank-koth-rpc-scan";
+import { decodeErc20TransfersForTokens, computeNetBalances, classifyNetBuyCandidates, type NetBuyCandidate } from "@/lib/market/plank-koth-net-classify";
 
 /** USDG is a stablecoin; treated as $1.00 for value purposes. Real oracle
  * integration would be a nice-to-have, not a launch blocker — a peg
@@ -46,115 +48,42 @@ export function isPlankTransfer(t: BlockscoutTxTokenTransfer): boolean {
   return !!addr && addr.toLowerCase() === PLANK_CONTRACT.toLowerCase() && t.type !== "ERC-721" && t.type !== "ERC-1155";
 }
 
-/**
- * Real recipient resolution for a (possibly router-routed) buy: Blockscout
- * already decodes every real token movement inside the transaction, so the
- * true final buyer is whichever address received real $PLANK in this tx and
- * did NOT itself forward any of it onward in the same tx — a router/relayer
- * that briefly holds tokens always shows a matching outbound leg. This
- * avoids needing to hand-decode Universal Router/0x calldata at all (see
- * the fraud doc's section 2 for why that's normally the hard part).
- */
-export function resolveFinalRecipients(transfers: BlockscoutTxTokenTransfer[]): Map<string, bigint> {
-  const plankTransfers = transfers.filter(isPlankTransfer);
-  const received = new Map<string, bigint>();
-  const forwarded = new Set<string>();
-  for (const t of plankTransfers) {
-    const to = t.to?.hash?.toLowerCase();
-    const from = t.from?.hash?.toLowerCase();
-    const value = BigInt(t.total?.value ?? "0");
-    if (to && !isCanonicalPlankPool(to)) {
-      received.set(to, (received.get(to) ?? 0n) + value);
-    }
-    if (from && !isCanonicalPlankPool(from)) {
-      forwarded.add(from);
-    }
-  }
-  for (const addr of forwarded) received.delete(addr);
-  return received;
+/** address(lowercased) -> counterSymbol, derived once from the pool
+ * allowlist itself -- never hand-duplicated, so a pool added there is
+ * automatically a recognized quote asset here too. */
+function quoteTokenSymbolMap(): Map<string, "WETH" | "USDG"> {
+  const map = new Map<string, "WETH" | "USDG">();
+  for (const pool of CANONICAL_PLANK_POOLS) map.set(pool.counterToken.toLowerCase(), pool.counterSymbol);
+  return map;
 }
 
-/** Real value paid for one recipient's leg: sum of WETH/USDG legs flowing
- * FROM that recipient INTO a canonical pool in this same transaction.
- *
- * Real bug found live 2026-08-26 (confirmed against real production
- * transfers, e.g. tx 0x42c96c03...02249a3): a real Uniswap swap NEVER has
- * the buyer's own wallet send the counter-asset into the pool directly --
- * Universal Router / SwapRouter02 (the only way any real user actually
- * swaps) does that on the buyer's behalf, so `from === recipient` was
- * false for every real buy, `usdValue` came out 0, and every single real
- * buy got rejected as a possible airdrop. `soleRecipient` lets a caller
- * that already knows this tx resolved to exactly one final recipient
- * (resolveFinalRecipients) attribute ANY payment leg into a canonical
- * pool to them -- no attribution ambiguity when there's only one buyer.
- * A real batched multi-recipient router tx (multiple distinct buyers in
- * one tx) keeps the stricter direct-match behavior: safely attributing
- * which router-forwarded leg paid for which of several buyers needs real
- * call-trace decoding this function doesn't do, so it stays conservative
- * there rather than guess. */
-export function resolveValuePaid(
-  transfers: BlockscoutTxTokenTransfer[],
-  recipient: string,
-  ethUsd: number,
-  soleRecipient: boolean
-): { ethPaidWei: bigint; usdValue: number } {
+/**
+ * Real design change, 2026-08-26 (external Grok research review, see
+ * plank-koth-net-classify.ts's own header): reads NET ERC-20 balance
+ * deltas across the whole transaction instead of matching individual
+ * transfer legs directly to/from the recipient. A router that receives
+ * PLANK/WETH and immediately forwards it nets to ~0 for the router --
+ * this holds regardless of how many router/aggregator hops the real
+ * payment or the token actually took, closing both the "no value paid
+ * found" bug (tx 0x42c96c03...02249a3) and the round-trip false positive
+ * (tx 0x0716472e...4e74ab) confirmed live against real production buys
+ * this session, without needing a soleRecipient special case at all.
+ */
+function resolveValuePaidFromNet(candidate: NetBuyCandidate, ethUsd: number): { ethPaidWei: bigint; usdValue: number } {
+  const symbolByToken = quoteTokenSymbolMap();
   let ethPaidWei = 0n;
   let usdValue = 0;
-  for (const t of transfers) {
-    const from = t.from?.hash?.toLowerCase();
-    const to = t.to?.hash?.toLowerCase();
-    if (!to || !isCanonicalPlankPool(to)) continue;
-    if (!soleRecipient && from !== recipient) continue;
-    const pool = plankPoolByAddress(to);
-    // Confirm this leg really is the pool's OWN counter asset, not (say) a
-    // PLANK-inbound leg from an unrelated hop landing on the same pool
-    // address within a larger routed transaction.
-    const tokenAddr = (t.token?.address_hash ?? t.token?.address)?.toLowerCase();
-    if (!pool || !tokenAddr || tokenAddr !== pool.counterToken.toLowerCase()) continue;
-    const value = BigInt(t.total?.value ?? "0");
-    if (pool.counterSymbol === "WETH") {
-      ethPaidWei += value;
-      usdValue += weiToUsd(value, ethUsd);
-    } else if (pool.counterSymbol === "USDG") {
+  for (const [tokenAddress, amount] of candidate.quoteSpent) {
+    const symbol = symbolByToken.get(tokenAddress);
+    if (symbol === "WETH") {
+      ethPaidWei += amount;
+      usdValue += weiToUsd(amount, ethUsd);
+    } else if (symbol === "USDG") {
       // USDG is 6 decimals (see GROK findings / uniswap-tokenlist.ts).
-      usdValue += Number(value) / 1_000_000 * USDG_USD;
+      usdValue += Number(amount) / 1_000_000 * USDG_USD;
     }
   }
   return { ethPaidWei, usdValue };
-}
-
-/**
- * Real same-tx round-trip / flash-loan shape check (fraud doc section 1):
- * the recipient (or a contract it deployed/controls in this same tx)
- * should not ALSO be supplying a large amount of the counter-asset TO the
- * pool in the same transaction (a sell leg) beyond what's needed to pay for
- * this buy, nor receiving a large amount of the counter-asset back FROM the
- * pool — either shape is the signature of a manipulate-then-buy-back or
- * flash-loan unwind pattern.
- */
-export function hasRoundTripShape(transfers: BlockscoutTxTokenTransfer[], recipient: string): boolean {
-  for (const t of transfers) {
-    const from = t.from?.hash?.toLowerCase();
-    const to = t.to?.hash?.toLowerCase();
-    // Recipient receiving WETH/USDG FROM a canonical pool in the same tx
-    // they're also buying PLANK from -- a real buyer only sends value in,
-    // never also receives the counter-asset back out.
-    //
-    // Real bug found live 2026-08-26 (confirmed against real production
-    // transfers, e.g. tx 0x0716472e...4e74ab): this never checked the
-    // transfer's own token address, only the addresses -- so a buy's own
-    // real PLANK receipt (pool -> buyer, the entire point of a buy) always
-    // satisfies `to === recipient && isCanonicalPlankPool(from)` and got
-    // misread as "buyer received the counter-asset back," flagging every
-    // single real buy as a round-trip. Must also confirm the transfer IS
-    // the pool's counter token (WETH/USDG), not PLANK.
-    if (to === recipient && from && isCanonicalPlankPool(from)) {
-      const pool = plankPoolByAddress(from);
-      const tokenAddr = (t.token?.address_hash ?? t.token?.address)?.toLowerCase();
-      if (pool && tokenAddr && tokenAddr === pool.counterToken.toLowerCase()) return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -248,57 +177,98 @@ async function writeLeaderboardRow(sale: PlankKothSale): Promise<void> {
  * plank-koth-watch.ts — is responsible for only calling this once the block
  * is old enough per Robinhood Chain's documented finality window; this
  * function does not itself re-check finality).
+ *
+ * Real rewrite, 2026-08-26 (external Grok research review): candidate
+ * intake and net-balance classification now read the transaction's real
+ * RPC receipt directly (fetchReceiptRpc, rpcCall's own THROW-on-failure
+ * contract underneath -- see plank-koth-rpc-scan.ts's own header) instead
+ * of Blockscout's tx-token-transfers walk. A failed receipt fetch now
+ * THROWS out of this function -- it is the caller's job (the watcher) to
+ * treat that as "unknown, try again," never silently as "not a buy." Only
+ * the reputation/funding checks below (classifyWallet, checkFundingSourceLink)
+ * still read Blockscout -- lower-severity, best-effort signals already
+ * designed to fail open (an unavailable check just means "no signal," never
+ * blocks an otherwise-clean candidate), unlike the primary detection path
+ * this rewrite closes.
  */
 export async function evaluatePlankKothCandidate(txHash: string): Promise<CandidateOutcome> {
-  const [tx, transfers] = await Promise.all([fetchTransaction(txHash), fetchTxTokenTransfers(txHash)]);
-  if (!tx || tx.status !== "ok") return { status: "not_a_buy" };
-  if (!transfers.some((t) => isPlankTransfer(t) && t.from?.hash && isCanonicalPlankPool(t.from.hash))) {
+  const receipt = await fetchReceiptRpc(txHash);
+  if (!receipt || receipt.status !== "0x1") return { status: "not_a_buy" };
+  const blockNumber = Number.parseInt(receipt.blockNumber, 16);
+
+  const quoteTokenAddresses = [...new Set(CANONICAL_PLANK_POOLS.map((p) => p.counterToken.toLowerCase()))];
+  const relevantTokens = new Set([PLANK_CONTRACT.toLowerCase(), ...quoteTokenAddresses]);
+  const decoded = decodeErc20TransfersForTokens(receipt.logs, relevantTokens);
+  if (!decoded.some((t) => t.tokenAddress === PLANK_CONTRACT.toLowerCase() && isCanonicalPlankPool(t.from))) {
     return { status: "not_a_buy" };
   }
 
-  const recipients = resolveFinalRecipients(transfers);
-  if (recipients.size === 0) {
+  // Real gap found live 2026-08-26 (confirmed against real production tx
+  // 0x0716472e...4e74ab): a "swap ETH for tokens" buy pays via the
+  // transaction's own native `value` field, wrapped into WETH by the
+  // router internally -- the buyer's own wallet never appears as `from`
+  // on any ERC-20 WETH Transfer log at all. Fold the tx's real native
+  // value in as a synthetic WETH-equivalent transfer (buyer -> tx.to)
+  // BEFORE net-balance computation, so the same uniform netting logic
+  // handles a native-ETH-funded buy exactly like an already-wrapped-WETH
+  // one -- see plank-koth-rpc-scan.ts's fetchTransactionRpc for the full
+  // real evidence this closes.
+  const wethPool = CANONICAL_PLANK_POOLS.find((p) => p.counterSymbol === "WETH");
+  if (wethPool) {
+    const tx = await fetchTransactionRpc(txHash);
+    const nativeValue = BigInt(tx.value ?? "0x0");
+    if (nativeValue > 0n && tx.from && tx.to) {
+      decoded.push({ tokenAddress: wethPool.counterToken.toLowerCase(), from: tx.from.toLowerCase(), to: tx.to.toLowerCase(), value: nativeValue });
+    }
+  }
+
+  const net = computeNetBalances(decoded);
+  const excluded = new Set([...canonicalPoolAddressesLower(), PLANK_CONTRACT.toLowerCase(), ...quoteTokenAddresses]);
+  const candidates = classifyNetBuyCandidates(net, PLANK_CONTRACT, quoteTokenAddresses, excluded);
+  if (candidates.length === 0) {
     await writeReviewQueue({
       txHash,
       wallet: null,
       ethPaidWei: null,
       plankAmount: null,
-      blockNumber: tx.block_number ?? null,
-      reason: "true recipient could not be resolved (router/relayer held tokens with no clear final holder)",
-      evidence: { transfers },
+      blockNumber,
+      reason: "no wallet nets positive PLANK and negative quote-asset in this tx (router/relayer held tokens with no clear net buyer)",
+      evidence: { logs: receipt.logs },
     });
     return { status: "rejected", reason: "unresolvable recipient" };
   }
 
   const { usd: ethUsd } = await getEthUsdPrice();
-  // Multiple distinct final recipients = a real batched multi-user router
-  // tx (fraud doc section 2) -- evaluate and, if warranted, offer EACH as
-  // its own independent candidate, never summed into one giant "buy".
+  // Multiple distinct net buyers = a real batched multi-user router tx
+  // (fraud doc section 2) -- evaluate and, if warranted, offer EACH as its
+  // own independent candidate, never summed into one giant "buy".
   let anyConfirmed: PlankKothSale | null = null;
-  for (const [recipient, plankAmount] of recipients) {
-    if (hasRoundTripShape(transfers, recipient)) {
+  for (const candidate of candidates) {
+    const recipient = candidate.wallet;
+    const plankAmount = candidate.plankAmount;
+    if (candidate.hasRoundTripShape) {
       await writeReviewQueue({
         txHash,
         wallet: recipient,
         ethPaidWei: null,
         plankAmount: plankAmount.toString(),
-        blockNumber: tx.block_number ?? null,
-        reason: "same-tx round-trip shape: recipient also received the counter-asset back from a canonical pool in this tx",
-        evidence: { transfers },
+        blockNumber,
+        reason: "same-tx round-trip shape: this wallet also nets positive in a quote asset in this same tx",
+        evidence: { logs: receipt.logs },
       });
       continue;
     }
 
-    const { ethPaidWei, usdValue } = resolveValuePaid(transfers, recipient, ethUsd, recipients.size === 1);
+    const { ethPaidWei, usdValue } = resolveValuePaidFromNet(candidate, ethUsd);
     if (usdValue <= 0) {
       await writeReviewQueue({
         txHash,
         wallet: recipient,
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
-        blockNumber: tx.block_number ?? null,
+        blockNumber,
         reason: "no real value-paid leg resolved for this recipient (possible airdrop/transfer misidentified as a buy)",
-        evidence: { transfers },
+        evidence: { logs: receipt.logs },
       });
       continue;
     }
@@ -328,7 +298,7 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
       ethPaidWei: ethPaidWei.toString(),
       plankAmount: plankAmount.toString(),
       usdValueAtBuy: usdValue,
-      blockNumber: tx.block_number ?? 0,
+      blockNumber,
     };
 
     if ((board.side === "bad_boards" || board.side === "fallen") && severity > 0.3) {
@@ -337,7 +307,7 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         wallet: recipient,
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
-        blockNumber: tx.block_number ?? null,
+        blockNumber,
         reason: `wallet has real Bad Boards history (side=${board.side}, severity=${severity.toFixed(2)}) -- ${board.badEntry?.reason ?? "reason not recorded"}`,
         evidence: { badEntry: board.badEntry },
       });
@@ -349,7 +319,7 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         wallet: recipient,
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
-        blockNumber: tx.block_number ?? null,
+        blockNumber,
         reason: `wallet has a real prior high-severity signal from ${priorHighSeverity.source} (${priorHighSeverity.createdAt}): ${priorHighSeverity.reason}`,
         evidence: { priorSignal: priorHighSeverity },
       });
@@ -361,9 +331,9 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         wallet: recipient,
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
-        blockNumber: tx.block_number ?? null,
+        blockNumber,
         reason: fundingFlag,
-        evidence: { transfers },
+        evidence: { logs: receipt.logs },
       });
       continue;
     }
