@@ -16,6 +16,34 @@ async function main(): Promise<void> {
   }
   if (await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
+    // Real gap found live 2026-08-26 (Decentraland "still not progressing"
+    // investigation): a genuine 429 had durably jailed this source (20min
+    // cooldown, mesh/jail.ts) -- correctly, real work must not run while
+    // jailed. But every skip during that window reported exit=0 (mesh-
+    // tick.ts's own default), and finishDataJob treats exit=0 as
+    // unconditional success -- a real, still-incomplete DEMAND job
+    // (subject present, a real visitor's own interest) got marked
+    // 'succeeded' and dropped on every single jailed skip, silently
+    // requiring another organic visibility ping to ever try again instead
+    // of self-healing once the jail naturally expires. A background-sweep
+    // invocation (no subject) already gets its own turn again via mesh-
+    // tick's own standing schedule, so this is scoped to demand jobs only.
+    //
+    // Real regression caught live within minutes of shipping the exit=2
+    // signal above, same day, same mistake as the pace-contention fix
+    // earlier: checking jail status is cheap (no real API call), so with
+    // ZERO delay this retried in an actual tight busy-loop -- hundreds of
+    // claim/check/re-enqueue cycles hammering Postgres for a source that
+    // is durably jailed for a full 20 minutes and cannot possibly succeed
+    // any sooner. A real jail is not "try again in a few seconds" the way
+    // transient pace contention is; a real, bounded 30s sleep here is a
+    // small, safe fraction of the 90s LANE_TIMEOUT_MS ceiling while being
+    // long enough that repeated retries during a 20-minute jail cost
+    // roughly 40 wasted checks instead of tens of thousands.
+    if (subject) {
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
+      process.exitCode = 2;
+    }
     return;
   }
 
