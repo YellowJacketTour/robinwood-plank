@@ -1031,6 +1031,23 @@
   display: none !important;
 }
 
+/* The legacy stylesheet styles every bare <main> as a 1000px two-column
+   grid. Pages that own their layout opt out with [data-woodstock] (and any
+   future holding/marketing page can reuse the hook). */
+/* The scoped legacy `a { color }` rule outranks Tailwind's text-* utilities
+   inside PlankSpace; give the utilities the specificity they need here. */
+.plankspace-native main[data-woodstock] a.text-cream { color: var(--color-cream); }
+.plankspace-native main[data-woodstock] a.text-wood-950 { color: var(--color-wood-950); }
+.plankspace-native main[data-woodstock] a.text-gold-300 { color: var(--color-gold-300); }
+
+.plankspace-native main[data-woodstock] {
+  display: block;
+  max-width: none;
+  margin: 0;
+  grid-template-columns: none;
+  gap: 0;
+}
+
 /* Any legacy wordmark that survives a future merge stays invisible. */
 .plankspace-native a.brand { display: none; }
 
