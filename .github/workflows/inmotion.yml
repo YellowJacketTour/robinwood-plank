@@ -787,9 +787,6 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.operation == 'provision-plank-koth-watch'
-    permissions:
-      actions: write
-      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: inmotion-staging
@@ -828,9 +825,10 @@ jobs:
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
-          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+          ssh -v -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          echo "REACHED REMOTE SHELL"
           set -euo pipefail
           app_dir="$1"
           node_bin="$2"
