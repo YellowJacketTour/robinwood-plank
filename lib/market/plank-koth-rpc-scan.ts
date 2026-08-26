@@ -33,7 +33,7 @@
 import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { readCursor, writeCursor } from "@/lib/market/plank-koth-cursor";
 import { ERC20_TRANSFER_TOPIC } from "@/lib/market/plank-koth-net-classify";
-import { CANONICAL_PLANK_POOLS, isCanonicalPlankPool } from "@/lib/market/plank-pools";
+import { CANONICAL_PLANK_POOLS } from "@/lib/market/plank-pools";
 import { CONTRACT_ADDRESS as PLANK_CONTRACT } from "@/lib/constants";
 
 const CHAIN_SLUG = "robinhood";
@@ -131,11 +131,29 @@ export async function scanForCandidates(): Promise<RpcScanResult> {
     throw lastError instanceof Error ? lastError : new Error(`plank-koth-rpc-scan: eth_getLogs failed: ${String(lastError)}`);
   }
 
+  // Real gap found live 2026-08-26 (external Grok research review, second
+  // pass): this used to only accept a PLANK Transfer whose `from` was one
+  // of the 3 hardcoded canonical pools -- a real buy through ANY other
+  // venue (a new fee tier, a new DEX, a V4-style pool manager, a
+  // multi-hop route whose FINAL leg lands on an unlisted pool) never even
+  // entered the classifier, no matter how correct that classifier is.
+  // Confirmed live: the watcher was healthy and confirming other real
+  // buys at the exact time it missed real buys over $600/$1,000 that
+  // happened through a venue not on this hardcoded list. Per Dune/
+  // subgraph-style indexer convention (decode ALL of a token's own
+  // Transfer events, treat pool allowlisting as a VENUE-QUALITY gate
+  // applied at classification, never as the discovery firehose itself),
+  // every real PLANK Transfer is now a candidate; evaluatePlankKothCandidate's
+  // own net-balance classification (which requires a real net quote-asset
+  // payment, not just token movement) already rejects a plain transfer/
+  // airdrop/wallet-to-wallet move cheaply, with no per-pool allowlist
+  // needed at THIS stage.
   const candidates: RpcCandidate[] = [];
+  const seenTxHashes = new Set<string>();
   for (const log of logs) {
-    if (log.topics.length !== 3 || !log.topics[1]) continue;
-    const from = "0x" + log.topics[1].slice(-40).toLowerCase();
-    if (!isCanonicalPlankPool(from)) continue;
+    if (log.topics.length !== 3 || !log.topics[1] || !log.topics[2]) continue;
+    if (seenTxHashes.has(log.transactionHash)) continue;
+    seenTxHashes.add(log.transactionHash);
     candidates.push({ txHash: log.transactionHash, blockNumber: Number.parseInt(log.blockNumber, 16) });
   }
 
