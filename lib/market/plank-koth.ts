@@ -1,0 +1,328 @@
+/**
+ * Season 2: King of the Hill for Largest Single $PLANK Buy — Postgres-backed
+ * state. See deploy/inmotion/postgres/migrations/074_plank_koth.sql +
+ * 075_plank_koth_usd_ranking.sql for the schema, lib/market/king-of-the-
+ * hill-rules.ts for the actual decision rule (reused UNMODIFIED — see that
+ * file's own header: it is deliberately asset-agnostic), and docs/
+ * marketplank/GROK-FINDINGS-plank-koth-fraud-detection-2026-08-25.md for why
+ * a candidate must pass a real fraud-gate pipeline
+ * (lib/market/plank-koth-candidate.ts) before it ever reaches
+ * offerPlankKothCandidate below.
+ *
+ * `priceWei` on a KothSale here holds the real USD value paid, as an
+ * integer of MICRO-USD (dollars * 1_000_000, so the rule engine's plain
+ * BigInt comparison stays exact) — the ranking metric — never the raw
+ * PLANK amount or raw ETH-wei (see the fraud doc's section 1 on why raw
+ * token amount is the spoofable side). USD, not raw ETH-wei, because a
+ * real, fully legitimate buy can be denominated entirely in USDG (see
+ * plank-pools.ts: one of the three canonical pools pairs PLANK with USDG,
+ * not WETH) — ranking by ETH-wei alone would rank every such buy as
+ * literally 0 and make it permanently unwinnable regardless of real value
+ * paid. `ethPaidWei`/`plankAmount`/`usdValueAtBuy` are carried alongside
+ * purely for display (ethPaidWei is 0 for a pure-USDG buy, by design).
+ */
+
+import { hasPostgresConfig, withPostgresTransaction } from "@/lib/postgres";
+import {
+  applyCandidateSale,
+  finalizeIfDue,
+  type KothSale,
+  type KothState,
+} from "@/lib/market/king-of-the-hill-rules";
+import type { PoolClient } from "pg";
+
+export function hasPlankKothStore(): boolean {
+  return hasPostgresConfig();
+}
+
+/**
+ * Real launch instant: 08:08 CDT (Central Daylight Time, UTC-5 in August)
+ * 2026-08-26 == 13:08 UTC -- see migration 074's own header for the same
+ * value used to seed the round's real 31-day deadline. Competing before
+ * this instant must never count: without this gate, applyCandidateSale
+ * (king-of-the-hill-rules.ts) only checks the UPPER bound (`nowMs >
+ * state.deadlineMs`) -- nothing in that shared, deliberately unmodified
+ * engine understands "hasn't started yet," since the NFT King of the Hill
+ * it was built for has no such pre-launch phase. This lower bound is
+ * therefore enforced HERE, one layer up, rather than by touching the
+ * shared rule engine.
+ */
+export const PLANK_KOTH_LAUNCH_AT_MS = Date.parse("2026-08-26T13:08:00.000Z");
+
+export type PlankKothSale = Omit<KothSale, "priceWei"> & {
+  /** Ranking key: USD value paid, as an integer of micro-USD. See header. */
+  priceWei: string;
+  ethPaidWei: string;
+  plankAmount: string;
+  usdValueAtBuy: number | null;
+  blockNumber: number;
+};
+
+export type PlankKothState = {
+  deadlineMs: number;
+  leadingSale: PlankKothSale | null;
+  winnerFinalizedAtMs: number | null;
+  winnerSale: PlankKothSale | null;
+};
+
+type PlankKothRow = {
+  deadline: Date;
+  leading_tx_hash: string | null;
+  leading_wallet: string | null;
+  leading_eth_paid_wei: string | null;
+  leading_plank_amount: string | null;
+  leading_usd_value_at_buy: string | null;
+  leading_value_micros: string | null;
+  leading_block_number: string | null;
+  winner_finalized_at: Date | null;
+  winner_wallet: string | null;
+  winner_tx_hash: string | null;
+  winner_eth_paid_wei: string | null;
+  winner_plank_amount: string | null;
+  winner_usd_value_at_buy: string | null;
+  winner_value_micros: string | null;
+};
+
+function rowToState(row: PlankKothRow): PlankKothState {
+  return {
+    deadlineMs: row.deadline.getTime(),
+    leadingSale:
+      row.leading_tx_hash && row.leading_value_micros && row.leading_plank_amount && row.leading_block_number
+        ? {
+            txHash: row.leading_tx_hash,
+            tokenId: null,
+            wallet: row.leading_wallet,
+            priceWei: row.leading_value_micros,
+            ethPaidWei: row.leading_eth_paid_wei ?? "0",
+            plankAmount: row.leading_plank_amount,
+            usdValueAtBuy: row.leading_usd_value_at_buy != null ? Number(row.leading_usd_value_at_buy) : null,
+            blockNumber: Number(row.leading_block_number),
+          }
+        : null,
+    winnerFinalizedAtMs: row.winner_finalized_at ? row.winner_finalized_at.getTime() : null,
+    winnerSale:
+      row.winner_tx_hash && row.winner_value_micros && row.winner_plank_amount
+        ? {
+            txHash: row.winner_tx_hash,
+            tokenId: null,
+            wallet: row.winner_wallet,
+            priceWei: row.winner_value_micros,
+            ethPaidWei: row.winner_eth_paid_wei ?? "0",
+            plankAmount: row.winner_plank_amount,
+            usdValueAtBuy: row.winner_usd_value_at_buy != null ? Number(row.winner_usd_value_at_buy) : null,
+            blockNumber: 0,
+          }
+        : null,
+  };
+}
+
+async function readRowForUpdate(client: PoolClient): Promise<PlankKothRow | null> {
+  const result = await client.query<PlankKothRow>(
+    `SELECT deadline, leading_tx_hash, leading_wallet, leading_eth_paid_wei, leading_plank_amount,
+            leading_usd_value_at_buy, leading_value_micros, leading_block_number,
+            winner_finalized_at, winner_wallet, winner_tx_hash, winner_eth_paid_wei, winner_plank_amount,
+            winner_usd_value_at_buy, winner_value_micros
+       FROM plank_koth
+      WHERE id = 1
+      FOR UPDATE`
+  );
+  return result.rows[0] ?? null;
+}
+
+async function writeState(client: PoolClient, state: PlankKothState): Promise<void> {
+  await client.query(
+    `UPDATE plank_koth
+        SET deadline = $1,
+            leading_tx_hash = $2,
+            leading_wallet = $3,
+            leading_eth_paid_wei = $4::numeric,
+            leading_plank_amount = $5::numeric,
+            leading_usd_value_at_buy = $6,
+            leading_value_micros = $7::numeric,
+            leading_block_number = $8,
+            winner_finalized_at = $9,
+            winner_wallet = $10,
+            winner_tx_hash = $11,
+            winner_eth_paid_wei = $12::numeric,
+            winner_plank_amount = $13::numeric,
+            winner_usd_value_at_buy = $14,
+            winner_value_micros = $15::numeric,
+            updated_at = NOW()
+      WHERE id = 1`,
+    [
+      new Date(state.deadlineMs).toISOString(),
+      state.leadingSale?.txHash ?? null,
+      state.leadingSale?.wallet ?? null,
+      state.leadingSale?.ethPaidWei ?? null,
+      state.leadingSale?.plankAmount ?? null,
+      state.leadingSale?.usdValueAtBuy ?? null,
+      state.leadingSale?.priceWei ?? null,
+      state.leadingSale?.blockNumber ?? null,
+      state.winnerFinalizedAtMs == null ? null : new Date(state.winnerFinalizedAtMs).toISOString(),
+      state.winnerSale?.wallet ?? null,
+      state.winnerSale?.txHash ?? null,
+      state.winnerSale?.ethPaidWei ?? null,
+      state.winnerSale?.plankAmount ?? null,
+      state.winnerSale?.usdValueAtBuy ?? null,
+      state.winnerSale?.priceWei ?? null,
+    ]
+  );
+}
+
+/**
+ * Read the current round, lazily finalizing it first if real time has passed
+ * the deadline — same lazy check-on-read discipline as the NFT KOTH's own
+ * getKingOfTheHill (see that file's header: idempotent, safe to call on
+ * every API read, no separate cron required).
+ */
+export async function getPlankKoth(nowMs: number = Date.now()): Promise<PlankKothState | null> {
+  if (!hasPlankKothStore()) return null;
+  return withPostgresTransaction(async (client) => {
+    const row = await readRowForUpdate(client);
+    if (!row) return null;
+    const state = rowToState(row);
+    const finalized = finalizeIfDue(state as KothState, nowMs) as PlankKothState;
+    if (finalized !== state) await writeState(client, finalized);
+    return finalized;
+  });
+}
+
+/**
+ * Offer a CONFIRMED (post fraud-gate, post-finality — see
+ * plank-koth-candidate.ts) buy as a KOTH candidate. Safe to call for every
+ * confirmed buy, including ones that don't beat the record, arrive after the
+ * deadline, or land after the round already finalized — applyCandidateSale/
+ * finalizeIfDue make all of those a no-op. Also safe to call twice for the
+ * same tx.
+ */
+export async function offerPlankKothCandidate(sale: PlankKothSale, nowMs: number = Date.now()): Promise<void> {
+  if (!hasPlankKothStore()) return;
+  // A real buy that happens to land before the announced launch instant
+  // (e.g. real trading activity on the pool before the contest itself has
+  // begun) must never become a candidate -- see PLANK_KOTH_LAUNCH_AT_MS's
+  // own header.
+  if (nowMs < PLANK_KOTH_LAUNCH_AT_MS) return;
+  await withPostgresTransaction(async (client) => {
+    const row = await readRowForUpdate(client);
+    if (!row) return;
+    let state = rowToState(row);
+    state = finalizeIfDue(state as KothState, nowMs) as PlankKothState;
+    const next = applyCandidateSale(state as KothState, sale, nowMs) as PlankKothState;
+    if (next !== state) await writeState(client, next);
+
+    // "Fallen champions" real history -- see migration 078's own header.
+    // A genuine new leader (distinct tx from whatever led before) both
+    // opens its own reign row AND, if there was a real previous champion,
+    // closes that champion's row out as dethroned -- all in the same
+    // transaction as the state-machine write above, so history and the
+    // live leader can never disagree about who's currently reigning.
+    if (next.leadingSale && next.leadingSale.txHash !== state.leadingSale?.txHash) {
+      await client.query(
+        `INSERT INTO plank_koth_champion_history (tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, became_champion_at)
+         VALUES ($1, $2, $3::numeric, $4::numeric, $5, $6) ON CONFLICT (tx_hash) DO NOTHING`,
+        [
+          next.leadingSale.txHash,
+          next.leadingSale.wallet,
+          next.leadingSale.ethPaidWei,
+          next.leadingSale.plankAmount,
+          next.leadingSale.usdValueAtBuy,
+          new Date(nowMs).toISOString(),
+        ]
+      );
+      if (state.leadingSale) {
+        await client.query(
+          `UPDATE plank_koth_champion_history SET dethroned_at = $1, dethroned_by_tx_hash = $2
+           WHERE tx_hash = $3 AND dethroned_at IS NULL`,
+          [new Date(nowMs).toISOString(), next.leadingSale.txHash, state.leadingSale.txHash]
+        );
+      }
+    }
+  });
+}
+
+export type FallenChampion = {
+  txHash: string;
+  wallet: string;
+  ethPaidWei: string;
+  plankAmount: string;
+  usdValueAtBuy: number | null;
+  becameChampionAt: string;
+  dethronedAt: string;
+  dethronedByTxHash: string | null;
+};
+
+/** Every wallet that was ONCE the #1 leader before being dethroned by a
+ * bigger real buy, newest-dethroned first. Excludes the current reigning
+ * champion (dethroned_at IS NULL) -- that one is already the live
+ * leadingSale/winnerSale this file's own state exposes. Pure display
+ * history; never consulted by the rule engine. */
+export async function getFallenChampions(limit = 20): Promise<FallenChampion[]> {
+  if (!hasPlankKothStore()) return [];
+  const { postgresQuery } = await import("@/lib/postgres");
+  const result = await postgresQuery<{
+    tx_hash: string;
+    wallet: string;
+    eth_paid_wei: string;
+    plank_amount: string;
+    usd_value_at_buy: string | null;
+    became_champion_at: Date;
+    dethroned_at: Date;
+    dethroned_by_tx_hash: string | null;
+  }>(
+    `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, became_champion_at, dethroned_at, dethroned_by_tx_hash
+       FROM plank_koth_champion_history
+      WHERE dethroned_at IS NOT NULL
+      ORDER BY dethroned_at DESC
+      LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map((row) => ({
+    txHash: row.tx_hash,
+    wallet: row.wallet,
+    ethPaidWei: row.eth_paid_wei,
+    plankAmount: row.plank_amount,
+    usdValueAtBuy: row.usd_value_at_buy != null ? Number(row.usd_value_at_buy) : null,
+    becameChampionAt: row.became_champion_at.toISOString(),
+    dethronedAt: row.dethroned_at.toISOString(),
+    dethronedByTxHash: row.dethroned_by_tx_hash,
+  }));
+}
+
+export type PreSeasonRecord = {
+  txHash: string;
+  wallet: string;
+  ethPaidWei: string;
+  plankAmount: string;
+  usdValueAtBuy: number | null;
+  auditedAt: string;
+};
+
+/** The single largest real $PLANK buy found by scripts/audit-plank-
+ * historical-record.ts walking full pre-launch history -- see migration
+ * 079's own header. Null until that audit has actually run once; never
+ * fabricated. Purely a display reference, never fed into the rule engine. */
+export async function getPreSeasonRecord(): Promise<PreSeasonRecord | null> {
+  if (!hasPlankKothStore()) return null;
+  const { postgresQuery } = await import("@/lib/postgres");
+  const result = await postgresQuery<{
+    tx_hash: string;
+    wallet: string;
+    eth_paid_wei: string;
+    plank_amount: string;
+    usd_value_at_buy: string | null;
+    audited_at: Date;
+  }>(
+    `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, audited_at
+       FROM plank_koth_pre_season_record WHERE id = 1`
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    txHash: row.tx_hash,
+    wallet: row.wallet,
+    ethPaidWei: row.eth_paid_wei,
+    plankAmount: row.plank_amount,
+    usdValueAtBuy: row.usd_value_at_buy != null ? Number(row.usd_value_at_buy) : null,
+    auditedAt: row.audited_at.toISOString(),
+  };
+}
