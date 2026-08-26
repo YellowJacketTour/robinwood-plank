@@ -155,10 +155,27 @@ async function main(): Promise<void> {
       // cycles through whatever's next) -- "live" priority now gets real
       // precedence over background-sweep competition for the shared
       // OpenSea pace slot (see opensea-key-pool.ts's BACKGROUND_SKIP_RATE).
-      const result = /^0x[0-9a-f]{40}$/i.test(subject)
+      const isDemandDriven = /^0x[0-9a-f]{40}$/i.test(subject);
+      const result = isDemandDriven
         ? await advanceEvmCollectionMembership(chain, subject, undefined, "live")
         : await advanceNextTrackedEvmMembership(chain);
       console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
+      // Real gap found live 2026-08-26 ("isnt hydrating by thousands in
+      // live priority" while actively viewing a 69%-complete collection):
+      // one call only ever advances ONE 50-item OpenSea page
+      // (rarity-index-runner.ts's own PAGE_SIZE), and unlike anchored-
+      // membership just above, this demand-driven job was always marked
+      // 'succeeded' after that single page -- it only ran again on the
+      // NEXT client visibility/detail ping, not back-to-back within the
+      // same viewing session. Same exit-code-2 signal anchored-membership
+      // already uses: mesh-tick.ts re-enqueues immediately when more real
+      // work remains, so a genuinely incomplete, actively-viewed collection
+      // now gets consecutive pages every mesh-tick pass instead of one page
+      // per demand ping. Scoped to the demand-driven branch only -- the
+      // background-sweep branch already gets its own turn every pass via
+      // mesh-tick.ts's own standing MESH_LANES entry, so signaling here too
+      // would be redundant, not incorrect.
+      if (isDemandDriven && result && "complete" in result && !result.complete) process.exitCode = 2;
       return;
     }
     if (source === "anchored-membership") {
