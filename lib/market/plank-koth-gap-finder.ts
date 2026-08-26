@@ -92,8 +92,30 @@ export type GapFinderResult = {
  * pipeline has ever recorded, and directly evaluates any genuine gap
  * through the SAME evaluatePlankKothCandidate pipeline the live watcher
  * uses -- a caught gap self-heals in this same pass, it doesn't just get
- * logged for a human to notice. */
+ * logged for a human to notice.
+ *
+ * Real bug found live 2026-08-26, immediately on first deploy: evaluating
+ * every found gap serially, with no bound, is the exact "unbounded
+ * sequential work" mistake already found and fixed earlier tonight in
+ * the review-queue reprocess script -- evaluatePlankKothCandidate's own
+ * reputation/funding checks can be several real, serial network round-
+ * trips each, and a first-ever pass against real pool history can find
+ * many gaps at once. Confirmed live: the very first provisioning run got
+ * killed by the CI job's own 10-minute timeout mid-pass, never even
+ * printing a result. Bounded per invocation, same as the primary
+ * watcher's own MAX_CANDIDATES_PER_PASS -- a real backlog still drains
+ * steadily across the cron's own repeat 10-minute passes instead of
+ * trying to do it all in one. */
+const MAX_GAPS_PER_PASS = 10;
+/** Second, independent safety net -- a count cap alone still risks the
+ * job timeout if a handful of evaluations each hit real, slow network
+ * round-trips. Real cron cadence is every 10 minutes; this leaves a real
+ * margin under that so the job always exits cleanly on its own rather
+ * than getting killed mid-evaluation. */
+const WALL_CLOCK_BUDGET_MS = 6 * 60_000;
+
 export async function runPlankKothGapFinder(): Promise<GapFinderResult> {
+  const startedAt = Date.now();
   const poolIds = await discoverPoolIds();
   const allHashes = new Set<string>();
   for (const poolId of poolIds) {
@@ -103,10 +125,12 @@ export async function runPlankKothGapFinder(): Promise<GapFinderResult> {
 
   const known = await loadKnownTxHashes([...allHashes]);
   const gaps = [...allHashes].filter((h) => !known.has(h));
+  const toEvaluate = gaps.slice(0, MAX_GAPS_PER_PASS);
 
   let evaluated = 0;
   let errors = 0;
-  for (const txHash of gaps) {
+  for (const txHash of toEvaluate) {
+    if (Date.now() - startedAt > WALL_CLOCK_BUDGET_MS) break;
     try {
       await evaluatePlankKothCandidate(txHash);
       evaluated += 1;
