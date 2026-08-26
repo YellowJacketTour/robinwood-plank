@@ -15,6 +15,54 @@ const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
 const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length);
 
 /**
+ * Real bug found live 2026-08-26 (throughput audit follow-up): --limit
+ * bounds TOTAL concurrent lanes, but has no concept that several distinct
+ * job sources (opensea-membership, opensea-stats, evm-metadata's OpenSea
+ * fallback, robinhood-membership) all share ONE external resource -- the
+ * 6-key OpenSea pool, whose real combined sustained throughput is ~1
+ * call/sec (600/hr/key, opensea-key-pool.ts's own OPENSEA_MIN_CALL_INTERVAL_MS).
+ * Confirmed live: with --limit=6 and several of those sources claimed in
+ * the same pass, EVERY key could be simultaneously mid-cooldown at the
+ * exact moment a live-priority call needed one, even after that call's
+ * own built-in retries (opensea-key-pool.ts's LIVE_RETRY_DELAYS_MS) --
+ * 100% failure rate on a healthy pool, a genuine contention regression
+ * from this session's own earlier throughput fixes making many more
+ * collections compete for real hydration at once instead of the same
+ * few permanently starving the rest.
+ *
+ * A real, in-process semaphore -- independent of --limit -- caps how many
+ * of THESE FOUR source kinds can be actually EXECUTING (not just
+ * claimed/leased) at the same instant. A worker that claims one of these
+ * jobs still owns the lease immediately; it only waits here, before
+ * calling runLane, for a free slot. Everything else (fills-reconcile,
+ * hypersync scans, unisat/helius lanes, etc.) is entirely unaffected and
+ * keeps using the full --limit as before.
+ */
+const OPENSEA_TOUCHING_SOURCES = new Set(["opensea-membership", "opensea-stats", "evm-metadata", "robinhood-membership"]);
+const MAX_CONCURRENT_OPENSEA_LANES = 2;
+
+class Semaphore {
+  private current = 0;
+  private readonly queue: Array<() => void> = [];
+  constructor(private readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.current < this.max) {
+      this.current++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.queue.push(resolve));
+    this.current++;
+  }
+  release(): void {
+    this.current--;
+    const next = this.queue.shift();
+    if (next) next();
+  }
+}
+
+const openSeaSemaphore = new Semaphore(MAX_CONCURRENT_OPENSEA_LANES);
+
+/**
  * Light-worker fast path (Unified Mesh Continuum build item #3, deferred
  * earlier for its own dedicated pass, now built conservatively -- Grok's
  * own recommendation, docs/marketplank/GROK-FINDINGS-unified-maximal-
@@ -209,7 +257,19 @@ async function main(): Promise<void> {
       const laneKey = `${job.source}:${job.chainSlug}`;
       await recordLaneClaim(laneKey);
       console.log(`[mesh-tick] start ${job.jobKey}`);
-      const code = await runLane(job.source, job.chainSlug, job.subject);
+      // See OPENSEA_TOUCHING_SOURCES's own header: this job is already
+      // claimed/leased to this worker regardless -- only its EXECUTION
+      // waits here for a free OpenSea-pool slot, so extra concurrent
+      // OpenSea demand queues in-process instead of every claimed lane
+      // hammering the shared 6-key pool at the exact same instant.
+      const needsOpenSeaSlot = OPENSEA_TOUCHING_SOURCES.has(job.source);
+      if (needsOpenSeaSlot) await openSeaSemaphore.acquire();
+      let code: number;
+      try {
+        code = await runLane(job.source, job.chainSlug, job.subject);
+      } finally {
+        if (needsOpenSeaSlot) openSeaSemaphore.release();
+      }
       // Exit code 2 is a real, deliberate "succeeded, but more real work
       // remains" signal (see mesh-lane.ts's anchored-membership handler) --
       // never a failure. finishDataJob first (its own unconditional status
