@@ -84,10 +84,20 @@ export async function getPlankEthSpotPrice(): Promise<number> {
 
     // Full precision via BigInt fixed-point, then a single float divide at
     // the end -- avoids the precision loss of dividing two huge bigints as
-    // floats directly while $PLANK's reserve is in the trillions of tokens.
-    const SCALE = BigInt(1_000_000_000_000); // 1e12
+    // floats directly. $PLANK's real ETH price is roughly 1e-13 ETH/token
+    // (see lib/plank-format.ts's own subscript-zero notation for how many
+    // leading zeros this actually has) -- a 1e12 scale floors that ratio to
+    // zero via integer BigInt division before the float divide ever runs,
+    // which is exactly the zero-price bug this replaced. 1e30 leaves
+    // comfortable headroom below the real ratio's magnitude.
+    const SCALE = BigInt(10) ** BigInt(30);
     const scaled = (reserveWeth * SCALE) / reservePlank;
-    const ethPerPlank = Number(scaled) / 1e12;
+    const ethPerPlank = Number(scaled) / 1e30;
+    // A caller (the Season 2 API route) uses `> 0` to decide whether this
+    // on-chain read is trustworthy vs. falling back to a cached price --
+    // throwing here instead of ever resolving 0 keeps that decision in one
+    // place rather than needing the same non-positive check twice.
+    if (!(ethPerPlank > 0)) throw new Error(`plank-live-price: non-positive price ${ethPerPlank}`);
 
     cache = { at: Date.now(), ethPerPlank };
     return ethPerPlank;

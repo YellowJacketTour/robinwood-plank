@@ -118,9 +118,13 @@ export async function GET(req: Request) {
         // not GeckoTerminal's cached derivation of them -- see that
         // module's header for the 2026-08-26 audit finding this replaced.
         // Falls back to poolStats.priceEth only if the live on-chain read
-        // itself fails (RPC outage), never silently for staleness alone.
+        // itself fails (RPC outage) or returns a non-positive value --
+        // never silently for staleness alone. `> 0`, not `!= null`: a
+        // real 0 must still fall through to the GeckoTerminal value
+        // rather than being treated as a legitimate live price.
         plankEth: (() => {
-          const ethPerPlank = liveEthPerPlank ?? poolStats?.priceEth ?? null;
+          const ethPerPlank =
+            liveEthPerPlank != null && liveEthPerPlank > 0 ? liveEthPerPlank : poolStats?.priceEth ?? null;
           return prizePlankTokens != null && ethPerPlank != null ? prizePlankTokens * ethPerPlank : null;
         })(),
       },
