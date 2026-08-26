@@ -838,13 +838,17 @@ jobs:
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
           esac
           test -x "$node_bin"
-          npx_bin="$(dirname "$node_bin")/npx"
-          test -x "$npx_bin"
 
           env_file="$app_dir/shared/.env.production"
           test -s "$env_file"
           artifact="$app_dir/current/scripts/plank-koth-watch-standalone.ts"
           test -s "$artifact"
+          # npx does not exist next to node in this cPanel nodevenv (real,
+          # confirmed failure 2026-08-26: `test -x "$(dirname node)/npx"`
+          # failed silently) -- invoke tsx's own CLI entry point directly
+          # via node instead, no npx in the path at all.
+          tsx_cli="$app_dir/current/node_modules/tsx/dist/cli.mjs"
+          test -s "$tsx_cli"
 
           logs_dir="$app_dir/logs"
           log_file="$logs_dir/plank-koth-watch.log"
@@ -862,7 +866,7 @@ jobs:
           # to fail silently every two minutes with nobody watching.
           cd "$app_dir/current"
           "$flock_bin" -w 55 "$lock_file" \
-            "$npx_bin" tsx --env-file="$env_file" "$artifact" \
+            "$node_bin" --env-file="$env_file" "$tsx_cli" "$artifact" \
             >> "$log_file" 2>&1
           tail -n 5 "$log_file"
 
@@ -873,9 +877,9 @@ jobs:
           awk '!/plank-koth-watch/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# plank-koth-watch (managed by inmotion branch)'
-            printf '*/2 * * * * cd %s && %s -n %s %s tsx --env-file=%s %s >> %s 2>&1\n' \
-              "$app_dir/current" "$flock_bin" "$lock_file" "$npx_bin" "$env_file" \
-              "$artifact" "$log_file"
+            printf '*/2 * * * * cd %s && %s -n %s %s --env-file=%s %s %s >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
+              "$tsx_cli" "$artifact" "$log_file"
           } >> "$cron_after"
           crontab "$cron_after"
           managed_count="$(crontab -l | grep -c 'plank-koth-watch' || true)"
@@ -950,14 +954,17 @@ jobs:
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
           esac
           test -x "$node_bin"
-          npx_bin="$(dirname "$node_bin")/npx"
-          test -x "$npx_bin"
           env_file="$app_dir/shared/.env.production"
           script="$app_dir/current/scripts/audit-plank-historical-record.ts"
           test -s "$env_file"
           test -s "$script"
+          # npx does not exist next to node in this cPanel nodevenv (real,
+          # confirmed failure 2026-08-26) -- invoke tsx's own CLI entry
+          # point directly via node instead.
+          tsx_cli="$app_dir/current/node_modules/tsx/dist/cli.mjs"
+          test -s "$tsx_cli"
           cd "$app_dir/current"
-          "$npx_bin" tsx --env-file="$env_file" "$script"
+          "$node_bin" --env-file="$env_file" "$tsx_cli" "$script"
           REMOTE
 
   admin-allowlist:
