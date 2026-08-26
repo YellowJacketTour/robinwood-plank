@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
+        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
         required: true
         type: choice
         default: deploy
@@ -24,6 +24,7 @@ on:
           - deploy
           - provision-relayer
           - verify-relayer
+          - provision-plank-koth-watch
           - set-admin-allowlist
           - set-dispatch-token
           - purge-market-data
@@ -769,6 +770,136 @@ jobs:
   # PLANK_ADMIN_ADDRESSES= line would silently shadow the first, which is the
   # kind of bug that only shows up as "why is my wallet still rejected".
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Season 2 $PLANK King of the Hill ("Biggest Buyer Board") standalone watcher
+  # cron. See scripts/plank-koth-watch-standalone.ts's own header for the full
+  # "why": that script deliberately has zero dependency on the multichain
+  # mesh-tick job scheduler (docs/INMOTION_DEPLOYMENT.md's own documented
+  # manual cron line for scripts/mesh-tick.ts), so the KOTH backend can run
+  # standalone. Modeled closely on provision-relayer above (same SSH setup,
+  # same idempotent managed-crontab-block rewrite, same verify-before-trust
+  # discipline: run it once synchronously and confirm real log output before
+  # ever installing the recurring schedule) -- simpler than that job because
+  # this script needs no separate secret file, just the app's own existing
+  # shared/.env.production (already used for every other production cron).
+  # ---------------------------------------------------------------------------
+  provision-plank-koth-watch:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-plank-koth-watch'
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run once, then install the managed cron entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          npx_bin="$(dirname "$node_bin")/npx"
+          test -x "$npx_bin"
+
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          artifact="$app_dir/current/scripts/plank-koth-watch-standalone.ts"
+          test -s "$artifact"
+
+          logs_dir="$app_dir/logs"
+          log_file="$logs_dir/plank-koth-watch.log"
+          lock_file="$app_dir/shared/plank-koth-watch.lock"
+          mkdir -p "$logs_dir"
+          chmod 700 "$logs_dir"
+          touch "$log_file"
+          chmod 600 "$log_file"
+
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          # Prove one real pass actually succeeds BEFORE installing the
+          # recurring schedule -- a broken script must never get scheduled
+          # to fail silently every two minutes with nobody watching.
+          cd "$app_dir/current"
+          "$flock_bin" -w 55 "$lock_file" \
+            "$npx_bin" tsx --env-file="$env_file" "$artifact" \
+            >> "$log_file" 2>&1
+          tail -n 5 "$log_file"
+
+          cron_before="$(mktemp)"
+          cron_after="$(mktemp)"
+          trap 'rm -f "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          awk '!/plank-koth-watch/' "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# plank-koth-watch (managed by inmotion branch)'
+            printf '*/2 * * * * cd %s && %s -n %s %s tsx --env-file=%s %s >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$lock_file" "$npx_bin" "$env_file" \
+              "$artifact" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          managed_count="$(crontab -l | grep -c 'plank-koth-watch' || true)"
+          test "$managed_count" -eq 1
+
+          # Confirm the cron actually fires on its own before declaring
+          # success -- same real "don't trust the schedule until it's been
+          # observed running" discipline provision-relayer already uses.
+          lines_before="$(wc -l < "$log_file")"
+          cron_observed=false
+          for attempt in $(seq 1 30); do
+            sleep 5
+            lines_after="$(wc -l < "$log_file")"
+            if [ "$lines_after" -gt "$lines_before" ]; then
+              cron_observed=true
+              break
+            fi
+          done
+          test "$cron_observed" = "true"
+          echo "PLANK_KOTH_WATCH_PROVISIONED={\"managedEntries\":$managed_count}"
+          tail -n 5 "$log_file"
+          REMOTE
+
   admin-allowlist:
     if: >-
       github.event_name == 'workflow_dispatch' &&
