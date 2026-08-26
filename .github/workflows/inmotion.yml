@@ -956,7 +956,10 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       inputs.operation == 'provision-plank-koth-gap-finder'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Real bug found live 2026-08-26: the script's own WALL_CLOCK_BUDGET_MS
+    # (6 min) bounds a single pass, but SSH/network overhead plus this
+    # job's other steps need real margin above that, not exactly that.
+    timeout-minutes: 15
     environment: inmotion-staging
     env:
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
