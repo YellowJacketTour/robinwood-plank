@@ -48,12 +48,27 @@ export function formatPlankAmount(raw: string | bigint, decimals = 18): { abbrev
   }
 }
 
+const SUBSCRIPT_DIGITS = ["₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"];
+
+function toSubscript(n: number): string {
+  return String(n)
+    .split("")
+    .map((d) => SUBSCRIPT_DIGITS[Number(d)] ?? d)
+    .join("");
+}
+
 /**
- * A per-token USD price this small (~$8e-10) needs scientific notation to
- * carry any real information -- "$0.00" under fixed-digit formatting is
- * technically not wrong, just uninformative. Renders as "$8.48e-10" for
- * anything under $0.01; ordinary formatUsd-shaped output otherwise (a
- * $PLANK price this cheap is the expected case, but this helper must stay
+ * A per-token USD price this small (~$8e-10) needs more than fixed-digit
+ * formatting to carry any real information -- "$0.00" is technically not
+ * wrong, just uninformative. Real "e-notation" (e.g. "$8.48e-10") is
+ * precise but reads as a debugger dump, not a price -- this uses the
+ * convention real DEX interfaces (Uniswap's own token price display among
+ * them) already settled on for sub-cent tokens: the leading run of zeros
+ * after the decimal point is collapsed into one subscripted digit giving
+ * the COUNT of zeros, followed by the real significant digits at full
+ * size -- "$0.0₉848" reads as "0.0, then 9 more zeros, then 848", exactly
+ * as precise as "$0.000000000848" without asking a reader to count zeros.
+ * Ordinary formatUsd-shaped output above $0.01 (this helper must stay
  * correct if the token ever appreciates past cent-scale).
  */
 export function formatPlankUsdPrice(usd: number | null | undefined): string {
@@ -63,6 +78,11 @@ export function formatPlankUsdPrice(usd: number | null | undefined): string {
       usd
     );
   }
-  const [mantissa, exponent] = usd.toExponential(2).split("e");
-  return `$${mantissa}e${exponent}`;
+  const exponent = Math.floor(Math.log10(usd));
+  const leadingZeros = Math.max(0, -exponent - 1);
+  const mantissa = usd / 10 ** exponent; // 1 <= mantissa < 10
+  const significantDigits = Math.round(mantissa * 100)
+    .toString()
+    .padStart(3, "0"); // 3 significant digits, e.g. "848"
+  return `$0.0${toSubscript(leadingZeros)}${significantDigits}`;
 }
