@@ -829,7 +829,7 @@ jobs:
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
           echo "REACHED REMOTE SHELL"
-          set -euo pipefail
+          set -euxo pipefail
           app_dir="$1"
           node_bin="$2"
           case "$app_dir" in
