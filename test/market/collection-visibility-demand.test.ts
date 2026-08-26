@@ -61,8 +61,14 @@ test("computeVisibilityPriority: boost caps at +10 (never exceeds VISIBLE_STALE_
   const now = new Date("2026-08-25T02:00:00Z");
   const priority = computeVisibilityPriority({
     lastHydratedAt: null,
-    firstVisibleAt: new Date("2026-01-01T00:00:00Z"), // waited "forever"
-    lastVisibleAt: new Date("2026-01-01T00:00:00Z"),
+    firstVisibleAt: new Date("2026-01-01T00:00:00Z"), // waited "forever" -- the aging anchor for never-hydrated
+    // Real, not the same instant as firstVisibleAt: this represents a
+    // collection someone has been actively re-visiting (or a background
+    // reconciliation ping has kept alive) all the way up to right now,
+    // never yet successfully hydrated -- not one that was visible once,
+    // eight months ago, and never checked on again (that scenario
+    // correctly demotes to BACKGROUND via STALE_VISIBILITY_MS instead).
+    lastVisibleAt: now,
     now,
   });
   assert.equal(priority, DEMAND_PRIORITY.VISIBLE_STALE_AGED);
@@ -75,7 +81,14 @@ test("computeVisibilityPriority: exactly-at-TTL boundary is not yet stale (stric
   const priority = computeVisibilityPriority({
     lastHydratedAt,
     firstVisibleAt: lastHydratedAt,
-    lastVisibleAt: lastHydratedAt,
+    // Real, distinct from lastHydratedAt on purpose: STALE_VISIBILITY_MS
+    // (90s, added by a later real fix -- "collections pinned at max
+    // priority with nothing re-affirming them") demotes straight to
+    // BACKGROUND once lastVisibleAt itself is stale, independent of the
+    // TARGET_FRESH_TTL_MS(10min) boundary this test exists to isolate.
+    // A stale-visibility timestamp here would trip that guard first and
+    // mask the exact behavior under test.
+    lastVisibleAt: now,
     now,
   });
   assert.equal(priority, DEMAND_PRIORITY.VISIBLE);

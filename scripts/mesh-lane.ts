@@ -156,26 +156,41 @@ async function main(): Promise<void> {
       // precedence over background-sweep competition for the shared
       // OpenSea pace slot (see opensea-key-pool.ts's BACKGROUND_SKIP_RATE).
       const isDemandDriven = /^0x[0-9a-f]{40}$/i.test(subject);
-      const result = isDemandDriven
-        ? await advanceEvmCollectionMembership(chain, subject, undefined, "live")
-        : await advanceNextTrackedEvmMembership(chain);
-      console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
+      if (!isDemandDriven) {
+        console.log("[mesh-lane] opensea-membership", JSON.stringify(await advanceNextTrackedEvmMembership(chain)));
+        return;
+      }
       // Real gap found live 2026-08-26 ("isnt hydrating by thousands in
       // live priority" while actively viewing a 69%-complete collection):
       // one call only ever advances ONE 50-item OpenSea page
-      // (rarity-index-runner.ts's own PAGE_SIZE), and unlike anchored-
-      // membership just above, this demand-driven job was always marked
-      // 'succeeded' after that single page -- it only ran again on the
-      // NEXT client visibility/detail ping, not back-to-back within the
-      // same viewing session. Same exit-code-2 signal anchored-membership
-      // already uses: mesh-tick.ts re-enqueues immediately when more real
-      // work remains, so a genuinely incomplete, actively-viewed collection
-      // now gets consecutive pages every mesh-tick pass instead of one page
-      // per demand ping. Scoped to the demand-driven branch only -- the
-      // background-sweep branch already gets its own turn every pass via
-      // mesh-tick.ts's own standing MESH_LANES entry, so signaling here too
-      // would be redundant, not incorrect.
-      if (isDemandDriven && result && "complete" in result && !result.complete) process.exitCode = 2;
+      // (rarity-index-runner.ts's own PAGE_SIZE). Loop pages back-to-back
+      // within this single invocation instead of one DB round-trip
+      // (claim -> run -> finish -> re-enqueue -> wait for the next
+      // mesh-tick pass) per page -- same bounded-deadline pattern
+      // evm-metadata already uses just below. Each iteration still goes
+      // through the real OpenSea pace limiter (reservedBackgroundFetch),
+      // so this never bypasses the external rate limit, only the queue
+      // round-trip overhead between pages while a visitor is actively
+      // watching. Bounded well under LANE_TIMEOUT_MS (90s, this file's own
+      // MAX_LANE_MS-equivalent constant above) so a slow/rate-limited
+      // collection can never make this lane itself time out.
+      let itemsObserved = 0;
+      let pages = 0;
+      let result: Awaited<ReturnType<typeof advanceEvmCollectionMembership>> | null = null;
+      const deadline = Date.now() + 45_000;
+      do {
+        result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
+        itemsObserved += result.itemsObserved;
+        pages += 1;
+      } while (!result.complete && result.itemsObserved > 0 && Date.now() < deadline);
+      console.log("[mesh-lane] opensea-membership", JSON.stringify({ ...result, pages, itemsObserved }));
+      // Same exit-code-2 signal anchored-membership already uses just
+      // below: mesh-tick.ts re-enqueues immediately when real work still
+      // remains after this invocation's own deadline/zero-progress exit,
+      // so a genuinely incomplete, actively-viewed collection keeps getting
+      // picked back up every mesh-tick pass instead of waiting for the
+      // next client visibility ping.
+      if (!result.complete) process.exitCode = 2;
       return;
     }
     if (source === "anchored-membership") {
@@ -357,7 +372,18 @@ main()
     } catch {
       /* */
     }
-    process.exitCode = 0;
+    // Real bug found live 2026-08-26 (audit: "why does anchored-membership's
+    // own exit-code-2 signal never actually re-enqueue anything"): this
+    // used to unconditionally set exitCode to 0 here, clobbering the
+    // `process.exitCode = 2` main() may have already set (anchored-
+    // membership/opensea-membership/robinhood-membership's own "succeeded,
+    // but more real work remains" signal) on EVERY successful run, forever.
+    // mesh-tick.ts's re-enqueue path (scripts/mesh-tick.ts:180-202) reads
+    // this exit code, so the signal was silently dead since the day it was
+    // written -- a bounded-window job never actually got picked back up
+    // automatically; only the next real client visibility ping ever
+    // re-enqueued it. Only default to 0 if main() didn't already set 2.
+    if (process.exitCode !== 2) process.exitCode = 0;
   })
   .catch((e) => {
     console.error("[mesh-lane] fatal", e instanceof Error ? e.message : e);

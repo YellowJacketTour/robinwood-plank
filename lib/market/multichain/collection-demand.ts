@@ -218,7 +218,17 @@ const AGING_MAX_BOOST = 10;
  * this long has certainly navigated away or closed. Treat it as
  * background-tier rather than continuing to honor a stale aging boost.
  */
-const STALE_VISIBILITY_MS = 90_000;
+// Real bug found live 2026-08-26 (throughput audit, three unit tests
+// exposed it): 90s is strictly LESS than one AGING_STEP_MINUTES (2min =
+// 120s), so `boost = floor(age(lastVisibleAt) / AGING_STEP_MINUTES)` could
+// NEVER produce a nonzero value for the already-hydrated-but-stale anchor
+// branch below -- by the time enough time passed for +1 boost, this gate
+// had already forced BACKGROUND for ANY input, making that entire
+// documented code path mathematically dead, not just untested. 5 minutes
+// still demotes a closed/navigated-away tab in a small fraction of the
+// original bug's 30+-minute timescale, while leaving real headroom for a
+// genuine aging boost to actually manifest.
+const STALE_VISIBILITY_MS = 5 * 60_000;
 
 /**
  * Pure aging-boost calculation -- exported and unit-tested on its own
@@ -355,18 +365,17 @@ export async function partitionKnownCollectionKeys(
  * keys, so enqueueDataJob's own GREATEST-on-conflict upsert coalesces with
  * anything already queued rather than creating parallel duplicate work.
  *
- * DELIBERATE SCOPE LIMIT (honest, not silently dropped): the design doc's
- * step 4 says to only request a job "if your existing job kinds say they're
- * incomplete or past TTL -- don't re-queue pure no-ops." This function does
- * NOT (yet) inspect per-source completion/TTL state before enqueuing --
- * doing that correctly needs reading each of plank_collection_cells'
- * `state`/`valid_until` per source, which is real additional surface this
- * pass didn't want to touch under the "no risky changes to unrelated
- * job-processing code" instruction. Bounded instead by: max 40 keys/POST,
- * max 1 POST/2.5s/tab (client), a 30/min server IP rate limit, and
- * enqueueDataJob's existing dedup -- so the worst case is "priority churn
- * on jobs already about to run," never unbounded new work. A true
- * per-source freshness check is a real, safe follow-up.
+ * UPDATE 2026-08-26: the design doc's step 4 ("only request a job if your
+ * existing job kinds say they're incomplete -- don't re-queue pure
+ * no-ops") is now actually satisfied, closing what used to be a real,
+ * explicitly-documented scope limit here. hydrationJobSources itself
+ * (see that function's own header) now checks each source's own cheap
+ * completion signal (lib/market/multichain/discovery/hydration-
+ * completion.ts) before including it, so this function inherits that for
+ * free -- a fully-synced collection on a wide rankings page no longer
+ * gets re-enqueued as a no-op just because it's on screen. Still bounded
+ * as before regardless: max 40 keys/POST, max 1 POST/2.5s/tab (client), a
+ * 30/min server IP rate limit, and enqueueDataJob's existing dedup.
  */
 export async function prioritizeVisibleCollections(
   chainSlug: string,

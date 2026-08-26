@@ -177,7 +177,20 @@ async function main(): Promise<void> {
       // collection subject; a lane id is orchestration identity, not data.
       subject: null,
       payload: { sliceSec: lane.sliceSec, cells: lane.cells },
-      priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 100 : 20,
+      // Real gap found live 2026-08-26 (throughput audit: "why does real
+      // visitor demand only crawl"): these three sources' 100 sat ABOVE
+      // every real-visitor demand tier (DETAIL_PAGE=95..98, VISIBLE=110 is
+      // the only thing actually above it) and TIED PREDICT_NEXT=100 --
+      // see collection-demand.ts's own DEMAND_PRIORITY comments, whose
+      // entire stated intent is that background work must never outrank a
+      // real click. Their not_before also ratchets to the earliest
+      // enqueue moment (control-plane.ts's own LEAST()), so once ahead on
+      // a tie they stayed ahead every pass, forever. Lowered to 60 --
+      // still well above the generic 20 background floor (these sources
+      // clearly need to matter more than typical background lanes), but
+      // below every real-demand tier so a visitor's own page never loses
+      // its turn to them.
+      priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 60 : 20,
     });
   }
 
