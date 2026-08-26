@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, audit the pre-season $PLANK record, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
+        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, audit the pre-season $PLANK record, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, repair mislabelled chain-event ledger rows, or dump the KOTH review queue (TEMPORARY diagnostic, see scripts/plank-koth-review-queue-dump.ts's own header).
         required: true
         type: choice
         default: deploy
@@ -30,6 +30,7 @@ on:
           - set-dispatch-token
           - purge-market-data
           - repair-activity
+          - diagnose-plank-koth-review-queue
       repair_from_block:
         description: >-
           repair-activity only — first block to re-derive. Defaults to
@@ -148,6 +149,7 @@ jobs:
       - run: npm run build:reindex
       - run: npm run build:plank-koth-watch
       - run: npm run build:audit-preseason
+      - run: npm run build:koth-diag
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -172,6 +174,7 @@ jobs:
           test -s .next/standalone/scripts/reindex-chain-events.mjs
           test -s .next/standalone/scripts/plank-koth-watch-standalone.mjs
           test -s .next/standalone/scripts/audit-plank-historical-record.mjs
+          test -s .next/standalone/scripts/plank-koth-review-queue-dump.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
@@ -913,6 +916,78 @@ jobs:
           test "$cron_observed" = "true"
           echo "PLANK_KOTH_WATCH_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 5 "$log_file"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # TEMPORARY diagnostic (added 2026-08-26, see scripts/plank-koth-review-
+  # queue-dump.ts's own header) -- real, live-observed buys through the
+  # canonical $PLANK pools were confirmed on-chain post-launch, the watcher
+  # cron was confirmed running and consuming them, yet the public leaderboard
+  # stayed empty. This prints plank_koth_review_queue/plank_koth_leaderboard/
+  # plank_koth so the real reason each buy didn't confirm (flagged vs
+  # rejected vs something else) is visible in the Actions log, without ever
+  # moving production DB credentials outside this SSH session. Remove this
+  # job (and build:koth-diag, and the script itself) once answered.
+  # ---------------------------------------------------------------------------
+  diagnose-plank-koth-review-queue:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'diagnose-plank-koth-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run the read-only dump and print it to this log
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euxo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          artifact="$app_dir/current/scripts/plank-koth-review-queue-dump.mjs"
+          test -s "$artifact"
+          cd "$app_dir/current"
+          "$node_bin" --env-file="$env_file" "$artifact"
           REMOTE
 
   audit-preseason-record:
