@@ -157,7 +157,16 @@ export default function PlankKothBoard() {
   // USD value the server already computed (prize.usdValue) divided by the
   // live ETH/USD tick, not a second independent source, so it can never
   // disagree with the USD figure shown right next to it.
-  const prizeEth = state?.prize?.usdValue != null && ethUsd > 0 ? state.prize.usdValue / ethUsd : null;
+  // Real, stable ETH amount from the pool's own ETH-denominated price
+  // ratio (server-computed, see the API route's own comment) -- and the
+  // USD figure DERIVED from that real ETH amount times the live WebSocket
+  // ETH/USD tick, not the other way around. GeckoTerminal's own USD price
+  // for a token whose only real market is an ETH-paired pool is itself
+  // built from priceEth * ethUsd, so this is the true anchor, and it makes
+  // both figures genuinely move together with the same live feed instead
+  // of the USD number sitting frozen at the last ~60s-cached poll.
+  const prizeEth = state?.prize?.plankEth ?? null;
+  const prizeUsdLive = prizeEth != null && ethUsd > 0 ? prizeEth * ethUsd : (state?.prize?.usdValue ?? null);
 
   if (!state?.available || target == null) return null;
 
@@ -280,8 +289,8 @@ export default function PlankKothBoard() {
                 <PlankAmount raw={state.prize.plankAmount} /> PLANK
               </p>
               <p className="flex flex-wrap items-baseline gap-x-1.5 text-base">
-                <LiveUsd value={state.prize.usdValue} label="Live prize USD value" />
-                <LiveEth value={prizeEth} label="Live prize ETH-equivalent value, moves with the ETH/USD ticker" />
+                <LiveUsd value={prizeUsdLive} label="Live prize USD value, tracks the ETH/USD ticker" />
+                <LiveEth value={prizeEth} label="Real ETH-equivalent value of the prize" />
               </p>
             </div>
           ) : (

@@ -67,6 +67,7 @@ export async function GET(req: Request) {
       prizePlankAmount != null && poolStats?.priceUsd != null
         ? (Number(prizePlankAmount) / 1e18) * poolStats.priceUsd
         : null;
+    const prizePlankTokens = prizePlankAmount != null ? Number(prizePlankAmount) / 1e18 : null;
 
     return publicJson({
       available: true,
@@ -107,6 +108,15 @@ export async function GET(req: Request) {
         supplyFraction: PRIZE_SUPPLY_FRACTION,
         plankAmount: prizePlankAmount != null ? prizePlankAmount.toString() : null,
         usdValue: prizeUsdValue,
+        // Real ETH amount of PLANK the prize is worth, from the pool's own
+        // ETH-denominated price (poolStats.priceEth) -- NOT usdValue /
+        // ethUsd. GeckoTerminal's own priceUsd for a token whose only real
+        // market is an ETH-paired AMM pool is itself DERIVED from
+        // priceEth * ethUsd, so this is the true anchor value: multiplying
+        // it by a LIVE ethUsd tick client-side gives a genuinely live,
+        // correctly-correlated USD figure instead of one frozen at the
+        // last ~60s-cached poll.
+        plankEth: prizePlankTokens != null && poolStats?.priceEth != null ? prizePlankTokens * poolStats.priceEth : null,
       },
       plankUsd: poolStats?.priceUsd ?? null,
     });

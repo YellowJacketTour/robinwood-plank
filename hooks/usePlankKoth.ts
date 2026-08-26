@@ -33,7 +33,7 @@ export type PlankKothResponse = {
   leaderboard?: PlankKothLeaderboardRow[];
   fallenChampions?: FallenChampion[];
   preSeasonRecord?: PreSeasonRecord | null;
-  prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null };
+  prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null; plankEth: number | null };
   plankUsd?: number | null;
 };
 
