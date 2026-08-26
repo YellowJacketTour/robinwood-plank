@@ -75,24 +75,47 @@ export function resolveFinalRecipients(transfers: BlockscoutTxTokenTransfer[]): 
 }
 
 /** Real value paid for one recipient's leg: sum of WETH/USDG legs flowing
- * FROM that recipient INTO a canonical pool in this same transaction. */
+ * FROM that recipient INTO a canonical pool in this same transaction.
+ *
+ * Real bug found live 2026-08-26 (confirmed against real production
+ * transfers, e.g. tx 0x42c96c03...02249a3): a real Uniswap swap NEVER has
+ * the buyer's own wallet send the counter-asset into the pool directly --
+ * Universal Router / SwapRouter02 (the only way any real user actually
+ * swaps) does that on the buyer's behalf, so `from === recipient` was
+ * false for every real buy, `usdValue` came out 0, and every single real
+ * buy got rejected as a possible airdrop. `soleRecipient` lets a caller
+ * that already knows this tx resolved to exactly one final recipient
+ * (resolveFinalRecipients) attribute ANY payment leg into a canonical
+ * pool to them -- no attribution ambiguity when there's only one buyer.
+ * A real batched multi-recipient router tx (multiple distinct buyers in
+ * one tx) keeps the stricter direct-match behavior: safely attributing
+ * which router-forwarded leg paid for which of several buyers needs real
+ * call-trace decoding this function doesn't do, so it stays conservative
+ * there rather than guess. */
 export function resolveValuePaid(
   transfers: BlockscoutTxTokenTransfer[],
   recipient: string,
-  ethUsd: number
+  ethUsd: number,
+  soleRecipient: boolean
 ): { ethPaidWei: bigint; usdValue: number } {
   let ethPaidWei = 0n;
   let usdValue = 0;
   for (const t of transfers) {
     const from = t.from?.hash?.toLowerCase();
     const to = t.to?.hash?.toLowerCase();
-    if (from !== recipient || !to || !isCanonicalPlankPool(to)) continue;
+    if (!to || !isCanonicalPlankPool(to)) continue;
+    if (!soleRecipient && from !== recipient) continue;
     const pool = plankPoolByAddress(to);
+    // Confirm this leg really is the pool's OWN counter asset, not (say) a
+    // PLANK-inbound leg from an unrelated hop landing on the same pool
+    // address within a larger routed transaction.
+    const tokenAddr = (t.token?.address_hash ?? t.token?.address)?.toLowerCase();
+    if (!pool || !tokenAddr || tokenAddr !== pool.counterToken.toLowerCase()) continue;
     const value = BigInt(t.total?.value ?? "0");
-    if (pool?.counterSymbol === "WETH") {
+    if (pool.counterSymbol === "WETH") {
       ethPaidWei += value;
       usdValue += weiToUsd(value, ethUsd);
-    } else if (pool?.counterSymbol === "USDG") {
+    } else if (pool.counterSymbol === "USDG") {
       // USDG is 6 decimals (see GROK findings / uniswap-tokenlist.ts).
       usdValue += Number(value) / 1_000_000 * USDG_USD;
     }
@@ -116,9 +139,19 @@ export function hasRoundTripShape(transfers: BlockscoutTxTokenTransfer[], recipi
     // Recipient receiving WETH/USDG FROM a canonical pool in the same tx
     // they're also buying PLANK from -- a real buyer only sends value in,
     // never also receives the counter-asset back out.
+    //
+    // Real bug found live 2026-08-26 (confirmed against real production
+    // transfers, e.g. tx 0x0716472e...4e74ab): this never checked the
+    // transfer's own token address, only the addresses -- so a buy's own
+    // real PLANK receipt (pool -> buyer, the entire point of a buy) always
+    // satisfies `to === recipient && isCanonicalPlankPool(from)` and got
+    // misread as "buyer received the counter-asset back," flagging every
+    // single real buy as a round-trip. Must also confirm the transfer IS
+    // the pool's counter token (WETH/USDG), not PLANK.
     if (to === recipient && from && isCanonicalPlankPool(from)) {
       const pool = plankPoolByAddress(from);
-      if (pool && (pool.counterSymbol === "WETH" || pool.counterSymbol === "USDG")) return true;
+      const tokenAddr = (t.token?.address_hash ?? t.token?.address)?.toLowerCase();
+      if (pool && tokenAddr && tokenAddr === pool.counterToken.toLowerCase()) return true;
     }
   }
   return false;
@@ -256,7 +289,7 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
       continue;
     }
 
-    const { ethPaidWei, usdValue } = resolveValuePaid(transfers, recipient, ethUsd);
+    const { ethPaidWei, usdValue } = resolveValuePaid(transfers, recipient, ethUsd, recipients.size === 1);
     if (usdValue <= 0) {
       await writeReviewQueue({
         txHash,
