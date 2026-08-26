@@ -26,6 +26,19 @@ function pad(n: number | undefined): string {
   return typeof n === "number" ? String(n).padStart(2, "0") : "—";
 }
 
+/** Real wall-clock reign length between two real ISO timestamps -- never
+ * estimated, computed fresh from becameChampionAt/dethronedAt each render. */
+function formatReignDuration(becameChampionAtIso: string, dethronedAtIso: string): string {
+  const ms = Date.parse(dethronedAtIso) - Date.parse(becameChampionAtIso);
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
 const TICK_CLASS: Record<TickDirection, string> = {
   up: "text-emerald-400",
   down: "text-red-400",
@@ -125,6 +138,7 @@ export default function PlankKothBoard() {
 
   const displayLeader = state?.finalized ? state.winner : state?.leadingBuy;
   const leaderboard: PlankKothLeaderboardRow[] = useMemo(() => state?.leaderboard ?? [], [state?.leaderboard]);
+  const fallenChampions = useMemo(() => state?.fallenChampions ?? [], [state?.fallenChampions]);
   // Real ETH-equivalent of the live prize -- derived from the same real
   // USD value the server already computed (prize.usdValue) divided by the
   // live ETH/USD tick, not a second independent source, so it can never
@@ -154,10 +168,10 @@ export default function PlankKothBoard() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
             )}
-            Season 2 · King of the Hill {isLive && <span className="text-emerald-400">· LIVE</span>}
+            Season 2 {isLive && <span className="text-emerald-400">· LIVE</span>}
           </p>
           <h2 className="mt-1 font-display text-2xl font-bold text-foreground sm:text-3xl">
-            Largest Single $PLANK Buy
+            Biggest Buyer Board
           </h2>
         </div>
         <div className="text-right leading-tight" role="timer" aria-live="off">
@@ -253,10 +267,10 @@ export default function PlankKothBoard() {
         </div>
       </div>
 
-      {/* Tower of top buys */}
+      {/* Board of biggest buys */}
       <div>
         <p className="mb-1.5 flex items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-wider text-foreground/45">
-          <span aria-hidden>🗼</span> Tower of top buys
+          <span aria-hidden>🗼</span> Board of biggest buys
         </p>
         {leaderboard.length === 0 ? (
           <p className="rounded-lg border border-line-strong bg-wood-900/20 p-4 text-center text-sm text-foreground/50">
@@ -308,6 +322,37 @@ export default function PlankKothBoard() {
           </div>
         )}
       </div>
+
+      {/* Fallen champions -- every wallet that WAS #1 before being
+          dethroned by a bigger real buy (plank_koth_champion_history,
+          migration 078). Reign duration is real wall-clock time between
+          became_champion_at and dethroned_at, never estimated. */}
+      {fallenChampions.length > 0 && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-wider text-foreground/45">
+            <span aria-hidden>⚔️</span> Fallen champions
+          </p>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {fallenChampions.map((c) => (
+              <div
+                key={c.txHash}
+                className="flex w-48 shrink-0 flex-col gap-1 rounded-lg border border-line-strong bg-wood-900/30 p-3 opacity-80 grayscale-[0.3] transition-opacity hover:opacity-100 hover:grayscale-0"
+              >
+                <p className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/40">
+                  Reigned {formatReignDuration(c.becameChampionAt, c.dethronedAt)}
+                </p>
+                <p className="font-mono text-sm font-bold text-foreground/70 line-through decoration-red-500/60">
+                  <PlankAmount raw={c.plankAmount} /> PLANK
+                </p>
+                <p className="text-[0.68rem] text-foreground/50">
+                  {c.usdValueAtBuy != null ? formatUsd(c.usdValueAtBuy) : "—"}
+                </p>
+                <WalletLink wallet={c.wallet} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

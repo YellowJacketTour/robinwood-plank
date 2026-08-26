@@ -1,5 +1,5 @@
 import { publicError, publicJson, rateLimit } from "@/lib/security";
-import { getPlankKoth, PLANK_KOTH_LAUNCH_AT_MS } from "@/lib/market/plank-koth";
+import { getPlankKoth, getFallenChampions, PLANK_KOTH_LAUNCH_AT_MS } from "@/lib/market/plank-koth";
 import { postgresQuery } from "@/lib/postgres";
 import { getPlankSupply } from "@/lib/plank-supply";
 import { getPlankPoolStats } from "@/lib/plank-price";
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const [leaderboard, supply, poolStats] = await Promise.all([
+    const [leaderboard, fallenChampions, supply, poolStats] = await Promise.all([
       postgresQuery<LeaderboardRow>(
         `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, block_number, confirmed_at
            FROM plank_koth_leaderboard
@@ -53,6 +53,7 @@ export async function GET(req: Request) {
           LIMIT $1`,
         [TOP_N]
       ),
+      getFallenChampions(20).catch(() => []),
       // Reuse the app's own existing, already-cached (6h) supply reader
       // (lib/plank-supply.ts) -- same real totalSupply() source /api/trade/
       // valuation already uses, rather than a second ad hoc on-chain read.
@@ -99,6 +100,7 @@ export async function GET(req: Request) {
         usdValueAtBuy: row.usd_value_at_buy != null ? Number(row.usd_value_at_buy) : null,
         confirmedAt: row.confirmed_at.toISOString(),
       })),
+      fallenChampions,
       prize: {
         supplyFraction: PRIZE_SUPPLY_FRACTION,
         plankAmount: prizePlankAmount != null ? prizePlankAmount.toString() : null,
