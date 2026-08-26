@@ -1,5 +1,5 @@
 import { publicError, publicJson, rateLimit } from "@/lib/security";
-import { getPlankKoth } from "@/lib/market/plank-koth";
+import { getPlankKoth, PLANK_KOTH_LAUNCH_AT_MS } from "@/lib/market/plank-koth";
 import { postgresQuery } from "@/lib/postgres";
 import { getPlankSupply } from "@/lib/plank-supply";
 import { getPlankPoolStats } from "@/lib/plank-price";
@@ -68,6 +68,8 @@ export async function GET(req: Request) {
 
     return publicJson({
       available: true,
+      launchAt: new Date(PLANK_KOTH_LAUNCH_AT_MS).toISOString(),
+      launched: Date.now() >= PLANK_KOTH_LAUNCH_AT_MS,
       deadline: new Date(state.deadlineMs).toISOString(),
       leadingBuy: state.leadingSale
         ? {

@@ -15,6 +15,8 @@ export type PlankKothLeaderboardRow = PlankKothBuy & { confirmedAt: string };
 
 export type PlankKothResponse = {
   available: boolean;
+  launchAt?: string;
+  launched?: boolean;
   deadline?: string;
   leadingBuy?: PlankKothBuy | null;
   finalized?: boolean;

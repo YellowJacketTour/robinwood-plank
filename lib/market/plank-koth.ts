@@ -35,6 +35,20 @@ export function hasPlankKothStore(): boolean {
   return hasPostgresConfig();
 }
 
+/**
+ * Real launch instant: 08:08 CDT (Central Daylight Time, UTC-5 in August)
+ * 2026-08-26 == 13:08 UTC -- see migration 074's own header for the same
+ * value used to seed the round's real 31-day deadline. Competing before
+ * this instant must never count: without this gate, applyCandidateSale
+ * (king-of-the-hill-rules.ts) only checks the UPPER bound (`nowMs >
+ * state.deadlineMs`) -- nothing in that shared, deliberately unmodified
+ * engine understands "hasn't started yet," since the NFT King of the Hill
+ * it was built for has no such pre-launch phase. This lower bound is
+ * therefore enforced HERE, one layer up, rather than by touching the
+ * shared rule engine.
+ */
+export const PLANK_KOTH_LAUNCH_AT_MS = Date.parse("2026-08-26T13:08:00.000Z");
+
 export type PlankKothSale = Omit<KothSale, "priceWei"> & {
   /** Ranking key: USD value paid, as an integer of micro-USD. See header. */
   priceWei: string;
@@ -183,6 +197,11 @@ export async function getPlankKoth(nowMs: number = Date.now()): Promise<PlankKot
  */
 export async function offerPlankKothCandidate(sale: PlankKothSale, nowMs: number = Date.now()): Promise<void> {
   if (!hasPlankKothStore()) return;
+  // A real buy that happens to land before the announced launch instant
+  // (e.g. real trading activity on the pool before the contest itself has
+  // begun) must never become a candidate -- see PLANK_KOTH_LAUNCH_AT_MS's
+  // own header.
+  if (nowMs < PLANK_KOTH_LAUNCH_AT_MS) return;
   await withPostgresTransaction(async (client) => {
     const row = await readRowForUpdate(client);
     if (!row) return;
