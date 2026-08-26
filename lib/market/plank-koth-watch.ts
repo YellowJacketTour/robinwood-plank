@@ -21,7 +21,7 @@
 import { fetchAddressTokenTransfers } from "@/lib/market/blockscout";
 import { CANONICAL_PLANK_POOLS, isCanonicalPlankPool } from "@/lib/market/plank-pools";
 import { evaluatePlankKothCandidate } from "@/lib/market/plank-koth-candidate";
-import { readCursor, writeCursor } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { readCursor, writeCursor } from "@/lib/market/plank-koth-cursor";
 import { CONTRACT_ADDRESS as PLANK_CONTRACT } from "@/lib/constants";
 
 /** ~13 real documented minutes plus a safety margin -- see this file's own
