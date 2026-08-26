@@ -259,24 +259,37 @@ export async function advanceEvmCollectionMembership(
 }
 
 export async function advanceNextTrackedEvmMembership(chainSlug: string) {
+  // Real bug found live 2026-08-26 (systemic audit: "why doesn't this ever
+  // reach 100%"): ORDER BY alone only DEPRIORITIZES a complete row, it
+  // doesn't exclude it -- once every OTHER collection also finishes (or on
+  // a chain with few tracked collections), this candidate query kept
+  // re-picking an already-COMPLETE collection, which then restarted at
+  // page 1 (advanceEvmCollectionMembership always writes complete=false
+  // on its very first page write) -- silently un-completing a finished
+  // collection and forcing a full re-walk, forever, on every cron tick.
+  // Exclude complete rows outright; `m.complete IS NOT TRUE` still admits
+  // NULL (a collection with no cursor row yet), so a genuinely never-seen
+  // collection is unaffected.
   const candidates = await postgresQuery<{ contract_address: string }>(
     `SELECT c.contract_address FROM plank_multichain_collections c
      LEFT JOIN plank_collection_membership_cursors m
        ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
-     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
-     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$' AND m.complete IS NOT TRUE
+     ORDER BY m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
     [chainSlug, OPENSEA_MEMBERSHIP_SOURCE]);
   const address = candidates.rows[0]?.contract_address;
   return address ? advanceEvmCollectionMembership(chainSlug, address) : null;
 }
 
 export async function advanceNextRobinhoodMembership() {
+  // Same real fix as advanceNextTrackedEvmMembership just above -- exclude
+  // complete rows outright rather than only deprioritizing them.
   const candidates = await postgresQuery<{ contract_address: string }>(
     `SELECT c.contract_address FROM plank_multichain_collections c
      LEFT JOIN plank_collection_membership_cursors m
        ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
-     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
-     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$' AND m.complete IS NOT TRUE
+     ORDER BY m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
     ["robinhood", OPENSEA_MEMBERSHIP_SOURCE]);
   const address = candidates.rows[0]?.contract_address;
   return address ? advanceEvmCollectionMembership("robinhood", address, "robinhood") : null;

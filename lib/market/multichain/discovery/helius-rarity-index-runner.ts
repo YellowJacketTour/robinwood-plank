@@ -187,7 +187,20 @@ export async function advanceSolanaCollectionMembership(collectionAddress: strin
   try {
     const result = await fetchGroupedPageWithTotal(mint, page);
     const expected = result.total ?? checkpoint?.expectedCount ?? null;
-    const projectedAfter = checkpoint?.observedCount ?? 0;
+    // Real bug found live 2026-08-26 (systemic audit: "why doesn't this
+    // ever reach 100%"): checkpoint.observedCount is NOT this walk's own
+    // progress -- writeCollectionMembershipCursor (collection-token-
+    // store.ts) always overwrites it with a plain COUNT(*) of every row in
+    // plank_collection_tokens for this collection, a table shared across
+    // every source (Magic Eden, tensor, metadata seeding, this walk
+    // itself). That count can already exceed `expected` well before this
+    // walk has actually paginated through everything, latching
+    // complete=true with cursor=null mid-walk -- a permanent, silent
+    // false-complete plateau. Use this walk's OWN true offset instead,
+    // same sound page*PAGE_SIZE arithmetic unisat-membership-index-
+    // runner.ts already uses correctly (it isn't contaminated by a shared
+    // count the way this was).
+    const projectedAfter = (page - 1) * PAGE_SIZE;
     const complete = result.items.length < PAGE_SIZE ||
       (expected !== null && projectedAfter + result.items.length >= expected);
     await upsertCollectionTokenProjection("solana-mainnet", projectionKey, {

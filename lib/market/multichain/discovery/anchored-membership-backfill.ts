@@ -84,8 +84,15 @@ export async function runAnchoredMembershipBackfill(
   });
 
   if (scan.done) {
+    // Real fix, 2026-08-26: stamp WHEN this completed too, not just THAT
+    // it completed -- isAnchoredMembershipComplete now expires this after
+    // a bounded TTL instead of trusting it forever, so real mints after
+    // this point eventually get scanned (cheaply -- the cursor above
+    // already resumes incrementally, never a full re-walk).
     await postgresQuery(
-      `UPDATE plank_contract_deploy_block SET anchored_membership_complete = TRUE WHERE chain_slug = $1 AND contract_address = $2`,
+      `UPDATE plank_contract_deploy_block
+          SET anchored_membership_complete = TRUE, anchored_membership_completed_at = NOW()
+        WHERE chain_slug = $1 AND contract_address = $2`,
       [chainSlug, address]
     ).catch(() => {});
   }
