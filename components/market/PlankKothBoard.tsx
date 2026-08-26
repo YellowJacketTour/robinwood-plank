@@ -356,9 +356,18 @@ export default function PlankKothBoard() {
             {launched ? "No confirmed buys yet." : "Buys don't count until the event goes live."}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-line-strong">
+          // Real fix, 2026-08-26 ("space optimal... always see the full
+          // information of all modules at a glance"): an unbounded row
+          // count used to grow this table (and the whole page) taller as
+          // more real buys confirmed, eventually pushing "fallen
+          // champions" and other modules below the fold entirely. A fixed
+          // max-height with its OWN scroll (not the page's) keeps every
+          // module visible together on both desktop and mobile; the
+          // sticky header keeps column labels visible while scrolling
+          // through a long list instead of scrolling them out of view.
+          <div className="max-h-[22rem] overflow-y-auto overflow-x-auto rounded-lg border border-line-strong sm:max-h-[26rem]">
             <table className="w-full text-left text-xs">
-              <thead className="bg-wood-900/60 text-[0.62rem] uppercase tracking-wider text-foreground/45">
+              <thead className="sticky top-0 z-10 bg-wood-900 text-[0.62rem] uppercase tracking-wider text-foreground/45 shadow-[0_1px_0_0_theme(colors.line.strong)]">
                 <tr>
                   <th className="px-3 py-2">#</th>
                   <th className="px-3 py-2">Buyer</th>

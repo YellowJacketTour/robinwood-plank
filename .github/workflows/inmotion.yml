@@ -33,6 +33,7 @@ on:
           - diagnose-plank-koth-review-queue
           - reprocess-plank-koth-review-queue
           - reset-plank-koth-rpc-cursor
+          - evaluate-plank-koth-tx
       repair_from_block:
         description: >-
           repair-activity only — first block to re-derive. Defaults to
@@ -52,6 +53,12 @@ on:
           reset-plank-koth-rpc-cursor only — real Robinhood Chain block
           number to rewind the RPC scanner's own cursor to (must be BEFORE
           its current position; this script refuses to move it forward).
+        required: false
+        type: string
+      plank_eval_tx_hash:
+        description: >-
+          evaluate-plank-koth-tx only — real transaction hash to directly
+          evaluate against production, bypassing discovery/cursor.
         required: false
         type: string
       confirmation:
@@ -161,6 +168,7 @@ jobs:
       - run: npm run build:koth-diag
       - run: npm run build:koth-reprocess
       - run: npm run build:koth-cursor-reset
+      - run: npm run build:koth-eval-tx
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -188,6 +196,7 @@ jobs:
           test -s .next/standalone/scripts/plank-koth-review-queue-dump.mjs
           test -s .next/standalone/scripts/reprocess-plank-koth-review-queue.mjs
           test -s .next/standalone/scripts/reset-plank-koth-rpc-cursor.mjs
+          test -s .next/standalone/scripts/evaluate-plank-koth-tx.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
@@ -1142,6 +1151,79 @@ jobs:
           test -s "$artifact"
           cd "$app_dir/current"
           PLANK_RPC_CURSOR_RESET_BLOCK="$reset_block" "$node_bin" --env-file="$env_file" "$artifact"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # TEMPORARY one-shot (added 2026-08-26, see scripts/evaluate-plank-koth-
+  # tx.ts's own header). Directly evaluates one real tx hash against
+  # production, bypassing discovery/cursor -- used to confirm a real,
+  # very recent large buy onto the public leaderboard immediately instead
+  # of waiting for the RPC scanner's own backfill to reach its block.
+  # Remove this job (and build:koth-eval-tx, and the script) once no
+  # longer needed.
+  # ---------------------------------------------------------------------------
+  evaluate-plank-koth-tx:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'evaluate-plank-koth-tx'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      PLANK_EVAL_TX_HASH: ${{ inputs.plank_eval_tx_hash }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          test -n "$PLANK_EVAL_TX_HASH"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run the direct tx evaluation and print its output to this log
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$PLANK_EVAL_TX_HASH" <<'REMOTE'
+          set -euxo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          tx_hash="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          artifact="$app_dir/current/scripts/evaluate-plank-koth-tx.mjs"
+          test -s "$artifact"
+          cd "$app_dir/current"
+          PLANK_EVAL_TX_HASH="$tx_hash" "$node_bin" --env-file="$env_file" "$artifact"
           REMOTE
 
   audit-preseason-record:
