@@ -154,6 +154,22 @@ export async function fetchReceiptRpc(txHash: string): Promise<RawReceipt> {
 
 export type RawTx = { from: string; to: string | null; value: string };
 
+/** Real block timestamp (hex seconds-since-epoch) -- used to derive the
+ * chain's REAL, currently-observed block rate for finality-margin math
+ * instead of a hardcoded assumption (see plank-koth-watch.ts's own header
+ * for the real bug this closes: a hardcoded 2 blocks/sec guess turned out
+ * to be ~5x slower than this chain's real measured ~9.9 blocks/sec,
+ * silently shrinking the intended 16-minute finality margin down to
+ * roughly 3 minutes). */
+export async function fetchBlockTimestampRpc(blockNumber: number): Promise<number> {
+  const { result } = await rpcCall<{ timestamp: string } | null>(CHAIN_SLUG, "eth_getBlockByNumber", [
+    "0x" + blockNumber.toString(16),
+    false,
+  ]);
+  if (!result) throw new Error(`plank-koth-rpc-scan: eth_getBlockByNumber returned null for block ${blockNumber}`);
+  return Number.parseInt(result.timestamp, 16);
+}
+
 /**
  * Real gap found live 2026-08-26 (confirmed against real production tx
  * 0x0716472e...4e74ab via a direct eth_getTransactionByHash call): a real
