@@ -41,7 +41,7 @@ export type CandidateOutcome =
   | { status: "rejected"; reason: string }
   | { status: "not_a_buy" };
 
-function isPlankTransfer(t: BlockscoutTxTokenTransfer): boolean {
+export function isPlankTransfer(t: BlockscoutTxTokenTransfer): boolean {
   const addr = t.token?.address_hash ?? t.token?.address;
   return !!addr && addr.toLowerCase() === PLANK_CONTRACT.toLowerCase() && t.type !== "ERC-721" && t.type !== "ERC-1155";
 }
@@ -55,7 +55,7 @@ function isPlankTransfer(t: BlockscoutTxTokenTransfer): boolean {
  * avoids needing to hand-decode Universal Router/0x calldata at all (see
  * the fraud doc's section 2 for why that's normally the hard part).
  */
-function resolveFinalRecipients(transfers: BlockscoutTxTokenTransfer[]): Map<string, bigint> {
+export function resolveFinalRecipients(transfers: BlockscoutTxTokenTransfer[]): Map<string, bigint> {
   const plankTransfers = transfers.filter(isPlankTransfer);
   const received = new Map<string, bigint>();
   const forwarded = new Set<string>();
@@ -76,7 +76,7 @@ function resolveFinalRecipients(transfers: BlockscoutTxTokenTransfer[]): Map<str
 
 /** Real value paid for one recipient's leg: sum of WETH/USDG legs flowing
  * FROM that recipient INTO a canonical pool in this same transaction. */
-function resolveValuePaid(
+export function resolveValuePaid(
   transfers: BlockscoutTxTokenTransfer[],
   recipient: string,
   ethUsd: number
@@ -109,7 +109,7 @@ function resolveValuePaid(
  * pool — either shape is the signature of a manipulate-then-buy-back or
  * flash-loan unwind pattern.
  */
-function hasRoundTripShape(transfers: BlockscoutTxTokenTransfer[], recipient: string): boolean {
+export function hasRoundTripShape(transfers: BlockscoutTxTokenTransfer[], recipient: string): boolean {
   for (const t of transfers) {
     const from = t.from?.hash?.toLowerCase();
     const to = t.to?.hash?.toLowerCase();

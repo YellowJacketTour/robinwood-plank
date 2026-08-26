@@ -287,3 +287,42 @@ export async function getFallenChampions(limit = 20): Promise<FallenChampion[]> 
     dethronedByTxHash: row.dethroned_by_tx_hash,
   }));
 }
+
+export type PreSeasonRecord = {
+  txHash: string;
+  wallet: string;
+  ethPaidWei: string;
+  plankAmount: string;
+  usdValueAtBuy: number | null;
+  auditedAt: string;
+};
+
+/** The single largest real $PLANK buy found by scripts/audit-plank-
+ * historical-record.ts walking full pre-launch history -- see migration
+ * 079's own header. Null until that audit has actually run once; never
+ * fabricated. Purely a display reference, never fed into the rule engine. */
+export async function getPreSeasonRecord(): Promise<PreSeasonRecord | null> {
+  if (!hasPlankKothStore()) return null;
+  const { postgresQuery } = await import("@/lib/postgres");
+  const result = await postgresQuery<{
+    tx_hash: string;
+    wallet: string;
+    eth_paid_wei: string;
+    plank_amount: string;
+    usd_value_at_buy: string | null;
+    audited_at: Date;
+  }>(
+    `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, audited_at
+       FROM plank_koth_pre_season_record WHERE id = 1`
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    txHash: row.tx_hash,
+    wallet: row.wallet,
+    ethPaidWei: row.eth_paid_wei,
+    plankAmount: row.plank_amount,
+    usdValueAtBuy: row.usd_value_at_buy != null ? Number(row.usd_value_at_buy) : null,
+    auditedAt: row.audited_at.toISOString(),
+  };
+}

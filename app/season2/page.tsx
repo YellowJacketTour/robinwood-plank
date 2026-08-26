@@ -15,7 +15,7 @@ export default function Season2Page() {
   return (
     <>
       <Nav />
-      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-10 sm:py-14">
+      <main className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8 sm:py-14">
         <PlankKothBoard />
         <p className="text-center text-[0.7rem] text-foreground/45">
           Every buy is verified against the canonical $PLANK pools, real on-chain finality, and this
