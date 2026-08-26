@@ -59,6 +59,29 @@ typography:
     fontWeight: 900
     lineHeight: 1.2
     letterSpacing: 0.12em
+  # Intermediate steps the codebase already uses everywhere through
+  # Tailwind's text-xs … text-2xl utilities. Documented 2026-08-26 so the
+  # ramp matches the shipped UI instead of pretending it has four steps.
+  display-sm:
+    fontFamily: Uncial Antiqua
+    fontSize: 1.5rem
+    fontWeight: 400
+    lineHeight: 1.1
+  title:
+    fontFamily: Nunito Sans
+    fontSize: 1.25rem
+    fontWeight: 800
+    lineHeight: 1.3
+  body-lg:
+    fontFamily: Nunito Sans
+    fontSize: 1rem
+    fontWeight: 500
+    lineHeight: 1.5
+  caption:
+    fontFamily: Nunito Sans
+    fontSize: 0.75rem
+    fontWeight: 600
+    lineHeight: 1.45
 rounded:
   # Stock Tailwind v4. There is no `--radius` override in app/globals.css and
   # no tailwind config file, so these are what the utilities actually resolve
@@ -322,6 +345,43 @@ This is a hard rule, not a style preference — it's the one visual element that
 These strings live in `VAULT_NAMES` / `VAULT_SHORT_NAMES` in `lib/market/vault-registry.ts` and are resolved from a vault **address** — never hardcoded in a component, and never selected by role, because with more than one legacy vault "the legacy one" is ambiguous.
 
 Color coding is keyed by generation and is the one place the version concept survives, as a token name rather than as text: `v1` orange, `v2` amber (demoted — it is retiring), `v3` emerald (current). Use `VAULT_LABEL_CLASS` and `VAULT_TEXT_CLASS`; do not hand-pick a different shade per component.
+
+## PlankSpace — a sub-mode, not a second system
+
+PlankSpace (the Lumberyard feed, boards, Woodstock, board mail) keeps the
+early-social-web *feel* — a warm bulletin-board card, a display-face heading,
+plain-spoken wood voice — but it is one room in the plank.love house. It has
+no palette, type stack, header, footer, or mascot of its own.
+
+- **Chrome.** The shared `Nav` plus the single PlankSpace rail
+  (`integrations/plankspace-app/app/plankspace-subnav.tsx`). PlankSpace pages
+  render no header, wordmark, or footer of their own.
+- **Parchment card.** The one token PlankSpace adds, derived — never a hex:
+  `--plankspace-card: color-mix(in oklch, var(--color-cream) 86%, var(--color-gold-300))`
+  with `-raised`, `-ink` (`wood-950`), `-muted` (wood-tinted, never gray), and
+  `-line` (`gold-600`/`wood-700` mix) companions. Dark panels use
+  `--color-panel-soft`; actions use `gold-500` on `wood-950`. Defined in
+  `integrations/plankspace-app/app/lumberyard.css`, scoped to
+  `.plankspace-native`, and therefore retinted by the site accent picker.
+- **Type.** Uncial Antiqua (`--font-display`) for the Lumberyard title, the
+  composer prompt, and the terms-gate title only; Nunito Sans (`--font-body`)
+  for everything else. No Georgia, Verdana, or Arial.
+- **Brand mark.** The plank character (`plank-head.webp` in the rail,
+  `plank-logo.webp` on the Lumberyard sign and empty/error states). Never an
+  emoji, and never a striped rectangle with eyes.
+- **Activity kinds** (post / knock / mood) are a small dot in the kind label,
+  not a thick side border on the card.
+- **Wallet moments** always render a visible status strip with plain copy
+  ("login-only signature, no gas") and a Cancel.
+
+Legacy PlankSpace stylesheets (`globals.css`, `profile-live.css`,
+`widget-live.css`) still carry literal browns and system fonts on the profile
+and Woodstock surfaces. Treat that as documented debt: retoken them into this
+sub-mode when those surfaces are next touched; do not extend them. That
+includes the CSS-drawn `.feed-plank` / `.composer-plank` / `.tiny-plank`
+"plank with eyes" devices on profile pages — they are not a sanctioned
+exception to the character-art rule and should be replaced with
+`plank-head.webp`, not suppressed in the design hook.
 
 ## Shapes
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   getPlankLoveWalletState,
@@ -11,7 +12,7 @@ const ADMINS = new Set([
   "0x7304b78e28370f45fdf77ca67bdbbf550c3aac34",
 ]);
 
-export default function AdminNavLink() {
+export default function AdminNavLink({ className }: { className?: string }) {
   const [wallet, setWallet] = useState("");
   useEffect(() => {
     const sync = (address: string | null) => setWallet((address || "").toLowerCase());
@@ -19,5 +20,5 @@ export default function AdminNavLink() {
     void getPlankLoveWalletState().then(state => sync(state.address)).catch(() => undefined);
     return unsubscribe;
   }, []);
-  return ADMINS.has(wallet) ? <a href="/plankspace/admin">Admin</a> : null;
+  return ADMINS.has(wallet) ? <Link href="/plankspace/admin" className={className}>Admin</Link> : null;
 }

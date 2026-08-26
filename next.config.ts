@@ -5,6 +5,8 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
  * Security headers + ensure server secrets are never treated as public.
  * UNISWAP_API_KEY must never use the NEXT_PUBLIC_ prefix.
  */
+const isDev = process.env.NODE_ENV !== "production";
+
 const securityHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
@@ -24,7 +26,10 @@ const securityHeaders = [
       // console error for every visitor, and analytics that silently never
       // report. Turn the feature off in the Cloudflare dashboard rather than
       // dropping this entry, otherwise the error simply comes back.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
+      // Dev only: lets local design tooling (e.g. the Impeccable detector
+      // overlay served from a localhost helper) load into the page. Never
+      // added to production builds.
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com${isDev ? " http://localhost:* http://127.0.0.1:*" : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
@@ -38,7 +43,7 @@ const securityHeaders = [
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
       "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://dexscreener.com https://www.dextools.io https://dextools.io",
-      "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
+      `connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:${isDev ? " http://localhost:* http://127.0.0.1:*" : ""}`,
       "frame-ancestors 'self'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -114,6 +119,35 @@ const nextConfig: NextConfig = {
     return [
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
+    ];
+  },
+  // PlankSpace pages live at the root (`app/(plankspace)/*`) but the product
+  // is presented as "/plankspace", so people (and the terms gate) naturally
+  // type /plankspace/browse. Send every such path to its real home instead of
+  // a bare 404. /plankspace itself, /plankspace/admin, and /plankspace/terms
+  // are real routes and are not listed here.
+  async redirects() {
+    const plankspacePages = [
+      "about",
+      "board-mail",
+      "board-safety",
+      "browse",
+      "create-profile",
+      "grain-policy",
+      "help",
+      "mood",
+      "planks-list",
+      "profile-editor",
+      "search",
+      "woodstock",
+    ];
+    return [
+      ...plankspacePages.map((page) => ({
+        source: `/plankspace/${page}/:path*`,
+        destination: `/${page}/:path*`,
+        permanent: false,
+      })),
+      { source: "/plankspace/u/:handle*", destination: "/u/:handle*", permanent: false },
     ];
   },
   async headers() {
