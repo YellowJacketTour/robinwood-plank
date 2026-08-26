@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   }
   const review = await postgresQuery(
     `SELECT tx_hash, wallet, eth_paid_wei::text, plank_amount::text, block_number, reason, status, created_at
-     FROM plank_koth_review_queue ORDER BY created_at DESC LIMIT 20`
+     FROM plank_koth_review_queue WHERE status = 'pending' ORDER BY eth_paid_wei::numeric DESC NULLS LAST LIMIT 30`
   );
   const leaderboard = await postgresQuery(
     `SELECT tx_hash, wallet, eth_paid_wei::text, plank_amount::text, usd_value_at_buy, block_number, confirmed_at
