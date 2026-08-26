@@ -22,34 +22,62 @@ export async function hydrationJobSources(
   normalized: string
 ): Promise<Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }>> {
   const list: Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }> = [];
+  // Real gap found live 2026-08-26 (Season 2 dashboard review): the
+  // anchored-membership fix below (isAnchoredMembershipComplete) was scoped
+  // to that ONE source only -- opensea/robinhood/helius/unisat-membership
+  // and evm-metadata had the exact same unconditional-re-enqueue shape and
+  // never got the same fix, so a truly finished collection could still edge
+  // out a genuinely incomplete one's real work on every repeat page visit.
+  // Same fix, same cheap one-indexed-read pattern, via hydration-
+  // completion.ts. unisat-rarity/opensea-stats/magiceden-solana/
+  // cryptopunks-native have no equally simple, verified single completion
+  // signal yet -- left unconditional rather than guess at one.
   if (isBitcoinChainSlug(chainSlug)) {
-    list.push({ source: "unisat-membership", basePriority: 98 }, { source: "unisat-rarity", basePriority: 97 });
+    const { isUnisatMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
+    if (!(await isUnisatMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "unisat-membership", basePriority: 98 });
+    }
+    list.push({ source: "unisat-rarity", basePriority: 97 });
   } else if (isSolanaChainSlug(chainSlug)) {
-    list.push({ source: "helius-membership", basePriority: 98 }, { source: "magiceden-solana", basePriority: 96 });
+    const { isHeliusMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
+    if (!(await isHeliusMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "helius-membership", basePriority: 98 });
+    }
+    list.push({ source: "magiceden-solana", basePriority: 96 });
   } else if (isRobinhoodChainSlug(chainSlug)) {
-    list.push(
-      { source: "robinhood-membership", basePriority: 98 },
-      { source: "evm-metadata", basePriority: 97 },
-      { source: "opensea-stats", basePriority: 96 }
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
     );
+    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "robinhood-membership", basePriority: 98 });
+    }
+    if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "evm-metadata", basePriority: 97 });
+    }
+    list.push({ source: "opensea-stats", basePriority: 96 });
   } else if (foreignChainByChainSlug(chainSlug)) {
-    list.push(
-      { source: "opensea-membership", basePriority: 98 },
-      { source: "evm-metadata", basePriority: 97 },
-      { source: "opensea-stats", basePriority: 96 },
-      // Real gap found live 2026-08-25 ("while i visit this page there is
-      // still no live sync"): a collection whose OpenSea enumeration has
-      // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
-      // looping over already-seen tokens) got ZERO benefit from a page
-      // visit -- opensea-membership above just re-ran the same already-
-      // stuck walk every time. anchored-membership was only ever
-      // manually enqueued via a one-off script, never part of the real
-      // page-visit demand set. Cheap to include unconditionally: once a
-      // contract's deploy block is cached (one real HyperSync call, ever)
-      // this self-limits via its own real done-check and the shared
-      // HyperSync circuit breaker -- it is never wasted work, only ever
-      // real, additional coverage a plain OpenSea walk cannot reach.
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
     );
+    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "opensea-membership", basePriority: 98 });
+    }
+    if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "evm-metadata", basePriority: 97 });
+    }
+    list.push({ source: "opensea-stats", basePriority: 96 });
+    // Real gap found live 2026-08-25 ("while i visit this page there is
+    // still no live sync"): a collection whose OpenSea enumeration has
+    // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
+    // looping over already-seen tokens) got ZERO benefit from a page
+    // visit -- opensea-membership above just re-ran the same already-
+    // stuck walk every time. anchored-membership was only ever
+    // manually enqueued via a one-off script, never part of the real
+    // page-visit demand set. Cheap to include unconditionally: once a
+    // contract's deploy block is cached (one real HyperSync call, ever)
+    // this self-limits via its own real done-check and the shared
+    // HyperSync circuit breaker -- it is never wasted work, only ever
+    // real, additional coverage a plain OpenSea walk cannot reach.
     // Real bug found live 2026-08-25 ("no sync, no progress" on MAYC
     // despite max priority): once wired in unconditionally, an ALREADY-
     // COMPLETE collection's anchored-membership job kept getting
