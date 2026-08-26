@@ -27,6 +27,18 @@ export function formatPlankFull(amount: number, maxDigits = 2): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: maxDigits }).format(amount);
 }
 
+/** ALWAYS exactly `digits` decimal places (real fixed-width ETH display,
+ * e.g. "2.140" never trims to "2.14") -- distinct from formatPlankFull's
+ * "up to N digits, trim trailing zeros" behavior, which is right for a
+ * huge PLANK amount but wrong for a small ETH figure where a real
+ * currently-flat 3rd digit is still real information, not noise. */
+export function formatEthFixed(amount: number, digits = 3): string {
+  if (!Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(
+    amount
+  );
+}
+
 /** "6.17T" -- the at-a-glance headline form. */
 export function formatPlankAbbreviated(amount: number, digits = 2): string {
   if (!Number.isFinite(amount)) return "—";
