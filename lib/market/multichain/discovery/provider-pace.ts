@@ -119,21 +119,41 @@ export const ALCHEMY_CU_COST: Record<string, number> = {
  */
 export async function claimProviderPaceSlot(paceKey: string, minIntervalMs: number, maxBacklogMs?: number): Promise<boolean> {
   const nowMs = Date.now();
-  const backlogCeilingMs = maxBacklogMs ?? minIntervalMs * 10;
-  const result = await postgresQuery<{ claimed_at: string }>(
+  void maxBacklogMs; // see header note below -- kept as a documented parameter, no longer load-bearing
+  // Real, severe bug found live 2026-08-26 (contention audit): the previous
+  // ON CONFLICT DO UPDATE ran UNCONDITIONALLY on every single call, success
+  // or failure -- a caller checking "is this key ready?" and getting NO
+  // (key not ready yet) still advanced next_slot_at_ms further into the
+  // future by another full interval, exactly as if it had made a real
+  // call. reserveOpenSeaKey's own attempt() tries up to 6 keys per call,
+  // retried up to 3 times (18 probes per single external reservation
+  // request) -- almost all of those probes "fail" under any real
+  // contention, and EVERY one still pushed that key deeper into backlog.
+  // Confirmed live: 6 real, distinct-account keys with ~34 actual calls/
+  // day EACH had a 59.5s-deep queue (near the old 62s ceiling) on every
+  // key simultaneously -- a queue depth wildly disproportionate to real
+  // usage, entirely self-inflicted by probe volume, not genuine demand.
+  // Fixed with a conditional UPSERT: the update only fires (and only
+  // advances the slot) when the row's CURRENT value already indicates
+  // readiness (`<= now`); a failed check leaves the stored state
+  // completely untouched, so checking readiness is no longer itself a
+  // (failed) claim. This also makes the old maxBacklogMs ceiling
+  // structurally unnecessary going forward -- the queue can now only grow
+  // from real, successful claims (a genuine burst of successful callers
+  // reserving consecutive real slots), never from failed probes -- but the
+  // parameter is kept so callers don't need updating, and so a future
+  // regression has the same safety net available again if needed.
+  const result = await postgresQuery<{ next_slot_at_ms: string }>(
     `INSERT INTO provider_pace_state (pace_key, next_slot_at_ms, updated_at)
      VALUES ($1, $2::bigint + $3::bigint, now())
      ON CONFLICT (pace_key) DO UPDATE SET
-       next_slot_at_ms = LEAST(
-         GREATEST(provider_pace_state.next_slot_at_ms, $2::bigint) + $3::bigint,
-         $2::bigint + $4::bigint
-       ),
+       next_slot_at_ms = $2::bigint + $3::bigint,
        updated_at = now()
-     RETURNING (next_slot_at_ms - $3::bigint)::text AS claimed_at`,
-    [paceKey, nowMs, minIntervalMs, backlogCeilingMs]
+     WHERE provider_pace_state.next_slot_at_ms <= $2::bigint
+     RETURNING next_slot_at_ms`,
+    [paceKey, nowMs, minIntervalMs]
   );
-  const claimedAt = Number(result.rows[0]?.claimed_at ?? nowMs);
-  return claimedAt <= nowMs;
+  return result.rows.length > 0;
 }
 
 /**
