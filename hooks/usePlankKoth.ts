@@ -13,6 +13,12 @@ export type PlankKothBuy = {
 
 export type PlankKothLeaderboardRow = PlankKothBuy & { confirmedAt: string };
 
+export type FallenChampion = PlankKothBuy & {
+  becameChampionAt: string;
+  dethronedAt: string;
+  dethronedByTxHash: string | null;
+};
+
 export type PlankKothResponse = {
   available: boolean;
   launchAt?: string;
@@ -23,6 +29,7 @@ export type PlankKothResponse = {
   winnerFinalizedAt?: string | null;
   winner?: PlankKothBuy | null;
   leaderboard?: PlankKothLeaderboardRow[];
+  fallenChampions?: FallenChampion[];
   prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null };
   plankUsd?: number | null;
 };

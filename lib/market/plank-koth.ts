@@ -209,5 +209,81 @@ export async function offerPlankKothCandidate(sale: PlankKothSale, nowMs: number
     state = finalizeIfDue(state as KothState, nowMs) as PlankKothState;
     const next = applyCandidateSale(state as KothState, sale, nowMs) as PlankKothState;
     if (next !== state) await writeState(client, next);
+
+    // "Fallen champions" real history -- see migration 078's own header.
+    // A genuine new leader (distinct tx from whatever led before) both
+    // opens its own reign row AND, if there was a real previous champion,
+    // closes that champion's row out as dethroned -- all in the same
+    // transaction as the state-machine write above, so history and the
+    // live leader can never disagree about who's currently reigning.
+    if (next.leadingSale && next.leadingSale.txHash !== state.leadingSale?.txHash) {
+      await client.query(
+        `INSERT INTO plank_koth_champion_history (tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, became_champion_at)
+         VALUES ($1, $2, $3::numeric, $4::numeric, $5, $6) ON CONFLICT (tx_hash) DO NOTHING`,
+        [
+          next.leadingSale.txHash,
+          next.leadingSale.wallet,
+          next.leadingSale.ethPaidWei,
+          next.leadingSale.plankAmount,
+          next.leadingSale.usdValueAtBuy,
+          new Date(nowMs).toISOString(),
+        ]
+      );
+      if (state.leadingSale) {
+        await client.query(
+          `UPDATE plank_koth_champion_history SET dethroned_at = $1, dethroned_by_tx_hash = $2
+           WHERE tx_hash = $3 AND dethroned_at IS NULL`,
+          [new Date(nowMs).toISOString(), next.leadingSale.txHash, state.leadingSale.txHash]
+        );
+      }
+    }
   });
+}
+
+export type FallenChampion = {
+  txHash: string;
+  wallet: string;
+  ethPaidWei: string;
+  plankAmount: string;
+  usdValueAtBuy: number | null;
+  becameChampionAt: string;
+  dethronedAt: string;
+  dethronedByTxHash: string | null;
+};
+
+/** Every wallet that was ONCE the #1 leader before being dethroned by a
+ * bigger real buy, newest-dethroned first. Excludes the current reigning
+ * champion (dethroned_at IS NULL) -- that one is already the live
+ * leadingSale/winnerSale this file's own state exposes. Pure display
+ * history; never consulted by the rule engine. */
+export async function getFallenChampions(limit = 20): Promise<FallenChampion[]> {
+  if (!hasPlankKothStore()) return [];
+  const { postgresQuery } = await import("@/lib/postgres");
+  const result = await postgresQuery<{
+    tx_hash: string;
+    wallet: string;
+    eth_paid_wei: string;
+    plank_amount: string;
+    usd_value_at_buy: string | null;
+    became_champion_at: Date;
+    dethroned_at: Date;
+    dethroned_by_tx_hash: string | null;
+  }>(
+    `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, became_champion_at, dethroned_at, dethroned_by_tx_hash
+       FROM plank_koth_champion_history
+      WHERE dethroned_at IS NOT NULL
+      ORDER BY dethroned_at DESC
+      LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map((row) => ({
+    txHash: row.tx_hash,
+    wallet: row.wallet,
+    ethPaidWei: row.eth_paid_wei,
+    plankAmount: row.plank_amount,
+    usdValueAtBuy: row.usd_value_at_buy != null ? Number(row.usd_value_at_buy) : null,
+    becameChampionAt: row.became_champion_at.toISOString(),
+    dethronedAt: row.dethroned_at.toISOString(),
+    dethronedByTxHash: row.dethroned_by_tx_hash,
+  }));
 }
