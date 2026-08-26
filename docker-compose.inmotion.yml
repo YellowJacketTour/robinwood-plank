@@ -40,6 +40,7 @@ services:
       AIRDROP_PERCENT_OF_SUPPLY: ${AIRDROP_PERCENT_OF_SUPPLY:-}
       AIRDROP_EXTRA: ${AIRDROP_EXTRA:-}
       GOOD_WOOD_EXTRA: ${GOOD_WOOD_EXTRA:-}
+      UPLOADS_DIR: /app/.data/uploads
     ports:
       - "${PLANK_BIND_ADDRESS:-127.0.0.1}:${PLANK_APP_PORT:-3000}:3000"
     depends_on:
@@ -49,6 +50,7 @@ services:
       - /tmp:size=128m,mode=1777
     volumes:
       - next_cache:/app/.next/cache
+      - uploads_data:/app/.data/uploads
     cap_drop:
       - ALL
     security_opt:
@@ -153,3 +155,4 @@ networks:
 volumes:
   postgres_data:
   next_cache:
+  uploads_data:

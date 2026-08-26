@@ -29,6 +29,7 @@ import {
   getChainId,
   getConnectedAccounts,
   getEthereumProvider,
+  signMessage as signWalletMessage,
   type Eip1193Provider,
 } from "@/lib/wallet";
 import ConnectWalletModalSwitch from "@/components/ConnectWalletModalSwitch";
@@ -79,7 +80,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // every page just because the provider wraps the whole app — so it is not
   // rendered until someone actually asks to connect. It stays mounted after
   // that, to keep the connector's own state across open/close.
-  const [connectMounted, setConnectMounted] = useState(false);
+  // Keep the selected connector mounted for the lifetime of the app. Reown
+  // restores WalletConnect sessions only while its hooks are mounted.
+  const [connectMounted, setConnectMounted] = useState(true);
+  const pendingPlankSpaceConnects = useRef<string[]>([]);
+  const walletStateRef = useRef({ address, chainId, status });
+  // Shared bridge consumers need the newest state synchronously.
+  // eslint-disable-next-line react-hooks/refs
+  walletStateRef.current = { address, chainId, status };
 
   const applyAccounts = useCallback((accounts: string[] | undefined) => {
     const next = accounts?.[0] ?? null;
@@ -168,9 +176,78 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       adoptAccount(addr);
       setConnectOpen(false);
       void ensureRobinhoodChain().catch(() => undefined);
+      for (const requestId of pendingPlankSpaceConnects.current.splice(0)) {
+        window.dispatchEvent(new CustomEvent("plank:wallet-response", {
+          detail: { requestId, result: { address: addr, state: { address: addr, chainId, status: "connected", isConnected: true } } },
+        }));
+      }
     },
-    [adoptAccount]
+    [adoptAccount, chainId]
   );
+
+  // PlankSpace is a native route in this same Next.js app. It must use this
+  // provider instead of creating/falling back to window.ethereum.
+  useEffect(() => {
+    const respond = (requestId: string, result?: unknown, error?: string) => {
+      window.dispatchEvent(new CustomEvent("plank:wallet-response", {
+        detail: { requestId, result, error },
+      }));
+    };
+    const onRequest = (raw: Event) => {
+      const detail = (raw as CustomEvent).detail as { requestId: string; method: string; payload?: { address?: string; message?: string; to?: string; valueHex?: string; chainId?: number } };
+      if (!detail?.requestId) return;
+      void (async () => {
+        try {
+          if (detail.method === "getState") {
+            const current = walletStateRef.current;
+            respond(detail.requestId, { state: { ...current, isConnected: Boolean(current.address) } });
+          } else if (detail.method === "connect") {
+            const current = walletStateRef.current;
+            if (current.address) respond(detail.requestId, { address: current.address, state: { ...current, status: "connected", isConnected: true } });
+            else {
+              let restored: string | null = null;
+              for (let attempt = 0; attempt < 8 && !restored; attempt += 1) {
+                const accounts = await getConnectedAccounts();
+                restored = accounts[0] || walletStateRef.current.address;
+                if (!restored) await new Promise(resolve => window.setTimeout(resolve, 250));
+              }
+              if (restored) {
+                adoptAccount(restored);
+                respond(detail.requestId, { address: restored, state: { address: restored, chainId: walletStateRef.current.chainId, status: "connected", isConnected: true } });
+                return;
+              }
+              pendingPlankSpaceConnects.current.push(detail.requestId);
+              openConnect();
+            }
+          } else if (detail.method === "ensureRobinhoodChain") {
+            await ensureRobinhoodChain();
+            await refresh();
+            const current = walletStateRef.current;
+            respond(detail.requestId, { state: { ...current, isConnected: Boolean(current.address) } });
+          } else if (detail.method === "signMessage") {
+            const currentAddress = walletStateRef.current.address;
+            if (!currentAddress || !detail.payload?.message) throw new Error("Connect your Plank.love wallet first.");
+            if (detail.payload.address && detail.payload.address.toLowerCase() !== currentAddress.toLowerCase()) throw new Error("Signing wallet does not match the connected profile.");
+            const signature = await signWalletMessage(currentAddress, detail.payload.message);
+            respond(detail.requestId, { address: currentAddress, signature });
+          } else if (detail.method === "sendNativeTransaction") {
+            const current = walletStateRef.current, payload=detail.payload;
+            if(!current.address||!payload?.to||!payload.valueHex)throw new Error("Connect your Plank.love wallet first.");
+            if(payload.address?.toLowerCase()!==current.address.toLowerCase())throw new Error("Sending wallet does not match the connected Plank.love wallet.");
+            if(payload.chainId&&current.chainId!==payload.chainId)throw new Error(`Switch the connected wallet to chain ${payload.chainId} before tipping.`);
+            if(!/^0x[a-f0-9]{40}$/i.test(payload.to)||!/^0x[0-9a-f]+$/i.test(payload.valueHex)||BigInt(payload.valueHex)<=0n)throw new Error("Invalid tip transaction details.");
+            const provider=getEthereumProvider();if(!provider)throw new Error("Connected wallet provider is unavailable.");
+            const txHash=await provider.request({method:"eth_sendTransaction",params:[{from:current.address,to:payload.to,value:payload.valueHex}]}) as string;
+            respond(detail.requestId,{address:current.address,txHash});
+          } else throw new Error("Unsupported wallet request.");
+        } catch (e) {
+          respond(detail.requestId, undefined, e instanceof Error ? e.message : "Wallet request failed.");
+        }
+      })();
+    };
+    window.addEventListener("plank:wallet-request", onRequest);
+    return () => window.removeEventListener("plank:wallet-request", onRequest);
+  }, [adoptAccount, openConnect, refresh]);
 
   const disconnect = useCallback(() => {
     setAddress(null);
@@ -193,6 +270,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("plank:wallet-state", {
+        detail: {
+          address,
+          chainId,
+          status,
+          isConnected: status === "connected" && Boolean(address),
+        },
+      })
+    );
+  }, [address, chainId, status]);
 
   const value = useMemo<WalletContextValue>(
     () => ({

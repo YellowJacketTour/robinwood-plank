@@ -1,0 +1,3 @@
+import Link from "next/link";
+export type LiveRoomSummary={slug:string;title:string;description:string;hostHandle:string;listeners:number;speakers:number};
+export default function LiveRoomCard({room}:{room:LiveRoomSummary}){return <article className="live-room-card"><div><span className="live-dot">LIVE</span><h3>{room.title}</h3><p>{room.description||"Pull up a board and listen in."}</p><small>Hosted by @{room.hostHandle}</small></div><div className="live-room-counts"><b>🎙 {Number(room.speakers)||0}</b><b>👂 {Number(room.listeners)||0}</b><Link href={`/woodstock/${room.slug}`}>Enter Lounge</Link></div></article>}

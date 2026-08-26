@@ -69,7 +69,9 @@
     "sharp": "^0.35.0",
     "sigma": "^3.0.3",
     "solana-web3js-v2": "npm:@solana/web3.js@^2.0.0",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "drizzle-orm": "^0.45.2",
+    "viem": "^2.55.19"
   },
   "overrides": {
     "postcss": "^8.5.20",

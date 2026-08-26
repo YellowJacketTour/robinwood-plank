@@ -24,7 +24,7 @@ import {
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
-import PlankKothBanner from "@/components/market/PlankKothBanner";
+import EventCountdown from "@/components/market/EventCountdown";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import CollectionStats from "@/components/market/CollectionStats";
 import { ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
@@ -1399,7 +1399,7 @@ export default function MarketView() {
                     multichain market gets a small text link here instead
                     of new tab-rail real estate. */}
                 <MarketBreadcrumb variant="native" />
-                <PlankKothBanner />
+                <EventCountdown />
                 {COLLECTION && (
                   <CollectionStats
                     collection={COLLECTION}

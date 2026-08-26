@@ -28,6 +28,8 @@ export const UPLOAD_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",
+  mp4: "video/mp4",
+  webm: "video/webm",
 };
 
 export function uploadsDir(): string {
