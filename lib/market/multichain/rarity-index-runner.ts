@@ -506,7 +506,27 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
        FROM plank_collection_tokens t
        WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)`,
       [chainSlug, collectionSlug]);
-    if (Number(state.rows[0]?.remaining ?? 1) !== 0 || !state.rows[0]?.membership_complete) continue;
+    // Real gap found live 2026-08-26 (HyperSync-primary hydration cutover,
+    // external Grok research review): this SQL's own membership_complete
+    // only reads plank_collection_membership_cursors, which for an EVM
+    // chain is written EXCLUSIVELY by opensea-membership's own
+    // writeCollectionMembershipCursor call -- anchored-membership's
+    // HyperSync scan tracks its progress in a completely separate cursor
+    // store (hypersync-evm-scan.ts's readCursor/writeCursor) and never
+    // touches this table. OpenSea's REST walk is being demoted to
+    // enrichment-only (hard-walled ~600 req/hr/account, confirmed live) and
+    // is no longer expected to ever reach "complete" as the primary
+    // membership source, so gating rarity finalization on it alone would
+    // make finalization unreachable for exactly the collections this
+    // cutover exists to fix. For an EVM chain, also accept
+    // isAnchoredMembershipComplete (the real, now-primary membership
+    // authority) as sufficient.
+    const membershipComplete = state.rows[0]?.membership_complete
+      || (foreignChainByChainSlug(chainSlug)
+        ? await (await import("@/lib/market/multichain/discovery/anchored-membership-status"))
+            .isAnchoredMembershipComplete(chainSlug, collectionSlug).catch(() => false)
+        : false);
+    if (Number(state.rows[0]?.remaining ?? 1) !== 0 || !membershipComplete) continue;
     const items = await readProjectedRarityInputs(chainSlug, collectionSlug);
     if (!items.length) continue;
     const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };

@@ -17,7 +17,13 @@ export type CollectionTokenProjectionPage = {
     animationUrl?: string | null; mediaType?: string | null;
     traits?: Array<{ traitType: string; value: string }>;
     rarityScore?: number | null; rarityRank?: number | null;
-    rarityPercentile?: number | null; rarityTier?: string | null }>;
+    rarityPercentile?: number | null; rarityTier?: string | null;
+    /** Real, on-chain-observed burn state (transferred to the zero address)
+     * as of the LATEST transfer this write has seen for the token -- see
+     * migration 082's own header. Omitted/undefined leaves existing burn
+     * state untouched; only pass true/false when a caller actually knows
+     * the token's current state from a real transfer log. */
+    isBurned?: boolean }>;
   expectedCount?: number | null; partial: boolean; provenance: string[]; sourceObservedAt: Date;
   preservePartial?: boolean;
 };
@@ -166,8 +172,8 @@ export async function upsertCollectionTokenProjection(
       await client.query(
         `INSERT INTO plank_collection_tokens (
            chain_slug, collection_slug, token_id, name, image_url, animation_url, media_type, traits, rarity_score, rarity_rank,
-           rarity_percentile, rarity_tier, provenance, source_observed_at, projected_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,NOW())
+           rarity_percentile, rarity_tier, provenance, source_observed_at, projected_at, is_burned
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,NOW(),COALESCE($15,FALSE))
          ON CONFLICT (chain_slug, collection_slug, token_id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, plank_collection_tokens.name),
            image_url = COALESCE(EXCLUDED.image_url, plank_collection_tokens.image_url),
@@ -180,16 +186,22 @@ export async function upsertCollectionTokenProjection(
            rarity_tier = COALESCE(EXCLUDED.rarity_tier, plank_collection_tokens.rarity_tier),
            provenance = ARRAY(SELECT DISTINCT unnest(plank_collection_tokens.provenance || EXCLUDED.provenance)),
            source_observed_at = GREATEST(plank_collection_tokens.source_observed_at, EXCLUDED.source_observed_at),
+           -- $15 (not EXCLUDED.is_burned, which the VALUES-side COALESCE
+           -- already forced to a concrete FALSE for the insert branch): a
+           -- caller that doesn't know a token's burn state (undefined ->
+           -- NULL) must leave existing state untouched, never silently
+           -- un-burn a token a different, burn-aware source already flagged.
+           is_burned = COALESCE($15, plank_collection_tokens.is_burned),
            projected_at = NOW()`,
         [chainSlug, collectionSlug, token.tokenId, token.name ?? null, token.imageUrl ?? null,
           token.animationUrl ?? null, token.mediaType ?? null,
           JSON.stringify(normalizeTraits(token.traits)),
           token.rarityScore ?? null, token.rarityRank ?? null, token.rarityPercentile ?? null,
-          token.rarityTier ?? null, provenance, page.sourceObservedAt]);
+          token.rarityTier ?? null, provenance, page.sourceObservedAt, token.isBurned ?? null]);
     }
     const count = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM plank_collection_tokens
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`, [chainSlug, collectionSlug]);
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND NOT is_burned`, [chainSlug, collectionSlug]);
     await client.query(
       `INSERT INTO plank_collection_token_projections (
          chain_slug, collection_slug, projected_count, expected_count, partial,

@@ -54,6 +54,7 @@ import {
 } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { upsertTrackedCollection, recordActivity } from "@/lib/market/multichain/store";
 import { decodeTransferLog, writeTransferLedgerEvents, type RawTransferLog, type DecodedTransfer } from "@/lib/market/multichain/discovery/transfer-ledger";
+import { ZERO_ADDRESS } from "@/lib/market/multichain/discovery/onchain-provenance";
 import { writeCollectionCell, writeChainCoverage, reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
 import { upsertCollectionTokenProjection } from "@/lib/market/multichain/collection-token-store";
 import { postgresQuery } from "@/lib/postgres";
@@ -205,7 +206,7 @@ async function writeTransfersFromHypersyncLogs(
   chainSlug: string,
   logs: Array<{ address?: string | null; topics: Array<string | null | undefined>; data?: string | null; transactionHash?: string | null; logIndex?: number; blockNumber?: number }>,
   blocks: Array<{ number?: number; timestamp?: number }>
-): Promise<void> {
+): Promise<DecodedTransfer[]> {
   const timestampByBlock = new Map<number, number>();
   for (const b of blocks) {
     if (b.number != null && b.timestamp != null) timestampByBlock.set(b.number, b.timestamp);
@@ -227,6 +228,17 @@ async function writeTransfersFromHypersyncLogs(
     }
   }
   await writeTransferLedgerEvents(decoded);
+  // Real gap found live 2026-08-26 (HyperSync-primary cutover, external
+  // Grok research review): callers previously had to re-decode every log a
+  // second time (runAddressScopedMembershipScan's own manual topic3
+  // extraction) to learn token ids for membership -- duplicating this
+  // function's own decode work, AND only ever covering ERC-721 (the manual
+  // extraction never looked at TransferSingle/TransferBatch's `data`
+  // field at all, silently dropping 100% of ERC-1155 membership). Return
+  // the already-decoded transfers (which cover 721 AND 1155 via
+  // decodeTransferLog, transfer-ledger.ts's own single decoder) so
+  // membership/burn tracking can derive from the SAME pass instead.
+  return decoded;
 }
 
 function requireApiToken(): string {
@@ -342,10 +354,8 @@ export async function runAddressScopedMembershipScan(input: {
     return { fromBlock: scannedUpTo, toBlock: input.toBlockCeiling, logsScanned: 0, tokensFound: 0, done: true };
   }
 
-  const observedErc721 = new Map<string, Set<string>>();
-  const rawTransferLogs: HypersyncLog[] = [];
-  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
+  let tokensFound = 0;
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: input.toBlockCeiling,
@@ -361,22 +371,66 @@ export async function runAddressScopedMembershipScan(input: {
   try {
     while (logsScanned < MAX_LOGS_PER_RUN) {
       const res = await withHypersyncReservation(() => client.get(query));
-      seenBlocks.push(...res.data.blocks);
+      const pageLogs: HypersyncLog[] = [];
       for (const log of res.data.logs) {
         if (!log.address) continue;
         const topic0 = log.topics[0]?.toLowerCase();
         if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
         if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
-        rawTransferLogs.push(log);
-        if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
-          const tokenId = BigInt(log.topics[3]).toString();
-          const ids = observedErc721.get(address) ?? new Set<string>();
-          ids.add(tokenId);
-          observedErc721.set(address, ids);
-        }
-        logsScanned += 1;
+        pageLogs.push(log);
       }
+      logsScanned += pageLogs.length;
+
+      // Real fix, 2026-08-26 (HyperSync-primary hydration cutover, external
+      // Grok research review): write every page as it arrives instead of
+      // accumulating the WHOLE scan in memory and committing once at the
+      // end -- this is the literal mechanism behind "thousands of tokens
+      // every 1-2 seconds": a crash/timeout mid-scan now loses at most one
+      // page, not the entire pass, and real membership becomes visible to
+      // the UI incrementally as HyperSync pages land, not only once a full
+      // (potentially multi-minute) scan finishes.
+      const decoded = await writeTransfersFromHypersyncLogs(input.chainSlug, pageLogs, res.data.blocks);
+
+      // Real fix, 2026-08-26: derive membership from the SAME decode pass
+      // transfer-ledger.ts's own decodeTransferLog already performs above
+      // -- covers ERC-721 Transfer AND ERC-1155 TransferSingle/
+      // TransferBatch. The old manual `log.topics[3]` extraction only ever
+      // handled ERC-721 (1155's token id lives in `data`, never inspected),
+      // silently dropping 100% of ERC-1155 membership. Track each token's
+      // LATEST observed `toAddress` in the order decodeTransferLog itself
+      // returns (real chain order for one query page) so a burn (transfer
+      // to the zero address) that happens AFTER an earlier mint/transfer
+      // in the same page is correctly reflected as current state, not
+      // just "this token id was seen at some point" -- see migration 082's
+      // own header for why an ever-seen count made 100% unreachable for
+      // any collection with real burns.
+      const latestToByToken = new Map<string, string>();
+      for (const t of decoded) {
+        if (t.contractAddress !== address) continue;
+        latestToByToken.set(t.tokenId, t.toAddress.toLowerCase());
+      }
+      if (latestToByToken.size > 0) {
+        await upsertCollectionTokenProjection(input.chainSlug, address, {
+          tokens: [...latestToByToken.entries()].map(([tokenId, toAddress]) => ({
+            tokenId, name: null, imageUrl: null, traits: [],
+            isBurned: toAddress === ZERO_ADDRESS,
+          })),
+          partial: true,
+          provenance: [input.provenance],
+          sourceObservedAt: new Date(),
+        });
+        tokensFound += latestToByToken.size;
+      }
+
       nextBlock = res.nextBlock;
+      // Same real clamp as runHypersyncPriorityWindowScan's own fix --
+      // HyperSync's nextBlock has been observed live coming back below the
+      // query's own fromBlock on a large request; never let this regress
+      // the cursor. Written every page now (not once at the very end), so
+      // this must run before advancing the durable cursor on each iteration.
+      nextBlock = Math.max(nextBlock, scannedUpTo);
+      await writeCursor(input.cursorKey, nextBlock);
+
       if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
       query = { ...query, fromBlock: nextBlock };
     }
@@ -385,16 +439,7 @@ export async function runAddressScopedMembershipScan(input: {
     if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});
     throw error;
   }
-  // Same real clamp as runHypersyncPriorityWindowScan's own fix -- HyperSync's
-  // nextBlock has been observed live coming back below the query's own
-  // fromBlock on a large request; never let this regress the cursor.
-  nextBlock = Math.max(nextBlock, scannedUpTo);
 
-  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
-  await persistObservedErc721Membership(input.chainSlug, observedErc721, new Set([address]), input.provenance);
-  await writeCursor(input.cursorKey, nextBlock);
-
-  const tokensFound = observedErc721.get(address)?.size ?? 0;
   const done = nextBlock >= input.toBlockCeiling;
   return { fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, tokensFound, done };
 }

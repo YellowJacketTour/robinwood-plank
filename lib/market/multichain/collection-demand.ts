@@ -59,13 +59,21 @@ export async function hydrationJobSources(
     const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
       "@/lib/market/multichain/discovery/hydration-completion"
     );
+    // Real priority flip, 2026-08-26 (HyperSync-primary hydration cutover,
+    // confirmed decision after external Grok research review): OpenSea's
+    // REST pagination is a hard-walled ~600 req/hr/account vendor limit
+    // (confirmed live) and is being demoted to enrichment-only (stats,
+    // supplementary metadata) -- it must never again outrank the
+    // anchored-membership HyperSync scan below for membership itself,
+    // or a collection page visit goes back to bottlenecking on the same
+    // wall this cutover exists to route around.
     if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
-      list.push({ source: "opensea-membership", basePriority: 98 });
+      list.push({ source: "opensea-membership", basePriority: 90 });
     }
     if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "evm-metadata", basePriority: 97 });
     }
-    list.push({ source: "opensea-stats", basePriority: 96 });
+    list.push({ source: "opensea-stats", basePriority: 89 });
     // Real gap found live 2026-08-25 ("while i visit this page there is
     // still no live sync"): a collection whose OpenSea enumeration has
     // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
@@ -101,7 +109,11 @@ export async function hydrationJobSources(
     // the dependency-free module directly instead.
     const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-status");
     if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
-      list.push({ source: "anchored-membership", basePriority: 95 });
+      // Raised above opensea-membership (90) -- see the priority-flip
+      // comment on that push above. HyperSync's own real per-request cost
+      // is a chain RPC log query, not a rate-walled marketplace REST call,
+      // so it is the source that should win every real contention tie.
+      list.push({ source: "anchored-membership", basePriority: 98 });
     }
     // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
     // then froze"): a SEPARATE, cheap completion check -- deliberately

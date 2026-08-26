@@ -294,8 +294,31 @@ async function main(): Promise<void> {
       // be a real 0x contract -- this is never a background-sweep source.
       if (!/^0x[0-9a-f]{40}$/i.test(subject)) throw new Error("anchored-membership requires a real contract subject");
       const { runAnchoredMembershipBackfill } = await import("../lib/market/multichain/discovery/anchored-membership-backfill");
-      const result = await runAnchoredMembershipBackfill(chain, subject);
-      console.log("[mesh-lane] anchored-membership", JSON.stringify(result));
+      // Real fix, 2026-08-26 (HyperSync-primary hydration cutover): each
+      // call only advances one CHUNK_BLOCKS/MAX_LOGS_PER_RUN-bounded slice
+      // (hypersync-evm-scan.ts's own real per-call caps), and this source
+      // now carries the whole "steady turbo climb to 100%" job that
+      // opensea-membership's own bounded do/while loop above was already
+      // given for the exact same reason -- one HyperSync scan pass per
+      // process spawn means every extra slice pays a full
+      // `spawn(node --import tsx)` cold start instead of looping in-process.
+      // Same bounded-deadline shape as opensea-membership's loop above; no
+      // per-key pace limiter to protect here (HyperSync is not the shared
+      // 6-key OpenSea pool), so this can safely run to its own deadline.
+      const ANCHORED_MAX_PASSES_PER_INVOCATION = 12;
+      let anchoredPasses = 0;
+      let result: Awaited<ReturnType<typeof runAnchoredMembershipBackfill>>;
+      const anchoredDeadline = Date.now() + 30_000;
+      do {
+        result = await runAnchoredMembershipBackfill(chain, subject);
+        anchoredPasses += 1;
+      } while (
+        !result.done &&
+        result.logsScanned > 0 &&
+        anchoredPasses < ANCHORED_MAX_PASSES_PER_INVOCATION &&
+        Date.now() < anchoredDeadline
+      );
+      console.log("[mesh-lane] anchored-membership", JSON.stringify({ ...result, passes: anchoredPasses }));
       // Real bug found live 2026-08-25 ("stuck on 60.04 since coming
       // back"): one call only advances a bounded slice of the real
       // 300,000-block anchor window (Lil Pudgys' first real run moved
