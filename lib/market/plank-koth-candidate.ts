@@ -295,11 +295,24 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
       getWalletSignals(recipient, "robinhood", 10).catch(() => []),
     ]);
     // Unified intelligence layer v1 -- consume, not just produce: a wallet
-    // this same pipeline already flagged on an EARLIER buy this round (or
-    // that some other feature entirely flagged) is real prior signal this
-    // check would otherwise never see, since classifyWallet/getBadSeverity
-    // only know about Bad Boards' own launch-window marks.
-    const priorHighSeverity = priorSignals.find((s) => s.severity >= 0.5);
+    // some OTHER feature entirely flagged (Bad Boards, a future feature) is
+    // real prior signal this check would otherwise never see, since
+    // classifyWallet/getBadSeverity only know about Bad Boards' own
+    // launch-window marks.
+    //
+    // Real bug found live 2026-08-26: this used to include signals with
+    // source "plank_koth_review" -- i.e. THIS SAME PIPELINE'S OWN past
+    // writeReviewQueue calls. Confirmed live: a wallet flagged once under
+    // an OLD, since-fixed classification bug (e.g. the router-mediated-
+    // payment bug fixed earlier tonight) got permanently re-flagged on
+    // every future evaluation forever, with the reason text nesting
+    // recursively ("prior signal from plank_koth_review: prior signal
+    // from plank_koth_review: ...: no value paid resolved") -- the
+    // pipeline was treating its own past, now-known-wrong conclusion as
+    // independent corroborating evidence for the same decision. A
+    // self-sourced signal is not independent evidence; only a signal from
+    // a genuinely different feature counts here.
+    const priorHighSeverity = priorSignals.find((s) => s.severity >= 0.5 && s.source !== "plank_koth_review");
 
     const sale: PlankKothSale = {
       txHash,
