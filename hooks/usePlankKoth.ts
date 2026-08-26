@@ -33,15 +33,22 @@ export type PlankKothResponse = {
   leaderboard?: PlankKothLeaderboardRow[];
   fallenChampions?: FallenChampion[];
   preSeasonRecord?: PreSeasonRecord | null;
-  prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null };
+  prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null; plankEth: number | null };
   plankUsd?: number | null;
 };
 
 /**
- * Live poll of /api/market/plank-koth (lib/market/plank-koth.ts). 8s TTL --
- * fast enough that the leaderboard/leader feel genuinely live without
- * hammering the route (matches useHydrationJobStatus's own 8s cadence
- * elsewhere in this app for the same "feels live" bar).
+ * Live poll of /api/market/plank-koth (lib/market/plank-koth.ts). 3s TTL --
+ * the leader/prize's real ETH-denominated price ratio (prize.plankEth)
+ * only changes when the underlying pool-price source itself refreshes, so
+ * a faster poll here never invents new information -- what it DOES do is
+ * shrink how long a genuine real change sits undetected before this app
+ * shows it, which matters now that the prize's live USD figure is derived
+ * from plankEth * a per-second ETH/USD tick (PlankKothBoard.tsx): the
+ * faster this value catches a real plankEth change, the sooner both
+ * figures are back in sync. Still far below hammering the route (matches
+ * useLiveEthUsd.ts's own real-time feel without needing a second
+ * WebSocket for a value that only meaningfully moves on real trades).
  */
 export function usePlankKoth(): PlankKothResponse | null {
   const [state, setState] = useState<PlankKothResponse | null>(null);
@@ -53,8 +60,8 @@ export function usePlankKoth(): PlankKothResponse | null {
     async function poll() {
       try {
         const data = await swrJson<PlankKothResponse>("/api/market/plank-koth", {
-          ttlMs: 8_000,
-          swrMs: 30_000,
+          ttlMs: 3_000,
+          swrMs: 15_000,
           session: true,
         });
         if (!cancelled) setState(data);
@@ -62,7 +69,7 @@ export function usePlankKoth(): PlankKothResponse | null {
         // Keep the last good state on a transient failure -- never blank
         // a live leaderboard just because one poll dropped.
       }
-      if (!cancelled) timer = window.setTimeout(poll, 8_000);
+      if (!cancelled) timer = window.setTimeout(poll, 3_000);
     }
 
     void poll();

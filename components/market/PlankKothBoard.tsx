@@ -7,7 +7,7 @@ import { usePlankKoth, type PlankKothBuy, type PlankKothLeaderboardRow } from "@
 import { useLiveEthUsd } from "@/hooks/useLiveEthUsd";
 import { useTickDirection, type TickDirection } from "@/hooks/useTickDirection";
 import { explorerTxUrl, explorerAddressUrl } from "@/lib/market/explorer-links";
-import { formatPlankAmount, formatPlankUsdPrice, formatPlankFull } from "@/lib/plank-format";
+import { formatPlankAmount, formatPlankUsdPrice, formatEthFixed } from "@/lib/plank-format";
 
 type Remaining = { days: number; hours: number; minutes: number; seconds: number; complete: boolean };
 
@@ -47,9 +47,32 @@ const TICK_CLASS: Record<TickDirection, string> = {
 
 /** Small "$X.XX" span that genuinely flashes green/red on a real change and
  * settles back to the theme-neutral color when flat -- see
- * hooks/useTickDirection.ts's own header on the honesty constraint. */
-function LiveUsd({ value, label, scientific }: { value: number | null; label: string; scientific?: boolean }) {
-  const direction = useTickDirection(value);
+ * hooks/useTickDirection.ts's own header on the honesty constraint.
+ *
+ * `direction` is optional: when the caller passes one in (see the prize's
+ * own usage below), this uses that SHARED signal instead of computing its
+ * own from `value` alone. Real reason: the prize's USD figure = its real
+ * ETH amount (nearly constant, thinly-traded pool) times the live ETH/USD
+ * rate (the actual thing moving) -- ticking USD off its own value and ETH
+ * off its own value independently made them flash out of sync (USD moved
+ * constantly, ETH almost never), which read as broken/contradictory even
+ * though each was individually honest. Since ETH/USD movement is the one
+ * real cause driving BOTH figures' dollar-denominated meaning, both use
+ * that same direction so "the prize's value just rose/fell" reads as one
+ * coherent signal instead of two independent, desynced ones. */
+function LiveUsd({
+  value,
+  label,
+  scientific,
+  direction: directionOverride,
+}: {
+  value: number | null;
+  label: string;
+  scientific?: boolean;
+  direction?: TickDirection;
+}) {
+  const ownDirection = useTickDirection(value);
+  const direction = directionOverride ?? ownDirection;
   if (value == null) return <span className="text-foreground/40">{"—"}</span>;
   return (
     <span className={`font-mono tabular-nums transition-colors duration-300 ${TICK_CLASS[direction]}`} title={label}>
@@ -58,16 +81,24 @@ function LiveUsd({ value, label, scientific }: { value: number | null; label: st
   );
 }
 
-/** Real ETH-equivalent value that moves live with the WebSocket ETH/USD
- * tick (see useLiveEthUsd.ts) -- ticks green/red exactly like LiveUsd, so
- * the prize's ETH figure visibly reacts to the same feed driving the price
- * strip above it, not a value frozen at the last 8s poll. */
-function LiveEth({ value, label }: { value: number | null; label: string }) {
-  const direction = useTickDirection(value);
+/** Real ETH-equivalent value -- see LiveUsd's own header on why this
+ * shares one direction signal with the USD figure beside it rather than
+ * ticking off its own (nearly-constant) value independently. */
+function LiveEth({
+  value,
+  label,
+  direction: directionOverride,
+}: {
+  value: number | null;
+  label: string;
+  direction?: TickDirection;
+}) {
+  const ownDirection = useTickDirection(value);
+  const direction = directionOverride ?? ownDirection;
   if (value == null) return <span className="text-foreground/40">{"—"}</span>;
   return (
     <span className={`font-mono tabular-nums transition-colors duration-300 ${TICK_CLASS[direction]}`} title={label}>
-      ≈ {formatPlankFull(value, 3)} ETH
+      ≈ {formatEthFixed(value, 3)} ETH
     </span>
   );
 }
@@ -129,6 +160,10 @@ function WalletLink({ wallet }: { wallet: string | null }) {
 export default function PlankKothBoard() {
   const state = usePlankKoth();
   const { price: ethUsd, live: ethLive } = useLiveEthUsd();
+  // Shared tick direction for the prize's USD + ETH figures -- see
+  // LiveUsd's own header on why both must move together off the one real
+  // cause (the ETH/USD rate) rather than each ticking independently.
+  const prizeValueDirection = useTickDirection(ethUsd || null);
   const plankUsd = state?.plankUsd ?? null;
   const [remaining, setRemaining] = useState<Remaining | null>(null);
   const [localLaunched, setLocalLaunched] = useState(false);
@@ -157,7 +192,16 @@ export default function PlankKothBoard() {
   // USD value the server already computed (prize.usdValue) divided by the
   // live ETH/USD tick, not a second independent source, so it can never
   // disagree with the USD figure shown right next to it.
-  const prizeEth = state?.prize?.usdValue != null && ethUsd > 0 ? state.prize.usdValue / ethUsd : null;
+  // Real, stable ETH amount from the pool's own ETH-denominated price
+  // ratio (server-computed, see the API route's own comment) -- and the
+  // USD figure DERIVED from that real ETH amount times the live WebSocket
+  // ETH/USD tick, not the other way around. GeckoTerminal's own USD price
+  // for a token whose only real market is an ETH-paired pool is itself
+  // built from priceEth * ethUsd, so this is the true anchor, and it makes
+  // both figures genuinely move together with the same live feed instead
+  // of the USD number sitting frozen at the last ~60s-cached poll.
+  const prizeEth = state?.prize?.plankEth ?? null;
+  const prizeUsdLive = prizeEth != null && ethUsd > 0 ? prizeEth * ethUsd : (state?.prize?.usdValue ?? null);
 
   if (!state?.available || target == null) return null;
 
@@ -280,8 +324,16 @@ export default function PlankKothBoard() {
                 <PlankAmount raw={state.prize.plankAmount} /> PLANK
               </p>
               <p className="flex flex-wrap items-baseline gap-x-1.5 text-base">
-                <LiveUsd value={state.prize.usdValue} label="Live prize USD value" />
-                <LiveEth value={prizeEth} label="Live prize ETH-equivalent value, moves with the ETH/USD ticker" />
+                <LiveUsd
+                  value={prizeUsdLive}
+                  label="Live prize USD value, tracks the ETH/USD ticker"
+                  direction={prizeValueDirection}
+                />
+                <LiveEth
+                  value={prizeEth}
+                  label="Real ETH-equivalent value of the prize"
+                  direction={prizeValueDirection}
+                />
               </p>
             </div>
           ) : (
