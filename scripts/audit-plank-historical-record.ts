@@ -79,7 +79,7 @@ async function main() {
         skippedRoundTrip += 1;
         continue;
       }
-      const { ethPaidWei, usdValue } = resolveValuePaid(transfers, recipient, ethUsd);
+      const { ethPaidWei, usdValue } = resolveValuePaid(transfers, recipient, ethUsd, recipients.size === 1);
       if (usdValue <= 0) continue;
       if (!best || usdValue > best.usdValue) {
         best = { txHash, wallet: recipient, ethPaidWei: ethPaidWei.toString(), plankAmount: plankAmount.toString(), usdValue, blockNumber };
