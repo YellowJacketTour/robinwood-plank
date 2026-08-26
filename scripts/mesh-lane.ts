@@ -193,11 +193,43 @@ async function main(): Promise<void> {
       let pages = 0;
       let result: Awaited<ReturnType<typeof advanceEvmCollectionMembership>> | null = null;
       const deadline = Date.now() + 30_000;
-      do {
-        result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
-        itemsObserved += result.itemsObserved;
-        pages += 1;
-      } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && Date.now() < deadline);
+      try {
+        do {
+          result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
+          itemsObserved += result.itemsObserved;
+          pages += 1;
+        } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && Date.now() < deadline);
+      } catch (e) {
+        // Real gap found live 2026-08-26 (contention audit follow-up):
+        // "OpenSea pool exhausted" is a genuinely transient, expected
+        // condition under real concurrent demand (provider-pace.ts's own
+        // bounded backlog, not a broken pool -- confirmed live via a
+        // direct isolated key-pool health check succeeding trivially
+        // moments after this exact error). It doesn't match the outer
+        // catch's jail-triggering pattern (429/403/rate limit/quota)
+        // below, so it fell through to a hard failure (exit 1, no
+        // automatic retry) -- meaning real, still-incomplete work sat
+        // waiting for the next organic client visibility ping instead of
+        // self-healing on mesh-tick's very next pass, unlike every other
+        // "more work remains" case in this file. Treat it the same way:
+        // no jail (the resource isn't broken, just busy), no hard
+        // failure, just "try again shortly."
+        // "no OpenSea slug ... no capacity" (resolveOpenSeaSlug's own
+        // message) is the same transient-contention symptom via a
+        // different call site -- genuinely covers both "no capacity right
+        // now" and "collection has no slug" per its own wording, but a
+        // slug-less collection retrying a bounded number of times (capped
+        // by real demand-priority re-enqueue frequency, never infinite)
+        // is a far smaller cost than silently failing every genuinely
+        // transient case.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/pool exhausted|no OpenSea slug/i.test(msg)) {
+          console.log(`[mesh-lane] opensea-membership pool busy, will retry: ${msg.slice(0, 180)}`);
+          process.exitCode = 2;
+          return;
+        }
+        throw e;
+      }
       console.log("[mesh-lane] opensea-membership", JSON.stringify({ ...result, pages, itemsObserved }));
       // Same exit-code-2 signal anchored-membership already uses just
       // below: mesh-tick.ts re-enqueues immediately when real work still
