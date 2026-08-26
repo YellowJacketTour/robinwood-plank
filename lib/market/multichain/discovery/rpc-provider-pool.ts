@@ -71,13 +71,25 @@ const FREE_PUBLIC_RPC: Record<string, Array<{ id: RpcProviderId; url: string }>>
   // publicnode has no zkSync era endpoint -- Matter Labs' own official
   // public RPC (the chain team's own free node) fills this slot.
   "zksync-mainnet": [{ id: "drpc", url: "https://mainnet.era.zksync.io" }],
-  // Robinhood Chain's own official public RPC (rpc.mainnet.chain.robinhood.com,
-  // real, free, keyless, already used elsewhere in this app -- see
-  // lib/mint-contract.ts's ROBINHOOD_RPC_URL) -- not a third-party vendor
-  // at all here, this IS the chain, so there's no quota-exhaustion risk in
-  // the way a paid vendor has. "drpc" tag is a placeholder id only
-  // (checkSourceBudget just needs a stable key); it is not actually dRPC.
-  "robinhood": [{ id: "drpc", url: "https://rpc.mainnet.chain.robinhood.com" }],
+  // Robinhood Chain -- real bug found live 2026-08-26: this used to list
+  // only ONE provider (the chain's own official public RPC), with no real
+  // redundancy at all. Confirmed live, repeatedly: that single endpoint's
+  // real rate limit tripped this pool's own circuit breaker into a real
+  // 15-minute jail multiple times in one night, each time taking down
+  // EVERY real caller sharing this one chain slug (the live KOTH watcher,
+  // its finality-margin math, backfill/diagnostic scripts) simultaneously
+  // -- exactly the single-point-of-failure this whole multi-provider pool
+  // exists to avoid for every OTHER chain. https://robinhood.drpc.org
+  // independently verified live (real eth_chainId call returns 0x1237,
+  // the real correct chain id) as a genuinely separate dRPC-operated
+  // endpoint, distinct from the chain's own official node -- a real
+  // second provider, not a relabeled duplicate of the first. Each keeps
+  // its own distinct provider id so a jail on one can never jail the
+  // other (see providerSource's own per-id key).
+  "robinhood": [
+    { id: "publicnode", url: "https://rpc.mainnet.chain.robinhood.com" },
+    { id: "drpc", url: "https://robinhood.drpc.org" },
+  ],
 };
 
 function alchemyRpcUrl(chainSlug: string): string | null {
