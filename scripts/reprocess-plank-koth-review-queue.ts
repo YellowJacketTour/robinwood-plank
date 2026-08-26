@@ -18,14 +18,23 @@
 import { postgresQuery, hasPostgresConfig } from "../lib/postgres";
 import { evaluatePlankKothCandidate } from "../lib/market/plank-koth-candidate";
 
-/** Real regression found live 2026-08-26 (Blockscout-REST era of this
- * script): unbounded concurrency drowned the one upstream REST dependency
- * everything read from. The RPC-based rewrite above reads from a real
- * multi-provider pool (rpc-provider-pool.ts) with its own per-provider
- * jail/failover, which tolerates far more real concurrent load -- kept
- * modest here anyway since this is a one-shot maintenance script, not a
- * throughput-critical path. */
-const CONCURRENCY = 5;
+/**
+ * Real regression found live 2026-08-26, twice: first the Blockscout-REST
+ * era of this script drowned that one upstream REST dependency under
+ * unbounded concurrency; then, after the RPC-based rewrite, concurrency=5
+ * against Robinhood Chain's RPC pool -- which has only ONE real provider
+ * registered (the official public endpoint; no Alchemy/second provider
+ * exists for this chain, see rpc-provider-pool.ts's own FREE_PUBLIC_RPC
+ * map) -- tripped real HTTP 429s within seconds, which trips the pool's
+ * own circuit breaker into a real 15-MINUTE jail (source-budget.ts's
+ * DEFAULT_JAIL_MS) on a provider key SHARED with the live production
+ * watcher cron. A one-off backfill script accidentally rate-limiting the
+ * live contest's own real-time detection for 15 minutes is a genuinely
+ * serious side effect -- concurrency=1 with a real delay between items
+ * keeps this well under the single public endpoint's real rate limit.
+ */
+const CONCURRENCY = 1;
+const DELAY_BETWEEN_ITEMS_MS = 1_500;
 
 async function main(): Promise<void> {
   if (!hasPostgresConfig()) {
@@ -61,6 +70,7 @@ async function main(): Promise<void> {
       })
     );
     results.push(...batchResults);
+    if (i + CONCURRENCY < pending.rows.length) await new Promise((r) => setTimeout(r, DELAY_BETWEEN_ITEMS_MS));
   }
   const confirmed = results.filter((r) => r === "confirmed").length;
   console.log(`[reprocess] done: ${confirmed} confirmed, ${results.length - confirmed} still flagged/rejected/not-a-buy/errored`);
