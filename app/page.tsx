@@ -1,5 +1,6 @@
 import Nav from "@/components/Nav";
 import Hero from "@/components/Hero";
+import PlankKothLandingBanner from "@/components/market/PlankKothLandingBanner";
 import TrustFacts from "@/components/TrustFacts";
 import Trade from "@/components/Trade";
 import MintInfo from "@/components/MintInfo";
@@ -18,6 +19,11 @@ export default function Home() {
       <Nav />
       <main id="main-content" tabIndex={-1} className="flex-1">
         <Hero />
+        {/* Season 2 "Biggest Buyer Board" -- owner directive: a large, warm
+            welcome to the live competition right on the landing page,
+            one click to /season2, before anything else competes for
+            attention below it. */}
+        <PlankKothLandingBanner />
         {/* Trust facts moved directly under the hero CTA row (CRO rationale:
             answer "is this a rug" in the same viewport as the ask). */}
         <TrustFacts />
