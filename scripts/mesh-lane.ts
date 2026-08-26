@@ -174,15 +174,30 @@ async function main(): Promise<void> {
       // watching. Bounded well under LANE_TIMEOUT_MS (90s, this file's own
       // MAX_LANE_MS-equivalent constant above) so a slow/rate-limited
       // collection can never make this lane itself time out.
+      // Real regression found live 2026-08-26, same day as the fix above:
+      // an unbounded-pages/45s loop, multiplied across every collection
+      // with live demand running concurrently (mesh-tick's own --limit
+      // lanes), overran provider-pace.ts's own backlog ceiling
+      // (minIntervalMs * 10 =~ 62s deep queue) -- confirmed live,
+      // Decentraland started hitting "OpenSea pool exhausted/jailed" on
+      // every attempt with the key pool itself checking out perfectly
+      // healthy moments later (a load/contention symptom, not a broken
+      // pool). One collection holding the shared pace queue's attention
+      // for up to 45s starves every OTHER collection's own single-page
+      // call queued behind it. Capped lower so one invocation's real gain
+      // over the old single-page behavior (still a meaningful 8x) doesn't
+      // come at the cost of starving concurrent demand for other
+      // collections sharing the same 6-key pool.
+      const MAX_PAGES_PER_INVOCATION = 8;
       let itemsObserved = 0;
       let pages = 0;
       let result: Awaited<ReturnType<typeof advanceEvmCollectionMembership>> | null = null;
-      const deadline = Date.now() + 45_000;
+      const deadline = Date.now() + 30_000;
       do {
         result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
         itemsObserved += result.itemsObserved;
         pages += 1;
-      } while (!result.complete && result.itemsObserved > 0 && Date.now() < deadline);
+      } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && Date.now() < deadline);
       console.log("[mesh-lane] opensea-membership", JSON.stringify({ ...result, pages, itemsObserved }));
       // Same exit-code-2 signal anchored-membership already uses just
       // below: mesh-tick.ts re-enqueues immediately when real work still
