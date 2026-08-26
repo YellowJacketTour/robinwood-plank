@@ -23,25 +23,48 @@
  * describes real soft (<1s) vs hard (~13min, L1-anchored) finality, and
  * explicitly warns not to treat a soft confirmation as settlement. Rather
  * than a stateful "pending" queue, this watcher simply never processes a
- * transfer whose own block is younger than the finality window (estimated
- * from block number now that discovery is block-native, not Blockscout
- * timestamp-native) — it stays unprocessed (cursor does not advance past
- * it) and gets picked up on a later pass once it's actually old enough.
+ * transfer whose own block is younger than the finality window — it stays
+ * unprocessed (cursor does not advance past it) and gets picked up on a
+ * later pass once it's actually old enough.
+ *
+ * Real bug found live 2026-08-26, moments after this rewrite first
+ * deployed: an initial hardcoded "2 blocks/second" assumption (meant to be
+ * a generous, conservative guess) turned out to be ~5x SLOWER than this
+ * chain's real measured rate (~9.9 blocks/sec, computed from two real,
+ * confirmed (block, timestamp) pairs from production transfers earlier
+ * this same session) -- silently shrinking the intended 16-minute finality
+ * margin down to roughly 3 minutes, the exact failure direction ("false-
+ * early promotion") this whole gate exists to prevent. Never hardcode a
+ * rate again: measure the chain's REAL, currently-observed block rate
+ * fresh on every single pass from two real block timestamps, so this
+ * self-corrects if the chain's real block time ever changes.
  */
-import { scanForCandidates } from "@/lib/market/plank-koth-rpc-scan";
+import { scanForCandidates, fetchBlockTimestampRpc } from "@/lib/market/plank-koth-rpc-scan";
 import { evaluatePlankKothCandidate } from "@/lib/market/plank-koth-candidate";
 import { startJobRun, heartbeatJobRun, finishJobRun, upsertEvalResult } from "@/lib/market/contest-job-observability";
 
-/** ~13 real documented minutes plus a safety margin -- see this file's own
- * header. Never hard-code a shorter window; a false-early promotion is the
- * one failure mode real value is riding on here. Robinhood Chain is
- * documented sub-second block time; a generous 2 blocks/second assumption
- * (conservative -- real blocks land faster) converts the same real 16-
- * minute delay into a block-count finality margin without depending on
- * Blockscout's own per-transfer timestamp field. */
 const FINALITY_DELAY_MS = 16 * 60 * 1000;
-const ASSUMED_BLOCKS_PER_SECOND = 2;
-const FINALITY_DELAY_BLOCKS = Math.ceil((FINALITY_DELAY_MS / 1000) * ASSUMED_BLOCKS_PER_SECOND);
+
+/**
+ * Real, live-measured finality boundary: fetches the real timestamp of two
+ * blocks from THIS pass's own scanned range and derives the chain's actual
+ * current block rate from them, then converts the real 16-minute delay
+ * into a block-count margin from that measured rate -- never a hardcoded
+ * guess. Falls back to the most conservative real answer (every candidate
+ * in this pass is treated as NOT yet finalized) if the chain's own block
+ * timestamps ever come back non-monotonic or otherwise untrustworthy,
+ * since understating the margin is the one failure mode that matters.
+ */
+async function computeFinalityBoundaryBlock(fromBlock: number, headBlock: number): Promise<number> {
+  if (headBlock <= fromBlock) return -1; // no real range to measure from; nothing is safe to finalize yet
+  const [fromTs, headTs] = await Promise.all([fetchBlockTimestampRpc(fromBlock), fetchBlockTimestampRpc(headBlock)]);
+  const blockDelta = headBlock - fromBlock;
+  const secondsDelta = headTs - fromTs;
+  if (secondsDelta <= 0) return -1; // non-monotonic timestamps -- distrust entirely, fail safe
+  const realBlocksPerSecond = blockDelta / secondsDelta;
+  const finalityDelayBlocks = Math.ceil((FINALITY_DELAY_MS / 1000) * realBlocksPerSecond);
+  return headBlock - finalityDelayBlocks;
+}
 
 /** Bounded so a first-run (or catch-up-after-downtime) historical backlog
  * can't make a single watch pass run unboundedly long -- each candidate
@@ -66,7 +89,7 @@ export async function runPlankKothWatch(): Promise<PlankKothWatchResult> {
     // the finality margin (the RPC scan's cursor already only advances
     // through blocks it successfully scanned, so this is purely about
     // WHICH already-discovered candidates are safe to evaluate now).
-    const finalityBoundary = scan.headBlock - FINALITY_DELAY_BLOCKS;
+    const finalityBoundary = await computeFinalityBoundaryBlock(scan.fromBlock, scan.headBlock);
     const finalized = scan.candidates.filter((c) => c.blockNumber <= finalityBoundary);
     const sawUnfinalized = finalized.length < scan.candidates.length;
 
