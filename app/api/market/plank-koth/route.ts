@@ -3,6 +3,7 @@ import { getPlankKoth, getFallenChampions, getPreSeasonRecord, PLANK_KOTH_LAUNCH
 import { postgresQuery } from "@/lib/postgres";
 import { getPlankSupply } from "@/lib/plank-supply";
 import { getPlankPoolStats } from "@/lib/plank-price";
+import { getPlankEthSpotPrice } from "@/lib/market/plank-live-price";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,7 +46,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const [leaderboard, fallenChampions, preSeasonRecord, supply, poolStats] = await Promise.all([
+    const [leaderboard, fallenChampions, preSeasonRecord, supply, poolStats, liveEthPerPlank] = await Promise.all([
       postgresQuery<LeaderboardRow>(
         `SELECT tx_hash, wallet, eth_paid_wei, plank_amount, usd_value_at_buy, block_number, confirmed_at
            FROM plank_koth_leaderboard
@@ -60,6 +61,7 @@ export async function GET(req: Request) {
       // valuation already uses, rather than a second ad hoc on-chain read.
       getPlankSupply().catch(() => null),
       getPlankPoolStats().catch(() => null),
+      getPlankEthSpotPrice().catch(() => null),
     ]);
 
     const prizePlankAmount = supply ? BigInt(supply.totalSupplyRaw) * 694_200n / 100_000_000n : null;
@@ -108,15 +110,19 @@ export async function GET(req: Request) {
         supplyFraction: PRIZE_SUPPLY_FRACTION,
         plankAmount: prizePlankAmount != null ? prizePlankAmount.toString() : null,
         usdValue: prizeUsdValue,
-        // Real ETH amount of PLANK the prize is worth, from the pool's own
-        // ETH-denominated price (poolStats.priceEth) -- NOT usdValue /
-        // ethUsd. GeckoTerminal's own priceUsd for a token whose only real
-        // market is an ETH-paired AMM pool is itself DERIVED from
-        // priceEth * ethUsd, so this is the true anchor value: multiplying
-        // it by a LIVE ethUsd tick client-side gives a genuinely live,
-        // correctly-correlated USD figure instead of one frozen at the
-        // last ~60s-cached poll.
-        plankEth: prizePlankTokens != null && poolStats?.priceEth != null ? prizePlankTokens * poolStats.priceEth : null,
+        // Real ETH amount of PLANK the prize is worth -- NOT usdValue /
+        // ethUsd (multiplying a live ethUsd tick client-side by this value
+        // gives a genuinely live, correctly-correlated USD figure instead
+        // of one frozen at a stale poll). Sourced from the canonical v2
+        // pool's own on-chain reserves (lib/market/plank-live-price.ts),
+        // not GeckoTerminal's cached derivation of them -- see that
+        // module's header for the 2026-08-26 audit finding this replaced.
+        // Falls back to poolStats.priceEth only if the live on-chain read
+        // itself fails (RPC outage), never silently for staleness alone.
+        plankEth: (() => {
+          const ethPerPlank = liveEthPerPlank ?? poolStats?.priceEth ?? null;
+          return prizePlankTokens != null && ethPerPlank != null ? prizePlankTokens * ethPerPlank : null;
+        })(),
       },
       plankUsd: poolStats?.priceUsd ?? null,
     });
