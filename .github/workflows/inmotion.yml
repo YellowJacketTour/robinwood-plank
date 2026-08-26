@@ -32,6 +32,7 @@ on:
           - repair-activity
           - diagnose-plank-koth-review-queue
           - reprocess-plank-koth-review-queue
+          - reset-plank-koth-rpc-cursor
       repair_from_block:
         description: >-
           repair-activity only — first block to re-derive. Defaults to
@@ -44,6 +45,13 @@ on:
         description: >-
           repair-activity only — last block to re-derive. Empty resolves to
           the current chain head at run time.
+        required: false
+        type: string
+      plank_rpc_cursor_reset_block:
+        description: >-
+          reset-plank-koth-rpc-cursor only — real Robinhood Chain block
+          number to rewind the RPC scanner's own cursor to (must be BEFORE
+          its current position; this script refuses to move it forward).
         required: false
         type: string
       confirmation:
@@ -152,6 +160,7 @@ jobs:
       - run: npm run build:audit-preseason
       - run: npm run build:koth-diag
       - run: npm run build:koth-reprocess
+      - run: npm run build:koth-cursor-reset
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -178,6 +187,7 @@ jobs:
           test -s .next/standalone/scripts/audit-plank-historical-record.mjs
           test -s .next/standalone/scripts/plank-koth-review-queue-dump.mjs
           test -s .next/standalone/scripts/reprocess-plank-koth-review-queue.mjs
+          test -s .next/standalone/scripts/reset-plank-koth-rpc-cursor.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
@@ -1060,6 +1070,78 @@ jobs:
           test -s "$artifact"
           cd "$app_dir/current"
           "$node_bin" --env-file="$env_file" "$artifact"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # TEMPORARY one-shot (added 2026-08-26, see scripts/reset-plank-koth-rpc-
+  # cursor.ts's own header). Rewinds the RPC scanner's cursor back to a real
+  # block near Season 2's actual launch, so the live cron naturally backfills
+  # the whole missed window on its normal cadence instead of a separate
+  # backfill script. Remove this job (and build:koth-cursor-reset, and the
+  # script) once the cron has caught back up to real-time.
+  # ---------------------------------------------------------------------------
+  reset-plank-koth-rpc-cursor:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'reset-plank-koth-rpc-cursor'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      PLANK_RPC_CURSOR_RESET_BLOCK: ${{ inputs.plank_rpc_cursor_reset_block }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          test -n "$PLANK_RPC_CURSOR_RESET_BLOCK"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run the cursor reset and print its output to this log
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$PLANK_RPC_CURSOR_RESET_BLOCK" <<'REMOTE'
+          set -euxo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          reset_block="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          artifact="$app_dir/current/scripts/reset-plank-koth-rpc-cursor.mjs"
+          test -s "$artifact"
+          cd "$app_dir/current"
+          PLANK_RPC_CURSOR_RESET_BLOCK="$reset_block" "$node_bin" --env-file="$env_file" "$artifact"
           REMOTE
 
   audit-preseason-record:
