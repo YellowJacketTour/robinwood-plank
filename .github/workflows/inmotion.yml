@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
+        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, audit the pre-season $PLANK record, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
         required: true
         type: choice
         default: deploy
@@ -25,6 +25,7 @@ on:
           - provision-relayer
           - verify-relayer
           - provision-plank-koth-watch
+          - audit-preseason-record
           - set-admin-allowlist
           - set-dispatch-token
           - purge-market-data
@@ -896,6 +897,66 @@ jobs:
           test "$cron_observed" = "true"
           echo "PLANK_KOTH_WATCH_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 5 "$log_file"
+          REMOTE
+
+  audit-preseason-record:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'audit-preseason-record'
+    runs-on: ubuntu-latest
+    # A full historical walk of every canonical pool's transfers, one
+    # Blockscout round-trip per candidate transaction (see the script's own
+    # header) -- real data measured locally at ~500+ candidates, comfortably
+    # under an hour but nowhere near instant.
+    timeout-minutes: 60
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run the one-time pre-season audit against production
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          npx_bin="$(dirname "$node_bin")/npx"
+          test -x "$npx_bin"
+          env_file="$app_dir/shared/.env.production"
+          script="$app_dir/current/scripts/audit-plank-historical-record.ts"
+          test -s "$env_file"
+          test -s "$script"
+          cd "$app_dir/current"
+          "$npx_bin" tsx --env-file="$env_file" "$script"
           REMOTE
 
   admin-allowlist:
