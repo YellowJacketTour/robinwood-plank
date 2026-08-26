@@ -19,6 +19,8 @@ export type FallenChampion = PlankKothBuy & {
   dethronedByTxHash: string | null;
 };
 
+export type PreSeasonRecord = PlankKothBuy & { auditedAt: string };
+
 export type PlankKothResponse = {
   available: boolean;
   launchAt?: string;
@@ -30,6 +32,7 @@ export type PlankKothResponse = {
   winner?: PlankKothBuy | null;
   leaderboard?: PlankKothLeaderboardRow[];
   fallenChampions?: FallenChampion[];
+  preSeasonRecord?: PreSeasonRecord | null;
   prize?: { supplyFraction: number; plankAmount: string | null; usdValue: number | null };
   plankUsd?: number | null;
 };

@@ -58,6 +58,20 @@ function LiveUsd({ value, label, scientific }: { value: number | null; label: st
   );
 }
 
+/** Real ETH-equivalent value that moves live with the WebSocket ETH/USD
+ * tick (see useLiveEthUsd.ts) -- ticks green/red exactly like LiveUsd, so
+ * the prize's ETH figure visibly reacts to the same feed driving the price
+ * strip above it, not a value frozen at the last 8s poll. */
+function LiveEth({ value, label }: { value: number | null; label: string }) {
+  const direction = useTickDirection(value);
+  if (value == null) return <span className="text-foreground/40">{"—"}</span>;
+  return (
+    <span className={`font-mono tabular-nums transition-colors duration-300 ${TICK_CLASS[direction]}`} title={label}>
+      ≈ {formatPlankFull(value, 3)} ETH
+    </span>
+  );
+}
+
 /** PLANK amounts on this dashboard range from a few tokens to trillions
  * (the prize alone is ~6.17T) -- always show the abbreviated K/M/B/T form
  * as the headline, with the real comma-grouped full number as a hover
@@ -153,7 +167,7 @@ export default function PlankKothBoard() {
   return (
     <div
       className={[
-        "flex flex-col gap-4 overflow-hidden rounded-2xl border p-4 sm:p-6",
+        "flex flex-col gap-4 overflow-hidden rounded-2xl border p-4 sm:p-6 lg:gap-5 lg:p-8",
         inFinalStretch
           ? "border-red-500/60 bg-[linear-gradient(160deg,rgba(127,29,29,0.25),theme(colors.panel))] shadow-[0_0_40px_-12px_rgba(248,113,113,0.4)]"
           : "border-gold-500/40 bg-[linear-gradient(160deg,rgba(180,140,40,0.14),theme(colors.panel))]",
@@ -191,6 +205,17 @@ export default function PlankKothBoard() {
               ⚠ Final stretch — any new record buy extends the clock 4h
             </p>
           )}
+          {/* Pre-season reference only -- see migration 079's own header.
+              Never shown once the real competition is live; a pre-launch
+              buy was never a real contest entry, this is purely "here's
+              proof the methodology holds up against real history." */}
+          {!launched && state?.preSeasonRecord && (
+            <p className="mt-1 text-[0.62rem] text-foreground/40">
+              Pre-season record:{" "}
+              <PlankAmount raw={state.preSeasonRecord.plankAmount} className="text-foreground/55" /> PLANK
+              {state.preSeasonRecord.usdValueAtBuy != null && ` (${formatUsd(state.preSeasonRecord.usdValueAtBuy)})`}
+            </p>
+          )}
         </div>
       </div>
 
@@ -208,9 +233,9 @@ export default function PlankKothBoard() {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:gap-5">
         {/* Current leading buy — the hero element */}
-        <div className="relative overflow-hidden rounded-xl border border-gold-500/50 bg-[linear-gradient(150deg,rgba(180,140,40,0.18),rgba(0,0,0,0.15))] p-4">
+        <div className="relative overflow-hidden rounded-xl border border-gold-500/50 bg-[linear-gradient(150deg,rgba(180,140,40,0.18),rgba(0,0,0,0.15))] p-4 lg:p-6">
           <p className="flex items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-wider text-gold-300">
             <span aria-hidden>👑</span> {state.finalized ? "Winning buy" : "Current leading buy"}
           </p>
@@ -244,7 +269,7 @@ export default function PlankKothBoard() {
         </div>
 
         {/* Prize */}
-        <div className="rounded-xl border border-line-strong bg-wood-900/30 p-4">
+        <div className="rounded-xl border border-line-strong bg-wood-900/30 p-4 lg:p-6">
           <p className="flex items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-wider text-foreground/45">
             <span aria-hidden>🏆</span> Prize ·{" "}
             {state.prize ? `${(state.prize.supplyFraction * 100).toFixed(5)}%` : ""} of total supply
@@ -254,11 +279,9 @@ export default function PlankKothBoard() {
               <p className="font-display text-2xl font-bold text-gold-300">
                 <PlankAmount raw={state.prize.plankAmount} /> PLANK
               </p>
-              <p className="text-base">
+              <p className="flex flex-wrap items-baseline gap-x-1.5 text-base">
                 <LiveUsd value={state.prize.usdValue} label="Live prize USD value" />
-                {prizeEth != null && (
-                  <span className="ml-1.5 text-foreground/55">≈ {formatPlankFull(prizeEth, 3)} ETH</span>
-                )}
+                <LiveEth value={prizeEth} label="Live prize ETH-equivalent value, moves with the ETH/USD ticker" />
               </p>
             </div>
           ) : (
