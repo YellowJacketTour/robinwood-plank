@@ -146,6 +146,8 @@ jobs:
       - run: npm run build:relayer
       - run: npm run build:market-refresh
       - run: npm run build:reindex
+      - run: npm run build:plank-koth-watch
+      - run: npm run build:audit-preseason
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -168,6 +170,8 @@ jobs:
           # drand relayer.
           test -s .next/standalone/scripts/refresh-market-data.mjs
           test -s .next/standalone/scripts/reindex-chain-events.mjs
+          test -s .next/standalone/scripts/plank-koth-watch-standalone.mjs
+          test -s .next/standalone/scripts/audit-plank-historical-record.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
@@ -841,14 +845,14 @@ jobs:
 
           env_file="$app_dir/shared/.env.production"
           test -s "$env_file"
-          artifact="$app_dir/current/scripts/plank-koth-watch-standalone.ts"
+          # The standalone Next.js release tree ships no devDependencies at
+          # all (npx does not exist next to node there either, confirmed
+          # 2026-08-26) -- there is no tsx and never will be. This script
+          # runs from the esbuild-bundled .mjs (package.json's own
+          # build:plank-koth-watch), same convention as reindex-chain-
+          # events.mjs/refresh-market-data.mjs, not the raw .ts source.
+          artifact="$app_dir/current/scripts/plank-koth-watch-standalone.mjs"
           test -s "$artifact"
-          # npx does not exist next to node in this cPanel nodevenv (real,
-          # confirmed failure 2026-08-26: `test -x "$(dirname node)/npx"`
-          # failed silently) -- invoke tsx's own CLI entry point directly
-          # via node instead, no npx in the path at all.
-          tsx_cli="$app_dir/current/node_modules/tsx/dist/cli.mjs"
-          test -s "$tsx_cli"
 
           logs_dir="$app_dir/logs"
           log_file="$logs_dir/plank-koth-watch.log"
@@ -866,7 +870,7 @@ jobs:
           # to fail silently every two minutes with nobody watching.
           cd "$app_dir/current"
           "$flock_bin" -w 55 "$lock_file" \
-            "$node_bin" --env-file="$env_file" "$tsx_cli" "$artifact" \
+            "$node_bin" --env-file="$env_file" "$artifact" \
             >> "$log_file" 2>&1
           tail -n 5 "$log_file"
 
@@ -877,9 +881,9 @@ jobs:
           awk '!/plank-koth-watch/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# plank-koth-watch (managed by inmotion branch)'
-            printf '*/2 * * * * cd %s && %s -n %s %s --env-file=%s %s %s >> %s 2>&1\n' \
+            printf '*/2 * * * * cd %s && %s -n %s %s --env-file=%s %s >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
-              "$tsx_cli" "$artifact" "$log_file"
+              "$artifact" "$log_file"
           } >> "$cron_after"
           crontab "$cron_after"
           managed_count="$(crontab -l | grep -c 'plank-koth-watch' || true)"
@@ -955,16 +959,15 @@ jobs:
           esac
           test -x "$node_bin"
           env_file="$app_dir/shared/.env.production"
-          script="$app_dir/current/scripts/audit-plank-historical-record.ts"
+          # The standalone release tree ships no devDependencies (no tsx,
+          # no npx next to node -- confirmed 2026-08-26); this runs from
+          # the esbuild-bundled .mjs (package.json's build:audit-preseason),
+          # same convention as reindex-chain-events.mjs.
+          script="$app_dir/current/scripts/audit-plank-historical-record.mjs"
           test -s "$env_file"
           test -s "$script"
-          # npx does not exist next to node in this cPanel nodevenv (real,
-          # confirmed failure 2026-08-26) -- invoke tsx's own CLI entry
-          # point directly via node instead.
-          tsx_cli="$app_dir/current/node_modules/tsx/dist/cli.mjs"
-          test -s "$tsx_cli"
           cd "$app_dir/current"
-          "$node_bin" --env-file="$env_file" "$tsx_cli" "$script"
+          "$node_bin" --env-file="$env_file" "$script"
           REMOTE
 
   admin-allowlist:
