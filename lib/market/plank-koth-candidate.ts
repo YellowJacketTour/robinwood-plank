@@ -214,9 +214,19 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
   const quoteTokenAddresses = [...new Set(CANONICAL_PLANK_POOLS.map((p) => p.counterToken.toLowerCase()))];
   const relevantTokens = new Set([PLANK_CONTRACT.toLowerCase(), ...quoteTokenAddresses]);
   const decoded = decodeErc20TransfersForTokens(receipt.logs, relevantTokens);
-  if (!decoded.some((t) => t.tokenAddress === PLANK_CONTRACT.toLowerCase() && isCanonicalPlankPool(t.from))) {
-    return { status: "not_a_buy" };
-  }
+  // Real gap found live 2026-08-26 (external Grok research review, second
+  // pass): this used to hard-require a PLANK leg sourced from one of the
+  // 3 hardcoded canonical pools before even attempting classification --
+  // a real buy through ANY other venue (a new fee tier, a new DEX, a
+  // V4-style pool manager) never got past this gate no matter how
+  // correct the net-balance classifier below is. Confirmed live: real
+  // buys over $600/$1,000 went missing this way while the watcher was
+  // otherwise healthy. Per Dune/subgraph-style indexer convention, pool
+  // allowlisting is a VENUE-QUALITY signal applied where it belongs
+  // (further down, informing fraud/venue holds), never the gate that
+  // decides whether classification is even attempted. If there is no
+  // real PLANK transfer at all, classifyNetBuyCandidates below naturally
+  // produces zero candidates and this still correctly rejects.
 
   // Real gap found live 2026-08-26 (confirmed against real production tx
   // 0x0716472e...4e74ab): a "swap ETH for tokens" buy pays via the
