@@ -116,8 +116,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // IMPORTANT: use the exact same JSON serialization as the client and
-    // plank.love's generic wallet-proof verifier.
     const canonicalPayload = {
       wallet,
       scope: "plankspace",
@@ -133,7 +131,10 @@ export async function POST(request: Request) {
 
     if (!verified.ok || verified.address !== wallet) {
       return Response.json(
-        { error: "Wallet signature did not match the connected plank.love wallet" },
+        {
+          error:
+            "Wallet signature did not match the active plank.love wallet. Reload the page and reconnect from the top navigation.",
+        },
         { status: 403 },
       );
     }
@@ -145,12 +146,11 @@ export async function POST(request: Request) {
       bytes,
       (b) => b.toString(16).padStart(2, "0"),
     ).join("");
+
     const expiresAt = new Date(
       Date.now() + SESSION_HOURS * 60 * 60 * 1000,
     ).toISOString();
 
-    // One active PlankSpace token per wallet. A successful new proof rotates
-    // the previous token instead of creating parallel sessions.
     await db.delete(walletSessions).where(eq(walletSessions.wallet, wallet));
     await db.insert(walletSessions).values({
       tokenHash: await sha256(token),
