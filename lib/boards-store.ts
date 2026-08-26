@@ -318,7 +318,7 @@ export async function markBadBoard(opts: {
 
   const at = opts.at ?? new Date();
   const good = await isGoodWood(a);
-  return mutateState((state) => {
+  const entry = await mutateState((state) => {
     // Check inside the write transaction so another Passenger worker cannot
     // register a widget session between this decision and the update.
     if (
@@ -373,6 +373,28 @@ export async function markBadBoard(opts: {
     touchCooldown(state, a, at);
     return entry;
   });
+
+  // Real fix, 2026-08-25 (docs/marketplank/GROK-FINDINGS-unified-
+  // intelligence-layer-2026-08-25.md's own most-actionable recommendation):
+  // a wallet marked here used to be invisible to every other feature (the
+  // $PLANK KOTH fraud pipeline included) -- write the same real observation
+  // into the shared wallet_signals ledger so it stops being discarded at
+  // this feature's own boundary. Best-effort: recordWalletSignal already
+  // swallows its own failures rather than risking this mark itself.
+  if (entry) {
+    const { recordWalletSignal } = await import("@/lib/market/wallet-signals");
+    await recordWalletSignal({
+      wallet: a,
+      chainSlug: "robinhood",
+      source: "bad_boards",
+      severity: entry.wasGoodWood ? 0.85 : 0.65,
+      reason: opts.reason,
+      evidence: { venue: entry.venue, sources: entry.sources },
+      txHash: opts.txHash ?? null,
+    });
+  }
+
+  return entry;
 }
 
 /**
