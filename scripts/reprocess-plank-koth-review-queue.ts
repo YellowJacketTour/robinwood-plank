@@ -16,6 +16,21 @@
 import { postgresQuery, hasPostgresConfig } from "../lib/postgres";
 import { evaluatePlankKothCandidate } from "../lib/market/plank-koth-candidate";
 
+/**
+ * Real bug found live 2026-08-26: the original version of this script
+ * awaited evaluatePlankKothCandidate ONE tx at a time. That function's own
+ * checkFundingSourceLink can make up to ~7 sequential Blockscout calls per
+ * candidate (each up to a real ~30s worst case with its own one-retry
+ * backoff -- see blockscout.ts's bsGetRetried), and Blockscout is
+ * confirmed genuinely flaky in production. Serially, 20 backlogged
+ * candidates' worst case is tens of minutes -- well past this workflow
+ * job's own 10-minute cap, so it looked hung when it was really just
+ * badly scoped. These 20 tx hashes are fully independent (distinct tx
+ * hashes, ON CONFLICT DO NOTHING on every write), so there is no
+ * correctness reason to serialize them -- run them concurrently instead,
+ * which bounds total wall-clock to roughly the SLOWEST single candidate
+ * rather than the sum of all of them.
+ */
 async function main(): Promise<void> {
   if (!hasPostgresConfig()) {
     throw new Error("reprocess-plank-koth-review-queue: no PostgreSQL configured");
@@ -23,26 +38,29 @@ async function main(): Promise<void> {
   const pending = await postgresQuery<{ tx_hash: string; wallet: string | null }>(
     `SELECT DISTINCT tx_hash, wallet FROM plank_koth_review_queue WHERE status = 'pending'`
   );
-  console.log(`[reprocess] ${pending.rows.length} pending review-queue tx hashes to re-evaluate`);
+  console.log(`[reprocess] ${pending.rows.length} pending review-queue tx hashes to re-evaluate (running concurrently)`);
 
-  let confirmed = 0;
-  let stillFlaggedOrRejected = 0;
-  for (const row of pending.rows) {
-    const outcome = await evaluatePlankKothCandidate(row.tx_hash);
-    console.log(`[reprocess] ${row.tx_hash} -> ${outcome.status}`);
-    if (outcome.status === "confirmed") {
-      confirmed += 1;
-      await postgresQuery(
-        `UPDATE plank_koth_review_queue
-         SET status = 'approved', resolved_at = NOW(), resolved_by = 'automated-reprocess-2026-08-26'
-         WHERE tx_hash = $1 AND status = 'pending'`,
-        [row.tx_hash]
-      );
-    } else {
-      stillFlaggedOrRejected += 1;
-    }
-  }
-  console.log(`[reprocess] done: ${confirmed} confirmed, ${stillFlaggedOrRejected} still flagged/rejected/not-a-buy`);
+  const results = await Promise.all(
+    pending.rows.map(async (row) => {
+      const outcome = await evaluatePlankKothCandidate(row.tx_hash).catch((error) => {
+        console.error(`[reprocess] ${row.tx_hash} -> ERROR`, error instanceof Error ? error.message : error);
+        return null;
+      });
+      if (outcome) console.log(`[reprocess] ${row.tx_hash} -> ${outcome.status}`);
+      if (outcome?.status === "confirmed") {
+        await postgresQuery(
+          `UPDATE plank_koth_review_queue
+           SET status = 'approved', resolved_at = NOW(), resolved_by = 'automated-reprocess-2026-08-26'
+           WHERE tx_hash = $1 AND status = 'pending'`,
+          [row.tx_hash]
+        );
+        return "confirmed" as const;
+      }
+      return "still-flagged-or-rejected" as const;
+    })
+  );
+  const confirmed = results.filter((r) => r === "confirmed").length;
+  console.log(`[reprocess] done: ${confirmed} confirmed, ${results.length - confirmed} still flagged/rejected/not-a-buy/errored`);
 }
 
 main()
