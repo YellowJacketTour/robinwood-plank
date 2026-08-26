@@ -224,7 +224,19 @@ async function main(): Promise<void> {
         // transient case.
         const msg = e instanceof Error ? e.message : String(e);
         if (/pool exhausted|no OpenSea slug/i.test(msg)) {
+          // Real regression found live 2026-08-26, moments after shipping
+          // the fix above: mesh-tick.ts re-enqueues on exit=2 with no
+          // delay, and its worker loop reclaims the very next job
+          // immediately -- confirmed live, this retried in a tight loop
+          // (multiple claims/sec) that kept adding NEW pace-claim attempts
+          // to the very backlog queue causing the contention, never
+          // letting it drain. A real, bounded sleep here (this process
+          // exits only after it elapses, so mesh-tick's own re-enqueue+
+          // reclaim genuinely waits this long) gives the shared pace queue
+          // real wall-clock time to drain between retries instead of
+          // hammering it continuously.
           console.log(`[mesh-lane] opensea-membership pool busy, will retry: ${msg.slice(0, 180)}`);
+          await new Promise((resolve) => setTimeout(resolve, 8_000));
           process.exitCode = 2;
           return;
         }
