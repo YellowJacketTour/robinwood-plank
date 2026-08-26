@@ -262,16 +262,24 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
     const recipient = candidate.wallet;
     const plankAmount = candidate.plankAmount;
     if (candidate.hasRoundTripShape) {
+      // Owner directive, 2026-08-26: security/fraud gates (round-trip,
+      // Bad Boards, prior-signal, funding-source) are DELIBERATELY
+      // downgraded to record-only for now -- "allow all buys to be
+      // listed... we will implement the security measures later with
+      // higher confidence." Still written to the review queue (so this
+      // signal isn't lost and can be revisited once these gates are
+      // re-enabled), but no longer blocks confirmation on its own. Only
+      // "not a real buy at all" (no candidate / no real value paid) stays
+      // a hard rejection.
       await writeReviewQueue({
         txHash,
         wallet: recipient,
         ethPaidWei: null,
         plankAmount: plankAmount.toString(),
         blockNumber,
-        reason: "same-tx round-trip shape: this wallet also nets positive in a quote asset in this same tx",
+        reason: "same-tx round-trip shape: this wallet also nets positive in a quote asset in this same tx (SECURITY GATE DISABLED -- recorded, not blocked)",
         evidence: { logs: receipt.logs },
       });
-      continue;
     }
 
     const { ethPaidWei, usdValue } = resolveValuePaidFromNet(candidate, ethUsd);
@@ -329,6 +337,10 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
       blockNumber,
     };
 
+    // Owner directive, 2026-08-26 (see the round-trip check above for the
+    // full explanation): these three security/fraud gates are recorded
+    // for a future re-enablement pass, but none of them block confirmation
+    // right now.
     if ((board.side === "bad_boards" || board.side === "fallen") && severity > 0.3) {
       await writeReviewQueue({
         txHash,
@@ -336,10 +348,9 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
         blockNumber,
-        reason: `wallet has real Bad Boards history (side=${board.side}, severity=${severity.toFixed(2)}) -- ${board.badEntry?.reason ?? "reason not recorded"}`,
+        reason: `wallet has real Bad Boards history (side=${board.side}, severity=${severity.toFixed(2)}) -- ${board.badEntry?.reason ?? "reason not recorded"} (SECURITY GATE DISABLED -- recorded, not blocked)`,
         evidence: { badEntry: board.badEntry },
       });
-      continue;
     }
     if (priorHighSeverity) {
       await writeReviewQueue({
@@ -348,10 +359,9 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
         blockNumber,
-        reason: `wallet has a real prior high-severity signal from ${priorHighSeverity.source} (${priorHighSeverity.createdAt}): ${priorHighSeverity.reason}`,
+        reason: `wallet has a real prior high-severity signal from ${priorHighSeverity.source} (${priorHighSeverity.createdAt}): ${priorHighSeverity.reason} (SECURITY GATE DISABLED -- recorded, not blocked)`,
         evidence: { priorSignal: priorHighSeverity },
       });
-      continue;
     }
     if (fundingFlag) {
       await writeReviewQueue({
@@ -360,10 +370,9 @@ export async function evaluatePlankKothCandidate(txHash: string): Promise<Candid
         ethPaidWei: ethPaidWei.toString(),
         plankAmount: plankAmount.toString(),
         blockNumber,
-        reason: fundingFlag,
+        reason: `${fundingFlag} (SECURITY GATE DISABLED -- recorded, not blocked)`,
         evidence: { logs: receipt.logs },
       });
-      continue;
     }
 
     await writeLeaderboardRow(sale);
