@@ -184,10 +184,24 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000): Promise
       id: string; job_key: string; kind: string; source: string; chain_slug: string | null;
       subject: string | null; payload: Record<string, unknown>;
     }>(
+      // Real starvation found live 2026-08-27: within one priority tier,
+      // ties broke on (not_before, id) alone -- a job that keeps FAILING
+      // and getting re-claimed (same job_key, same low id, unchanged
+      // not_before) permanently out-competes a newer, never-yet-tried job
+      // at the identical priority, forever. Confirmed live: CloneX's
+      // anchored-membership job (HyperSync-backed, genuinely unrestricted,
+      // no OpenSea dependency at all) sat at max priority (120) with ZERO
+      // claims the entire session while dozens of older opensea-membership
+      // rows at the same tier, some already 20 attempts deep into a real
+      // OpenSea-contention retry loop, kept winning the id tiebreak every
+      // single round. Ordering by attempts first within a priority tier
+      // means every job gets a real first try before any job gets a
+      // second -- a fair round-robin instead of a queue where early
+      // failures compound into permanent starvation of untried work.
       `WITH candidate AS (
          SELECT id FROM plank_data_jobs
          WHERE status = 'queued' AND not_before <= NOW() ${kindClause}
-         ORDER BY priority DESC, not_before, id
+         ORDER BY priority DESC, attempts, not_before, id
          FOR UPDATE SKIP LOCKED LIMIT 1
        )
        UPDATE plank_data_jobs j SET status = 'running', attempts = attempts + 1,
