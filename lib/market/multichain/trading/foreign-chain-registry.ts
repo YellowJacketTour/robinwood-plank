@@ -170,6 +170,25 @@ export function chainBrandColor(chainSlug: string): string {
   return CHAIN_BRAND_COLOR[chainSlug] ?? "#58BDF0";
 }
 
+/**
+ * Real, computed RGB inversion (255-r, 255-g, 255-b) of this chain's own
+ * real brand color above -- a genuine "inverted" color, not a second
+ * hand-picked palette that could drift from the real brand colors this
+ * app already maintains. Used by MetadataCoverageBar.tsx for its own
+ * resting-state fill, distinct from ArchivalDepthBar's resting wood/amber
+ * gradient and from its own active-fill rarity-tier-color cycle, so the
+ * two bars are never visually identical in either state.
+ */
+export function chainBrandColorInverted(chainSlug: string): string {
+  const hex = chainBrandColor(chainSlug).replace("#", "");
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some((n) => Number.isNaN(n))) return "#58BDF0";
+  const toHex = (n: number) => (255 - n).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 /** Short glyph for a compact colored chain badge -- avoids hotlinking third-party logo assets while staying instantly recognizable per chain. */
 const CHAIN_GLYPH: Record<string, string> = {
   "eth-mainnet": "Ξ",

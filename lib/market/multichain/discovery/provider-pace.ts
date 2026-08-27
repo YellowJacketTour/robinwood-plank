@@ -125,9 +125,9 @@ export async function claimProviderPaceSlot(paceKey: string, minIntervalMs: numb
   // or failure -- a caller checking "is this key ready?" and getting NO
   // (key not ready yet) still advanced next_slot_at_ms further into the
   // future by another full interval, exactly as if it had made a real
-  // call. reserveOpenSeaKey's own attempt() tries up to 6 keys per call,
-  // retried up to 3 times (18 probes per single external reservation
-  // request) -- almost all of those probes "fail" under any real
+  // call. reserveOpenSeaKey's own attempt() tries every key in the pool per
+  // call, retried up to 3 times (pool-size x 3 probes per single external
+  // reservation request) -- almost all of those probes "fail" under any real
   // contention, and EVERY one still pushed that key deeper into backlog.
   // Confirmed live: 6 real, distinct-account keys with ~34 actual calls/
   // day EACH had a 59.5s-deep queue (near the old 62s ceiling) on every

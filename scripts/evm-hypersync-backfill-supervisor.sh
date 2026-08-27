@@ -9,13 +9,15 @@
 # this just makes that resumption automatic instead of requiring a human
 # to notice and manually relaunch.
 cd "$(dirname "$0")/.."
+source scripts/_supervisor-singleton.sh
+supervisor_singleton "evm-hypersync-backfill-supervisor"
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
 ATTEMPT=0
 while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
-  npx tsx scripts/evm-hypersync-backfill-pass.mjs
+  supervisor_run node --import tsx scripts/evm-hypersync-backfill-pass.mjs
   code=$?
   echo "=== supervisor: pass exited code $code ==="
   sleep 2

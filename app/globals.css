@@ -1248,6 +1248,29 @@ body .nft-modal .nft-modal-body {
   animation: archival-surge 1.2s ease-in-out infinite;
 }
 
+/* MetadataCoverageBar's own fill animation -- real, live tier colors
+   (lib/rarity.ts's tierColor, the exact same 5 real values every rarity
+   badge/tier chip elsewhere in this app already uses: Legendary #f8d98a,
+   Epic #c4b5fd, Rare #93c5fd, Uncommon #86efac, Common #d6d3d1), cycled
+   only while a real plank_data_jobs row is actively filling this exact
+   collection's traits/metadata right now (`active`, same
+   useHydrationJobStatus signal ArchivalDepthBar's own surge already
+   uses) -- resolves back to the chain's own inverted brand color
+   (chainBrandColorInverted, foreign-chain-registry.ts) the instant work
+   stops, same "surge while working, rest when idle" honesty discipline
+   as archival-surge above. */
+@keyframes rarity-cycle {
+  0%, 100% { background-color: #f8d98a; }
+  20% { background-color: #c4b5fd; }
+  40% { background-color: #93c5fd; }
+  60% { background-color: #86efac; }
+  80% { background-color: #d6d3d1; }
+}
+
+.animate-rarity-cycle {
+  animation: rarity-cycle 3s ease-in-out infinite;
+}
+
 /* ============================================================
    Market styling/UX polish pass (ListingCard, foreign confirm modals,
    MultichainCollectionView loading/empty states). Tokens only -- see

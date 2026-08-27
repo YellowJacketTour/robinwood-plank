@@ -28,13 +28,6 @@ function asStringArray(value: unknown): string[] {
 }
 
 export async function POST(req: NextRequest) {
-  // Same rate-limit helper/pattern every other market route uses (see e.g.
-  // app/api/market/multichain/collection/route.ts) -- no auth required
-  // (public market data), IP-scoped only. 30/min matches the design doc's
-  // "Rate / safety checklist" section.
-  const limited = rateLimit(req, { key: "market-multichain-visibility-demand", limit: 30, windowMs: 60_000 });
-  if (limited) return limited;
-
   let body: unknown;
   try {
     body = await req.json();
@@ -49,6 +42,23 @@ export async function POST(req: NextRequest) {
   if (typeof chainSlug !== "string" || !chainSlug.trim()) {
     return NextResponse.json({ error: "chainSlug is required" }, { status: 400 });
   }
+
+  // Same rate-limit helper/pattern every other market route uses (see e.g.
+  // app/api/market/multichain/collection/route.ts) -- no auth required
+  // (public market data), IP-scoped. 30/min matches the design doc's
+  // "Rate / safety checklist" section, but scoped PER CHAIN (not one shared
+  // budget across every chain from one IP): GlobalMarketHub.tsx's own
+  // continuous-hydration effect fires one POST per distinct chain visible
+  // on the page every 20s, so an aggregate/all-chains view (the rankings
+  // page's default) legitimately sends N chains x 3 ticks/min -- with the
+  // real current chain count (12), that's 36/min against a single flat
+  // 30/min bucket, guaranteed to self-throttle real demand signal even
+  // with zero abuse. Live-confirmed 2026-08-27: ~11% of real calls (253 of
+  // 2368) were dropped by exactly this. Each chain is already an
+  // independent mesh-tick priority lane, so budgeting it independently
+  // here is the correct unit, not a loosened limit.
+  const limited = rateLimit(req, { key: `market-multichain-visibility-demand:${chainSlug}`, limit: 30, windowMs: 60_000 });
+  if (limited) return limited;
   const ctx = typeof context === "string" && VALID_CONTEXTS.has(context)
     ? (context as "rankings" | "detail" | "rail" | "movers")
     : undefined;

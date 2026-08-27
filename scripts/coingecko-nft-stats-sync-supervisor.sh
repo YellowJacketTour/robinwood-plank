@@ -8,13 +8,15 @@
 # Getting a free CoinGecko Demo key (COINGECKO_API_KEY, 2-min signup, no
 # cost) raises this to 100/min -- see coingecko-nft-stats.ts's own header.
 cd "$(dirname "$0")/.."
+source scripts/_supervisor-singleton.sh
+supervisor_singleton "coingecko-nft-stats-sync-supervisor"
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
 ATTEMPT=0
 while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== coingecko-sync supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
-  npx tsx scripts/coingecko-nft-stats-sync-pass.mjs
+  supervisor_run node --import tsx scripts/coingecko-nft-stats-sync-pass.mjs
   echo "=== coingecko-sync supervisor: pass exited code $? ==="
   sleep 2
 done
