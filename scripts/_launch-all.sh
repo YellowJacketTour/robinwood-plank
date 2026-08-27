@@ -81,5 +81,6 @@ launch_if_dead "evm-hypersync-backfill-supervisor" "bash scripts/evm-hypersync-b
 launch_if_dead "genesis-seaport-backfill-supervisor" "bash scripts/genesis-seaport-backfill-supervisor.sh"
 launch_if_dead "coingecko-nft-stats-sync-supervisor" "bash scripts/coingecko-nft-stats-sync-supervisor.sh"
 launch_if_dead "opensea-stats-sync-supervisor" "bash scripts/opensea-stats-sync-supervisor.sh"
+launch_if_dead "mesh-tick-supervisor" "bash scripts/mesh-tick-supervisor.sh"
 
 echo "=== all checks done ==="
