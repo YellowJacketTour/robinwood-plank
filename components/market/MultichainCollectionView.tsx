@@ -305,6 +305,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     knownSupply: number | null;
     lastArchivedAt: string | null;
     jobProcessing: boolean;
+    /** Real, separate metadata (L3) signal -- see archival-ledger.ts's
+     * ArchivalApiShape header for why this is never blended into
+     * archivalScore/tokensEverHydrated above (real trait/metadata coverage
+     * vs real membership are two different, honest questions). */
+    metadataTokens: number | null;
+    metadataCoverage: number | null;
   } | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
@@ -553,6 +559,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             knownSupply: number | null;
             lastArchivedAt: string | null;
             jobProcessing: boolean;
+            metadataTokens: number | null;
+            metadataCoverage: number | null;
           } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
@@ -2068,6 +2076,23 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           chainSlug={chainSlug}
           active={isActivelyHydrating}
         />
+      )}
+      {/* Real, separate metadata (L3) signal -- see archival-ledger.ts's
+          ArchivalApiShape header for why this must never be blended into
+          the membership bar above. Only shown when it says something the
+          membership bar doesn't already: full membership can be reached
+          via HyperSync well before trait/metadata enrichment (a separate,
+          slower, OpenSea/on-chain-gated process) catches up behind it --
+          this is the honest "still filling in traits" signal for exactly
+          that gap, not shown at all once the two agree (nothing left to
+          say twice). */}
+      {archival?.metadataCoverage != null && archival.metadataCoverage < 0.999 && (
+        <p className="mt-1 text-[11px] leading-snug text-amber-100/55">
+          Traits & metadata {(archival.metadataCoverage * 100).toFixed(1)}%
+          {archival.metadataTokens != null && archival.tokensEverHydrated != null
+            ? ` - ${archival.metadataTokens.toLocaleString()} of ${archival.tokensEverHydrated.toLocaleString()} known tokens`
+            : ""}
+        </p>
       )}
       {supplyStats?.holderCount != null && (
         <p className="text-[0.65rem] text-foreground/45">

@@ -173,6 +173,11 @@ export async function GET(req: NextRequest) {
                 knownSupply: archival.knownSupply,
                 lastArchivedAt: archival.lastArchivedAt,
                 jobProcessing: archival.jobProcessing ?? false,
+                // Real, separate metadata (L3) signal -- see
+                // ArchivalApiShape's own header for why this must never be
+                // blended into archivalScore/tokensEverHydrated above.
+                metadataTokens: archival.metadataTokens ?? null,
+                metadataCoverage: archival.metadataCoverage ?? null,
               }
             : null,
         },
