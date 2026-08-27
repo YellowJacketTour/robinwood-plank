@@ -75,6 +75,24 @@ export async function hydrationJobSources(
       list.push({ source: "evm-metadata", basePriority: 97 });
     }
     list.push({ source: "opensea-stats", basePriority: 96 });
+    // Real gap found live 2026-08-27 (external research): this app's own
+    // Robinhood Chain was OpenSea-only here, on the assumption HyperSync
+    // (Envio) has no coverage for a private/custom L2 -- live-verified
+    // FALSE the same day, see evm-log-scan.ts's own EVM_CHAIN_ID header
+    // for the direct curl proof (real, live, matching block height on
+    // both published HyperSync hostnames for chain 4663). Same two
+    // sources, same completion-check shape, as the foreign-EVM branch
+    // below -- deliberately kept as a separate branch rather than merged
+    // with it so the EVM-only cryptopunks-native check further down never
+    // accidentally applies to this chain.
+    const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-status");
+    if (!countComplete && !(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "anchored-membership", basePriority: 95 });
+    }
+    const { isTokenIndexProbeComplete: isTokenIndexProbeCompleteRobinhood } = await import("@/lib/market/multichain/discovery/token-index-probe");
+    if (!(await isTokenIndexProbeCompleteRobinhood(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "token-index-probe", basePriority: 96 });
+    }
   } else if (foreignChainByChainSlug(chainSlug)) {
     const { isOpenseaMembershipComplete, isEvmMetadataComplete, isMembershipCountComplete } = await import(
       "@/lib/market/multichain/discovery/hydration-completion"
