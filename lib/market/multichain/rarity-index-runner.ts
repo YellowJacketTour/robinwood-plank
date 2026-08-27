@@ -8,7 +8,7 @@
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
-import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey, recordOpenSeaAccountFailure } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey, recordOpenSeaAccountFailure, recordOpenSeaRateLimitHeaders } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
@@ -103,10 +103,11 @@ async function reservedBackgroundFetch(url: string, priority: "live" | "backgrou
   }
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    await recordOpenSeaAccountFailure(slot.providerAccount, res.status === 429 || res.status === 403);
+    await recordOpenSeaAccountFailure(slot.providerAccount, res.status === 429 || res.status === 403, res);
     return { ok: false, exhausted: false, status: res.status, detail: bodyText.slice(0, 200) };
   }
   recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
   return { ok: true, res };
 }
 
