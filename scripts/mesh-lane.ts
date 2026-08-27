@@ -14,7 +14,22 @@ async function main(): Promise<void> {
   if (!source || !chain) {
     throw new Error("mesh-lane requires --source= and --chain=");
   }
-  if (await isSourceJailed(source, chain)) {
+  // Real bug found live 2026-08-27 (external research + live audit,
+  // confirmed against OpenSea's own current docs): OpenSea's rate limit is
+  // real and per-ACCOUNT, and this app's key pool is real, distinct
+  // accounts that genuinely multiply capacity (~600/hr each). This bare
+  // SOURCE-NAME jail check bailed the entire lane the moment ANY one
+  // account durably jailed, even with 6 of 7 healthy -- confirmed live,
+  // jail timers for all 7 pool keys matched to the millisecond, which is
+  // only possible if one shared bare-name jail was gating all of them at
+  // once. opensea-key-pool.ts's own orderCandidates now checks each real
+  // account's durable jail individually (the actual fix); this bare-name
+  // gate would just override that correct per-account result with a wrong
+  // all-or-nothing one for these sources. Sources with no real multi-
+  // account pool concept (unisat, ordiscan, etc.) still need this exact
+  // check -- it's only wrong for the ones with a real per-account pool.
+  const OPENSEA_POOL_SOURCES = new Set(["opensea-membership", "opensea-stats", "evm-metadata", "robinhood-membership"]);
+  if (!OPENSEA_POOL_SOURCES.has(source) && await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
     // Real gap found live 2026-08-26 (Decentraland "still not progressing"
     // investigation): a genuine 429 had durably jailed this source (20min
@@ -437,13 +452,24 @@ async function main(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/429|403|rate limit|quota/i.test(msg)) {
-      const providerSource = source === "ordiscan-discovery"
-        ? "ordiscan"
-        : source === "opensea-membership" ? "opensea-stats"
-        : source.startsWith("unisat") ? "unisat" : source;
-      // Quotas attach to the credential/provider account, not one chain.
-      await jailSource(providerSource, 20 * 60_000, true);
-      if (providerSource !== source) await jailSource(source, 20 * 60_000, true);
+      // Real bug found live 2026-08-27: for OpenSea-pool sources, jailing
+      // the bare source name here (with no idea WHICH of the 7 real
+      // accounts actually failed) is exactly what caused every account's
+      // jail timer to match to the millisecond -- one account's real 429
+      // durably blocked all seven. The real fix jails the SPECIFIC
+      // account at its actual point of failure (reserveOpenSeaKey's own
+      // settle path, opensea-key-pool.ts) where the real providerAccount
+      // is known; this generic catch has no account identity to jail
+      // correctly, so for these sources it does nothing and trusts the
+      // per-account jail already fired upstream.
+      if (!OPENSEA_POOL_SOURCES.has(source)) {
+        const providerSource = source === "ordiscan-discovery"
+          ? "ordiscan"
+          : source.startsWith("unisat") ? "unisat" : source;
+        // Quotas attach to the credential/provider account, not one chain.
+        await jailSource(providerSource, 20 * 60_000, true);
+        if (providerSource !== source) await jailSource(source, 20 * 60_000, true);
+      }
       console.log(`[mesh-lane] jailed ${source}: ${msg.slice(0, 180)}`);
       return;
     }
