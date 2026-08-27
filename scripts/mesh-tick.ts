@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { MESH_LANES, type MeshLane } from "../lib/market/multichain/mesh/matrix";
 import { isSourceJailed } from "../lib/market/multichain/mesh/jail";
 import { claimDataJob, enqueueDataJob, finishDataJob } from "../lib/market/multichain/control-plane";
+import { configuredOpenSeaKeyCount } from "../lib/market/multichain/discovery/opensea-key-pool";
 
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
@@ -37,9 +38,21 @@ const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("-
  * calling runLane, for a free slot. Everything else (fills-reconcile,
  * hypersync scans, unisat/helius lanes, etc.) is entirely unaffected and
  * keeps using the full --limit as before.
+ *
+ * Real gap found live 2026-08-27: this cap was a flat 2, tuned for this
+ * app's real key count at the time (1-2 real keys total). With the pool
+ * grown to 7 real, independently-paced keys, a flat 2 left 5 of 7 keys
+ * idle at every instant -- real sustained throughput capped under a third
+ * of what the pool can actually support, manifesting as spurious "pool
+ * exhausted/jailed" contention (provider-pace.ts's own per-key 6.2s
+ * cooldown, not a broken pool) even while a direct pool-health check
+ * showed all 7 keys under 3% of their daily allowance. Scaled to the real
+ * configured pool size (min 2, preserving prior single-key behavior)
+ * instead of a number that silently goes stale every time a key is added
+ * or removed.
  */
 const OPENSEA_TOUCHING_SOURCES = new Set(["opensea-membership", "opensea-stats", "evm-metadata", "robinhood-membership"]);
-const MAX_CONCURRENT_OPENSEA_LANES = 2;
+const MAX_CONCURRENT_OPENSEA_LANES = Math.max(2, configuredOpenSeaKeyCount());
 
 class Semaphore {
   private current = 0;
