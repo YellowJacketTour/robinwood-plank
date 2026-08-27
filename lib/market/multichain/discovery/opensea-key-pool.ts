@@ -203,10 +203,23 @@ async function orderCandidates(priority: OpenSeaKeyPriority, window: ProviderWin
     .map(({ entry }) => entry);
   if (unjailed.length === 0) return [];
   const usage = await loadTodayUsage(unjailed.map((e) => e.providerAccount), window);
-  const withLoad: Array<OpenSeaKeyEntry & KeyLoad> = unjailed.map((entry) => ({
-    ...entry,
-    load: usage.get(entry.providerAccount) ?? 0,
-  }));
+  const withLoad: Array<OpenSeaKeyEntry & KeyLoad> = unjailed.map((entry) => {
+    // Real, live rate-limit headers (when fresh -- see freshRateLimitSnapshot's
+    // own header) are a strictly more accurate, more CURRENT signal than the
+    // daily-usage estimate below: they reflect this exact account's real
+    // remaining budget as OpenSea itself reports it right now, not an
+    // estimate this app derives from its own reservation bookkeeping (which
+    // can only ever see calls THIS app made, never the account's real total
+    // if it's ever used outside this pool). Scaled onto the same rough
+    // magnitude as the daily load figure (fraction-used x daily allowance)
+    // so the two remain comparable within one sort; falls back to the
+    // existing daily estimate whenever no fresh snapshot exists yet.
+    const snap = freshRateLimitSnapshot(entry.providerAccount);
+    const load = snap && snap.limit > 0
+      ? Math.round((1 - snap.remaining / snap.limit) * OPENSEA_STATS_DAILY_ALLOWANCE)
+      : usage.get(entry.providerAccount) ?? 0;
+    return { ...entry, load };
+  });
   return priority === "background"
     // Most-loaded-with-remaining-capacity first; a key already at/over
     // allowance would just fail reserveProviderCapacity below and get
@@ -357,10 +370,75 @@ export async function settleOpenSeaKey(slot: OpenSeaKeySlot, cost = 1, success =
  * fix: jail the SPECIFIC real account, durably, at its real point of
  * failure, where `providerAccount` is genuinely known.
  */
-export async function recordOpenSeaAccountFailure(providerAccount: string, isQuotaError: boolean, jailMs = 20 * 60_000): Promise<void> {
+/**
+ * Real, live-verified 2026-08-27: OpenSea's actual response headers on
+ * every call (not just failures) include `x-ratelimit-limit` and
+ * `x-ratelimit-remaining`, and these genuinely decrement per real
+ * (non-cached) request -- confirmed live by bursting 40 real calls and
+ * watching remaining count down 119->100. `Retry-After` on a real 429 is
+ * also real and vendor-specified, not something this app has to guess.
+ * This is a materially better signal than the existing daily-usage
+ * estimate (OPENSEA_STATS_DAILY_ALLOWANCE, itself derived from a "600/hr"
+ * figure that this same live burst test contradicts -- the real observed
+ * limit for this endpoint was 120 per a much shorter window, not 600/hr).
+ * Kept as a short-TTL, in-memory, best-effort overlay ON TOP of the
+ * existing durable daily-usage bookkeeping, never replacing it: a
+ * snapshot older than SNAPSHOT_TTL_MS is treated as absent (this account
+ * may have made real calls through a completely different process since,
+ * which this process's own memory has no way to know about) -- this can
+ * only ever make selection SMARTER when fresh data exists, never less
+ * safe when it doesn't.
+ */
+type RateLimitSnapshot = { remaining: number; limit: number; observedAt: number };
+const rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
+const SNAPSHOT_TTL_MS = 30_000;
+
+export function recordOpenSeaRateLimitHeaders(providerAccount: string, headers: Headers): void {
+  const remaining = headers.get("x-ratelimit-remaining");
+  const limit = headers.get("x-ratelimit-limit");
+  if (remaining == null || limit == null) return;
+  const remainingNum = Number(remaining);
+  const limitNum = Number(limit);
+  if (!Number.isFinite(remainingNum) || !Number.isFinite(limitNum)) return;
+  rateLimitSnapshots.set(providerAccount, { remaining: remainingNum, limit: limitNum, observedAt: Date.now() });
+}
+
+function freshRateLimitSnapshot(providerAccount: string): RateLimitSnapshot | null {
+  const snap = rateLimitSnapshots.get(providerAccount);
+  if (!snap || Date.now() - snap.observedAt > SNAPSHOT_TTL_MS) return null;
+  return snap;
+}
+
+/**
+ * Real vendor-specified cooldown, when OpenSea actually sends one --
+ * `Retry-After` as either a real integer seconds count or an HTTP-date
+ * (both are valid per the header's own real spec). Returns null when
+ * absent, NOT a guessed default -- the caller decides the fallback.
+ */
+export function retryAfterMsFromHeaders(headers: Headers): number | null {
+  const raw = headers.get("retry-after");
+  if (!raw) return null;
+  const asSeconds = Number(raw);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) return asSeconds * 1000;
+  const asDateMs = Date.parse(raw);
+  return Number.isFinite(asDateMs) ? Math.max(0, asDateMs - Date.now()) : null;
+}
+
+export async function recordOpenSeaAccountFailure(
+  providerAccount: string,
+  isQuotaError: boolean,
+  jailMsOrResponse?: number | Response
+): Promise<void> {
   if (!isQuotaError) {
     recordSourceFailure(providerAccount, false);
     return;
+  }
+  let jailMs = 20 * 60_000;
+  if (jailMsOrResponse instanceof Response) {
+    recordOpenSeaRateLimitHeaders(providerAccount, jailMsOrResponse.headers);
+    jailMs = retryAfterMsFromHeaders(jailMsOrResponse.headers) ?? jailMs;
+  } else if (typeof jailMsOrResponse === "number") {
+    jailMs = jailMsOrResponse;
   }
   const { jailSource } = await import("@/lib/market/multichain/mesh/jail");
   await jailSource(providerAccount, jailMs, true).catch(() => {

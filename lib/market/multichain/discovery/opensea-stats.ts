@@ -19,7 +19,7 @@
  * on-chain, never guessed or fuzzy-resolved.
  */
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
-import { recordOpenSeaAccountFailure } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { recordOpenSeaAccountFailure, recordOpenSeaRateLimitHeaders } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { postgresQuery } from "@/lib/postgres";
 import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
@@ -140,7 +140,7 @@ export async function resolveOpenSeaSlug(
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
+    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText), res);
     return null;
   }
 
@@ -152,6 +152,7 @@ export async function resolveOpenSeaSlug(
     return null;
   }
   recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
   return body.collection ?? null;
 }
 
@@ -186,7 +187,7 @@ export async function fetchOpenSeaCollectionStats(
   lastStatsNotFound = false;
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
+    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText), res);
     lastStatsNotFound = res.status === 404;
     return null;
   }
@@ -199,6 +200,7 @@ export async function fetchOpenSeaCollectionStats(
     return null;
   }
   recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
 
   const oneDay = body.intervals?.find((i) => i.interval === "one_day");
   const sevenDay = body.intervals?.find((i) => i.interval === "seven_day");
@@ -245,7 +247,7 @@ export async function fetchOpenSeaCollectionDisplay(
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
+    await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText), res);
     return null;
   }
 
@@ -257,6 +259,7 @@ export async function fetchOpenSeaCollectionDisplay(
     return null;
   }
   recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
   const supply = body.total_supply;
   const handle = body.twitter_username?.trim().replace(/^@/, "") || null;
   return {
@@ -313,7 +316,7 @@ export async function fetchOpenSeaListedCount(
     }
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
-      await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText));
+      await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText), res);
       return null;
     }
     let body: {
@@ -327,6 +330,7 @@ export async function fetchOpenSeaListedCount(
       return null;
     }
     recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
     for (const listing of body.listings ?? []) {
       const tokenId = listing.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria;
       if (tokenId) unique.add(tokenId);
