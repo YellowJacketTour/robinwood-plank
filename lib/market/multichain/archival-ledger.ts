@@ -404,6 +404,27 @@ export type ArchivalApiShape = {
    * lookup (see getArchivalStatsForCollection) -- omitted, never false, for
    * a batched rankings-list lookup that skipped the check entirely. */
   jobProcessing?: boolean;
+  /**
+   * Real gap found live 2026-08-27 (external research, "the melt bar lies
+   * if L1 and L4 get blended into one number"): `tokensEverHydrated` above
+   * is defined as rows with a real name/image already present (see
+   * backfillArchivalStatsFromExistingTokens's own filter), NOT pure
+   * membership -- a collection can be 100% membership-complete (every real
+   * token id known, confirmed via isMembershipCountComplete) while this
+   * number still climbs behind it as trait/metadata enrichment catches up
+   * separately. The existing MAX-with-projected_count logic below already
+   * makes `tokensEverHydrated` track close to real membership in practice
+   * (confirmed live: CloneX correctly reads 19,764/19,764 after tonight's
+   * fixes), but the two are still conceptually different real signals and
+   * deserve separate, honest labels rather than one implicitly-blended
+   * number. `metadataTokens`/`metadataCoverage` expose the real,
+   * additional "how much of what we have real trait data for" signal,
+   * only computed for the single-collection detail route (never the
+   * batched rankings lookup -- see that function's own header on why an
+   * extra per-row query there is a real cost this app won't pay).
+   */
+  metadataTokens?: number | null;
+  metadataCoverage?: number | null;
 };
 
 type RawArchivalStatsRow = {
@@ -575,7 +596,26 @@ export async function getArchivalStatsForCollection(
   const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, shape.tokensEverHydrated ?? 0);
   shape.archivalScore = archivalScore;
   shape.scoreMethod = scoreMethod;
-  return { ...shape, jobProcessing: jobResult.rows[0]?.exists === true };
+
+  // Real, separate metadata (L3) signal -- see ArchivalApiShape's own
+  // header for why this must never be conflated with membership above.
+  const metadataResult = await postgresQuery<{ metadata_count: string }>(
+    `SELECT COUNT(*)::text AS metadata_count FROM plank_collection_tokens
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND (name IS NOT NULL OR image_url IS NOT NULL)`,
+    [chainSlug, normalized]
+  ).catch(() => ({ rows: [{ metadata_count: "0" }] }));
+  const metadataTokens = Number(metadataResult.rows[0]?.metadata_count ?? 0);
+  const metadataDenominator = liveCount ?? shape.knownSupply ?? null;
+  const metadataCoverage = metadataDenominator != null && metadataDenominator > 0
+    ? Math.min(1, metadataTokens / metadataDenominator)
+    : null;
+
+  return {
+    ...shape,
+    jobProcessing: jobResult.rows[0]?.exists === true,
+    metadataTokens,
+    metadataCoverage,
+  };
 }
 
 /**
