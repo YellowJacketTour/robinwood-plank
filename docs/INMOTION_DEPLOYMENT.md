@@ -262,6 +262,11 @@ The workflow uses the GitHub Environment `inmotion-staging`.
 - `INMOTION_SSH_KEY`
 - `INMOTION_HOST_KEY`
 - `UNISWAP_API_KEY`
+- `RPC_URL` optional — private EVM RPC provider; absent secret keeps the public-RPC fallback
+- `ZEROX_API_KEY` optional — 0x aggregator; absent secret keeps 0x features disabled
+- `OPENSEA_API_KEYS` optional, comma-separated — multichain discovery's OpenSea multi-key pool (see lib/market/multichain/discovery/opensea-key-pool.ts); absent secret falls back to the server's self-managed free key
+- `ALCHEMY_API_KEY` optional — multichain discovery's EVM `eth_getLogs` fallback pool; absent secret leaves that pool degraded (HyperSync remains the primary EVM source regardless)
+- `HELIUS_API_KEYS` optional, comma-separated — multichain discovery's Solana DAS pool; absent secret leaves Solana discovery degraded
 - `RELAYER_PRIVATE_KEY`
 - `CRON_SECRET` only while the legacy HTTP cron endpoint remains
 - `VAULT_DISPATCH_TOKEN` — the fine-grained PAT (`actions: write` on this repo
