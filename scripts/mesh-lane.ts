@@ -16,6 +16,34 @@ async function main(): Promise<void> {
   }
   if (await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
+    // Real gap found live 2026-08-26 (Decentraland "still not progressing"
+    // investigation): a genuine 429 had durably jailed this source (20min
+    // cooldown, mesh/jail.ts) -- correctly, real work must not run while
+    // jailed. But every skip during that window reported exit=0 (mesh-
+    // tick.ts's own default), and finishDataJob treats exit=0 as
+    // unconditional success -- a real, still-incomplete DEMAND job
+    // (subject present, a real visitor's own interest) got marked
+    // 'succeeded' and dropped on every single jailed skip, silently
+    // requiring another organic visibility ping to ever try again instead
+    // of self-healing once the jail naturally expires. A background-sweep
+    // invocation (no subject) already gets its own turn again via mesh-
+    // tick's own standing schedule, so this is scoped to demand jobs only.
+    //
+    // Real regression caught live within minutes of shipping the exit=2
+    // signal above, same day, same mistake as the pace-contention fix
+    // earlier: checking jail status is cheap (no real API call), so with
+    // ZERO delay this retried in an actual tight busy-loop -- hundreds of
+    // claim/check/re-enqueue cycles hammering Postgres for a source that
+    // is durably jailed for a full 20 minutes and cannot possibly succeed
+    // any sooner. A real jail is not "try again in a few seconds" the way
+    // transient pace contention is; a real, bounded 30s sleep here is a
+    // small, safe fraction of the 90s LANE_TIMEOUT_MS ceiling while being
+    // long enough that repeated retries during a 20-minute jail cost
+    // roughly 40 wasted checks instead of tens of thousands.
+    if (subject) {
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
+      process.exitCode = 2;
+    }
     return;
   }
 
@@ -155,10 +183,101 @@ async function main(): Promise<void> {
       // cycles through whatever's next) -- "live" priority now gets real
       // precedence over background-sweep competition for the shared
       // OpenSea pace slot (see opensea-key-pool.ts's BACKGROUND_SKIP_RATE).
-      const result = /^0x[0-9a-f]{40}$/i.test(subject)
-        ? await advanceEvmCollectionMembership(chain, subject, undefined, "live")
-        : await advanceNextTrackedEvmMembership(chain);
-      console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
+      const isDemandDriven = /^0x[0-9a-f]{40}$/i.test(subject);
+      if (!isDemandDriven) {
+        console.log("[mesh-lane] opensea-membership", JSON.stringify(await advanceNextTrackedEvmMembership(chain)));
+        return;
+      }
+      // Real gap found live 2026-08-26 ("isnt hydrating by thousands in
+      // live priority" while actively viewing a 69%-complete collection):
+      // one call only ever advances ONE 50-item OpenSea page
+      // (rarity-index-runner.ts's own PAGE_SIZE). Loop pages back-to-back
+      // within this single invocation instead of one DB round-trip
+      // (claim -> run -> finish -> re-enqueue -> wait for the next
+      // mesh-tick pass) per page -- same bounded-deadline pattern
+      // evm-metadata already uses just below. Each iteration still goes
+      // through the real OpenSea pace limiter (reservedBackgroundFetch),
+      // so this never bypasses the external rate limit, only the queue
+      // round-trip overhead between pages while a visitor is actively
+      // watching. Bounded well under LANE_TIMEOUT_MS (90s, this file's own
+      // MAX_LANE_MS-equivalent constant above) so a slow/rate-limited
+      // collection can never make this lane itself time out.
+      // Real regression found live 2026-08-26, same day as the fix above:
+      // an unbounded-pages/45s loop, multiplied across every collection
+      // with live demand running concurrently (mesh-tick's own --limit
+      // lanes), overran provider-pace.ts's own backlog ceiling
+      // (minIntervalMs * 10 =~ 62s deep queue) -- confirmed live,
+      // Decentraland started hitting "OpenSea pool exhausted/jailed" on
+      // every attempt with the key pool itself checking out perfectly
+      // healthy moments later (a load/contention symptom, not a broken
+      // pool). One collection holding the shared pace queue's attention
+      // for up to 45s starves every OTHER collection's own single-page
+      // call queued behind it. Capped lower so one invocation's real gain
+      // over the old single-page behavior (still a meaningful 8x) doesn't
+      // come at the cost of starving concurrent demand for other
+      // collections sharing the same 6-key pool.
+      const MAX_PAGES_PER_INVOCATION = 8;
+      let itemsObserved = 0;
+      let pages = 0;
+      let result: Awaited<ReturnType<typeof advanceEvmCollectionMembership>> | null = null;
+      const deadline = Date.now() + 30_000;
+      try {
+        do {
+          result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
+          itemsObserved += result.itemsObserved;
+          pages += 1;
+        } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && Date.now() < deadline);
+      } catch (e) {
+        // Real gap found live 2026-08-26 (contention audit follow-up):
+        // "OpenSea pool exhausted" is a genuinely transient, expected
+        // condition under real concurrent demand (provider-pace.ts's own
+        // bounded backlog, not a broken pool -- confirmed live via a
+        // direct isolated key-pool health check succeeding trivially
+        // moments after this exact error). It doesn't match the outer
+        // catch's jail-triggering pattern (429/403/rate limit/quota)
+        // below, so it fell through to a hard failure (exit 1, no
+        // automatic retry) -- meaning real, still-incomplete work sat
+        // waiting for the next organic client visibility ping instead of
+        // self-healing on mesh-tick's very next pass, unlike every other
+        // "more work remains" case in this file. Treat it the same way:
+        // no jail (the resource isn't broken, just busy), no hard
+        // failure, just "try again shortly."
+        // "no OpenSea slug ... no capacity" (resolveOpenSeaSlug's own
+        // message) is the same transient-contention symptom via a
+        // different call site -- genuinely covers both "no capacity right
+        // now" and "collection has no slug" per its own wording, but a
+        // slug-less collection retrying a bounded number of times (capped
+        // by real demand-priority re-enqueue frequency, never infinite)
+        // is a far smaller cost than silently failing every genuinely
+        // transient case.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/pool exhausted|no OpenSea slug/i.test(msg)) {
+          // Real regression found live 2026-08-26, moments after shipping
+          // the fix above: mesh-tick.ts re-enqueues on exit=2 with no
+          // delay, and its worker loop reclaims the very next job
+          // immediately -- confirmed live, this retried in a tight loop
+          // (multiple claims/sec) that kept adding NEW pace-claim attempts
+          // to the very backlog queue causing the contention, never
+          // letting it drain. A real, bounded sleep here (this process
+          // exits only after it elapses, so mesh-tick's own re-enqueue+
+          // reclaim genuinely waits this long) gives the shared pace queue
+          // real wall-clock time to drain between retries instead of
+          // hammering it continuously.
+          console.log(`[mesh-lane] opensea-membership pool busy, will retry: ${msg.slice(0, 180)}`);
+          await new Promise((resolve) => setTimeout(resolve, 8_000));
+          process.exitCode = 2;
+          return;
+        }
+        throw e;
+      }
+      console.log("[mesh-lane] opensea-membership", JSON.stringify({ ...result, pages, itemsObserved }));
+      // Same exit-code-2 signal anchored-membership already uses just
+      // below: mesh-tick.ts re-enqueues immediately when real work still
+      // remains after this invocation's own deadline/zero-progress exit,
+      // so a genuinely incomplete, actively-viewed collection keeps getting
+      // picked back up every mesh-tick pass instead of waiting for the
+      // next client visibility ping.
+      if (!result.complete) process.exitCode = 2;
       return;
     }
     if (source === "anchored-membership") {
@@ -194,6 +313,36 @@ async function main(): Promise<void> {
       // would race finishDataJob's later UPDATE (matched by id/lease_owner,
       // unconditional) and get silently overwritten back to 'succeeded'
       // with no future pickup.
+      if (!result.done) process.exitCode = 2;
+      return;
+    }
+    if (source === "token-index-probe") {
+      // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
+      // then froze"): anchored-membership was confirmed NOT deadlocked,
+      // just genuinely slow closing the final gap because it must replay
+      // every real historical Transfer log, most of which are resales of
+      // already-known tokens -- see token-index-probe.ts's own header.
+      // ERC721Enumerable's tokenByIndex(i) reads the real token ID at
+      // each index directly from current contract state, exact and
+      // dramatically cheaper, once known_supply is chain-confirmed. Runs
+      // alongside anchored-membership rather than replacing it (some real
+      // contracts don't implement Enumerable -- this self-detects and
+      // no-ops for those, done=true on the very first call).
+      if (!/^0x[0-9a-f]{40}$/i.test(subject)) throw new Error("token-index-probe requires a real contract subject");
+      const { runTokenIndexProbe } = await import("../lib/market/multichain/discovery/token-index-probe");
+      const result = await runTokenIndexProbe(chain, subject);
+      console.log("[mesh-lane] token-index-probe", JSON.stringify(result));
+      if (!result.done) process.exitCode = 2;
+      return;
+    }
+    if (source === "plank-koth-watch") {
+      const { runPlankKothWatch } = await import("../lib/market/plank-koth-watch");
+      const result = await runPlankKothWatch();
+      console.log("[mesh-lane] plank-koth-watch", JSON.stringify(result));
+      // Same exit-code-2 self-requeue pattern as anchored-membership above:
+      // `done: false` means a real, unfinalized (or unscanned-this-pass)
+      // buy is still waiting, so mesh-tick should reclaim this lane again
+      // promptly rather than waiting for its own next scheduled cadence.
       if (!result.done) process.exitCode = 2;
       return;
     }
@@ -310,7 +459,18 @@ main()
     } catch {
       /* */
     }
-    process.exitCode = 0;
+    // Real bug found live 2026-08-26 (audit: "why does anchored-membership's
+    // own exit-code-2 signal never actually re-enqueue anything"): this
+    // used to unconditionally set exitCode to 0 here, clobbering the
+    // `process.exitCode = 2` main() may have already set (anchored-
+    // membership/opensea-membership/robinhood-membership's own "succeeded,
+    // but more real work remains" signal) on EVERY successful run, forever.
+    // mesh-tick.ts's re-enqueue path (scripts/mesh-tick.ts:180-202) reads
+    // this exit code, so the signal was silently dead since the day it was
+    // written -- a bounded-window job never actually got picked back up
+    // automatically; only the next real client visibility ping ever
+    // re-enqueued it. Only default to 0 if main() didn't already set 2.
+    if (process.exitCode !== 2) process.exitCode = 0;
   })
   .catch((e) => {
     console.error("[mesh-lane] fatal", e instanceof Error ? e.message : e);

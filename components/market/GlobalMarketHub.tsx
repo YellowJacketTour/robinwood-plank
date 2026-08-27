@@ -2353,6 +2353,8 @@ export default function GlobalMarketHub() {
                                   tokensEverHydrated={c.archival.tokensEverHydrated}
                                   knownSupply={c.archival.knownSupply}
                                   pulseKey={c.archival.lastArchivedAt}
+                                  chainSlug={c.chainSlug}
+                                  active={jobProcessingByKey[rowKey] != null}
                                 />
                               )}
                             </span>

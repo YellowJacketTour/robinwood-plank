@@ -259,24 +259,37 @@ export async function advanceEvmCollectionMembership(
 }
 
 export async function advanceNextTrackedEvmMembership(chainSlug: string) {
+  // Real bug found live 2026-08-26 (systemic audit: "why doesn't this ever
+  // reach 100%"): ORDER BY alone only DEPRIORITIZES a complete row, it
+  // doesn't exclude it -- once every OTHER collection also finishes (or on
+  // a chain with few tracked collections), this candidate query kept
+  // re-picking an already-COMPLETE collection, which then restarted at
+  // page 1 (advanceEvmCollectionMembership always writes complete=false
+  // on its very first page write) -- silently un-completing a finished
+  // collection and forcing a full re-walk, forever, on every cron tick.
+  // Exclude complete rows outright; `m.complete IS NOT TRUE` still admits
+  // NULL (a collection with no cursor row yet), so a genuinely never-seen
+  // collection is unaffected.
   const candidates = await postgresQuery<{ contract_address: string }>(
     `SELECT c.contract_address FROM plank_multichain_collections c
      LEFT JOIN plank_collection_membership_cursors m
        ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
-     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
-     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$' AND m.complete IS NOT TRUE
+     ORDER BY m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
     [chainSlug, OPENSEA_MEMBERSHIP_SOURCE]);
   const address = candidates.rows[0]?.contract_address;
   return address ? advanceEvmCollectionMembership(chainSlug, address) : null;
 }
 
 export async function advanceNextRobinhoodMembership() {
+  // Same real fix as advanceNextTrackedEvmMembership just above -- exclude
+  // complete rows outright rather than only deprioritizing them.
   const candidates = await postgresQuery<{ contract_address: string }>(
     `SELECT c.contract_address FROM plank_multichain_collections c
      LEFT JOIN plank_collection_membership_cursors m
        ON m.chain_slug = c.chain_slug AND lower(m.collection_slug) = lower(c.contract_address) AND m.source = $2
-     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$'
-     ORDER BY (m.complete IS NOT TRUE) DESC, m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
+     WHERE c.chain_slug = $1 AND c.contract_address ~* '^0x[0-9a-f]{40}$' AND m.complete IS NOT TRUE
+     ORDER BY m.updated_at ASC NULLS FIRST, c.id LIMIT 1`,
     ["robinhood", OPENSEA_MEMBERSHIP_SOURCE]);
   const address = candidates.rows[0]?.contract_address;
   return address ? advanceEvmCollectionMembership("robinhood", address, "robinhood") : null;
@@ -787,12 +800,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Real bug found live 2026-08-26: this session's own opensea-membership
+// page-looping fix (mesh-lane.ts, bounded do/while) calls
+// advanceEvmCollectionMembership repeatedly within one 45s invocation,
+// and every single call re-resolved the slug from scratch -- a contract's
+// OpenSea slug never changes, so a 10-page loop paid 10 REDUNDANT
+// key-reservation round trips for information already known after page 1,
+// needlessly multiplying contention on the shared 6-key pool under real
+// concurrent load (confirmed live: "no OpenSea key with capacity" errors
+// on a collection whose keys, checked directly, were all healthy -- a
+// contention symptom, not a broken pool). Slug resolution is the one part
+// of this whole path that is genuinely, permanently cacheable.
+const slugCache = new Map<string, { slug: string | null; at: number }>();
+const SLUG_CACHE_TTL_MS = 60 * 60_000;
+
 async function resolveOpenSeaSlug(
   chainSlug: string,
   contractAddress: string,
   openSeaChainOverride?: string,
   priority: "live" | "background" = "background"
 ): Promise<string | null> {
+  const cacheKey = `${chainSlug}:${contractAddress.toLowerCase()}`;
+  const cached = slugCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SLUG_CACHE_TTL_MS) return cached.slug;
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = openSeaChainOverride ?? chain?.openSeaChain;
   if (!openSeaChain) return null;
@@ -800,7 +830,11 @@ async function resolveOpenSeaSlug(
   if (!fetched.ok) return null;
   const res = fetched.res;
   const data = (await res.json()) as { collection?: string };
-  return data.collection ?? null;
+  const slug = data.collection ?? null;
+  // Never cache a null result: a transient failure/no-capacity moment must
+  // not get permanently remembered as "this collection has no slug."
+  if (slug != null) slugCache.set(cacheKey, { slug, at: Date.now() });
+  return slug;
 }
 
 /** Dispatches the same -log2 kernel to the chain's real enumerator. Never Alchemy. */

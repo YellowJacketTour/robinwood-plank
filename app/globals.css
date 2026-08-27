@@ -1227,6 +1227,27 @@ body .nft-modal .nft-modal-body {
   animation: archival-shimmer 1.1s linear infinite;
 }
 
+/* Real fix, 2026-08-25 ("progress bar should surge the color of the
+   respective chain when its actively filling in archive, and then
+   resolve back to wood orange loading color when its resting"):
+   ArchivalDepthBar.tsx swaps the fill's own gradient to the collection's
+   real chain-brand color (chainBrandColor()) exactly while a real
+   plank_data_jobs row is hydrating it right now (`active`, from
+   useHydrationJobStatus's fast 8s poll) -- this animation is the pulse
+   riding on top of that color while it's surged, same event-driven-only
+   discipline as .animate-plank-glow (never a decorative idle loop). The
+   .transition-[background] duration-700 utility on the fill element
+   itself (see ArchivalDepthBar.tsx) handles the actual color swap/resolve
+   between the chain color and the wood/amber gradient. */
+@keyframes archival-surge {
+  0%, 100% { filter: brightness(1) saturate(1); }
+  50% { filter: brightness(1.25) saturate(1.3); }
+}
+
+.animate-archival-surge {
+  animation: archival-surge 1.2s ease-in-out infinite;
+}
+
 /* ============================================================
    Market styling/UX polish pass (ListingCard, foreign confirm modals,
    MultichainCollectionView loading/empty states). Tokens only -- see

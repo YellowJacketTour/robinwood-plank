@@ -15,6 +15,54 @@ const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
 const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length);
 
 /**
+ * Real bug found live 2026-08-26 (throughput audit follow-up): --limit
+ * bounds TOTAL concurrent lanes, but has no concept that several distinct
+ * job sources (opensea-membership, opensea-stats, evm-metadata's OpenSea
+ * fallback, robinhood-membership) all share ONE external resource -- the
+ * 6-key OpenSea pool, whose real combined sustained throughput is ~1
+ * call/sec (600/hr/key, opensea-key-pool.ts's own OPENSEA_MIN_CALL_INTERVAL_MS).
+ * Confirmed live: with --limit=6 and several of those sources claimed in
+ * the same pass, EVERY key could be simultaneously mid-cooldown at the
+ * exact moment a live-priority call needed one, even after that call's
+ * own built-in retries (opensea-key-pool.ts's LIVE_RETRY_DELAYS_MS) --
+ * 100% failure rate on a healthy pool, a genuine contention regression
+ * from this session's own earlier throughput fixes making many more
+ * collections compete for real hydration at once instead of the same
+ * few permanently starving the rest.
+ *
+ * A real, in-process semaphore -- independent of --limit -- caps how many
+ * of THESE FOUR source kinds can be actually EXECUTING (not just
+ * claimed/leased) at the same instant. A worker that claims one of these
+ * jobs still owns the lease immediately; it only waits here, before
+ * calling runLane, for a free slot. Everything else (fills-reconcile,
+ * hypersync scans, unisat/helius lanes, etc.) is entirely unaffected and
+ * keeps using the full --limit as before.
+ */
+const OPENSEA_TOUCHING_SOURCES = new Set(["opensea-membership", "opensea-stats", "evm-metadata", "robinhood-membership"]);
+const MAX_CONCURRENT_OPENSEA_LANES = 2;
+
+class Semaphore {
+  private current = 0;
+  private readonly queue: Array<() => void> = [];
+  constructor(private readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.current < this.max) {
+      this.current++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.queue.push(resolve));
+    this.current++;
+  }
+  release(): void {
+    this.current--;
+    const next = this.queue.shift();
+    if (next) next();
+  }
+}
+
+const openSeaSemaphore = new Semaphore(MAX_CONCURRENT_OPENSEA_LANES);
+
+/**
  * Light-worker fast path (Unified Mesh Continuum build item #3, deferred
  * earlier for its own dedicated pass, now built conservatively -- Grok's
  * own recommendation, docs/marketplank/GROK-FINDINGS-unified-maximal-
@@ -141,6 +189,25 @@ async function main(): Promise<void> {
   const { hasDurableKv } = await import("../lib/market/durable-kv");
   if (!hasDurableKv()) throw new Error("mesh-tick: no PG");
 
+  // Real bug found live 2026-08-25 ("doesnt appear to be fast live
+  // filling"): confirmed live 217 collections across every chain were
+  // PINNED at the max viewport-visibility priority (120), most last
+  // actually pinged 30+ real minutes ago -- see demoteStaleVisibleDemand's
+  // own header for the full "why" (a ratchet-only-up field, same shape as
+  // the earlier not_before starvation bug, with nothing to ever bring it
+  // back down once the tab that earned it closes). Left unattended this
+  // permanently starves every real, currently-open detail-page's own
+  // demand (anchored-membership/opensea-stats/etc top out around 95-100)
+  // -- run the correction every real pass, before claiming, so a stuck
+  // backlog never gets more than one pass' worth of head start.
+  try {
+    const { demoteStaleVisibleDemand } = await import("../lib/market/multichain/collection-demand");
+    const { demoted } = await demoteStaleVisibleDemand();
+    if (demoted) console.log(`[mesh-tick] demoted ${demoted} stale-visible job(s) back to background priority`);
+  } catch (error) {
+    console.error("[mesh-tick] demoteStaleVisibleDemand failed", error instanceof Error ? error.message : error);
+  }
+
   const lanes: MeshLane[] = [];
   for (const lane of MESH_LANES) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;
@@ -158,7 +225,20 @@ async function main(): Promise<void> {
       // collection subject; a lane id is orchestration identity, not data.
       subject: null,
       payload: { sliceSec: lane.sliceSec, cells: lane.cells },
-      priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 100 : 20,
+      // Real gap found live 2026-08-26 (throughput audit: "why does real
+      // visitor demand only crawl"): these three sources' 100 sat ABOVE
+      // every real-visitor demand tier (DETAIL_PAGE=95..98, VISIBLE=110 is
+      // the only thing actually above it) and TIED PREDICT_NEXT=100 --
+      // see collection-demand.ts's own DEMAND_PRIORITY comments, whose
+      // entire stated intent is that background work must never outrank a
+      // real click. Their not_before also ratchets to the earliest
+      // enqueue moment (control-plane.ts's own LEAST()), so once ahead on
+      // a tie they stayed ahead every pass, forever. Lowered to 60 --
+      // still well above the generic 20 background floor (these sources
+      // clearly need to matter more than typical background lanes), but
+      // below every real-demand tier so a visitor's own page never loses
+      // its turn to them.
+      priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 60 : 20,
     });
   }
 
@@ -177,7 +257,19 @@ async function main(): Promise<void> {
       const laneKey = `${job.source}:${job.chainSlug}`;
       await recordLaneClaim(laneKey);
       console.log(`[mesh-tick] start ${job.jobKey}`);
-      const code = await runLane(job.source, job.chainSlug, job.subject);
+      // See OPENSEA_TOUCHING_SOURCES's own header: this job is already
+      // claimed/leased to this worker regardless -- only its EXECUTION
+      // waits here for a free OpenSea-pool slot, so extra concurrent
+      // OpenSea demand queues in-process instead of every claimed lane
+      // hammering the shared 6-key pool at the exact same instant.
+      const needsOpenSeaSlot = OPENSEA_TOUCHING_SOURCES.has(job.source);
+      if (needsOpenSeaSlot) await openSeaSemaphore.acquire();
+      let code: number;
+      try {
+        code = await runLane(job.source, job.chainSlug, job.subject);
+      } finally {
+        if (needsOpenSeaSlot) openSeaSemaphore.release();
+      }
       // Exit code 2 is a real, deliberate "succeeded, but more real work
       // remains" signal (see mesh-lane.ts's anchored-membership handler) --
       // never a failure. finishDataJob first (its own unconditional status

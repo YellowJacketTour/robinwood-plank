@@ -25,16 +25,33 @@ import { postgresQuery } from "@/lib/postgres";
 const completeCache = new Map<string, { value: boolean; at: number }>();
 const COMPLETE_CACHE_TTL_MS = 60_000;
 
+/**
+ * Real bug found live 2026-08-26 (systemic audit: "why doesn't this ever
+ * reach 100%"): the underlying flag used to be a permanent, one-way latch
+ * -- true forever, the instant a scan first reached the chain tip, with
+ * every mint AFTER that point silently never scanned again. The real
+ * anchored scan (anchored-membership-backfill.ts) resumes incrementally
+ * from its own durable HyperSync cursor, never re-walking from the deploy
+ * block, so re-validating periodically is cheap -- there is no reason to
+ * trust "complete" forever. This still adds zero RPC/heavy work to this
+ * function's own cheap live-page-visit read: expiry is a plain timestamp
+ * comparison against a value already being fetched.
+ */
+const COMPLETION_TTL_MS = 24 * 60 * 60_000;
+
 export async function isAnchoredMembershipComplete(chainSlug: string, contractAddress: string): Promise<boolean> {
   const key = `${chainSlug}:${contractAddress.toLowerCase()}`;
   const cached = completeCache.get(key);
   if (cached && Date.now() - cached.at < COMPLETE_CACHE_TTL_MS) return cached.value;
 
-  const result = await postgresQuery<{ anchored_membership_complete: boolean }>(
-    `SELECT anchored_membership_complete FROM plank_contract_deploy_block WHERE chain_slug = $1 AND contract_address = $2`,
+  const result = await postgresQuery<{ anchored_membership_complete: boolean; anchored_membership_completed_at: Date | null }>(
+    `SELECT anchored_membership_complete, anchored_membership_completed_at FROM plank_contract_deploy_block WHERE chain_slug = $1 AND contract_address = $2`,
     [chainSlug, contractAddress.toLowerCase()]
   );
-  const value = result.rows[0]?.anchored_membership_complete === true;
+  const row = result.rows[0];
+  const completedAt = row?.anchored_membership_completed_at;
+  const notExpired = completedAt != null && Date.now() - new Date(completedAt).getTime() < COMPLETION_TTL_MS;
+  const value = row?.anchored_membership_complete === true && notExpired;
   completeCache.set(key, { value, at: Date.now() });
   return value;
 }

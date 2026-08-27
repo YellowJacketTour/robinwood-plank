@@ -22,34 +22,62 @@ export async function hydrationJobSources(
   normalized: string
 ): Promise<Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }>> {
   const list: Array<{ source: Parameters<typeof enqueueDataJob>[0]["source"]; basePriority: number }> = [];
+  // Real gap found live 2026-08-26 (Season 2 dashboard review): the
+  // anchored-membership fix below (isAnchoredMembershipComplete) was scoped
+  // to that ONE source only -- opensea/robinhood/helius/unisat-membership
+  // and evm-metadata had the exact same unconditional-re-enqueue shape and
+  // never got the same fix, so a truly finished collection could still edge
+  // out a genuinely incomplete one's real work on every repeat page visit.
+  // Same fix, same cheap one-indexed-read pattern, via hydration-
+  // completion.ts. unisat-rarity/opensea-stats/magiceden-solana/
+  // cryptopunks-native have no equally simple, verified single completion
+  // signal yet -- left unconditional rather than guess at one.
   if (isBitcoinChainSlug(chainSlug)) {
-    list.push({ source: "unisat-membership", basePriority: 98 }, { source: "unisat-rarity", basePriority: 97 });
+    const { isUnisatMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
+    if (!(await isUnisatMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "unisat-membership", basePriority: 98 });
+    }
+    list.push({ source: "unisat-rarity", basePriority: 97 });
   } else if (isSolanaChainSlug(chainSlug)) {
-    list.push({ source: "helius-membership", basePriority: 98 }, { source: "magiceden-solana", basePriority: 96 });
+    const { isHeliusMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
+    if (!(await isHeliusMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "helius-membership", basePriority: 98 });
+    }
+    list.push({ source: "magiceden-solana", basePriority: 96 });
   } else if (isRobinhoodChainSlug(chainSlug)) {
-    list.push(
-      { source: "robinhood-membership", basePriority: 98 },
-      { source: "evm-metadata", basePriority: 97 },
-      { source: "opensea-stats", basePriority: 96 }
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
     );
+    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "robinhood-membership", basePriority: 98 });
+    }
+    if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "evm-metadata", basePriority: 97 });
+    }
+    list.push({ source: "opensea-stats", basePriority: 96 });
   } else if (foreignChainByChainSlug(chainSlug)) {
-    list.push(
-      { source: "opensea-membership", basePriority: 98 },
-      { source: "evm-metadata", basePriority: 97 },
-      { source: "opensea-stats", basePriority: 96 },
-      // Real gap found live 2026-08-25 ("while i visit this page there is
-      // still no live sync"): a collection whose OpenSea enumeration has
-      // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
-      // looping over already-seen tokens) got ZERO benefit from a page
-      // visit -- opensea-membership above just re-ran the same already-
-      // stuck walk every time. anchored-membership was only ever
-      // manually enqueued via a one-off script, never part of the real
-      // page-visit demand set. Cheap to include unconditionally: once a
-      // contract's deploy block is cached (one real HyperSync call, ever)
-      // this self-limits via its own real done-check and the shared
-      // HyperSync circuit breaker -- it is never wasted work, only ever
-      // real, additional coverage a plain OpenSea walk cannot reach.
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
     );
+    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "opensea-membership", basePriority: 98 });
+    }
+    if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "evm-metadata", basePriority: 97 });
+    }
+    list.push({ source: "opensea-stats", basePriority: 96 });
+    // Real gap found live 2026-08-25 ("while i visit this page there is
+    // still no live sync"): a collection whose OpenSea enumeration has
+    // plateaued (Lil Pudgys: confirmed live, its own /nfts pagination
+    // looping over already-seen tokens) got ZERO benefit from a page
+    // visit -- opensea-membership above just re-ran the same already-
+    // stuck walk every time. anchored-membership was only ever
+    // manually enqueued via a one-off script, never part of the real
+    // page-visit demand set. Cheap to include unconditionally: once a
+    // contract's deploy block is cached (one real HyperSync call, ever)
+    // this self-limits via its own real done-check and the shared
+    // HyperSync circuit breaker -- it is never wasted work, only ever
+    // real, additional coverage a plain OpenSea walk cannot reach.
     // Real bug found live 2026-08-25 ("no sync, no progress" on MAYC
     // despite max priority): once wired in unconditionally, an ALREADY-
     // COMPLETE collection's anchored-membership job kept getting
@@ -74,6 +102,19 @@ export async function hydrationJobSources(
     const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-status");
     if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "anchored-membership", basePriority: 95 });
+    }
+    // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
+    // then froze"): a SEPARATE, cheap completion check -- deliberately
+    // NOT nested under anchored-membership's own flag above. The two
+    // scans have independent completion criteria (this one's cursor vs
+    // known_supply; anchored-membership's own provenance/transfer-ledger
+    // backfill vs the real chain tip), so gating one on the other's flag
+    // could stop real, still-useful work early. See token-index-probe.ts's
+    // own header for why this exists alongside anchored-membership rather
+    // than replacing it.
+    const { isTokenIndexProbeComplete } = await import("@/lib/market/multichain/discovery/token-index-probe");
+    if (!(await isTokenIndexProbeComplete(chainSlug, normalized).catch(() => false))) {
+      list.push({ source: "token-index-probe", basePriority: 96 });
     }
     if (chainSlug === "eth-mainnet" && normalized === CRYPTOPUNKS_CONTRACT) {
       list.push({ source: "cryptopunks-native", basePriority: 100 });
@@ -155,6 +196,41 @@ const AGING_STEP_MINUTES = 2;
 const AGING_MAX_BOOST = 10;
 
 /**
+ * Real bug found live 2026-08-25 ("doesnt appear to be fast live filling",
+ * MAYC still stuck despite the anchored-membership demand path itself now
+ * working): confirmed live that 217 collections across every chain sat
+ * PINNED at the max VISIBLE_STALE_AGED priority (120) -- most last
+ * actually pinged 34+ real minutes ago (a rankings-page tab opened once
+ * this session, then closed or navigated away). computeVisibilityPriority
+ * has no floor on how long ago `lastVisibleAt` was real: once a
+ * collection ages all the way up to the 120 ceiling, NOTHING in this
+ * mechanism ever brings it back down, even after the client that made it
+ * "visible" is long gone -- and because enqueueDataJob's own conflict
+ * clause is `priority = GREATEST(existing, new)` (a one-way ratchet,
+ * mirroring the EXACT same shape as the `not_before = LEAST(...)`
+ * starvation bug fixed earlier this session for anchored-membership
+ * itself), a stuck-at-120 job can never be out-prioritized by fresh,
+ * real, currently-open-page demand (anchored-membership/opensea-stats/etc
+ * top out around 95-100) -- it wins every single claim tie, forever,
+ * exactly like Lil Pudgys' finished job did before that fix. A visibility
+ * signal this old is not real anymore: a genuinely open tab re-pings far
+ * more often than this (client caps at 1 POST/2.5s), so anything idle
+ * this long has certainly navigated away or closed. Treat it as
+ * background-tier rather than continuing to honor a stale aging boost.
+ */
+// Real bug found live 2026-08-26 (throughput audit, three unit tests
+// exposed it): 90s is strictly LESS than one AGING_STEP_MINUTES (2min =
+// 120s), so `boost = floor(age(lastVisibleAt) / AGING_STEP_MINUTES)` could
+// NEVER produce a nonzero value for the already-hydrated-but-stale anchor
+// branch below -- by the time enough time passed for +1 boost, this gate
+// had already forced BACKGROUND for ANY input, making that entire
+// documented code path mathematically dead, not just untested. 5 minutes
+// still demotes a closed/navigated-away tab in a small fraction of the
+// original bug's 30+-minute timescale, while leaving real headroom for a
+// genuine aging boost to actually manifest.
+const STALE_VISIBILITY_MS = 5 * 60_000;
+
+/**
  * Pure aging-boost calculation -- exported and unit-tested on its own
  * (test/market/collection-demand-visibility.test.ts) because it's the one
  * piece of real, non-trivial arithmetic in this whole feature. Mirrors the
@@ -180,6 +256,12 @@ export function computeVisibilityPriority(input: {
   now?: Date;
 }): number {
   const now = input.now ?? new Date();
+  // See STALE_VISIBILITY_MS's own header: a visibility ping this old is not
+  // real signal anymore -- the tab that produced it is almost certainly
+  // closed or navigated away, so this collection is no different from
+  // plain background cadence and must not keep climbing (or holding) an
+  // aged-up priority nothing is actually re-affirming.
+  if (now.getTime() - input.lastVisibleAt.getTime() > STALE_VISIBILITY_MS) return DEMAND_PRIORITY.BACKGROUND;
   const stale = input.lastHydratedAt == null || now.getTime() - input.lastHydratedAt.getTime() > TARGET_FRESH_TTL_MS;
   if (!stale) return DEMAND_PRIORITY.VISIBLE;
   const anchor = input.lastHydratedAt == null ? input.firstVisibleAt : input.lastVisibleAt;
@@ -283,18 +365,17 @@ export async function partitionKnownCollectionKeys(
  * keys, so enqueueDataJob's own GREATEST-on-conflict upsert coalesces with
  * anything already queued rather than creating parallel duplicate work.
  *
- * DELIBERATE SCOPE LIMIT (honest, not silently dropped): the design doc's
- * step 4 says to only request a job "if your existing job kinds say they're
- * incomplete or past TTL -- don't re-queue pure no-ops." This function does
- * NOT (yet) inspect per-source completion/TTL state before enqueuing --
- * doing that correctly needs reading each of plank_collection_cells'
- * `state`/`valid_until` per source, which is real additional surface this
- * pass didn't want to touch under the "no risky changes to unrelated
- * job-processing code" instruction. Bounded instead by: max 40 keys/POST,
- * max 1 POST/2.5s/tab (client), a 30/min server IP rate limit, and
- * enqueueDataJob's existing dedup -- so the worst case is "priority churn
- * on jobs already about to run," never unbounded new work. A true
- * per-source freshness check is a real, safe follow-up.
+ * UPDATE 2026-08-26: the design doc's step 4 ("only request a job if your
+ * existing job kinds say they're incomplete -- don't re-queue pure
+ * no-ops") is now actually satisfied, closing what used to be a real,
+ * explicitly-documented scope limit here. hydrationJobSources itself
+ * (see that function's own header) now checks each source's own cheap
+ * completion signal (lib/market/multichain/discovery/hydration-
+ * completion.ts) before including it, so this function inherits that for
+ * free -- a fully-synced collection on a wide rankings page no longer
+ * gets re-enqueued as a no-op just because it's on screen. Still bounded
+ * as before regardless: max 40 keys/POST, max 1 POST/2.5s/tab (client), a
+ * 30/min server IP rate limit, and enqueueDataJob's existing dedup.
  */
 export async function prioritizeVisibleCollections(
   chainSlug: string,
@@ -386,4 +467,52 @@ export async function prioritizeVisibleCollections(
     enqueued += results.filter((r) => r.status === "fulfilled").length;
   }
   return { enqueued };
+}
+
+/**
+ * Active correction pass for the real bug documented on STALE_VISIBILITY_MS
+ * above: computeVisibilityPriority's own stale check only ever runs again
+ * for a key someone is STILL pinging -- a collection nobody has pinged in
+ * a long while never gets recomputed at all, so it needs an explicit sweep
+ * rather than relying on the read path to self-heal. Two real, separate
+ * ratchet-only-up fields need correcting: collection_visibility_demand's
+ * own current_priority (harmless to plain overwrite -- it's a live-state
+ * column, not a conflict-resolution ratchet) and plank_data_jobs.priority
+ * for any STILL-QUEUED job under one of these keys (the actual thing
+ * capable of starving real demand at claim time) -- 'running' jobs are
+ * deliberately left untouched, matching claimDataJob's own lease-expiry
+ * reset discipline of never interrupting in-flight work.
+ *
+ * Cheap and safe to run on every real mesh-tick pass: one indexed read
+ * (chain_slug, last_visible_at) plus, only when it finds anything, one
+ * bounded UPDATE per affected chain's job rows.
+ */
+export async function demoteStaleVisibleDemand(): Promise<{ demoted: number }> {
+  const stale = await postgresQuery<{ chain_slug: string; collection_key: string }>(
+    `UPDATE collection_visibility_demand
+       SET current_priority = $1
+     WHERE last_visible_at < NOW() - ($2 || ' milliseconds')::interval
+       AND current_priority > $1
+     RETURNING chain_slug, collection_key`,
+    [DEMAND_PRIORITY.BACKGROUND, STALE_VISIBILITY_MS]
+  );
+  if (stale.rows.length === 0) return { demoted: 0 };
+  const byChain = new Map<string, string[]>();
+  for (const row of stale.rows) {
+    const list = byChain.get(row.chain_slug) ?? [];
+    list.push(row.collection_key);
+    byChain.set(row.chain_slug, list);
+  }
+  let demoted = 0;
+  for (const [chainSlug, keys] of byChain) {
+    const jobKeyPatterns = keys.map((key) => `demand:%:${chainSlug}:${key}`);
+    const result = await postgresQuery(
+      `UPDATE plank_data_jobs SET priority = $1, updated_at = NOW()
+       WHERE status = 'queued' AND kind = $2 AND priority > $1
+         AND job_key LIKE ANY($3::text[])`,
+      [DEMAND_PRIORITY.BACKGROUND, `mesh-lane:${chainSlug}`, jobKeyPatterns]
+    );
+    demoted += result.rowCount ?? 0;
+  }
+  return { demoted };
 }
