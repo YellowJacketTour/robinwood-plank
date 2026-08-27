@@ -117,6 +117,25 @@ PGSSLMODE=disable
 Keep the password only in the server environment file. `PGPOOL_MAX=4` limits
 each Passenger process to a small pool suitable for shared hosting.
 
+**Local dev only, does not apply here**: local Postgres instances
+(`C:\Users\<user>\pg-local\pg-data\postgresql.conf` on this session's own
+dev machine) ship with the stock `shared_buffers = 128MB` and
+`random_page_cost = 4.0` (spinning-disk default) regardless of real data
+volume or real SSD storage. Found live 2026-08-27: with `plank_collection_tokens`
+at ~19.4M rows / 16GB, every hydration-completion query was hitting disk
+on a cold 128MB cache -- one single-collection COUNT took 715ms-1.47s cold,
+7-28ms once cached with `shared_buffers = 4GB`. Tuned locally
+(`shared_buffers=4GB`, `effective_cache_size=12GB`, `work_mem=32MB`,
+`maintenance_work_mem=512MB`, `random_page_cost=1.1` for real SSD storage;
+`effective_io_concurrency` MUST stay at its Windows default -- setting it
+to anything nonzero crashed the server on restart, confirmed live, no
+`posix_fadvise` on Windows). **This is a self-hosted local Postgres
+instance's own `postgresql.conf`, entirely separate from this repo and
+from cPanel's managed PostgreSQL** -- there is nothing to change in this
+app's own config for it, and production's own real server-level tuning
+under InMotion's shared hosting is unknown and not something this app can
+control or verify from here.
+
 PostgreSQL stores:
 
 - indexed signed marketplace orders;
