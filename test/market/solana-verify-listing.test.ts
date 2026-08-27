@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PublicKey, type Connection } from "@solana/web3.js";
-import { verifySolanaListingOnChain } from "../../app/api/market/multichain/solana-verify-listing/route";
+import { verifySolanaListingOnChain } from "../../lib/market/multichain/solana-listing-verification";
 
 // Reuses the same real, live-verified fixture magiceden-m2-onchain.test.ts
 // pins (see that file's header for the full "checked against the real

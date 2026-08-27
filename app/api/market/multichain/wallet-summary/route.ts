@@ -25,7 +25,7 @@ import { fetchForeignAllListings, fetchForeignCollectionOffers } from "@/lib/mar
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
-import { resolveOwnedTokenIds } from "@/app/api/market/multichain/owned/route";
+import { resolveOwnedTokenIds } from "@/lib/market/multichain/owned-token-resolver";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 import { getListings, getOffers } from "@/lib/market/orders-store";

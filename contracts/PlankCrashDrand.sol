@@ -355,6 +355,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         maxAwaitBlocks = cfg.maxAwaitBlocks;
         maxElapsedBlocks = cfg.maxElapsedBlocks;
         registrationWindowBlocks = cfg.registrationWindowBlocks;
+        if (cfg.rakeBps > 10000 || cfg.keeperRewardBps > 10000 || cfg.maxStakePerWalletBps > 10000) {
+            revert BadVaultConfig();
+        }
         rakeBps = cfg.rakeBps;
         minParticipants = cfg.minParticipants;
         minPoolSize = cfg.minPoolSize;
@@ -370,6 +373,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             revert BadVaultConfig();
         }
         if (cfg.reserveShareBps > 10000) revert BadVaultConfig();
+        if (cfg.reserveCap != 0 && cfg.reserveCap < cfg.reserveFloorWei) revert BadVaultConfig();
+        if (cfg.jackpotSink != address(0) && cfg.jackpotSink.code.length == 0) revert BadVaultConfig();
         seedNumerator = cfg.seedNumerator;
         seedDenominator = cfg.seedDenominator;
         reserveShareBps = cfg.reserveShareBps;
@@ -785,11 +790,17 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         r.crashElapsedBlocks = effective;
         r.crashMultiplierBps = _multiplierAt(effective);
-        r.distributable = (r.pool * (10000 - rakeBps)) / 10000;
+        // Vault seed is restricted community prize principal, not player
+        // wagering revenue. Preserve it in full and assess rake only on the
+        // player-funded portion of the pool.
+        uint256 vaultSeed = r.rolledOverFromPrevious;
+        uint256 playerPool = r.pool - vaultSeed;
+        uint256 playerDistributable = (playerPool * (10000 - rakeBps)) / 10000;
+        r.distributable = vaultSeed + playerDistributable;
         r.registrationDeadlineBlock = block.number + registrationWindowBlocks;
         r.phase = Phase.CRASHED;
 
-        uint256 rake = r.pool - r.distributable;
+        uint256 rake = playerPool - playerDistributable;
         uint256 keeperReward = (rake * keeperRewardBps) / 10000;
         uint256 netRake = rake - keeperReward;
         // Compound a share of the rake straight back into the Vault instead
@@ -1022,7 +1033,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         if (r.provisionalWinningWeight == 0) return 0;
         uint256 myWeight = (stakeOf[roundId][player] * _multiplierAt(cashOutBlock - r.lockBlock)) / 10000;
-        uint256 distributableNow = (r.pool * (10000 - rakeBps)) / 10000;
+        uint256 vaultSeed = r.rolledOverFromPrevious;
+        uint256 playerPool = r.pool - vaultSeed;
+        uint256 distributableNow = vaultSeed + (playerPool * (10000 - rakeBps)) / 10000;
         return (distributableNow * myWeight) / r.provisionalWinningWeight;
     }
 }

@@ -100,19 +100,37 @@ export async function postgresQuery<T extends QueryResultRow = QueryResultRow>(
   return postgresPool().query<T>(text, [...values]);
 }
 
+/** PostgreSQL's documented transaction-race signals: deadlock_detected and
+ * serialization_failure. A bounded retry is safe because every caller reruns
+ * its complete transaction after PostgreSQL has rolled the prior attempt back. */
+const RETRYABLE_PG_CODES = new Set(["40P01", "40001"]);
+
+function isRetryablePgError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error
+    && RETRYABLE_PG_CODES.has(String((error as { code?: unknown }).code));
+}
+
 export async function withPostgresTransaction<T>(
-  run: (client: PoolClient) => Promise<T>
+  run: (client: PoolClient) => Promise<T>,
+  maxAttempts = 3
 ): Promise<T> {
-  const client = await postgresPool().connect();
-  try {
-    await client.query("BEGIN");
-    const result = await run(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const client = await postgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await run(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      if (attempt < maxAttempts && isRetryablePgError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt + Math.random() * 50));
+        continue;
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
+  throw new Error("withPostgresTransaction: unreachable");
 }

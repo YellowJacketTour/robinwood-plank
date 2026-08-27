@@ -1,5 +1,6 @@
 import { walletProofMessage, walletProofPayloadHash, type WalletProof } from "@/lib/wallet-proof";
 import { signMessage } from "@/lib/wallet";
+export { PORTFOLIO_PROOF_DOMAIN } from "@/lib/portfolio-proof-domain";
 
 /**
  * Client-side counterpart to lib/wallet-proof.ts's verifyWalletProof --
@@ -23,8 +24,6 @@ export const REFERRAL_PROOF_DOMAIN = "plank-referral";
  * Distinct domain on purpose: a signature collected to READ a portfolio must
  * never be replayable as a referral claim or a wallet link.
  */
-export const PORTFOLIO_PROOF_DOMAIN = "portfolio-read";
-
 export async function buildWalletProof(
   address: string,
   domain: string,

@@ -94,6 +94,7 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
 
   it("rejects a seed fraction that is not a proper fraction (that is what guarantees non-emptiness)", async () => {
     const Crash = await ethers.getContractFactory("PlankCrashDrand");
+    const [, , eoa] = await ethers.getSigners();
     await expect(deploy({ seedNumerator: 2n, seedDenominator: 2n })).to.be.revertedWithCustomError(
       Crash,
       "BadVaultConfig"
@@ -107,6 +108,40 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       "BadVaultConfig"
     );
     await expect(deploy({ reserveShareBps: 10001n })).to.be.revertedWithCustomError(Crash, "BadVaultConfig");
+    await expect(deploy({ rakeBps: 10001n })).to.be.revertedWithCustomError(Crash, "BadVaultConfig");
+    await expect(deploy({ keeperRewardBps: 10001n })).to.be.revertedWithCustomError(Crash, "BadVaultConfig");
+    await expect(deploy({ maxStakePerWalletBps: 10001n })).to.be.revertedWithCustomError(Crash, "BadVaultConfig");
+    await expect(deploy({ reserveFloorWei: 100n, reserveCap: 99n })).to.be.revertedWithCustomError(
+      Crash,
+      "BadVaultConfig"
+    );
+    await expect(deploy({ reserveCap: 100n, jackpotSink: eoa.address })).to.be.revertedWithCustomError(
+      Crash,
+      "BadVaultConfig"
+    );
+  });
+
+  it("never charges rake on restricted Vault seed", async () => {
+    const { crash, beacon, alice, bob } = await deploy({
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      rakeBps: 1000n,
+      keeperRewardBps: 2500n,
+      reserveShareBps: 4000n,
+      maxStakePerWalletBps: 10000n,
+    });
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("10") });
+    await playRound(crash, beacon, alice, bob, "seed-rake-primer");
+    const { rid } = await playRound(crash, beacon, alice, bob, "seed-rake-proof");
+    const round = await crash.rounds(rid);
+    const seed = round.rolledOverFromPrevious;
+    const playerPool = round.pool - seed;
+    const playerDistributable = (playerPool * 9000n) / 10000n;
+    const playerRake = playerPool - playerDistributable;
+
+    expect(seed).to.be.gt(0n);
+    expect(round.distributable).to.equal(seed + playerDistributable);
+    expect(round.pool - round.distributable).to.equal(playerRake);
   });
 
   it("fundVault grows the reserve and nextSeed() is exactly floor(reserve * num/den)", async () => {

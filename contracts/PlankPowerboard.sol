@@ -37,8 +37,8 @@ interface IWagerSource {
  *     ticket holder takes the ENTIRE rolling jackpot. It resets and starts
  *     again.
  *   - If it misses, that ticket holder still wins a consolation slice
- *     (consolationBps of the pot) and THE REST ROLLS OVER, so the jackpot
- *     is strictly bigger next epoch.
+ *     (consolationBps of the pot) and THE REST ROLLS OVER. The pot grows
+ *     only when new funding exceeds payouts.
  *
  * WHY THIS SHAPE -- grounded in how real lotteries actually behave:
  *   - The rollover is the engine. Players are ~15x more likely to buy in
@@ -107,7 +107,7 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     address private immutable _deployer;
     IPlankProgression public progression;
 
-    /// The rolling jackpot. Grows with every rake deposit and every miss.
+    /// The current rolling jackpot; deposits increase it and payouts reduce it.
     uint256 public jackpot;
     uint256 public totalPaidOut;
     uint256 public jackpotsHit;

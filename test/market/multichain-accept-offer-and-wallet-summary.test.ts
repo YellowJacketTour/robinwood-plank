@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assertAcceptableOffer } from "../../lib/market/seaport";
 import { acceptRobinhoodOfferNow } from "../../lib/market/multichain/trading/foreign-fulfill";
-import { resolveOwnedTokenIds } from "../../app/api/market/multichain/owned/route";
+import { resolveOwnedTokenIds } from "../../lib/market/multichain/owned-token-resolver";
 import { listTrackedCollections } from "../../lib/market/multichain/store";
 import { getListings, getOffers } from "../../lib/market/orders-store";
 
