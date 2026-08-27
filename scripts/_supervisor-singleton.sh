@@ -14,6 +14,23 @@ _supervisor_fingerprint() {
   ps -p "$pid" 2>/dev/null | awk -v p="$pid" '$1 == p { print $7 }'
 }
 
+# Real root cause found live 2026-08-27 (55 duplicate node.exe processes,
+# 41+ orphaned mesh-tick/mesh-lane children, confirmed live): MSYS bash's
+# own PID space (what `$!`/`ps`'s own PID column report) is NOT the same
+# numbering space as Windows' real process IDs -- `ps -p PID` here reports
+# BOTH separately (PID column vs WINPID column, confirmed distinct live).
+# `taskkill.exe` is a native Windows binary; every prior call anywhere in
+# this repo passed it the MSYS-space PID directly, which either killed
+# nothing (taskkill: "process not found", seen live repeatedly tonight) or
+# -- worse -- coincidentally matched and killed a real, unrelated Windows
+# process. This is why stopping a supervisor never reliably killed its
+# real child tree: the trap fired, computed the right fingerprint, then
+# handed taskkill.exe a number from the wrong universe. Translate first.
+_supervisor_winpid() {
+  local pid="$1"
+  ps -p "$pid" 2>/dev/null | awk -v p="$pid" '$1 == p { print $4 }'
+}
+
 supervisor_singleton() {
   local name="$1"
   SUPERVISOR_NAME="$name"
@@ -57,7 +74,11 @@ supervisor_cleanup() {
       # Kill the explicit child tree so stopping a supervisor leaves no Node
       # grandchildren behind. Fingerprint-checked so a PID reused by an
       # unrelated process in the gap between exit and cleanup is never hit.
-      taskkill.exe //F //T //PID "$SUPERVISOR_CHILD_PID" >/dev/null 2>&1 || true
+      # Translated to the real Windows PID first -- see _supervisor_winpid's
+      # own header; taskkill.exe cannot act on an MSYS-space PID at all.
+      local child_winpid
+      child_winpid="$(_supervisor_winpid "$SUPERVISOR_CHILD_PID")"
+      [ -n "$child_winpid" ] && taskkill.exe //F //T //PID "$child_winpid" >/dev/null 2>&1 || true
     fi
   fi
   if [ -n "${SUPERVISOR_LOCK_DIR:-}" ] && [ "$(cat "$SUPERVISOR_LOCK_DIR/pid" 2>/dev/null)" = "$$" ]; then
