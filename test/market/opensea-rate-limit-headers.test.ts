@@ -30,10 +30,13 @@ test(
   "recordOpenSeaAccountFailure uses the real Retry-After header instead of the blind 20-minute default",
   { skip: !hasPostgresConfig() },
   async () => {
-    const { recordOpenSeaAccountFailure, loadOpenSeaKeyPool } = await import("../../lib/market/multichain/discovery/opensea-key-pool");
+    const { recordOpenSeaAccountFailure, openSeaKeySource } = await import("../../lib/market/multichain/discovery/opensea-key-pool");
     const { jailRemainingMs } = await import("../../lib/market/multichain/mesh/jail");
-    const pool = await loadOpenSeaKeyPool();
-    const target = pool[0].providerAccount;
+    // This behavior is independent of whether CI has a real OpenSea secret.
+    // Use an isolated provider-account key so the test exercises the durable
+    // jail without dereferencing an empty configured pool or touching a real
+    // account's state.
+    const target = openSeaKeySource(`retry-after-test-${process.pid}-${Date.now()}`);
     const fakeResponse = new Response(null, { status: 429, headers: { "retry-after": "45" } });
     await recordOpenSeaAccountFailure(target, true, fakeResponse);
     const remaining = await jailRemainingMs(target);
