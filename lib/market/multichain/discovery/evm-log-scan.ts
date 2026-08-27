@@ -82,6 +82,19 @@ export const EVM_CHAIN_ID: Record<string, number> = {
   "bnb-mainnet": 56,
   "avax-mainnet": 43114,
   "zksync-mainnet": 324,
+  // Real gap found live 2026-08-27 (external research): this app's own
+  // Robinhood Chain had zero HyperSync coverage, treated as permanently
+  // OpenSea-only, on the assumption Envio's public indexing infrastructure
+  // doesn't cover a private/custom L2. That assumption was live-verified
+  // FALSE the same day -- Envio published HyperIndex for Robinhood Chain
+  // 2026-07-10: https://robinhood.hypersync.xyz and
+  // https://4663.hypersync.xyz both return real, live, matching block
+  // height (confirmed via a direct authenticated curl, not assumed).
+  // hypersyncUrl() below builds its URL as `https://${chainId}.hypersync.xyz`,
+  // so this entry alone is what's needed to bring Robinhood onto the same
+  // HyperSync-backed anchored-membership/token-index-probe path every
+  // other EVM chain already has.
+  robinhood: 4663,
 };
 
 /**
