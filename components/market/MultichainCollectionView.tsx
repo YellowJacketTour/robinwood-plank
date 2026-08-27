@@ -58,6 +58,7 @@ import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
 import DataSourceChip from "@/components/market/DataSourceChip";
 import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
+import { MetadataCoverageBar } from "@/components/market/hydration/MetadataCoverageBar";
 import { isCoverageCtaDegraded, coverageCtaReason, type CollectionCoverageInfo } from "@/lib/market/multichain/collection-coverage";
 
 /** Ledger/OpenSea/Magic Eden events all default a missing or unresolved address to this sentinel -- it means "unknown" (e.g. a mint's from-side), not a real repeated wallet, so it must never be treated as a matching pair by computeWashSuspicion(). Same constant lib/market/trending.ts uses server-side for the same reason. */
@@ -2077,22 +2078,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           active={isActivelyHydrating}
         />
       )}
-      {/* Real, separate metadata (L3) signal -- see archival-ledger.ts's
+      {/* Real, separate metadata (L3) bar -- see archival-ledger.ts's
           ArchivalApiShape header for why this must never be blended into
-          the membership bar above. Only shown when it says something the
-          membership bar doesn't already: full membership can be reached
-          via HyperSync well before trait/metadata enrichment (a separate,
-          slower, OpenSea/on-chain-gated process) catches up behind it --
-          this is the honest "still filling in traits" signal for exactly
-          that gap, not shown at all once the two agree (nothing left to
+          the membership bar above. Own fill behavior (owner's own design
+          brief, 2026-08-27): cycles through real rarity-tier colors while
+          actively filling, rests on the chain's own INVERTED brand color
+          -- see MetadataCoverageBar.tsx's own header. Renders nothing at
+          all once metadata has caught up to membership (nothing left to
           say twice). */}
-      {archival?.metadataCoverage != null && archival.metadataCoverage < 0.999 && (
-        <p className="mt-1 text-[11px] leading-snug text-amber-100/55">
-          Traits & metadata {(archival.metadataCoverage * 100).toFixed(1)}%
-          {archival.metadataTokens != null && archival.tokensEverHydrated != null
-            ? ` - ${archival.metadataTokens.toLocaleString()} of ${archival.tokensEverHydrated.toLocaleString()} known tokens`
-            : ""}
-        </p>
+      {archival && (
+        <MetadataCoverageBar
+          metadataCoverage={archival.metadataCoverage}
+          metadataTokens={archival.metadataTokens}
+          knownTokens={archival.tokensEverHydrated}
+          pulseKey={archival.lastArchivedAt}
+          chainSlug={chainSlug}
+          active={isActivelyHydrating}
+          className="mt-2"
+        />
       )}
       {supplyStats?.holderCount != null && (
         <p className="text-[0.65rem] text-foreground/45">

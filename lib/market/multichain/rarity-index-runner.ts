@@ -425,7 +425,24 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   }
   let complete = 0, empty = 0, retry = 0, cidSkipped = 0;
   const errors: string[] = [];
-  for (const item of work) {
+  // Real gap found live 2026-08-27 (external research: "surely there's a
+  // cheat code with hypersync/onchain/IPFS that can make full metadata
+  // populate instantly"): this loop ran every item in `work` FULLY
+  // SEQUENTIALLY, each one's own real IPFS/HTTP body fetch (with its own
+  // internal multi-gateway serial fallback chain, lib/ipfs.ts) blocking
+  // the next item's turn to even start. Live-reproduced: a direct call
+  // for a real, genuinely-incomplete Doodles batch (limit=5) produced
+  // zero output within 30s -- not an infinite hang, but slow-gateway
+  // latency compounding across 5 sequential items each paying their own
+  // full fallback chain. JS's single-threaded event loop means the
+  // existing shared-counter mutations below (complete += 1, etc.) stay
+  // race-free even when every item's awaits now interleave instead of
+  // running one at a time -- this is the same class of fix already
+  // applied to prioritizeVisibleCollections' per-key loop earlier
+  // tonight, same reasoning: nothing in one item's outcome depends on
+  // another's, so concurrent execution can only ever be faster, never
+  // less correct.
+  await Promise.all(work.map(async (item) => {
     try {
       const itemKey = `${item.collectionSlug}:${item.tokenId}`;
       const batchedUri = batchUriByKey.get(itemKey);
@@ -441,7 +458,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
           await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
           cidSkipped += 1;
           complete += 1;
-          continue;
+          return;
         }
       }
 
@@ -456,7 +473,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       if (!metadata || (!metadata.name && !metadata.imageUrl && metadata.traits.length === 0)) {
         await writeTokenMetadataResult({ chainSlug, ...item, state: "empty" });
         empty += 1;
-        continue;
+        return;
       }
       // Same honest isNewToken check as hydrateSpecificToken's single-click
       // path -- this bulk background lane is the app's actual highest-
@@ -495,7 +512,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       if (errors.length < 3) errors.push(error instanceof Error ? error.message : String(error));
       retry += 1;
     }
-  }
+  }));
   let rarityFinalized = 0;
   for (const collectionSlug of new Set(work.map((item) => item.collectionSlug))) {
     const state = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
