@@ -806,7 +806,7 @@ function sleep(ms: number): Promise<void> {
 // and every single call re-resolved the slug from scratch -- a contract's
 // OpenSea slug never changes, so a 10-page loop paid 10 REDUNDANT
 // key-reservation round trips for information already known after page 1,
-// needlessly multiplying contention on the shared 6-key pool under real
+// needlessly multiplying contention on the shared OpenSea key pool under real
 // concurrent load (confirmed live: "no OpenSea key with capacity" errors
 // on a collection whose keys, checked directly, were all healthy -- a
 // contention symptom, not a broken pool). Slug resolution is the one part

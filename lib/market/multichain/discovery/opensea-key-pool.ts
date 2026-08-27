@@ -240,14 +240,15 @@ const BACKGROUND_SKIP_RATE = 0.95;
 
 /**
  * Real gap found live 2026-08-25 ("resolve absolutely everything, no
- * shortcuts"): pool health showed ALL 6 real keys unjailed and well under
- * their real daily allowance (one at 27%, the rest under 1%) at the exact
- * moment real callers were failing with "no OpenSea key with capacity."
- * Not quota exhaustion -- real per-key pacing (6.2s/key, matching
+ * shortcuts"): pool health showed ALL real keys (6 at the time) unjailed and
+ * well under their real daily allowance (one at 27%, the rest under 1%) at
+ * the exact moment real callers were failing with "no OpenSea key with
+ * capacity." Not quota exhaustion -- real per-key pacing (6.2s/key, matching
  * OpenSea's documented 600/hr) means the whole pool's real sustained
- * throughput is only ~1 request/second; with mesh-tick's concurrency
- * raised to 16 workers tonight, it's genuinely possible for all 6 keys to
- * be momentarily mid-cooldown at the exact same instant a "live" caller
+ * throughput is only ~(pool size) requests/second; with mesh-tick's
+ * concurrency raised to 16 workers tonight, it's genuinely possible for
+ * every key in the pool to be momentarily mid-cooldown at the exact same
+ * instant a "live" caller
  * asks. The old code treated that as an immediate, permanent failure
  * (logged as "fatal", one wasted job attempt) even though a key
  * statistically frees up within about a second. A short, bounded retry

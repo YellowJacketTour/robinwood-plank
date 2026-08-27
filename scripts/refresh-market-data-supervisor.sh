@@ -19,13 +19,15 @@
 # on cursor-resumable, real, compounding progress toward a genuinely
 # complete record serves no purpose except silently stopping it.
 cd "$(dirname "$0")/.."
+source scripts/_supervisor-singleton.sh
+supervisor_singleton "refresh-market-data-supervisor"
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
 ATTEMPT=0
 while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== refresh-market-data supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
-  npx tsx scripts/refresh-market-data.ts --full
+  supervisor_run node --import tsx scripts/refresh-market-data.ts --full
   code=$?
   echo "=== refresh-market-data supervisor: pass exited code $code ==="
   # Real pacing, not a self-imposed limit: this pass touches many

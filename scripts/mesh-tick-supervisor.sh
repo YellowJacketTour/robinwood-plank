@@ -1,5 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")/.."
+source scripts/_supervisor-singleton.sh
+supervisor_singleton "mesh-tick-supervisor"
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
 ATTEMPT=0
@@ -18,7 +20,7 @@ while true; do
   # explicit --limit=6 against a real, deliberately-capped PGPOOL_MAX=4 on
   # its hosted DB tier (see docs/INMOTION_DEPLOYMENT.md) -- do not "fix"
   # that number to match this one, it is a real, different constraint.
-  npx tsx scripts/mesh-tick.ts --limit=16
+  supervisor_run node --import tsx scripts/mesh-tick.ts --limit=16
   echo "=== mesh-tick supervisor: pass exited code $? ==="
   sleep 2
 done

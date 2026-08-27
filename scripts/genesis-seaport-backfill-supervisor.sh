@@ -9,13 +9,15 @@
 # Cursors persist in Postgres between passes regardless of how long this
 # runs, so leaving it running is real, compounding progress.
 cd "$(dirname "$0")/.."
+source scripts/_supervisor-singleton.sh
+supervisor_singleton "genesis-seaport-backfill-supervisor"
 set -a; source <(grep -E "^[A-Z_]+=" .env.local); set +a
 
 ATTEMPT=0
 while true; do
   ATTEMPT=$((ATTEMPT + 1))
   echo "=== genesis-backfill supervisor: attempt $ATTEMPT, $(date -u +%H:%M:%S) UTC ==="
-  npx tsx scripts/genesis-seaport-backfill-pass.mjs
+  supervisor_run node --import tsx scripts/genesis-seaport-backfill-pass.mjs
   echo "=== genesis-backfill supervisor: pass exited code $? ==="
   sleep 2
 done
