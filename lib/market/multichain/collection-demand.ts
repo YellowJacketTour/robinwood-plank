@@ -45,10 +45,16 @@ export async function hydrationJobSources(
     }
     list.push({ source: "magiceden-solana", basePriority: 96 });
   } else if (isRobinhoodChainSlug(chainSlug)) {
-    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete, isMembershipCountComplete } = await import(
       "@/lib/market/multichain/discovery/hydration-completion"
     );
-    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+    // Real, source-agnostic short-circuit (2026-08-27): the real row count
+    // already reaching the real, independently-known total_supply -- see
+    // isMembershipCountComplete's own header for the CloneX incident this
+    // fixes (HyperSync had already fully populated a collection while
+    // OpenSea's own walk, with no way to know that, kept re-pulling pages).
+    const countComplete = await isMembershipCountComplete(chainSlug, normalized).catch(() => false);
+    if (!countComplete && !(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "robinhood-membership", basePriority: 98 });
     }
     if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
@@ -56,10 +62,11 @@ export async function hydrationJobSources(
     }
     list.push({ source: "opensea-stats", basePriority: 96 });
   } else if (foreignChainByChainSlug(chainSlug)) {
-    const { isOpenseaMembershipComplete, isEvmMetadataComplete } = await import(
+    const { isOpenseaMembershipComplete, isEvmMetadataComplete, isMembershipCountComplete } = await import(
       "@/lib/market/multichain/discovery/hydration-completion"
     );
-    if (!(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
+    const countComplete = await isMembershipCountComplete(chainSlug, normalized).catch(() => false);
+    if (!countComplete && !(await isOpenseaMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "opensea-membership", basePriority: 98 });
     }
     if (!(await isEvmMetadataComplete(chainSlug, normalized).catch(() => false))) {
@@ -100,7 +107,7 @@ export async function hydrationJobSources(
     // if the collection were still incomplete-but-unreachable. Import
     // the dependency-free module directly instead.
     const { isAnchoredMembershipComplete } = await import("@/lib/market/multichain/discovery/anchored-membership-status");
-    if (!(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
+    if (!countComplete && !(await isAnchoredMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "anchored-membership", basePriority: 95 });
     }
     // Real fix, 2026-08-25 ("it has to be stuck... was syncing fast and
