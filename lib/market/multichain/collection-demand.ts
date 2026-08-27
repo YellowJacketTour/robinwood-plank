@@ -33,14 +33,28 @@ export async function hydrationJobSources(
   // cryptopunks-native have no equally simple, verified single completion
   // signal yet -- left unconditional rather than guess at one.
   if (isBitcoinChainSlug(chainSlug)) {
-    const { isUnisatMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
-    if (!(await isUnisatMembershipComplete(chainSlug, normalized).catch(() => false))) {
+    const { isUnisatMembershipComplete, isMembershipCountComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
+    );
+    // Real gap found live 2026-08-27 (same audit that found the CloneX/EVM
+    // count-completion gap): Bitcoin and Solana never got the same
+    // source-agnostic cross-check -- isUnisatMembershipComplete/
+    // isHeliusMembershipComplete only ever read their OWN source's flag,
+    // exactly the per-source-blindness shape isMembershipCountComplete was
+    // built to fix. The function itself is chain-agnostic (chain_slug +
+    // collection key + plank_multichain_snapshots.total_supply), so wiring
+    // it in here is the same fix, not a new one.
+    const countComplete = await isMembershipCountComplete(chainSlug, normalized).catch(() => false);
+    if (!countComplete && !(await isUnisatMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "unisat-membership", basePriority: 98 });
     }
     list.push({ source: "unisat-rarity", basePriority: 97 });
   } else if (isSolanaChainSlug(chainSlug)) {
-    const { isHeliusMembershipComplete } = await import("@/lib/market/multichain/discovery/hydration-completion");
-    if (!(await isHeliusMembershipComplete(chainSlug, normalized).catch(() => false))) {
+    const { isHeliusMembershipComplete, isMembershipCountComplete } = await import(
+      "@/lib/market/multichain/discovery/hydration-completion"
+    );
+    const countComplete = await isMembershipCountComplete(chainSlug, normalized).catch(() => false);
+    if (!countComplete && !(await isHeliusMembershipComplete(chainSlug, normalized).catch(() => false))) {
       list.push({ source: "helius-membership", basePriority: 98 });
     }
     list.push({ source: "magiceden-solana", basePriority: 96 });
@@ -416,8 +430,19 @@ export async function prioritizeVisibleCollections(
   );
 
   const now = new Date();
-  let enqueued = 0;
-  for (const normalized of allKeys) {
+  // Real perf gap found live 2026-08-27 (visibility-demand taking 300ms-16s
+  // per POST under real concurrent load): this loop used to run every key
+  // FULLY SEQUENTIALLY -- up to 50 keys x ~5-8 awaited DB round trips each
+  // (an aging-row read/write plus hydrationJobSources' own several
+  // completion checks), none of it overlapping. Nothing in the loop body
+  // depends on another key's result, so running all keys concurrently
+  // turns "sum of every key's latency" into "the slowest single key's
+  // latency" -- the same fix already applied to enqueueDataJob's own
+  // per-key job list just below. Errors per key are caught inside the
+  // per-key function itself (matching the original try/catch), so one
+  // key's failure can never affect another's.
+  const perKeyEnqueued = await Promise.all(
+    allKeys.map(async (normalized) => {
     const isCore = visibleSet.has(normalized);
     const isKnown = knownKeys.has(normalized);
     let priority: number = isCore ? DEMAND_PRIORITY.VISIBLE : DEMAND_PRIORITY.PREDICT_NEXT;
@@ -471,8 +496,10 @@ export async function prioritizeVisibleCollections(
       priority,
     }));
     const results = await Promise.allSettled(jobs.map((job) => enqueueDataJob(job)));
-    enqueued += results.filter((r) => r.status === "fulfilled").length;
-  }
+    return results.filter((r) => r.status === "fulfilled").length;
+    })
+  );
+  const enqueued = perKeyEnqueued.reduce((sum, n) => sum + n, 0);
   return { enqueued };
 }
 
