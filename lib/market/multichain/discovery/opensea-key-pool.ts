@@ -96,6 +96,30 @@ function parseKeyList(raw: string): string[] {
 }
 
 /**
+ * Real configured pool size, synchronously, from env alone -- for callers
+ * (mesh-tick.ts's own OpenSea concurrency semaphore) that need a real
+ * capacity number at module-load time, before any async pool/DB read is
+ * possible. Mirrors loadOpenSeaKeyPool's own OPENSEA_API_KEYS parsing
+ * exactly (same dedup, same 10-key cap) but never falls through to the
+ * single managed/pinned key's real value -- only whether one exists at all,
+ * since this is a capacity COUNT, not a key lookup. Real gap found live
+ * 2026-08-27: mesh-tick.ts's own semaphore was hardcoded to 2, a real
+ * concurrency ceiling tuned when this app had 1-2 real keys total -- with a
+ * 7-key pool, that left 5 of 7 keys idle at every instant, throttling real
+ * sustained throughput to under a third of the pool's real capacity and
+ * manifesting as spurious "pool exhausted/jailed" contention errors even
+ * though the pool itself was healthy and under 3% of its daily allowance.
+ */
+export function configuredOpenSeaKeyCount(): number {
+  const raw = process.env.OPENSEA_API_KEYS?.trim();
+  if (raw) {
+    const keys = parseKeyList(raw).slice(0, 10);
+    if (keys.length > 0) return keys.length;
+  }
+  return 1;
+}
+
+/**
  * The pool as configured right now. Falls back to the single existing
  * `getOpenSeaApiKey()` key (env override or managed/rotated key) when
  * `OPENSEA_API_KEYS` is unset -- zero behavior change for every deployment
