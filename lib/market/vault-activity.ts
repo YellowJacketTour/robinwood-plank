@@ -101,7 +101,6 @@ const SCAN_HEAD_KV_KEY = "plank:market:vault-scan-head-v1";
  */
 const NFT_TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-const DEPOSIT_FALLBACK_HEAD_KV_KEY = "plank:market:vault-deposit-fallback-scan-head-v1";
 
 /**
  * Both the SSE stream (getVaultActivity(40)) and estimateApr inside
@@ -590,13 +589,31 @@ async function fromEthRpc(
 }
 
 /**
- * Fallback source for deposits the vault's own logs never recorded (see
- * DEPOSIT_FALLBACK_HEAD_KV_KEY's header). Scans the tracked NFT contract's
- * Transfer logs for `to == vault`, which is real, on-chain, and true
- * regardless of which vault function moved the token. Same incremental/
- * cold-start shape as fromEthRpc, but against the NFT contract's address
- * and its own separate resume cursor, since the two scans cover different
- * emitting contracts and must not share (or corrupt) each other's progress.
+ * Fallback source for deposits the vault's own logs never recorded.
+ * Scans the tracked NFT contract's Transfer logs for `to == vault`, which
+ * is real, on-chain, and true regardless of which vault function moved the
+ * token there.
+ *
+ * Deliberately NOT a resume-cursor design: an earlier version tried to
+ * walk backward from the chain head with a bounded chunk budget, then
+ * remember how far it got so later calls could resume forward. Confirmed
+ * live 2026-08-28, twice, that this doesn't actually work: a bounded walk
+ * that stops early has no safe way to mark itself "done" (doing so
+ * permanently skips whatever it didn't reach, which is exactly how the
+ * 2026-08-27 deposit went missing in the first place), and raising the
+ * bound enough to avoid that risked a real 60-second Cloudflare 504 on
+ * this public, live-traffic endpoint instead.
+ *
+ * Simpler and safe: always rescan a fixed, fresh trailing window (5 days)
+ * rather than trying to resume a partial historical walk, and rely on the
+ * dedupe already in scanVault (by txHash+tokenId) to collapse the overlap
+ * with earlier calls -- there is no cursor to get stuck or lie about
+ * completion. Chunked at the same 50,000-block size logScanBudget already
+ * uses elsewhere (known safe against this RPC) and fetched with bounded
+ * concurrency so wall-clock stays low regardless of how many chunks a
+ * 5-day window needs -- measured live 2026-08-28: ~10 blocks/sec on this
+ * chain (706,986 blocks over a genuinely observed ~71,340s span), so 5
+ * days is roughly 4.3M blocks / ~87 chunks of 50,000.
  */
 async function fromNftDepositFallback(
   vault: string,
@@ -604,31 +621,11 @@ async function fromNftDepositFallback(
   full: boolean
 ): Promise<VaultTradeEvent[]> {
   const latest = await ethBlockNumberDisplay();
-  const { chunkBlocks, maxChunks } = logScanBudget();
-  // Confirmed live 2026-08-28: reusing fromEthRpc's own cold-start chunk
-  // budget (12 chunks non-full) marked itself "complete" and advanced the
-  // resume cursor to `latest` after covering only 600,000 blocks back --
-  // short of the real gap to the missed 2026-08-27 deposit by ~107,000
-  // blocks. Because `completed` only means "no window threw", not "reached
-  // genesis or known-good coverage", that false completion permanently
-  // skipped the gap: every later call takes the fast incremental path
-  // forward from the now-advanced head and can never revisit it. This is a
-  // one-time historical backfill, not a routine per-request cost -- once
-  // its cursor is set, every future call is the cheap incremental branch --
-  // so it deliberately uses a larger budget than the primary scan to make a
-  // false "complete" far less likely on the very first run. Measured live:
-  // ~3-4s per chunk against the public RPC, so 20 chunks (1,000,000 blocks,
-  // comfortably past the confirmed ~707,000-block gap) stays well inside
-  // Cloudflare's proxy timeout instead of the 40+ chunks that would risk it.
-  const chunks = full ? Math.max(maxChunks, 15) : 20;
+  const { chunkBlocks } = logScanBudget();
+  const BLOCKS_PER_DAY = 864_000; // ~10 blocks/sec, measured live above.
+  const WINDOW_DAYS = 5;
+  const CONCURRENCY = 12;
   const toVaultTopic = zeroPadValue(vault, 32).toLowerCase();
-  const rawLogs: Array<{
-    topics: string[];
-    data: string;
-    blockNumber: string;
-    transactionHash: string;
-    logIndex: string;
-  }> = [];
 
   const getLogs = (fromBlock: number, toBlock: number) =>
     ethGetLogsDisplay({
@@ -638,41 +635,27 @@ async function fromNftDepositFallback(
       toBlock: "0x" + toBlock.toString(16),
     });
 
-  const head = full ? 0 : (await readScanHeads(DEPOSIT_FALLBACK_HEAD_KV_KEY))[vault.toLowerCase()] ?? 0;
+  const windowStart = Math.max(0, latest - BLOCKS_PER_DAY * WINDOW_DAYS);
+  const ranges: Array<[number, number]> = [];
+  for (let to = latest; to > windowStart; to -= chunkBlocks) {
+    const from = Math.max(windowStart, to - chunkBlocks + 1);
+    ranges.push([from, to]);
+  }
 
-  if (head > 0 && head < latest) {
-    let from = head + 1;
-    let scannedTo = head;
-    for (let chunk = 0; chunk < maxChunks && from <= latest; chunk += 1) {
-      const to = Math.min(latest, from + chunkBlocks - 1);
-      try {
-        rawLogs.push(...(await getLogs(from, to)));
-      } catch {
-        break;
-      }
-      scannedTo = to;
-      from = to + 1;
-    }
-    if (scannedTo > head) await writeScanHead(vault, scannedTo, DEPOSIT_FALLBACK_HEAD_KV_KEY);
-  } else {
-    let toBlock = latest;
-    let completed = true;
-    for (
-      let chunk = 0;
-      chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
-      chunk += 1
-    ) {
-      const fromBlock = Math.max(0, toBlock - chunkBlocks);
-      try {
-        rawLogs.push(...(await getLogs(fromBlock, toBlock)));
-      } catch {
-        completed = false;
-        break;
-      }
-      if (fromBlock === 0) break;
-      toBlock = fromBlock - 1;
-    }
-    if (completed) await writeScanHead(vault, latest, DEPOSIT_FALLBACK_HEAD_KV_KEY);
+  const rawLogs: Array<{
+    topics: string[];
+    data: string;
+    blockNumber: string;
+    transactionHash: string;
+    logIndex: string;
+  }> = [];
+  for (let i = 0; i < ranges.length; i += CONCURRENCY) {
+    const batch = ranges.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(([from, to]) => getLogs(from, to).catch(() => []))
+    );
+    for (const r of results) rawLogs.push(...r);
+    if (!full && rawLogs.length >= limit * 3) break;
   }
 
   if (rawLogs.length === 0) return [];
