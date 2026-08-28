@@ -1,7 +1,8 @@
 import { currentPlaytestIdentity, playtestMutationOriginAllowed } from "@/lib/playtest-auth";
 import {
-  lockPlaytestBet, placePlaytestBet, PlaytestRoomError,
+  adjustPlaytestCredit, lockPlaytestBet, placePlaytestBet, PlaytestRoomError,
   settlePlaytestRound, startPlaytestRound, tickPlaytestRound,
+  updatePlaytestPolicy,
 } from "@/lib/playtest-rooms";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
@@ -10,7 +11,7 @@ export const runtime = "nodejs";
 
 type CommandBody = {
   action?: unknown; commandId?: unknown; stake?: unknown;
-  targetBps?: unknown; lotteryOutcome?: unknown;
+  targetBps?: unknown; lotteryOutcome?: unknown; policy?: unknown; userId?: unknown; balance?: unknown;
 };
 
 function integer(value: unknown, field: string): bigint {
@@ -26,7 +27,7 @@ export async function POST(req: Request, context: { params: Promise<{ roomId: st
     const limited = rateLimit(req, { key: "playtest-room-command", limit: 120, windowMs: 60_000 });
     if (limited) return limited;
     const identity = await currentPlaytestIdentity();
-    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Passkey sign-in required." }, 401);
+    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
     const body = await readJsonBody<CommandBody>(req);
     if (typeof body.commandId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.commandId)) {
       return publicJson({ error: "BAD_COMMAND_ID", message: "A UUID command ID is required." }, 400);
@@ -46,6 +47,10 @@ export async function POST(req: Request, context: { params: Promise<{ roomId: st
       result = await settlePlaytestRound(identity, roomId, body.commandId, body.lotteryOutcome as "none" | "miss" | "hit");
     } else if (body.action === "tick") {
       result = await tickPlaytestRound(identity, roomId, body.commandId);
+    } else if (body.action === "adminPolicy") {
+      result = await updatePlaytestPolicy(identity, roomId, body.commandId, body.policy);
+    } else if (body.action === "adminCredit" && typeof body.userId === "string") {
+      result = await adjustPlaytestCredit(identity, roomId, body.commandId, body.userId, integer(body.balance, "balance"));
     } else {
       return publicJson({ error: "BAD_ACTION", message: "Unknown laboratory command." }, 400);
     }

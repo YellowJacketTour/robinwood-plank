@@ -24,7 +24,7 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     const limited = rateLimit(req, { key: "playtest-room-updates", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
     const identity = await currentPlaytestIdentity();
-    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Passkey sign-in required." }, 401);
+    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
     const { roomId } = await context.params;
     if (!UUID.test(roomId)) return publicJson({ error: "BAD_ROOM_ID", message: "Invalid room identifier." }, 400);
     const url = new URL(req.url);

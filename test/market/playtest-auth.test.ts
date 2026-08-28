@@ -1,19 +1,41 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { cleanDisplayName, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestEnabled, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256 } from "../../lib/playtest-auth-core";
+import { cleanDisplayName, cleanPin, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestBootstrapAllowed, playtestEnabled, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256, usernameKey } from "../../lib/playtest-auth-core";
 
 const saved = {
   origin: process.env.PLANK_PLAYTEST_ORIGIN,
   rp: process.env.PLANK_PLAYTEST_RP_ID,
   invites: process.env.PLANK_PLAYTEST_INVITE_HASHES,
   enabled: process.env.PLANK_PLAYTEST_ENABLED,
+  bootstrap: process.env.PLANK_PLAYTEST_BOOTSTRAP_HASH,
 };
 
 afterEach(() => {
+  const envNames: Record<string, string> = {
+    origin: "PLANK_PLAYTEST_ORIGIN", rp: "PLANK_PLAYTEST_RP_ID",
+    enabled: "PLANK_PLAYTEST_ENABLED", invites: "PLANK_PLAYTEST_INVITE_HASHES",
+    bootstrap: "PLANK_PLAYTEST_BOOTSTRAP_HASH",
+  };
   for (const [key, value] of Object.entries(saved)) {
-    const env = key === "origin" ? "PLANK_PLAYTEST_ORIGIN" : key === "rp" ? "PLANK_PLAYTEST_RP_ID" : key === "enabled" ? "PLANK_PLAYTEST_ENABLED" : "PLANK_PLAYTEST_INVITE_HASHES";
+    const env = envNames[key];
     if (value === undefined) delete process.env[env]; else process.env[env] = value;
   }
+});
+
+test("personal player and host PIN formats are exact-length", () => {
+  assert.equal(cleanPin("4827", 4), "4827");
+  assert.equal(cleanPin("731905", 6), "731905");
+  assert.equal(cleanPin("4827", 6), null);
+  assert.equal(cleanPin("0731905", 6), null);
+  assert.equal(cleanPin(4827, 4), null);
+});
+
+test("the first host claim requires the high-entropy deployment credential", () => {
+  const setup = "Yc2dnLzUcGeUYi1s_Ur7DDwzPISk1iTb05xjiv8NJho";
+  process.env.PLANK_PLAYTEST_BOOTSTRAP_HASH = sha256(setup);
+  assert.equal(playtestBootstrapAllowed(setup), true);
+  assert.equal(playtestBootstrapAllowed("731905"), false);
+  assert.equal(playtestBootstrapAllowed(`${setup}x`), false);
 });
 
 test("invite comparison accepts only configured SHA-256 hashes", () => {
@@ -26,6 +48,7 @@ test("invite comparison accepts only configured SHA-256 hashes", () => {
 test("invite and display-name normalization is deterministic and bounded", () => {
   assert.equal(normalizeInvite("  code  "), "code");
   assert.equal(cleanDisplayName("  Plank   Friend "), "Plank Friend");
+  assert.equal(usernameKey("PLANK Friend"), "plank friend");
   assert.equal(cleanDisplayName("x".repeat(41)), null);
 });
 
