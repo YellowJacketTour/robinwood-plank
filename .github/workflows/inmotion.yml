@@ -31,6 +31,7 @@ on:
           - purge-market-data
           - repair-activity
           - refresh-market-activity
+          - reset-vault-scan-head
           - diagnose-plank-koth-review-queue
           - reprocess-plank-koth-review-queue
           - reset-plank-koth-rpc-cursor
@@ -2260,6 +2261,110 @@ jobs:
             --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
             --header "Cache-Control: no-cache" \
             "$url/api/market/multichain/collection?chainSlug=robinhood&collectionSlug=0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156" || true
+          echo
+
+  # ---------------------------------------------------------------------------
+  # The "Live Premium Plank Liquidity trades" ticker (VaultTradeHistory.tsx /
+  # /api/market/vault/activity) is a SEPARATE code path from
+  # refresh-market-data.mjs — it replays chain logs directly
+  # (lib/market/vault-activity.ts), on every request, not off a cron. It was
+  # found stuck showing nothing newer than 2026-08-24 while the vault
+  # contract's own transaction history (confirmed independently via
+  # Blockscout) has a real depositMany from 2026-08-27. Ruled out an ABI
+  # topic-hash mismatch (the exact bug class this file's own header warns
+  # about for the V2->V3 LiquidityAdded rename) — Deposited/Redeemed are
+  # byte-identical between vault-abi.json and vault-v3-abi.json.
+  #
+  # The remaining explanation is the incremental scan's own resume cursor
+  # (plank_kv_values row "plank:market:vault-scan-head-v1", written by
+  # fromEthRpc's steady-state path) parked behind a gap larger than one
+  # request's bounded eth_getLogs window ever closes, with no code path that
+  # detects or repairs a stuck cursor. Deleting the row is safe and
+  # non-destructive: it only ever advances (writeScanHead refuses to move it
+  # backward), so removing it just makes the very next request take the
+  # cold-start branch already built for a first-ever run — a bounded
+  # backward walk from the current chain head — instead of resuming from a
+  # stale point. No vault event data itself is touched.
+  # ---------------------------------------------------------------------------
+  reset-vault-scan-head:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'reset-vault-scan-head'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Delete the stuck scan-head cursor row
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          "$node_bin" --env-file="$env_file" -e '
+            const { Client } = require("pg");
+            (async () => {
+              const client = new Client({
+                host: process.env.PGHOST,
+                port: Number(process.env.PGPORT || 5432),
+                database: process.env.PGDATABASE,
+                user: process.env.PGUSER,
+                password: process.env.PGPASSWORD,
+              });
+              await client.connect();
+              const res = await client.query(
+                "DELETE FROM plank_kv_values WHERE key_name = $1",
+                ["plank:market:vault-scan-head-v1"]
+              );
+              console.log("deleted rows:", res.rowCount);
+              await client.end();
+            })().catch((e) => { console.error(e); process.exit(1); });
+          '
+          REMOTE
+
+      - name: Trigger one fresh cold-start scan and report the result
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          curl -sS --connect-timeout 5 --max-time 60 \
+            --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+            --header "Cache-Control: no-cache" \
+            "$url/api/market/vault/activity?vault=0xacE28f72Fc3e15eA1671e689806694A9b0cE047D" || true
           echo
 
   # ---------------------------------------------------------------------------
