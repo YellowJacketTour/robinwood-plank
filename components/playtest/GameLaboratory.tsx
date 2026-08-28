@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { LIVE_GROWTH_PER_SECOND } from "@/lib/playtest-live-shared";
 
-type Identity = { id: string; displayName: string };
+type Identity = { id: string; displayName: string; isAdmin: boolean };
 type RoomItem = { id: string; joinCode: string; name: string; phase: string; owner: boolean; members: number };
 type Snapshot = {
   serverNow: string;
-  room: { id: string; joinCode: string; name: string; isOwner: boolean; rulesHash: string; phase: "lobby" | "running" | "settled"; version: string; currentRound: string; commitment: string | null; reveal: string | null; crashBps: string | null; startedAt: string | null; crashAt: string | null };
+  room: { id: string; joinCode: string; name: string; isOwner: boolean; isAdmin: boolean; rulesHash: string; phase: "lobby" | "running" | "settled"; version: string; currentRound: string; commitment: string | null; reveal: string | null; crashBps: string | null; startedAt: string | null; crashAt: string | null };
   policy: Record<string, string | number>;
   simulation: { iteration: string; protectedPrincipal: string; emissionBuffer: string; lottery: { netPrize: string; highWaterPrize: string; pendingFunding: string; resetReserve: string }; totals: Record<string, string> };
   members: Array<{ id: string; displayName: string; balance: string }>;
@@ -34,6 +34,10 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [code, setCode] = useState("");
   const [stake, setStake] = useState("10000");
   const [target, setTarget] = useState("2.00");
+  const [policyKey, setPolicyKey] = useState("minimumPlayers");
+  const [policyValue, setPolicyValue] = useState("2");
+  const [creditUser, setCreditUser] = useState("");
+  const [creditBalance, setCreditBalance] = useState("1000000");
   const [notice, setNotice] = useState("Ready.");
   const [busy, setBusy] = useState<string | null>(null);
   const [connection, setConnection] = useState<"live" | "reconnecting">("reconnecting");
@@ -87,7 +91,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
       await loadRooms(); setSelected(result.id); setNotice("Room ready.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Room command failed."); } finally { setBusy(null); }
   };
-  const command = async (action: "bet" | "start" | "lock" | "settle" | "tick", extra: Record<string, unknown> = {}) => {
+  const command = async (action: "bet" | "start" | "lock" | "settle" | "tick" | "adminPolicy" | "adminCredit", extra: Record<string, unknown> = {}) => {
     if (!selected) return;
     const id = uuid();
     setBusy(action); setNotice(action === "lock" ? "Sending lock…" : `${action} pending…`);
@@ -148,6 +152,22 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
           </div>
           <aside className="grid content-start gap-3"><Panel title="Your flight plan"><p className="text-sm text-cream-muted">Balance: {credits(me?.balance)}</p><div className="mt-3 grid grid-cols-2 gap-2"><label className="text-xs">Stake<input inputMode="numeric" value={stake} onChange={(e) => setStake(e.target.value.replace(/\D/g, ""))} className="mt-1 min-h-12 w-full rounded border border-line bg-black/30 px-2" /></label><label className="text-xs">Auto-lock ×<input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} className="mt-1 min-h-12 w-full rounded border border-line bg-black/30 px-2" /></label></div><button onClick={() => command("bet", { stake, targetBps: String(Math.round(Number(target) * 10_000)) })} disabled={Boolean(busy) || snap.room.phase === "running"} className="mt-3 min-h-12 w-full rounded bg-gold-500 font-black text-wood-950 disabled:opacity-40">Commit test credits</button>{seat && <p className="mt-3 text-xs">Stake {credits(seat.stake)} · target {multi(seat.requestedTargetBps)} · lock {multi(seat.acceptedTargetBps)}</p>}{snap.room.phase === "running" && deadlinePassed && <button onClick={() => command("tick")} disabled={Boolean(busy)} className="mt-3 min-h-12 w-full rounded border border-violet-400 text-violet-200 disabled:opacity-40">Settle as keeper</button>}</Panel>{snap.room.isOwner && <Panel title="Host controls"><button onClick={() => command("start")} disabled={Boolean(busy) || snap.room.phase === "running"} className="min-h-12 w-full rounded border border-emerald-400 text-emerald-200 disabled:opacity-40">Launch round</button><div className="mt-2 grid grid-cols-3 gap-2">{(["none", "miss", "hit"] as const).map((outcome) => <button key={outcome} onClick={() => command("settle", { lotteryOutcome: outcome })} disabled={Boolean(busy) || snap.room.phase !== "running" || !deadlinePassed} className="min-h-11 rounded border border-line text-xs uppercase disabled:opacity-40">{outcome}</button>)}</div></Panel>}</aside>
         </section>
+        {identity.isAdmin && <section className="mt-3"><Panel title="Admin simulation console">
+          <p className="mb-4 text-xs text-cream-muted">Host-PIN controls are server-validated, room-scoped, and written to the authoritative replay log. Parameters can change only between rounds.</p>
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <label className="text-xs">Economic parameter<select value={policyKey} onChange={(e) => { setPolicyKey(e.target.value); setPolicyValue(String(snap.policy[e.target.value] ?? "0")); }} className="mt-1 min-h-11 w-full rounded border border-line bg-panel-strong px-2">
+              {["minimumPlayers","minimumStake","protectedPrincipalBps","keeperRewardBps","crashSeed","emissionBufferCap","lotteryFounderFeeBps","lotteryInitialBase","lotteryMinimumIncrease","lotteryBaseGrowthBps","lotteryMinimumBaseStep","consolation"].map((key) => <option key={key}>{key}</option>)}
+            </select></label>
+            <label className="text-xs">Value<input inputMode="numeric" value={policyValue} onChange={(e) => setPolicyValue(e.target.value.replace(/\D/g, ""))} className="mt-1 min-h-11 w-full rounded border border-line bg-panel-strong px-2 font-mono" /></label>
+            <button onClick={() => command("adminPolicy", { policy: { [policyKey]: policyValue } })} disabled={Boolean(busy) || snap.room.phase === "running" || !policyValue} className="min-h-11 self-end rounded border border-gold-500 px-4 text-gold-300 disabled:opacity-40">Apply parameter</button>
+          </div>
+          <div className="my-4 h-px bg-line" />
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <label className="text-xs">Player<select value={creditUser} onChange={(e) => setCreditUser(e.target.value)} className="mt-1 min-h-11 w-full rounded border border-line bg-panel-strong px-2"><option value="">Choose player</option>{snap.members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
+            <label className="text-xs">Test-credit balance<input inputMode="numeric" value={creditBalance} onChange={(e) => setCreditBalance(e.target.value.replace(/\D/g, ""))} className="mt-1 min-h-11 w-full rounded border border-line bg-panel-strong px-2 font-mono" /></label>
+            <button onClick={() => command("adminCredit", { userId: creditUser, balance: creditBalance })} disabled={Boolean(busy) || !creditUser || !creditBalance} className="min-h-11 self-end rounded border border-line-strong px-4 text-gold-300 disabled:opacity-40">Set balance</button>
+          </div>
+        </Panel></section>}
         <section className="mt-3 grid gap-3 lg:grid-cols-3"><Metrics title="Heartwood Vault" rows={[["Protected principal", credits(snap.simulation.protectedPrincipal)], ["Emission buffer", credits(snap.simulation.emissionBuffer)], ["Iterations", snap.simulation.iteration]]} /><Metrics title="Powerboard" rows={[["Current prize", credits(snap.simulation.lottery.netPrize)], ["High water", credits(snap.simulation.lottery.highWaterPrize)], ["Reset reserve", credits(snap.simulation.lottery.resetReserve)]]} /><Metrics title="Rake flow" rows={[["Gross rake", credits(snap.simulation.totals.grossRake)], ["Burn", credits(snap.simulation.totals.burned)], ["Community", credits(snap.simulation.totals.communityFunded)], ["Founders", credits(snap.simulation.totals.crashFounderRake)]]} /></section>
         <section className="mt-3 grid gap-3 xl:grid-cols-2"><Panel title="Pilots and receipts"><div className="overflow-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead><tr className="text-cream-muted"><th>Pilot</th><th>Stake</th><th>Target</th><th>Lock</th><th>Result</th><th>Payout</th></tr></thead><tbody>{snap.seats.map((s) => <tr key={s.userId} className="border-t border-white/10"><td className="py-3">{s.displayName}</td><td>{credits(s.stake)}</td><td>{multi(s.requestedTargetBps)}</td><td>{multi(s.acceptedTargetBps)}</td><td>{s.survived === null ? "Pending" : s.survived ? "Survived" : "Busted"}</td><td>{s.payout ? credits(s.payout) : "—"}</td></tr>)}</tbody></table></div></Panel><Panel title="Authoritative event log"><ol className="max-h-64 space-y-2 overflow-auto font-mono text-xs">{snap.events.slice().reverse().map((item) => <li key={item.sequence} className="rounded bg-black/25 p-2"><b className="text-amber-300">#{item.sequence}</b> {item.type}<time className="float-right text-cream-muted">{new Date(item.at).toLocaleTimeString()}</time></li>)}</ol><details className="mt-3 text-xs"><summary className="min-h-11 cursor-pointer py-3 font-bold">Proof identifiers</summary><p className="break-all font-mono">rules {snap.room.rulesHash}<br />commit {snap.room.commitment ?? "—"}<br />reveal {snap.room.reveal ?? "hidden until settlement"}</p><div className="mt-3 grid grid-cols-2 gap-2"><button onClick={verifyProof} className="min-h-11 rounded border border-emerald-400 text-emerald-200">Verify locally</button><button onClick={exportSnapshot} className="min-h-11 rounded border border-line">Export JSON</button></div></details></Panel></section>
       </> : <p className="p-10 text-center">Loading authoritative snapshot…</p>}

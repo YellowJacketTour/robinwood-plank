@@ -1,19 +1,36 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { cleanDisplayName, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestEnabled, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256 } from "../../lib/playtest-auth-core";
+import { cleanDisplayName, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestEnabled, playtestMutationOriginAllowed, playtestPinRole, playtestRp, sessionCookie, sha256 } from "../../lib/playtest-auth-core";
 
 const saved = {
   origin: process.env.PLANK_PLAYTEST_ORIGIN,
   rp: process.env.PLANK_PLAYTEST_RP_ID,
   invites: process.env.PLANK_PLAYTEST_INVITE_HASHES,
   enabled: process.env.PLANK_PLAYTEST_ENABLED,
+  playerPin: process.env.PLANK_PLAYTEST_PLAYER_PIN_HASH,
+  adminPin: process.env.PLANK_PLAYTEST_ADMIN_PIN_HASH,
 };
 
 afterEach(() => {
+  const envNames: Record<string, string> = {
+    origin: "PLANK_PLAYTEST_ORIGIN", rp: "PLANK_PLAYTEST_RP_ID",
+    enabled: "PLANK_PLAYTEST_ENABLED", invites: "PLANK_PLAYTEST_INVITE_HASHES",
+    playerPin: "PLANK_PLAYTEST_PLAYER_PIN_HASH", adminPin: "PLANK_PLAYTEST_ADMIN_PIN_HASH",
+  };
   for (const [key, value] of Object.entries(saved)) {
-    const env = key === "origin" ? "PLANK_PLAYTEST_ORIGIN" : key === "rp" ? "PLANK_PLAYTEST_RP_ID" : key === "enabled" ? "PLANK_PLAYTEST_ENABLED" : "PLANK_PLAYTEST_INVITE_HASHES";
+    const env = envNames[key];
     if (value === undefined) delete process.env[env]; else process.env[env] = value;
   }
+});
+
+test("shared player and host PINs are exact-length, hash-only role proofs", () => {
+  process.env.PLANK_PLAYTEST_PLAYER_PIN_HASH = sha256("4827");
+  process.env.PLANK_PLAYTEST_ADMIN_PIN_HASH = sha256("731905");
+  assert.equal(playtestPinRole("4827"), "player");
+  assert.equal(playtestPinRole("731905"), "admin");
+  assert.equal(playtestPinRole("4828"), null);
+  assert.equal(playtestPinRole("0731905"), null);
+  assert.equal(playtestPinRole(4827), null);
 });
 
 test("invite comparison accepts only configured SHA-256 hashes", () => {

@@ -1,5 +1,5 @@
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { consumeCeremony, createSession, playtestMutationOriginAllowed, playtestRp, sessionCookie } from "@/lib/playtest-auth";
+import { consumeCeremony, createSession, playtestMutationOriginAllowed, playtestPasskeysEnabled, playtestRp, sessionCookie } from "@/lib/playtest-auth";
 import { postgresQuery } from "@/lib/postgres";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
@@ -13,6 +13,7 @@ type PasskeyRow = {
 
 export async function POST(req: Request) {
   try {
+    if (!playtestPasskeysEnabled()) return publicJson({ error: "PASSKEYS_DISABLED", message: "Use the playtest PIN entrance." }, 404);
     if (!playtestMutationOriginAllowed(req)) return publicJson({ error: "BAD_ORIGIN", message: "Cross-origin request rejected." }, 403);
     const limited = rateLimit(req, { key: "playtest-passkey-auth-verify", limit: 20, windowMs: 60_000 });
     if (limited) return limited;

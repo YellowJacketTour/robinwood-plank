@@ -10,6 +10,12 @@ export function playtestEnabled(): boolean {
   return process.env.PLANK_PLAYTEST_ENABLED?.trim().toLowerCase() === "true";
 }
 
+/** Legacy enrollment is off by default after the laboratory moved to shared
+ * PIN entry. Kept only as an explicit rollback switch. */
+export function playtestPasskeysEnabled(): boolean {
+  return process.env.PLANK_PLAYTEST_PASSKEYS_ENABLED?.trim().toLowerCase() === "true";
+}
+
 function configuredOrigin(): URL {
   const raw = process.env.PLANK_PLAYTEST_ORIGIN?.trim();
   if (!raw) throw new Error("PLANK_PLAYTEST_ORIGIN is not configured.");
@@ -56,6 +62,18 @@ export function inviteAllowed(invite: string): boolean {
   const hashes = (process.env.PLANK_PLAYTEST_INVITE_HASHES || "")
     .split(",").map((v) => v.trim().toLowerCase()).filter((v) => /^[0-9a-f]{64}$/.test(v));
   return hashes.some((hash) => timingSafeEqual(candidate, Buffer.from(hash, "hex")));
+}
+
+export type PlaytestAccessRole = "player" | "admin";
+
+/** Shared PINs are compared only through protected SHA-256 deployment values.
+ * The raw four/six digit values never enter the release or browser bundle. */
+export function playtestPinRole(value: unknown): PlaytestAccessRole | null {
+  if (typeof value !== "string" || !/^\d{4}(?:\d{2})?$/.test(value)) return null;
+  const role: PlaytestAccessRole = value.length === 6 ? "admin" : "player";
+  const configured = process.env[role === "admin" ? "PLANK_PLAYTEST_ADMIN_PIN_HASH" : "PLANK_PLAYTEST_PLAYER_PIN_HASH"]?.trim().toLowerCase();
+  if (!configured || !/^[0-9a-f]{64}$/.test(configured)) return null;
+  return timingSafeEqual(Buffer.from(sha256(value), "hex"), Buffer.from(configured, "hex")) ? role : null;
 }
 
 export function cleanDisplayName(value: unknown): string | null {

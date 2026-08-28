@@ -20,7 +20,7 @@ export default async function PlaytestPage() {
           <h1 className="mt-3 text-4xl text-gold-300">Plank Crash Playtest</h1>
           <p className="mt-4 text-cream-muted">Hosted through RobinWood&apos;s official application and PostgreSQL infrastructure, but isolated from production contracts, wallets, balances, and settlement authority.</p>
         </header>
-        <div className="max-w-xl"><PasskeyGate initialIdentity={identity ? { displayName: identity.displayName } : null} /></div>
+        <div className="max-w-xl"><PasskeyGate initialIdentity={identity ? { displayName: identity.displayName, isAdmin: identity.isAdmin } : null} /></div>
       </div>
     </main>
     <Footer />

@@ -26,7 +26,7 @@ export interface SimulationPolicy {
   minimumStake: bigint;
 }
 
-export interface SimulationPlayer extends Seat {}
+export type SimulationPlayer = Seat;
 
 export type LotteryOutcome = "hit" | "miss" | "none";
 
@@ -101,7 +101,7 @@ const ZERO_TOTALS: SimulationTotals = {
   externalLotteryFunding: 0n,
 };
 
-function validatePolicy(policy: SimulationPolicy): void {
+export function validatePolicy(policy: SimulationPolicy): void {
   const bounded = [
     policy.rakeBps,
     policy.keeperRewardBps,

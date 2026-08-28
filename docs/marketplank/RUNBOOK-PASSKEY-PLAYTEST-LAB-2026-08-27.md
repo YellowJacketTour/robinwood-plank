@@ -1,4 +1,9 @@
-# Passkey-gated Plank game laboratory
+# PIN-gated Plank game laboratory
+
+> Entry flow superseded on 2026-08-28. The WebAuthn material below documents
+> the first laboratory release; active testers now choose a username and use a
+> shared four-digit player PIN. The distinct six-digit host PIN adds audited,
+> simulation-only controls.
 
 ## Official infrastructure, unofficial game
 
@@ -16,8 +21,8 @@ and disabled pages return not-found while mutations fail closed before storage.
 
 ## Security boundary
 
-`/playtest` is an invitation-only simulation surface. A passkey authenticates a
-tester to the laboratory; it is not a wallet, transaction signer, admin proof,
+`/playtest` is a PIN-gated simulation surface. A hardened server session authenticates a
+tester to the laboratory; it is not a wallet, transaction signer,
 custody key, faucet entitlement, or authority over a production contract.
 Simulation APIs must call `currentPlaytestIdentity()` independently. Hiding a
 button or redirecting a page is never authorization.
@@ -41,7 +46,8 @@ the following GitHub repository variables and secret before releasing:
 - variable `PLANK_PLAYTEST_ORIGIN=https://plank.love` (or the currently
   verified canonical HTTPS origin until DNS cutover);
 - variable `PLANK_PLAYTEST_RP_ID` matching that origin's registrable RP host;
-- secret `PLANK_PLAYTEST_INVITE_HASHES` containing comma-separated hashes.
+- secret `PLANK_PLAYTEST_PLAYER_PIN_HASH` containing the SHA-256 digest of the four-digit player PIN;
+- secret `PLANK_PLAYTEST_ADMIN_PIN_HASH` containing the SHA-256 digest of the six-digit host PIN.
 
 The deployment workflow transfers these through `shared/runtime-secrets`,
 atomically upserts `shared/.env.production` at mode `600`, runs the normal
@@ -53,7 +59,8 @@ Equivalent resulting runtime configuration:
 ```dotenv
 PLANK_PLAYTEST_ORIGIN=https://plank.love
 PLANK_PLAYTEST_RP_ID=plank.love
-PLANK_PLAYTEST_INVITE_HASHES=<sha256-hex>,<sha256-hex>
+PLANK_PLAYTEST_PLAYER_PIN_HASH=<sha256-hex>
+PLANK_PLAYTEST_ADMIN_PIN_HASH=<sha256-hex>
 PLANK_PLAYTEST_ENABLED=true
 ```
 

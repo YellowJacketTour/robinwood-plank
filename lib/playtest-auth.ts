@@ -9,7 +9,7 @@ import {
 } from "@/lib/playtest-auth-core";
 export * from "@/lib/playtest-auth-core";
 
-export type PlaytestIdentity = { id: string; displayName: string };
+export type PlaytestIdentity = { id: string; displayName: string; isAdmin: boolean };
 export type PlaytestCeremony = {
   id: string;
   challenge: string;
@@ -60,10 +60,21 @@ export async function createSession(userId: string): Promise<string> {
   return token;
 }
 
+export async function createPinIdentity(displayName: string, isAdmin: boolean): Promise<{ identity: PlaytestIdentity; token: string }> {
+  const id = randomUUID();
+  const marker = sha256(`pin-session:${id}`);
+  await postgresQuery(
+    `INSERT INTO playtest_users (id, display_name, invite_hash, is_admin) VALUES ($1,$2,$3,$4)`,
+    [id, displayName, marker, isAdmin],
+  );
+  const token = await createSession(id);
+  return { identity: { id, displayName, isAdmin }, token };
+}
+
 export async function sessionFromToken(token: string | undefined): Promise<PlaytestIdentity | null> {
   if (!token || token.length < 32 || token.length > 128) return null;
-  const result = await postgresQuery<{ id: string; display_name: string }>(
-    `SELECT u.id, u.display_name
+  const result = await postgresQuery<{ id: string; display_name: string; is_admin: boolean }>(
+    `SELECT u.id, u.display_name, u.is_admin
        FROM playtest_sessions s
        JOIN playtest_users u ON u.id = s.user_id
       WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
@@ -71,7 +82,7 @@ export async function sessionFromToken(token: string | undefined): Promise<Playt
     [sha256(token)]
   );
   const row = result.rows[0];
-  return row ? { id: row.id, displayName: row.display_name } : null;
+  return row ? { id: row.id, displayName: row.display_name, isAdmin: row.is_admin } : null;
 }
 
 export async function currentPlaytestIdentity(): Promise<PlaytestIdentity | null> {
