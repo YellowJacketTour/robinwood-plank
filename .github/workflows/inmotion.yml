@@ -2362,11 +2362,26 @@ jobs:
         run: |
           set -euo pipefail
           url="${INMOTION_HEALTH_URL:-https://plank.love}"
-          curl -sS --connect-timeout 5 --max-time 60 \
+          curl -sS --connect-timeout 5 --max-time 90 \
             --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
             --header "Cache-Control: no-cache" \
+            -w "\n[curl] http_code=%{http_code} time_total=%{time_total}\n" \
             "$url/api/market/vault/activity?vault=0xacE28f72Fc3e15eA1671e689806694A9b0cE047D" || true
           echo
+
+      - name: Tail the app's own error log for anything from this request
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          echo "=== passenger.log (last 60 lines)"
+          tail -n 60 "$app_dir/logs/passenger.log" 2>&1 || echo "(missing)"
+          REMOTE
 
   # ---------------------------------------------------------------------------
   # Keep dev from drifting behind master.
