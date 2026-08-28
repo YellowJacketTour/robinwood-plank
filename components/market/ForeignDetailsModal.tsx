@@ -5,7 +5,7 @@ import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import type { Listing } from "@/lib/market/types";
 import NftFocusedMedia from "@/components/market/NftFocusedMedia";
 import { formatTokenAmount } from "@/lib/trade";
-import type { SolanaListingVerification } from "@/app/api/market/multichain/solana-verify-listing/route";
+import type { SolanaListingVerification } from "@/lib/market/multichain/solana-listing-verification";
 import ChainIcon from "@/components/market/ChainIcon";
 import { formatRank } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
@@ -67,15 +67,21 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
   // only (a bounded, single-item action, never a scan). "idle" covers both
   // "not Solana" and "haven't started yet" so the section below can render
   // nothing until there's something real to say.
-  const [verification, setVerification] = useState<SolanaListingVerification | "loading" | "idle">("idle");
+  const verificationKey = [
+    listing.tokenId,
+    listing.maker ?? "",
+    listing.priceWei,
+    listing.solanaEscrow?.auctionHouse ?? "",
+    listing.solanaEscrow?.tokenAccount ?? "",
+  ].join(":");
+  const [verificationResult, setVerificationResult] = useState<{
+    key: string;
+    value: SolanaListingVerification;
+  } | null>(null);
 
   useEffect(() => {
-    if (!isSolana) {
-      setVerification("idle");
-      return;
-    }
+    if (!isSolana) return;
     let cancelled = false;
-    setVerification("loading");
     (async () => {
       try {
         const params = new URLSearchParams({ tokenMint: listing.tokenId });
@@ -91,15 +97,26 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
         }
         const res = await fetch(`/api/market/multichain/solana-verify-listing?${params.toString()}`);
         const data = (await res.json()) as SolanaListingVerification;
-        if (!cancelled) setVerification(data);
+        if (!cancelled) setVerificationResult({ key: verificationKey, value: data });
       } catch {
-        if (!cancelled) setVerification({ verified: false, reason: "Could not reach the verification service." });
+        if (!cancelled) {
+          setVerificationResult({
+            key: verificationKey,
+            value: { verified: false, reason: "Could not reach the verification service." },
+          });
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [isSolana, listing.tokenId]);
+  }, [isSolana, listing.maker, listing.priceWei, listing.solanaEscrow, listing.tokenId, verificationKey]);
+
+  const verification: SolanaListingVerification | "loading" | "idle" = !isSolana
+    ? "idle"
+    : verificationResult?.key === verificationKey
+      ? verificationResult.value
+      : "loading";
 
   const title = displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name });
 

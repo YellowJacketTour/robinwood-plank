@@ -58,6 +58,7 @@ import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import { computeWashSuspicion, type WashCandidateSale } from "@/lib/market/wash-trade-signal";
 import DataSourceChip from "@/components/market/DataSourceChip";
 import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
+import { MetadataCoverageBar } from "@/components/market/hydration/MetadataCoverageBar";
 import { isCoverageCtaDegraded, coverageCtaReason, type CollectionCoverageInfo } from "@/lib/market/multichain/collection-coverage";
 
 /** Ledger/OpenSea/Magic Eden events all default a missing or unresolved address to this sentinel -- it means "unknown" (e.g. a mint's from-side), not a real repeated wallet, so it must never be treated as a matching pair by computeWashSuspicion(). Same constant lib/market/trending.ts uses server-side for the same reason. */
@@ -305,6 +306,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     knownSupply: number | null;
     lastArchivedAt: string | null;
     jobProcessing: boolean;
+    /** Real, separate metadata (L3) signal -- see archival-ledger.ts's
+     * ArchivalApiShape header for why this is never blended into
+     * archivalScore/tokensEverHydrated above (real trait/metadata coverage
+     * vs real membership are two different, honest questions). */
+    metadataTokens: number | null;
+    metadataCoverage: number | null;
   } | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
@@ -553,6 +560,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             knownSupply: number | null;
             lastArchivedAt: string | null;
             jobProcessing: boolean;
+            metadataTokens: number | null;
+            metadataCoverage: number | null;
           } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
@@ -2067,6 +2076,25 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           pulseKey={archival.lastArchivedAt}
           chainSlug={chainSlug}
           active={isActivelyHydrating}
+        />
+      )}
+      {/* Real, separate metadata (L3) bar -- see archival-ledger.ts's
+          ArchivalApiShape header for why this must never be blended into
+          the membership bar above. Own fill behavior (owner's own design
+          brief, 2026-08-27): cycles through real rarity-tier colors while
+          actively filling, rests on the chain's own INVERTED brand color
+          -- see MetadataCoverageBar.tsx's own header. Renders nothing at
+          all once metadata has caught up to membership (nothing left to
+          say twice). */}
+      {archival && (
+        <MetadataCoverageBar
+          metadataCoverage={archival.metadataCoverage}
+          metadataTokens={archival.metadataTokens}
+          knownTokens={archival.tokensEverHydrated}
+          pulseKey={archival.lastArchivedAt}
+          chainSlug={chainSlug}
+          active={isActivelyHydrating}
+          className="mt-2"
         />
       )}
       {supplyStats?.holderCount != null && (

@@ -308,6 +308,34 @@ export async function findEarliestTransferBlock(
 }
 
 /**
+ * Real gap found live 2026-08-27 (external research): anchored-membership-
+ * backfill.ts fetched the current chain tip via a plain `eth_blockNumber`
+ * RPC call (rpc-provider-pool.ts, backed by the same single, unpooled
+ * Alchemy key already found live to have real, current monthly-CU-quota
+ * exhaustion) on EVERY invocation, for EVERY collection -- a real, fully
+ * avoidable drain on an already-scarce shared resource, when the exact
+ * same HyperSync client this file already holds open for the real scan
+ * can report its own real chain height directly, for free relative to
+ * Alchemy's metered CU wallet (HyperSync has no documented per-request
+ * ceiling, only the shared account-level circuit breaker every lane here
+ * already respects via withHypersyncReservation). A plain `getHeight()`
+ * call -- not `streamHeight()` -- is the right primitive for this app's
+ * real architecture: mesh-lane.ts spawns a fresh, short-lived process per
+ * job, so a persistent streaming connection would need to be
+ * re-established on every single invocation anyway, defeating its own
+ * purpose; `stream()`'s real, documented advantage over `get()` is bulk
+ * historical paging, not a websocket connection, and that advantage is
+ * already captured by runAddressScopedMembershipScan's own paginated walk.
+ */
+export async function getHypersyncHeight(chainSlug: string): Promise<number | null> {
+  const chainId = EVM_CHAIN_ID[chainSlug];
+  if (!chainId) return null;
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+  return withHypersyncReservation(() => client.getHeight());
+}
+
+/**
  * Real fix, 2026-08-25 ("still nothing" -- anchored-membership only
  * advancing ~800 blocks per real call): anchored-membership-backfill.ts
  * was reusing runHypersyncPriorityWindowScan, the GLOBAL discovery scan --

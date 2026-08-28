@@ -49,6 +49,45 @@ export async function isUnisatMembershipComplete(chainSlug: string, collectionKe
   return isMembershipSourceComplete(chainSlug, collectionKey, UNISAT_COLLECTION_ITEMS_SOURCE);
 }
 
+/**
+ * Real gap found live 2026-08-27 ("does it know it's reached 100%?"): NO --
+ * confirmed live on CloneX, whose real `plank_collection_tokens` row count
+ * had already reached its full, real, known total_supply (19,764 of
+ * 19,764), yet isOpenseaMembershipComplete/isAnchoredMembershipComplete/
+ * isEvmMetadataComplete all still reported false, and three separate
+ * membership sources (opensea-membership, anchored-membership,
+ * robinhood-membership) kept actively re-enqueuing and re-walking a
+ * collection that was already functionally finished. Root cause: each
+ * source's own `complete` flag is set only when THAT source's own
+ * pagination/scan personally reaches its own end -- HyperSync's
+ * anchored-membership had already written every real row via a DIFFERENT
+ * path, but OpenSea's own walk had no way to know that and kept paginating
+ * regardless, wasting real, rate-limited OpenSea capacity on a collection
+ * with nothing left to discover.
+ *
+ * This is a source-agnostic, additional short-circuit: real row count in
+ * plank_collection_tokens vs the real, independently-sourced total_supply
+ * already on plank_multichain_snapshots (the same number the UI's own
+ * "X of Y" item count reads from). Two real indexed reads, no network
+ * call. A `null` total_supply (never yet reported by any stats source)
+ * correctly returns false -- absence of a known ceiling is not evidence of
+ * completeness.
+ */
+export async function isMembershipCountComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
+  const result = await postgresQuery<{ observed: string; total_supply: number | null }>(
+    `SELECT
+       (SELECT COUNT(*) FROM plank_collection_tokens t
+          WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2))::text AS observed,
+       (SELECT s.total_supply FROM plank_multichain_collections c
+          JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+          WHERE c.chain_slug = $1 AND lower(c.contract_address) = lower($2)) AS total_supply`,
+    [chainSlug, collectionKey]
+  );
+  const row = result.rows[0];
+  if (!row || row.total_supply == null || row.total_supply <= 0) return false;
+  return Number(row.observed) >= row.total_supply;
+}
+
 /** Same condition advanceEvmTokenMetadata's own rarity-finalize step already
  * computes for itself (rarity-index-runner.ts ~line 487): membership fully
  * enumerated AND zero rows still pending/retry. Metadata work is per-token,

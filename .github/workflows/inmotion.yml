@@ -286,7 +286,14 @@ jobs:
           UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
           RPC_URL: ${{ secrets.RPC_URL }}
           ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
+          OPENSEA_API_KEYS: ${{ secrets.OPENSEA_API_KEYS }}
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          HELIUS_API_KEYS: ${{ secrets.HELIUS_API_KEYS }}
           NEXT_PUBLIC_REFERRAL_ENABLED: ${{ vars.NEXT_PUBLIC_REFERRAL_ENABLED || 'false' }}
+          PLANK_PLAYTEST_ENABLED: ${{ vars.PLANK_PLAYTEST_ENABLED || 'false' }}
+          PLANK_PLAYTEST_ORIGIN: ${{ vars.PLANK_PLAYTEST_ORIGIN || 'https://plank.love' }}
+          PLANK_PLAYTEST_RP_ID: ${{ vars.PLANK_PLAYTEST_RP_ID || 'plank.love' }}
+          PLANK_PLAYTEST_INVITE_HASHES: ${{ secrets.PLANK_PLAYTEST_INVITE_HASHES }}
         shell: bash
         run: |
           set -euo pipefail
@@ -345,6 +352,35 @@ jobs:
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
             rm -f "$zerox_secret"
           fi
+          # Multichain NFT discovery key pools (opensea-key-pool.ts /
+          # alchemy-key-pool.ts / helius-key-pool.ts) — optional secrets,
+          # staged exactly like RPC_URL/ZEROX_API_KEY. Absent secret = that
+          # pool stays on whatever the server env already has (OpenSea falls
+          # back to its self-managed free key; Alchemy/Helius stay degraded).
+          if [ -n "${OPENSEA_API_KEYS:-}" ]; then
+            opensea_secret="$RUNNER_TEMP/opensea-api-keys"
+            printf '%s' "$OPENSEA_API_KEYS" > "$opensea_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$opensea_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.opensea-api-keys.${RELEASE_SHA}"
+            rm -f "$opensea_secret"
+          fi
+          if [ -n "${ALCHEMY_API_KEY:-}" ]; then
+            alchemy_secret="$RUNNER_TEMP/alchemy-api-key"
+            printf '%s' "$ALCHEMY_API_KEY" > "$alchemy_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$alchemy_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.alchemy-api-key.${RELEASE_SHA}"
+            rm -f "$alchemy_secret"
+          fi
+          if [ -n "${HELIUS_API_KEYS:-}" ]; then
+            helius_secret="$RUNNER_TEMP/helius-api-keys"
+            printf '%s' "$HELIUS_API_KEYS" > "$helius_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$helius_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.helius-api-keys.${RELEASE_SHA}"
+            rm -f "$helius_secret"
+          fi
           # Feature flags that are ALSO read server-side.
           #
           # NEXT_PUBLIC_* is inlined into the CLIENT bundle at build time, so
@@ -367,6 +403,31 @@ jobs:
             "$flag_file" \
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.next-public-flags.${RELEASE_SHA}"
           rm -f "$flag_file"
+
+          # Unofficial multiplayer laboratory configuration. This remains
+          # server-only: the enable flag fails closed, RP/origin bind WebAuthn,
+          # and only invitation hashes (never raw invitation codes) cross the
+          # protected runtime-secret channel.
+          playtest_config="$RUNNER_TEMP/playtest-config"
+          case "${PLANK_PLAYTEST_ENABLED:-false}" in true|false) ;; *) echo "Invalid PLANK_PLAYTEST_ENABLED." >&2; exit 1 ;; esac
+          [[ "$PLANK_PLAYTEST_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || { echo "Invalid PLANK_PLAYTEST_ORIGIN." >&2; exit 1; }
+          [[ "$PLANK_PLAYTEST_RP_ID" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Invalid PLANK_PLAYTEST_RP_ID." >&2; exit 1; }
+          if [ "${PLANK_PLAYTEST_ENABLED:-false}" = true ]; then
+            [[ "${PLANK_PLAYTEST_INVITE_HASHES:-}" =~ ^[0-9a-fA-F]{64}(,[0-9a-fA-F]{64})*$ ]] || {
+              echo "Enabled playtest requires comma-separated SHA-256 invitation hashes." >&2
+              exit 1
+            }
+          fi
+          {
+            printf 'PLANK_PLAYTEST_ENABLED=%s\n' "${PLANK_PLAYTEST_ENABLED:-false}"
+            printf 'PLANK_PLAYTEST_ORIGIN=%s\n' "${PLANK_PLAYTEST_ORIGIN}"
+            printf 'PLANK_PLAYTEST_RP_ID=%s\n' "${PLANK_PLAYTEST_RP_ID}"
+            printf 'PLANK_PLAYTEST_INVITE_HASHES=%s\n' "${PLANK_PLAYTEST_INVITE_HASHES:-}"
+          } > "$playtest_config"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$playtest_config" \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.playtest-config.${RELEASE_SHA}"
+          rm -f "$playtest_config"
 
       - name: Migrate, activate, and restart Passenger
         shell: bash
@@ -414,6 +475,35 @@ jobs:
             mv -f "$env_file.next" "$env_file"
             rm -f "$staged_zerox_key"
           fi
+          # Same upsert for the three optional multichain discovery key
+          # pools (see the staging side for which module reads each var).
+          staged_opensea_keys="$app_dir/shared/runtime-secrets/.opensea-api-keys.$release_sha"
+          if [ -s "$staged_opensea_keys" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^OPENSEA_API_KEYS=' "$env_file" > "$env_file.next" || true
+            printf 'OPENSEA_API_KEYS=%s\n' "$(cat "$staged_opensea_keys")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_opensea_keys"
+          fi
+          staged_alchemy_key="$app_dir/shared/runtime-secrets/.alchemy-api-key.$release_sha"
+          if [ -s "$staged_alchemy_key" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^ALCHEMY_API_KEY=' "$env_file" > "$env_file.next" || true
+            printf 'ALCHEMY_API_KEY=%s\n' "$(cat "$staged_alchemy_key")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_alchemy_key"
+          fi
+          staged_helius_keys="$app_dir/shared/runtime-secrets/.helius-api-keys.$release_sha"
+          if [ -s "$staged_helius_keys" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^HELIUS_API_KEYS=' "$env_file" > "$env_file.next" || true
+            printf 'HELIUS_API_KEYS=%s\n' "$(cat "$staged_helius_keys")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_helius_keys"
+          fi
           # Server-side feature flags (see the staging side for why the build
           # env alone is not enough). The staged file is already NAME=value
           # lines, so each is upserted by name rather than hardcoding one.
@@ -428,6 +518,21 @@ jobs:
               mv -f "$env_file.next" "$env_file"
             done < "$staged_flags"
             rm -f "$staged_flags"
+          fi
+          staged_playtest="$app_dir/shared/runtime-secrets/.playtest-config.$release_sha"
+          if [ -s "$staged_playtest" ]; then
+            env_file="$app_dir/shared/.env.production"
+            while IFS='=' read -r config_name config_value; do
+              case "$config_name" in
+                PLANK_PLAYTEST_ENABLED|PLANK_PLAYTEST_ORIGIN|PLANK_PLAYTEST_RP_ID|PLANK_PLAYTEST_INVITE_HASHES) ;;
+                *) echo "Refusing unexpected playtest config key." >&2; exit 1 ;;
+              esac
+              grep -v "^${config_name}=" "$env_file" > "$env_file.next" || true
+              printf '%s=%s\n' "$config_name" "$config_value" >> "$env_file.next"
+              chmod 600 "$env_file.next"
+              mv -f "$env_file.next" "$env_file"
+            done < "$staged_playtest"
+            rm -f "$staged_playtest"
           fi
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"

@@ -12,7 +12,7 @@
  */
 import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { findContractDeployBlock } from "@/lib/market/multichain/discovery/contract-deploy-block";
-import { runAddressScopedMembershipScan } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
+import { runAddressScopedMembershipScan, getHypersyncHeight } from "@/lib/market/multichain/discovery/hypersync-evm-scan";
 import { postgresQuery } from "@/lib/postgres";
 import { isAnchoredMembershipComplete } from "@/lib/market/multichain/discovery/anchored-membership-status";
 
@@ -61,8 +61,21 @@ export async function runAnchoredMembershipBackfill(
   if (deployBlock == null) {
     throw new Error(`anchored-membership: no real Transfer activity found for ${chainSlug}:${address} -- nothing to anchor to yet`);
   }
-  const { result: heightHex } = await rpcCall<string>(chainSlug, "eth_blockNumber", []);
-  const currentHeight = parseInt(heightHex, 16);
+  // Real fix, 2026-08-27: this used to call eth_blockNumber via the
+  // Alchemy-backed RPC pool for every single invocation -- a real, fully
+  // avoidable drain on an already-scarce, already-exhausted shared
+  // resource, when the HyperSync client this scan is about to use anyway
+  // can report its own real chain height for free relative to Alchemy's
+  // metered CU wallet. Falls back to the RPC call only if HyperSync's own
+  // height call fails or the chain has no real HyperSync coverage.
+  const hypersyncHeight = await getHypersyncHeight(chainSlug).catch(() => null);
+  let currentHeight: number;
+  if (hypersyncHeight != null) {
+    currentHeight = hypersyncHeight;
+  } else {
+    const { result: heightHex } = await rpcCall<string>(chainSlug, "eth_blockNumber", []);
+    currentHeight = parseInt(heightHex, 16);
+  }
   // Real fix, 2026-08-25 ("this should reach 100% but has stopped"): a
   // fixed 300,000-block window past deploy stopped a real, legitimate
   // collection's own history 45 days short of full coverage -- every

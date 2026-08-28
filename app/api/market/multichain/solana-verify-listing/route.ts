@@ -23,7 +23,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { Connection } from "@solana/web3.js";
-import { fetchM2Listing } from "@/lib/market/multichain/adapters/magiceden-m2-onchain";
+import { verifySolanaListingOnChain } from "@/lib/market/multichain/solana-listing-verification";
 import { publicError, rateLimit } from "@/lib/security";
 import { pickHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
 
@@ -47,113 +47,12 @@ async function solanaRpcUrl(): Promise<string> {
   );
 }
 
-type MeTokenListing = {
-  pdaAddress?: string;
-  auctionHouse?: string;
-  tokenAddress?: string;
-  seller?: string;
-  tokenMint?: string;
-  price?: number;
-};
-
-export type SolanaListingVerification =
-  | { verified: false; reason: string }
-  | {
-      verified: true;
-      priceMatches: boolean;
-      onchain: { pda: string; priceLamports: string; seller: string; tokenMint: string; expiry: number };
-      apiPriceLamports: string;
-    };
-
 /**
  * Core, testable logic -- takes an already-constructed Connection and an
  * injectable fetch (so tests can stub Magic Eden's response without a real
  * network call) and returns the verdict. The GET handler below is a thin
  * wrapper that builds the real Connection and calls this.
  */
-export type SolanaListingLead = {
-  seller: string;
-  auctionHouse: string;
-  tokenAccount: string;
-  /** True lamports the UI is showing. Preferred over priceSol. */
-  priceLamports?: string;
-  priceSol?: number;
-};
-
-export async function verifySolanaListingOnChain(input: {
-  tokenMint: string;
-  connection: Connection;
-  fetchImpl?: typeof fetch;
-  lead?: SolanaListingLead;
-}): Promise<SolanaListingVerification> {
-  const tokenAccountOf = (row: MeTokenListing | SolanaListingLead | undefined): string | undefined => {
-    if (!row) return undefined;
-    if ("tokenAccount" in row && row.tokenAccount) return row.tokenAccount;
-    if ("tokenAddress" in row) return (row as MeTokenListing).tokenAddress;
-    return undefined;
-  };
-  let lead: MeTokenListing | SolanaListingLead | undefined = input.lead;
-  if (!lead?.seller || !lead.auctionHouse || !tokenAccountOf(lead)) {
-    const doFetch = input.fetchImpl ?? fetch;
-    const res = await doFetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(input.tokenMint)}/listings`, {
-      headers: { accept: "application/json" },
-    });
-    if (!res.ok) {
-      return { verified: false, reason: `Magic Eden ${res.status}` };
-    }
-    const raw = (await res.json().catch(() => null)) as MeTokenListing[] | null;
-    lead = raw?.[0];
-  }
-  const seller = lead?.seller;
-  const auctionHouse = lead?.auctionHouse;
-  const tokenAccount = tokenAccountOf(lead);
-  if (!seller || !auctionHouse || !tokenAccount) {
-    return { verified: false, reason: "No active Magic Eden listing found for this token." };
-  }
-
-  let onchain;
-  try {
-    onchain = await fetchM2Listing({
-      connection: input.connection,
-      seller,
-      auctionHouse,
-      tokenAccount,
-      tokenMint: input.tokenMint,
-    });
-  } catch (error) {
-    return {
-      verified: false,
-      reason: error instanceof Error ? error.message : "On-chain listing lookup failed.",
-    };
-  }
-
-  if (!onchain) {
-    return { verified: false, reason: "Magic Eden's API shows this listing, but no matching on-chain account was found." };
-  }
-
-  const typedLead = lead as SolanaListingLead & MeTokenListing;
-  const apiPriceLamports = typedLead.priceLamports
-    ? typedLead.priceLamports
-    : typeof typedLead.price === "number"
-      ? BigInt(Math.round(typedLead.price * 1_000_000_000)).toString()
-      : typeof typedLead.priceSol === "number"
-        ? BigInt(Math.round(typedLead.priceSol * 1_000_000_000)).toString()
-        : onchain.priceLamports;
-
-  return {
-    verified: true,
-    priceMatches: onchain.priceLamports === apiPriceLamports,
-    onchain: {
-      pda: onchain.pda,
-      priceLamports: onchain.priceLamports,
-      seller: onchain.wallet,
-      tokenMint: onchain.tokenMint,
-      expiry: onchain.expiry,
-    },
-    apiPriceLamports,
-  };
-}
-
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-solana-verify-listing", limit: 30, windowMs: 60_000 });
   if (limited) return limited;

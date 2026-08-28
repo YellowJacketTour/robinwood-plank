@@ -23,7 +23,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow, type ProviderWindow } from "@/lib/market/multichain/control-plane";
-import { checkSourceBudget, readSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
+import { checkSourceBudget, readSourceBudget, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { isSourceJailed, jailRemainingMs } from "@/lib/market/multichain/mesh/jail";
 import { claimProviderPaceSlot, PROVIDER_PACE_PROFILES } from "@/lib/market/multichain/discovery/provider-pace";
 
@@ -96,6 +96,30 @@ function parseKeyList(raw: string): string[] {
 }
 
 /**
+ * Real configured pool size, synchronously, from env alone -- for callers
+ * (mesh-tick.ts's own OpenSea concurrency semaphore) that need a real
+ * capacity number at module-load time, before any async pool/DB read is
+ * possible. Mirrors loadOpenSeaKeyPool's own OPENSEA_API_KEYS parsing
+ * exactly (same dedup, same 10-key cap) but never falls through to the
+ * single managed/pinned key's real value -- only whether one exists at all,
+ * since this is a capacity COUNT, not a key lookup. Real gap found live
+ * 2026-08-27: mesh-tick.ts's own semaphore was hardcoded to 2, a real
+ * concurrency ceiling tuned when this app had 1-2 real keys total -- with a
+ * 7-key pool, that left 5 of 7 keys idle at every instant, throttling real
+ * sustained throughput to under a third of the pool's real capacity and
+ * manifesting as spurious "pool exhausted/jailed" contention errors even
+ * though the pool itself was healthy and under 3% of its daily allowance.
+ */
+export function configuredOpenSeaKeyCount(): number {
+  const raw = process.env.OPENSEA_API_KEYS?.trim();
+  if (raw) {
+    const keys = parseKeyList(raw).slice(0, 10);
+    if (keys.length > 0) return keys.length;
+  }
+  return 1;
+}
+
+/**
  * The pool as configured right now. Falls back to the single existing
  * `getOpenSeaApiKey()` key (env override or managed/rotated key) when
  * `OPENSEA_API_KEYS` is unset -- zero behavior change for every deployment
@@ -154,13 +178,48 @@ export type OpenSeaKeyPriority = "live" | "background";
  */
 async function orderCandidates(priority: OpenSeaKeyPriority, window: ProviderWindow): Promise<Array<OpenSeaKeyEntry & KeyLoad>> {
   const pool = await loadOpenSeaKeyPool();
-  const unjailed = pool.filter((entry) => checkSourceBudget(entry.providerAccount).allowed);
+  // Real gap found live 2026-08-27 (external research, confirmed against
+  // OpenSea's own current docs: the real rate-limit bucket is per ACCOUNT,
+  // and this app's 7 keys are 7 real, distinct accounts -- they genuinely
+  // multiply, ~600/hr each). The bug was never that the accounts share one
+  // bucket; it's that this function only ever checked the IN-MEMORY,
+  // per-PROCESS jail (checkSourceBudget) -- but mesh-lane.ts spawns a
+  // fresh, short-lived process per job, so that in-memory state starts
+  // empty every single time and can never actually protect a truly-jailed
+  // account across jobs. The durable, cross-process jail (mesh/jail.ts)
+  // was only ever consulted at the bare SOURCE NAME level (mesh-lane.ts's
+  // own entry guard), never per real account -- which is why bursting one
+  // account's real 429 durably jailed the bare "opensea-stats"/
+  // "opensea-membership" name and silently blocked every other healthy
+  // account behind it, with jail timers matching to the millisecond.
+  // Checking the durable per-account jail here, alongside the in-memory
+  // one, is what actually makes 7 accounts behave like 7 independent
+  // ~600/hr buckets instead of one shared one.
+  const durableChecks = await Promise.all(
+    pool.map(async (entry) => ({ entry, jailed: await isSourceJailed(entry.providerAccount).catch(() => false) }))
+  );
+  const unjailed = durableChecks
+    .filter(({ entry, jailed }) => !jailed && checkSourceBudget(entry.providerAccount).allowed)
+    .map(({ entry }) => entry);
   if (unjailed.length === 0) return [];
   const usage = await loadTodayUsage(unjailed.map((e) => e.providerAccount), window);
-  const withLoad: Array<OpenSeaKeyEntry & KeyLoad> = unjailed.map((entry) => ({
-    ...entry,
-    load: usage.get(entry.providerAccount) ?? 0,
-  }));
+  const withLoad: Array<OpenSeaKeyEntry & KeyLoad> = unjailed.map((entry) => {
+    // Real, live rate-limit headers (when fresh -- see freshRateLimitSnapshot's
+    // own header) are a strictly more accurate, more CURRENT signal than the
+    // daily-usage estimate below: they reflect this exact account's real
+    // remaining budget as OpenSea itself reports it right now, not an
+    // estimate this app derives from its own reservation bookkeeping (which
+    // can only ever see calls THIS app made, never the account's real total
+    // if it's ever used outside this pool). Scaled onto the same rough
+    // magnitude as the daily load figure (fraction-used x daily allowance)
+    // so the two remain comparable within one sort; falls back to the
+    // existing daily estimate whenever no fresh snapshot exists yet.
+    const snap = freshRateLimitSnapshot(entry.providerAccount);
+    const load = snap && snap.limit > 0
+      ? Math.round((1 - snap.remaining / snap.limit) * OPENSEA_STATS_DAILY_ALLOWANCE)
+      : usage.get(entry.providerAccount) ?? 0;
+    return { ...entry, load };
+  });
   return priority === "background"
     // Most-loaded-with-remaining-capacity first; a key already at/over
     // allowance would just fail reserveProviderCapacity below and get
@@ -240,14 +299,15 @@ const BACKGROUND_SKIP_RATE = 0.95;
 
 /**
  * Real gap found live 2026-08-25 ("resolve absolutely everything, no
- * shortcuts"): pool health showed ALL 6 real keys unjailed and well under
- * their real daily allowance (one at 27%, the rest under 1%) at the exact
- * moment real callers were failing with "no OpenSea key with capacity."
- * Not quota exhaustion -- real per-key pacing (6.2s/key, matching
+ * shortcuts"): pool health showed ALL real keys (6 at the time) unjailed and
+ * well under their real daily allowance (one at 27%, the rest under 1%) at
+ * the exact moment real callers were failing with "no OpenSea key with
+ * capacity." Not quota exhaustion -- real per-key pacing (6.2s/key, matching
  * OpenSea's documented 600/hr) means the whole pool's real sustained
- * throughput is only ~1 request/second; with mesh-tick's concurrency
- * raised to 16 workers tonight, it's genuinely possible for all 6 keys to
- * be momentarily mid-cooldown at the exact same instant a "live" caller
+ * throughput is only ~(pool size) requests/second; with mesh-tick's
+ * concurrency raised to 16 workers tonight, it's genuinely possible for
+ * every key in the pool to be momentarily mid-cooldown at the exact same
+ * instant a "live" caller
  * asks. The old code treated that as an immediate, permanent failure
  * (logged as "fatal", one wasted job attempt) even though a key
  * statistically frees up within about a second. A short, bounded retry
@@ -289,6 +349,103 @@ export async function reserveOpenSeaKey(cost = 1, opts?: { priority?: OpenSeaKey
 
 export async function settleOpenSeaKey(slot: OpenSeaKeySlot, cost = 1, success = true): Promise<void> {
   await settleProviderCapacity(slot.providerAccount, slot.window, cost, success);
+}
+
+/**
+ * Real gap found live 2026-08-27 (external research, confirmed against
+ * OpenSea's current docs: real accounts genuinely multiply the 600/hr
+ * bucket -- this app's 7-key pool is real, distinct capacity, not one
+ * shared bucket to round-robin). Every real 429/quota failure at the
+ * actual call sites (opensea-stats.ts, rarity-index-runner.ts) only ever
+ * called the in-memory-only recordSourceFailure -- never the DURABLE,
+ * cross-process jailSource -- so a real rate-limited account was only
+ * ever protected within the one short-lived mesh-lane.ts process that hit
+ * it; the very next spawn (which happens constantly, one per job) started
+ * from a clean slate and could immediately retry the same still-jailed
+ * account. The only thing that DID call the durable jailSource was
+ * mesh-lane.ts's own generic top-level catch, which had no idea which of
+ * the 7 real accounts actually failed and jailed the bare source name
+ * instead -- durably blocking all seven at once, which is the actual
+ * "every jail timer matches to the millisecond" bug. This is the correct
+ * fix: jail the SPECIFIC real account, durably, at its real point of
+ * failure, where `providerAccount` is genuinely known.
+ */
+/**
+ * Real, live-verified 2026-08-27: OpenSea's actual response headers on
+ * every call (not just failures) include `x-ratelimit-limit` and
+ * `x-ratelimit-remaining`, and these genuinely decrement per real
+ * (non-cached) request -- confirmed live by bursting 40 real calls and
+ * watching remaining count down 119->100. `Retry-After` on a real 429 is
+ * also real and vendor-specified, not something this app has to guess.
+ * This is a materially better signal than the existing daily-usage
+ * estimate (OPENSEA_STATS_DAILY_ALLOWANCE, itself derived from a "600/hr"
+ * figure that this same live burst test contradicts -- the real observed
+ * limit for this endpoint was 120 per a much shorter window, not 600/hr).
+ * Kept as a short-TTL, in-memory, best-effort overlay ON TOP of the
+ * existing durable daily-usage bookkeeping, never replacing it: a
+ * snapshot older than SNAPSHOT_TTL_MS is treated as absent (this account
+ * may have made real calls through a completely different process since,
+ * which this process's own memory has no way to know about) -- this can
+ * only ever make selection SMARTER when fresh data exists, never less
+ * safe when it doesn't.
+ */
+type RateLimitSnapshot = { remaining: number; limit: number; observedAt: number };
+const rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
+const SNAPSHOT_TTL_MS = 30_000;
+
+export function recordOpenSeaRateLimitHeaders(providerAccount: string, headers: Headers): void {
+  const remaining = headers.get("x-ratelimit-remaining");
+  const limit = headers.get("x-ratelimit-limit");
+  if (remaining == null || limit == null) return;
+  const remainingNum = Number(remaining);
+  const limitNum = Number(limit);
+  if (!Number.isFinite(remainingNum) || !Number.isFinite(limitNum)) return;
+  rateLimitSnapshots.set(providerAccount, { remaining: remainingNum, limit: limitNum, observedAt: Date.now() });
+}
+
+function freshRateLimitSnapshot(providerAccount: string): RateLimitSnapshot | null {
+  const snap = rateLimitSnapshots.get(providerAccount);
+  if (!snap || Date.now() - snap.observedAt > SNAPSHOT_TTL_MS) return null;
+  return snap;
+}
+
+/**
+ * Real vendor-specified cooldown, when OpenSea actually sends one --
+ * `Retry-After` as either a real integer seconds count or an HTTP-date
+ * (both are valid per the header's own real spec). Returns null when
+ * absent, NOT a guessed default -- the caller decides the fallback.
+ */
+export function retryAfterMsFromHeaders(headers: Headers): number | null {
+  const raw = headers.get("retry-after");
+  if (!raw) return null;
+  const asSeconds = Number(raw);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) return asSeconds * 1000;
+  const asDateMs = Date.parse(raw);
+  return Number.isFinite(asDateMs) ? Math.max(0, asDateMs - Date.now()) : null;
+}
+
+export async function recordOpenSeaAccountFailure(
+  providerAccount: string,
+  isQuotaError: boolean,
+  jailMsOrResponse?: number | Response
+): Promise<void> {
+  if (!isQuotaError) {
+    recordSourceFailure(providerAccount, false);
+    return;
+  }
+  let jailMs = 20 * 60_000;
+  if (jailMsOrResponse instanceof Response) {
+    recordOpenSeaRateLimitHeaders(providerAccount, jailMsOrResponse.headers);
+    jailMs = retryAfterMsFromHeaders(jailMsOrResponse.headers) ?? jailMs;
+  } else if (typeof jailMsOrResponse === "number") {
+    jailMs = jailMsOrResponse;
+  }
+  const { jailSource } = await import("@/lib/market/multichain/mesh/jail");
+  await jailSource(providerAccount, jailMs, true).catch(() => {
+    // Best-effort durability: the in-memory jail (inside jailSource itself)
+    // already fired before the durable KV write could fail, so a DB hiccup
+    // here still leaves this process correctly protected either way.
+  });
 }
 
 export type OpenSeaKeyHealth = {

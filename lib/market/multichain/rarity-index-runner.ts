@@ -8,7 +8,7 @@
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
-import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
+import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey, recordOpenSeaAccountFailure, recordOpenSeaRateLimitHeaders } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
@@ -103,10 +103,11 @@ async function reservedBackgroundFetch(url: string, priority: "live" | "backgrou
   }
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
-    recordSourceFailure(slot.providerAccount, res.status === 429 || res.status === 403);
+    await recordOpenSeaAccountFailure(slot.providerAccount, res.status === 429 || res.status === 403, res);
     return { ok: false, exhausted: false, status: res.status, detail: bodyText.slice(0, 200) };
   }
   recordSourceSuccess(slot.providerAccount);
+  recordOpenSeaRateLimitHeaders(slot.providerAccount, res.headers);
   return { ok: true, res };
 }
 
@@ -424,7 +425,24 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
   }
   let complete = 0, empty = 0, retry = 0, cidSkipped = 0;
   const errors: string[] = [];
-  for (const item of work) {
+  // Real gap found live 2026-08-27 (external research: "surely there's a
+  // cheat code with hypersync/onchain/IPFS that can make full metadata
+  // populate instantly"): this loop ran every item in `work` FULLY
+  // SEQUENTIALLY, each one's own real IPFS/HTTP body fetch (with its own
+  // internal multi-gateway serial fallback chain, lib/ipfs.ts) blocking
+  // the next item's turn to even start. Live-reproduced: a direct call
+  // for a real, genuinely-incomplete Doodles batch (limit=5) produced
+  // zero output within 30s -- not an infinite hang, but slow-gateway
+  // latency compounding across 5 sequential items each paying their own
+  // full fallback chain. JS's single-threaded event loop means the
+  // existing shared-counter mutations below (complete += 1, etc.) stay
+  // race-free even when every item's awaits now interleave instead of
+  // running one at a time -- this is the same class of fix already
+  // applied to prioritizeVisibleCollections' per-key loop earlier
+  // tonight, same reasoning: nothing in one item's outcome depends on
+  // another's, so concurrent execution can only ever be faster, never
+  // less correct.
+  await Promise.all(work.map(async (item) => {
     try {
       const itemKey = `${item.collectionSlug}:${item.tokenId}`;
       const batchedUri = batchUriByKey.get(itemKey);
@@ -440,7 +458,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
           await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
           cidSkipped += 1;
           complete += 1;
-          continue;
+          return;
         }
       }
 
@@ -455,7 +473,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       if (!metadata || (!metadata.name && !metadata.imageUrl && metadata.traits.length === 0)) {
         await writeTokenMetadataResult({ chainSlug, ...item, state: "empty" });
         empty += 1;
-        continue;
+        return;
       }
       // Same honest isNewToken check as hydrateSpecificToken's single-click
       // path -- this bulk background lane is the app's actual highest-
@@ -494,7 +512,7 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
       if (errors.length < 3) errors.push(error instanceof Error ? error.message : String(error));
       retry += 1;
     }
-  }
+  }));
   let rarityFinalized = 0;
   for (const collectionSlug of new Set(work.map((item) => item.collectionSlug))) {
     const state = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
@@ -806,7 +824,7 @@ function sleep(ms: number): Promise<void> {
 // and every single call re-resolved the slug from scratch -- a contract's
 // OpenSea slug never changes, so a 10-page loop paid 10 REDUNDANT
 // key-reservation round trips for information already known after page 1,
-// needlessly multiplying contention on the shared 6-key pool under real
+// needlessly multiplying contention on the shared OpenSea key pool under real
 // concurrent load (confirmed live: "no OpenSea key with capacity" errors
 // on a collection whose keys, checked directly, were all healthy -- a
 // contention symptom, not a broken pool). Slug resolution is the one part
