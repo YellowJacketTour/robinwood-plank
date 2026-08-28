@@ -22,7 +22,7 @@ export const DEFAULT_PROFILE_CSS_GUIDE = `/* PlankSpace public customization hoo
 .module-comments { }
 `;
 
-export const CYBERPUNK_PROFILE_CSS = `/* NEON LUMBERYARD — paste into Custom HTML + CSS */
+export const CYBERPUNK_PROFILE_CSS = `/* NEON LUMBERYARD — paste into Profile CSS */
 .plankspace-profile {
   --neon-cyan: #35f2ff;
   --neon-pink: #ff3cac;

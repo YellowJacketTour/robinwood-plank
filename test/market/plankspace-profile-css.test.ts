@@ -18,6 +18,11 @@ test("profile CSS changes layout only beneath the PlankSpace profile root", () =
   assert.deepEqual(result.warnings, []);
 });
 
+test("profile root rules outrank the built-in two-class theme selector", () => {
+  const result = compileProfileCss(".plankspace-profile{background:#090b14;color:#fff}");
+  assert.match(result.css, /\.classic-profile\.classic-profile/);
+});
+
 test("profile CSS cannot hide protected PlankSpace controls", () => {
   const result = compileProfileCss(`
     .plankspace-protected { display: none; }

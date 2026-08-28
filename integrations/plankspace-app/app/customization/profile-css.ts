@@ -25,7 +25,10 @@ function scopedSelector(selector: string): string {
         entry.replaceWith(selectorParser.className({ value: "classic-profile" }));
         return;
       }
-      if (text.startsWith(PROFILE_ROOT)) return;
+      if (text.startsWith(PROFILE_ROOT)) {
+        entry.prepend(selectorParser.className({ value: "classic-profile" }));
+        return;
+      }
       entry.prepend(selectorParser.combinator({ value: " " }));
       entry.prepend(selectorParser.className({ value: "classic-profile" }));
     });
