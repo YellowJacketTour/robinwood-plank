@@ -11,7 +11,17 @@
 # vacated one shows none at all.
 _supervisor_fingerprint() {
   local pid="$1"
-  ps -p "$pid" 2>/dev/null | awk -v p="$pid" '$1 == p { print $7 }'
+  case "$(uname -s 2>/dev/null)" in
+    MSYS*|MINGW*|CYGWIN*)
+      # Git Bash/MSYS: PID PPID PGID WINPID TTY UID STIME COMMAND.
+      ps -p "$pid" 2>/dev/null | awk -v p="$pid" '$1 == p { print $7 }'
+      ;;
+    *)
+      # Native procps (Linux CI): request the process start time explicitly;
+      # its default table has a different shape and no STIME column.
+      ps -o lstart= -p "$pid" 2>/dev/null | awk '{$1=$1; print}'
+      ;;
+  esac
 }
 
 # Real root cause found live 2026-08-27 (55 duplicate node.exe processes,
