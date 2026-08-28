@@ -385,7 +385,8 @@ export async function updateCollectionMarketStats(
      SET volume_24h_wei = $2, sales_24h = $3,
          volume_7d_wei = $4, sales_7d = $5,
          volume_30d_wei = $6, sales_30d = $7,
-         floor_change_pct = COALESCE($8, floor_change_pct)
+         floor_change_pct = COALESCE($8, floor_change_pct),
+         synced_at = NOW()
      WHERE collection_id = $1`,
     [
       id,
