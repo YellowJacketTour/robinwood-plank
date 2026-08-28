@@ -120,11 +120,33 @@ const targets = new Set(
 type Outcome = { target: string; ok: boolean; detail: string };
 const results: Outcome[] = [];
 
+// Real hang found live 2026-08-27/28 ("plank isnt an A grade... not
+// convinced we aren't failing to detect all of plank robinwood nft
+// activity"): the "sales" step genuinely hung -- confirmed live via a
+// direct process check (0% CPU delta over 3s, zero open network
+// connections) rather than assumed -- deep inside a per-transaction
+// royalty-resolution call chain, likely an in-flight-promise cache
+// (rpc-cache.ts's withRpcCache) never settling after some earlier call's
+// abort/timeout wiring failed to actually reject. `step()` had NO wall-
+// clock ceiling of its own, so this one stuck step blocked EVERY step
+// after it forever -- including the RobinWood-native steps just moved
+// earlier in this same file, which still never got a turn. A real
+// timeout here, not a fix to the exact hang's root cause (out of scope
+// for tonight, and this ceiling protects against the next unknown hang
+// too), is what actually keeps the app's own home-chain data flowing
+// regardless of what any one step does.
+const STEP_TIMEOUT_MS = 5 * 60_000;
+
 async function step(target: string, run: () => Promise<string>): Promise<void> {
   if (!targets.has(target)) return;
   const startedAt = Date.now();
   try {
-    const detail = await run();
+    const detail = await Promise.race([
+      run(),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error(`step timed out after ${STEP_TIMEOUT_MS / 1000}s`)), STEP_TIMEOUT_MS)
+      ),
+    ]);
     const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
     results.push({ target, ok: true, detail: `${detail} (${secs}s)` });
     console.log(`[refresh] ${target}: ${detail} (${secs}s)`);
@@ -257,6 +279,97 @@ async function main(): Promise<void> {
     const { getVaultActivity } = await import("../lib/market/vault-activity");
     const events = await getVaultActivity(full ? 400 : 100);
     return `${events.length} events`;
+  });
+
+  // Real bug found live 2026-08-27/28 ("plank isnt an A grade... not
+  // convinced we aren't failing to detect all of plank robinwood nft
+  // activity"): these three steps used to live much later in this same
+  // sequential script, after the Solana rarity-scaffolding section --
+  // which, on a real, currently-running --full pass, can take many hours
+  // (heavily rate-limited by Magic Eden/Helius, confirmed live: still
+  // grinding through alphabetically-sorted "m" collections 20 hours into
+  // one run). Since this file runs everything in one strictly sequential
+  // process, RobinWood's OWN native volume/sales/floor data -- the
+  // project's own home-chain market -- was hostage to how long an
+  // entirely unrelated third-party chain's rate limits happened to take
+  // that run, confirmed live: plank_multichain_snapshots.synced_at for
+  // RobinWood's own contract was stuck at a timestamp from days earlier.
+  // Moved here, right after the OTHER native/vault/portfolio steps this
+  // file already (correctly) runs early, so the app's own marketplace
+  // data is never gated behind a slow third-party chain's rate limits.
+  await step("evm-fill-stats", async () => {
+    const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
+    const { ROBINHOOD_CHAIN_SLUG } = await import("../lib/market/multichain/trading/non-evm-chains");
+    const chains = [ROBINHOOD_CHAIN_SLUG, ...FOREIGN_CHAINS.map((c) => c.chainSlug)];
+    let totalUpdated = 0;
+    for (const chainSlug of chains) {
+      const r = await updateEvmVolumeFromSeaportFills(chainSlug);
+      totalUpdated += r.updated;
+    }
+    return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
+  });
+
+  await step("cryptopunks-native-book", async () => {
+    const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
+    const result = await syncCryptoPunksNativeBook();
+    return `${result.listed} contract listings (${result.publicListed} public); floor ${result.floorWei ?? "none"}`;
+  });
+
+  // RobinWood's native Marketplank floor is built from executable orders,
+  // not inferred from purchases. Record it every refresh so the API can
+  // produce a real 24h comparison once both endpoints exist.
+  await step("robinwood-floor-observation", async () => {
+    const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
+    const { getListings } = await import("../lib/market/orders-store");
+    const { recordFloorObservation, upsertTrackedCollection } = await import("../lib/market/multichain/store");
+    const bySlug = await getListings("robinwood").catch(() => []);
+    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
+    const listings = bySlug.length >= byContract.length ? bySlug : byContract;
+    let floor = listings.reduce<bigint | null>((minimum, listing) => {
+      try {
+        const price = BigInt(listing.priceWei);
+        return minimum == null || price < minimum ? price : minimum;
+      } catch {
+        return minimum;
+      }
+    }, null);
+    let listedCount = listings.length;
+    let source = "native-executable-order-book";
+    // A local/dev worker can legitimately have an empty local order store
+    // while the canonical deployment owns the live signed book. Observe the
+    // same canonical book the public projection uses, otherwise local refresh
+    // runs register the collection but still never create a price endpoint.
+    if (floor == null) {
+      const { fetchCanonicalRobinwoodStats } = await import("../lib/market/canonical-robinwood");
+      const canonical = await fetchCanonicalRobinwoodStats({ hostHeader: null });
+      if (canonical?.floorPriceWei) {
+        floor = BigInt(canonical.floorPriceWei);
+        listedCount = canonical.listedCount;
+        source = "canonical-native-executable-order-book";
+      }
+    }
+    // RobinWood is projected into the public index as its native home row,
+    // rather than discovered by a third-party adapter. Floor observations
+    // resolve their FK by (chain, contract), so the native collection must
+    // still be registered in the same durable collection table first. Before
+    // this invariant was enforced the INSERT ... SELECT matched zero rows and
+    // every scheduled observation was silently discarded.
+    await upsertTrackedCollection({
+      chainSlug: "robinhood",
+      chainId: 4663,
+      contractAddress: NFT_CONTRACT_ADDRESS,
+      adapter: "robinhood-native",
+      isVaultBacked: true,
+    });
+    await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
+      priceAtomic: floor?.toString() ?? null,
+      currency: "ETH",
+      marketplace: "marketplank",
+      listedCount,
+      source,
+    });
+    return floor == null ? "no executable native floor" : `${listedCount} listings; floor ${floor}`;
   });
 
   // Vault-aware wallet portfolio PnL — records a NAV snapshot per vault
@@ -993,87 +1106,6 @@ async function main(): Promise<void> {
       onProgress: (line) => console.log(`[refresh:scaffold-rarity-ordinalswallet] ${line}`),
     });
     return `${result.totalTracked} OrdinalsWallet tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed`;
-  });
-
-  // Real 24h volume/sales for every EVM chain, from this app's own
-  // first-party plank_seaport_fills index -- see
-  // updateEvmVolumeFromSeaportFills's own header (store.ts) for why this
-  // was a real, present, unused data asset before 2026-08-20. Covers
-  // Robinhood Chain's own community collections too, which have zero
-  // OpenSea presence and so had zero other possible source of this data.
-  await step("evm-fill-stats", async () => {
-    const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
-    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
-    const { ROBINHOOD_CHAIN_SLUG } = await import("../lib/market/multichain/trading/non-evm-chains");
-    const chains = [ROBINHOOD_CHAIN_SLUG, ...FOREIGN_CHAINS.map((c) => c.chainSlug)];
-    let totalUpdated = 0;
-    for (const chainSlug of chains) {
-      const r = await updateEvmVolumeFromSeaportFills(chainSlug);
-      totalUpdated += r.updated;
-    }
-    return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
-  });
-
-  await step("cryptopunks-native-book", async () => {
-    const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
-    const result = await syncCryptoPunksNativeBook();
-    return `${result.listed} contract listings (${result.publicListed} public); floor ${result.floorWei ?? "none"}`;
-  });
-
-  // RobinWood's native Marketplank floor is built from executable orders,
-  // not inferred from purchases. Record it every refresh so the API can
-  // produce a real 24h comparison once both endpoints exist.
-  await step("robinwood-floor-observation", async () => {
-    const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
-    const { getListings } = await import("../lib/market/orders-store");
-    const { recordFloorObservation, upsertTrackedCollection } = await import("../lib/market/multichain/store");
-    const bySlug = await getListings("robinwood").catch(() => []);
-    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
-    const listings = bySlug.length >= byContract.length ? bySlug : byContract;
-    let floor = listings.reduce<bigint | null>((minimum, listing) => {
-      try {
-        const price = BigInt(listing.priceWei);
-        return minimum == null || price < minimum ? price : minimum;
-      } catch {
-        return minimum;
-      }
-    }, null);
-    let listedCount = listings.length;
-    let source = "native-executable-order-book";
-    // A local/dev worker can legitimately have an empty local order store
-    // while the canonical deployment owns the live signed book. Observe the
-    // same canonical book the public projection uses, otherwise local refresh
-    // runs register the collection but still never create a price endpoint.
-    if (floor == null) {
-      const { fetchCanonicalRobinwoodStats } = await import("../lib/market/canonical-robinwood");
-      const canonical = await fetchCanonicalRobinwoodStats({ hostHeader: null });
-      if (canonical?.floorPriceWei) {
-        floor = BigInt(canonical.floorPriceWei);
-        listedCount = canonical.listedCount;
-        source = "canonical-native-executable-order-book";
-      }
-    }
-    // RobinWood is projected into the public index as its native home row,
-    // rather than discovered by a third-party adapter. Floor observations
-    // resolve their FK by (chain, contract), so the native collection must
-    // still be registered in the same durable collection table first. Before
-    // this invariant was enforced the INSERT ... SELECT matched zero rows and
-    // every scheduled observation was silently discarded.
-    await upsertTrackedCollection({
-      chainSlug: "robinhood",
-      chainId: 4663,
-      contractAddress: NFT_CONTRACT_ADDRESS,
-      adapter: "robinhood-native",
-      isVaultBacked: true,
-    });
-    await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
-      priceAtomic: floor?.toString() ?? null,
-      currency: "ETH",
-      marketplace: "marketplank",
-      listedCount,
-      source,
-    });
-    return floor == null ? "no executable native floor" : `${listedCount} listings; floor ${floor}`;
   });
 
   // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,
