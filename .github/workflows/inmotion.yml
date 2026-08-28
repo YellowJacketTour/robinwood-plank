@@ -309,6 +309,9 @@ jobs:
           OPENSEA_API_KEYS: ${{ secrets.OPENSEA_API_KEYS }}
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
           HELIUS_API_KEYS: ${{ secrets.HELIUS_API_KEYS }}
+          ENVIO_API_TOKEN: ${{ secrets.ENVIO_API_TOKEN }}
+          UNISAT_API_KEY: ${{ secrets.UNISAT_API_KEY }}
+          ORDISCAN_API_KEY: ${{ secrets.ORDISCAN_API_KEY }}
           NEXT_PUBLIC_REFERRAL_ENABLED: ${{ vars.NEXT_PUBLIC_REFERRAL_ENABLED || 'false' }}
           PLANK_PLAYTEST_ENABLED: ${{ vars.PLANK_PLAYTEST_ENABLED || 'false' }}
           PLANK_PLAYTEST_ORIGIN: ${{ vars.PLANK_PLAYTEST_ORIGIN || 'https://plank.love' }}
@@ -400,6 +403,39 @@ jobs:
               "$helius_secret" \
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.helius-api-keys.${RELEASE_SHA}"
             rm -f "$helius_secret"
+          fi
+          # HyperSync + Bitcoin/Ordinals discovery lanes (hypersync-evm-scan.ts,
+          # unisat-collection-list-scan.ts, ordiscan-collection-scan.ts) were
+          # silently failing on every production refresh pass — confirmed live
+          # 2026-08-28 via refresh-market-data.mjs's own error output
+          # ("ENVIO_API_TOKEN is not set", "UNISAT_API_KEY is not configured",
+          # "ORDISCAN_API_KEY is not configured") — because these three were
+          # never staged to the server at all, despite already being live,
+          # working keys in local dev. Same optional-secret pattern as the
+          # three pools above.
+          if [ -n "${ENVIO_API_TOKEN:-}" ]; then
+            envio_secret="$RUNNER_TEMP/envio-api-token"
+            printf '%s' "$ENVIO_API_TOKEN" > "$envio_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$envio_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.envio-api-token.${RELEASE_SHA}"
+            rm -f "$envio_secret"
+          fi
+          if [ -n "${UNISAT_API_KEY:-}" ]; then
+            unisat_secret="$RUNNER_TEMP/unisat-api-key"
+            printf '%s' "$UNISAT_API_KEY" > "$unisat_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$unisat_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.unisat-api-key.${RELEASE_SHA}"
+            rm -f "$unisat_secret"
+          fi
+          if [ -n "${ORDISCAN_API_KEY:-}" ]; then
+            ordiscan_secret="$RUNNER_TEMP/ordiscan-api-key"
+            printf '%s' "$ORDISCAN_API_KEY" > "$ordiscan_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$ordiscan_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.ordiscan-api-key.${RELEASE_SHA}"
+            rm -f "$ordiscan_secret"
           fi
           # Feature flags that are ALSO read server-side.
           #
@@ -523,6 +559,33 @@ jobs:
             chmod 600 "$env_file.next"
             mv -f "$env_file.next" "$env_file"
             rm -f "$staged_helius_keys"
+          fi
+          staged_envio_token="$app_dir/shared/runtime-secrets/.envio-api-token.$release_sha"
+          if [ -s "$staged_envio_token" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^ENVIO_API_TOKEN=' "$env_file" > "$env_file.next" || true
+            printf 'ENVIO_API_TOKEN=%s\n' "$(cat "$staged_envio_token")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_envio_token"
+          fi
+          staged_unisat_key="$app_dir/shared/runtime-secrets/.unisat-api-key.$release_sha"
+          if [ -s "$staged_unisat_key" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^UNISAT_API_KEY=' "$env_file" > "$env_file.next" || true
+            printf 'UNISAT_API_KEY=%s\n' "$(cat "$staged_unisat_key")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_unisat_key"
+          fi
+          staged_ordiscan_key="$app_dir/shared/runtime-secrets/.ordiscan-api-key.$release_sha"
+          if [ -s "$staged_ordiscan_key" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^ORDISCAN_API_KEY=' "$env_file" > "$env_file.next" || true
+            printf 'ORDISCAN_API_KEY=%s\n' "$(cat "$staged_ordiscan_key")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_ordiscan_key"
           fi
           # Server-side feature flags (see the staging side for why the build
           # env alone is not enough). The staged file is already NAME=value
