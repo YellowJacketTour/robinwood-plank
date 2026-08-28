@@ -2348,10 +2348,13 @@ jobs:
               });
               await client.connect();
               const res = await client.query(
-                "DELETE FROM plank_kv_values WHERE key_name = $1",
-                ["plank:market:vault-scan-head-v1"]
+                "SELECT key_name, value FROM plank_kv_values WHERE key_name IN ($1, $2)",
+                ["plank:market:vault-scan-head-v1", "plank:market:vault-deposit-fallback-scan-head-v1"]
               );
-              console.log("deleted rows:", res.rowCount);
+              for (const row of res.rows) {
+                console.log(row.key_name, "=", JSON.stringify(row.value));
+              }
+              if (res.rows.length === 0) console.log("neither key present");
               await client.end();
             })().catch((e) => { console.error(e); process.exit(1); });
           '
