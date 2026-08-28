@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { compileProfileCss } from "../../integrations/plankspace-app/app/customization/profile-css";
 import { customProfileCss } from "../../integrations/plankspace-app/app/custom-profile-css-v2";
+import { CYBERPUNK_PROFILE_CSS } from "../../integrations/plankspace-app/app/customization/default-profile-css";
 
 test("profile CSS changes layout only beneath the PlankSpace profile root", () => {
   const result = compileProfileCss(`
@@ -60,4 +63,27 @@ test("legacy combined HTML and CSS can rearrange the full existing profile", () 
   assert.match(css, /\.classic-profile > main/);
   assert.match(css, /display:\s*grid/);
   assert.match(css, /order:\s*-1/);
+});
+
+test("bundled profile example overrides the semantic skin used by module interiors", () => {
+  const css = compileProfileCss(CYBERPUNK_PROFILE_CSS).css;
+
+  assert.match(css, /--profile-bg:\s*#090b14\s*!important/);
+  assert.match(css, /--profile-panel:\s*#0d1224\s*!important/);
+  assert.match(css, /--profile-text:\s*#e9fbff\s*!important/);
+  assert.match(css, /--profile-link:\s*#ffe56b\s*!important/);
+  assert.match(css, /--profile-heading:\s*#35f2ff\s*!important/);
+  assert.match(css, /--profile-font:\s*var\(--font-body\)\s*!important/);
+});
+
+test("semantic profile colors reach legacy nested surfaces without leaking outside the profile", () => {
+  const globalCss = readFileSync(
+    resolve(process.cwd(), "integrations/plankspace-app/app/globals.css"),
+    "utf8",
+  );
+
+  assert.match(globalCss, /\.classic-profile\.classic-profile :where\([^)]*\.feed article[^)]*\.interests dd/);
+  assert.match(globalCss, /\.classic-profile\.classic-profile \.interests dt\{[^}]*--profile-accent/);
+  assert.match(globalCss, /\.classic-profile\.classic-profile \.contact \.board-actions button\{[^}]*--profile-link/);
+  assert.doesNotMatch(globalCss, /(?:^|[},])\s*\.interests dd\{[^}]*--profile-panel/m);
 });

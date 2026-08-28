@@ -5,13 +5,13 @@ import { DevelopmentXProvider, selectXProvider } from "../../integrations/planks
 test("development X provider connects, imports, and publishes deterministically", async () => {
   const provider = new DevelopmentXProvider();
   const account = await provider.connect({ handle: "degenwaffle" });
-  assert.equal(account.username, "degenwaffle");
+  assert.equal(account.username, "Degen_Waffle");
   const first = await provider.listRecentPosts(account, "");
   assert.equal(first.posts.length, 2);
   assert.equal((await provider.listRecentPosts(account, first.cursor)).posts.length, 0);
   const published = await provider.createPost(account, "PLANK IS FOR THE PEOPLE", "post-42");
   assert.equal(published.id, "xdev-post-42");
-  assert.match(published.url, /degenwaffle\/status\/xdev-post-42/);
+  assert.match(published.url, /Degen_Waffle\/status\/xdev-post-42/);
 });
 
 test("development provider is impossible to select in production", () => {

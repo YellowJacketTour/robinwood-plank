@@ -132,24 +132,26 @@ export default function WidgetManager({
     <section className="widget-manager" id="profile-widget-manager">
       <div className="widget-manager-head">
         <div>
-          <small>PROFILE WIDGETS</small>
           <h2>Build your module stack</h2>
           <p>
             Add only what you want public. Portfolio widgets start hidden and
             never infer wallets.
           </p>
         </div>
-        <div>
-          <select
-            value={addType}
-            onChange={(e) => setAddType(e.target.value as WidgetType)}
-          >
-            {WIDGET_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {widgetLabels[type]}
-              </option>
-            ))}
-          </select>
+        <div className="widget-add-tools">
+          <label>
+            <span>Add a module</span>
+            <select
+              value={addType}
+              onChange={(e) => setAddType(e.target.value as WidgetType)}
+            >
+              {WIDGET_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {widgetLabels[type]}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={() =>

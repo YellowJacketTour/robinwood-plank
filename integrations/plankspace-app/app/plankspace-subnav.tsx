@@ -83,12 +83,21 @@ export default function PlankSpaceSubnav() {
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <AdminNavLink className={`${pill} ${idle}`} />
-          <Link
-            href="/profile-editor#connections"
-            className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
-          >
-            X + Widgets
-          </Link>
+          {onEditor ? (
+            <a
+              href="#connections"
+              className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
+            >
+              X + Widgets
+            </a>
+          ) : (
+            <Link
+              href="/profile-editor#connections"
+              className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
+            >
+              X + Widgets
+            </Link>
+          )}
           <Link
             href="/profile-editor"
             aria-current={onEditor ? "page" : undefined}

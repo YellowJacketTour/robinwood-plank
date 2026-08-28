@@ -3,7 +3,7 @@ export type XPost={id:string;text:string;createdAt:string;url:string};
 export interface XProvider{connect(input:{handle:string;code?:string;verifier?:string}):Promise<XAccount>;listRecentPosts(account:XAccount,cursor:string):Promise<{posts:XPost[];cursor:string}>;createPost(account:XAccount,text:string,idempotencyKey:string):Promise<XPost>;createPostIfRequested(account:XAccount,text:string,idempotencyKey:string,requested:boolean):Promise<XPost|null>}
 
 export class DevelopmentXProvider implements XProvider{
- async connect({handle}:{handle:string}):Promise<XAccount>{const username=handle.toLowerCase().replace(/[^a-z0-9_]/g,"").slice(0,15)||"plank";return{id:`xdev-${username}`,username,accessToken:`development-${username}`}}
+ async connect():Promise<XAccount>{const username="Degen_Waffle";return{id:"xdev-degen_waffle",username,accessToken:"development-degen_waffle"}}
  async listRecentPosts(account:XAccount,cursor:string){if(cursor)return{posts:[],cursor};const posts=["Connected X to my PlankSpace.","PLANK IS FOR THE PEOPLE 🪵"].map((text,index)=>({id:`xdev-import-${account.username}-${index+1}`,text,createdAt:new Date(Date.now()-(index+1)*60_000).toISOString(),url:`https://x.com/${account.username}/status/xdev-import-${index+1}`}));return{posts,cursor:"development-complete"}}
  async createPost(account:XAccount,text:string,idempotencyKey:string):Promise<XPost>{const id=`xdev-${idempotencyKey}`;return{id,text,createdAt:new Date().toISOString(),url:`https://x.com/${account.username}/status/${id}`}}
  async createPostIfRequested(account:XAccount,text:string,idempotencyKey:string,requested:boolean){return requested?this.createPost(account,text,idempotencyKey):null}

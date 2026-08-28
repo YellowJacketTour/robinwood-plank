@@ -409,6 +409,11 @@ export default function ProfileForm({
         body: JSON.stringify({ ...proof, wallet, handle, profile }),
       }).then((r) => r.json());
       if (result.error) throw new Error(result.error);
+      if (Array.isArray(result.warnings) && result.warnings.length) {
+        setNotice(`Profile saved with CSS changes: ${result.warnings.join(" ")}`);
+        setStep(2);
+        return;
+      }
       localStorage.removeItem("plankspace-profile-draft");
       window.location.href = `/u/${handle}`;
     } catch (e) {
@@ -455,7 +460,7 @@ export default function ProfileForm({
       <header className="page-bar">
         <h1>{editing ? "Profile workshop" : "Profile carpentry"}</h1>
       </header>
-      <main className="onboard-card profile-builder">
+      <main className="onboard-card profile-builder" data-market-shell>
         <div className="onboard-progress">
           <i className={step >= 1 ? "active" : ""} />
           <i className={step >= 2 ? "active" : ""} />
@@ -463,14 +468,13 @@ export default function ProfileForm({
         </div>
         {profileToolsVisibility({ editing, handle: form.handle }) && (
           <section id="connections" className="profile-connections-workshop">
-            <header>
-              <small>X + WIDGETS</small>
+            <div className="profile-connections-intro">
               <h1>Connect your feed and customize your board.</h1>
               <p>
                 X sharing is optional and off by default. External widgets stay
                 paused until each visitor chooses to load them.
               </p>
-            </header>
+            </div>
             <XConnectionManager wallet={wallet} handle={form.handle} />
             {wallet ? (
               <WidgetManager wallet={wallet} handle={form.handle} />
@@ -832,8 +836,8 @@ export default function ProfileForm({
             <h1>Make the whole page yours.</h1>
             <p>
               These settings change your full profile and are saved to your
-              wallet-owned page. Custom HTML and CSS still controls your Custom
-              Space module.
+              wallet-owned page. Profile CSS restyles the complete profile
+              canvas; Custom HTML stays inside the sandboxed Custom Space module.
             </p>
             <div className="theme-builder">
               <label>
