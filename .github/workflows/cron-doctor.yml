@@ -1,0 +1,103 @@
+name: Cron doctor (read-only)
+
+# TEMPORARY, dispatch-only diagnostic. Mirrors env-doctor.yml's exact
+# safety pattern (same self-hosted trusted-dispatch runner, same
+# install-key/wipe-key bracket) for a different question:
+#
+# plank.love's Activity feed and 24h stats were showing nothing newer than
+# several days old (2026-08-28) despite real on-chain transfers confirmed
+# independently via Blockscout as recent as 35 minutes prior, and despite
+# /api/health confirming the app itself was on the latest deployed commit.
+# docs/INMOTION_DEPLOYMENT.md documents that production data ingestion is
+# driven entirely by cPanel cron on the InMotion box (refresh-market-data,
+# mesh-tick) -- separate from the GitHub Actions deploy pipeline -- so a
+# green deploy proves nothing about whether that cron is actually running.
+# This exists to check that, from the box, without guessing and without
+# ever printing a secret.
+#
+# STRICTLY READ-ONLY: lists crontab entries, tails the two log files named
+# in the deployment doc, and reports lock-file/process state. Never cats
+# .env.production, never prints PGPASSWORD/API keys.
+#
+# Delete this workflow once the actual cron failure (if any) is fixed and
+# confirmed staying fixed.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  doctor:
+    runs-on: [self-hosted, robinwood-trusted-dispatch]
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+    steps:
+      - name: Install SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Report cron + refresh pipeline state
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+
+          echo "=== crontab -l"
+          crontab -l 2>&1 || echo "(no crontab or unreadable)"
+
+          echo
+          echo "=== running node/tsx processes touching this app"
+          ps -eo pid,etimes,cmd 2>/dev/null | grep -iE 'refresh-market-data|mesh-tick' | grep -v grep || echo "(none running right now)"
+
+          echo
+          echo "=== market-refresh.log (last 40 lines)"
+          if [ -f "$app_dir/logs/market-refresh.log" ]; then
+            tail -n 40 "$app_dir/logs/market-refresh.log"
+            echo "--- mtime: $(date -r "$app_dir/logs/market-refresh.log" -u '+%Y-%m-%dT%H:%M:%SZ')"
+          else
+            echo "MISSING: $app_dir/logs/market-refresh.log"
+          fi
+
+          echo
+          echo "=== market-mesh.log (last 40 lines)"
+          if [ -f "$app_dir/logs/market-mesh.log" ]; then
+            tail -n 40 "$app_dir/logs/market-mesh.log"
+            echo "--- mtime: $(date -r "$app_dir/logs/market-mesh.log" -u '+%Y-%m-%dT%H:%M:%SZ')"
+          else
+            echo "MISSING: $app_dir/logs/market-mesh.log"
+          fi
+
+          echo
+          echo "=== lock files (stuck flock would silently block every future cron tick)"
+          for lock in "$app_dir/shared/market-refresh.lock" "$app_dir/shared/market-refresh-full.lock" "$app_dir/shared/market-mesh.lock"; do
+            if [ -e "$lock" ]; then
+              echo "PRESENT: $lock (mtime $(date -r "$lock" -u '+%Y-%m-%dT%H:%M:%SZ'))"
+            else
+              echo "absent: $lock"
+            fi
+          done
+
+          echo
+          echo "=== running app: which release is current"
+          ls -la "$app_dir/current" 2>/dev/null | head -2 || echo "(no current symlink)"
+          REMOTE
+
+      - name: Wipe the SSH key from this machine
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
