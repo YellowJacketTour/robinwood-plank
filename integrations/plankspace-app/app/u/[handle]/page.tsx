@@ -6,7 +6,7 @@ import { getDb } from "../../../db";
 import { profileRelations, profiles } from "../../../db/schema";
 import KnockForm from "./knock-form";
 import { BoardActions, Feed, MiniGame, PlankShelf } from "../../profile-extras";
-import { customProfileCss, hasVisibleCustomContent } from "../../custom-profile-css";
+import { customProfileCss, hasVisibleCustomContent } from "../../custom-profile-css-v2";
 import ProfileWidgets from "../../widgets/profile-widgets";
 import ProfileVideoPlayer from "../../profile-video-player";
 

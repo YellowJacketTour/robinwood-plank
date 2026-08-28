@@ -52,6 +52,7 @@
     "@tensor-foundation/whitelist": "^1.0.0",
     "bitcoinjs-lib": "^7.0.1",
     "colorthief": "^3.5.0",
+    "drizzle-orm": "^0.45.2",
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "ethers": "^6.17.0",
@@ -62,6 +63,8 @@
     "motion": "^13.1.1",
     "next": "^16.2.12",
     "pg": "^8.22.0",
+    "postcss": "^8.5.26",
+    "postcss-selector-parser": "^7.1.5",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -70,7 +73,6 @@
     "sigma": "^3.0.3",
     "solana-web3js-v2": "npm:@solana/web3.js@^2.0.0",
     "three": "^0.185.1",
-    "drizzle-orm": "^0.45.2",
     "viem": "^2.55.19"
   },
   "overrides": {
