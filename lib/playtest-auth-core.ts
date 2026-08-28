@@ -10,6 +10,12 @@ export function playtestEnabled(): boolean {
   return process.env.PLANK_PLAYTEST_ENABLED?.trim().toLowerCase() === "true";
 }
 
+/** Legacy enrollment is off by default after the laboratory moved to shared
+ * PIN entry. Kept only as an explicit rollback switch. */
+export function playtestPasskeysEnabled(): boolean {
+  return process.env.PLANK_PLAYTEST_PASSKEYS_ENABLED?.trim().toLowerCase() === "true";
+}
+
 function configuredOrigin(): URL {
   const raw = process.env.PLANK_PLAYTEST_ORIGIN?.trim();
   if (!raw) throw new Error("PLANK_PLAYTEST_ORIGIN is not configured.");
@@ -45,6 +51,16 @@ export function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/** The first admin claim additionally requires a high-entropy deployment
+ * credential. A six-digit PIN alone is never allowed to claim an Internet
+ * deployment because that would create a trivial first-visitor race. */
+export function playtestBootstrapAllowed(value: unknown): boolean {
+  if (typeof value !== "string" || value.length < 32 || value.length > 128) return false;
+  const configured = process.env.PLANK_PLAYTEST_BOOTSTRAP_HASH?.trim().toLowerCase();
+  if (!configured || !/^[0-9a-f]{64}$/.test(configured)) return false;
+  return timingSafeEqual(Buffer.from(sha256(value), "hex"), Buffer.from(configured, "hex"));
+}
+
 export function normalizeInvite(value: string): string {
   return value.trim().normalize("NFKC");
 }
@@ -58,10 +74,18 @@ export function inviteAllowed(invite: string): boolean {
   return hashes.some((hash) => timingSafeEqual(candidate, Buffer.from(hash, "hex")));
 }
 
+export function cleanPin(value: unknown, digits: 4 | 6): string | null {
+  return typeof value === "string" && new RegExp(`^\\d{${digits}}$`).test(value) ? value : null;
+}
+
 export function cleanDisplayName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const clean = value.trim().normalize("NFKC").replace(/\s+/g, " ");
   return clean.length >= 1 && clean.length <= 40 ? clean : null;
+}
+
+export function usernameKey(displayName: string): string {
+  return displayName.normalize("NFKC").toLocaleLowerCase("en-US");
 }
 
 export function newSessionToken(): string {

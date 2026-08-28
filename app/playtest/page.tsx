@@ -1,15 +1,19 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import AppBackdrop from "@/components/AppBackdrop";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import { PasskeyGate } from "@/components/playtest/PasskeyGate";
-import { currentPlaytestIdentity, playtestEnabled } from "@/lib/playtest-auth";
+import { adminConfigured, currentPlaytestIdentity, playtestBootstrapAllowed, playtestEnabled } from "@/lib/playtest-auth";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { robots: { index: false, follow: false, nocache: true } };
 
-export default async function PlaytestPage() {
+export default async function PlaytestPage({ searchParams }: { searchParams: Promise<{ invite?: string | string[]; setup?: string | string[] }> }) {
   if (!playtestEnabled()) notFound();
-  const identity = await currentPlaytestIdentity();
+  const [identity, configured, query] = await Promise.all([currentPlaytestIdentity(), adminConfigured(), searchParams]);
+  const initialInvite = typeof query.invite === "string" ? query.invite : "";
+  const initialSetup = typeof query.setup === "string" && playtestBootstrapAllowed(query.setup) ? query.setup : "";
   return <>
     <AppBackdrop />
     <Nav />
@@ -20,7 +24,7 @@ export default async function PlaytestPage() {
           <h1 className="mt-3 text-4xl text-gold-300">Plank Crash Playtest</h1>
           <p className="mt-4 text-cream-muted">Hosted through RobinWood&apos;s official application and PostgreSQL infrastructure, but isolated from production contracts, wallets, balances, and settlement authority.</p>
         </header>
-        <div className="max-w-xl"><PasskeyGate initialIdentity={identity ? { displayName: identity.displayName } : null} /></div>
+        <div className="max-w-xl"><PasskeyGate adminConfigured={configured} initialInvite={initialInvite} initialSetup={initialSetup} initialIdentity={identity ? { displayName: identity.displayName, isAdmin: identity.isAdmin } : null} /></div>
       </div>
     </main>
     <Footer />

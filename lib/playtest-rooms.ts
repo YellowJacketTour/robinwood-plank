@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { initialSimulationState, serializeSimulationState, simulateIteration, type LotteryOutcome } from "@/lib/casino/simulation";
+import { initialSimulationState, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import {
@@ -153,7 +153,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       schema: "plank.live-lab.snapshot.v1", serverNow: new Date().toISOString(),
       room: {
         id: room.id, joinCode: room.join_code, name: room.name, ownerUserId: room.owner_user_id,
-        isOwner: room.owner_user_id === identity.id, rulesHash: room.rules_hash,
+        isOwner: room.owner_user_id === identity.id || identity.isAdmin, isAdmin: identity.isAdmin, rulesHash: room.rules_hash,
         phase: room.phase, version: room.version, currentRound: room.current_round,
         commitment: room.commitment, reveal: revealVisible, crashBps: crashVisible,
         startedAt: room.started_at?.toISOString() ?? null, crashAt: room.crash_at?.toISOString() ?? null,
@@ -167,7 +167,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         payout: row.payout, net: row.net, survived: row.survived, lockedAt: row.locked_at?.toISOString() ?? null,
       })),
       events: events.rows.reverse().map((row) => ({ sequence: row.sequence, type: row.event_type, commandId: row.command_id, payload: row.public_payload, at: row.created_at.toISOString() })),
-      me: { id: identity.id, displayName: identity.displayName },
+      me: { id: identity.id, displayName: identity.displayName, isAdmin: identity.isAdmin },
     };
   });
 }
@@ -260,7 +260,7 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
 export async function startPlaytestRound(identity: PlaytestIdentity, roomId: string, commandId: string) {
   return withPostgresTransaction(async (client) => {
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
-    if (room.owner_user_id !== identity.id) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can launch.");
+    if (room.owner_user_id !== identity.id && !identity.isAdmin) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can launch.");
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "lobby" || BigInt(room.current_round) < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a lobby round with bets.");
     const count = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2`, [roomId, room.current_round]);
@@ -309,7 +309,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
   if (!["none", "miss", "hit"].includes(lotteryOutcome)) throw new PlaytestRoomError(400, "BAD_LOTTERY_OUTCOME", "Invalid lottery outcome.");
   return withPostgresTransaction(async (client) => {
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
-    if (ownerOnly && room.owner_user_id !== identity.id) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can select a laboratory lottery outcome.");
+    if (ownerOnly && room.owner_user_id !== identity.id && !identity.isAdmin) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can select a laboratory lottery outcome.");
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "running" || !room.crash_at || !room.crash_bps) throw new PlaytestRoomError(409, "NOT_RUNNING", "No round is currently running.");
     if (Date.now() < room.crash_at.getTime()) throw new PlaytestRoomError(409, "ROUND_ACTIVE", "The round has not crashed yet.");
@@ -355,4 +355,58 @@ export async function tickPlaytestRound(identity: PlaytestIdentity, roomId: stri
   const lotterySample = createHash("sha256").update(`${reveal}:powerboard`).digest()[0];
   const outcome: LotteryOutcome = lotterySample % 16 === 0 ? "hit" : "miss";
   return settlePlaytestRound(identity, roomId, commandId, outcome, false);
+}
+
+const EDITABLE_POLICY_KEYS = new Set<keyof SimulationPolicy>([
+  "keeperRewardBps", "protectedPrincipalBps", "crashSeed", "emissionBufferCap",
+  "lotteryFounderFeeBps", "lotteryInitialBase", "lotteryMinimumIncrease",
+  "lotteryBaseGrowthBps", "lotteryMinimumBaseStep", "consolation",
+  "minimumPlayers", "minimumStake",
+]);
+
+/** Admin-only laboratory tuning. The ratified rake and allocation rule remain
+ * immutable; edits are validated by the same economic kernel used to settle. */
+export async function updatePlaytestPolicy(identity: PlaytestIdentity, roomId: string, commandId: string, patch: unknown) {
+  if (!identity.isAdmin) throw new PlaytestRoomError(403, "ADMIN_ONLY", "The host PIN is required.");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new PlaytestRoomError(400, "BAD_POLICY", "Policy changes must be an object.");
+  return withPostgresTransaction(async (client) => {
+    const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
+    if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
+    if (room.phase === "running") throw new PlaytestRoomError(409, "ROUND_ACTIVE", "Tune parameters between rounds.");
+    const candidate = parsePolicy(room.policy) as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(patch as Record<string, unknown>)) {
+      if (!EDITABLE_POLICY_KEYS.has(key as keyof SimulationPolicy)) throw new PlaytestRoomError(400, "BAD_POLICY_KEY", `${key} cannot be changed in the host console.`);
+      if (key === "minimumPlayers") {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed)) throw new PlaytestRoomError(400, "BAD_POLICY_VALUE", `${key} must be an integer.`);
+        candidate[key] = parsed;
+      } else {
+        if (typeof value !== "string" || !/^\d{1,30}$/.test(value)) throw new PlaytestRoomError(400, "BAD_POLICY_VALUE", `${key} must be a non-negative integer string.`);
+        candidate[key] = BigInt(value);
+      }
+    }
+    try { validatePolicy(candidate as unknown as SimulationPolicy); }
+    catch (error) { throw new PlaytestRoomError(400, "INVALID_POLICY", error instanceof Error ? error.message : "Invalid policy."); }
+    room.version = String(BigInt(room.version) + 1n);
+    room.policy = serializeBigInts(candidate);
+    room.rules_hash = playtestRulesHash(candidate as unknown as SimulationPolicy);
+    await client.query(`UPDATE playtest_rooms SET version=$2,policy=$3,rules_hash=$4 WHERE id=$1`, [room.id, room.version, JSON.stringify(room.policy), room.rules_hash]);
+    await event(client, room, "admin.policy.updated", identity.id, commandId, { patch, rulesHash: room.rules_hash });
+    return { duplicate: false, version: room.version, rulesHash: room.rules_hash };
+  });
+}
+
+export async function adjustPlaytestCredit(identity: PlaytestIdentity, roomId: string, commandId: string, userId: string, balance: bigint) {
+  if (!identity.isAdmin) throw new PlaytestRoomError(403, "ADMIN_ONLY", "The host PIN is required.");
+  if (balance < 0n || balance > 10n ** 30n) throw new PlaytestRoomError(400, "BAD_BALANCE", "Balance is outside the laboratory range.");
+  return withPostgresTransaction(async (client) => {
+    const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
+    if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
+    const changed = await client.query(`UPDATE playtest_room_members SET test_credit_balance=$3 WHERE room_id=$1 AND user_id=$2`, [roomId, userId, balance.toString()]);
+    if (!changed.rowCount) throw new PlaytestRoomError(404, "MEMBER_NOT_FOUND", "That player is not in this room.");
+    room.version = String(BigInt(room.version) + 1n);
+    await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [room.id, room.version]);
+    await event(client, room, "admin.credit.adjusted", identity.id, commandId, { userId, balance });
+    return { duplicate: false, version: room.version };
+  });
 }

@@ -14,7 +14,7 @@ function roomError(error: unknown) {
 export async function GET() {
   try {
     const identity = await currentPlaytestIdentity();
-    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Passkey sign-in required." }, 401);
+    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
     return publicJson({ rooms: await listPlaytestRooms(identity) });
   } catch (error) { return roomError(error); }
 }
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     const limited = rateLimit(req, { key: "playtest-rooms", limit: 30, windowMs: 60_000 });
     if (limited) return limited;
     const identity = await currentPlaytestIdentity();
-    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Passkey sign-in required." }, 401);
+    if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
     const body = await readJsonBody<{ action?: unknown; name?: unknown; code?: unknown }>(req);
     if (body.action === "create" && typeof body.name === "string") {
       return publicJson(await createPlaytestRoom(identity, body.name), 201);
