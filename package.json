@@ -16,6 +16,7 @@
     "test:market": "tsx --test test/market/*.test.ts",
     "test:postgres": "tsx scripts/verify-postgres-storage.ts",
     "test:e2e": "playwright test",
+    "plankspace:x-sync": "tsx scripts/sync-plankspace-x.ts",
     "test": "npm run test:market && npm run test:contracts",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

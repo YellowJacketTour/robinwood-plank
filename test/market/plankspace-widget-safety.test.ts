@@ -43,3 +43,9 @@ test("external widget document grants network access only inside an isolated fra
   assert.doesNotMatch(document, /allow-same-origin|allow-forms|allow-popups|allow-top-navigation/);
   assert.match(document, /elfsight-app-1e832c7b/);
 });
+
+test("custom widget saves are blocked until every snippet validates", async () => {
+  const { widgetValidationErrors } = await import("../../integrations/plankspace-app/app/widgets/widget-safety");
+  assert.deepEqual(widgetValidationErrors([{ type: "custom", config: { source: '<script src="http://bad.test/x.js"></script>' } }]), ["Widget 1: Widget scripts must use HTTPS."]);
+  assert.deepEqual(widgetValidationErrors([{ type: "custom", config: { source: '<script src="https://good.test/x.js"></script>' } }]), []);
+});

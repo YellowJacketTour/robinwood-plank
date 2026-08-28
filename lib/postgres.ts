@@ -93,6 +93,8 @@ export function postgresPool(): Pool {
   return state.__plankPostgresPool;
 }
 
+export async function closePostgres():Promise<void>{const state=postgresGlobal();if(state.__plankPostgresPool){const pool=state.__plankPostgresPool;delete state.__plankPostgresPool;await pool.end()}}
+
 export async function postgresQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values: readonly unknown[] = []

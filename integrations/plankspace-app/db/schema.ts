@@ -11,6 +11,43 @@ export const posts = pgTable("plankspace_posts", {
   mediaAlt: text("media_alt").notNull().default(""),
   likes: integer("likes").notNull().default(0),
   moderationStatus: text("moderation_status").notNull().default("approved"),
+  source: text("source").notNull().default("plankspace"),
+  externalPostId: text("external_post_id").notNull().default(""),
+  xPublishStatus: text("x_publish_status").notNull().default("not-requested"),
+  xPostUrl: text("x_post_url").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const xAccounts = pgTable("plankspace_x_accounts", {
+  wallet: text("wallet").primaryKey(),
+  profileHandle: text("profile_handle").notNull().unique(),
+  xUserId: text("x_user_id").notNull(),
+  xUsername: text("x_username").notNull(),
+  accessTokenEncrypted: text("access_token_encrypted").notNull().default(""),
+  refreshTokenEncrypted: text("refresh_token_encrypted").notNull().default(""),
+  tokenExpiresAt: text("token_expires_at"),
+  syncCursor: text("sync_cursor").notNull().default(""),
+  connectedAt: text("connected_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const xPostMappings = pgTable("plankspace_x_post_mappings", {
+  id: serial("id").primaryKey(),
+  wallet: text("wallet").notNull(),
+  plankspacePostId: integer("plankspace_post_id"),
+  xPostId: text("x_post_id").notNull().unique(),
+  direction: text("direction").notNull(),
+  xPostUrl: text("x_post_url").notNull().default(""),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+},table=>[index("plankspace_x_mappings_wallet_idx").on(table.wallet,table.createdAt)]);
+
+export const xOAuthStates = pgTable("plankspace_x_oauth_states", {
+  state: text("state").primaryKey(),
+  wallet: text("wallet").notNull(),
+  profileHandle: text("profile_handle").notNull(),
+  pkceVerifier: text("pkce_verifier").notNull(),
+  expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

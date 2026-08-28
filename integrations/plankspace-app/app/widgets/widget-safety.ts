@@ -1,6 +1,7 @@
 import { WIDGET_TYPES, defaultWidgetStyle, type ProfileWidget, type WidgetType } from "./widget-types";
 
 const text=(value:unknown,max=300)=>typeof value==="string"?value.trim().slice(0,max):"";
+const record=(value:unknown):Record<string,unknown>=>value&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:{};
 const hex=(value:unknown,fallback:string)=>/^#[0-9a-f]{6}$/i.test(String(value))?String(value):fallback;
 const evm=(value:unknown)=>/^0x[a-f0-9]{40}$/i.test(String(value))?String(value).toLowerCase():"";
 const https=(value:unknown)=>{try{const u=new URL(text(value,800));return u.protocol==="https:"?u.toString():""}catch{return ""}};
@@ -31,6 +32,8 @@ export function analyzeExternalWidget(value:unknown):ExternalWidgetAnalysis{
  if(errors.length)return {source:"",origins:[...origins].sort(),executable:scripts.length>0,errors:[...new Set(errors)]};
  return {source,origins:[...origins].sort(),executable:scripts.length>0,errors:[]};
 }
+
+export function widgetValidationErrors(widgets:unknown[]):string[]{return widgets.flatMap((value,index)=>{const raw=record(value);if(raw.type!=="custom")return [];const config=record(raw.config),analysis=analyzeExternalWidget(config.source??config.html);return analysis.errors.map(error=>`Widget ${index+1}: ${error}`)})}
 
 export function sanitizeWidget(raw: unknown, index: number): ProfileWidget | null {
   const input=(raw&&typeof raw==="object"?raw:{}) as Record<string,unknown>;

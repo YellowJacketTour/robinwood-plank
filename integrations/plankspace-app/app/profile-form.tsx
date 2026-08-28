@@ -9,6 +9,7 @@ import {
 import { walletProof } from "./auth-client";
 import { readApiJson } from "./api-client";
 import WidgetManager from "./widgets/widget-manager";
+import XConnectionManager from "./x/x-connection-manager";
 import { CYBERPUNK_PROFILE_CSS, DEFAULT_PROFILE_CSS_GUIDE } from "./customization/default-profile-css";
 
 type FormState = {
@@ -859,7 +860,10 @@ export default function ProfileForm({
               {saving ? "Saving your space…" : "Save Design & Profile"}
             </button>
             {editing && wallet && form.handle && (
-              <WidgetManager wallet={wallet} handle={form.handle} />
+              <>
+                <XConnectionManager wallet={wallet} handle={form.handle} />
+                <WidgetManager wallet={wallet} handle={form.handle} />
+              </>
             )}
           </section>
         )}
