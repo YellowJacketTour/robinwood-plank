@@ -10,7 +10,11 @@ import { walletProof } from "./auth-client";
 import { readApiJson } from "./api-client";
 import WidgetManager from "./widgets/widget-manager";
 import XConnectionManager from "./x/x-connection-manager";
-import { CYBERPUNK_PROFILE_CSS, DEFAULT_PROFILE_CSS_GUIDE } from "./customization/default-profile-css";
+import { profileToolsVisibility } from "./profile-tools-visibility";
+import {
+  CYBERPUNK_PROFILE_CSS,
+  DEFAULT_PROFILE_CSS_GUIDE,
+} from "./customization/default-profile-css";
 
 type FormState = {
   handle: string;
@@ -457,6 +461,24 @@ export default function ProfileForm({
           <i className={step >= 2 ? "active" : ""} />
           <i className={step >= 3 ? "active" : ""} />
         </div>
+        {profileToolsVisibility({ editing, handle: form.handle }) && (
+          <section id="connections" className="profile-connections-workshop">
+            <header>
+              <small>X + WIDGETS</small>
+              <h1>Connect your feed and customize your board.</h1>
+              <p>
+                X sharing is optional and off by default. External widgets stay
+                paused until each visitor chooses to load them.
+              </p>
+            </header>
+            <XConnectionManager wallet={wallet} handle={form.handle} />
+            {wallet ? (
+              <WidgetManager wallet={wallet} handle={form.handle} />
+            ) : (
+              <p>Connect your Plank.love wallet to manage profile widgets.</p>
+            )}
+          </section>
+        )}
         {step === 1 && (
           <section>
             <div className="onboard-plank">
@@ -713,10 +735,16 @@ export default function ProfileForm({
                   maxLength={24000}
                 />
                 <span className="custom-code-actions">
-                  <button type="button" onClick={() => set("customCss", CYBERPUNK_PROFILE_CSS)}>
+                  <button
+                    type="button"
+                    onClick={() => set("customCss", CYBERPUNK_PROFILE_CSS)}
+                  >
                     Load Cyberpunk Example
                   </button>
-                  <button type="button" onClick={() => set("customCss", DEFAULT_PROFILE_CSS_GUIDE)}>
+                  <button
+                    type="button"
+                    onClick={() => set("customCss", DEFAULT_PROFILE_CSS_GUIDE)}
+                  >
                     Load CSS Hook Guide
                   </button>
                   <button type="button" onClick={() => set("customCss", "")}>
@@ -726,7 +754,9 @@ export default function ProfileForm({
               </label>
               <label className="wide">
                 CUSTOM HTML — SANDBOXED MODULE
-                <span>This content stays inside the movable Custom Space box.</span>
+                <span>
+                  This content stays inside the movable Custom Space box.
+                </span>
                 <textarea
                   className="code-input"
                   value={form.customHtml}
@@ -859,12 +889,6 @@ export default function ProfileForm({
             <button onClick={save} disabled={saving}>
               {saving ? "Saving your space…" : "Save Design & Profile"}
             </button>
-            {editing && wallet && form.handle && (
-              <>
-                <XConnectionManager wallet={wallet} handle={form.handle} />
-                <WidgetManager wallet={wallet} handle={form.handle} />
-              </>
-            )}
           </section>
         )}
         {notice && (

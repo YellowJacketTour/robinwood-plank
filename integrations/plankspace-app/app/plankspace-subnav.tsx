@@ -36,7 +36,8 @@ const current = "border-line-strong bg-gold-500/15 text-gold-300";
 
 export default function PlankSpaceSubnav() {
   const pathname = usePathname() || "/plankspace";
-  const onEditor = active(pathname, "/profile-editor") || active(pathname, "/create-profile");
+  const onEditor =
+    active(pathname, "/profile-editor") || active(pathname, "/create-profile");
 
   return (
     <div
@@ -83,9 +84,19 @@ export default function PlankSpaceSubnav() {
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <AdminNavLink className={`${pill} ${idle}`} />
           <Link
+            href="/profile-editor#connections"
+            className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
+          >
+            X + Widgets
+          </Link>
+          <Link
             href="/profile-editor"
             aria-current={onEditor ? "page" : undefined}
-            className={`${pill} ${onEditor ? current : "border-line-strong bg-wood-900 text-gold-300 hover:bg-wood-800"}`}
+            className={`${pill} ${
+              onEditor
+                ? current
+                : "border-line-strong bg-wood-900 text-gold-300 hover:bg-wood-800"
+            }`}
           >
             My board
           </Link>
