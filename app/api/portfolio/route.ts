@@ -5,6 +5,7 @@ import { getWalletCohortPositions } from "@/lib/market/portfolio-store";
 import { avgCostPerShareWei, marketValueWei, unrealizedPnlWei } from "@/lib/market/portfolio-pnl";
 import { currentNavPerShareWei } from "@/lib/market/portfolio-nav-history";
 import { vaultName, vaultShortName } from "@/lib/market/vault-registry";
+import { PORTFOLIO_PROOF_DOMAIN } from "@/lib/portfolio-proof-domain";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,8 +15,6 @@ const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // rest of this codebase writes bigint constants as BigInt(...) for the same
 // reason (see lib/market/vault.ts, lib/market/vault-stats.ts).
 const ZERO = BigInt(0);
-
-export const PORTFOLIO_PROOF_DOMAIN = "portfolio-read";
 
 /**
  * WHAT THIS ROUTE WILL AND WILL NOT TELL A STRANGER.

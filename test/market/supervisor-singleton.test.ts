@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+// Git Bash is required on Windows because the supervisors run in its MSYS
+// process namespace. CI runs on Linux, where the native bash is the correct
+// interpreter. A Windows-only absolute path made every Linux assertion test
+// the spawn error's empty output instead of the guard itself.
+const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/bash";
 const GUARD = join(process.cwd(), "scripts/_supervisor-singleton.sh").replace(/\\/g, "/");
 
 const supervisors = [

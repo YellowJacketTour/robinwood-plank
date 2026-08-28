@@ -290,6 +290,10 @@ jobs:
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
           HELIUS_API_KEYS: ${{ secrets.HELIUS_API_KEYS }}
           NEXT_PUBLIC_REFERRAL_ENABLED: ${{ vars.NEXT_PUBLIC_REFERRAL_ENABLED || 'false' }}
+          PLANK_PLAYTEST_ENABLED: ${{ vars.PLANK_PLAYTEST_ENABLED || 'false' }}
+          PLANK_PLAYTEST_ORIGIN: ${{ vars.PLANK_PLAYTEST_ORIGIN || 'https://plank.love' }}
+          PLANK_PLAYTEST_RP_ID: ${{ vars.PLANK_PLAYTEST_RP_ID || 'plank.love' }}
+          PLANK_PLAYTEST_INVITE_HASHES: ${{ secrets.PLANK_PLAYTEST_INVITE_HASHES }}
         shell: bash
         run: |
           set -euo pipefail
@@ -400,6 +404,31 @@ jobs:
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.next-public-flags.${RELEASE_SHA}"
           rm -f "$flag_file"
 
+          # Unofficial multiplayer laboratory configuration. This remains
+          # server-only: the enable flag fails closed, RP/origin bind WebAuthn,
+          # and only invitation hashes (never raw invitation codes) cross the
+          # protected runtime-secret channel.
+          playtest_config="$RUNNER_TEMP/playtest-config"
+          case "${PLANK_PLAYTEST_ENABLED:-false}" in true|false) ;; *) echo "Invalid PLANK_PLAYTEST_ENABLED." >&2; exit 1 ;; esac
+          [[ "$PLANK_PLAYTEST_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || { echo "Invalid PLANK_PLAYTEST_ORIGIN." >&2; exit 1; }
+          [[ "$PLANK_PLAYTEST_RP_ID" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Invalid PLANK_PLAYTEST_RP_ID." >&2; exit 1; }
+          if [ "${PLANK_PLAYTEST_ENABLED:-false}" = true ]; then
+            [[ "${PLANK_PLAYTEST_INVITE_HASHES:-}" =~ ^[0-9a-fA-F]{64}(,[0-9a-fA-F]{64})*$ ]] || {
+              echo "Enabled playtest requires comma-separated SHA-256 invitation hashes." >&2
+              exit 1
+            }
+          fi
+          {
+            printf 'PLANK_PLAYTEST_ENABLED=%s\n' "${PLANK_PLAYTEST_ENABLED:-false}"
+            printf 'PLANK_PLAYTEST_ORIGIN=%s\n' "${PLANK_PLAYTEST_ORIGIN}"
+            printf 'PLANK_PLAYTEST_RP_ID=%s\n' "${PLANK_PLAYTEST_RP_ID}"
+            printf 'PLANK_PLAYTEST_INVITE_HASHES=%s\n' "${PLANK_PLAYTEST_INVITE_HASHES:-}"
+          } > "$playtest_config"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$playtest_config" \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.playtest-config.${RELEASE_SHA}"
+          rm -f "$playtest_config"
+
       - name: Migrate, activate, and restart Passenger
         shell: bash
         run: |
@@ -489,6 +518,21 @@ jobs:
               mv -f "$env_file.next" "$env_file"
             done < "$staged_flags"
             rm -f "$staged_flags"
+          fi
+          staged_playtest="$app_dir/shared/runtime-secrets/.playtest-config.$release_sha"
+          if [ -s "$staged_playtest" ]; then
+            env_file="$app_dir/shared/.env.production"
+            while IFS='=' read -r config_name config_value; do
+              case "$config_name" in
+                PLANK_PLAYTEST_ENABLED|PLANK_PLAYTEST_ORIGIN|PLANK_PLAYTEST_RP_ID|PLANK_PLAYTEST_INVITE_HASHES) ;;
+                *) echo "Refusing unexpected playtest config key." >&2; exit 1 ;;
+              esac
+              grep -v "^${config_name}=" "$env_file" > "$env_file.next" || true
+              printf '%s=%s\n' "$config_name" "$config_value" >> "$env_file.next"
+              chmod 600 "$env_file.next"
+              mv -f "$env_file.next" "$env_file"
+            done < "$staged_playtest"
+            rm -f "$staged_playtest"
           fi
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"

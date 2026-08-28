@@ -7,7 +7,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { resolveOwnedTokenIds } from "@/lib/market/multichain/owned-token-resolver";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -35,14 +36,8 @@ const ALCHEMY_SUBDOMAIN: Record<string, string> = {
  * already uses. Bounded at MAX_ENUMERATED_TOKENS / MAX_SCANNED_TRANSFER_LOGS
  * so a single request can't fan out unboundedly.
  */
-const MAX_ENUMERATED_TOKENS = 200;
-const ACTIVITY_SCAN_BLOCKS = 50_000;
-
 function encodeUint(value: bigint): string {
   return value.toString(16).padStart(64, "0");
-}
-function encodeAddress(address: string): string {
-  return address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 /**
  * Try ERC721Enumerable first (balanceOf + tokenOfOwnerByIndex) -- exact and
@@ -52,70 +47,6 @@ function encodeAddress(address: string): string {
  * doesn't implement it, which reverts/errors on the very first
  * tokenOfOwnerByIndex call rather than partially enumerating.
  */
-export async function resolveOwnedTokenIds(rpcUrl: string, contractAddress: string, owner: string): Promise<string[]> {
-  try {
-    const balanceHex = await rpcCall<string>(rpcUrl, "eth_call", [
-      { to: contractAddress, data: "0x70a08231" + encodeAddress(owner) },
-      "latest",
-    ]);
-    const balance = BigInt(balanceHex);
-    if (balance > BigInt(0) && balance <= BigInt(MAX_ENUMERATED_TOKENS)) {
-      const ids: string[] = [];
-      for (let i = BigInt(0); i < balance; i++) {
-        const tokenHex = await rpcCall<string>(rpcUrl, "eth_call", [
-          { to: contractAddress, data: "0x2f745c59" + encodeAddress(owner) + encodeUint(i) },
-          "latest",
-        ]);
-        ids.push(BigInt(tokenHex).toString());
-      }
-      return ids;
-    }
-    if (balance === BigInt(0)) return [];
-  } catch {
-    // Not ERC721Enumerable (or balanceOf itself failed) -- fall through to the log scan.
-  }
-
-  const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
-  const latest = Number.parseInt(latestHex, 16);
-  const fromBlock = Math.max(0, latest - ACTIVITY_SCAN_BLOCKS);
-  const ownerTopic = "0x" + encodeAddress(owner);
-
-  type RawLog = { topics: string[]; blockNumber: string; logIndex: string };
-  const [incoming, outgoing] = await Promise.all([
-    rpcCall<RawLog[]>(rpcUrl, "eth_getLogs", [
-      { address: contractAddress, fromBlock: "0x" + fromBlock.toString(16), toBlock: "0x" + latest.toString(16), topics: [TRANSFER_TOPIC, null, ownerTopic] },
-    ]),
-    rpcCall<RawLog[]>(rpcUrl, "eth_getLogs", [
-      { address: contractAddress, fromBlock: "0x" + fromBlock.toString(16), toBlock: "0x" + latest.toString(16), topics: [TRANSFER_TOPIC, ownerTopic] },
-    ]),
-  ]);
-
-  // Latest event per token wins: if the most recent Transfer touching this
-  // token sent it TO the owner, they still hold it; if the most recent one
-  // sent it FROM the owner, they don't anymore.
-  const rank = (l: RawLog) => Number.parseInt(l.blockNumber, 16) * 1_000_000 + Number.parseInt(l.logIndex ?? "0x0", 16);
-  const latestEventByToken = new Map<string, { direction: "in" | "out"; rank: number }>();
-  for (const log of incoming) {
-    if (log.topics.length !== 4) continue;
-    const tokenId = BigInt(log.topics[3]).toString();
-    const r = rank(log);
-    const existing = latestEventByToken.get(tokenId);
-    if (!existing || r > existing.rank) latestEventByToken.set(tokenId, { direction: "in", rank: r });
-  }
-  for (const log of outgoing) {
-    if (log.topics.length !== 4) continue;
-    const tokenId = BigInt(log.topics[3]).toString();
-    const r = rank(log);
-    const existing = latestEventByToken.get(tokenId);
-    if (!existing || r > existing.rank) latestEventByToken.set(tokenId, { direction: "out", rank: r });
-  }
-
-  return [...latestEventByToken.entries()]
-    .filter(([, v]) => v.direction === "in")
-    .map(([tokenId]) => tokenId)
-    .slice(0, MAX_ENUMERATED_TOKENS);
-}
-
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-owned", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
