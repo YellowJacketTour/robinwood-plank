@@ -2335,6 +2335,7 @@ jobs:
           test -x "$node_bin"
           env_file="$app_dir/shared/.env.production"
           test -s "$env_file"
+          cd "$app_dir/current"
           "$node_bin" --env-file="$env_file" -e '
             const { Client } = require("pg");
             (async () => {
