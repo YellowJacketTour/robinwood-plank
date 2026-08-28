@@ -202,6 +202,26 @@ jobs:
           test -s .next/standalone/scripts/plank-koth-gap-finder-standalone.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
+          # build:market-refresh's esbuild step marks @envio-dev/* as
+          # --external (it's a native addon, not something esbuild can
+          # bundle), so refresh-market-data.mjs resolves it from real
+          # node_modules at runtime. Next's standalone output only traces
+          # and ships what the Next.js APP graph itself imports — this
+          # script isn't part of that graph, so the package silently never
+          # made it into a single release, and refresh-market-data.mjs has
+          # been crashing with ERR_MODULE_NOT_FOUND on every production
+          # invocation since @envio-dev/hypersync-client was introduced
+          # (confirmed live 2026-08-28 via the refresh-market-activity
+          # dispatch operation — this is why plank.love's Activity feed and
+          # 24h stats were stuck stale for weeks despite clean deploys).
+          # Copying the whole scoped dir carries both the JS wrapper and
+          # whichever platform-native optionalDependency npm actually
+          # resolved on this runner (linux-x64-gnu, matching InMotion's
+          # shared Linux hosting).
+          mkdir -p .next/standalone/node_modules/@envio-dev
+          cp -R node_modules/@envio-dev/. .next/standalone/node_modules/@envio-dev/
+          test -d .next/standalone/node_modules/@envio-dev/hypersync-client
+          test -d .next/standalone/node_modules/@envio-dev/hypersync-client-linux-x64-gnu
           tar -C .next/standalone -czf passenger-release.tgz .
 
       - name: Upload release artifact
