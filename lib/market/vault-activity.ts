@@ -1,9 +1,10 @@
-import { Interface } from "ethers";
+import { Interface, zeroPadValue } from "ethers";
 import {
   durableKv as kv,
   hasDurableKv,
 } from "@/lib/market/durable-kv";
 import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import vaultV3Abi from "@/lib/market/vault-v3-abi.json";
 import { BLOCKSCOUT_BASE, fetchAddressLogs } from "@/lib/market/blockscout";
@@ -77,6 +78,30 @@ const STORED_HISTORY_LIMIT = 500;
  * finished turns the steady state into a single forward window.
  */
 const SCAN_HEAD_KV_KEY = "plank:market:vault-scan-head-v1";
+
+/**
+ * Confirmed live 2026-08-28 via a real transaction receipt
+ * (eth_getTransactionReceipt on the actual depositMany tx, not inferred):
+ * the deployed vault's depositMany path emits the NFT contract's own
+ * Transfer(from, vault, tokenId) log but NO Deposited event at all — not a
+ * decode gap (Deposited is byte-identical between vault-abi.json and
+ * vault-v3-abi.json, ruled out first), not a Blockscout indexing lag
+ * (confirmed absent via a direct eth_getLogs call against the Deposited
+ * topic in that exact block range), not a stuck scan cursor (reset it,
+ * result unchanged). The event genuinely was never written on-chain, so no
+ * amount of re-scanning the vault's own logs can ever recover it.
+ *
+ * The NFT contract's Transfer log the tx DOES emit is real, on-chain, and
+ * sufficient on its own: a plain Transfer where `to` is the vault address IS
+ * a deposit, regardless of which vault function moved it there. This scans
+ * that instead, filtered to the tracked NFT contract, and is only used to
+ * fill in what the primary sources missed (see the dedupe against existing
+ * "deposit" rows in scanVault) so a normal single-item deposit that DOES
+ * get a real Deposited event is never double-counted.
+ */
+const NFT_TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const DEPOSIT_FALLBACK_HEAD_KV_KEY = "plank:market:vault-deposit-fallback-scan-head-v1";
 
 /**
  * Both the SSE stream (getVaultActivity(40)) and estimateApr inside
@@ -286,10 +311,10 @@ async function writeKv(events: VaultTradeEvent[]): Promise<void> {
   }
 }
 
-async function readScanHeads(): Promise<Record<string, number>> {
+async function readScanHeads(kvKey: string = SCAN_HEAD_KV_KEY): Promise<Record<string, number>> {
   if (!hasKv()) return {};
   try {
-    const v = await kv.get<Record<string, number>>(SCAN_HEAD_KV_KEY);
+    const v = await kv.get<Record<string, number>>(kvKey);
     if (v && typeof v === "object") return v;
   } catch {
     /* */
@@ -301,13 +326,17 @@ async function readScanHeads(): Promise<Record<string, number>> {
  * Only ever advances. A lower value would re-scan blocks we already have, and
  * a concurrent Passenger worker holding a staler head must not walk it back.
  */
-async function writeScanHead(vault: string, block: number): Promise<void> {
+async function writeScanHead(
+  vault: string,
+  block: number,
+  kvKey: string = SCAN_HEAD_KV_KEY
+): Promise<void> {
   if (!hasKv() || !Number.isFinite(block) || block <= 0) return;
   try {
-    const heads = await readScanHeads();
+    const heads = await readScanHeads(kvKey);
     const key = vault.toLowerCase();
     if ((heads[key] ?? 0) >= block) return;
-    await kv.set(SCAN_HEAD_KV_KEY, { ...heads, [key]: block });
+    await kv.set(kvKey, { ...heads, [key]: block });
   } catch {
     /* */
   }
@@ -560,6 +589,125 @@ async function fromEthRpc(
   return events;
 }
 
+/**
+ * Fallback source for deposits the vault's own logs never recorded (see
+ * DEPOSIT_FALLBACK_HEAD_KV_KEY's header). Scans the tracked NFT contract's
+ * Transfer logs for `to == vault`, which is real, on-chain, and true
+ * regardless of which vault function moved the token. Same incremental/
+ * cold-start shape as fromEthRpc, but against the NFT contract's address
+ * and its own separate resume cursor, since the two scans cover different
+ * emitting contracts and must not share (or corrupt) each other's progress.
+ */
+async function fromNftDepositFallback(
+  vault: string,
+  limit: number,
+  full: boolean
+): Promise<VaultTradeEvent[]> {
+  const latest = await ethBlockNumberDisplay();
+  const { chunkBlocks, maxChunks } = logScanBudget();
+  const chunks = full ? Math.max(maxChunks, 15) : maxChunks;
+  const toVaultTopic = zeroPadValue(vault, 32).toLowerCase();
+  const rawLogs: Array<{
+    topics: string[];
+    data: string;
+    blockNumber: string;
+    transactionHash: string;
+    logIndex: string;
+  }> = [];
+
+  const getLogs = (fromBlock: number, toBlock: number) =>
+    ethGetLogsDisplay({
+      address: NFT_CONTRACT_ADDRESS,
+      topics: [NFT_TRANSFER_TOPIC, null, toVaultTopic],
+      fromBlock: "0x" + fromBlock.toString(16),
+      toBlock: "0x" + toBlock.toString(16),
+    });
+
+  const head = full ? 0 : (await readScanHeads(DEPOSIT_FALLBACK_HEAD_KV_KEY))[vault.toLowerCase()] ?? 0;
+
+  if (head > 0 && head < latest) {
+    let from = head + 1;
+    let scannedTo = head;
+    for (let chunk = 0; chunk < maxChunks && from <= latest; chunk += 1) {
+      const to = Math.min(latest, from + chunkBlocks - 1);
+      try {
+        rawLogs.push(...(await getLogs(from, to)));
+      } catch {
+        break;
+      }
+      scannedTo = to;
+      from = to + 1;
+    }
+    if (scannedTo > head) await writeScanHead(vault, scannedTo, DEPOSIT_FALLBACK_HEAD_KV_KEY);
+  } else {
+    let toBlock = latest;
+    let completed = true;
+    for (
+      let chunk = 0;
+      chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
+      chunk += 1
+    ) {
+      const fromBlock = Math.max(0, toBlock - chunkBlocks);
+      try {
+        rawLogs.push(...(await getLogs(fromBlock, toBlock)));
+      } catch {
+        completed = false;
+        break;
+      }
+      if (fromBlock === 0) break;
+      toBlock = fromBlock - 1;
+    }
+    if (completed) await writeScanHead(vault, latest, DEPOSIT_FALLBACK_HEAD_KV_KEY);
+  }
+
+  if (rawLogs.length === 0) return [];
+
+  rawLogs.sort((a, b) => {
+    const bn = Number(BigInt(b.blockNumber) - BigInt(a.blockNumber));
+    if (bn !== 0) return bn;
+    return Number(BigInt(b.logIndex) - BigInt(a.logIndex));
+  });
+  const trimmed = full ? rawLogs : rawLogs.slice(0, limit);
+
+  const blockNumbers = [...new Set(trimmed.map((l) => l.blockNumber))];
+  const blockTimeByNumber = new Map<string, number>();
+  await Promise.all(
+    blockNumbers.slice(0, 60).map(async (bn) => {
+      try {
+        const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [bn, false], {
+          timeoutMs: 4_000,
+          urls: SERVER_DISPLAY_RPC_URLS,
+        });
+        if (block?.timestamp) blockTimeByNumber.set(bn, Number(BigInt(block.timestamp)));
+      } catch {
+        /* skip */
+      }
+    })
+  );
+
+  const events: VaultTradeEvent[] = [];
+  for (const log of trimmed) {
+    // ERC-721 Transfer: topics = [sig, from(indexed), to(indexed), tokenId(indexed)].
+    const from = "0x" + log.topics[1].slice(-40);
+    const tokenIdHex = log.topics[3];
+    if (!tokenIdHex) continue;
+    const ts = blockTimeByNumber.get(log.blockNumber);
+    events.push({
+      kind: "deposit",
+      address: from,
+      ethWei: null,
+      sharesWei: null,
+      tokenId: BigInt(tokenIdHex).toString(),
+      txHash: log.transactionHash,
+      blockNumber: Number(BigInt(log.blockNumber)),
+      logIndex: Number(BigInt(log.logIndex)),
+      timestamp: ts == null ? null : new Date(ts * 1000).toISOString(),
+      vaultAddress: vault,
+    });
+  }
+  return events;
+}
+
 async function scanVault(
   vault: string,
   limit: number,
@@ -588,6 +736,29 @@ async function scanVault(
     } catch {
       /* */
     }
+  }
+  // Always attempted, regardless of how many events the sources above
+  // already found — the gap this covers (depositMany emitting no Deposited
+  // event) can exist even when older vault history is plentiful, so the
+  // length-gated checks above would never trigger it. Filtered against
+  // deposits already found for the same (txHash, tokenId) so a normal
+  // single-item deposit that DOES get a real Deposited event is never
+  // double-counted.
+  try {
+    const existingDepositKeys = new Set(
+      merged
+        .filter((e) => e.kind === "deposit")
+        .map((e) => `${e.txHash.toLowerCase()}:${e.tokenId}`)
+    );
+    const fallback = (await fromNftDepositFallback(vault, cap, full)).filter(
+      (e) => !existingDepositKeys.has(`${e.txHash.toLowerCase()}:${e.tokenId}`)
+    );
+    if (fallback.length > 0) {
+      parts.push(fallback);
+      merged = mergeVaultActivityHistory(...parts);
+    }
+  } catch {
+    /* */
   }
   return merged.slice(0, cap);
 }
