@@ -39,6 +39,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [creditUser, setCreditUser] = useState("");
   const [creditBalance, setCreditBalance] = useState("1000000");
   const [notice, setNotice] = useState("Ready.");
+  const [inviteUrl, setInviteUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [connection, setConnection] = useState<"live" | "reconnecting">("reconnecting");
   const [now, setNow] = useState(0);
@@ -124,6 +125,19 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
       setNotice("Replay JSON exported.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Replay export failed."); }
   };
+  const createInvite = async () => {
+    if (!selected) return;
+    setBusy("invite"); setNotice("Creating a one-use invitation…");
+    try {
+      const result = await json<{ url: string }>(await fetch("/api/playtest/invites", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId: selected }),
+      }));
+      setInviteUrl(result.url);
+      await navigator.clipboard?.writeText(result.url).catch(() => {});
+      setNotice("Invitation created and copied. It expires in seven days and works once.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Invitation failed."); }
+    finally { setBusy(null); }
+  };
 
   const liveBps = useMemo(() => {
     if (!snap?.room.startedAt || snap.room.phase !== "running") return null;
@@ -154,6 +168,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
         </section>
         {identity.isAdmin && <section className="mt-3"><Panel title="Admin simulation console">
           <p className="mb-4 text-xs text-cream-muted">Host-PIN controls are server-validated, room-scoped, and written to the authoritative replay log. Parameters can change only between rounds.</p>
+          <div className="mb-4 rounded-lg border border-violet-400/30 bg-violet-500/10 p-3"><p className="text-xs font-black uppercase tracking-wider text-violet-200">Invite a player to this room</p><button onClick={createInvite} disabled={Boolean(busy) || !selected} className="mt-2 min-h-11 rounded border border-violet-300 px-4 text-violet-100 disabled:opacity-40">Create and copy one-use link</button>{inviteUrl ? <input aria-label="Latest invitation URL" readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} className="mt-2 min-h-11 w-full rounded border border-line bg-black/30 px-2 font-mono text-xs" /> : null}</div>
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
             <label className="text-xs">Economic parameter<select value={policyKey} onChange={(e) => { setPolicyKey(e.target.value); setPolicyValue(String(snap.policy[e.target.value] ?? "0")); }} className="mt-1 min-h-11 w-full rounded border border-line bg-panel-strong px-2">
               {["minimumPlayers","minimumStake","protectedPrincipalBps","keeperRewardBps","crashSeed","emissionBufferCap","lotteryFounderFeeBps","lotteryInitialBase","lotteryMinimumIncrease","lotteryBaseGrowthBps","lotteryMinimumBaseStep","consolation"].map((key) => <option key={key}>{key}</option>)}

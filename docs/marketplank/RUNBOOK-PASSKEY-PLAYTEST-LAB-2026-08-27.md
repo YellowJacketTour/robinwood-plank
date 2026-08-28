@@ -2,7 +2,8 @@
 
 > Entry flow superseded on 2026-08-28. The WebAuthn material below documents
 > the first laboratory release; active testers now choose a username and use a
-> shared four-digit player PIN. The distinct six-digit host PIN adds audited,
+> one-use invitation. Each player chooses a personal four-digit PIN, while the
+> host claims a personal six-digit PIN through a high-entropy setup URL. This adds audited,
 > simulation-only controls.
 
 ## Official infrastructure, unofficial game
@@ -46,8 +47,8 @@ the following GitHub repository variables and secret before releasing:
 - variable `PLANK_PLAYTEST_ORIGIN=https://plank.love` (or the currently
   verified canonical HTTPS origin until DNS cutover);
 - variable `PLANK_PLAYTEST_RP_ID` matching that origin's registrable RP host;
-- secret `PLANK_PLAYTEST_PLAYER_PIN_HASH` containing the SHA-256 digest of the four-digit player PIN;
-- secret `PLANK_PLAYTEST_ADMIN_PIN_HASH` containing the SHA-256 digest of the six-digit host PIN.
+- secret `PLANK_PLAYTEST_BOOTSTRAP_HASH` containing the SHA-256 digest of a
+  high-entropy, one-use host setup credential.
 
 The deployment workflow transfers these through `shared/runtime-secrets`,
 atomically upserts `shared/.env.production` at mode `600`, runs the normal
@@ -59,14 +60,15 @@ Equivalent resulting runtime configuration:
 ```dotenv
 PLANK_PLAYTEST_ORIGIN=https://plank.love
 PLANK_PLAYTEST_RP_ID=plank.love
-PLANK_PLAYTEST_PLAYER_PIN_HASH=<sha256-hex>
-PLANK_PLAYTEST_ADMIN_PIN_HASH=<sha256-hex>
+PLANK_PLAYTEST_BOOTSTRAP_HASH=<sha256-hex>
 PLANK_PLAYTEST_ENABLED=true
 ```
 
-Generate a different high-entropy invitation for every tester. Keep raw values
-out of the repository, CI logs, query strings, and browser history. One safe
-PowerShell workflow is:
+Generate a high-entropy bootstrap credential once. The host uses its private
+setup URL before invitations are issued; after the first claim, the database
+transaction permanently closes bootstrap. Personal four/six-digit PINs are
+scrypt-derived with independent salts and are never deployment configuration.
+One safe PowerShell workflow for the bootstrap credential is:
 
 ```powershell
 $bytes = New-Object byte[] 32
