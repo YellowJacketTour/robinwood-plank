@@ -605,7 +605,22 @@ async function fromNftDepositFallback(
 ): Promise<VaultTradeEvent[]> {
   const latest = await ethBlockNumberDisplay();
   const { chunkBlocks, maxChunks } = logScanBudget();
-  const chunks = full ? Math.max(maxChunks, 15) : maxChunks;
+  // Confirmed live 2026-08-28: reusing fromEthRpc's own cold-start chunk
+  // budget (12 chunks non-full) marked itself "complete" and advanced the
+  // resume cursor to `latest` after covering only 600,000 blocks back --
+  // short of the real gap to the missed 2026-08-27 deposit by ~107,000
+  // blocks. Because `completed` only means "no window threw", not "reached
+  // genesis or known-good coverage", that false completion permanently
+  // skipped the gap: every later call takes the fast incremental path
+  // forward from the now-advanced head and can never revisit it. This is a
+  // one-time historical backfill, not a routine per-request cost -- once
+  // its cursor is set, every future call is the cheap incremental branch --
+  // so it deliberately uses a larger budget than the primary scan to make a
+  // false "complete" far less likely on the very first run. Measured live:
+  // ~3-4s per chunk against the public RPC, so 20 chunks (1,000,000 blocks,
+  // comfortably past the confirmed ~707,000-block gap) stays well inside
+  // Cloudflare's proxy timeout instead of the 40+ chunks that would risk it.
+  const chunks = full ? Math.max(maxChunks, 15) : 20;
   const toVaultTopic = zeroPadValue(vault, 32).toLowerCase();
   const rawLogs: Array<{
     topics: string[];
