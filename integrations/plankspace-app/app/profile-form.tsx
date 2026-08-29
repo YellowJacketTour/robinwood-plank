@@ -730,8 +730,10 @@ export default function ProfileForm({
               <label className="wide">
                 PROFILE CSS — CHANGES THE WHOLE PAGE
                 <span>
-                  Paste plain CSS rules here. Do not include export const,
-                  backticks, or a &lt;style&gt; wrapper.
+                  Paste raw CSS or a complete layout containing one or more
+                  &lt;style&gt; blocks. SpaceHey-style profile selectors are
+                  translated safely; site navigation and wallet controls stay
+                  protected. Do not include export const or backticks.
                 </span>
                 <textarea
                   className="code-input"

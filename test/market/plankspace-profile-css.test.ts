@@ -65,6 +65,59 @@ test("legacy combined HTML and CSS can rearrange the full existing profile", () 
   assert.match(css, /order:\s*-1/);
 });
 
+test("complete style snippets and raw CSS are both accepted", () => {
+  const wrapped = compileProfileCss(`
+    <!-- SpaceHey layout -->
+    <style>.profile-info { color: hotpink; }</style>
+    <style>.profile .contact { border: 2px solid hotpink; }</style>
+    <a href="https://example.com">layout credit</a>
+  `);
+  const raw = compileProfileCss(".profile-info { color: hotpink; }");
+
+  assert.match(wrapped.css, /\.classic-profile \.identity/);
+  assert.match(wrapped.css, /\.classic-profile\.classic-profile \.contact/);
+  assert.doesNotMatch(wrapped.css, /<style|<a\b/i);
+  assert.match(raw.css, /\.classic-profile \.identity/);
+});
+
+test("SpaceHey profile selectors map to PlankSpace modules without reaching site chrome", () => {
+  const result = compileProfileCss(`
+    body { background: black; color: white; }
+    .general-about, .blurbs { border: 2px solid hotpink; }
+    .profile .mood { background: black; }
+    .profile .url-info { color: grey; }
+    .table-section, table.details-table { background: transparent; }
+    nav .links, footer { color: hotpink; }
+  `);
+
+  assert.match(result.css, /\.classic-profile\.classic-profile\s*\{/);
+  assert.match(result.css, /\.classic-profile \.about/);
+  assert.match(result.css, /\.classic-profile\.classic-profile \.status/);
+  assert.match(result.css, /\.classic-profile\.classic-profile \.url/);
+  assert.match(result.css, /\.classic-profile \.interests/);
+  assert.doesNotMatch(result.css, /nav \.links|footer/);
+  assert.ok(result.warnings.some((warning) => warning.includes("site chrome")));
+});
+
+test("SpaceHey fixed background effects are retained as profile-local absolute effects", () => {
+  const result = compileProfileCss(`
+    @keyframes slide { to { transform: translate(-400px, 400px); } }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: -500px;
+      background: url("https://images.example/pattern.png");
+      animation: slide 20s linear infinite;
+      z-index: -1;
+    }
+  `);
+
+  assert.match(result.css, /\.classic-profile\.classic-profile::after/);
+  assert.match(result.css, /position:\s*absolute/);
+  assert.doesNotMatch(result.css, /position:\s*fixed/);
+  assert.match(result.css, /@keyframes slide/);
+});
+
 test("bundled profile example overrides the semantic skin used by module interiors", () => {
   const css = compileProfileCss(CYBERPUNK_PROFILE_CSS).css;
 
