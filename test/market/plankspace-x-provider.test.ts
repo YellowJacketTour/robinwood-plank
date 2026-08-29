@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DevelopmentXProvider, selectXProvider } from "../../integrations/plankspace-app/app/x/provider";
+import {
+  DevelopmentXProvider,
+  LiveXProvider,
+  formatPlankSpaceXPost,
+  selectXProvider,
+} from "../../integrations/plankspace-app/app/x/provider";
 
 test("development X provider connects, imports, and publishes deterministically", async () => {
   const provider = new DevelopmentXProvider();
@@ -23,4 +28,28 @@ test("X publication remains explicitly opt-in", async () => {
   const account = await provider.connect({ handle: "plank" });
   assert.equal(await provider.createPostIfRequested(account, "local", "key", false), null);
   assert.equal((await provider.createPostIfRequested(account, "shared", "key", true))?.id, "xdev-key");
+});
+
+test("PlankSpace X posts carry the required footer and stay within X's limit", () => {
+  assert.equal(
+    formatPlankSpaceXPost("Hello from the Lumberyard"),
+    "Hello from the Lumberyard\n\nPosted from my PlankSpace on Plank.Love",
+  );
+
+  const result = formatPlankSpaceXPost(`${"board ".repeat(60)}🪵`);
+  assert.ok(Array.from(result).length <= 280);
+  assert.ok(result.endsWith("\n\nPosted from my PlankSpace on Plank.Love"));
+  assert.doesNotMatch(result, /�/);
+});
+
+test("live X failures remain readable when X returns a non-JSON response", async () => {
+  const provider = new LiveXProvider(async () =>
+    new Response("<html>gateway failure</html>", { status: 502 }),
+  );
+  const account = { id: "123", username: "plank", accessToken: "token" };
+
+  await assert.rejects(
+    provider.listRecentPosts(account, ""),
+    /X timeline request failed \(502\)/,
+  );
 });

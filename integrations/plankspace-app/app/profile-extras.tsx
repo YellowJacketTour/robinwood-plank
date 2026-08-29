@@ -103,6 +103,7 @@ export function Feed() {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [xConnected,setXConnected]=useState(false),
+    [xUsername,setXUsername]=useState(""),
     [alsoPostToX,setAlsoPostToX]=useState(false);
   useEffect(() => {
     fetch("/api/posts")
@@ -110,7 +111,7 @@ export function Feed() {
       .then((d) => setItems(d.posts || []))
       .catch(() => setMessage("Feed unavailable"));
   }, []);
-  useEffect(()=>{const refresh=(address:string|null)=>{if(!address){setXConnected(false);setAlsoPostToX(false);return}fetch(`/api/x/status?wallet=${address}`).then(r=>r.json()).then(x=>setXConnected(Boolean(x.connected))).catch(()=>setXConnected(false))};void getPlankLoveWalletState().then(state=>refresh(state.address));return subscribePlankLoveWalletState(state=>refresh(state.address))},[]);
+  useEffect(()=>{const refresh=(address:string|null)=>{if(!address){setXConnected(false);setXUsername("");setAlsoPostToX(false);return}fetch(`/api/x/status?wallet=${address}`).then(r=>r.json()).then(x=>{const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");if(!connected)setAlsoPostToX(false)}).catch(()=>{setXConnected(false);setXUsername("");setAlsoPostToX(false)})};void getPlankLoveWalletState().then(state=>refresh(state.address));return subscribePlankLoveWalletState(state=>refresh(state.address))},[]);
   const act = async (kind: "post" | "like", id?: number) => {
     setBusy(true);
     setMessage("");
@@ -133,6 +134,10 @@ export function Feed() {
         setItems((v) => [result.post, ...v]);
         setBody("");
         setMedia(emptyMedia);
+        setAlsoPostToX(false);
+        if (result.post?.xPublishStatus === "failed") {
+          setMessage("Posted to PlankSpace, but X sharing failed. Reconnect X and try again.");
+        }
       } else setItems((v) => v.map((p) => (p.id === id ? result.post : p)));
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Action failed");
@@ -156,7 +161,19 @@ export function Feed() {
           onChange={setMedia}
           idPrefix="profile-lumber"
         />
-        {xConnected&&<label className="x-share-choice"><input type="checkbox" checked={alsoPostToX} onChange={e=>setAlsoPostToX(e.target.checked)}/> Also post this to X (optional)</label>}
+        {xConnected&&<label className={`x-share-choice ${alsoPostToX?"is-selected":""}`}>
+          <input type="checkbox" checked={alsoPostToX} onChange={e=>setAlsoPostToX(e.target.checked)}/>
+          <span className="x-share-switch" aria-hidden="true"><i /></span>
+          <span className="x-share-copy">
+            <b>Share this post to X</b>
+            <small>{alsoPostToX?`Will also publish${xUsername?` as @${xUsername}`:""}`:"Optional · off by default"}</small>
+          </span>
+        </label>}
+        {xConnected&&alsoPostToX&&<div className="x-share-preview">
+          <b>X post footer</b>
+          <span>Posted from my PlankSpace on Plank.Love</span>
+          <small>Long PlankSpace posts are shortened only on X.</small>
+        </div>}
         <button disabled={busy || !body.trim()} onClick={() => act("post")}>
           Connect, Sign & Post
         </button>
