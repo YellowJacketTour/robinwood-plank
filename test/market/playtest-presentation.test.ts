@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { connectionState, presentedMultiplierBps, signedNet } from "../../lib/playtest-presentation";
+
+test("the visible multiplier freezes at the committed crash point", () => {
+  assert.equal(presentedMultiplierBps({ phase: "running", liveBps: 42_000, crashBps: "23500", deadlinePassed: false }), 23_500);
+  assert.equal(presentedMultiplierBps({ phase: "running", liveBps: 90_000, crashBps: "23500", deadlinePassed: true }), 23_500);
+  assert.equal(presentedMultiplierBps({ phase: "settled", liveBps: null, crashBps: "23500", deadlinePassed: true }), 23_500);
+});
+
+test("results are classified by signed net, not survival", () => {
+  assert.equal(signedNet("100", "80"), -20n);
+  assert.equal(signedNet("100", "100"), 0n);
+  assert.equal(signedNet("100", "125"), 25n);
+  assert.equal(signedNet("100", null), null);
+});
+
+test("transport freshness is distinct from animation", () => {
+  assert.equal(connectionState(null, 50_000), "idle");
+  assert.equal(connectionState(48_000, 50_000), "live");
+  assert.equal(connectionState(20_000, 50_000), "delayed");
+  assert.equal(connectionState(2_000, 50_000), "offline");
+});
