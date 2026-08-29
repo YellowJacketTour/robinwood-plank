@@ -118,6 +118,37 @@ test("SpaceHey fixed background effects are retained as profile-local absolute e
   assert.match(result.css, /@keyframes slide/);
 });
 
+test("incomplete style blocks are repaired independently instead of disabling the profile", () => {
+  const result = compileProfileCss(`
+    <style>
+      .profile-info { color: hotpink; }
+      footer { background: black;
+    </style>
+    <style>
+      button { color: black;
+    </style>
+    <style>.online { color: lime; }</style>
+  `);
+
+  assert.match(result.css, /\.classic-profile \.identity/);
+  assert.match(result.css, /\.classic-profile button/);
+  assert.match(result.css, /\.classic-profile \.online/);
+  assert.ok(result.warnings.some((warning) => warning.includes("2 incomplete CSS blocks were repaired")));
+});
+
+test("the public-profile renderer preserves style-block boundaries during recovery", () => {
+  const css = customProfileCss(`
+    <style>.profile-info { color: hotpink; } footer { color: grey;</style>
+    <style>button { background: black;</style>
+    <style>* { cursor: url(https://example.com/cursor.cur), auto; }</style>
+  `);
+
+  assert.match(css, /\.classic-profile \.identity/);
+  assert.match(css, /\.classic-profile button/);
+  assert.match(css, /\.classic-profile \*/);
+  assert.match(css, /cursor\.cur/);
+});
+
 test("bundled profile example overrides the semantic skin used by module interiors", () => {
   const css = compileProfileCss(CYBERPUNK_PROFILE_CSS).css;
 

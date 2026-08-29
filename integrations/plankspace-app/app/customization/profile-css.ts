@@ -10,9 +10,47 @@ const SITE_CHROME_SELECTOR = /^(?:html\s+)?(?:nav|footer|header)(?:\b|\s|\.|#|:|
 
 export type CompiledProfileCss = { css: string; warnings: string[] };
 
-function cssSource(rawSource: string): string {
+function missingClosingBraces(source: string): number {
+  let balance = 0;
+  let quote = "";
+  let inComment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (inComment) {
+      if (char === "*" && next === "/") {
+        inComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      inComment = true;
+      index += 1;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === "{") balance += 1;
+    else if (char === "}") balance -= 1;
+    if (balance < 0) return 0;
+  }
+  return balance;
+}
+
+function cssSource(rawSource: string): { source: string; repairedBlocks: number } {
   const blocks = [...rawSource.matchAll(STYLE_BLOCK)].map((match) => match[1]);
-  return blocks.length ? blocks.join("\n") : rawSource;
+  const inputs = blocks.length ? blocks : [rawSource];
+  let repairedBlocks = 0;
+  const repaired = inputs.map((block) => {
+    const missing = missingClosingBraces(block);
+    if (!missing) return block;
+    repairedBlocks += 1;
+    return `${block}\n${"}".repeat(missing)}`;
+  });
+  return { source: repaired.join("\n"), repairedBlocks };
 }
 
 function spaceHeySelector(selector: string): string {
@@ -77,10 +115,13 @@ function insideKeyframes(rule: Rule): boolean {
 }
 
 export function compileProfileCss(rawSource: string): CompiledProfileCss {
-  const source = cssSource(String(rawSource || "")).trim();
+  const prepared = cssSource(String(rawSource || ""));
+  const source = prepared.source.trim();
   if (!source || !source.replace(/\/\*[\s\S]*?\*\//g, "").trim()) return { css: "", warnings: [] };
 
-  const warnings: string[] = [];
+  const warnings: string[] = prepared.repairedBlocks
+    ? [`${prepared.repairedBlocks} incomplete CSS ${prepared.repairedBlocks === 1 ? "block was" : "blocks were"} repaired.`]
+    : [];
   if (source.length > MAX_SOURCE_LENGTH) {
     return { css: "", warnings: [`Custom CSS exceeds ${MAX_SOURCE_LENGTH} characters.`] };
   }

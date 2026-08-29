@@ -1,12 +1,7 @@
 import { compileProfileCss } from "./customization/profile-css";
 
 export function customProfileCss(customCss: string, legacyHtml = ""): string {
-  const legacySource = legacyHtml || (/<style\b/i.test(customCss) ? customCss : "");
-  const legacyCss = [...String(legacySource).matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)]
-    .map((match) => match[1])
-    .join("\n");
-  const source = legacySource === customCss ? legacyCss : customCss || legacyCss;
-  return compileProfileCss(String(source)).css;
+  return compileProfileCss(String(customCss || legacyHtml)).css;
 }
 
 export function hasVisibleCustomContent(html: string): boolean {
