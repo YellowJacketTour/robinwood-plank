@@ -1,0 +1,110 @@
+name: Diagnose private playtest room creation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Inspect playtest schema and sanitized application errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -o BatchMode=yes -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          test -x "$node_bin"
+
+          # Query metadata only. No usernames, PIN/session material, room
+          # payloads, connection strings, or environment values are emitted.
+          "$node_bin" --env-file="$env_file" - <<'NODE'
+          const { Pool } = require("pg");
+          const pool = new Pool({
+            host: process.env.PGHOST,
+            port: Number(process.env.PGPORT || 5432),
+            database: process.env.PGDATABASE,
+            user: process.env.PGUSER,
+            password: process.env.PGPASSWORD,
+            max: 1,
+          });
+          (async () => {
+            const client = await pool.connect();
+            try {
+              const tables = await client.query(`
+                SELECT c.relname, has_table_privilege(current_user, c.oid, 'SELECT') AS can_select,
+                       has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert,
+                       has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update
+                  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                 WHERE n.nspname=current_schema()
+                   AND c.relname IN ('playtest_users','playtest_rooms','playtest_room_members','playtest_room_events')
+                 ORDER BY c.relname`);
+              const columns = await client.query(`
+                SELECT table_name, column_name, data_type, is_nullable
+                  FROM information_schema.columns
+                 WHERE table_schema=current_schema()
+                   AND table_name IN ('playtest_rooms','playtest_room_members','playtest_room_events')
+                 ORDER BY table_name, ordinal_position`);
+              const migrations = await client.query(`
+                SELECT version FROM plank_schema_migrations
+                 WHERE version LIKE '%playtest%' ORDER BY version`);
+              console.log(JSON.stringify({ currentUser: (await client.query('SELECT current_user')).rows[0].current_user,
+                tables: tables.rows, columns: columns.rows, migrations: migrations.rows }, null, 2));
+            } finally { client.release(); await pool.end(); }
+          })().catch((error) => {
+            console.error(JSON.stringify({ code: error.code, constraint: error.constraint,
+              table: error.table, column: error.column, message: error.message }));
+            process.exitCode = 1;
+          });
+          NODE
+
+          log_file="$app_dir/logs/passenger.log"
+          if [ -r "$log_file" ]; then
+            echo 'SANITIZED_PLAYTEST_ERRORS_BEGIN'
+            tail -n 2000 "$log_file" \
+              | grep -E '\[api\]|\[playtest-room\]|playtest_room' \
+              | tail -n 80 \
+              | sed -E 's/(pin|token|cookie|password|secret|session)=?[^ ]*/\1=[REDACTED]/Ig' || true
+            echo 'SANITIZED_PLAYTEST_ERRORS_END'
+          else
+            echo 'Passenger log unavailable.'
+          fi
+          REMOTE
