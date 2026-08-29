@@ -469,6 +469,7 @@ export default function ProfileForm({
         {profileToolsVisibility({ editing, handle: form.handle }) && (
           <section id="connections" className="profile-connections-workshop">
             <div className="profile-connections-intro">
+              <small>CONNECTIONS &amp; WIDGETS</small>
               <h1>Connect your feed and customize your board.</h1>
               <p>
                 X sharing is optional and off by default. External widgets stay

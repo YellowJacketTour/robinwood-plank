@@ -67,6 +67,45 @@
   font-size: 1rem;
 }
 
+.plankspace-native .lumberyard-page-header {
+  max-width: 1120px;
+  margin: 24px auto 0;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-panel);
+  color: var(--plankspace-panel-ink);
+  box-shadow: var(--shadow-panel);
+}
+
+.plankspace-native .lumberyard-page-header small {
+  color: var(--color-gold-400);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.plankspace-native .lumberyard-page-header h1 {
+  margin: 4px 0;
+  color: var(--color-gold-300);
+  font: 400 clamp(1.55rem, 3vw, 2.2rem)/1.05 var(--font-display), Georgia, serif;
+}
+
+.plankspace-native .lumberyard-page-header p { margin: 0; color: var(--plankspace-panel-muted); }
+.plankspace-native .lumberyard-page-header > div:last-child { display: flex; gap: 8px; flex: none; }
+.plankspace-native .lumberyard-profile-action { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 9px 14px; border: 1px solid var(--color-gold-500); border-radius: var(--plankspace-radius); background: var(--color-gold-500); color: var(--color-wood-950); font-weight: 800; text-decoration: none; }
+.plankspace-native .lumberyard-profile-action:hover { background: var(--color-gold-400); text-decoration: none; }
+.plankspace-native .lumberyard-profile-action.is-secondary { background: transparent; color: var(--color-gold-300); }
+
+@media (max-width: 720px) {
+  .plankspace-native .lumberyard-page-header { margin: 12px 12px 0; align-items: stretch; flex-direction: column; }
+  .plankspace-native .lumberyard-page-header > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
 .plankspace-native .home-feed > main {
   max-width: 1120px;
   margin: 0 auto;

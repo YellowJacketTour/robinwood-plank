@@ -104,6 +104,7 @@ export function Feed() {
     [message, setMessage] = useState(""),
     [xConnected,setXConnected]=useState(false),
     [xUsername,setXUsername]=useState(""),
+    [xRetryAfter,setXRetryAfter]=useState(0),
     [alsoPostToX,setAlsoPostToX]=useState(false);
   useEffect(() => {
     fetch("/api/posts")
@@ -111,7 +112,7 @@ export function Feed() {
       .then((d) => setItems(d.posts || []))
       .catch(() => setMessage("Feed unavailable"));
   }, []);
-  useEffect(()=>{const refresh=(address:string|null)=>{if(!address){setXConnected(false);setXUsername("");setAlsoPostToX(false);return}fetch(`/api/x/status?wallet=${address}`).then(r=>r.json()).then(x=>{const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");if(!connected)setAlsoPostToX(false)}).catch(()=>{setXConnected(false);setXUsername("");setAlsoPostToX(false)})};void getPlankLoveWalletState().then(state=>refresh(state.address));return subscribePlankLoveWalletState(state=>refresh(state.address))},[]);
+  useEffect(()=>{const refresh=(address:string|null)=>{if(!address){setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false);return}fetch(`/api/x/status?wallet=${address}`).then(r=>r.json()).then(x=>{const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");setXRetryAfter(connected&&!x.postCooldown?.allowed?Number(x.postCooldown.retryAfterSeconds||0):0);if(!connected)setAlsoPostToX(false)}).catch(()=>{setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false)})};void getPlankLoveWalletState().then(state=>refresh(state.address));return subscribePlankLoveWalletState(state=>refresh(state.address))},[]);
   const act = async (kind: "post" | "like", id?: number) => {
     setBusy(true);
     setMessage("");
@@ -135,7 +136,10 @@ export function Feed() {
         setBody("");
         setMedia(emptyMedia);
         setAlsoPostToX(false);
-        if (result.post?.xPublishStatus === "failed") {
+        if (result.xShare?.status === "cooldown") {
+          setXRetryAfter(Number(result.xShare.retryAfterSeconds || 300));
+          setMessage(`Posted to PlankSpace. X sharing is available again in about ${Math.ceil(Number(result.xShare.retryAfterSeconds || 300) / 60)} minute(s).`);
+        } else if (result.post?.xPublishStatus === "failed") {
           setMessage("Posted to PlankSpace, but X sharing failed. Reconnect X and try again.");
         }
       } else setItems((v) => v.map((p) => (p.id === id ? result.post : p)));
@@ -161,12 +165,12 @@ export function Feed() {
           onChange={setMedia}
           idPrefix="profile-lumber"
         />
-        {xConnected&&<label className={`x-share-choice ${alsoPostToX?"is-selected":""}`}>
-          <input type="checkbox" checked={alsoPostToX} onChange={e=>setAlsoPostToX(e.target.checked)}/>
+        {xConnected&&<label className={`x-share-choice ${alsoPostToX?"is-selected":""} ${xRetryAfter>0?"is-disabled":""}`}>
+          <input type="checkbox" checked={alsoPostToX} disabled={xRetryAfter>0} onChange={e=>setAlsoPostToX(e.target.checked)}/>
           <span className="x-share-switch" aria-hidden="true"><i /></span>
           <span className="x-share-copy">
             <b>Share this post to X</b>
-            <small>{alsoPostToX?`Will also publish${xUsername?` as @${xUsername}`:""}`:"Optional · off by default"}</small>
+            <small>{xRetryAfter>0?`Available again in about ${Math.ceil(xRetryAfter/60)} minute(s)`:alsoPostToX?`Will also publish${xUsername?` as @${xUsername}`:""}`:"Optional · off by default"}</small>
           </span>
         </label>}
         {xConnected&&alsoPostToX&&<div className="x-share-preview">

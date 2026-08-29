@@ -3,7 +3,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import AdminNavLink from "./admin-nav-link";
+import { savedProfileHandle } from "./auth-client";
+import { getPlankLoveWalletState, subscribePlankLoveWalletState } from "./plank-love-wallet";
 
 /**
  * The single PlankSpace rail. It sits directly under the shared site header
@@ -38,6 +41,15 @@ export default function PlankSpaceSubnav() {
   const pathname = usePathname() || "/plankspace";
   const onEditor =
     active(pathname, "/profile-editor") || active(pathname, "/create-profile");
+  const [profileHandle, setProfileHandle] = useState("");
+  useEffect(() => {
+    const resolve = (address: string | null) => {
+      if (!address) { setProfileHandle(""); return; }
+      void savedProfileHandle(address).then(setProfileHandle).catch(() => setProfileHandle(""));
+    };
+    void getPlankLoveWalletState().then((state) => resolve(state.address));
+    return subscribePlankLoveWalletState((state) => resolve(state.address));
+  }, []);
 
   return (
     <div
@@ -83,21 +95,6 @@ export default function PlankSpaceSubnav() {
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <AdminNavLink className={`${pill} ${idle}`} />
-          {onEditor ? (
-            <a
-              href="#connections"
-              className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
-            >
-              X + Widgets
-            </a>
-          ) : (
-            <Link
-              href="/profile-editor#connections"
-              className={`${pill} border-line-strong bg-gold-500/15 text-gold-300 hover:bg-gold-500/25`}
-            >
-              X + Widgets
-            </Link>
-          )}
           <Link
             href="/profile-editor"
             aria-current={onEditor ? "page" : undefined}
@@ -107,7 +104,14 @@ export default function PlankSpaceSubnav() {
                 : "border-line-strong bg-wood-900 text-gold-300 hover:bg-wood-800"
             }`}
           >
-            My board
+            Edit Profile
+          </Link>
+          <Link
+            href={profileHandle ? `/u/${profileHandle}` : "/profile-editor"}
+            aria-current={profileHandle && pathname === `/u/${profileHandle}` ? "page" : undefined}
+            className={`${pill} border-line-strong bg-gold-500 text-wood-950 hover:bg-gold-400`}
+          >
+            My Profile
           </Link>
         </div>
       </div>

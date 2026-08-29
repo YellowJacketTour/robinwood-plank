@@ -165,3 +165,19 @@ export async function savedWalletProof(wallet: string) {
   const sessionToken = await activeToken(normalized);
   return sessionToken ? { wallet: normalized, sessionToken } : {};
 }
+
+/** Resolve the public board owned by an already-verified local session. */
+export async function savedProfileHandle(wallet: string) {
+  const normalized = wallet.toLowerCase();
+  const token = localStorage.getItem(key(normalized)) || "";
+  if (!token) return "";
+  const response = await fetch(`/api/auth/session?wallet=${encodeURIComponent(normalized)}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const result = await readApiJson<{ active?: boolean; handle?: string }>(response, "Could not find your PlankSpace profile.").catch((): { active?: boolean; handle?: string } => ({}));
+  if (result.active && typeof result.handle === "string") return result.handle;
+  const xStatus = await fetch(`/api/x/status?wallet=${encodeURIComponent(normalized)}`)
+    .then((item) => item.json() as Promise<{ handle?: string }>)
+    .catch((): { handle?: string } => ({}));
+  return typeof xStatus.handle === "string" ? xStatus.handle : "";
+}

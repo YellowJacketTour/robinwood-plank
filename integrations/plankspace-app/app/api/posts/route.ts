@@ -1,11 +1,13 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { notifications, postLikes, posts, profiles, xPostMappings } from "../../../db/schema";
+import { notifications, postLikes, posts, profiles, xAccounts, xPostMappings } from "../../../db/schema";
 import { normalizePostMedia } from "../../post-media";
 import { hashJson } from "../auth/hash";
 import { type Proof, verifyAndConsumeProof } from "../auth/verify";
 import { loadXAccount } from "../../x/account";
 import { getXProvider } from "../../x/provider";
+import { evaluateXPostCooldown, isDegenXCooldownExempt } from "../../x/policy";
+import { getXPostCooldownMinutes } from "../../x/settings";
 
 export async function GET() {
   try {
@@ -61,7 +63,7 @@ export async function POST(request: Request) {
     );
   const db = getDb(),
     [a] = await db
-      .select({ displayName: profiles.displayName })
+      .select({ displayName: profiles.displayName, handle: profiles.handle })
       .from(profiles)
       .where(eq(profiles.wallet, wallet))
       .limit(1),
@@ -85,8 +87,58 @@ export async function POST(request: Request) {
     .insert(posts)
     .values({ author: a.displayName, authorWallet: wallet, body, ...media, xPublishStatus:data.alsoPostToX?"pending":"not-requested" })
     .returning();
-  if(data.alsoPostToX){const account=await loadXAccount(wallet);if(!account)post=(await db.update(posts).set({xPublishStatus:"failed"}).where(eq(posts.id,post.id)).returning())[0];else try{const published=await getXProvider().createPost(account,body,`post-${post.id}`);await db.insert(xPostMappings).values({wallet,plankspacePostId:post.id,xPostId:published.id,direction:"publish",xPostUrl:published.url,idempotencyKey:`post-${post.id}`});post=(await db.update(posts).set({xPublishStatus:"published",externalPostId:published.id,xPostUrl:published.url}).where(eq(posts.id,post.id)).returning())[0]}catch{post=(await db.update(posts).set({xPublishStatus:"failed"}).where(eq(posts.id,post.id)).returning())[0]}}
-  return Response.json({ post }, { status: 201 });
+  let xShare: { status: string; retryAfterSeconds?: number } | undefined;
+  if (data.alsoPostToX) {
+    const account = await loadXAccount(wallet);
+    const [xRow] = await db.select().from(xAccounts).where(eq(xAccounts.wallet, wallet)).limit(1);
+    if (!account || !xRow) {
+      post = (await db.update(posts).set({ xPublishStatus: "failed" }).where(eq(posts.id, post.id)).returning())[0];
+      xShare = { status: "reconnect-required" };
+    } else {
+      const cooldownMinutes = await getXPostCooldownMinutes();
+      const decision = evaluateXPostCooldown({
+        lastPublishedAt: xRow.lastPublishedAt,
+        cooldownMinutes,
+        profileHandle: a.handle,
+      });
+      let reserved = decision.allowed;
+      const reservedAt = new Date().toISOString();
+      if (reserved && !isDegenXCooldownExempt(a.handle) && cooldownMinutes > 0) {
+        const cutoff = new Date(Date.now() - cooldownMinutes * 60_000).toISOString();
+        const rows = await db.update(xAccounts)
+          .set({ lastPublishedAt: reservedAt, updatedAt: reservedAt })
+          .where(and(eq(xAccounts.wallet, wallet), or(isNull(xAccounts.lastPublishedAt), lte(xAccounts.lastPublishedAt, cutoff))))
+          .returning({ wallet: xAccounts.wallet });
+        reserved = rows.length === 1;
+      }
+      if (!reserved) {
+        const retry = evaluateXPostCooldown({
+          lastPublishedAt: xRow.lastPublishedAt,
+          cooldownMinutes,
+          profileHandle: a.handle,
+        });
+        post = (await db.update(posts).set({ xPublishStatus: "failed" }).where(eq(posts.id, post.id)).returning())[0];
+        xShare = { status: "cooldown", retryAfterSeconds: Math.max(1, retry.retryAfterSeconds) };
+      } else {
+        try {
+          const published = await getXProvider().createPost(account, body, `post-${post.id}`);
+          await db.insert(xPostMappings).values({ wallet, plankspacePostId: post.id, xPostId: published.id, direction: "publish", xPostUrl: published.url, idempotencyKey: `post-${post.id}` });
+          if (isDegenXCooldownExempt(a.handle) || cooldownMinutes === 0) {
+            await db.update(xAccounts).set({ lastPublishedAt: reservedAt, updatedAt: reservedAt }).where(eq(xAccounts.wallet, wallet));
+          }
+          post = (await db.update(posts).set({ xPublishStatus: "published", externalPostId: published.id, xPostUrl: published.url }).where(eq(posts.id, post.id)).returning())[0];
+          xShare = { status: "published" };
+        } catch {
+          if (!isDegenXCooldownExempt(a.handle) && cooldownMinutes > 0) {
+            await db.update(xAccounts).set({ lastPublishedAt: xRow.lastPublishedAt, updatedAt: new Date().toISOString() }).where(and(eq(xAccounts.wallet, wallet), eq(xAccounts.lastPublishedAt, reservedAt)));
+          }
+          post = (await db.update(posts).set({ xPublishStatus: "failed" }).where(eq(posts.id, post.id)).returning())[0];
+          xShare = { status: "failed" };
+        }
+      }
+    }
+  }
+  return Response.json({ post, xShare }, { status: 201 });
 }
 
 export async function PATCH(request: Request) {

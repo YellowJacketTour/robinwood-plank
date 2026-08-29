@@ -27,6 +27,8 @@ export const xAccounts = pgTable("plankspace_x_accounts", {
   refreshTokenEncrypted: text("refresh_token_encrypted").notNull().default(""),
   tokenExpiresAt: text("token_expires_at"),
   syncCursor: text("sync_cursor").notNull().default(""),
+  lastPublishedAt: text("last_published_at"),
+  lastImportedAt: text("last_imported_at"),
   connectedAt: text("connected_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });

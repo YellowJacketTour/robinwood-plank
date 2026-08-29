@@ -148,6 +148,10 @@ export default function HomeFeed(){
  const canPost=Boolean(body.trim())&&!busy;
 
  return <div className="home-feed">
+  <header className="lumberyard-page-header">
+   <div><small>YOUR PLACE IN THE LUMBERYARD</small><h1>Build a board that feels like you.</h1><p>Create a wallet-owned PlankSpace profile, then customize its layout, widgets, and style.</p></div>
+   <div><Link className="lumberyard-profile-action" href={wallet?"/profile-editor":"/create-profile"}>{wallet?"Edit Profile":"Create Profile"}</Link><Link className="lumberyard-profile-action is-secondary" href="/browse">Browse Profiles</Link></div>
+  </header>
   <main id="main-content" tabIndex={-1}>
    <aside aria-labelledby="lumberyard-title">
     <img className="lumberyard-mascot" src={MASCOT} alt="" width={132} height={132}/>

@@ -4,7 +4,7 @@ import {
   type WalletProof,
 } from "@/lib/wallet-proof";
 import { getDb } from "../../../../db";
-import { walletSessions } from "../../../../db/schema";
+import { profiles, walletSessions } from "../../../../db/schema";
 
 const SESSION_DOMAIN = "plankspace-session";
 const SESSION_ACTION = "create";
@@ -48,10 +48,11 @@ export async function GET(request: Request) {
       )
       .limit(1);
 
-    return Response.json({
-      active: Boolean(session && Date.parse(session.expiresAt) > Date.now()),
-      expiresAt: session?.expiresAt || null,
-    });
+    const active = Boolean(session && Date.parse(session.expiresAt) > Date.now());
+    const [profile] = active
+      ? await db.select({ handle: profiles.handle }).from(profiles).where(eq(profiles.wallet, wallet)).limit(1)
+      : [];
+    return Response.json({ active, expiresAt: session?.expiresAt || null, handle: profile?.handle || null });
   } catch (error) {
     console.error("[plankspace-auth] session lookup failed", error);
     return Response.json({ active: false }, { status: 503 });
