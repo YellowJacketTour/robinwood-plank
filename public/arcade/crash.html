@@ -829,6 +829,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
 const { ethers } = window;
 const $ = (id) => document.getElementById(id);
+const PLAYTEST_MODE = new URLSearchParams(window.location.search).get("playtest") === "1";
 
 // ── Deploy-address auto-sync ─────────────────────────────────────────────
 // Real bug this closes: every hardcoded address below (BANK_ADDR,
@@ -2673,7 +2674,7 @@ $("connectBtn").addEventListener("click", async () => {
 let SIMULATE_ADDR = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
 // All five address fallbacks above are now assigned -- safe to sync from
 // the deploy manifest, well before any connect/Simulate button is usable.
-await loadDeployAddresses();
+if (!PLAYTEST_MODE) await loadDeployAddresses();
 const SIM_RPC = "http://127.0.0.1:8545";
 let botBetTimer = null;
 let botBetAttemptedRound = null;
@@ -3419,6 +3420,12 @@ async function doPlaceBet(viaButton) {
   // calls out as load-bearing for feeling in-control, not decorative.
   sfx.click(); haptic(15);
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "PLACING BET…"; }
+  if (PLAYTEST_MODE) {
+    return privatePlaytestCommand("bet", {
+      stake: String(Math.max(1, Math.round(Number(betAmount) * 1_000_000))),
+      targetBps: String(Math.round(autoTarget * 10_000)),
+    });
+  }
   try {
     // Bank mode: the browser session key bets from the pre-funded buffer --
     // no wallet popup. Otherwise the classic per-bet path.
@@ -3483,6 +3490,7 @@ async function doCashOut(viaButton) {
   // before a single await runs.
   sfx.click(); haptic(15);
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "CASHING OUT…"; }
+  if (PLAYTEST_MODE) return privatePlaytestCommand("lock");
   try {
     const roundId = await crash.currentRoundId();
     const liveBps = await crash.liveMultiplierBps(roundId);
@@ -3538,14 +3546,14 @@ document.addEventListener("keydown", (e) => {
 })();
 
 primaryBtn.addEventListener("click", async () => {
-  if (uiState === "betting-open") { await doPlaceBet(true); refresh(); }
-  else if (uiState === "live-hold") { await doCashOut(true); refresh(); }
+  if (uiState === "betting-open") { await doPlaceBet(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
+  else if (uiState === "live-hold") { await doCashOut(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
 });
 
 // Called from the poll (both real + simulate paths) with the current round
 // state, so auto-play acts on the SAME authoritative data the UI renders.
 async function autoPlayTick(phase, roundId, hasStake, hasCashedOut, liveBps) {
-  if (!autoPlay || autoBusy || !signer) return;
+  if (!autoPlay || autoBusy || (!signer && !PLAYTEST_MODE)) return;
   const rid = roundId.toString();
   try {
     if (phase === 0 && !hasStake && autoBetRound !== rid) {
@@ -4239,7 +4247,232 @@ async function leaveInstantPlay() {
   }
 }
 
-refreshBankUI();
+// ── Private multiplayer adapter ─────────────────────────────────────────────
+// The permissioned laboratory intentionally reuses this production-grade
+// PlankCrash presentation. Only the transport changes: contract reads/writes
+// become same-origin, authenticated room snapshots and idempotent commands.
+let privateRoomId = null;
+let privateRooms = [];
+let privateSnapshot = null;
+let privateRefreshBusy = false;
+let privatePoll = null;
+let privateTickRound = null;
+let privateLastError = "";
+
+async function privateJson(response) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || body.error || `Request failed (${response.status})`);
+  return body;
+}
+
+async function privatePlaytestCommand(action, extra = {}) {
+  if (!privateRoomId) return false;
+  try {
+    await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, commandId: crypto.randomUUID(), ...extra }),
+    }));
+    if (action !== "tick") sfx.click();
+    await refreshPrivatePlaytest();
+    return true;
+  } catch (error) {
+    if (action !== "tick") {
+      sfx.error();
+      toast(error.message, "error");
+    }
+    await refreshPrivatePlaytest();
+    return false;
+  }
+}
+
+function privateCredits(value) {
+  try { return BigInt(value || "0").toLocaleString(); } catch { return "0"; }
+}
+
+function renderPrivateRoster(snapshot) {
+  const board = $(snapshot.room.phase === "settled" ? "scoreboard" : "liveBoard");
+  const other = $(snapshot.room.phase === "settled" ? "liveBoard" : "scoreboard");
+  other.classList.remove("show");
+  board.replaceChildren();
+  const title = document.createElement("div");
+  title.className = "scoreboard-title";
+  title.textContent = snapshot.room.phase === "settled" ? "ROUND RESULTS" : "LIVE TABLE";
+  board.appendChild(title);
+  for (const member of snapshot.members) {
+    const seat = snapshot.seats.find((candidate) => candidate.userId === member.id);
+    const row = document.createElement("div");
+    row.className = "score-row";
+    const name = document.createElement("span");
+    name.textContent = member.displayName;
+    const result = document.createElement("span");
+    result.textContent = !seat ? `READY · ${privateCredits(member.balance)} credits`
+      : snapshot.room.phase === "settled" ? `${seat.survived ? "LOCKED" : "BUST"} · ${privateCredits(seat.payout)} paid`
+      : seat.acceptedTargetBps ? `LOCKED ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×`
+      : `FLYING · ${privateCredits(seat.stake)} credits`;
+    row.append(name, result);
+    board.appendChild(row);
+  }
+  board.classList.add("show");
+}
+
+function paintPrivateSnapshot(snapshot) {
+  privateSnapshot = snapshot;
+  const prior = phaseState;
+  phaseState = snapshot.room.phase === "lobby" ? "betting" : snapshot.room.phase === "running" ? "live" : "crashed";
+  $("roundLabel").textContent = `ROUND ${snapshot.room.currentRound}`;
+  $("playersStat").textContent = String(snapshot.members.length);
+  const pool = snapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
+  $("poolStat").textContent = `${privateCredits(pool)} CREDITS`;
+  $("vaultAmt").textContent = privateCredits(snapshot.simulation.protectedPrincipal);
+  $("vaultSeed").textContent = " protected";
+  $("pbTickets").textContent = `PRIZE ${privateCredits(snapshot.simulation.lottery.netPrize)}`;
+  $("pbJackpot").textContent = " Powerboard";
+
+  const me = snapshot.members.find((member) => member.id === snapshot.me.id);
+  const seat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
+  const started = snapshot.room.startedAt ? Date.parse(snapshot.room.startedAt) : null;
+  const crashAt = snapshot.room.crashAt ? Date.parse(snapshot.room.crashAt) : null;
+  const now = Date.now();
+  let liveBps = 10000;
+  if (snapshot.room.phase === "running" && started) {
+    liveBps = Math.max(10000, Math.floor(10000 * Math.exp(0.22 * Math.max(0, now - started) / 1000)));
+  }
+
+  if (phaseState === "betting") {
+    flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
+    setMultReadout("0.00", "fueling");
+    $("substatus").textContent = seat ? "BET COMMITTED · HOST MAY LAUNCH" : "BETTING OPEN · TEST CREDITS ONLY";
+    updatePrimaryButton(seat ? "waiting" : "betting-open", { sub: me ? `Balance ${privateCredits(me.balance)} credits` : "" });
+    if (autoPlay) void autoPlayTick(0, snapshot.room.currentRound, Boolean(seat), Boolean(seat?.acceptedTargetBps), 0);
+  } else if (phaseState === "live") {
+    if (prior !== "live") {
+      launchAt = performance.now();
+      spawnParticles(0xffb37a, prefersReducedMotion ? 12 : 50, 2.4);
+      sfx.ignition(); haptic(40);
+    }
+    const x = liveBps / 10000;
+    const impliedElapsed = Math.max(0, (-200 + Math.sqrt(Math.max(0, 20 * liveBps - 160000))) / 2);
+    launchAt = performance.now() - impliedElapsed * LOCAL_BLOCK_MS;
+    setMultReadout(x.toFixed(2), "live");
+    $("substatus").textContent = "IN FLIGHT · AUTHORITATIVE SERVER CLOCK";
+    targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
+    multGraphSamples.push(x);
+    if (multGraphSamples.length > 400) multGraphSamples.shift();
+    drawMultGraph();
+    updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps ? "cashed" : "live-hold", {
+      sub: seat?.acceptedTargetBps ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` : `Balance ${privateCredits(me?.balance)} credits`,
+    });
+    if (autoPlay) void autoPlayTick(1, snapshot.room.currentRound, Boolean(seat), Boolean(seat?.acceptedTargetBps), liveBps);
+    if (crashAt && now >= crashAt && privateTickRound !== snapshot.room.currentRound) {
+      privateTickRound = snapshot.room.currentRound;
+      void privatePlaytestCommand("tick");
+    }
+  } else {
+    const crashBps = Number(snapshot.room.crashBps || 10000);
+    const x = crashBps / 10000;
+    setMultReadout(x.toFixed(2), "crashed");
+    $("substatus").textContent = "CRASHED · SETTLED FROM COMMITTED OUTCOME";
+    targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
+    if (prior !== "crashed") {
+      crashedAt = performance.now();
+      spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
+      sfx.crash(); haptic([50, 30, 80]);
+    }
+    updatePrimaryButton("betting-open", { sub: "Commit test credits to open the next round" });
+  }
+  renderPrivateRoster(snapshot);
+  const hud = $("privateHudStatus");
+  if (hud) hud.textContent = `${snapshot.room.name} · ${snapshot.room.joinCode} · ${snapshot.room.phase.toUpperCase()}`;
+  const launch = $("privateLaunch");
+  if (launch) launch.disabled = !snapshot.room.isOwner || snapshot.room.phase !== "lobby" || snapshot.seats.length === 0;
+  if (uiState === "betting-open") primaryBtn.textContent = `COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} TEST CREDITS`;
+  else if (uiState === "live-hold") primaryBtn.textContent = "LOCK MULTIPLIER NOW";
+}
+
+async function refreshPrivatePlaytest() {
+  if (privateRefreshBusy) return;
+  privateRefreshBusy = true;
+  try {
+    if (!privateRoomId) {
+      const listed = await privateJson(await fetch("/api/playtest/rooms", { cache: "no-store" }));
+      privateRooms = listed.rooms;
+      const requested = new URLSearchParams(location.search).get("room");
+      privateRoomId = listed.rooms.find((room) => room.id === requested)?.id || listed.rooms[0]?.id || null;
+      const picker = $("privateRoomPicker");
+      if (picker) {
+        picker.replaceChildren(...listed.rooms.map((room) => {
+          const option = document.createElement("option");
+          option.value = room.id;
+          option.textContent = `${room.name} · ${room.joinCode}`;
+          return option;
+        }));
+        picker.value = privateRoomId || "";
+      }
+      if (!privateRoomId) {
+        $("privateHudStatus").textContent = "No private table yet · return to the lobby to create one";
+        return;
+      }
+    }
+    paintPrivateSnapshot(await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}`, { cache: "no-store" })));
+  } catch (error) {
+    if (error.message !== privateLastError) {
+      privateLastError = error.message;
+      toast(error.message, "error");
+    }
+  } finally {
+    privateRefreshBusy = false;
+  }
+}
+
+async function startPrivatePlaytest() {
+  document.body.dataset.playtest = "true";
+  const style = document.createElement("style");
+  style.textContent = `
+    body[data-playtest="true"] #gearBtn, body[data-playtest="true"] #simBtn,
+    body[data-playtest="true"] #bankPanel, body[data-playtest="true"] #fuelPanel,
+    body[data-playtest="true"] #adminLinkBtn { display:none !important }
+    #privateHud{position:fixed;z-index:85;top:58px;left:50%;transform:translateX(-50%);display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px;max-width:calc(100vw - 20px);padding:7px 9px;border:1px solid rgba(255,200,87,.35);border-radius:10px;background:rgba(6,10,9,.9);backdrop-filter:blur(10px);font:700 11px/1.2 inherit;color:#e9dec9}
+    #privateHud button,#privateHud a{min-height:34px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 10px;background:#14221b;color:#f5ecdc;font:700 11px inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}
+    #privateHud select{min-height:34px;max-width:240px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 8px;background:#07100c;color:#f5ecdc;font:700 11px inherit}
+    #privateHud button.primary{border-color:#3ddc84;color:#8dffc0}#privateHud button:disabled{opacity:.4;cursor:not-allowed}
+    @media(max-width:720px){#privateHud{top:50px;width:calc(100vw - 16px)}.topbar{padding-top:46px;height:auto}.stage{min-height:52vh}}
+  `;
+  document.head.appendChild(style);
+  const hud = document.createElement("div");
+  hud.id = "privateHud";
+  const picker = document.createElement("select"); picker.id = "privateRoomPicker"; picker.setAttribute("aria-label", "Private table"); picker.onchange = async () => { privateRoomId = picker.value || null; privateSnapshot = null; await refreshPrivatePlaytest(); };
+  const status = document.createElement("span"); status.id = "privateHudStatus"; status.textContent = "Connecting to private table…";
+  const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "primary"; launch.textContent = "LAUNCH ROUND"; launch.onclick = () => privatePlaytestCommand("start");
+  const solo = document.createElement("button"); solo.textContent = "SOLO LAB"; solo.title = "Admin: set the minimum-player gate to one for end-to-end host testing"; solo.onclick = () => privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers: 1 } });
+  const invite = document.createElement("button"); invite.textContent = "COPY INVITE"; invite.onclick = async () => {
+    try {
+      const result = await privateJson(await fetch("/api/playtest/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId: privateRoomId }) }));
+      await navigator.clipboard.writeText(result.url); toast("Private invitation copied", "success");
+    } catch (error) { toast(error.message, "error"); }
+  };
+  const archive = document.createElement("button"); archive.textContent = "ARCHIVE"; archive.title = "Hide this accidental or completed test table"; archive.onclick = async () => {
+    if (!privateRoomId || !window.confirm("Archive this private test table? This is recoverable database state, not a destructive delete.")) return;
+    try {
+      await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}`, { method: "DELETE" }));
+      privateRoomId = null; privateSnapshot = null; toast("Table archived", "success"); await refreshPrivatePlaytest();
+    } catch (error) { toast(error.message, "error"); }
+  };
+  const lobby = document.createElement("a"); lobby.href = "/playtest/game?classic=1"; lobby.target = "_top"; lobby.textContent = "TABLES / ADMIN";
+  hud.append(picker, status, launch, solo, invite, archive, lobby);
+  document.body.appendChild(hud);
+  $("simBtn").classList.add("hide");
+  document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
+    chip.textContent = Number(chip.dataset.amt) * 1_000_000 >= 1000 ? `${Number(chip.dataset.amt) * 1000}K` : String(Number(chip.dataset.amt) * 1_000_000);
+  });
+  $("primaryBtn").textContent = "CONNECTING TO PRIVATE TABLE…";
+  $("btnSub").textContent = "No wallet · no value · authoritative multiplayer simulation";
+  await refreshPrivatePlaytest();
+  privatePoll = window.setInterval(refreshPrivatePlaytest, 250);
+}
+
+if (PLAYTEST_MODE) void startPrivatePlaytest();
+else refreshBankUI();
 </script>
 
 <!-- ── Instant Play (PlankBank) ─────────────────────────────────────────
