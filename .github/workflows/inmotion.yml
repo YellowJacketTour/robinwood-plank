@@ -490,7 +490,11 @@ jobs:
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
-          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+          # pg_dump can be silent for several minutes. Keep transport traffic
+          # flowing so the hosting edge cannot reap a healthy backup/migration
+          # session as idle (the prior failure repeated at ~4m25s).
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" <<'REMOTE'
           set -euo pipefail
