@@ -30,7 +30,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [rooms, setRooms] = useState<RoomItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [snap, setSnap] = useState<Snapshot | null>(null);
-  const [name, setName] = useState(`${identity.displayName}'s flight`);
+  const [name, setName] = useState(`${identity.displayName}'s table`);
   const [code, setCode] = useState("");
   const [stake, setStake] = useState("10000");
   const [target, setTarget] = useState("2.00");
@@ -41,7 +41,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [notice, setNotice] = useState("Ready.");
   const [inviteUrl, setInviteUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [connection, setConnection] = useState<"live" | "reconnecting">("reconnecting");
+  const [connection, setConnection] = useState<"idle" | "live" | "reconnecting">("idle");
   const [now, setNow] = useState(0);
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const generation = useRef(0);
@@ -63,7 +63,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
     return () => window.clearTimeout(timer);
   }, [loadRooms]);
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) { setConnection("idle"); return; }
     const controller = new AbortController();
     const run = async () => {
       let after = "-1";
@@ -150,13 +150,13 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   return <main data-market-shell className="site-shell min-h-screen bg-[#080b15] px-3 py-4 text-cream md:px-6">
     <div className="mx-auto max-w-[1500px]">
       <header className="rounded-xl border border-amber-400/40 bg-[#171425]/95 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[.18em] text-amber-300">Simulation · no value · test credits</p><h1 className="mt-1 text-2xl text-gold-300">Plank Flight Laboratory</h1></div><div className="flex flex-wrap gap-2 text-xs"><span className={`rounded-full border px-3 py-2 ${connection === "live" ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>● {connection === "live" ? "Live" : "Reconnecting"}</span><span className="rounded-full border border-line px-3 py-2">Clock {clockOffsetMs >= 0 ? "+" : ""}{clockOffsetMs} ms</span><span className="rounded-full border border-line px-3 py-2">{identity.displayName}</span></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[.18em] text-amber-300">Simulation · no value · test credits</p><h1 className="mt-1 text-2xl text-gold-300">PlankCrash Private Table</h1></div><div className="flex flex-wrap gap-2 text-xs"><span className={`rounded-full border px-3 py-2 ${connection === "live" ? "border-emerald-400/40 text-emerald-200" : connection === "reconnecting" ? "border-amber-400/40 text-amber-200" : "border-line text-cream-muted"}`}>● {connection === "live" ? "Live" : connection === "reconnecting" ? "Reconnecting" : "No room selected"}</span><span className="rounded-full border border-line px-3 py-2">Clock {clockOffsetMs >= 0 ? "+" : ""}{clockOffsetMs} ms</span><span className="rounded-full border border-line px-3 py-2">{identity.displayName}</span></div></div>
       </header>
       <p role="status" aria-live="polite" className="my-3 min-h-10 rounded-lg bg-white/5 px-3 py-2 text-sm text-cream-muted">{notice}</p>
 
       {!selected ? <section className="grid gap-4 md:grid-cols-2">
-        <Panel title="Create a flight room"><label className="text-sm">Room name<input value={name} maxLength={48} onChange={(e) => setName(e.target.value)} className="mt-2 min-h-12 w-full rounded-md border border-line bg-black/30 px-3" /></label><button disabled={Boolean(busy)} onClick={() => roomAction("create")} className="mt-4 min-h-12 w-full rounded-md bg-gold-500 font-black text-wood-950">Create room</button></Panel>
-        <Panel title="Join n friends"><label className="text-sm">Room code<input value={code} maxLength={8} onChange={(e) => setCode(e.target.value.toUpperCase())} className="mt-2 min-h-12 w-full rounded-md border border-line bg-black/30 px-3 font-mono tracking-[.2em]" /></label><button disabled={Boolean(busy)} onClick={() => roomAction("join")} className="mt-4 min-h-12 w-full rounded-md border border-gold-500 font-black text-gold-300">Join room</button></Panel>
+        <Panel title="Create a private PlankCrash table"><label className="text-sm">Table name<input value={name} maxLength={48} onChange={(e) => setName(e.target.value)} className="mt-2 min-h-12 w-full rounded-md border border-line bg-black/30 px-3" /></label><button disabled={Boolean(busy)} onClick={() => roomAction("create")} className="mt-4 min-h-12 w-full rounded-md bg-gold-500 font-black text-wood-950">Create table</button></Panel>
+        <Panel title="Join friends"><label className="text-sm">Table code<input value={code} maxLength={8} onChange={(e) => setCode(e.target.value.toUpperCase())} className="mt-2 min-h-12 w-full rounded-md border border-line bg-black/30 px-3 font-mono tracking-[.2em]" /></label><button disabled={Boolean(busy)} onClick={() => roomAction("join")} className="mt-4 min-h-12 w-full rounded-md border border-gold-500 font-black text-gold-300">Join table</button></Panel>
       </section> : snap ? <>
         <nav aria-label="Rooms" className="mb-3 flex gap-2 overflow-auto">{rooms.map((room) => <button key={room.id} onClick={() => setSelected(room.id)} className={`min-h-11 shrink-0 rounded-md border px-3 text-sm ${room.id === selected ? "border-gold-400 bg-gold-500/15" : "border-line"}`}>{room.name} · {room.members}</button>)}<button onClick={() => { setSnap(null); setSelected(null); }} className="min-h-11 shrink-0 rounded-md border border-line px-3">＋ Room</button></nav>
         <section className="grid gap-3 xl:grid-cols-[1.5fr_.7fr]">

@@ -61,7 +61,7 @@ export async function createPlaytestRoom(identity: PlaytestIdentity, name: strin
   const state = initialSimulationState(policy);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      return await withPostgresTransaction(async (client) => {
+      const created = await withPostgresTransaction(async (client) => {
         const row: RoomRow = {
           id: randomUUID(), join_code: roomCode(), name: clean, owner_user_id: identity.id,
           rules_hash: playtestRulesHash(policy), policy: serializeBigInts(policy), simulation_state: serializeSimulationState(state),
@@ -76,9 +76,29 @@ export async function createPlaytestRoom(identity: PlaytestIdentity, name: strin
             JSON.stringify(row.policy), JSON.stringify(row.simulation_state)],
         );
         await client.query(`INSERT INTO playtest_room_members (room_id,user_id) VALUES ($1,$2)`, [row.id, identity.id]);
-        await event(client, row, "room.created", identity.id, null, { name: clean, joinCode: row.join_code });
-        return { id: row.id, joinCode: row.join_code };
+        return row;
       });
+
+      // The room and its owner membership are the authoritative availability
+      // boundary.  A replay/audit append must never make an otherwise valid
+      // room disappear (for example when a shared-host sequence is briefly
+      // locked or its grant drifted).  Later commands remain fully
+      // transactional; this bootstrap marker is deliberately best-effort and
+      // carries no economic state.
+      await postgresQuery(
+        `INSERT INTO playtest_room_events
+           (room_id, room_version, round_id, event_type, actor_user_id, command_id, public_payload)
+         VALUES ($1,$2,$3,$4,$5,NULL,$6)`,
+        [created.id, created.version, created.current_round, "room.created", identity.id,
+          JSON.stringify({ name: clean, joinCode: created.join_code })],
+      ).catch((error) => {
+        console.error("[playtest-room] room.created audit append failed", {
+          roomId: created.id,
+          code: (error as { code?: unknown }).code,
+          constraint: (error as { constraint?: unknown }).constraint,
+        });
+      });
+      return { id: created.id, joinCode: created.join_code };
     } catch (error) {
       if ((error as { code?: string }).code !== "23505" || attempt === 4) throw error;
     }
