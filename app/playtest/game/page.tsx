@@ -7,10 +7,20 @@ import { currentPlaytestIdentity, playtestEnabled } from "@/lib/playtest-auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function PlaytestGamePage() {
+export default async function PlaytestGamePage({ searchParams }: { searchParams: Promise<{ classic?: string }> }) {
   if (!playtestEnabled()) notFound();
-  const identity = await currentPlaytestIdentity();
+  const [identity, query] = await Promise.all([currentPlaytestIdentity(), searchParams]);
   if (!identity) redirect("/playtest");
+  if (query.classic !== "1") {
+    return <main id="main-content" className="fixed inset-0 bg-black">
+      <iframe
+        src="/arcade/crash.html?playtest=1"
+        title="PlankCrash private multiplayer table"
+        className="h-full w-full border-0"
+        allow="clipboard-write"
+      />
+    </main>;
+  }
   return <>
     <AppBackdrop />
     <Nav />
