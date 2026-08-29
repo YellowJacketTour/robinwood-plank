@@ -142,6 +142,25 @@ export async function listPlaytestRooms(identity: PlaytestIdentity) {
   }));
 }
 
+/** Recoverable room cleanup for accidental/obsolete laboratory tables. */
+export async function archivePlaytestRoom(identity: PlaytestIdentity, roomId: string) {
+  return withPostgresTransaction(async (client) => {
+    const room = await lockedRoom(client, roomId);
+    await requireMember(client, roomId, identity.id);
+    if (room.owner_user_id !== identity.id && !identity.isAdmin) {
+      throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the table host can archive it.");
+    }
+    if (room.phase === "running") {
+      throw new PlaytestRoomError(409, "ROUND_ACTIVE", "Settle the active round before archiving this table.");
+    }
+    await client.query(
+      `UPDATE playtest_rooms SET archived_at=NOW(),version=version+1 WHERE id=$1`,
+      [roomId],
+    );
+    return { archived: true };
+  });
+}
+
 export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: string) {
   return withPostgresTransaction(async (client) => {
     await requireMember(client, roomId, identity.id);
