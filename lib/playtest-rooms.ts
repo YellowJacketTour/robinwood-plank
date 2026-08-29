@@ -125,10 +125,10 @@ export async function joinPlaytestRoom(identity: PlaytestIdentity, rawCode: stri
 export async function listPlaytestRooms(identity: PlaytestIdentity) {
   const result = await postgresQuery<{
     id: string; join_code: string; name: string; phase: string; version: string;
-    current_round: string; owner: boolean; members: string;
+    current_round: string; is_owner: boolean; members: string;
   }>(
     `SELECT r.id,r.join_code,r.name,r.phase,r.version::text,r.current_round::text,
-            (r.owner_user_id=$1) owner, COUNT(all_members.user_id)::text members
+            (r.owner_user_id=$1) AS is_owner, COUNT(all_members.user_id)::text AS members
        FROM playtest_rooms r
        JOIN playtest_room_members mine ON mine.room_id=r.id AND mine.user_id=$1
        JOIN playtest_room_members all_members ON all_members.room_id=r.id
@@ -137,7 +137,7 @@ export async function listPlaytestRooms(identity: PlaytestIdentity) {
   );
   return result.rows.map((row) => ({
     id: row.id, joinCode: row.join_code, name: row.name, phase: row.phase,
-    version: row.version, currentRound: row.current_round, owner: row.owner,
+    version: row.version, currentRound: row.current_round, owner: row.is_owner,
     members: Number(row.members),
   }));
 }
