@@ -53,6 +53,7 @@ jobs:
           env_file="$app_dir/shared/.env.production"
           test -s "$env_file"
           test -x "$node_bin"
+          cd "$app_dir/current"
 
           # Query metadata only. No usernames, PIN/session material, room
           # payloads, connection strings, or environment values are emitted.
