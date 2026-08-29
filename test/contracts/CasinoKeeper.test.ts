@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 import { tick, biddersOf, type KeeperConfig } from "../../scripts/casino-keeper.js";
 
 /**
@@ -97,6 +98,7 @@ describe("Casino keeper — the loop runs itself", () => {
       jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED_BLOCKS), // Phase 3 hardening fields (test defaults)
     });
     expect((await crash.getAddress()).toLowerCase()).to.equal(predictedCrash.toLowerCase());
 
@@ -131,8 +133,8 @@ describe("Casino keeper — the loop runs itself", () => {
     const { crash, powerboard, distributor, cfg, alice, bob, keeper } = await deployCasino();
 
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     // Alice locks in a win by cashing out immediately; Bob rides and busts.
     await networkHelpers.time.increase(6);
 
@@ -171,8 +173,8 @@ describe("Casino keeper — the loop runs itself", () => {
     await networkHelpers.time.increase(61);
     await crash.lockRound(); // voids the stale empty round, opens a new one
 
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
 
     await runKeeper(cfg, keeper, 16);
@@ -190,8 +192,8 @@ describe("Casino keeper — the loop runs itself", () => {
   it("PUBLIC: a completely different, unprivileged account can pick up mid-round and finish it", async () => {
     const { crash, cfg, alice, bob, keeper, stranger } = await deployCasino();
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
 
     // The "official" keeper does a couple of ticks, then dies.
@@ -208,8 +210,8 @@ describe("Casino keeper — the loop runs itself", () => {
   it("the keeper holds no privilege: it never receives a player's payout, only its own advertised keeper reward", async () => {
     const { crash, cfg, alice, bob, keeper } = await deployCasino();
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
     // Lock from a PLAYER's wallet, not the keeper's -- lockRound is public,
     // so this doubles as proof that a plain user can advance the game.
@@ -243,8 +245,8 @@ describe("Casino keeper — the loop runs itself", () => {
   it("discovers bettors from the contract's own BetPlaced events, keeping no private list", async () => {
     const { crash, cfg, alice, bob, keeper } = await deployCasino();
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     const crashAsKeeper = new ethers.Contract(
       cfg.crash,
       ["event BetPlaced(uint256 indexed roundId, address indexed player, uint256 amount)"],

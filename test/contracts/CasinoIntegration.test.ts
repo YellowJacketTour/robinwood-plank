@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * End-to-end proof that the WHOLE unified plank.love economics loop
@@ -103,6 +104,7 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED_BLOCKS), // Phase 3 hardening fields (test defaults)
     });
 
     expect((await crash.getAddress()).toLowerCase()).to.equal(predictedCrash.toLowerCase());
@@ -114,8 +116,8 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       await deployCasino();
 
     // ── Two real bets ──────────────────────────────────────────────
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("2") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("2") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("2") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("2") });
     const roundId = await crash.currentRoundId();
     const pool = ethers.parseEther("4");
 

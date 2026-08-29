@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * The wired-up progression integration against a REAL PlankCrashDrand --
@@ -38,7 +39,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
       minParticipants: 1n, // isolate progression behavior from the unrelated participant-count void path
       minPoolSize: 0n,
       maxStakePerWalletBps: 10000n, // isolate progression's OWN cap from the pre-existing pool-relative cap
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 8n,
       reserveShareBps: 0n,
@@ -47,6 +48,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(1800), // Phase 3 hardening fields (test defaults)
     });
     const crashAddr = await crash.getAddress();
 
@@ -82,7 +84,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     // this fixture -- should succeed with the FULL amount as the stake,
     // no premium skimmed anywhere.
     const stake = ethers.parseEther("50");
-    await (await crash.connect(alice).placeBet({ value: stake })).wait();
+    await (await crash.connect(alice).placeBet(0n, { value: stake })).wait();
     expect(await crash.stakeOf(1, alice.address)).to.equal(stake);
     expect(await crash.reserve()).to.equal(0n); // nothing to skim -- progression was never wired
   });
@@ -92,7 +94,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     await (await crash.setProgression(await progression.getAddress())).wait();
 
     const saplingCap = await progression.CAP_SAPLING();
-    await expect(crash.connect(alice).placeBet({ value: saplingCap + 1n })).to.be.revertedWithCustomError(
+    await expect(crash.connect(alice).placeBet(0n, { value: saplingCap + 1n })).to.be.revertedWithCustomError(
       crash,
       "StakeExceedsCap"
     );
@@ -100,7 +102,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     // payment, but the recorded stake is net of the Sapling premium (this
     // bet is above the exempt threshold, so 15% is skimmed to the Vault;
     // see the dedicated premium test below for that behavior in isolation).
-    await (await crash.connect(alice).placeBet({ value: saplingCap })).wait();
+    await (await crash.connect(alice).placeBet(0n, { value: saplingCap })).wait();
     const expectedNet = saplingCap - (saplingCap * 1500n) / 10000n;
     expect(await crash.stakeOf(1, alice.address)).to.equal(expectedNet);
   });
@@ -116,7 +118,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     const expectedNetStake = gross - expectedPremium;
 
     const reserveBefore = await crash.reserve();
-    await (await crash.connect(alice).placeBet({ value: gross })).wait();
+    await (await crash.connect(alice).placeBet(0n, { value: gross })).wait();
 
     expect(await crash.stakeOf(1, alice.address)).to.equal(expectedNetStake);
     expect(await crash.reserve()).to.equal(reserveBefore + expectedPremium);
@@ -131,7 +133,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     await (await crash.setProgression(await progression.getAddress())).wait();
 
     const exempt = await progression.FIRST_BET_EXEMPT_WEI();
-    await (await crash.connect(alice).placeBet({ value: exempt })).wait();
+    await (await crash.connect(alice).placeBet(0n, { value: exempt })).wait();
     expect(await crash.stakeOf(1, alice.address)).to.equal(exempt);
     expect(await crash.reserve()).to.equal(0n);
   });
@@ -146,7 +148,7 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     let i = 0;
     while ((await progression.rankOf(alice.address)) === 0n /* Sapling */ && i < 50) {
       const roundId = await crash.currentRoundId();
-      await (await crash.connect(alice).placeBet({ value: perBet })).wait();
+      await (await crash.connect(alice).placeBet(0n, { value: perBet })).wait();
 
       // Lock, then reveal with entropy that resolves to an IMMEDIATE crash
       // (r=0 -> elapsed=0 -> 1.00x), then settle right away -- so a fresh
@@ -176,6 +178,6 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
     // at the wallet's original ceiling.
     const overSapling = saplingCap + 1n;
     expect(overSapling).to.be.at.most(stickCap);
-    await (await crash.connect(alice).placeBet({ value: overSapling })).wait();
+    await (await crash.connect(alice).placeBet(0n, { value: overSapling })).wait();
   });
 });

@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 import { tick, type KeeperConfig } from "../../scripts/casino-keeper.js";
 
 /**
@@ -50,7 +51,7 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.01"),
       maxStakePerWalletBps: 6000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 2n,
       reserveShareBps: 0n,
@@ -59,6 +60,7 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
       jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
+      ...hardeningFor(40), // Phase 3 hardening fields (test defaults)
     });
     expect((await crash.getAddress()).toLowerCase()).to.equal(predictedCrash.toLowerCase());
 
@@ -106,30 +108,30 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
 
     // Not yet granted -> betVia is rejected.
     await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"))
+      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n)
     ).to.be.revertedWithCustomError(bank, "SessionInvalid");
 
     const expiry = (await networkHelpers.time.latest()) + 3600;
     await bank.connect(alice).grantSession(sessionKey.address, ethers.parseEther("0.3"), expiry);
 
     // Within cap: two 0.1 bets are fine (across rounds), a third 0.2 breaks the 0.3 cap.
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"));
+    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
     expect(await crash.stakeOf(await crash.currentRoundId(), alice.address)).to.equal(ethers.parseEther("0.1"));
     // Same round, same player can't double-bet -> move to a fresh round by voiding.
     await networkHelpers.time.increase(6);
     await crash.lockRound(); // voids (only 1 participant), opens a new round
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"));
+    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
     // Cap now at 0.2 spent; a 0.2 more exceeds 0.3.
     await networkHelpers.time.increase(6);
     await crash.lockRound();
     await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.2"))
+      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.2"), 0n)
     ).to.be.revertedWithCustomError(bank, "CapExceeded");
 
     // Revoked -> dead immediately.
     await bank.connect(alice).revokeSession(sessionKey.address);
     await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.05"))
+      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.05"), 0n)
     ).to.be.revertedWithCustomError(bank, "SessionInvalid");
   });
 
@@ -145,7 +147,7 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
     await bank.connect(alice).deposit({ value: ethers.parseEther("1") });
     const expiry = (await networkHelpers.time.latest()) + 3600;
     await bank.connect(alice).grantSession(sessionKey.address, ethers.parseEther("1"), expiry);
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"));
+    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
 
     // A stranger calling cashOutFor directly on the crash is not the funder.
     const roundId = await crash.currentRoundId();
@@ -175,13 +177,13 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
 
     // Instant play: the session key bets FOR alice from her buffer, no popup.
     const stake = ethers.parseEther("0.2");
-    await bank.connect(sessionKey).betVia(crashAddr, stake);
+    await bank.connect(sessionKey).betVia(crashAddr, stake, 0n);
     expect(await bank.balanceOf(alice.address)).to.equal(ethers.parseEther("0.8")); // debited
     expect(await crash.stakeOf(await crash.currentRoundId(), alice.address)).to.equal(stake);
 
     // Bob plays too (a second participant so the round is valid).
     const roundId = await crash.currentRoundId();
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.2") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("0.2") });
 
     // Close betting and lock the round (LIVE) -- pause here so alice's
     // session key can lock in a win before the keeper reveals + settles.

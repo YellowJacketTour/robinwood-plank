@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * PlankFuelBooster conservation + cap fuzz. Randomized burns of varying
@@ -56,7 +57,7 @@ describe("PlankFuelBooster -- conservation + cap invariants under randomized bur
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.001"),
       maxStakePerWalletBps: 10000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 8n,
       reserveShareBps: 0n,
@@ -65,6 +66,7 @@ describe("PlankFuelBooster -- conservation + cap invariants under randomized bur
       jackpotSink: ethers.ZeroAddress,
       treasury: deployer.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(20), // Phase 3 hardening fields (test defaults)
     });
 
     const booster: any = await (
@@ -132,8 +134,8 @@ describe("PlankFuelBooster -- conservation + cap invariants under randomized bur
           // a bet or two so a locked round can actually proceed sometimes
           const p1 = pick(players);
           const p2 = pick(players.filter((x) => x !== p1)) || players[0];
-          await crash.connect(p1).placeBet({ value: ethers.parseEther("0.02") }).catch(() => {});
-          await crash.connect(p2).placeBet({ value: ethers.parseEther("0.02") }).catch(() => {});
+          await crash.connect(p1).placeBet(0n, { value: ethers.parseEther("0.02") }).catch(() => {});
+          await crash.connect(p2).placeBet(0n, { value: ethers.parseEther("0.02") }).catch(() => {});
         }
       } catch (_) {
         // a revert (e.g. cap hit, oracle stale) is fine -- nothing should

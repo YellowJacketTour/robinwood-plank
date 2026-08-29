@@ -49,8 +49,10 @@ import { fetchRound, parseG1 } from "./relay-drand.js";
 
 const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
-  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious)",
+  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious, uint256 revealNotBefore, uint256 reserveAtLock, address lockedBy, address revealedBy)",
   "function maxElapsedBlocks() view returns (uint256)",
+  // Hardening (b): the explicit max-multiplier block cap (<= maxElapsedBlocks) is what settlement clamps to.
+  "function maxMultiplierElapsedBlocks() view returns (uint256)",
   "function minParticipants() view returns (uint256)",
   "function participantCount(uint256) view returns (uint256)",
   "function accumulatedRake() view returns (uint256)",
@@ -216,7 +218,7 @@ export async function tick(
       // Settle once real elapsed blocks have reached the crash point.
       const fresh = await crash.rounds(id);
       if (fresh.entropyRevealed) {
-        const maxElapsed: bigint = await crash.maxElapsedBlocks();
+        const maxElapsed: bigint = await crash.maxMultiplierElapsedBlocks();
         const effective =
           fresh.trueCrashElapsedBlocks < maxElapsed ? fresh.trueCrashElapsedBlocks : maxElapsed;
         if (blockNumber - fresh.lockBlock >= effective) {

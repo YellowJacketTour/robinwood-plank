@@ -112,6 +112,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 provisionalWinningWeight;
         uint256 registrationDeadlineBlock;
         uint256 rolledOverFromPrevious;
+        // ── Phase 3 hardening (a)/(b)/(c) fields, appended so every
+        //    pre-existing positional decoder of rounds() still lines up ──
+        // (a) First unix second at which targetDrandRound's signature can
+        //     exist ANYWHERE (= the beacon's own emission time for that
+        //     round, genesis + (round-1)*period). Manual cash-out is valid
+        //     strictly before it, regardless of on-chain reveal state.
+        uint256 revealNotBefore;
+        // (b) The Vault balance at lock -- the base of the single-payout cap.
+        uint256 reserveAtLock;
+        // (c) Who locked / revealed, so settleRound can pay their bounty.
+        address lockedBy;
+        address revealedBy;
     }
 
     uint256 public immutable bettingDurationSeconds;
@@ -134,6 +146,44 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 public immutable minPoolSize;
     uint256 public immutable maxStakePerWalletBps;
     uint256 public immutable keeperRewardBps;
+    // ── Hardening (c): funded keeper bounties. All three are bps OF THE
+    //    RAKE (not of the pool), paid from the round's rake at settleRound
+    //    via _asyncTransfer pull-payments -- never pushed. keeperRewardBps
+    //    (settle) is REQUIRED > 0; reveal/lock bounties may be 0.
+    uint256 public immutable keeperRevealBps;
+    uint256 public immutable keeperLockBps;
+    // ── Hardening (b): deterministic bankroll caps, all in bytecode ──────
+    // Hard ceiling on the per-round seed as a fraction of the Vault, in
+    // ADDITION to seedNumerator/seedDenominator: seed <= reserve*seedMaxBps
+    // /10000. Bounded above by SEED_MAX_BPS_CEILING (a constant), so no
+    // deploy config can put more than half the bankroll into one round.
+    uint256 public constant SEED_MAX_BPS_CEILING = 5000;
+    uint256 public immutable seedMaxBps;
+    // Single-payout cap: the HOUSE-SIDE portion (the Vault seed's share) of
+    // any one player's payout in a round is capped at
+    // reserveAtLock*singlePayoutCapBps/10000. The excess is credited back
+    // to the Vault (pool conserved -- see claim()), not lost. The player-
+    // funded portion of a payout is never capped: parimutuel player money
+    // is not house exposure.
+    uint256 public immutable singlePayoutCapBps;
+    // Daily-loss circuit: if, inside the current DRAWDOWN_WINDOW, the Vault
+    // has fallen more than dailyDrawdownBps below that window's peak, the
+    // next round seeds 0 (players-only parimutuel continues). The window
+    // is a stepped 24h window keyed from the last roll, not a per-second
+    // rolling buffer -- documented approximation, cheaper in gas.
+    uint256 public constant DRAWDOWN_WINDOW = 24 hours;
+    uint256 public immutable dailyDrawdownBps;
+    // High-water-mark circuit: if the Vault is more than hwmDrawdownBps
+    // below its all-time high (clamped to reserveCap when capped), seed 0
+    // until refilled.
+    uint256 public immutable hwmDrawdownBps;
+    // Explicit maximum multiplier the game can ever pay, in bps. Realised
+    // in whole blocks: maxMultiplierElapsedBlocks is the LARGEST elapsed
+    // block count whose _multiplierAt does not exceed maxMultiplierBps, and
+    // the effective crash elapsed is clamped to it (it is <= maxElapsedBlocks
+    // by the constructor bound check). OWNER-SUPPLIED -- see spec §6.
+    uint256 public immutable maxMultiplierBps;
+    uint256 public immutable maxMultiplierElapsedBlocks;
     address public immutable treasury;
     uint256 public accumulatedRake;
 
@@ -166,8 +216,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // Sized at 20 rounds (60s at evmnet's real 3s period), not a
     // thinner margin: a real, disclosed L2-specific risk, found during
     // audit, not steady clock drift (which is self-cancelling --
-    // presetCashOut's/revealEntropy's due-time checks read the same
-    // beacon.currentRoundAt() the target was picked against). Arbitrum-
+    // cashOut's revealNotBefore gate is derived from the same beacon
+    // schedule the target was picked against). Arbitrum-
     // style Orbit sequencers can snap block.timestamp forward in a
     // single step to catch up to wall-clock time after an idle gap with
     // no transactions -- a documented sequencer behavior, not
@@ -196,10 +246,26 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // winners are paid from the round pool, never from the Vault, and the
     // Vault's ONLY outflow is that fractional seed. See _seedFromReserve().
     uint256 public reserve;
+    // Hardening (b) circuit state. reserveHighWaterMark is the all-time
+    // high of `reserve`; drawdownWindowPeak is the high inside the current
+    // DRAWDOWN_WINDOW that started at drawdownWindowStart.
+    uint256 public reserveHighWaterMark;
+    uint256 public drawdownWindowStart;
+    uint256 public drawdownWindowPeak;
     mapping(uint256 => Round) public rounds;
     mapping(uint64 => uint256) public drandRoundToRoundId;
     mapping(uint256 => mapping(address => uint256)) public stakeOf;
+    // MANUAL cash-out block only (0 = no manual cash-out). The EFFECTIVE
+    // cash-out block used for settlement is effectiveCashOutBlock(), the
+    // earlier of this and the auto target committed at bet time.
     mapping(uint256 => mapping(address => uint256)) public cashOutBlockOf;
+    // Hardening (a): the auto-cash-out target committed WITH the bet, in
+    // multiplier bps (0 = manual play only). Immutable per (round, player):
+    // there is no setter, a second placeBet in the same round reverts
+    // AlreadyBet, and carryForwardStake copies it verbatim into the new
+    // round (a carried stake keeps its commitment -- it cannot be re-chosen
+    // with any more information than it was originally chosen with).
+    mapping(uint256 => mapping(address => uint256)) public autoCashOutBps;
     mapping(uint256 => mapping(address => bool)) public registered;
     mapping(uint256 => mapping(address => bool)) public claimed;
     mapping(uint256 => mapping(address => uint256)) private _weightOf;
@@ -243,6 +309,10 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     event RoundLocked(uint256 indexed roundId, uint256 lockBlock, uint64 targetDrandRound);
     event RoundVoided(uint256 indexed roundId, uint256 rolledOverPool, string reason);
     event CashedOut(uint256 indexed roundId, address indexed player, uint256 atBlock, bool preset);
+    event AutoCashOutCommitted(uint256 indexed roundId, address indexed player, uint256 targetBps, uint256 targetElapsedBlocks);
+    event PayoutCapped(uint256 indexed roundId, address indexed player, uint256 uncappedShare, uint256 paid, uint256 excessToVault);
+    event SeedHalted(uint256 indexed roundId, uint8 reason, uint256 reserveNow);
+    event KeeperRewarded(uint256 indexed roundId, address indexed keeper, uint8 kind, uint256 amount);
     event EntropyRevealed(uint256 indexed roundId, uint256 trueCrashMultiplierBps, uint256 trueCrashElapsedBlocks);
     event RoundCrashed(uint256 indexed roundId, uint256 crashMultiplierBps, uint256 crashElapsedBlocks, bool cappedByMax);
     event ResultRegistered(uint256 indexed roundId, address indexed player, bool won, uint256 weight);
@@ -268,8 +338,12 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error CrashPointNotYetReached();
     error PastCrashPoint();
     error TargetUnreachable();
-    /// @dev MEDIUM-severity fix, 2026-08-18: the target drand round is publicly determinable but not yet reveal()'d on-chain -- see cashOut()'s own comment.
-    error AwaitingEntropyReveal();
+    /// @dev Hardening (a): block.timestamp >= revealNotBefore -- the target drand round's signature can exist somewhere, so no cash-out may be chosen any more, revealed or not.
+    error CashOutWindowClosed();
+    error BadAutoTarget();
+    error KeeperRewardRequired();
+    error BadHardeningConfig();
+    error BadMaxMultiplier();
     error RandomnessNotYetAvailable();
     error ZeroBeacon();
     error RoundIntervalTooShort();
@@ -318,6 +392,15 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         //   jackpotSink == 0 -> cascade disabled (standalone crash).
         uint256 reserveCap;
         address jackpotSink;
+        // ── Phase 3 hardening (spec docs/marketplank/SPEC-CRASH-GO-LIVE-
+        //    HARDENING.md). Values are PROPOSED there, NOT ratified. ─────
+        uint256 keeperRevealBps; // (c) bps of rake to whoever revealEntropy()'d
+        uint256 keeperLockBps; // (c) bps of rake to whoever lockRound()'d
+        uint256 seedMaxBps; // (b) 0 < x <= SEED_MAX_BPS_CEILING
+        uint256 singlePayoutCapBps; // (b) 0 < x <= 10000, of reserveAtLock
+        uint256 dailyDrawdownBps; // (b) 0 < x <= 10000 (10000 = never trips)
+        uint256 hwmDrawdownBps; // (b) 0 < x <= 10000 (10000 = never trips)
+        uint256 maxMultiplierBps; // (b) 10000 < x <= _multiplierAt(maxElapsedBlocks)
     }
 
     constructor(Config memory cfg) {
@@ -362,8 +445,34 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         minParticipants = cfg.minParticipants;
         minPoolSize = cfg.minPoolSize;
         maxStakePerWalletBps = cfg.maxStakePerWalletBps;
+        // Hardening (c): liveness is paid for. A zero settle bounty is the
+        // documented root cause of "nobody settles" (spec §0/§3).
+        if (cfg.keeperRewardBps == 0) revert KeeperRewardRequired();
+        if (cfg.keeperRewardBps + cfg.keeperRevealBps + cfg.keeperLockBps > 10000) revert BadHardeningConfig();
         keeperRewardBps = cfg.keeperRewardBps;
+        keeperRevealBps = cfg.keeperRevealBps;
+        keeperLockBps = cfg.keeperLockBps;
         treasury = cfg.treasury;
+
+        // Hardening (b): every cap is a bounded immutable.
+        if (cfg.seedMaxBps == 0 || cfg.seedMaxBps > SEED_MAX_BPS_CEILING) revert BadHardeningConfig();
+        if (cfg.singlePayoutCapBps == 0 || cfg.singlePayoutCapBps > 10000) revert BadHardeningConfig();
+        if (cfg.dailyDrawdownBps == 0 || cfg.dailyDrawdownBps > 10000) revert BadHardeningConfig();
+        if (cfg.hwmDrawdownBps == 0 || cfg.hwmDrawdownBps > 10000) revert BadHardeningConfig();
+        seedMaxBps = cfg.seedMaxBps;
+        singlePayoutCapBps = cfg.singlePayoutCapBps;
+        dailyDrawdownBps = cfg.dailyDrawdownBps;
+        hwmDrawdownBps = cfg.hwmDrawdownBps;
+        // The max multiplier must be a real, reachable ceiling: strictly
+        // above 1.00x and no higher than the block cap already allows.
+        if (cfg.maxMultiplierBps <= 10000 || cfg.maxMultiplierBps > _multiplierAt(cfg.maxElapsedBlocks)) {
+            revert BadMaxMultiplier();
+        }
+        maxMultiplierBps = cfg.maxMultiplierBps;
+        uint256 capElapsed = _invertMultiplier(cfg.maxMultiplierBps); // smallest e with mult(e) >= cap
+        if (_multiplierAt(capElapsed) > cfg.maxMultiplierBps) capElapsed -= 1; // largest e with mult(e) <= cap
+        maxMultiplierElapsedBlocks = capElapsed;
+        drawdownWindowStart = block.timestamp;
 
         // Vault: the seed fraction MUST be a proper fraction (0 < num < den)
         // -- this is exactly what guarantees the reserve can never be drawn
@@ -436,31 +545,87 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// `reserve - seed` is strictly positive. The optional floor only makes
     /// the guarantee stronger (reserve >= reserveFloorWei). This is the ONLY
     /// place the Vault is ever debited.
+    /// Hardening (b) circuits are applied here too: seedMaxBps is a hard
+    /// ceiling on the fraction, and either drawdown circuit forces seed=0
+    /// (the game continues players-only; the house just stops subsidising).
     function _seedFromReserve() private returns (uint256 seed) {
+        _rollDrawdownWindow();
+        uint8 halt = _seedHaltReason();
+        if (halt != 0) {
+            emit SeedHalted(currentRoundId, halt, reserve);
+            return 0;
+        }
+        seed = _computeSeed();
+        // reserve - seed > 0 always (seed < reserve), so the Vault survives.
+        if (seed > 0) reserve -= seed;
+    }
+
+    /// Pure seed formula (no circuits): min(num/den, seedMaxBps) of the
+    /// Vault, clamped to the optional floor.
+    function _computeSeed() private view returns (uint256 seed) {
         uint256 avail = reserve;
         if (avail == 0) return 0;
         if (reserveFloorWei > 0 && avail <= reserveFloorWei) return 0; // preserve the floor
         seed = (avail * seedNumerator) / seedDenominator; // floor, strictly < avail
+        uint256 bpsCap = (avail * seedMaxBps) / 10000; // hardening (b).1: bytecode ceiling
+        if (seed > bpsCap) seed = bpsCap;
         if (reserveFloorWei > 0) {
             uint256 maxDraw = avail - reserveFloorWei;
             if (seed > maxDraw) seed = maxDraw;
         }
-        // avail - seed > 0 always (seed < avail), so the Vault survives.
-        reserve = avail - seed;
+    }
+
+    /// Steps the daily-loss window forward once it has expired; the new
+    /// window's peak starts at the current balance (so a drawdown that
+    /// already happened stops counting once 24h have passed -- "until the
+    /// window rolls", exactly like the spec's rolling window, quantised).
+    function _rollDrawdownWindow() private {
+        if (block.timestamp >= drawdownWindowStart + DRAWDOWN_WINDOW) {
+            drawdownWindowStart = block.timestamp;
+            drawdownWindowPeak = reserve;
+        }
+    }
+
+    /// 0 = seeding allowed; 1 = daily-loss circuit tripped; 2 = high-water-
+    /// mark circuit tripped. `windowRolled` = evaluate as if an expired
+    /// window had just been rolled (what _seedFromReserve does first).
+    function _seedHaltReason(bool windowRolled) private view returns (uint8) {
+        uint256 bal = reserve;
+        if (!windowRolled) {
+            uint256 peak = drawdownWindowPeak;
+            if (peak > bal && (peak - bal) * 10000 > peak * dailyDrawdownBps) return 1;
+        }
+        uint256 hwm = reserveHighWaterMark;
+        if (reserveCap != 0 && hwm > reserveCap) hwm = reserveCap; // a capped Vault can never sit above its cap
+        if (hwm > 0 && bal * 10000 < hwm * (10000 - hwmDrawdownBps)) return 2;
+        return 0;
+    }
+
+    function _seedHaltReason() private view returns (uint8) {
+        return _seedHaltReason(block.timestamp >= drawdownWindowStart + DRAWDOWN_WINDOW);
+    }
+
+    /// View mirror of the circuit check the NEXT seed draw will make.
+    function seedHaltReason() public view returns (uint8) {
+        return _seedHaltReason();
+    }
+
+    /// The ONLY place the Vault is ever credited. Keeps both circuit peaks
+    /// current so a refill lifts the HWM/window peak exactly like the spec's
+    /// "until refilled".
+    function _creditReserve(uint256 amount) private {
+        uint256 bal = reserve + amount;
+        reserve = bal;
+        if (bal > reserveHighWaterMark) reserveHighWaterMark = bal;
+        if (bal > drawdownWindowPeak) drawdownWindowPeak = bal;
     }
 
     /// What the NEXT round will be seeded with, given the Vault right now --
-    /// a pure mirror of _seedFromReserve for the UI ("next game starts with
-    /// X already in the pot; the Vault holds Y").
+    /// a pure mirror of _seedFromReserve (circuits included) for the UI
+    /// ("next game starts with X already in the pot; the Vault holds Y").
     function nextSeed() external view returns (uint256 seed) {
-        uint256 avail = reserve;
-        if (avail == 0) return 0;
-        if (reserveFloorWei > 0 && avail <= reserveFloorWei) return 0;
-        seed = (avail * seedNumerator) / seedDenominator;
-        if (reserveFloorWei > 0) {
-            uint256 maxDraw = avail - reserveFloorWei;
-            if (seed > maxDraw) seed = maxDraw;
-        }
+        if (_seedHaltReason() != 0) return 0;
+        return _computeSeed();
     }
 
     /// Anyone can grow the Vault directly -- dev priming, a sponsor boosting
@@ -481,7 +646,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// not a theft, but a real integrity gap this guard closes outright.
     function fundVault() external payable nonReentrant {
         if (msg.value == 0) revert NothingToFund();
-        reserve += msg.value;
+        _creditReserve(msg.value);
         emit VaultFunded(msg.sender, msg.value, reserve);
         _spillOverflow();
     }
@@ -550,28 +715,53 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         netStake = grossStake - premium;
 
         if (premium > 0) {
-            reserve += premium;
+            _creditReserve(premium);
             emit VaultFunded(player, premium, reserve);
             _spillOverflow();
         }
         p.recordBet(player, grossStake);
     }
 
-    function placeBet() external payable nonReentrant {
+    /// Hardening (a): the auto-cash-out target is a REQUIRED part of the
+    /// bet (0 = manual play only). It is committed here, before lock, before
+    /// the target drand round is even chosen, and can never be changed for
+    /// this (round, player): presetCashOut is gone. Settlement uses the
+    /// EARLIER of this target and any manual cashOut() -- the committed
+    /// target is a ceiling the player cannot raise after the fact.
+    function placeBet(uint256 autoCashOutBps_) external payable nonReentrant {
         Round storage r = rounds[currentRoundId];
         if (r.phase != Phase.BETTING) revert BadPhase();
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (stakeOf[currentRoundId][msg.sender] != 0) revert AlreadyBet();
 
         uint256 stakeAmount = _applyProgression(msg.sender, msg.value);
+        _enterRound(r, currentRoundId, msg.sender, stakeAmount, autoCashOutBps_);
+    }
+
+    /// Shared bet-recording tail for placeBet / placeBetFor / carryForward.
+    function _enterRound(Round storage r, uint256 id, address player, uint256 stakeAmount, uint256 auto_) private {
         _checkStakeCap(r, r.pool, stakeAmount);
         uint256 poolAfter = r.pool + stakeAmount;
 
-        stakeOf[currentRoundId][msg.sender] = stakeAmount;
+        stakeOf[id][player] = stakeAmount;
         r.pool = poolAfter;
-        participantCount[currentRoundId] += 1;
-        if (stakeAmount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = stakeAmount;
-        emit BetPlaced(currentRoundId, msg.sender, stakeAmount);
+        participantCount[id] += 1;
+        if (stakeAmount > largestStakeInRound[id]) largestStakeInRound[id] = stakeAmount;
+        emit BetPlaced(id, player, stakeAmount);
+        _commitAutoCashOut(r, id, player, stakeAmount, auto_);
+    }
+
+    /// Records the auto target and its provisional winning weight. Bounded
+    /// to [1.00x, maxMultiplierBps] and to a block offset the capped crash
+    /// can actually reach, so a committed target is always settleable.
+    function _commitAutoCashOut(Round storage r, uint256 id, address player, uint256 stakeAmount, uint256 auto_) private {
+        if (auto_ == 0) return;
+        if (auto_ < 10000 || auto_ > maxMultiplierBps) revert BadAutoTarget();
+        uint256 targetElapsed = _invertMultiplier(auto_);
+        if (targetElapsed > maxMultiplierElapsedBlocks) revert TargetUnreachable();
+        autoCashOutBps[id][player] = auto_;
+        r.provisionalWinningWeight += (stakeAmount * _multiplierAt(targetElapsed)) / 10000;
+        emit AutoCashOutCommitted(id, player, auto_, targetElapsed);
     }
 
     /// Places a bet FOR `player`, funded by msg.value (the caller supplies
@@ -580,7 +770,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// difference is who signed and who paid. Used by PlankBank to let a
     /// depositor play from their pre-funded balance without signing each
     /// bet. Records the funder so cashOutFor is restricted to them.
-    function placeBetFor(address player) external payable nonReentrant {
+    function placeBetFor(address player, uint256 autoCashOutBps_) external payable nonReentrant {
         if (player == address(0)) revert ZeroPlayer();
         Round storage r = rounds[currentRoundId];
         if (r.phase != Phase.BETTING) revert BadPhase();
@@ -592,36 +782,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // other funder; rank belongs to whoever the stake (and the risk)
         // actually belongs to.
         uint256 stakeAmount = _applyProgression(player, msg.value);
-        _checkStakeCap(r, r.pool, stakeAmount);
-        uint256 poolAfter = r.pool + stakeAmount;
-
-        stakeOf[currentRoundId][player] = stakeAmount;
-        r.pool = poolAfter;
-        participantCount[currentRoundId] += 1;
-        if (stakeAmount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = stakeAmount;
         betFundedBy[currentRoundId][player] = msg.sender;
-        emit BetPlaced(currentRoundId, player, stakeAmount);
+        _enterRound(r, currentRoundId, player, stakeAmount, autoCashOutBps_);
     }
 
     /// Cash out on `player`'s behalf. Restricted to the address that funded
     /// the bet via placeBetFor -- i.e. the bank the player deposited into,
     /// which enforces the player's own session-key authorization before
     /// calling this. No one else can force a player's early cash-out.
-    /// @dev Carries the same AwaitingEntropyReveal gate as cashOut() below -- see that function's own comment for the full rationale. A funder is exactly as capable of exploiting the pre-reveal information asymmetry as the player themself would be.
+    /// @dev Carries the same CashOutWindowClosed gate as cashOut() below -- see that function's own comment for the full rationale. A funder is exactly as capable of exploiting the pre-reveal information asymmetry as the player themself would be.
     function cashOutFor(uint256 roundId, address player) external nonReentrant {
         if (betFundedBy[roundId][player] != msg.sender) revert NotFunder();
-        Round storage r = rounds[roundId];
-        if (r.phase != Phase.LIVE) revert BadPhase();
-        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
-            revert AwaitingEntropyReveal();
-        }
-        if (stakeOf[roundId][player] == 0) revert NoBet();
-        if (cashOutBlockOf[roundId][player] != 0) revert AlreadyCashedOut();
-        uint256 elapsed = block.number - r.lockBlock;
-        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
-        cashOutBlockOf[roundId][player] = block.number;
-        r.provisionalWinningWeight += (stakeOf[roundId][player] * _multiplierAt(elapsed)) / 10000;
-        emit CashedOut(roundId, player, block.number, false);
+        _cashOut(roundId, player);
     }
 
     /// Opt in (or out, with address(0)) to have future winnings pushed to
@@ -640,15 +812,11 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (cur.phase != Phase.BETTING) revert BadPhase();
         if (stakeOf[currentRoundId][msg.sender] != 0) revert AlreadyBet();
 
-        _checkStakeCap(cur, cur.pool, amount);
-        uint256 poolAfter = cur.pool + amount;
-
         carriedForward[fromRoundId][msg.sender] = true;
-        stakeOf[currentRoundId][msg.sender] = amount;
-        cur.pool = poolAfter;
-        participantCount[currentRoundId] += 1;
-        if (amount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = amount;
-        emit BetPlaced(currentRoundId, msg.sender, amount);
+        // Hardening (a): a carried stake KEEPS the auto target it was
+        // committed with (copied verbatim, never re-chosen) -- see
+        // autoCashOutBps's own comment.
+        _enterRound(cur, currentRoundId, msg.sender, amount, autoCashOutBps[fromRoundId][msg.sender]);
     }
 
     /// Locks the round and commits it to a specific future drand round --
@@ -691,75 +859,79 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.lockBlock = block.number;
         r.targetDrandRound = beacon.nextRoundAfter(block.timestamp) + uint64(TARGET_ROUND_SAFETY_PERIODS);
         drandRoundToRoundId[r.targetDrandRound] = id;
+        // Hardening (a): the first second at which the target round's
+        // signature can exist ANYWHERE, by the beacon's own schedule (drand
+        // convention: round 1 is emitted AT genesis, so round R is emitted
+        // at genesis + (R-1)*period -- the same convention the beacon's
+        // currentRoundAt() uses, so `block.timestamp >= revealNotBefore`
+        // is exactly `currentRoundAt(block.timestamp) >= targetDrandRound`).
+        r.revealNotBefore = beacon.genesisTimestamp() + (uint256(r.targetDrandRound) - 1) * beacon.period();
+        // Hardening (b): the base of this round's single-payout cap.
+        r.reserveAtLock = reserve;
+        // Hardening (c): remember who to pay at settlement.
+        r.lockedBy = msg.sender;
         emit RoundLocked(id, r.lockBlock, r.targetDrandRound);
     }
 
     /**
-     * @dev MEDIUM-severity fix, 2026-08-18. Same real vulnerability class
-     *      presetCashOut() below was already fixed against, applied here
-     *      too: once the target drand round's due time passes, its real
-     *      signature is publicly fetchable from any drand HTTP relay (or
-     *      independently computable) regardless of whether anyone has
-     *      called revealEntropy() on THIS contract yet. Gating only on
-     *      r.entropyRevealed (as this function did before) left a real
-     *      window where a player who fetches/verifies the round off-chain
-     *      can compute the true crash point locally and call cashOut() at
-     *      exactly the last valid block for a deterministic, risk-free
-     *      near-maximum-multiplier cash-out, while every other player is
-     *      still genuinely guessing -- a real information asymmetry that
-     *      transfers pool share from casual players to whoever runs this.
-     *      Fix: once the round is publicly due but not yet revealed
-     *      on-chain, cashOut() blocks (same as presetCashOut already did)
-     *      until someone calls the cheap, permissionless revealEntropy()
-     *      -- which, once the round is due, anyone (a keeper, or the
-     *      player themself) can call in the same block. This costs a
-     *      liveness window of at most "one more transaction," not funds.
+     * Hardening (a), superseding the 2026-08-18 MEDIUM fix. The old gate
+     * ("refuse once the round is publicly due but not yet revealed on-
+     * chain") was a race between relayers, defended by an ordering
+     * argument. The new gate is a bytecode invariant: a manual cash-out
+     * is valid ONLY while block.timestamp < revealNotBefore, the instant
+     * the target drand round's signature can exist anywhere -- regardless
+     * of whether revealEntropy() has been called, regardless of what any
+     * relay has done. After that instant NO cash-out can be chosen by
+     * anyone; the only thing that can still fire is the auto target that
+     * was committed with the bet, before lock. This is invariant I-a:
+     * effectiveCashOutBlock is a function of data written at or before
+     * lock plus at most one manual action taken while the randomness
+     * could not yet exist.
      */
     function cashOut(uint256 roundId) external nonReentrant {
-        Round storage r = rounds[roundId];
-        if (r.phase != Phase.LIVE) revert BadPhase();
-        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
-            revert AwaitingEntropyReveal();
-        }
-        if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
-        if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
-        uint256 elapsed = block.number - r.lockBlock;
-        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
-        cashOutBlockOf[roundId][msg.sender] = block.number;
-        r.provisionalWinningWeight += (stakeOf[roundId][msg.sender] * _multiplierAt(elapsed)) / 10000;
-        emit CashedOut(roundId, msg.sender, block.number, false);
+        _cashOut(roundId, msg.sender);
     }
 
-    /// ONLY valid while the target drand round is genuinely NOT YET DUE --
-    /// gated on real availability (beacon.currentRoundAt(now) < the
-    /// target round), NOT on whether revealEntropy() has been called on
-    /// THIS contract yet. Real bug, found and fixed here (the same class
-    /// of bug found and fixed in PlankCrashV2.sol's presetCashOut -- see
-    /// that file's own comment for the full writeup): a drand evmnet
-    /// round's real signature is publicly fetchable via any drand HTTP
-    /// relay the instant its due time passes, regardless of whether
-    /// anyone has relayed it to the shared beacon or called
-    /// revealEntropy() here yet. Gating on the on-chain flag alone would
-    /// let anyone who fetches the signature off-chain, verifies it
-    /// themselves (or just trusts the public relay), and computes the
-    /// true crash point locally, call presetCashOut with a guaranteed,
-    /// risk-free maximum-multiplier target before anyone bothers to
-    /// reveal on-chain.
-    function presetCashOut(uint256 roundId, uint256 targetMultiplierBps) external nonReentrant {
+    function _cashOut(uint256 roundId, address player) private {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (r.entropyRevealed || beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
-            revert EntropyAlreadyRevealed();
+        if (block.timestamp >= r.revealNotBefore) revert CashOutWindowClosed();
+        uint256 stake = stakeOf[roundId][player];
+        if (stake == 0) revert NoBet();
+        if (cashOutBlockOf[roundId][player] != 0) revert AlreadyCashedOut();
+        uint256 elapsed = block.number - r.lockBlock;
+        uint256 auto_ = autoCashOutBps[roundId][player];
+        if (auto_ != 0) {
+            uint256 autoElapsed = _invertMultiplier(auto_);
+            // The committed target already fired (it is the earlier one);
+            // a later manual action cannot raise it.
+            if (elapsed >= autoElapsed) revert AlreadyCashedOut();
+            // Swap the provisional weight from the auto target to the
+            // (earlier, smaller) manual one.
+            r.provisionalWinningWeight -= (stake * _multiplierAt(autoElapsed)) / 10000;
         }
-        if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
-        if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
+        // Belt-and-braces: with a real beacon entropy cannot be revealed
+        // before revealNotBefore, so this only ever bites under a mock.
+        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
+        cashOutBlockOf[roundId][player] = block.number;
+        r.provisionalWinningWeight += (stake * _multiplierAt(elapsed)) / 10000;
+        emit CashedOut(roundId, player, block.number, false);
+    }
 
-        if (_multiplierAt(maxElapsedBlocks) < targetMultiplierBps) revert TargetUnreachable();
-        uint256 targetElapsed = _invertMultiplier(targetMultiplierBps);
-
-        cashOutBlockOf[roundId][msg.sender] = r.lockBlock + targetElapsed;
-        r.provisionalWinningWeight += (stakeOf[roundId][msg.sender] * _multiplierAt(targetElapsed)) / 10000;
-        emit CashedOut(roundId, msg.sender, r.lockBlock + targetElapsed, true);
+    /// The cash-out block settlement uses: the EARLIER of the manual
+    /// cash-out (if any) and the auto target committed at bet time (if
+    /// any), both relative to lockBlock. 0 = no cash-out at all (or the
+    /// round has not locked yet, in which case an auto target has no block
+    /// yet).
+    function effectiveCashOutBlock(uint256 roundId, address player) public view returns (uint256) {
+        uint256 manual = cashOutBlockOf[roundId][player];
+        uint256 auto_ = autoCashOutBps[roundId][player];
+        if (auto_ == 0) return manual;
+        Round storage r = rounds[roundId];
+        if (r.lockBlock == 0) return 0;
+        uint256 autoBlock = r.lockBlock + _invertMultiplier(auto_);
+        if (manual != 0 && manual < autoBlock) return manual;
+        return autoBlock;
     }
 
     /// Permissionless, like PlankCrashV2's revealEntropy() -- anyone who
@@ -778,6 +950,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         (uint256 trueMultiplierBps, uint256 trueElapsed) = _deriveCrash(randomness);
         r.trueCrashElapsedBlocks = trueElapsed;
         r.entropyRevealed = true;
+        r.revealedBy = msg.sender; // hardening (c): paid at settleRound
         emit EntropyRevealed(roundId, trueMultiplierBps, trueElapsed);
     }
 
@@ -801,8 +974,14 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.phase = Phase.CRASHED;
 
         uint256 rake = playerPool - playerDistributable;
+        // Hardening (c): three bounties from the rake budget -- settle
+        // (msg.sender), reveal (r.revealedBy), lock (r.lockedBy) -- all
+        // pull-payments via _asyncTransfer, never pushed. Their sum is
+        // bounded to <= 100% of the rake by the constructor.
         uint256 keeperReward = (rake * keeperRewardBps) / 10000;
-        uint256 netRake = rake - keeperReward;
+        uint256 revealReward = (rake * keeperRevealBps) / 10000;
+        uint256 lockReward = (rake * keeperLockBps) / 10000;
+        uint256 netRake = rake - keeperReward - revealReward - lockReward;
         // Compound a share of the rake straight back into the Vault instead
         // of sending it all to the treasury -- this is the steady growth
         // engine that makes the prize pot grow on WINNING rounds too, not
@@ -810,14 +989,25 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // reallocates within the take (Vault vs treasury).
         uint256 reserveCut = (netRake * reserveShareBps) / 10000;
         if (reserveCut > 0) {
-            reserve += reserveCut;
+            _creditReserve(reserveCut);
             emit VaultGrew(roundId, reserveCut, reserve);
         }
         accumulatedRake += netRake - reserveCut;
-        if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
+        if (keeperReward > 0) {
+            _asyncTransfer(msg.sender, keeperReward);
+            emit KeeperRewarded(roundId, msg.sender, 2, keeperReward);
+        }
+        if (revealReward > 0) {
+            _asyncTransfer(r.revealedBy, revealReward);
+            emit KeeperRewarded(roundId, r.revealedBy, 1, revealReward);
+        }
+        if (lockReward > 0) {
+            _asyncTransfer(r.lockedBy, lockReward);
+            emit KeeperRewarded(roundId, r.lockedBy, 0, lockReward);
+        }
         if (reserveCut > 0) _spillOverflow(); // cascade any overflow to the jackpot
 
-        emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxElapsedBlocks);
+        emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxMultiplierElapsedBlocks);
         _startRound();
     }
 
@@ -846,7 +1036,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 seed = r.rolledOverFromPrevious;
         if (seed > 0) {
             r.rolledOverFromPrevious = 0;
-            reserve += seed;
+            _creditReserve(seed);
         }
     }
 
@@ -874,7 +1064,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.swept = true;
         uint256 amount = r.distributable;
         r.distributable = 0;
-        reserve += amount;
+        _creditReserve(amount);
         emit PoolRolledOver(roundId, amount);
         _spillOverflow(); // a big bust windfall can push the Vault past its cap
     }
@@ -897,7 +1087,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (registered[roundId][player]) revert AlreadyRegistered();
         registered[roundId][player] = true;
 
-        uint256 cashOutBlock = cashOutBlockOf[roundId][player];
+        // Hardening (a): min(manual, lockBlock + invert(auto)) -- see
+        // effectiveCashOutBlock().
+        uint256 cashOutBlock = effectiveCashOutBlock(roundId, player);
         bool won = cashOutBlock != 0 && (cashOutBlock - r.lockBlock) <= r.crashElapsedBlocks;
 
         uint256 weight = 0;
@@ -926,7 +1118,20 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (weight == 0) revert NotWinner();
 
         claimed[roundId][player] = true;
-        uint256 payout = (r.distributable * weight) / r.totalWinningWeight;
+        uint256 share = (r.distributable * weight) / r.totalWinningWeight;
+        // Hardening (b).2: single-payout cap on the HOUSE-SIDE portion.
+        // POOL CONSERVATION: payout + excess == share exactly, and the
+        // excess is credited to the Vault (which seeds future pools), so
+        // every wei of `distributable` is still accounted for -- nothing
+        // is destroyed, only re-weighted toward future rounds. Same-round
+        // redistribution to the other winners would need an O(n^2) water-
+        // filling pass over a sybil-growable winner list, so it is
+        // deliberately not done on-chain.
+        (uint256 payout, uint256 excess) = _capPayout(r, weight, r.totalWinningWeight, share);
+        if (excess > 0) {
+            _creditReserve(excess);
+            emit PayoutCapped(roundId, player, share, payout, excess);
+        }
         address sink = payoutRedirect[player];
         if (sink != address(0)) {
             // Push into the player's chosen sink (their bank) so wins
@@ -940,13 +1145,33 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             _asyncTransfer(player, payout);
         }
         emit Claimed(roundId, player, payout);
+        if (excess > 0) _spillOverflow();
+    }
+
+    /// Splits a winner's parimutuel `share` into (paid, excess): the seed's
+    /// pro-rata part of the share is capped at reserveAtLock*singlePayoutCap
+    /// /10000; the player-funded part is never capped. paid + excess == share.
+    function _capPayout(Round storage r, uint256 weight, uint256 totalWeight, uint256 share)
+        private
+        view
+        returns (uint256 paid, uint256 excess)
+    {
+        uint256 seed = r.rolledOverFromPrevious;
+        if (seed == 0 || totalWeight == 0) return (share, 0);
+        uint256 seedShare = (seed * weight) / totalWeight;
+        uint256 cap = (r.reserveAtLock * singlePayoutCapBps) / 10000;
+        if (seedShare <= cap) return (share, 0);
+        excess = seedShare - cap;
+        paid = share - excess;
     }
 
     // ── Pure math -- byte-for-byte identical to PlankCrashV2's, not ──────
     // ── re-derived, so all four contracts pay out the exact same curve ──
 
+    /// Clamped to maxMultiplierElapsedBlocks (<= maxElapsedBlocks by the
+    /// constructor bound), the explicit max-multiplier cap of hardening (b).
     function _effectiveCrashElapsed(Round storage r) private view returns (uint256) {
-        return r.trueCrashElapsedBlocks < maxElapsedBlocks ? r.trueCrashElapsedBlocks : maxElapsedBlocks;
+        return r.trueCrashElapsedBlocks < maxMultiplierElapsedBlocks ? r.trueCrashElapsedBlocks : maxMultiplierElapsedBlocks;
     }
 
     function _multiplierAt(uint256 elapsedBlocks) public pure returns (uint256) {
@@ -955,7 +1180,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
     /// GAS + DoS FIX: was a LINEAR SEARCH (up to 200,000 loop iterations),
     /// called on every revealEntropy() (via _deriveCrash, for EVERY round
-    /// that settles) and every presetCashOut(). Beyond the raw gas waste,
+    /// that settles) and every auto-target commit. Beyond the raw gas waste,
     /// this was a genuine latent liveness risk: a drand-derived crash
     /// multiplier near the extreme tail (r close to 9999 in _deriveCrash
     /// makes multiplierBps enormous) could require enough iterations to
@@ -1015,20 +1240,22 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         return _multiplierAt(elapsed);
     }
 
+    /// Reflects hardening (a) (effective = earlier of manual/auto) and
+    /// (b) (single-payout cap applied). This is the number the UI must
+    /// show -- never `stake x multiplier` (spec §7 copy discipline).
     function estimatedPayout(uint256 roundId, address player) external view returns (uint256) {
         Round storage r = rounds[roundId];
-        uint256 cashOutBlock = cashOutBlockOf[roundId][player];
+        uint256 cashOutBlock = effectiveCashOutBlock(roundId, player);
         if (cashOutBlock == 0) return 0;
 
         if (r.phase == Phase.CRASHED || r.phase == Phase.SETTLED) {
             bool won = (cashOutBlock - r.lockBlock) <= r.crashElapsedBlocks;
             if (!won) return 0;
             uint256 realWeight = (stakeOf[roundId][player] * _multiplierAt(cashOutBlock - r.lockBlock)) / 10000;
-            if (r.totalWinningWeight > 0) {
-                return (r.distributable * realWeight) / r.totalWinningWeight;
-            }
-            if (r.provisionalWinningWeight == 0) return 0;
-            return (r.distributable * realWeight) / r.provisionalWinningWeight;
+            uint256 totalW = r.totalWinningWeight > 0 ? r.totalWinningWeight : r.provisionalWinningWeight;
+            if (totalW == 0) return 0;
+            (uint256 paid, ) = _capPayout(r, realWeight, totalW, (r.distributable * realWeight) / totalW);
+            return paid;
         }
 
         if (r.provisionalWinningWeight == 0) return 0;
@@ -1036,7 +1263,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 vaultSeed = r.rolledOverFromPrevious;
         uint256 playerPool = r.pool - vaultSeed;
         uint256 distributableNow = vaultSeed + (playerPool * (10000 - rakeBps)) / 10000;
-        return (distributableNow * myWeight) / r.provisionalWinningWeight;
+        (uint256 est, ) = _capPayout(r, myWeight, r.provisionalWinningWeight, (distributableNow * myWeight) / r.provisionalWinningWeight);
+        return est;
     }
 }
 

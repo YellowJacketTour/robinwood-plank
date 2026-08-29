@@ -69,15 +69,16 @@ const { ethers } = await hardhat.network.create();
 
 const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
-  "function currentRound() view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious)",
-  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious)",
-  "function placeBet() payable",
+  "function currentRound() view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious, uint256 revealNotBefore, uint256 reserveAtLock, address lockedBy, address revealedBy)",
+  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious, uint256 revealNotBefore, uint256 reserveAtLock, address lockedBy, address revealedBy)",
+  "function placeBet(uint256 autoCashOutBps) payable", // hardening (a): auto target committed with the bet (0 = manual)
   "function lockRound()",
   "function revealEntropy(uint256 roundId)",
   "function settleRound(uint256 roundId)",
   "function fundVault() payable",
   "function reserve() view returns (uint256)",
   "function maxElapsedBlocks() view returns (uint256)",
+  "function maxMultiplierElapsedBlocks() view returns (uint256)",
 ];
 const POWERBOARD_ABI = [
   "function currentEpoch() view returns (uint256)",
@@ -202,7 +203,7 @@ async function main() {
     if (!a1 || !a2) throw new Error("RIG_A1=<account> RIG_A2=<ethAmount> required");
     const signer = named[a1];
     if (!signer) throw new Error(`unknown account "${a1}" -- use deployer|alice|bob|carol`);
-    const tx = await crash.connect(signer).placeBet({ value: ethers.parseEther(a2) });
+    const tx = await crash.connect(signer).placeBet(0n, { value: ethers.parseEther(a2) });
     await tx.wait();
     console.log(`${a1} placed a competitor bet of ${a2} ETH`);
     return;
@@ -301,7 +302,7 @@ async function main() {
       return;
     }
     if (Number(r.phase) === 1 && r.entropyRevealed) {
-      const maxElapsed = await crash.maxElapsedBlocks();
+      const maxElapsed = await crash.maxMultiplierElapsedBlocks();
       const effective = r.trueCrashElapsedBlocks < maxElapsed ? r.trueCrashElapsedBlocks : maxElapsed;
       const blockNow = await ethers.provider.getBlockNumber();
       if (BigInt(blockNow) - r.lockBlock >= effective) {

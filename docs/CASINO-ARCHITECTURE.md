@@ -9,6 +9,35 @@ Everything here is real, compiled, and tested (`npx hardhat test`, 186 passing
 as of this writing). Nothing in this doc is aspirational unless explicitly
 marked **OPEN**.
 
+## 0. Status (2026-08-29)
+
+- **Crash family (`PlankCrashDrand` + Bank/Rake/Powerboard/Progression/Fuel):
+  hardenings (a)(b)(c) implemented on branch `feat/cos-p3-crash-hardening` —
+  NOT deployed, constants NOT ratified.** Spec:
+  `docs/marketplank/SPEC-CRASH-GO-LIVE-HARDENING.md`; tests:
+  `test/contracts/PlankCrashHardening.test.ts` (C1–C8 + invariant I-a fuzz +
+  pool-conservation property).
+- (a) `placeBet(autoCashOutBps)` / `placeBetFor(player, autoCashOutBps)` commit
+  the auto target with the bet (immutable per round/player; carried stakes keep
+  it); `presetCashOut` REMOVED; `lockRound` stores `revealNotBefore` (beacon
+  emission time of `targetDrandRound`); manual `cashOut` reverts
+  `CashOutWindowClosed` once `block.timestamp >= revealNotBefore`, revealed or
+  not; settlement uses `effectiveCashOutBlock = min(manual, lockBlock +
+  invert(auto))`.
+- (b) `seedMaxBps` (immutable, bytecode ceiling `SEED_MAX_BPS_CEILING`=5000),
+  `singlePayoutCapBps` on the house-side (seed) share of any one payout vs
+  `reserveAtLock` — the excess is credited to the Vault (pool conserved, proven
+  in-test), `dailyDrawdownBps` (24h stepped window) and `hwmDrawdownBps`
+  circuits force seed=0 while play continues, and an explicit owner-supplied
+  `maxMultiplierBps` (constructor-bounded) replaces the implicit block cap.
+- (c) `keeperRewardBps` must be > 0 (constructor reverts); `keeperRevealBps` /
+  `keeperLockBps` pay the revealer / locker from the rake at `settleRound`, all
+  via `_asyncTransfer` pull-payments.
+- `scripts/deploy-casino.ts` carries the spec's §6 PROPOSED values only
+  (loudly marked "PROPOSED — not ratified; do not deploy") and REVERTS unless
+  the owner supplies `CASINO_MAX_MULTIPLIER_BPS`. Sections below that describe
+  `presetCashOut` or a zero keeper reward predate this branch.
+
 ---
 
 ## 1. The one-paragraph version
@@ -170,7 +199,7 @@ carry a reward, so the loop does not depend on any single operator:
 | `lockRound` | anyone | — (cheap, and gates everything downstream) |
 | relay drand round to the beacon | anyone (`scripts/relay-drand.ts` exists) | — (shared across all consumers) |
 | `revealEntropy` | anyone | — |
-| `settleRound` | anyone | `keeperRewardBps` of the rake |
+| `settleRound` | anyone | `keeperRewardBps` of the rake (must be > 0 since hardening (c)); `lockRound`/`revealEntropy` callers get `keeperLockBps`/`keeperRevealBps` of the same rake at settlement |
 | `registerResult` / `claim` | **anyone, on any player's behalf** | — |
 | `sweepBustedRound` | anyone | — |
 | `executeBurn` | anyone | share of ETH spent |

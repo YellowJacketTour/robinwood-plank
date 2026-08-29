@@ -84,7 +84,7 @@ async function main() {
   // if/when settlement is opened to third-party keepers -- it is carved
   // from the rake before the split below, so a nonzero value proportionally
   // reduces all three legs.
-  const KEEPER_REWARD_BPS = 0n;
+  const KEEPER_REWARD_BPS = 1n; // hardening (c): the constructor rejects 0; 1 bps keeps local rake math ~unchanged
 
   // ── Split of that rake (bps of the rake, must sum to <= 10000) ─────
   // 1.8 / 1.8 / 0.9 points of the pool -> 40% / 40% / 20% of the rake.
@@ -226,6 +226,17 @@ async function main() {
     jackpotSink: await airdropPool.getAddress(), // cascade Vault overflow -> jackpot
     treasury: await distributor.getAddress(), // rake flows into the community-economics splitter
     beacon: await beacon.getAddress(),
+    // ── Phase 3 hardening fields (spec docs/marketplank/SPEC-CRASH-GO-LIVE-
+    //    HARDENING.md). LOCAL/TEST values: circuits set so they cannot trip
+    //    and the max multiplier equal to what MAX_ELAPSED_BLOCKS already
+    //    implied. NOT the proposed production values (see deploy-casino.ts).
+    keeperRevealBps: 0n,
+    keeperLockBps: 0n,
+    seedMaxBps: 5000n,
+    singlePayoutCapBps: 10000n,
+    dailyDrawdownBps: 10000n,
+    hwmDrawdownBps: 10000n,
+    maxMultiplierBps: 10000n + BigInt(MAX_ELAPSED_BLOCKS) * 40n + (BigInt(MAX_ELAPSED_BLOCKS) * BigInt(MAX_ELAPSED_BLOCKS)) / 5n,
   }); // nonce + 2
   await crash.waitForDeployment();
 
