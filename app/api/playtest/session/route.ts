@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { adminConfigured, authenticatePersonalPin, bootstrapAdmin, cleanDisplayName, cleanPin, clearSessionCookie, currentPlaytestIdentity, playtestBootstrapAllowed, playtestMutationOriginAllowed, registerFromInvite, PLAYTEST_SESSION_COOKIE, revokeSession, sessionCookie } from "@/lib/playtest-auth";
+import { adminConfigured, authenticatePersonalPin, bootstrapAdmin, cleanDisplayName, cleanPin, clearSessionCookie, currentPlaytestIdentity, joinRoomFromInvite, playtestBootstrapAllowed, playtestMutationOriginAllowed, registerFromInvite, PLAYTEST_SESSION_COOKIE, revokeSession, sessionCookie } from "@/lib/playtest-auth";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,12 @@ export async function POST(req: Request) {
     const limited = rateLimit(req, { key: "playtest-pin-login", limit: 8, windowMs: 15 * 60_000 });
     if (limited) return limited;
     const body = await readJsonBody<{ action?: unknown; displayName?: unknown; pin?: unknown; invite?: unknown; setup?: unknown }>(req);
+    if (body.action === "joinInvite") {
+      const identity = await currentPlaytestIdentity();
+      if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Sign in before joining this table." }, 401);
+      if (typeof body.invite !== "string" || body.invite.length < 20) return publicJson({ error: "BAD_INVITE", message: "Use a valid table invitation." }, 400);
+      return publicJson({ displayName: identity.displayName, isAdmin: identity.isAdmin, roomId: await joinRoomFromInvite(identity, body.invite) }, 201);
+    }
     const displayName = cleanDisplayName(body.displayName);
     if (!displayName) return publicJson({ error: "BAD_NAME", message: "Choose a username between 1 and 40 characters." }, 400);
     let authenticated;

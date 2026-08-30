@@ -130,7 +130,7 @@ export async function playtestInvitePreview(invite: string): Promise<{ roomId: s
        FROM playtest_invites i
        LEFT JOIN playtest_rooms r ON r.id=i.room_id AND r.archived_at IS NULL
        LEFT JOIN playtest_users u ON u.id=r.owner_user_id
-      WHERE i.token_hash=$1 AND i.consumed_at IS NULL AND i.expires_at>NOW()`,
+      WHERE i.token_hash=$1 AND (i.room_id IS NOT NULL OR i.consumed_at IS NULL) AND i.expires_at>NOW()`,
     [sha256(invite)],
   );
   const row = result.rows[0];
@@ -140,13 +140,17 @@ export async function playtestInvitePreview(invite: string): Promise<{ roomId: s
 export async function registerFromInvite(displayName: string, pin: string, invite: string): Promise<{ identity: PlaytestIdentity; token: string; roomId: string | null }> {
   const registered = await withPostgresTransaction(async (client) => {
     const found = await client.query<{ room_id: string | null }>(
-      `UPDATE playtest_invites SET consumed_at=NOW()
-        WHERE token_hash=$1 AND consumed_at IS NULL AND expires_at>NOW()
-        RETURNING room_id`, [sha256(invite)],
+      `SELECT room_id FROM playtest_invites
+        WHERE token_hash=$1 AND (room_id IS NOT NULL OR consumed_at IS NULL) AND expires_at>NOW()
+        FOR UPDATE`, [sha256(invite)],
     );
     if (!found.rows[0]) throw new Error("INVITE_INVALID");
     const created = await createPersonalIdentity(displayName, pin, false, client);
-    await client.query(`UPDATE playtest_invites SET consumed_by=$2 WHERE token_hash=$1`, [sha256(invite), created.id]);
+    // A room-bound link is a reusable secret door for the host's invited
+    // group. Unbound account invitations remain one-use.
+    if (!found.rows[0].room_id) {
+      await client.query(`UPDATE playtest_invites SET consumed_at=NOW(),consumed_by=$2 WHERE token_hash=$1`, [sha256(invite), created.id]);
+    }
     if (found.rows[0].room_id) {
       await client.query(
         `INSERT INTO playtest_room_members (room_id,user_id,test_credit_balance) VALUES ($1,$2,1000000)
@@ -156,6 +160,27 @@ export async function registerFromInvite(displayName: string, pin: string, invit
     return { identity: created, roomId: found.rows[0].room_id };
   });
   return { ...registered, token: await createSession(registered.identity.id) };
+}
+
+export async function joinRoomFromInvite(identity: PlaytestIdentity, invite: string): Promise<string> {
+  return withPostgresTransaction(async (client) => {
+    const found = await client.query<{ room_id: string }>(
+      `SELECT i.room_id
+         FROM playtest_invites i
+         JOIN playtest_rooms r ON r.id=i.room_id AND r.archived_at IS NULL
+        WHERE i.token_hash=$1 AND i.room_id IS NOT NULL AND i.expires_at>NOW()
+        FOR SHARE`,
+      [sha256(invite)],
+    );
+    const roomId = found.rows[0]?.room_id;
+    if (!roomId) throw new Error("INVITE_INVALID");
+    await client.query(
+      `INSERT INTO playtest_room_members (room_id,user_id,test_credit_balance) VALUES ($1,$2,1000000)
+       ON CONFLICT (room_id,user_id) DO NOTHING`,
+      [roomId, identity.id],
+    );
+    return roomId;
+  });
 }
 
 export async function sessionFromToken(token: string | undefined): Promise<PlaytestIdentity | null> {

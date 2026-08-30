@@ -77,6 +77,38 @@ export function parseSimulationState(raw: unknown): SimulationState {
   return revive(raw) as SimulationState;
 }
 
+const EDITABLE_SIMULATION_AMOUNTS = new Set([
+  "protectedPrincipal", "emissionBuffer",
+  "lottery.cycleBase", "lottery.netPrize", "lottery.highWaterPrize",
+  "lottery.pendingFunding", "lottery.resetReserve", "lottery.rollover", "lottery.nextPrizeTarget",
+  "totals.burned", "totals.communityFunded", "totals.crashFounderRake", "totals.lotteryFounderFees",
+]);
+const EDITABLE_SIMULATION_FLAGS = new Set(["lottery.awaitingSeal", "lottery.readyForDraw"]);
+
+export function injectSimulationState(current: SimulationState, patch: unknown): SimulationState {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new RangeError("Simulation changes must be an object.");
+  const state = parseSimulationState(serializeBigInts(current)) as unknown as Record<string, unknown>;
+  for (const [path, value] of Object.entries(patch as Record<string, unknown>)) {
+    if (!EDITABLE_SIMULATION_AMOUNTS.has(path) && !EDITABLE_SIMULATION_FLAGS.has(path)) throw new RangeError(`${path} cannot be injected.`);
+    const [parent, child] = path.split(".");
+    const target = child ? state[parent] as Record<string, unknown> : state;
+    if (!target || typeof target !== "object") throw new RangeError(`${path} is unavailable.`);
+    if (EDITABLE_SIMULATION_FLAGS.has(path)) {
+      if (typeof value !== "boolean") throw new RangeError(`${path} must be true or false.`);
+      target[child] = value;
+    } else {
+      if (typeof value !== "string" || !/^\d{1,30}$/.test(value)) throw new RangeError(`${path} must be a non-negative integer string.`);
+      target[child || parent] = BigInt(value);
+    }
+  }
+  const lottery = state.lottery as Record<string, unknown>;
+  if (lottery.awaitingSeal && lottery.readyForDraw) throw new RangeError("A lottery cannot await sealing and be ready for a draw simultaneously.");
+  if (lottery.readyForDraw && BigInt(String(lottery.netPrize)) <= 0n) throw new RangeError("A draw-ready lottery needs a positive prize.");
+  if (BigInt(String(lottery.highWaterPrize)) < BigInt(String(lottery.netPrize))) lottery.highWaterPrize = lottery.netPrize;
+  if (BigInt(String(lottery.cycleBase)) <= 0n || BigInt(String(lottery.nextPrizeTarget)) <= 0n) throw new RangeError("Lottery bases and targets must stay positive.");
+  return state as unknown as SimulationState;
+}
+
 export function simulationCrashBps(revealHex: string): bigint {
   if (!/^[0-9a-f]{64}$/.test(revealHex)) throw new RangeError("invalid reveal");
   const sample = BigInt(`0x${revealHex.slice(0, 16)}`);

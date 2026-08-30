@@ -6,7 +6,7 @@ import { initialSimulationState, serializeSimulationState, simulateIteration, va
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import {
-  crashDurationMs, DEFAULT_PLAYTEST_POLICY, multiplierAt, parsePolicy,
+  crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 
@@ -456,6 +456,27 @@ export async function adjustPlaytestCredit(identity: PlaytestIdentity, roomId: s
     room.version = String(BigInt(room.version) + 1n);
     await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [room.id, room.version]);
     await event(client, room, "admin.credit.adjusted", identity.id, commandId, { userId, balance });
+    return { duplicate: false, version: room.version };
+  });
+}
+
+/** Explicit admin-only scenario injection for the no-value laboratory. This
+ * never runs as part of normal settlement and is permanently identified in
+ * the room replay log so injected state cannot be mistaken for earned state. */
+export async function adjustPlaytestSimulation(identity: PlaytestIdentity, roomId: string, commandId: string, patch: unknown) {
+  if (!identity.isAdmin) throw new PlaytestRoomError(403, "ADMIN_ONLY", "The host PIN is required.");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new PlaytestRoomError(400, "BAD_SIMULATION_PATCH", "Simulation changes must be an object.");
+  return withPostgresTransaction(async (client) => {
+    const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
+    if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
+    if (room.phase === "running") throw new PlaytestRoomError(409, "ROUND_ACTIVE", "Inject scenarios between rounds.");
+    let state;
+    try { state = injectSimulationState(parseSimulationState(room.simulation_state), patch); }
+    catch (error) { throw new PlaytestRoomError(400, "INVALID_SIMULATION_STATE", error instanceof Error ? error.message : "Invalid simulation state."); }
+    room.version = String(BigInt(room.version) + 1n);
+    room.simulation_state = serializeSimulationState(state);
+    await client.query(`UPDATE playtest_rooms SET version=$2,simulation_state=$3 WHERE id=$1`, [room.id, room.version, JSON.stringify(room.simulation_state)]);
+    await event(client, room, "admin.simulation.injected", identity.id, commandId, { patch, laboratoryOnly: true });
     return { duplicate: false, version: room.version };
   });
 }
