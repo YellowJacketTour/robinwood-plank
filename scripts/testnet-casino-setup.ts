@@ -62,9 +62,9 @@ async function main() {
   const MIN_PARTICIPANTS = STRICT ? 2n : 1n;
   const MIN_POOL = ethers.parseEther("0.001");
   const MAX_STAKE_BPS = STRICT ? 6000n : 10000n;
-  const KEEPER_REWARD_BPS = 0n;
+  const KEEPER_REWARD_BPS = 1n; // hardening (c): the constructor rejects 0; 1 bps keeps local rake math ~unchanged
 
-  const BURN_BPS = 4000n;
+  const BURN_BPS = 2000n;
   const AIRDROP_BPS = 4000n;
   const BURN_KEEPER_REWARD_BPS = 100n;
   const MAX_ETH_PER_BURN = ethers.parseEther("0.1");
@@ -184,6 +184,20 @@ async function main() {
     jackpotSink: await airdropPool.getAddress(),
     treasury: await distributor.getAddress(),
     beacon: await beacon.getAddress(),
+    // ── Phase 3 hardening fields (spec docs/marketplank/SPEC-CRASH-GO-LIVE-
+    //    HARDENING.md). LOCAL/TEST values: circuits set so they cannot trip
+    //    and the max multiplier equal to what MAX_ELAPSED_BLOCKS already
+    //    implied. NOT the proposed production values (see deploy-casino.ts).
+    keeperRevealBps: 0n,
+    keeperLockBps: 0n,
+    seedMaxBps: 5000n,
+    singlePayoutCapBps: 10000n,
+    dailyDrawdownBps: 10000n,
+    hwmDrawdownBps: 10000n,
+    maxMultiplierBps: 10000n + BigInt(MAX_ELAPSED_BLOCKS) * 40n + (BigInt(MAX_ELAPSED_BLOCKS) * BigInt(MAX_ELAPSED_BLOCKS)) / 5n,
+    // Re-review NEW-1: seed-income budget bootstrap. LOCAL/TEST: reserveCap/10
+    // (the constructor's own bound); production value is PROPOSED in deploy-casino.ts.
+    seedBootstrapBudgetWei: RESERVE_CAP / 10n,
   }, FEES);
   await crash.waitForDeployment();
 

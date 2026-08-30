@@ -58,8 +58,10 @@ documented cause of most on-chain casino failures.
    rounds; same-round redistribution would be an O(n²) water-fill over a sybil-growable
    winner list, so it is deliberately not done on-chain). Proposed 200 bps (2%).
    **This is a PER-WALLET UX bound** ("no single ticket wins more than 2% of the
-   bankroll"), **not a sybil bound** — N wallets get N caps. The sybil bound is 2.6 below.
-   (Review MED-3 / §2.2 wording.)
+   bankroll"), **not a sybil bound** — N wallets get N caps. Neither is 2.6's fair-odds cap
+   (re-review NEW-1: it bounds house money per WINNER, and a colluding group recycles its
+   losers' stakes through the player pot). The only sybil/collusion bound is the seed-income
+   budget, 2.7 below. (Review MED-3 / §2.2 wording; corrected by re-review NEW-1.)
 6. **Seed distributed by PROFIT weight (review HIGH-1):** the round pool is two pots. The
    player-funded pot splits by the classic `stake × mult` weight. The Vault SEED splits by
    `stake × (mult − 1)` (the profit weight) **and** is capped per winner at that same
@@ -72,6 +74,34 @@ documented cause of most on-chain casino failures.
    fair-odds cap is continuous in the exit and bounds the extraction RATE at every
    multiplier. When the cap binds the remainder returns to the Vault; when no winner has
    profit weight (all exits at exactly 1.00×) the seed returns whole. Conservation exact.
+   **What this is NOT (re-review NEW-1): a sybil or collusion bound.** The cap limits house
+   money per winner at `stake × (m − 1)`, but the LOSING stakes go to the PLAYER pot, not to
+   the house. A colluding group — an absorber at the minimum target that wins the player pot
+   whenever the others lose, plus B₁..₃ at target m sized so Σ`stake × (m − 1)` ≥ seed — has
+   EV/round = `seed/m − rake × Σstakes` > 0 for m ≳ 1.06 (reviewer: 15.6% of a 2 ETH bankroll
+   in 6 rounds, group +0.136 ETH; reproduced: 18.5% in 8 rounds at m = 1.088 on 0f21383). In
+   a parimutuel game the Vault seed is pure subsidy; no per-round or per-winner cap bounds
+   what a coordinated field can extract. Only 2.7 does.
+7. **Seed bounded by HOUSE INCOME (re-review NEW-1, structural):** a rolling `seedBudget`
+   (wei) in bytecode. `settleRound` credits it with the round's **net rake** (rake minus the
+   keeper bounties — the rake the house actually retains, whether it lands in the Vault or
+   the treasury); every seed drawn is debited from it; a rescued seed (void), a busted
+   round's returned seed, and a capped payout's excess are credited back (never paid, never
+   spent). Each round's seed is
+   `≤ min(seedBudget × SEED_INCOME_MULTIPLE_BPS / 10⁴, reserve × SEED_MAX_BPS / 10⁴, drawdown circuits)`,
+   so at all times **cumulative house money paid out ≤ `SEED_BOOTSTRAP_BUDGET_WEI` +
+   `SEED_INCOME_MULTIPLE` × cumulative net rake earned.** At the PROPOSED 10000 bps the house
+   recycles at most 100% of what it earned: "positive-sum for the community" becomes
+   literally true — the community gets the rake back as seed, never more, and a colluding
+   group can at best recover its own retained rake, netting at most the one-off bootstrap
+   minus the bounties it paid (strictly negative once the bootstrap is spent). The
+   bootstrap (`seedBootstrapBudgetWei`, constructor input, ≤ `reserveCap/10` enforced when
+   the Vault is capped) is the only allowance that exists before any rake has been earned.
+   Also: `autoCashOutBps == 10000` (elapsed 0, P(win) = 1) is rejected `BadAutoTarget` —
+   every committed target takes ≥ 1 block of crash risk. Tests
+   `colludingAbsorberIsNotProfitable` (reviewer's absorber + 3-winner probe at
+   m ∈ {1.088, 1.25, 1.6, 2.6}, 8 rounds, unbiased PRNG randomness, with and without the
+   bootstrap; FAILS on 0f21383), `seedBoundedByHouseIncome`, `autoTargetMustExceedOneX`.
 3. **Daily-loss circuit:** rolling 24h window of `reserve` net change; if the drawdown
    exceeds `DAILY_DRAWDOWN_BPS`, the next round seeds 0 from reserve (players-only
    parimutuel continues — the game never stops, the house simply stops subsidizing).
@@ -120,6 +150,10 @@ betId)`. Always close betting before the target round. Tracked as Phase 3.1.
 | `KEEPER_REVEAL_BPS` / `KEEPER_LOCK_BPS` | 100 / 100 of rake | cheap calls, small bounty |
 | max multiplier cap | **OWNER MUST SUPPLY** (§2 open question 4) | not a Fable proposal |
 | `rakeBps` | must be > 0 (constructor reverts) | review LOW-2: every keeper bounty is bps OF THE RAKE, so rake 0 = the "nobody settles" failure (c) forbids |
+| `SEED_INCOME_MULTIPLE_BPS` (bytecode) | **10000** | re-review NEW-1 (§2.7): cumulative seed ≤ 100% of cumulative net rake (+ bootstrap) — the house recycles at most what it earned; the only sybil/collusion bound |
+| `SEED_BOOTSTRAP_BUDGET_WEI` (constructor `seedBootstrapBudgetWei`) | **`reserveCap/10` = 0.2 ETH at Stage-1** | re-review NEW-1: the only seed allowance before rake exists; constructor rejects > `reserveCap/10` on a capped Vault; it is the maximum a colluding group can ever net, once |
+| minimum auto target | **10001 bps** (1.00x rejected) | re-review NEW-1 (b): `_invertMultiplier(10000) = 0` = a P(win)=1 absorber |
+| `estimatedPayout` cap base before lock | current `reserve` | re-review NEW-2: `reserveAtLock` is 0 during BETTING, which zeroed the seed portion of the virtual-lock estimate; test `estimateEqualBettingAndLive` |
 
 Test fixtures (`test/contracts/helpers/crashHardening.ts`) now use exactly these PROPOSED
 values so every suite exercises the caps and circuits that would ship (review MED-3). They
@@ -136,5 +170,17 @@ number; a manual-only bet reads 0 until it exits.
 Ratify §6 → implement (a)(b)(c) → unit + invariant + C1–C8 tests (≥5 seeds) → multi-lens
 Fable review to green → real-signer write-path on fork/testnet → staged deploy at Stage-1
 caps → arcade route in nav ONLY after the write-path proof (§3.8). Copy discipline: show
-`estimatedPayout()`, never `stake × multiplier`; "positive-sum for the community, not
-positive-EV per bet"; fixed daily cadence, no surprise triggers.
+`estimatedPayout()` — labelled as the player's CURRENT share, which may shrink as others cash
+out, never as an upper bound (re-review NEW-3) — never `stake × multiplier`; "positive-sum
+for the community, not positive-EV per bet"; fixed daily cadence, no surprise triggers.
+
+Go-live checklist additions (re-review):
+- [ ] **NEW-4: pin `CASHOUT_CLOSE_MARGIN_PERIODS` to the target chain's MEASURED sequencer
+      timestamp-drift bound** (for an Arbitrum Orbit chain: the `MaxTimeVariation`
+      parameters — `delaySeconds`/`futureSeconds` — of the deployed SequencerInbox, read from
+      the chain, plus observed drift over a multi-day sample). The bytecode value is 2
+      periods = 6 s on quicknet; it is a PROPOSAL, not a measurement. Never assert "< 6 s"
+      untested: if the measured bound exceeds the margin, raise the constant (and
+      `TARGET_ROUND_SAFETY_PERIODS` with it) before deploy.
+- [ ] NEW-1: confirm `seedBootstrapBudgetWei ≤ reserveCap/10` in the deploy config and that
+      `seedBudget()` on the deployed contract equals it before the first round is seeded.

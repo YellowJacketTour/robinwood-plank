@@ -16,6 +16,15 @@ export const HARDENING_TEST_DEFAULTS = {
   singlePayoutCapBps: 200n, // (b) 2% of reserveAtLock house-side per wallet -- PROPOSED
   dailyDrawdownBps: 1500n, // (b) 15%/24h halts subsidy -- PROPOSED
   hwmDrawdownBps: 5000n, // (b) 50% from high-water halts subsidy -- PROPOSED
+  // Re-review NEW-1: the seed-income budget. The fixture default is
+  // deliberately LARGE (not the proposed reserveCap/10): every other suite
+  // tests a seed FORMULA (num/den draw, seedMaxBps, drawdown circuits) that
+  // assumes the Vault can seed before any rake exists, and the proposed
+  // 0.2 ETH bootstrap would clip those seeds to 0 and hide the arithmetic
+  // under test. The income bound itself is exercised, at the PROPOSED
+  // value, by colludingAbsorberIsNotProfitable / seedBoundedByHouseIncome,
+  // which override this at their own call sites.
+  seedBootstrapBudgetWei: 10n ** 24n, // 1,000,000 ETH: budget effectively off (fixture cap is 0 = uncapped)
 };
 
 /// Mirror of PlankCrashDrand._multiplierAt (pure, integer): 10000 + 40e + e^2/5.

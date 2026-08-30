@@ -84,11 +84,11 @@ async function main() {
   // if/when settlement is opened to third-party keepers -- it is carved
   // from the rake before the split below, so a nonzero value proportionally
   // reduces all three legs.
-  const KEEPER_REWARD_BPS = 0n;
+  const KEEPER_REWARD_BPS = 1n; // hardening (c): the constructor rejects 0; 1 bps keeps local rake math ~unchanged
 
   // ── Split of that rake (bps of the rake, must sum to <= 10000) ─────
   // 1.8 / 1.8 / 0.9 points of the pool -> 40% / 40% / 20% of the rake.
-  const BURN_BPS = 4000n; // 40% burn / 40% community / 20% founder
+  const BURN_BPS = 2000n; // 20% of rake = 0.9% of pool -> buys + burns $PLANK
   const AIRDROP_BPS = 4000n; // 40% of rake = 1.8% of pool -> the rolling community jackpot
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
   const BURN_KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)
@@ -226,6 +226,20 @@ async function main() {
     jackpotSink: await airdropPool.getAddress(), // cascade Vault overflow -> jackpot
     treasury: await distributor.getAddress(), // rake flows into the community-economics splitter
     beacon: await beacon.getAddress(),
+    // ── Phase 3 hardening fields (spec docs/marketplank/SPEC-CRASH-GO-LIVE-
+    //    HARDENING.md). LOCAL/TEST values: circuits set so they cannot trip
+    //    and the max multiplier equal to what MAX_ELAPSED_BLOCKS already
+    //    implied. NOT the proposed production values (see deploy-casino.ts).
+    keeperRevealBps: 0n,
+    keeperLockBps: 0n,
+    seedMaxBps: 5000n,
+    singlePayoutCapBps: 10000n,
+    dailyDrawdownBps: 10000n,
+    hwmDrawdownBps: 10000n,
+    maxMultiplierBps: 10000n + BigInt(MAX_ELAPSED_BLOCKS) * 40n + (BigInt(MAX_ELAPSED_BLOCKS) * BigInt(MAX_ELAPSED_BLOCKS)) / 5n,
+    // Re-review NEW-1: seed-income budget bootstrap. LOCAL/TEST: reserveCap/10
+    // (the constructor's own bound); production value is PROPOSED in deploy-casino.ts.
+    seedBootstrapBudgetWei: RESERVE_CAP / 10n,
   }); // nonce + 2
   await crash.waitForDeployment();
 

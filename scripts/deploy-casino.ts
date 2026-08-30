@@ -85,8 +85,33 @@ async function main() {
 
   // ── Ratified economics (overridable) ───────────────────────────────
   const RAKE_BPS = envBig("CASINO_RAKE_BPS", 450n); // 4.5% total
-  const KEEPER_REWARD_BPS = envBig("CASINO_KEEPER_REWARD_BPS", 0n); // dev-run keeper
-  const BURN_BPS = envBig("CASINO_BURN_BPS", 4000n); // 40% of net rake; founder receives the 20% remainder
+  // ── Phase 3 hardening constants ──────────────────────────────────
+  // PROPOSED — not ratified; do not deploy. These defaults are the spec's
+  // §6 PROPOSED values (docs/marketplank/SPEC-CRASH-GO-LIVE-HARDENING.md)
+  // and require owner ratification before any real-network deploy. The
+  // crash family is NOT deployed; this script exists to be reviewed, not
+  // run, until §6 is ratified and the §7 gauntlet is green.
+  const KEEPER_REWARD_BPS = envBig("CASINO_KEEPER_REWARD_BPS", 500n); // (c) 5% of rake to the settler -- PROPOSED, must be > 0
+  const KEEPER_REVEAL_BPS = envBig("CASINO_KEEPER_REVEAL_BPS", 100n); // (c) 1% of rake to the revealer -- PROPOSED
+  const KEEPER_LOCK_BPS = envBig("CASINO_KEEPER_LOCK_BPS", 100n); // (c) 1% of rake to the locker -- PROPOSED
+  const SEED_MAX_BPS = envBig("CASINO_SEED_MAX_BPS", 500n); // (b) <=5% of bankroll per round -- PROPOSED
+  const SINGLE_PAYOUT_CAP_BPS = envBig("CASINO_SINGLE_PAYOUT_CAP_BPS", 200n); // (b) 2% of reserveAtLock house-side per player -- PROPOSED
+  const DAILY_DRAWDOWN_BPS = envBig("CASINO_DAILY_DRAWDOWN_BPS", 1500n); // (b) 15%/24h halts subsidy -- PROPOSED
+  const HWM_DRAWDOWN_BPS = envBig("CASINO_HWM_DRAWDOWN_BPS", 5000n); // (b) 50% from high-water halts subsidy -- PROPOSED
+  // (b) Max multiplier: OWNER MUST SUPPLY (spec §6 -- explicitly "not a
+  // Fable proposal"). There is deliberately NO default: the constructor
+  // needs 10000 < x <= _multiplierAt(maxElapsedBlocks), and this script
+  // REVERTS unless CASINO_MAX_MULTIPLIER_BPS is set.
+  const MAX_MULTIPLIER_BPS = (() => {
+    const v = process.env.CASINO_MAX_MULTIPLIER_BPS?.trim();
+    if (!v) {
+      throw new Error(
+        "CASINO_MAX_MULTIPLIER_BPS is unset. PROPOSED — not ratified; do not deploy. The max multiplier cap is an OWNER decision (spec §6) and has no default."
+      );
+    }
+    return BigInt(v);
+  })();
+  const BURN_BPS = envBig("CASINO_BURN_BPS", 2000n); // 20% of rake = 0.9% of pool
   const AIRDROP_BPS = envBig("CASINO_AIRDROP_BPS", 4000n); // 40% of rake = 1.8% of pool
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
 
@@ -115,6 +140,7 @@ async function main() {
   // 2 ETH. mustHitByEpochs guarantees the full jackpot pays out at least that
   // often (in epochs) even if the ball never naturally hits.
   const RESERVE_CAP = envBig("CASINO_RESERVE_CAP_WEI", ethers.parseEther("2"));
+  const SEED_BOOTSTRAP_BUDGET_WEI = envBig("CASINO_SEED_BOOTSTRAP_BUDGET_WEI", RESERVE_CAP / 10n); // NEW-1 -- PROPOSED (<= reserveCap/10)
   const MUST_HIT_EPOCHS = envBig("CASINO_MUST_HIT_EPOCHS", 30n);
 
   // Powerboard
@@ -198,6 +224,19 @@ async function main() {
     jackpotSink: await powerboard.getAddress(), // cascade Vault overflow -> jackpot
     treasury: await distributor.getAddress(),
     beacon: BEACON,
+    // Phase 3 hardening -- PROPOSED — not ratified; do not deploy.
+    keeperRevealBps: KEEPER_REVEAL_BPS,
+    keeperLockBps: KEEPER_LOCK_BPS,
+    seedMaxBps: SEED_MAX_BPS,
+    singlePayoutCapBps: SINGLE_PAYOUT_CAP_BPS,
+    dailyDrawdownBps: DAILY_DRAWDOWN_BPS,
+    hwmDrawdownBps: HWM_DRAWDOWN_BPS,
+    maxMultiplierBps: MAX_MULTIPLIER_BPS,
+    // Re-review NEW-1: seed-income budget bootstrap -- PROPOSED reserveCap/10;
+    // the constructor rejects anything larger on a capped Vault. After it is
+    // spent, every wei of seed is <= 100% of net rake earned (bytecode
+    // SEED_INCOME_MULTIPLE_BPS = 10000).
+    seedBootstrapBudgetWei: SEED_BOOTSTRAP_BUDGET_WEI,
   }); // nonce+2
   await crash.waitForDeployment();
 
