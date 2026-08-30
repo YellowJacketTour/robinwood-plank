@@ -4453,9 +4453,10 @@ function renderPrivateRoster(snapshot) {
     tag.textContent = `${member.isBot ? `CPU · ${(member.botProfile?.preset || "custom").toUpperCase()}` : member.id === snapshot.room.ownerUserId ? "HOST" : "PLAYER"}${member.id === snapshot.me.id ? " · YOU" : ""}`;
     identity.append(dot, name, tag);
     const result = document.createElement("span");
-    result.className = `private-player-state ${snapshot.room.phase === "settled" && seat?.survived ? "win" : ""}`;
+    const profitable = snapshot.room.phase === "settled" && BigInt(seat?.net || "0") > 0n;
+    result.className = `private-player-state ${profitable ? "win" : ""}`;
     result.textContent = !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
-      : snapshot.room.phase === "settled" ? `${seat.survived ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked` : "Crashed"} · ${privateCredits(seat.payout)} paid`
+      : snapshot.room.phase === "settled" ? `${!seat.survived ? "Crashed" : profitable ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · PROFIT` : `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · DILUTED`} · ${privateCredits(seat.payout)} paid`
       : seat.acceptedTargetBps ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · watching`
       : snapshot.room.phase === "running" ? `Flying · ${privateCredits(seat.stake)} cr` : `Committed · ${privateCredits(seat.stake)} cr`;
     row.append(identity, result);
@@ -4476,17 +4477,18 @@ function paintPrivateConclusion(snapshot, me, seat) {
     return;
   }
   const crash = (Number(snapshot.room.crashBps || 10000) / 10000).toFixed(2);
-  const won = Boolean(seat?.survived);
   const locked = seat?.acceptedTargetBps ? (Number(seat.acceptedTargetBps) / 10000).toFixed(2) : null;
   const net = BigInt(seat?.net || "0");
+  const survived = Boolean(seat?.survived);
+  const profitable = survived && net > 0n;
   const conclusionKey = `${snapshot.room.id}:${snapshot.room.currentRound}:${seat?.payout || "spectator"}`;
   if (privateConclusionKey === conclusionKey) return;
   privateConclusionKey = conclusionKey;
-  card.className = `result-card private-result show ${won ? "win" : "lose"}`;
+  card.className = `result-card private-result show ${profitable ? "win" : "lose"}`;
   card.replaceChildren();
   const eyebrow = document.createElement("div"); eyebrow.className = "result-tier"; eyebrow.textContent = `ROUND ${snapshot.room.currentRound} COMPLETE · CRASHED AT ${crash}×`;
   const headline = document.createElement("div"); headline.className = "result-mult";
-  headline.textContent = !seat ? "ROUND SETTLED" : won ? `LOCKED ${locked}×` : "CAUGHT IN THE CRASH";
+  headline.textContent = !seat ? "ROUND SETTLED" : !survived ? "CAUGHT IN THE CRASH" : profitable ? `PROFIT · LOCKED ${locked}×` : `LOCKED ${locked}× · POOL DILUTED`;
   const money = document.createElement("div"); money.className = "result-delta";
   money.textContent = !seat ? "You watched this round" : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
@@ -4494,9 +4496,11 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const founderTotal = BigInt(snapshot.simulation.totals?.crashFounderRake || "0") + BigInt(snapshot.simulation.totals?.lotteryFounderFees || "0");
   world.innerHTML = `<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span><span><small>LOTTERY PRIZE</small>${privateCredits(snapshot.simulation.lottery.netPrize)}</span><span><small>RESET RESERVE</small>${privateCredits(snapshot.simulation.lottery.resetReserve)}</span><span><small>FOUNDER TOTAL</small>${privateCredits(founderTotal)}</span>`;
   const note = document.createElement("div"); note.className = "private-result-note";
-  const settlementEvent = [...snapshot.events].reverse().find((event) => event.type === "round.settled" && event.payload?.lotteryWinner);
+  const settlementEvent = [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;
-  note.textContent = `${seat ? "Your payout is your parimutuel share of the round pool after the configured allocations—not stake × the displayed lock multiplier." : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
+  const allocation = settlementEvent?.payload?.accounting?.allocations?.find((entry) => entry.id === snapshot.me.id);
+  const base = allocation ? privateCredits(allocation.base) : null; const surplus = allocation ? privateCredits(allocation.surplus) : null;
+  note.textContent = `${seat ? `${base !== null ? `Exact settlement: ${base} base return + ${surplus} risk surplus = ${privateCredits(seat.payout)}. ` : ""}${survived && !profitable ? "You beat the crash, but too much stake also survived to cover every stake after the 4.50% routed rake; the bounded pool cannot manufacture the difference. " : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
   const next = document.createElement("div"); next.className = "private-result-next"; next.textContent = `RETURN TO THE TABLE · THEN PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
   card.append(eyebrow, headline, money, balance, world, note, next);
   if (privateMotionReduced()) {
@@ -4661,7 +4665,15 @@ function paintPrivateSnapshot(snapshot) {
   const panelTitle = document.querySelector(".private-panel-title");
   if (panelTitle) panelTitle.textContent = snapshot.room.name;
   const launch = $("privateLaunch");
-  if (launch) { launch.hidden = !snapshot.room.isOwner; launch.disabled = snapshot.room.phase !== "lobby" || snapshot.seats.length === 0; }
+  if (launch) {
+    const queuedBots = snapshot.members.filter((member) => member.isBot && member.botProfile?.enabled && BigInt(member.balance) >= BigInt(snapshot.policy.minimumStake || "0")).length;
+    launch.hidden = !snapshot.room.isOwner;
+    // Synthetic strategies commit atomically inside the authoritative launch
+    // transaction. Requiring a pre-existing human seat here made a bot-only
+    // laboratory impossible even though the server correctly supports it.
+    launch.disabled = snapshot.room.phase !== "lobby" || (snapshot.seats.length === 0 && queuedBots === 0);
+    launch.title = queuedBots ? `${queuedBots} CPU participant${queuedBots === 1 ? "" : "s"} will commit when this round launches` : "Launch when committed players are ready";
+  }
   const solo = $("privateSolo");
   if (solo) { solo.hidden = !snapshot.room.isAdmin; solo.disabled = snapshot.room.phase === "running"; }
   const archive = $("privateArchive");
@@ -4807,12 +4819,26 @@ async function startPrivatePlaytest() {
   const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "launch"; launch.textContent = "LAUNCH WHEN EVERYONE IS READY"; launch.onclick = () => privatePlaytestCommand("start");
   const solo = document.createElement("button"); solo.id = "privateSolo"; solo.textContent = "SOLO LAB"; solo.title = "Admin: set the minimum-player gate to one for end-to-end host testing"; solo.onclick = () => privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers: 1 } });
   let showPrivateInvite = () => {};
+  const copyPrivateText = async (value) => {
+    if (!value) return false;
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); return true; }
+    } catch (_) {}
+    const fallback = document.createElement("textarea");
+    fallback.value = value; fallback.readOnly = true; fallback.setAttribute("aria-hidden", "true");
+    fallback.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(fallback); fallback.focus(); fallback.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (_) {}
+    fallback.remove();
+    return copied;
+  };
   const invite = document.createElement("button"); invite.textContent = "COPY INVITE"; invite.onclick = async () => {
     try {
       const result = await privateJson(await fetch("/api/playtest/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId: privateRoomId }) }));
       showPrivateInvite(result.url);
-      try { await navigator.clipboard.writeText(result.url); toast("Reusable table invitation copied", "success"); }
-      catch (_) { toast("Invitation ready · copy it from the open panel", "success"); }
+      if (await copyPrivateText(result.url)) toast("Reusable table invitation copied", "success");
+      else toast("Invitation ready · select COPY SECRET LINK in the open panel", "info");
     } catch (error) { toast(error.message, "error"); }
   };
   const archive = document.createElement("button"); archive.id = "privateArchive"; archive.textContent = "ARCHIVE"; archive.title = "Hide this accidental or completed test table"; archive.onclick = async () => {
@@ -4857,10 +4883,14 @@ async function startPrivatePlaytest() {
   const inviteDialog = document.createElement("dialog"); inviteDialog.id = "privateInvite"; inviteDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Reusable private table door</div><h2>Bring your friends aboard</h2><p class="private-menu-lede">Anyone with this secret link can create a unique username and four-digit PIN, then joins this exact table. The same link works for your whole invited group for seven days.</p><input class="private-invite-url" id="privateInviteUrl" aria-label="Reusable invitation URL" readonly style="width:100%;margin:18px 0"><div class="private-menu-actions"><button id="privateInviteCopy" class="primary">COPY SECRET LINK</button><a id="privateInviteOpen" target="_blank" rel="noopener">TEST IN NEW TAB</a><button id="privateInviteClose">RETURN TO TABLE</button></div></div>`; document.body.appendChild(inviteDialog);
   const inviteUrl = inviteDialog.querySelector("#privateInviteUrl"); const inviteOpen = inviteDialog.querySelector("#privateInviteOpen");
   showPrivateInvite = (url) => { inviteUrl.value = url; inviteOpen.href = url; if (!inviteDialog.open) inviteDialog.showModal(); inviteUrl.focus(); inviteUrl.select(); };
-  inviteDialog.querySelector("#privateInviteCopy").onclick = async () => { try { await navigator.clipboard.writeText(inviteUrl.value); toast("Reusable table invitation copied", "success"); } catch (_) { inviteUrl.focus(); inviteUrl.select(); } };
+  inviteDialog.querySelector("#privateInviteCopy").onclick = async () => {
+    if (await copyPrivateText(inviteUrl.value)) toast("Reusable table invitation copied", "success");
+    else { inviteUrl.focus(); inviteUrl.select(); toast("Copy is blocked by this browser · press Ctrl+C", "info"); }
+  };
   inviteDialog.querySelector("#privateInviteClose").onclick = () => inviteDialog.close();
 
   const simulationDialog = document.createElement("dialog"); simulationDialog.id = "privateSimulation"; simulationDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Host PIN · no-value scenario injection</div><h2>Table simulation controls</h2><p class="private-menu-lede">Change rules between rounds, place the Vault and Powerboard at specific test states, set cumulative burn counters, and adjust any friend's credits. Every injection is server-validated and labeled in the replay log; none of this can touch mainnet.</p><div id="privateAdminStatus" class="private-admin-status"></div>
+    <section class="private-admin-section"><h3>QUICK TEST SETUP</h3><p class="private-menu-lede">Start with a useful population in one click, then use the detailed controls only when a scenario needs exact tuning.</p><div class="private-menu-actions"><button data-quick-sim="solo" class="primary">SOLO + 8 MIXED CPU</button><button data-quick-sim="friends">FRIENDS + 8 CPU</button><button data-quick-sim="stress">100-CPU STRESS</button></div></section>
     <section class="private-admin-section"><h3>TABLE & RAKE ROUTING</h3><p class="private-menu-lede">Basis points use 10,000 = 100%. The ratified 4.50% rake and PFSS allocation remain locked.</p><div class="private-admin-grid">
       <label class="private-setting"><span>Minimum players</span><input data-policy="minimumPlayers" inputmode="numeric"></label><label class="private-setting"><span>Minimum stake</span><input data-policy="minimumStake" inputmode="numeric"></label><label class="private-setting"><span>Vault share of routed rake (bps)</span><input data-policy="protectedPrincipalBps" inputmode="numeric"></label><label class="private-setting"><span>Keeper reward (bps)</span><input data-policy="keeperRewardBps" inputmode="numeric"></label><label class="private-setting"><span>Crash seed per round</span><input data-policy="crashSeed" inputmode="numeric"></label><label class="private-setting"><span>Emission buffer cap</span><input data-policy="emissionBufferCap" inputmode="numeric"></label>
     </div><div class="private-menu-actions"><button id="privateApplyRules" class="primary">APPLY TABLE RULES</button></div></section>
@@ -4877,6 +4907,7 @@ async function startPrivatePlaytest() {
     <div class="private-admin-grid"><label class="private-setting"><span>Apply preset</span><select id="privateBotEditPreset"><option value="cautious">Cautious</option><option value="balanced" selected>Balanced</option><option value="bold">Bold</option><option value="whale">Whale</option><option value="house-money">House-money</option><option value="break-even">Break-even</option><option value="wildcard">Wildcard</option></select></label><label class="private-setting"><span>Reference bankroll</span><input id="privateBotEditBankroll" value="1000000" inputmode="numeric"></label><label class="private-setting private-setting-check"><span>Enabled next round</span><input id="privateBotEnabled" type="checkbox" checked></label><label class="private-setting"><span>Stake min (bps)</span><input id="privateBotStakeMin" value="250" inputmode="numeric"></label><label class="private-setting"><span>Stake max (bps)</span><input id="privateBotStakeMax" value="800" inputmode="numeric"></label><label class="private-setting"><span>Lock target min (bps)</span><input id="privateBotTargetMin" value="14000" inputmode="numeric"></label><label class="private-setting"><span>Lock target max (bps)</span><input id="privateBotTargetMax" value="30000" inputmode="numeric"></label><label class="private-setting private-setting-check"><span>Reset balances to reference</span><input id="privateBotReset" type="checkbox"></label></div>
     <div class="private-menu-actions"><button id="privateUpdateBots" class="primary">APPLY TO SELECTED</button><button id="privateRemoveBots">REMOVE SELECTED</button></div></section>
     <section class="private-admin-section"><h3>PLAYER CREDITS</h3><div class="private-admin-grid"><label class="private-setting"><span>Player</span><select id="privateCreditUser"></select></label><label class="private-setting"><span>New balance</span><input id="privateCreditBalance" inputmode="numeric"></label></div><div class="private-menu-actions"><button id="privateApplyCredit" class="primary">SET PLAYER BALANCE</button></div></section>
+    <section class="private-admin-section"><h3>CO-HOST ACCESS</h3><p class="private-menu-lede">Create a separate six-digit host login. Co-hosts can create their own tables, invite people, tune simulations, and administer test credits. PINs are derived server-side and never stored as plain text.</p><div class="private-admin-grid"><label class="private-setting"><span>Co-host username</span><input id="privateCohostName" maxlength="40" autocomplete="off"></label><label class="private-setting"><span>Six-digit PIN</span><input id="privateCohostPin" inputmode="numeric" maxlength="6" autocomplete="new-password"></label></div><div class="private-menu-actions"><button id="privateCreateCohost">CREATE CO-HOST LOGIN</button></div></section>
     <section class="private-admin-section"><h3>FORCE LOTTERY OUTCOME AFTER CRASH</h3><p class="private-menu-lede">Once the authoritative flight deadline passes, settle this round with no draw, a rollover miss, or a winner-takes-all hit.</p><div class="private-menu-actions"><button data-outcome="none">NO DRAW</button><button data-outcome="miss">MISS · ROLLOVER</button><button data-outcome="hit">HIT · WINNER TAKES ALL</button></div></section>
     <div class="private-menu-actions"><button id="privateSimulationClose">RETURN TO TABLE</button></div></div>`; document.body.appendChild(simulationDialog);
   const adminStatus = simulationDialog.querySelector("#privateAdminStatus");
@@ -4909,12 +4940,29 @@ async function startPrivatePlaytest() {
   simulationDialog.querySelector("#privateBotEditPreset").onchange = (event) => { const range = presetRanges[event.target.value]; ["#privateBotStakeMin","#privateBotStakeMax","#privateBotTargetMin","#privateBotTargetMax"].forEach((id,index) => simulationDialog.querySelector(id).value = range[index]); };
   const addBots = async (count) => { const preset = simulationDialog.querySelector("#privateBotPreset").value; const bankroll = botDigits("#privateBotBankroll", "1000000"); const ok = await privatePlaytestCommand("adminBots", { bots: { operation:"add", count, preset, bankroll } }); if (ok) fillSimulationConsole(); };
   simulationDialog.querySelector("#privateAddBots").onclick = () => addBots(Number(botDigits("#privateBotCount", "1")));
+  simulationDialog.querySelectorAll("[data-quick-sim]").forEach((button) => { button.onclick = async () => {
+    if (!privateSnapshot || privateSnapshot.room.phase === "running") { toast("Quick setup is available between rounds", "error"); return; }
+    const mode = button.dataset.quickSim; const minimumPlayers = mode === "friends" ? 2 : 1; const count = mode === "stress" ? 100 : 8;
+    adminStatus.textContent = `Preparing ${mode} scenario…`;
+    const policyOk = await privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers } });
+    const botsOk = policyOk && await privatePlaytestCommand("adminBots", { bots: { operation:"add", count, preset:"mixed", bankroll:"1000000" } });
+    adminStatus.textContent = botsOk ? `Ready · ${count} mixed CPU participants added.` : "Quick setup was rejected · review the table notification.";
+    if (botsOk) fillSimulationConsole();
+  }; });
   simulationDialog.querySelectorAll("[data-bot-mass]").forEach((button) => button.onclick = () => addBots(Number(button.dataset.botMass)));
   simulationDialog.querySelector("#privateSelectAllBots").onclick = () => simulationDialog.querySelectorAll("[data-bot-id]").forEach((input) => input.checked = true);
   simulationDialog.querySelector("#privateSelectNoBots").onclick = () => simulationDialog.querySelectorAll("[data-bot-id]").forEach((input) => input.checked = false);
   simulationDialog.querySelector("#privateUpdateBots").onclick = async () => { const ids = selectedBots(); const profile = { preset:simulationDialog.querySelector("#privateBotEditPreset").value, enabled:simulationDialog.querySelector("#privateBotEnabled").checked, initialBankroll:botDigits("#privateBotEditBankroll","1000000"), stakeMinBps:Number(botDigits("#privateBotStakeMin","1")), stakeMaxBps:Number(botDigits("#privateBotStakeMax","10000")), targetMinBps:Number(botDigits("#privateBotTargetMin","10100")), targetMaxBps:Number(botDigits("#privateBotTargetMax","1000000")) }; const ok = await privatePlaytestCommand("adminBots", { bots:{ operation:"update", ids, profile, resetBalance:simulationDialog.querySelector("#privateBotReset").checked } }); if (ok) fillSimulationConsole(); };
   simulationDialog.querySelector("#privateRemoveBots").onclick = async () => { const ids = selectedBots(); if (!ids.length || !confirm(`Remove ${ids.length} selected synthetic participant(s) from this table?`)) return; const ok = await privatePlaytestCommand("adminBots", { bots:{ operation:"remove", ids } }); if (ok) fillSimulationConsole(); };
   simulationDialog.querySelector("#privateApplyCredit").onclick = async () => { const userId = simulationDialog.querySelector("#privateCreditUser").value; const balance = simulationDialog.querySelector("#privateCreditBalance").value.replace(/\D/g, ""); if (balance) await privatePlaytestCommand("adminCredit", { userId, balance }); fillSimulationConsole(); };
+  simulationDialog.querySelector("#privateCreateCohost").onclick = async () => {
+    const displayName = simulationDialog.querySelector("#privateCohostName").value.trim(); const pinInput = simulationDialog.querySelector("#privateCohostPin"); const pin = pinInput.value.replace(/\D/g, "");
+    if (!displayName || pin.length !== 6) { toast("Enter a username and exactly six PIN digits", "error"); return; }
+    try {
+      const created = await privateJson(await fetch("/api/playtest/admins", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ displayName, pin }) }));
+      pinInput.value = ""; simulationDialog.querySelector("#privateCohostName").value = ""; adminStatus.textContent = `${created.displayName} can now sign in as a co-host.`; toast("Co-host login created", "success");
+    } catch (error) { toast(error.message, "error"); }
+  };
   simulationDialog.querySelectorAll("[data-outcome]").forEach((button) => { button.onclick = () => privatePlaytestCommand("settle", { lotteryOutcome: button.dataset.outcome }); });
   simulationDialog.querySelector("#privateSimulationClose").onclick = () => simulationDialog.close();
   const menuDialog = document.createElement("dialog"); menuDialog.id = "privateMenu"; menuDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">PlankCrash alpha</div><h2>Game menu</h2><p class="private-menu-lede">Preferences stay on this device. The shared round keeps running while this menu is open; no player can pause an authoritative multiplayer table.</p><div class="private-setting-grid"><label class="private-setting"><span>Motion</span><select id="privateMotion"><option value="system">Match device</option><option value="full">Full motion</option><option value="reduced">Reduced motion</option></select></label><label class="private-setting"><span>Graphics</span><select id="privateQuality"><option value="high">High</option><option value="balanced">Balanced</option><option value="low">Battery saver</option></select></label><label class="private-setting private-setting-check"><span>High contrast HUD</span><input id="privateContrast" type="checkbox"></label><label class="private-setting private-setting-check"><span>Sound</span><input id="privateSound" type="checkbox"></label><label class="private-setting private-setting-check"><span>Phone vibration</span><input id="privateHaptics" type="checkbox"></label><div class="private-setting"><span>Display</span><button id="privateFullscreen">ENTER FULL SCREEN</button></div></div><div class="private-menu-actions"><button id="privateMenuHelp">HOW TO PLAY</button><button class="primary" id="privateMenuClose">RETURN TO FLIGHT</button></div></div>`; document.body.appendChild(menuDialog);

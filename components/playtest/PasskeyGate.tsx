@@ -70,7 +70,7 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
     </div> : null}
     <div className="p-6">
     <h2 className="text-2xl text-gold-300">{mode === "bootstrap" ? "Claim the host account" : mode === "register" ? "Create your invited player" : "Return to the private playtest"}</h2>
-    <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This is a one-use invitation. Choose a unique username and your own four-digit PIN." : "Enter your existing username and personal four- or six-digit PIN."}</p>
+    <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This private table invitation remains reusable for the invited group for seven days. Choose a unique username and your own four-digit PIN." : "Enter your existing username and personal four- or six-digit PIN."}</p>
     <label className="mt-5 block text-xs font-black uppercase tracking-wider text-gold-300">Username
       <input autoComplete="nickname" className="mt-2 min-h-11 w-full rounded-md border border-line bg-panel-strong px-3 text-cream outline-none focus:border-line-strong" maxLength={40} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
     </label>

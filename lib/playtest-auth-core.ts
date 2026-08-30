@@ -37,6 +37,17 @@ export function playtestRp(): { rpID: string; origin: string; rpName: string } {
   return { rpID, origin: origin.origin, rpName: "Plank Love Game Laboratory" };
 }
 
+/** Build invitations from the operator-controlled public origin. Request URLs
+ * may contain Passenger/reverse-proxy hosts and must never escape into links
+ * sent to players. */
+export function playtestInviteUrl(token: string): string {
+  const normalized = normalizeInvite(token);
+  if (normalized.length < 20 || normalized.length > 512) throw new Error("Invalid invitation token.");
+  const url = new URL("/playtest", configuredOrigin());
+  url.searchParams.set("invite", normalized);
+  return url.toString();
+}
+
 /** Exact Origin check for every cookie-authenticated mutation. SameSite is a
  * useful browser defense, but it is not the authorization boundary. */
 export function playtestMutationOriginAllowed(req: Request): boolean {
