@@ -123,8 +123,22 @@ export async function createRoomInvite(identity: PlaytestIdentity, roomId: strin
   return token;
 }
 
-export async function registerFromInvite(displayName: string, pin: string, invite: string): Promise<{ identity: PlaytestIdentity; token: string }> {
-  const identity = await withPostgresTransaction(async (client) => {
+export async function playtestInvitePreview(invite: string): Promise<{ roomId: string | null; roomName: string | null; joinCode: string | null; hostName: string | null } | null> {
+  if (!invite || invite.length < 20) return null;
+  const result = await postgresQuery<{ room_id: string | null; room_name: string | null; join_code: string | null; host_name: string | null }>(
+    `SELECT i.room_id,r.name room_name,r.join_code,u.display_name host_name
+       FROM playtest_invites i
+       LEFT JOIN playtest_rooms r ON r.id=i.room_id AND r.archived_at IS NULL
+       LEFT JOIN playtest_users u ON u.id=r.owner_user_id
+      WHERE i.token_hash=$1 AND i.consumed_at IS NULL AND i.expires_at>NOW()`,
+    [sha256(invite)],
+  );
+  const row = result.rows[0];
+  return row ? { roomId: row.room_id, roomName: row.room_name, joinCode: row.join_code, hostName: row.host_name } : null;
+}
+
+export async function registerFromInvite(displayName: string, pin: string, invite: string): Promise<{ identity: PlaytestIdentity; token: string; roomId: string | null }> {
+  const registered = await withPostgresTransaction(async (client) => {
     const found = await client.query<{ room_id: string | null }>(
       `UPDATE playtest_invites SET consumed_at=NOW()
         WHERE token_hash=$1 AND consumed_at IS NULL AND expires_at>NOW()
@@ -139,9 +153,9 @@ export async function registerFromInvite(displayName: string, pin: string, invit
          ON CONFLICT (room_id,user_id) DO NOTHING`, [found.rows[0].room_id, created.id],
       );
     }
-    return created;
+    return { identity: created, roomId: found.rows[0].room_id };
   });
-  return { identity, token: await createSession(identity.id) };
+  return { ...registered, token: await createSession(registered.identity.id) };
 }
 
 export async function sessionFromToken(token: string | undefined): Promise<PlaytestIdentity | null> {
