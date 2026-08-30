@@ -299,7 +299,9 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
     );
     room.version = String(BigInt(room.version) + 1n); room.current_round = roundId.toString();
     await client.query(`UPDATE playtest_rooms SET version=$2,current_round=$3,phase='lobby',commitment=NULL,reveal=NULL,crash_bps=NULL,started_at=NULL,crash_at=NULL,settled_at=NULL WHERE id=$1`, [roomId, room.version, room.current_round]);
-    await event(client, room, "bet.accepted", identity.id, commandId, { stake, targetBps });
+    // Stake is shared table state; the requested auto-lock is private player
+    // strategy until it executes (or the immutable round settles).
+    await event(client, room, "bet.accepted", identity.id, commandId, { stake });
     return { duplicate: false, version: room.version };
   });
 }
@@ -346,7 +348,10 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       `UPDATE playtest_rooms SET phase='running',version=$2,commitment=$3,reveal=$4,crash_bps=$5,started_at=$6,crash_at=$7,settled_at=NULL WHERE id=$1`,
       [roomId, room.version, commitment, reveal, crashBps.toString(), started, crashAt],
     );
-    await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString(), crashAt: crashAt.toISOString() });
+    // Never publish crashAt while the round is live. A deadline is merely the
+    // unrevealed crash multiplier expressed in time, so exposing it defeats
+    // commit/reveal even when crash_bps and reveal remain private.
+    await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString() });
     if (committed.length) await event(client, room, "bots.committed", identity.id, null, {
       count: committed.length,
       presets: committed.reduce<Record<string, number>>((counts, bot) => {
@@ -605,7 +610,9 @@ export async function managePlaytestBots(identity: PlaytestIdentity, roomId: str
     } else throw new PlaytestRoomError(400, "BAD_BOT_OPERATION", "Unknown synthetic-participant operation.");
     room.version = String(BigInt(room.version) + 1n);
     await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [roomId, room.version]);
-    await event(client, room, `admin.bots.${String(input.operation)}`, identity.id, commandId, { affected, configuration: input.operation === "remove" ? undefined : input, laboratoryOnly: true });
+    // Bot tuning is host strategy and must not be broadcast through the
+    // participant replay stream. Members only need the resulting seat state.
+    await event(client, room, `admin.bots.${String(input.operation)}`, identity.id, commandId, { affected, laboratoryOnly: true });
     return { duplicate: false, version: room.version, affected };
   });
 }

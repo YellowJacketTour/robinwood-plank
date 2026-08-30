@@ -80,6 +80,8 @@ That is honest and solvent, but it does not satisfy an “enormous live total”
 ## Acceptance invariants
 
 - No running response contains `reveal`, `crashBps`, `crashAt`, `due`, or any reversible equivalent.
+- Public replay events likewise omit the live deadline, human auto-lock targets, and host bot-strategy configuration. These fields cannot bypass the snapshot privacy boundary.
+- After settlement, the private-alpha verification panel locally hashes the revealed seed and independently derives the crash point with Web Crypto; it reports a mismatch if either proof fails.
 - `commitment == SHA-256(reveal)` after settlement.
 - A lock at or after the hidden deadline is rejected regardless of what the client displays.
 - Accepted lock factors are immutable and server-computed.
