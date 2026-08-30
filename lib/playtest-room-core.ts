@@ -150,6 +150,20 @@ export function simulationCrashBps(revealHex: string): bigint {
 
 export const PLAYTEST_POWERBOARD_ODDS = 16;
 
+/** Exact integer presentation quote for a linear-weight two-stage voucher.
+ * This never enters settlement; it makes the already-ratified probability
+ * visible without floating-point drift or a wallet-based Sybil bonus. */
+export function powerboardVoucherQuote(myWeight: bigint, totalWeight: bigint, netPrize: bigint, hitOddsOneIn = PLAYTEST_POWERBOARD_ODDS) {
+  if (myWeight < 0n || totalWeight < 0n || netPrize < 0n || myWeight > totalWeight) throw new RangeError("invalid voucher quote amounts");
+  if (!Number.isSafeInteger(hitOddsOneIn) || hitOddsOneIn < 1) throw new RangeError("invalid hit odds");
+  const odds = BigInt(hitOddsOneIn);
+  return {
+    conditionalSharePpm: totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n,
+    combinedOddsOneInCeil: myWeight > 0n ? (totalWeight * odds + myWeight - 1n) / myWeight : 0n,
+    probabilityWeightedPrize: totalWeight > 0n ? netPrize * myWeight / (totalWeight * odds) : 0n,
+  };
+}
+
 /** Public, deterministic numbered draw derived from the already-committed reveal. */
 export function powerboardRoundDraw(revealHex: string) {
   if (!/^[0-9a-f]{64}$/.test(revealHex)) throw new RangeError("invalid reveal");

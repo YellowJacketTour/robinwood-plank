@@ -5,7 +5,7 @@ import {
   bettingRoundId,
   canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt,
   parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
-  simulationCrashBps, powerboardRoundDraw,
+  simulationCrashBps, powerboardRoundDraw, powerboardVoucherQuote,
 } from "../../lib/playtest-room-core";
 
 test("a multiplayer lobby advances once and keeps every commitment in one round", () => {
@@ -21,6 +21,20 @@ test("every committed reveal produces one bounded deterministic Powerboard numbe
   assert.deepEqual(first, powerboardRoundDraw(reveal));
   assert.ok(first.drawnNumber >= 1 && first.drawnNumber <= first.oddsOneIn);
   assert.equal(first.rawHit, first.drawnNumber === first.winningNumber);
+});
+
+test("Powerboard voucher quote exposes exact two-stage odds and is Sybil invariant", () => {
+  const whole = powerboardVoucherQuote(25_000n, 100_000n, 1_600_000n, 16);
+  assert.deepEqual(whole, {
+    conditionalSharePpm: 250_000n,
+    combinedOddsOneInCeil: 64n,
+    probabilityWeightedPrize: 25_000n,
+  });
+  const splitA = powerboardVoucherQuote(10_000n, 100_000n, 1_600_000n, 16);
+  const splitB = powerboardVoucherQuote(15_000n, 100_000n, 1_600_000n, 16);
+  assert.equal(splitA.conditionalSharePpm + splitB.conditionalSharePpm, whole.conditionalSharePpm);
+  assert.equal(splitA.probabilityWeightedPrize + splitB.probabilityWeightedPrize, whole.probabilityWeightedPrize);
+  assert.throws(() => powerboardVoucherQuote(100_001n, 100_000n, 1n), /invalid/);
 });
 
 test("room rules hash is canonical and stable across key order", () => {

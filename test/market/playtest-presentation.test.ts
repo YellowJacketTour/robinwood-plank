@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { connectionState, presentedMultiplierBps, signedNet } from "../../lib/playtest-presentation";
+
+const arcadeSource = readFileSync(new URL("../../public/arcade/crash.html", import.meta.url), "utf8");
 
 test("the visible multiplier freezes at the committed crash point", () => {
   assert.equal(presentedMultiplierBps({ phase: "running", liveBps: 42_000, crashBps: "23500", deadlinePassed: false }), 23_500);
@@ -20,4 +23,11 @@ test("transport freshness is distinct from animation", () => {
   assert.equal(connectionState(48_000, 50_000), "live");
   assert.equal(connectionState(20_000, 50_000), "delayed");
   assert.equal(connectionState(2_000, 50_000), "offline");
+});
+
+test("settlement acknowledgement survives numeric/string round hydration and cannot be covered by the theater", () => {
+  assert.match(arcadeSource, /function samePrivateRound\(left, right\)/);
+  assert.match(arcadeSource, /String\(left\) === String\(right\)/);
+  assert.match(arcadeSource, /private-reveal-continue[^}]+pointer-events:auto/);
+  assert.match(arcadeSource, /continueButton\.onclick = \(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); acknowledgePrivateSettlement\(\); \}/);
 });
