@@ -140,6 +140,7 @@ async function main() {
   // 2 ETH. mustHitByEpochs guarantees the full jackpot pays out at least that
   // often (in epochs) even if the ball never naturally hits.
   const RESERVE_CAP = envBig("CASINO_RESERVE_CAP_WEI", ethers.parseEther("2"));
+  const SEED_BOOTSTRAP_BUDGET_WEI = envBig("CASINO_SEED_BOOTSTRAP_BUDGET_WEI", RESERVE_CAP / 10n); // NEW-1 -- PROPOSED (<= reserveCap/10)
   const MUST_HIT_EPOCHS = envBig("CASINO_MUST_HIT_EPOCHS", 30n);
 
   // Powerboard
@@ -231,6 +232,11 @@ async function main() {
     dailyDrawdownBps: DAILY_DRAWDOWN_BPS,
     hwmDrawdownBps: HWM_DRAWDOWN_BPS,
     maxMultiplierBps: MAX_MULTIPLIER_BPS,
+    // Re-review NEW-1: seed-income budget bootstrap -- PROPOSED reserveCap/10;
+    // the constructor rejects anything larger on a capped Vault. After it is
+    // spent, every wei of seed is <= 100% of net rake earned (bytecode
+    // SEED_INCOME_MULTIPLE_BPS = 10000).
+    seedBootstrapBudgetWei: SEED_BOOTSTRAP_BUDGET_WEI,
   }); // nonce+2
   await crash.waitForDeployment();
 

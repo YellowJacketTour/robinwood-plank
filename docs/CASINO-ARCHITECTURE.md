@@ -51,7 +51,22 @@ marked **OPEN**.
   1.0001× auto exit (P = 0.9999) earns 0.4% of its stake instead of the whole
   seed. Test `seedNotFarmableAtMinExit` reproduces the reviewer's 4-sybil probe:
   18.5% of the bankroll in 7 rounds on the old key, ≤ the fair-odds bound
-  (0.06%) now. Spec §2.6.
+  (0.06%) now. Spec §2.6. **This is NOT a sybil/collusion bound** (re-review
+  NEW-1): the losing stakes go to the player pot, so an absorber + N winners
+  recycle them and net `seed/m − rake × Σstakes` per round.
+- **Seed bounded by HOUSE INCOME (re-review NEW-1, structural):** a rolling
+  `seedBudget` credited with each round's net rake (after keeper bounties) and
+  debited by every seed drawn (returns credited back); each round's seed ≤
+  `seedBudget × SEED_INCOME_MULTIPLE_BPS/10⁴` (bytecode 10000) on top of every
+  other cap, so cumulative house money paid out ≤ `seedBootstrapBudgetWei`
+  (constructor, ≤ `reserveCap/10`) + 100% of cumulative net rake — the house
+  recycles at most what it earned, and a colluding group can at best recover
+  its own retained rake. `autoCashOutBps == 10000` (a P(win)=1 absorber) is
+  rejected. Tests `colludingAbsorberIsNotProfitable` (fails on 0f21383),
+  `seedBoundedByHouseIncome`, `autoTargetMustExceedOneX`. Spec §2.7.
+- `estimatedPayout` during BETTING uses the current `reserve` as the
+  single-payout cap base (`reserveAtLock` is 0 pre-lock — re-review NEW-2), so
+  the bet-slip estimate equals the LIVE estimate on the same state.
 - (c) `keeperRewardBps` must be > 0 and `rakeBps` must be > 0 (constructor
   reverts — review LOW-2, bounties are bps of the rake); `keeperRevealBps` /
   `keeperLockBps` pay the revealer / locker from the rake at `settleRound`, all
@@ -200,13 +215,18 @@ The consequences are real and will surprise people:
 **Collusion doesn't pay.** Two colluding players (or one sybil running both
 sides) can only ever get back the distributable, which is strictly less than
 what they put in — they simply pay the rake. Pari-mutuel is not exploitable by
-coordination.
+coordination — **for the player-funded pot.** The Vault seed is different: it is
+house money, and a coordinated field CAN farm it (re-review NEW-1); that is why
+the seed is bounded by house income (`seedBudget`, §0): the group can never take
+out more than the rake it paid in.
 
 **At larger N it smooths out** — your multiplier's *relative* rank matters
 more than its absolute value, and the "everyone cashed at once" degenerate
 outcome becomes vanishingly unlikely. The honest UI consequence at every N:
-show `estimatedPayout()` (a real share of a real pot), never `stake ×
-multiplier`, which the game never pays.
+show `estimatedPayout()` — the player's **current** share of the current pot,
+which may shrink as other players cash out ahead of the crash; it is not an
+upper bound and not a promise — never `stake × multiplier`, which the game
+never pays.
 
 **And if the whole field busts,** nobody wins — the pot is not stranded, it
 rolls into the next round (`sweepBustedRound`). That's the mechanic that makes

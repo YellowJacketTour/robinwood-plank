@@ -174,9 +174,38 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // funded portion of a payout is never capped: parimutuel player money
     // is not house exposure. This is a PER-WALLET UX bound ("no single
     // ticket wins more than X% of the bankroll"), NOT a sybil bound -- N
-    // wallets get N caps. The sybil bound is the seed's fair-odds cap in
-    // _splitPayout (review HIGH-1) plus the drawdown circuits.
+    // wallets get N caps. Neither is the fair-odds cap in _splitPayout
+    // (review HIGH-1): it bounds each WINNER's house money, but a colluding
+    // group recycles its losers' stakes through the player pot (re-review
+    // NEW-1). The only sybil/collusion bound is the seed INCOME budget
+    // below: house money paid out can never exceed house money earned.
     uint256 public immutable singlePayoutCapBps;
+    // ── Re-review NEW-1: the seed is bounded by HOUSE INCOME ─────────────
+    // In a parimutuel game the Vault seed is pure subsidy: whatever is paid
+    // out of it is a transfer from the house to the field, and a colluding
+    // field (an absorber that always wins the player pot plus N wallets
+    // targeting a multiplier m, sized so their fair-odds profit covers the
+    // seed) has EV/round = seed/m - rake*stakes > 0 for m above ~1.06 --
+    // the fair-odds cap only bounds house money PER WINNER, and the losing
+    // stakes go to the group's own absorber, not to the house. No per-
+    // round cap fixes that; only a bound on the cumulative subsidy does.
+    // seedBudget is that bound, in wei: it is credited with every round's
+    // net rake (the rake the house actually retains after keeper bounties)
+    // and debited by every seed drawn, so at all times
+    //   sum(seeds drawn) - sum(seeds returned) <= bootstrap + sum(net rake)
+    // and a round's seed is <= seedBudget * SEED_INCOME_MULTIPLE_BPS/10000
+    // on top of every other cap. At 10000 bps the house recycles at most
+    // 100% of what it earned: "positive-sum for the community" is then
+    // literally true -- the community gets the rake back as seed, never
+    // more, so a colluding group can at best recover its own rake (minus
+    // keeper bounties) and can never net-extract house capital.
+    // SEED_BOOTSTRAP: the constructor's seedBootstrapBudgetWei (<= reserveCap
+    // /10 when capped) is the only allowance that exists before any rake
+    // has been earned, so the first rounds can seed. PROPOSED values: spec
+    // §6. Both are exercised by colludingAbsorberIsNotProfitable.
+    uint256 public constant SEED_INCOME_MULTIPLE_BPS = 10000;
+    uint256 public immutable seedBootstrapBudgetWei;
+    uint256 public seedBudget;
     // Review MED-1: manual cash-outs close this many drand periods BEFORE
     // the target round's emission time, relative to the CHAIN clock. The
     // chain's block.timestamp can lag wall-clock (sequencer lag delta); the
@@ -419,6 +448,10 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 dailyDrawdownBps; // (b) 0 < x <= 10000 (10000 = never trips)
         uint256 hwmDrawdownBps; // (b) 0 < x <= 10000 (10000 = never trips)
         uint256 maxMultiplierBps; // (b) 10000 < x <= _multiplierAt(maxElapsedBlocks)
+        // Re-review NEW-1: initial seed-income budget, wei. <= reserveCap/10
+        // when the Vault is capped (an uncapped Vault leaves it to the
+        // owner; deploy-casino.ts pins it to reserveCap/10 -- PROPOSED).
+        uint256 seedBootstrapBudgetWei;
     }
 
     constructor(Config memory cfg) {
@@ -510,6 +543,11 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         reserveFloorWei = cfg.reserveFloorWei;
         reserveCap = cfg.reserveCap;
         jackpotSink = cfg.jackpotSink;
+        // NEW-1: the bootstrap seed budget is bounded by the (now validated)
+        // bankroll cap; an uncapped Vault leaves it to the owner (spec §6).
+        if (cfg.reserveCap != 0 && cfg.seedBootstrapBudgetWei > cfg.reserveCap / 10) revert BadHardeningConfig();
+        seedBootstrapBudgetWei = cfg.seedBootstrapBudgetWei;
+        seedBudget = cfg.seedBootstrapBudgetWei;
 
         _startRound();
     }
@@ -577,11 +615,17 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         }
         seed = _computeSeed();
         // reserve - seed > 0 always (seed < reserve), so the Vault survives.
-        if (seed > 0) reserve -= seed;
+        if (seed > 0) {
+            reserve -= seed;
+            // NEW-1: seed <= budget*multiple/10000 by _computeSeed; the debit
+            // saturates so a multiple > 10000 could never underflow here.
+            uint256 b = seedBudget;
+            seedBudget = seed >= b ? 0 : b - seed;
+        }
     }
 
     /// Pure seed formula (no circuits): min(num/den, seedMaxBps) of the
-    /// Vault, clamped to the optional floor.
+    /// Vault, then the NEW-1 income budget, clamped to the optional floor.
     function _computeSeed() private view returns (uint256 seed) {
         uint256 avail = reserve;
         if (avail == 0) return 0;
@@ -589,6 +633,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         seed = (avail * seedNumerator) / seedDenominator; // floor, strictly < avail
         uint256 bpsCap = (avail * seedMaxBps) / 10000; // hardening (b).1: bytecode ceiling
         if (seed > bpsCap) seed = bpsCap;
+        uint256 incomeCap = (seedBudget * SEED_INCOME_MULTIPLE_BPS) / 10000; // NEW-1: house-income bound
+        if (seed > incomeCap) seed = incomeCap;
         if (reserveFloorWei > 0) {
             uint256 maxDraw = avail - reserveFloorWei;
             if (seed > maxDraw) seed = maxDraw;
@@ -809,12 +855,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     }
 
     /// Records the auto target and its provisional winning weight. Bounded
-    /// to [1.00x, maxMultiplierBps] and to a block offset the capped crash
-    /// can actually reach, so a committed target is always settleable.
+    /// to (1.00x, maxMultiplierBps] -- strictly above 1.00x (NEW-1) -- and
+    /// to a block offset the capped crash can actually reach, so a
+    /// committed target is always settleable.
     function _commitAutoCashOut(Round storage r, uint256 id, address player, uint256 stakeAmount, uint256 auto_) private {
         if (auto_ == 0) return;
-        if (auto_ < 10000 || auto_ > maxMultiplierBps) revert BadAutoTarget();
+        // NEW-1 (b): exactly 1.00x inverts to elapsed 0 -- a bet that wins
+        // with P = 1 and takes the whole player pot whenever anyone else
+        // loses: the colluding group's riskless absorber. Every committed
+        // target must take >= 1 block of crash risk.
+        if (auto_ <= 10000 || auto_ > maxMultiplierBps) revert BadAutoTarget();
         uint256 targetElapsed = _invertMultiplier(auto_);
+        if (targetElapsed == 0) revert BadAutoTarget();
         if (targetElapsed > maxMultiplierElapsedBlocks) revert TargetUnreachable();
         autoCashOutBps[id][player] = auto_;
         (uint256 w, uint256 pw) = _weightsAt(stakeAmount, targetElapsed);
@@ -1069,6 +1121,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 revealReward = (rake * keeperRevealBps) / 10000;
         uint256 lockReward = (rake * keeperLockBps) / 10000;
         uint256 netRake = rake - keeperReward - revealReward - lockReward;
+        // NEW-1: the rake the house actually retains (after bounties) is the
+        // ONLY income that can ever be recycled as seed.
+        seedBudget += netRake;
         // Compound a share of the rake straight back into the Vault instead
         // of sending it all to the treasury -- this is the steady growth
         // engine that makes the prize pot grow on WINNING rounds too, not
@@ -1124,6 +1179,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (seed > 0) {
             r.rolledOverFromPrevious = 0;
             _creditReserve(seed, false); // a return, not new capital (MED-2)
+            seedBudget += seed; // NEW-1: never paid out, so not spent budget
         }
     }
 
@@ -1152,6 +1208,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 amount = r.distributable;
         r.distributable = 0;
         _creditReserve(amount);
+        seedBudget += r.rolledOverFromPrevious; // NEW-1: the seed came back unpaid
         emit PoolRolledOver(roundId, amount);
         _spillOverflow(); // a big bust windfall can push the Vault past its cap
     }
@@ -1235,6 +1292,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         );
         if (excess > 0) {
             _creditReserve(excess, false); // a return of house money, not new capital (MED-2)
+            seedBudget += excess; // NEW-1: unpaid seed is unspent budget
             emit PayoutCapped(roundId, player, payout + excess, payout, excess);
         }
         address sink = payoutRedirect[player];
@@ -1285,7 +1343,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
      *
      * Then hardening (b).2 on top: the seed part is capped at
      * reserveAtLock*singlePayoutCapBps/10000 (a per-wallet UX bound, not a
-     * sybil bound). The player-funded part is never capped.
+     * sybil bound). The player-funded part is never capped. Re-review
+     * NEW-2: before lock (estimatedPayout's virtual-lock estimate) the cap
+     * base is the CURRENT reserve, which is exactly what reserveAtLock will
+     * be stamped with, so the BETTING estimate equals the LIVE one.
+     *
+     * NOT a collusion bound, either of them (re-review NEW-1): the fair-
+     * odds cap limits each winner's house money, but the losing stakes go
+     * to the PLAYER pot, so a group whose absorber always wins the player
+     * pot nets seed/m - rake*stakes per round. The collusion bound is the
+     * seed-income budget (seedBudget): cumulative seed <= bootstrap +
+     * cumulative net rake, so the group can never recover more house money
+     * than it paid the house.
      */
     function _splitPayout(Round storage r, uint256 w, uint256 pw, uint256 W, uint256 PW, uint256 distributable)
         private
@@ -1298,7 +1367,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (seed == 0) return (paid, 0);
         uint256 seedRaw = PW > 0 ? (seed * pw) / PW : (seed * w) / W;
         uint256 seedPaid = seedRaw > pw ? pw : seedRaw; // fair-odds cap (HIGH-1)
-        uint256 cap = (r.reserveAtLock * singlePayoutCapBps) / 10000;
+        uint256 capBase = r.lockBlock == 0 ? reserve : r.reserveAtLock; // NEW-2
+        uint256 cap = (capBase * singlePayoutCapBps) / 10000;
         if (seedPaid > cap) seedPaid = cap; // hardening (b).2
         paid += seedPaid;
         excess = seedRaw - seedPaid;
@@ -1382,7 +1452,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// Reflects hardening (a) (effective = earlier of manual/auto), the
     /// HIGH-1 seed split, and (b) (single-payout cap applied). This is the
     /// number the UI must show -- never `stake x multiplier` (spec §7 copy
-    /// discipline). During BETTING (review LOW-3) an auto target is priced
+    /// discipline). It is the player's CURRENT share of the current pot,
+    /// not an upper bound: it shrinks as other players cash out ahead of
+    /// the crash (NEW-3). During BETTING (review LOW-3) an auto target is priced
     /// against a VIRTUAL lock (elapsed = invert(auto)) and the current
     /// provisional pool/weights, so the bet slip shows a real number; a
     /// manual-only bet has no knowable exit yet and reads 0.

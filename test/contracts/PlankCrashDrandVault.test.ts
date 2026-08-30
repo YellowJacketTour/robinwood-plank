@@ -242,6 +242,7 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       reserveShareBps: 0n,
       reserveCap: ethers.parseEther("1"),
       jackpotSink: await pb.getAddress(),
+      seedBootstrapBudgetWei: ethers.parseEther("0.1"), // NEW-1: <= reserveCap/10 on a capped Vault
     });
 
     // Fund the Vault above its cap -> it caps, and the overflow lands in the jackpot.

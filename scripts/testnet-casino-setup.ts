@@ -195,6 +195,9 @@ async function main() {
     dailyDrawdownBps: 10000n,
     hwmDrawdownBps: 10000n,
     maxMultiplierBps: 10000n + BigInt(MAX_ELAPSED_BLOCKS) * 40n + (BigInt(MAX_ELAPSED_BLOCKS) * BigInt(MAX_ELAPSED_BLOCKS)) / 5n,
+    // Re-review NEW-1: seed-income budget bootstrap. LOCAL/TEST: reserveCap/10
+    // (the constructor's own bound); production value is PROPOSED in deploy-casino.ts.
+    seedBootstrapBudgetWei: RESERVE_CAP / 10n,
   }, FEES);
   await crash.waitForDeployment();
 
