@@ -364,9 +364,19 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       crashBps: BigInt(room.crash_bps), lotteryOutcome,
     });
     for (const allocation of result.settlement?.allocations ?? []) {
+      const originalSeat = seats.rows.find((seat) => seat.user_id === allocation.id);
+      const autoAccepted = allocation.survived && originalSeat?.accepted_target_bps === null;
+      const autoLockedAt = autoAccepted && room.started_at
+        ? new Date(room.started_at.getTime() + crashDurationMs(allocation.targetBps))
+        : null;
       await client.query(
-        `UPDATE playtest_round_seats SET payout=$4,net=$5,survived=$6 WHERE room_id=$1 AND round_id=$2 AND user_id=$3`,
-        [roomId, room.current_round, allocation.id, allocation.payout.toString(), allocation.net.toString(), allocation.survived],
+        `UPDATE playtest_round_seats
+            SET payout=$4,net=$5,survived=$6,
+                accepted_target_bps=COALESCE(accepted_target_bps,$7),
+                locked_at=COALESCE(locked_at,$8)
+          WHERE room_id=$1 AND round_id=$2 AND user_id=$3`,
+        [roomId, room.current_round, allocation.id, allocation.payout.toString(), allocation.net.toString(), allocation.survived,
+          autoAccepted ? allocation.targetBps.toString() : null, autoLockedAt],
       );
       await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance+$3 WHERE room_id=$1 AND user_id=$2`, [roomId, allocation.id, allocation.payout.toString()]);
     }
