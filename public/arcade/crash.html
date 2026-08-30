@@ -3546,6 +3546,10 @@ document.addEventListener("keydown", (e) => {
 })();
 
 primaryBtn.addEventListener("click", async () => {
+  if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled" && privateSettlementAcknowledgedRound !== privateSnapshot.room.currentRound) {
+    acknowledgePrivateSettlement();
+    return;
+  }
   if (uiState === "betting-open") { await doPlaceBet(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
   else if (uiState === "live-hold") { await doCashOut(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
 });
@@ -4258,6 +4262,22 @@ let privateRefreshBusy = false;
 let privatePoll = null;
 let privateTickRound = null;
 let privateLastError = "";
+let privateConclusionKey = "";
+let privateSettlementAcknowledgedRound = null;
+let privateFirstSnapshot = true;
+let privateSessionCommitted = 0n;
+let privateSessionStart = Date.now();
+let privateSessionInitialBalance = null;
+
+function privateSessionKey(roomId, suffix) { return `plank-alpha:${roomId}:${suffix}`; }
+
+function acknowledgePrivateSettlement() {
+  if (!privateSnapshot) return;
+  privateSettlementAcknowledgedRound = privateSnapshot.room.currentRound;
+  sessionStorage.setItem(privateSessionKey(privateSnapshot.room.id, "ack"), String(privateSettlementAcknowledgedRound));
+  $("resultCard").classList.remove("show");
+  paintPrivateSnapshot(privateSnapshot);
+}
 
 async function privateJson(response) {
   const body = await response.json().catch(() => ({}));
@@ -4273,6 +4293,10 @@ async function privatePlaytestCommand(action, extra = {}) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, commandId: crypto.randomUUID(), ...extra }),
     }));
+    if (action === "bet" && extra.stake) {
+      privateSessionCommitted += BigInt(extra.stake);
+      sessionStorage.setItem(privateSessionKey(privateRoomId, "committed"), privateSessionCommitted.toString());
+    }
     if (action !== "tick") sfx.click();
     await refreshPrivatePlaytest();
     return true;
@@ -4323,14 +4347,22 @@ function renderPrivateRoster(snapshot) {
 function paintPrivateConclusion(snapshot, me, seat) {
   const card = $("resultCard");
   if (snapshot.room.phase !== "settled") {
+    privateConclusionKey = "";
     card.className = "result-card";
     card.replaceChildren();
+    return;
+  }
+  if (privateSettlementAcknowledgedRound === snapshot.room.currentRound) {
+    card.classList.remove("show");
     return;
   }
   const crash = (Number(snapshot.room.crashBps || 10000) / 10000).toFixed(2);
   const won = Boolean(seat?.survived);
   const locked = seat?.acceptedTargetBps ? (Number(seat.acceptedTargetBps) / 10000).toFixed(2) : null;
   const net = BigInt(seat?.net || "0");
+  const conclusionKey = `${snapshot.room.id}:${snapshot.room.currentRound}:${seat?.payout || "spectator"}`;
+  if (privateConclusionKey === conclusionKey) return;
+  privateConclusionKey = conclusionKey;
   card.className = `result-card private-result show ${won ? "win" : "lose"}`;
   card.replaceChildren();
   const eyebrow = document.createElement("div"); eyebrow.className = "result-tier"; eyebrow.textContent = `ROUND ${snapshot.room.currentRound} COMPLETE · CRASHED AT ${crash}×`;
@@ -4339,10 +4371,64 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const money = document.createElement("div"); money.className = "result-delta";
   money.textContent = !seat ? "You watched this round" : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
+  const world = document.createElement("div"); world.className = "private-result-world";
+  const founderTotal = BigInt(snapshot.simulation.totals?.crashFounderRake || "0") + BigInt(snapshot.simulation.totals?.lotteryFounderFees || "0");
+  world.innerHTML = `<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span><span><small>LOTTERY PRIZE</small>${privateCredits(snapshot.simulation.lottery.netPrize)}</span><span><small>RESET RESERVE</small>${privateCredits(snapshot.simulation.lottery.resetReserve)}</span><span><small>FOUNDER TOTAL</small>${privateCredits(founderTotal)}</span>`;
   const note = document.createElement("div"); note.className = "private-result-note";
   note.textContent = seat ? "Your payout is your parimutuel share of the round pool after the configured allocations—not stake × the displayed lock multiplier." : "Commit below to take a seat in the next round.";
-  const next = document.createElement("div"); next.className = "private-result-next"; next.textContent = `NEXT · COMMIT FOR ROUND ${Number(snapshot.room.currentRound) + 1}`;
-  card.append(eyebrow, headline, money, balance, note, next);
+  const next = document.createElement("div"); next.className = "private-result-next"; next.textContent = `RETURN TO THE TABLE · THEN PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
+  card.append(eyebrow, headline, money, balance, world, note, next);
+  card.dataset.reveal = "crash";
+  window.setTimeout(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "personal"; }, 550);
+  window.setTimeout(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "world"; }, 1_150);
+}
+
+function privateJourneyStage(snapshot, seat) {
+  if (snapshot.room.phase === "running") return "fly";
+  if (snapshot.room.phase === "settled") return privateSettlementAcknowledgedRound === snapshot.room.currentRound ? "return" : "settle";
+  if (!seat) return "gather";
+  return "launch";
+}
+
+function updatePrivateJourney(snapshot, me, seat) {
+  const stage = privateJourneyStage(snapshot, seat);
+  document.querySelectorAll("#privateJourney [data-stage]").forEach((node) => {
+    node.classList.toggle("active", node.dataset.stage === stage);
+    const order = ["gather", "launch", "fly", "settle", "return"];
+    node.classList.toggle("complete", order.indexOf(node.dataset.stage) < order.indexOf(stage));
+  });
+  const cue = $("privateCoachCue");
+  if (cue) {
+    const cues = {
+      gather: seat ? "Your commitment is intact. The host launches when the table is ready." : "Choose a stake below and commit. That reserves your seat in the shared round.",
+      launch: snapshot.room.isOwner ? "Your friends can see who is ready. Launch when the table feels assembled." : "You are ready. The host controls the shared launch.",
+      fly: !seat ? "You are spectating this flight. Watch how lock decisions shape the shared settlement." : seat.acceptedTargetBps ? `You secured ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×. Watch the rest of the table finish the story.` : "The multiplier is rising. Lock now whenever you want to secure your parimutuel claim weight.",
+      settle: "The crash is known. Review your result, the group outcome, and what this round changed.",
+      return: `The story is accounted for. Choose your stake when you are ready to open round ${Number(snapshot.room.currentRound) + 1}.`,
+    };
+    cue.textContent = cues[stage];
+  }
+  const elapsed = Math.max(0, Date.now() - privateSessionStart);
+  const minutes = Math.floor(elapsed / 60_000);
+  const seconds = Math.floor((elapsed % 60_000) / 1000);
+  const sessionNet = privateSessionInitialBalance === null || !me ? 0n : BigInt(me.balance) - privateSessionInitialBalance;
+  const session = $("privateSessionStats");
+  if (session) session.innerHTML = `<span><small>SESSION</small>${minutes}:${String(seconds).padStart(2, "0")}</span><span><small>COMMITTED</small>${privateCredits(privateSessionCommitted)}</span><span class="${sessionNet >= 0n ? "positive" : "negative"}"><small>NET</small>${sessionNet >= 0n ? "+" : ""}${privateCredits(sessionNet)}</span>`;
+}
+
+function tellPrivateReconnectStory(snapshot, seat) {
+  if (!privateFirstSnapshot) return;
+  privateFirstSnapshot = false;
+  const overlay = $("privateReconnect");
+  if (!overlay) return;
+  const lines = snapshot.room.phase === "running"
+    ? ["TABLE RESTORED", `Round ${snapshot.room.currentRound} is already in flight.`, seat?.acceptedTargetBps ? `Your ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× lock is intact.` : seat ? "Your committed seat is intact." : "Rejoining as a spectator."]
+    : snapshot.room.phase === "settled"
+      ? ["WELCOME BACK", `Round ${snapshot.room.currentRound} settled.`, "Review what happened before returning to the table."]
+      : ["TABLE RESTORED", seat ? "Your commitment is intact." : "Your friends and table state are intact.", "Continue exactly where the group left off."];
+  overlay.replaceChildren(...lines.map((line, index) => { const el = document.createElement(index === 0 ? "strong" : "span"); el.textContent = line; return el; }));
+  overlay.classList.add("show");
+  window.setTimeout(() => overlay.classList.remove("show"), 2_200);
 }
 
 function paintPrivateSnapshot(snapshot) {
@@ -4360,6 +4446,18 @@ function paintPrivateSnapshot(snapshot) {
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
   const seat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
+  if (privateSessionInitialBalance === null && me) {
+    const initialKey = privateSessionKey(snapshot.room.id, "initial-balance");
+    const startKey = privateSessionKey(snapshot.room.id, "started-at");
+    const storedInitial = sessionStorage.getItem(initialKey);
+    const storedStart = sessionStorage.getItem(startKey);
+    privateSessionInitialBalance = BigInt(storedInitial || me.balance);
+    privateSessionStart = Number(storedStart || Date.now());
+    privateSessionCommitted = BigInt(sessionStorage.getItem(privateSessionKey(snapshot.room.id, "committed")) || "0");
+    privateSettlementAcknowledgedRound = sessionStorage.getItem(privateSessionKey(snapshot.room.id, "ack"));
+    sessionStorage.setItem(initialKey, privateSessionInitialBalance.toString());
+    sessionStorage.setItem(startKey, String(privateSessionStart));
+  }
   const started = snapshot.room.startedAt ? Date.parse(snapshot.room.startedAt) : null;
   const crashAt = snapshot.room.crashAt ? Date.parse(snapshot.room.crashAt) : null;
   const now = Date.now();
@@ -4412,6 +4510,8 @@ function paintPrivateSnapshot(snapshot) {
   }
   renderPrivateRoster(snapshot);
   paintPrivateConclusion(snapshot, me, seat);
+  updatePrivateJourney(snapshot, me, seat);
+  tellPrivateReconnectStory(snapshot, seat);
   const hud = $("privateHudStatus");
   if (hud) hud.textContent = `${snapshot.room.name} · ${snapshot.room.joinCode} · ${snapshot.room.phase.toUpperCase()}`;
   const joinCode = $("privateJoinCode");
@@ -4425,13 +4525,17 @@ function paintPrivateSnapshot(snapshot) {
   const archive = $("privateArchive");
   if (archive) archive.disabled = !snapshot.room.isOwner || snapshot.room.phase === "running";
   if (uiState === "betting-open") primaryBtn.textContent = snapshot.room.phase === "settled"
-    ? `OPEN ROUND ${Number(snapshot.room.currentRound) + 1} · COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))}`
+    ? privateSettlementAcknowledgedRound === snapshot.room.currentRound
+      ? `OPEN ROUND ${Number(snapshot.room.currentRound) + 1} · COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))}`
+      : "RETURN TO TABLE · REVIEW COMPLETE"
     : `COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} TEST CREDITS`;
   else if (uiState === "live-hold") primaryBtn.textContent = "LOCK MULTIPLIER NOW";
   const phase = $("privatePhaseGuide");
   if (phase) phase.textContent = snapshot.room.phase === "lobby" ? `${snapshot.seats.length}/${snapshot.members.length} committed · host launches when everyone is ready`
     : snapshot.room.phase === "running" ? `${snapshot.seats.filter((candidate) => candidate.acceptedTargetBps).length}/${snapshot.seats.length} locked · round resolves automatically`
-    : `Round ${snapshot.room.currentRound} settled · review results, then commit for round ${Number(snapshot.room.currentRound) + 1}`;
+    : privateSettlementAcknowledgedRound === snapshot.room.currentRound
+      ? `Round ${snapshot.room.currentRound} accounted · choose your stake and gather for round ${Number(snapshot.room.currentRound) + 1}`
+      : `Round ${snapshot.room.currentRound} settled · review results, then return to the table`;
 }
 
 async function refreshPrivatePlaytest() {
@@ -4442,7 +4546,9 @@ async function refreshPrivatePlaytest() {
       const listed = await privateJson(await fetch("/api/playtest/rooms", { cache: "no-store" }));
       privateRooms = listed.rooms;
       const requested = new URLSearchParams(location.search).get("room");
-      privateRoomId = listed.rooms.find((room) => room.id === requested)?.id || listed.rooms[0]?.id || null;
+      const remembered = localStorage.getItem("plank-alpha:last-room");
+      privateRoomId = listed.rooms.find((room) => room.id === requested)?.id || listed.rooms.find((room) => room.id === remembered)?.id || listed.rooms[0]?.id || null;
+      if (privateRoomId) localStorage.setItem("plank-alpha:last-room", privateRoomId);
       const picker = $("privateRoomPicker");
       if (picker) {
         picker.replaceChildren(...listed.rooms.map((room) => {
@@ -4480,20 +4586,33 @@ async function startPrivatePlaytest() {
     #privateHud button,#privateHud a{min-height:34px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 10px;background:#14221b;color:#f5ecdc;font:700 11px inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}
     #privateHud select{min-height:34px;max-width:240px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 8px;background:#07100c;color:#f5ecdc;font:700 11px inherit}
     #privateHud button.primary{border-color:#3ddc84;color:#8dffc0}#privateHud button:disabled{opacity:.4;cursor:not-allowed}
+    #privateJourney{position:fixed;z-index:83;top:108px;left:18px;display:flex;align-items:center;width:min(720px,calc(100vw - 372px));padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(5,9,11,.78);backdrop-filter:blur(8px)}
+    #privateJourney span{position:relative;flex:1;padding-top:13px;color:#69766f;text-align:center;font:800 9px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase}#privateJourney span:before{content:"";position:absolute;top:2px;left:50%;width:7px;height:7px;border-radius:50%;background:#354039;transform:translateX(-50%)}#privateJourney span:not(:last-child):after{content:"";position:absolute;left:calc(50% + 7px);right:calc(-50% + 7px);top:5px;height:1px;background:#354039}#privateJourney span.complete{color:#8ea198}#privateJourney span.complete:before,#privateJourney span.complete:not(:last-child):after{background:#3ddc84}#privateJourney span.active{color:#ffc857}#privateJourney span.active:before{background:#ffc857;box-shadow:0 0 12px rgba(255,200,87,.7)}
     #privateTablePanel{position:fixed;z-index:84;right:14px;top:58px;width:320px;max-height:calc(100vh - 76px);overflow:auto;padding:14px;border:1px solid rgba(255,200,87,.28);border-radius:14px;background:rgba(5,9,9,.92);backdrop-filter:blur(14px);box-shadow:0 18px 60px rgba(0,0,0,.45);color:#f4ead7;font-family:inherit}
     .private-panel-kicker{font:800 10px/1.2 var(--font-mono);letter-spacing:.14em;color:#ffc857;text-transform:uppercase}.private-panel-title{margin:5px 0 2px;font:400 22px/1 var(--font-display)}
     .private-code{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0;padding:10px;border:1px dashed rgba(255,200,87,.38);border-radius:9px;background:rgba(255,200,87,.05)}.private-code strong{font:800 20px/1 var(--font-mono);letter-spacing:.12em}.private-code small{display:block;color:#aab1aa;font:700 9px/1.2 var(--font-mono);letter-spacing:.08em;text-transform:uppercase}
     #privatePhaseGuide{margin:0 0 12px;color:#aeb9b1;font:600 11px/1.45 var(--font-mono)}.private-panel-section{margin-top:12px;padding-top:11px;border-top:1px solid rgba(255,255,255,.1)}.private-panel-label{margin-bottom:7px;color:#89968e;font:800 9px/1 var(--font-mono);letter-spacing:.13em;text-transform:uppercase}
+    #privateCoachCue{margin:10px 0 2px;padding:10px;border-left:2px solid #ffc857;border-radius:0 8px 8px 0;background:rgba(255,200,87,.06);color:#d8cdb8;font:600 10px/1.5 var(--font-mono)}#privateSessionStats{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:9px}#privateSessionStats span{padding:7px 4px;border:1px solid rgba(255,255,255,.08);border-radius:7px;text-align:center;font:800 10px var(--font-mono)}#privateSessionStats small{display:block;margin-bottom:3px;color:#6f7c74;font-size:7px;letter-spacing:.08em}#privateSessionStats .positive{color:#75f0ae}#privateSessionStats .negative{color:#ff9bad}
     #privateRoster{display:flex;flex-direction:column;gap:6px}.private-player{display:grid;gap:4px;padding:9px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.025)}.private-player.me{border-color:rgba(61,220,132,.35);background:rgba(61,220,132,.055)}.private-player-identity{display:flex;align-items:center;gap:7px}.private-player-identity strong{font-size:12px}.private-player-identity small{margin-left:auto;color:#78857d;font:700 8px var(--font-mono);letter-spacing:.08em}.private-player-dot{width:7px;height:7px;border-radius:50%;background:#778078}.private-player-dot.committed{background:#3ddc84;box-shadow:0 0 8px rgba(61,220,132,.6)}.private-player-state{padding-left:14px;color:#aeb7b1;font:600 10px/1.3 var(--font-mono)}.private-player-state.win{color:#75f0ae}
-    .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}
+    .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
     .result-card.private-result{width:min(590px,calc(100% - 360px));padding:26px 30px;background:rgba(5,9,12,.94);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:480px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
+    .private-result-world{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
+    #privateReconnect{position:fixed;inset:0;z-index:96;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(3,6,8,.92);color:#e8decb;opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s;text-align:center}#privateReconnect.show{opacity:1;visibility:visible}#privateReconnect strong{color:#ffc857;font:400 30px var(--font-display)}#privateReconnect span{font:700 12px/1.3 var(--font-mono);color:#aab7af}
+    #privateHow{width:min(620px,calc(100vw - 28px));border:1px solid rgba(255,200,87,.35);border-radius:16px;padding:0;background:#07100c;color:#efe6d4;box-shadow:0 24px 100px rgba(0,0,0,.75)}#privateHow::backdrop{background:rgba(0,0,0,.78);backdrop-filter:blur(5px)}.private-how-inner{padding:22px}.private-how-inner h2{margin:0;color:#ffc857;font:400 28px var(--font-display)}.private-how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:16px 0}.private-how-grid div{padding:11px;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:rgba(255,255,255,.025);font:600 10px/1.45 var(--font-mono)}.private-how-grid b{display:block;margin-bottom:5px;color:#75f0ae}.private-how-note{color:#aab7af;font:600 10px/1.5 var(--font-mono)}.private-how-close{width:100%;min-height:42px;margin-top:16px;border:1px solid #ffc857;border-radius:8px;background:transparent;color:#ffc857;font:800 11px var(--font-mono);cursor:pointer}
     body[data-playtest="true"] .deck{padding-right:350px}
-    @media(max-width:900px){#privateHud{top:50px;left:8px;right:8px;max-width:none}.topbar{padding-top:46px;height:auto}#privateTablePanel{position:relative;z-index:35;top:auto;right:auto;width:auto;max-height:none;margin:8px 10px}.private-host-actions{grid-template-columns:repeat(2,1fr)}body[data-playtest="true"] .deck{padding-right:18px}.result-card.private-result{width:min(590px,calc(100% - 24px))}.stage{min-height:58vh}}
+    @media(max-width:900px){#privateHud{top:50px;left:8px;right:8px;max-width:none}.topbar{padding-top:46px;height:auto}#privateJourney{position:relative;z-index:35;top:auto;left:auto;width:auto;margin:55px 10px 0}#privateTablePanel{position:relative;z-index:35;top:auto;right:auto;width:auto;max-height:none;margin:8px 10px}.private-host-actions{grid-template-columns:repeat(2,1fr)}body[data-playtest="true"] .deck{padding-right:18px}.result-card.private-result{width:min(590px,calc(100% - 24px))}.private-result-world{grid-template-columns:1fr 1fr}.stage{min-height:58vh}.private-how-grid{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
   const hud = document.createElement("div");
   hud.id = "privateHud";
-  const picker = document.createElement("select"); picker.id = "privateRoomPicker"; picker.setAttribute("aria-label", "Private table"); picker.onchange = async () => { privateRoomId = picker.value || null; privateSnapshot = null; await refreshPrivatePlaytest(); };
+  const picker = document.createElement("select"); picker.id = "privateRoomPicker"; picker.setAttribute("aria-label", "Private table"); picker.onchange = async () => {
+    privateRoomId = picker.value || null; privateSnapshot = null; privateSessionInitialBalance = null; privateConclusionKey = ""; privateSettlementAcknowledgedRound = null; privateFirstSnapshot = true;
+    if (privateRoomId) {
+      localStorage.setItem("plank-alpha:last-room", privateRoomId);
+      try { window.parent.history.replaceState({}, "", `/playtest/game?room=${encodeURIComponent(privateRoomId)}`); } catch (_) {}
+    }
+    await refreshPrivatePlaytest();
+  };
   const status = document.createElement("span"); status.id = "privateHudStatus"; status.textContent = "Connecting to private table…";
   const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "launch"; launch.textContent = "LAUNCH WHEN EVERYONE IS READY"; launch.onclick = () => privatePlaytestCommand("start");
   const solo = document.createElement("button"); solo.id = "privateSolo"; solo.textContent = "SOLO LAB"; solo.title = "Admin: set the minimum-player gate to one for end-to-end host testing"; solo.onclick = () => privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers: 1 } });
@@ -4513,6 +4632,8 @@ async function startPrivatePlaytest() {
   const lobby = document.createElement("a"); lobby.href = "/playtest/game?classic=1"; lobby.target = "_top"; lobby.textContent = "TABLES / ADMIN";
   hud.append(picker, status);
   document.body.appendChild(hud);
+  const journey = document.createElement("nav"); journey.id = "privateJourney"; journey.setAttribute("aria-label", "Round journey"); journey.innerHTML = '<span data-stage="gather">Gather & commit</span><span data-stage="launch">Launch</span><span data-stage="fly">Fly & lock</span><span data-stage="settle">Settle</span><span data-stage="return">Return</span>'; document.body.appendChild(journey);
+  const reconnect = document.createElement("div"); reconnect.id = "privateReconnect"; reconnect.setAttribute("role", "status"); document.body.appendChild(reconnect);
   const panel = document.createElement("aside"); panel.id = "privateTablePanel"; panel.setAttribute("aria-label", "Private table and friends");
   const kicker = document.createElement("div"); kicker.className = "private-panel-kicker"; kicker.textContent = "Private friend table";
   const panelTitle = document.createElement("div"); panelTitle.className = "private-panel-title"; panelTitle.textContent = "Play together";
@@ -4520,10 +4641,15 @@ async function startPrivatePlaytest() {
   const codeText = document.createElement("div"); codeText.innerHTML = '<small>Invite code</small><strong id="privateJoinCode">—</strong>';
   const codeCopy = document.createElement("button"); codeCopy.textContent = "COPY LINK"; codeCopy.onclick = () => invite.click(); code.append(codeText, codeCopy);
   const guide = document.createElement("div"); guide.id = "privatePhaseGuide"; guide.textContent = "Connecting to the authoritative table…";
+  const coach = document.createElement("div"); coach.id = "privateCoachCue"; coach.textContent = "Restoring your place in the story";
+  const session = document.createElement("div"); session.id = "privateSessionStats";
   const playerSection = document.createElement("section"); playerSection.className = "private-panel-section"; playerSection.innerHTML = '<div class="private-panel-label">Players and readiness</div><div id="privateRoster"></div>';
   const hostSection = document.createElement("section"); hostSection.className = "private-panel-section"; const hostLabel = document.createElement("div"); hostLabel.className = "private-panel-label"; hostLabel.textContent = "Host and table controls";
   const actions = document.createElement("div"); actions.className = "private-host-actions"; archive.className = "danger"; actions.append(launch, solo, invite, archive, lobby); hostSection.append(hostLabel, actions);
-  panel.append(kicker, panelTitle, code, guide, playerSection, hostSection); $("app").appendChild(panel);
+  const how = document.createElement("button"); how.textContent = "HOW TO PLAY";
+  const leave = document.createElement("a"); leave.href = "/playtest"; leave.target = "_top"; leave.className = "leave"; leave.textContent = "LEAVE TABLE"; actions.append(how, leave);
+  panel.append(kicker, panelTitle, code, guide, coach, session, playerSection, hostSection); $("app").appendChild(panel);
+  const howDialog = document.createElement("dialog"); howDialog.id = "privateHow"; howDialog.innerHTML = '<div class="private-how-inner"><h2>One shared flight, fully accounted</h2><div class="private-how-grid"><div><b>1 · GATHER</b>Choose test credits and commit to reserve your seat.</div><div><b>2 · FLY</b>The host launches. Lock whenever you choose before the crash.</div><div><b>3 · SETTLE & GROW</b>The bounded pool is distributed and every lasting movement is shown.</div></div><p class="private-how-note">Your displayed lock multiplier determines parimutuel claim weight; it is not a fixed stake × multiplier promise. Refreshing never erases an accepted commitment or lock because the authoritative table lives on the server.</p><button class="private-how-close">RETURN TO TABLE</button></div>'; document.body.appendChild(howDialog); how.onclick = () => howDialog.showModal(); howDialog.querySelector(".private-how-close").onclick = () => howDialog.close();
   $("simBtn").classList.add("hide");
   document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
     chip.textContent = Number(chip.dataset.amt) * 1_000_000 >= 1000 ? `${Number(chip.dataset.amt) * 1000}K` : String(Number(chip.dataset.amt) * 1_000_000);

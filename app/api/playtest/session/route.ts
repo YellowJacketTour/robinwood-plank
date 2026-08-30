@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       if (!authenticated) return publicJson({ error: "BAD_PIN", message: "Username or PIN is incorrect." }, 401);
     }
     const { identity, token } = authenticated;
-    const response = publicJson({ displayName: identity.displayName, isAdmin: identity.isAdmin }, 201);
+    const response = publicJson({ displayName: identity.displayName, isAdmin: identity.isAdmin, roomId: "roomId" in authenticated ? authenticated.roomId : null }, 201);
     response.headers.append("Set-Cookie", sessionCookie(token));
     return response;
   } catch (error) {

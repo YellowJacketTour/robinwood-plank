@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 
-type Identity = { displayName: string; isAdmin: boolean };
-type Props = { initialIdentity: Identity | null; adminConfigured: boolean; initialInvite: string; initialSetup: string };
+type Identity = { displayName: string; isAdmin: boolean; roomId?: string | null };
+type InvitePreview = { roomId: string | null; roomName: string | null; joinCode: string | null; hostName: string | null } | null;
+type Props = { initialIdentity: Identity | null; adminConfigured: boolean; initialInvite: string; initialSetup: string; invitePreview: InvitePreview };
 
 async function json<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T & { message?: string };
@@ -11,7 +12,7 @@ async function json<T>(response: Response): Promise<T> {
   return body;
 }
 
-export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: invite, initialSetup: setup }: Props) {
+export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: invite, initialSetup: setup, invitePreview }: Props) {
   const [identity, setIdentity] = useState(initialIdentity);
   const [displayName, setDisplayName] = useState("");
   const [pin, setPin] = useState("");
@@ -26,6 +27,7 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: mode, displayName, pin, invite, setup }),
       }));
       setIdentity(result); setPin("");
+      if (result.roomId) window.location.assign(`/playtest/game?room=${encodeURIComponent(result.roomId)}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Entry failed."); }
     finally { setBusy(false); }
   }
@@ -41,12 +43,19 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
     <h2 className="mt-2 text-2xl text-gold-300">Welcome, {identity.displayName}</h2>
     <p className="mt-3 text-sm text-cream-muted">This session controls simulation credits only. It cannot sign transactions or move mainnet assets.</p>
     <div className="mt-5 flex flex-wrap gap-3">
-      <a className="min-h-11 rounded-md bg-gold-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-wood-950" href="/playtest/game">{identity.isAdmin ? "Open host console" : "Enter game"}</a>
+      <a className="min-h-11 rounded-md bg-gold-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-wood-950" href={invitePreview?.roomId ? `/playtest/game?room=${encodeURIComponent(invitePreview.roomId)}` : "/playtest/game"}>{identity.isAdmin ? "Open host console" : "Enter game"}</a>
       <button className="min-h-11 rounded-md border border-line-strong bg-panel-strong px-4 text-xs font-black uppercase tracking-wider text-gold-300" disabled={busy} onClick={signOut}>Sign out</button>
     </div>
   </section>;
 
-  return <section className="rounded-xl border border-line bg-panel p-6">
+  return <section className="overflow-hidden rounded-2xl border border-gold-500/30 bg-panel shadow-2xl">
+    {mode === "register" ? <div className="border-b border-line bg-gradient-to-r from-wood-950 to-panel-strong px-6 py-5">
+      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gold-400">Private table invitation</p>
+      <h2 className="mt-2 text-3xl text-gold-300">{invitePreview?.roomName || "A PlankCrash table awaits"}</h2>
+      <p className="mt-2 text-sm text-cream-muted">{invitePreview?.hostName ? `${invitePreview.hostName} invited you to gather, fly, and settle a shared round.` : "Create your player to cross the threshold into the private alpha."}</p>
+      {invitePreview?.joinCode ? <p className="mt-4 inline-flex rounded-md border border-gold-500/30 bg-black/20 px-3 py-2 font-mono text-xs font-black tracking-[0.14em] text-gold-300">TABLE {invitePreview.joinCode}</p> : null}
+    </div> : null}
+    <div className="p-6">
     <h2 className="text-2xl text-gold-300">{mode === "bootstrap" ? "Claim the host account" : mode === "register" ? "Create your invited player" : "Return to the private playtest"}</h2>
     <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This is a one-use invitation. Choose a unique username and your own four-digit PIN." : "Enter your existing username and personal four- or six-digit PIN."}</p>
     <label className="mt-5 block text-xs font-black uppercase tracking-wider text-gold-300">Username
@@ -58,5 +67,7 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
     <p id="pin-help" className="mt-2 text-xs text-cream-muted">{mode === "bootstrap" ? "Exactly 6 digits. Keep this private." : mode === "register" ? "Exactly 4 digits. Remember it for future visits." : "Players use 4 digits; the host uses 6."}</p>
     <button className="mt-5 min-h-11 w-full rounded-md bg-gold-500 px-4 text-xs font-black uppercase tracking-wider text-wood-950 disabled:opacity-40" disabled={busy || !displayName.trim() || (mode === "bootstrap" ? pin.length !== 6 : mode === "register" ? pin.length !== 4 : ![4, 6].includes(pin.length))} onClick={enter}>{busy ? "Entering…" : mode === "bootstrap" ? "Set host account" : mode === "register" ? "Create player and join" : "Enter playtest"}</button>
     {message ? <p className="mt-4 rounded-md bg-panel-strong p-3 text-sm text-red-400" role="alert">{message}</p> : null}
+    <div className="mt-5 grid grid-cols-3 gap-2 border-t border-line pt-4 text-center text-[10px] font-bold uppercase tracking-wider text-cream-muted"><span>Gather</span><span>Fly</span><span>Settle &amp; grow</span></div>
+    </div>
   </section>;
 }
