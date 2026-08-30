@@ -46,7 +46,10 @@ test("laboratory crash fixture is deterministic, bounded, and committed separate
   const reveal = "f".repeat(64);
   const crash = simulationCrashBps(reveal);
   assert.equal(crash, simulationCrashBps(reveal));
-  assert.ok(crash >= 10_000n && crash <= 1_000_000n);
+  assert.ok(crash >= 10_000n && crash <= 100_000_000n);
+  const maximum = simulationCrashBps(`${"0".repeat(60)}270f`);
+  assert.ok(maximum > 1_000_000n, "the laboratory preserves a genuine tail beyond 100x");
+  assert.equal(maximum, 100_000_000n);
   assert.throws(() => simulationCrashBps("not-a-reveal"));
 });
 
@@ -57,4 +60,9 @@ test("authoritative display curve is monotonic and reaches crash on its deadline
   assert.equal(multiplierAt(start, start), 10_000n);
   assert.ok(multiplierAt(start, start + duration / 2) > 10_000n);
   assert.ok(multiplierAt(start, start + duration) >= crash);
+  const enormous = 100_000_000n;
+  const enormousDuration = crashDurationMs(enormous);
+  assert.ok(enormousDuration > 40_000 && enormousDuration < 45_000);
+  assert.ok(multiplierAt(start, start + enormousDuration - 1) < enormous);
+  assert.ok(multiplierAt(start, start + enormousDuration) >= enormous);
 });

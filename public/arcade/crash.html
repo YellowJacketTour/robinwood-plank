@@ -2857,15 +2857,10 @@ function setMultReadout(xStr, cls) {
   el.className = "mult " + cls;
   const [whole, frac] = xStr.split(".");
   el.innerHTML = whole + '<span class="x">.' + (frac || "00") + "x</span>";
-  // Presentational-only risk tiering: reads the already-computed display
-  // value to pick a glow intensity tier while LIVE, nothing new is
-  // computed or decided here. Thresholds are display taste, not game logic.
-  if (cls === "live") {
-    const n = Number(xStr);
-    el.dataset.risk = n >= 5 ? "3" : n >= 2.5 ? "2" : n >= 1.5 ? "1" : "0";
-  } else {
-    delete el.dataset.risk;
-  }
+  // Do not paint arbitrary numeric "risk zones" that can be mistaken for a
+  // lock recommendation. Atmosphere may intensify continuously, but the UI
+  // never claims a strategically privileged multiplier.
+  delete el.dataset.risk;
 }
 
 let resultCardTimer = null;
@@ -4597,7 +4592,7 @@ function paintPrivateSnapshot(snapshot) {
     // doing so through the legacy quadratic inverse caused the 1.00/1.01
     // oscillation and repeatedly replayed the ignition kick.
     setMultReadout(x.toFixed(2), "live");
-    $("substatus").textContent = "IN FLIGHT · AUTHORITATIVE SERVER CLOCK";
+    $("substatus").textContent = "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
     multGraphSamples.push(x);
     if (multGraphSamples.length > 400) multGraphSamples.shift();
@@ -4647,7 +4642,7 @@ function paintPrivateSnapshot(snapshot) {
       ? `OPEN ROUND ${Number(snapshot.room.currentRound) + 1} · COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))}`
       : "RETURN TO TABLE · REVIEW COMPLETE"
     : `COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} TEST CREDITS`;
-  else if (uiState === "live-hold") primaryBtn.textContent = "LOCK MULTIPLIER NOW";
+  else if (uiState === "live-hold") primaryBtn.textContent = "LOCK CLAIM WEIGHT NOW";
   const phase = $("privatePhaseGuide");
   const people = snapshot.members.filter((member) => !member.isBot);
   const peopleCommitted = snapshot.seats.filter((seat) => people.some((member) => member.id === seat.userId)).length;

@@ -196,14 +196,21 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         isOwner: room.owner_user_id === identity.id || identity.isAdmin, isAdmin: identity.isAdmin, rulesHash: room.rules_hash,
         phase: room.phase, version: room.version, currentRound: room.current_round,
         commitment: room.commitment, reveal: revealVisible, crashBps: crashVisible,
-        startedAt: room.started_at?.toISOString() ?? null, crashAt: room.crash_at?.toISOString() ?? null,
+        startedAt: room.started_at?.toISOString() ?? null,
+        // The exact deadline is economically equivalent to the unrevealed
+        // crash point. It becomes auditable only after settlement.
+        crashAt: room.phase === "settled" ? room.crash_at?.toISOString() ?? null : null,
         settledAt: room.settled_at?.toISOString() ?? null,
       },
       policy: room.policy, simulation: room.simulation_state,
       members: members.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, balance: row.test_credit_balance, isBot: row.is_bot, botProfile: row.bot_profile })),
       seats: seats.rows.map((row) => ({
         userId: row.user_id, displayName: row.display_name, stake: row.stake,
-        requestedTargetBps: row.requested_target_bps, acceptedTargetBps: row.accepted_target_bps,
+        // A planned auto-lock is private strategy until it executes. Accepted
+        // locks are historical public table actions; settled targets are
+        // auditable after the outcome is immutable.
+        requestedTargetBps: row.user_id === identity.id || room.phase === "settled" ? row.requested_target_bps : null,
+        acceptedTargetBps: row.accepted_target_bps,
         payout: row.payout, net: row.net, survived: row.survived, lockedAt: row.locked_at?.toISOString() ?? null,
       })),
       events: events.rows.reverse().map((row) => ({ sequence: row.sequence, type: row.event_type, commandId: row.command_id, payload: row.public_payload, at: row.created_at.toISOString() })),
@@ -340,7 +347,13 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       [roomId, room.version, commitment, reveal, crashBps.toString(), started, crashAt],
     );
     await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString(), crashAt: crashAt.toISOString() });
-    if (committed.length) await event(client, room, "bots.committed", identity.id, null, { count: committed.length, commitments: committed });
+    if (committed.length) await event(client, room, "bots.committed", identity.id, null, {
+      count: committed.length,
+      presets: committed.reduce<Record<string, number>>((counts, bot) => {
+        counts[bot.preset] = (counts[bot.preset] ?? 0) + 1;
+        return counts;
+      }, {}),
+    });
     return { duplicate: false, version: room.version };
   });
 }
@@ -510,6 +523,20 @@ export async function adjustPlaytestCredit(identity: PlaytestIdentity, roomId: s
     await event(client, room, "admin.credit.adjusted", identity.id, commandId, { userId, balance });
     return { duplicate: false, version: room.version };
   });
+}
+
+/** Server-internal poll state. `due` is deliberately never serialized to a
+ * participant; exposing it would disclose the committed crash deadline. */
+export async function playtestRoomPollState(identity: PlaytestIdentity, roomId: string): Promise<{ version: string; due: boolean }> {
+  const result = await postgresQuery<{ version: string; due: boolean }>(
+    `SELECT r.version::text,
+            (r.phase='running' AND r.crash_at IS NOT NULL AND r.crash_at<=NOW()) AS due
+       FROM playtest_rooms r
+       JOIN playtest_room_members m ON m.room_id=r.id AND m.user_id=$2
+      WHERE r.id=$1 AND r.archived_at IS NULL`, [roomId, identity.id],
+  );
+  if (!result.rows[0]) throw new PlaytestRoomError(404, "ROOM_NOT_FOUND", "Room not found.");
+  return result.rows[0];
 }
 
 type BotCommand = {
