@@ -48,6 +48,7 @@
     "scripts/test-rig.ts",
     "scripts/testnet-casino-setup.ts",
     "scripts/verify-foreign-fee-router-fork.ts",
+    "scripts/crash-writepath-proof.ts",
     "types/ethers-contracts"
   ]
 }
