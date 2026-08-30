@@ -137,6 +137,23 @@ Do not enable mainnet writes from this surface. A later mainnet UI may reuse
 presentation and transaction construction, but wallets must sign each exact
 on-chain action through the normal wallet boundary.
 
+### Synthetic participant population
+
+The six-digit host opens **SIM CONTROLS → SYNTHETIC PARTICIPANTS** between
+rounds. Add 1–100 at a time (up to 500 active per table) using a named profile
+or the mixed research distribution. Each CPU identity appears in the common
+roster with its strategy and bankroll. Select any one bot, any checkbox batch,
+or **SELECT ALL** to change its preset, stake/target bounds, enabled state, and
+reference bankroll; balance reset is explicit and off by default. **REMOVE
+SELECTED** removes only the selected laboratory actors after confirmation.
+
+At launch, enabled bots make server-authoritative commitments from their own
+balances before reveal generation. They cannot see or alter the crash. Their
+wagers earn epoch-isolated linear Powerboard tickets exactly like human test
+wagers. Invitees see the same CPU commitments, locks, settlements, jackpot
+winner, and balances, but the simulation controls are not rendered for them
+and every mutation is rejected server-side without the host role.
+
 ## Launch gate
 
 - external WebAuthn and session review;
