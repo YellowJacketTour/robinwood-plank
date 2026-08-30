@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor } from "./helpers/crashHardening.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * PlankCrashDrand's real delta from PlankCrashV2 (its header is required
@@ -271,7 +271,8 @@ describe("PlankCrashDrand", () => {
     await closeBettingAndLock(crash);
 
     const round = await crash.rounds(roundId);
-    expect(round.revealNotBefore).to.equal(DRAND_GENESIS_TIME + (BigInt(round.targetDrandRound) - 1n) * DRAND_PERIOD);
+    // Review MED-1: the window closes CASHOUT_CLOSE_MARGIN_PERIODS (2) before the target round's emission, chain-clock relative.
+    expect(round.revealNotBefore).to.equal(DRAND_GENESIS_TIME + (BigInt(round.targetDrandRound) - 1n) * DRAND_PERIOD - 2n * DRAND_PERIOD);
     await networkHelpers.time.increaseTo(round.revealNotBefore);
     expect((await crash.rounds(roundId)).entropyRevealed).to.equal(false); // deliberately never revealed or relayed
 
@@ -354,12 +355,16 @@ describe("PlankCrashDrand", () => {
     const expectedRake = (pool * RAKE_BPS) / 10000n;
     const expectedKeeperReward = (expectedRake * KEEPER_REWARD_BPS) / 10000n;
 
+    // Hardening (c) under the PROPOSED fixture defaults: the locker and the
+    // revealer are bountied 1% of the rake each, on top of the settler.
+    const expectedLockReveal =
+      (expectedRake * HARDENING_TEST_DEFAULTS.keeperLockBps) / 10000n + (expectedRake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n;
     await crash.connect(carol).settleRound(roundId);
     expect(await crash.payments(carol.address)).to.equal(expectedKeeperReward);
-    expect(await crash.accumulatedRake()).to.equal(expectedRake - expectedKeeperReward);
+    expect(await crash.accumulatedRake()).to.equal(expectedRake - expectedKeeperReward - expectedLockReveal);
 
     await crash.claimRake();
-    expect(await crash.payments(treasury.address)).to.equal(expectedRake - expectedKeeperReward);
+    expect(await crash.payments(treasury.address)).to.equal(expectedRake - expectedKeeperReward - expectedLockReveal);
   });
 
   it("the same _multiplierAt/_deriveCrash curve as PlankCrashV2 -- both contracts pay out identically for the same entropy, proving the drand swap changed nothing about game math", async () => {

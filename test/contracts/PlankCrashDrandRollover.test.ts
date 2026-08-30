@@ -120,11 +120,12 @@ describe("PlankCrashDrand — busted-round rollover", () => {
     const openRound = await crash.currentRoundId();
     await crash.lockRound(); // voids the empty stale round, starts the seeded one
 
-    // With this config the Vault releases a STRICT FRACTION (1/2) per game,
-    // so the new round is seeded with floor(reserve/2) and the Vault KEEPS
-    // the rest -- it is never emptied. That retained balance is the whole
-    // point: no game can ever start the forward carry at zero.
-    const seed = distributable / 2n; // floor(reserve * 1/2)
+    // With this config the Vault releases a STRICT FRACTION per game -- the
+    // num/den says 1/2, but hardening (b).1's PROPOSED seedMaxBps (500)
+    // binds first, so the new round is seeded with floor(reserve * 5%) and
+    // the Vault KEEPS the rest -- it is never emptied. That retained balance
+    // is the whole point: no game can ever start the forward carry at zero.
+    const seed = (distributable * 500n) / 10000n; // min(1/2, seedMaxBps) of the Vault
     const seededId = await crash.currentRoundId();
     expect(seededId).to.be.gt(openRound);
     const seeded = await crash.rounds(seededId);

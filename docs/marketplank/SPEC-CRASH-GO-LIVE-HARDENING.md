@@ -51,10 +51,27 @@ The reserve is the house-side capital. Caps that do not scale DOWN with the bank
 documented cause of most on-chain casino failures.
 1. **Seed cap per round:** `seed ≤ reserve × SEED_MAX_BPS / 10_000` in addition to
    `num/den` (make the fraction a bounded immutable, ceiling in bytecode).
-2. **Single-payout cap:** at `registerResult`, any single player's payout is capped at
-   `reserveAtLock × SINGLE_PAYOUT_CAP_BPS / 10_000`; the excess stays in the pool and
-   distributes to the other winners (parimutuel keeps the pool conserved — nothing is
-   "lost", only re-weighted). Proposed 200 bps (2%).
+2. **Single-payout cap:** at `claim`, the HOUSE-SIDE (Vault-seed) portion of any single
+   wallet's payout is capped at `reserveAtLock × SINGLE_PAYOUT_CAP_BPS / 10_000`; the
+   player-funded parimutuel portion is never capped. The excess is credited back to the
+   Vault (pool conserved wei-for-wei — nothing is "lost", only re-weighted toward future
+   rounds; same-round redistribution would be an O(n²) water-fill over a sybil-growable
+   winner list, so it is deliberately not done on-chain). Proposed 200 bps (2%).
+   **This is a PER-WALLET UX bound** ("no single ticket wins more than 2% of the
+   bankroll"), **not a sybil bound** — N wallets get N caps. The sybil bound is 2.6 below.
+   (Review MED-3 / §2.2 wording.)
+6. **Seed distributed by PROFIT weight (review HIGH-1):** the round pool is two pots. The
+   player-funded pot splits by the classic `stake × mult` weight. The Vault SEED splits by
+   `stake × (mult − 1)` (the profit weight) **and** is capped per winner at that same
+   `stake × (mult − 1)` — i.e. at most the profit a fair-odds book would have paid on the
+   risk actually taken. Without this, a 1.0001× auto target (P(win) = 0.9999) collected the
+   ENTIRE seed every round for a 0.4% risk: 4 sybil wallets drained 18.5% of a 2 ETH
+   bankroll in 7 rounds (reviewer's probe, reproduced in `seedNotFarmableAtMinExit`).
+   Chosen over a `SEED_MIN_MULTIPLIER_BPS` eligibility floor (proposed 15000): a floor is a
+   cliff — the same farm re-parks just above it at P = 2/3 for the full seed — while the
+   fair-odds cap is continuous in the exit and bounds the extraction RATE at every
+   multiplier. When the cap binds the remainder returns to the Vault; when no winner has
+   profit weight (all exits at exactly 1.00×) the seed returns whole. Conservation exact.
 3. **Daily-loss circuit:** rolling 24h window of `reserve` net change; if the drawdown
    exceeds `DAILY_DRAWDOWN_BPS`, the next round seeds 0 from reserve (players-only
    parimutuel continues — the game never stops, the house simply stops subsidizing).
@@ -93,11 +110,26 @@ betId)`. Always close betting before the target round. Tracked as Phase 3.1.
 |---|---|---|
 | `SINGLE_PAYOUT_CAP_BPS` | 200 | 2% of reserve at lock — WINR-class bound |
 | `SEED_MAX_BPS` | 500 | house never puts >5% of bankroll into one round |
+| `SEED_MAX_BPS_CEILING` (bytecode) | **1000** (was 5000) | review MED-3: the constant ceiling is 2× the proposal, not 10× — no deploy config can put >10% of the bankroll into one round |
+| `CASHOUT_CLOSE_MARGIN_PERIODS` (bytecode) | **2 periods = 6 s** on drand quicknet | review MED-1: manual cash-outs close `revealNotBefore = emission − margin` on the CHAIN clock (absorbs sequencer lag < 6 s); belt: `_cashOut` also reverts once `beacon.isRoundAvailable(target)` regardless of clock |
+| seed distribution key | `stake × (mult − 1)`, per-winner cap at the same | review HIGH-1 (§2.6): fair-odds bound on house money; not a tunable — a `SEED_MIN_MULTIPLIER_BPS` floor (15000) was considered and rejected as a cliff |
+| daily window peak on roll | `max(reserve, prevPeak × (1 − DAILY_DRAWDOWN_BPS/10⁴)^n)` | review MED-2: the peak decays by the allowed drawdown per elapsed window instead of resetting to the depleted balance (which allowed ~2× the budget across a boundary); rescued seeds / capped-payout excess are RETURNS and do not raise the window peak |
 | `DAILY_DRAWDOWN_BPS` | 1500 | 15%/24h halts subsidy, not play |
 | `HWM_DRAWDOWN_BPS` | 5000 | 50% from high-water halts subsidy until refilled |
 | `keeperRewardBps` (settle) | 500 of rake | liveness is worth 5% of rake |
 | `KEEPER_REVEAL_BPS` / `KEEPER_LOCK_BPS` | 100 / 100 of rake | cheap calls, small bounty |
 | max multiplier cap | **OWNER MUST SUPPLY** (§2 open question 4) | not a Fable proposal |
+| `rakeBps` | must be > 0 (constructor reverts) | review LOW-2: every keeper bounty is bps OF THE RAKE, so rake 0 = the "nobody settles" failure (c) forbids |
+
+Test fixtures (`test/contracts/helpers/crashHardening.ts`) now use exactly these PROPOSED
+values so every suite exercises the caps and circuits that would ship (review MED-3). They
+remain unratified; `scripts/deploy-casino.ts` is still the only place deploy values live.
+
+Review LOW-1: `cashOut` reverts `TargetUnreachable` once `elapsed > maxMultiplierElapsedBlocks`
+(the crash has certainly happened; recording a cash-out there was a guaranteed loss).
+Review LOW-3: `estimatedPayout` prices a committed auto target during BETTING against a
+virtual lock (`elapsed = invert(auto)`) and the provisional pool, so the bet slip shows a real
+number; a manual-only bet reads 0 until it exits.
 | Stage-1 bankroll cap (`reserveCap`) | 2 ETH-equiv | small until incident-free time accrues |
 
 ## 7. Go-live sequence (§6 gauntlet)

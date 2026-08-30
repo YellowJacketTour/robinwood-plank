@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor, multiplierAt } from "./helpers/crashHardening.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor, multiplierAt, splitPayout, weightsAt } from "./helpers/crashHardening.js";
 
 /**
  * Phase 3 go-live hardening of PlankCrashDrand -- the "attack fails" tests
@@ -12,8 +12,9 @@ import { hardeningFor, multiplierAt } from "./helpers/crashHardening.js";
  *     min(manual, lockBlock + invert(auto));
  *   - a pool-conservation property under the single-payout cap.
  *
- * Constants used here are FIXTURE values, not the spec's proposed
- * production values (those live, unratified, in scripts/deploy-casino.ts).
+ * Hardening constants used here are the spec's §6 PROPOSED values (review
+ * MED-3: the fixture defaults in helpers/crashHardening.ts ARE the proposals,
+ * so these suites exercise what would ship); they remain unratified.
  */
 describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   const DRAND_PERIOD = 3n;
@@ -24,6 +25,10 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   const AWAIT = 60;
   const RAKE_BPS = 450n;
   const KEEPER_BPS = 500n;
+  const SEED_MAX_BPS = HARDENING_TEST_DEFAULTS.seedMaxBps; // 500: the binding seed fraction under the proposals (num/den 1/2 is looser)
+  const CAP_BPS = HARDENING_TEST_DEFAULTS.singlePayoutCapBps;
+  const MARGIN = 2n * DRAND_PERIOD; // CASHOUT_CLOSE_MARGIN_PERIODS * period (MED-1)
+  const seedFor = (reserve: bigint) => (reserve * SEED_MAX_BPS) / 10000n;
 
   function prng(seed: number) {
     let s = seed >>> 0;
@@ -115,15 +120,25 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   // ───────────────────────────── C1 ─────────────────────────────────────
   it("noCashOutAfterRevealNotBefore", async () => {
     // Invariant I-a, fuzzed: randomized relay / reveal / cash-out / time /
-    // block ordering across >= 5 seeds. Whatever the order, (1) every
-    // SUCCESSFUL manual cash-out landed in a block with timestamp <
-    // revealNotBefore, (2) every manual cash-out attempted at or after
-    // revealNotBefore reverted CashOutWindowClosed -- regardless of whether
-    // the randomness had been relayed/revealed -- and (3) the effective
-    // cash-out block is exactly min(manual, lockBlock + invert(auto)).
+    // block ordering across >= 5 seeds, under a SEQUENCER-LAG MODEL (review
+    // MED-1): wall-clock = chain clock + delta, delta = (seed mod 9) periods
+    // i.e. 0..8 periods -- most seeds lag MORE than the 2-period margin.
+    // The relayer can only inject the target round once it exists in
+    // wall-clock terms (chain time + delta >= emission). Whatever the order,
+    // (1) every SUCCESSFUL manual cash-out landed in a block with timestamp
+    // < revealNotBefore = emission - margin AND before the round had been
+    // relayed (the clock-independent belt), (2) every manual cash-out
+    // attempted at or after revealNotBefore, or after the relay, reverted
+    // CashOutWindowClosed -- regardless of on-chain reveal state -- and
+    // (3) the effective cash-out block is exactly min(manual, lockBlock +
+    // invert(auto)).
     const AUTO_CHOICES = [0n, 10001n, multiplierAt(3), multiplierAt(10)];
-    for (const seed of [1, 2, 3, 4, 5, 6, 7]) {
+    let totalSuccesses = 0;
+    let totalAfterClose = 0;
+    let totalBeltOnly = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
       const rand = prng(seed);
+      const delta = BigInt(seed % 9) * DRAND_PERIOD; // sequencer lag, seconds (the LCG's first draw barely depends on the seed)
       const { crash, beacon, alice, bob } = await deploy();
       const rid: bigint = await crash.currentRoundId();
       const autos: Record<string, bigint> = {
@@ -135,40 +150,54 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       await lock(crash);
       const r = await crash.rounds(rid);
       const rnb: bigint = r.revealNotBefore;
-      expect(rnb).to.equal(DRAND_GENESIS + (BigInt(r.targetDrandRound) - 1n) * DRAND_PERIOD);
+      const emission = DRAND_GENESIS + (BigInt(r.targetDrandRound) - 1n) * DRAND_PERIOD;
+      expect(rnb).to.equal(emission - MARGIN);
 
       const manualBlock: Record<string, bigint> = {};
-      let attemptsAfterRnb = 0;
+      let relayed = false;
+      let attemptsAfterClose = 0;
+      let attempts = 0;
       let successes = 0;
-      for (let step = 0; step < 30; step++) {
+      // The target round is >= 21 periods (63 s) after lock; ~48 steps of
+      // 1..12 s time hops plus ~1 s per mined block straddle that boundary
+      // on most seeds (and stay short of it on some -- both are wanted).
+      for (let step = 0; step < 48; step++) {
         const op = Math.floor(rand() * 6);
         if (op === 0) {
-          await networkHelpers.time.increase(1 + Math.floor(rand() * 8));
+          await networkHelpers.time.increase(1 + Math.floor(rand() * 12));
         } else if (op === 1) {
           await networkHelpers.mine(1 + Math.floor(rand() * 3));
         } else if (op === 2) {
-          // "Off-chain-known randomness": the relayer may inject the target
-          // round's value at ANY time (the mock does not enforce due-time),
-          // modelling a player who fetched the signature the instant it
-          // was producible -- or even an out-of-band leak before that.
-          await beacon.setRandomness(r.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes(`c1-${seed}-${step}`)));
+          // Lag model: the signature exists (and a player who fetched it
+          // knows the crash point) once WALL time reaches emission, i.e.
+          // chain time >= emission - delta. When delta > MARGIN the chain-
+          // clock gate alone would still be open for a while -- the belt
+          // must close it the moment the relay lands.
+          const chainNow = BigInt(await networkHelpers.time.latest());
+          if (chainNow + delta >= emission) {
+            await beacon.setRandomness(r.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes(`c1-${seed}-${step}`)));
+            relayed = true;
+          }
         } else if (op === 3) {
           await crash.revealEntropy(rid).catch(() => {});
         } else {
           const who = op === 4 ? alice : bob;
           const latest = BigInt(await networkHelpers.time.latest());
           const nextTsAtLeast = latest + 1n;
+          attempts++;
           try {
             const tx = await crash.connect(who).cashOut(rid);
             const rc = await tx.wait();
             const blk = await ethers.provider.getBlock(rc.blockNumber);
             expect(BigInt(blk!.timestamp), `seed ${seed} step ${step}: cash-out landed at/after revealNotBefore`).to.be.lt(rnb);
+            expect(relayed, `seed ${seed} step ${step}: cash-out landed after the round was relayed (belt failed)`).to.equal(false);
             manualBlock[who.address] = BigInt(rc.blockNumber);
             successes++;
           } catch (err: any) {
-            if (nextTsAtLeast >= rnb) {
-              attemptsAfterRnb++;
-              expect(String(err?.message ?? err), `seed ${seed} step ${step}: wrong revert after revealNotBefore`).to.include(
+            if (nextTsAtLeast >= rnb || relayed) {
+              attemptsAfterClose++;
+              if (relayed && nextTsAtLeast < rnb) totalBeltOnly++; // the chain clock said open; only the belt closed it
+              expect(String(err?.message ?? err), `seed ${seed} step ${step}: wrong revert after the window closed`).to.include(
                 "CashOutWindowClosed"
               );
             }
@@ -190,14 +219,21 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
         expect(await crash.cashOutBlockOf(rid, who.address)).to.equal(manual ?? 0n);
         expect(await crash.autoCashOutBps(rid, who.address)).to.equal(auto);
       }
-      // Sanity that the fuzz really exercised the boundary on this seed, or at least one side of it.
-      expect(successes + attemptsAfterRnb, `seed ${seed} exercised nothing`).to.be.gt(0);
+      // Sanity that the fuzz really attempted cash-outs on this seed.
+      expect(attempts, `seed ${seed} attempted nothing`).to.be.gt(0);
+      totalSuccesses += successes;
+      totalAfterClose += attemptsAfterClose;
 
       // The round is still settleable after any ordering.
       if (!(await crash.rounds(rid)).entropyRevealed) await revealWith(crash, beacon, rid, await winnableRandomness(crash, `c1-tail-${seed}`));
       await settle(crash, rid);
       expect((await crash.rounds(rid)).phase).to.equal(2n);
     }
+    // Across the seeds both sides of the boundary were exercised, and the
+    // lag model produced at least one case only the belt could close.
+    expect(totalSuccesses, "no cash-out ever succeeded").to.be.gt(0);
+    expect(totalAfterClose, "no cash-out was ever attempted after the close").to.be.gt(0);
+    expect(totalBeltOnly, "the lag model never produced a belt-only close (delta > margin)").to.be.gt(0);
   });
 
   // ───────────────────────────── C2 ─────────────────────────────────────
@@ -237,20 +273,35 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
 
   // ───────────────────────────── C3 ─────────────────────────────────────
   it("singlePayoutCapped", async () => {
-    const CAP_BPS = 200n;
-    const { crash, beacon, alice, bob } = await deploy({ singlePayoutCapBps: CAP_BPS });
+    // Under the proposals the seed is 5% of the Vault and the per-wallet
+    // house-side cap is 2% of reserveAtLock. To make the (b).2 cap the
+    // BINDING bound (rather than HIGH-1's fair-odds cap, which is tested on
+    // its own below) the sole winner exits at the max multiplier: 40 blocks
+    // = 1.192x on a 5 ETH stake, so her fair-odds profit (0.96 ETH) exceeds
+    // both the seed (0.5) and the 2% cap (0.19).
+    const { crash, beacon, alice, bob } = await deploy();
     await crash.connect(alice).fundVault({ value: ethers.parseEther("10") });
-    await lock(crash); // voids the empty round; the next one is seeded with 5 ETH
+    await lock(crash); // voids the empty round; the next one is seeded with 5% = 0.5 ETH
     const rid: bigint = await crash.currentRoundId();
     const seed: bigint = (await crash.rounds(rid)).rolledOverFromPrevious;
-    expect(seed).to.equal(ethers.parseEther("5"));
+    expect(seed).to.equal(ethers.parseEther("0.5"));
 
-    await crash.connect(alice).placeBet(10001n, { value: ethers.parseEther("1") });
+    const AUTO = multiplierAt(MAX_ELAPSED);
+    const STAKE_A = ethers.parseEther("5");
+    await crash.connect(alice).placeBet(AUTO, { value: STAKE_A });
     await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await lock(crash);
     const reserveAtLock: bigint = (await crash.rounds(rid)).reserveAtLock;
-    expect(reserveAtLock).to.equal(ethers.parseEther("5"));
-    await revealWith(crash, beacon, rid, await winnableRandomness(crash, "c3"));
+    expect(reserveAtLock).to.equal(ethers.parseEther("9.5"));
+    // A crash at/after the cap so the 4.92x auto target wins.
+    let v = "";
+    for (let i = 0; i < 400 && !v; i++) {
+      const cand = ethers.keccak256(ethers.toUtf8Bytes(`c3-max-${i}`));
+      const [, elapsed] = await crash._deriveCrash(cand);
+      if (elapsed >= BigInt(MAX_ELAPSED)) v = cand;
+    }
+    expect(v, "no capped-crash randomness found").to.not.equal("");
+    await revealWith(crash, beacon, rid, v);
     await settle(crash, rid);
     await crash.registerResult(rid, alice.address);
     await crash.registerResult(rid, bob.address);
@@ -258,11 +309,14 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
 
     const r = await crash.rounds(rid);
     const D: bigint = r.distributable;
-    expect(D).to.equal(seed + (ethers.parseEther("2") * (10000n - RAKE_BPS)) / 10000n);
+    expect(D).to.equal(seed + (ethers.parseEther("6") * (10000n - RAKE_BPS)) / 10000n);
     // Alice is the sole winner: her uncapped share is the WHOLE pool, of
-    // which the whole 5 ETH seed is house money. The cap bounds that to
-    // reserveAtLock*2% = 0.1 ETH; the rest of the seed returns to the Vault.
+    // which the whole 0.5 ETH seed is house money. Her fair-odds cap is
+    // 0.96 ETH (does not bind); the (b).2 cap bounds the house side to
+    // reserveAtLock*2% = 0.19 ETH; the rest of the seed returns to the Vault.
     const cap = (reserveAtLock * CAP_BPS) / 10000n;
+    expect(cap).to.equal(ethers.parseEther("0.19"));
+    expect(weightsAt(STAKE_A, MAX_ELAPSED).pw).to.be.gt(seed);
     const expectedExcess = seed - cap;
     const expectedPayout = D - expectedExcess;
     expect(await crash.estimatedPayout(rid, alice.address)).to.equal(expectedPayout);
@@ -282,36 +336,192 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   });
 
   it("seedCapped", async () => {
-    const { crash, Crash, alice } = await deploy({ seedMaxBps: 500n }); // num/den says 1/2; the bytecode cap says 5%
+    const { crash, Crash, alice } = await deploy(); // num/den says 1/2; the PROPOSED bytecode cap says 5%
     await crash.connect(alice).fundVault({ value: ethers.parseEther("10") });
     expect(await crash.nextSeed()).to.equal(ethers.parseEther("0.5")); // 10 * 500 / 10000, not 5
     await lock(crash);
     const rid: bigint = await crash.currentRoundId();
     expect((await crash.rounds(rid)).rolledOverFromPrevious).to.equal(ethers.parseEther("0.5"));
     expect(await crash.reserve()).to.equal(ethers.parseEther("9.5"));
-    // The ceiling is in bytecode: no config can exceed SEED_MAX_BPS_CEILING or be 0.
-    expect(await crash.SEED_MAX_BPS_CEILING()).to.equal(5000n);
-    await expect(deploy({ seedMaxBps: 5001n })).to.be.revertedWithCustomError(Crash, "BadHardeningConfig");
+    // The ceiling is in bytecode (review MED-3: 1000, i.e. 2x the proposal,
+    // not 10x): no config can exceed SEED_MAX_BPS_CEILING or be 0.
+    expect(await crash.SEED_MAX_BPS_CEILING()).to.equal(1000n);
+    await expect(deploy({ seedMaxBps: 1001n })).to.be.revertedWithCustomError(Crash, "BadHardeningConfig");
+    await expect(deploy({ seedMaxBps: 5000n })).to.be.revertedWithCustomError(Crash, "BadHardeningConfig");
     await expect(deploy({ seedMaxBps: 0n })).to.be.revertedWithCustomError(Crash, "BadHardeningConfig");
+    const { crash: atCeiling } = await deploy({ seedMaxBps: 1000n });
+    await atCeiling.connect(alice).fundVault({ value: ethers.parseEther("10") });
+    expect(await atCeiling.nextSeed()).to.equal(ethers.parseEther("1"));
+  });
+
+  // ─────────────────── HIGH-1: the seed is not farmable ──────────────────
+  it("seedNotFarmableAtMinExit", async () => {
+    // Reviewer's probe, reproduced under the PROPOSED constants: a 2 ETH
+    // bankroll; 4 sybil wallets, each betting the minimum-ish stake with a
+    // 1.0001x auto target (fires at elapsed = 1 block = 1.004x, wins with
+    // P = 0.9999); 7 rounds back to back (~5 min at real cadence). Under
+    // the old stake*mult seed key the sybils took the ENTIRE 5% seed every
+    // round for a 0.4% risk -- 0.37 ETH = 18.5% of the bankroll in 7 rounds
+    // at ~6.6x the stake they ever risked. Bound asserted (HIGH-1 fix):
+    //   houseMoneyExtracted <= sum over (round, wallet) that won of
+    //                          stake * (mult_at_exit - 1)
+    // i.e. house money never exceeds the FAIR-ODDS profit on the risk
+    // actually taken -- the player's EV-equivalent contribution: a fair
+    // book pays stake*(m-1) with probability 1/m, expectation stake*(m-1)/m,
+    // which at a 1.004x exit is 0.4% of stake per round. The old code paid
+    // ~0.1 ETH/round against a bound of 4*0.01*0.004 = 0.00016 ETH/round:
+    // this test FAILS on it by ~600x. Also asserted, in the reviewer's own
+    // units: total extraction < 1% of the bankroll (old: 18.5%).
+    const { crash, beacon, signers } = await deploy();
+    const sybils = signers.slice(2, 6);
+    const BANKROLL = ethers.parseEther("2");
+    const STAKE = ethers.parseEther("0.01");
+    await crash.connect(signers[7]).fundVault({ value: BANKROLL });
+    await lock(crash); // void the empty round; the next one is seeded
+    let fairOddsBound = 0n;
+    let roundsWon = 0;
+    for (let i = 0; i < 7; i++) {
+      const rid: bigint = await crash.currentRoundId();
+      const seed: bigint = (await crash.rounds(rid)).rolledOverFromPrevious;
+      for (const s of sybils) await crash.connect(s).placeBet(10001n, { value: STAKE });
+      await lock(crash);
+      await revealWith(crash, beacon, rid, await winnableRandomness(crash, `farm-${i}`));
+      await settle(crash, rid);
+      const r = await crash.rounds(rid);
+      expect(r.crashElapsedBlocks).to.be.gte(1n); // the min exit won this round
+      for (const s of sybils) await crash.registerResult(rid, s.address);
+      await networkHelpers.mine(REG + 1);
+      for (const s of sybils) {
+        await crash.claim(rid, s.address);
+        fairOddsBound += weightsAt(STAKE, 1).pw; // stake * (1.004 - 1) = 0.00004 ETH
+      }
+      if (seed > 0n) roundsWon++;
+    }
+    // The seed of the round currently open is house money still in flight,
+    // not extracted: the Vault + that seed is what the house still holds.
+    const inFlight: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
+    const houseNow: bigint = (await crash.reserve()) + inFlight;
+    const extracted = BANKROLL - houseNow;
+    expect(roundsWon, "the probe did not exercise seeded rounds").to.be.gte(4); // daily circuit may halt the tail
+    expect(extracted, "house money extracted must be <= the fair-odds profit on the risk taken").to.be.lte(fairOddsBound);
+    expect(extracted * 100n, "extraction must be < 1% of the bankroll (reviewer's probe: 18.5%)").to.be.lt(BANKROLL);
+    // And the sybils' NET result is a loss (rake on their own pool > the
+    // dust of house money): the farm is unprofitable, not just slow.
+    let sybilOut = 0n;
+    for (const s of sybils) sybilOut += await crash.payments(s.address);
+    expect(sybilOut).to.be.lt(STAKE * 4n * 7n);
+  });
+
+  it("seedSplitByProfitWeight", async () => {
+    // Two winners in one round: alice exits at ~1x (profit weight ~0), bob
+    // at 10 blocks (1.42x). The PLAYER pot still splits by stake*mult, but
+    // the SEED splits by stake*(mult-1) -- bob takes essentially all of it,
+    // capped at his fair-odds profit, and each winner's house money is
+    // <= stake*(mult-1). Pool conserved exactly.
+    const { crash, beacon, alice, bob } = await deploy();
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("10") });
+    await lock(crash);
+    const rid: bigint = await crash.currentRoundId();
+    const seed: bigint = (await crash.rounds(rid)).rolledOverFromPrevious;
+    const SA = ethers.parseEther("1");
+    const SB = ethers.parseEther("1");
+    await crash.connect(alice).placeBet(10001n, { value: SA });
+    await crash.connect(bob).placeBet(multiplierAt(10), { value: SB });
+    await lock(crash);
+    const reserveAtLock: bigint = (await crash.rounds(rid)).reserveAtLock;
+    let v = "";
+    for (let i = 0; i < 400 && !v; i++) {
+      const cand = ethers.keccak256(ethers.toUtf8Bytes(`split-${i}`));
+      const [, elapsed] = await crash._deriveCrash(cand);
+      if (elapsed >= 10n && elapsed <= BigInt(MAX_ELAPSED)) v = cand;
+    }
+    await revealWith(crash, beacon, rid, v);
+    await settle(crash, rid);
+    await crash.registerResult(rid, alice.address);
+    await crash.registerResult(rid, bob.address);
+    await networkHelpers.mine(REG + 1);
+    const r = await crash.rounds(rid);
+    const a = weightsAt(SA, 1);
+    const b = weightsAt(SB, 10);
+    expect(r.totalWinningWeight).to.equal(a.w + b.w);
+    expect(r.totalWinningProfitWeight).to.equal(a.pw + b.pw);
+    const common = { W: a.w + b.w, PW: a.pw + b.pw, distributable: r.distributable, seed, reserveAtLock, singlePayoutCapBps: CAP_BPS };
+    const ea = splitPayout({ ...a, ...common });
+    const eb = splitPayout({ ...b, ...common });
+    expect(await crash.estimatedPayout(rid, alice.address)).to.equal(ea.paid);
+    expect(await crash.estimatedPayout(rid, bob.address)).to.equal(eb.paid);
+    const reserveBefore: bigint = await crash.reserve();
+    await crash.claim(rid, alice.address);
+    await crash.claim(rid, bob.address);
+    expect(await crash.payments(alice.address)).to.equal(ea.paid);
+    expect(await crash.payments(bob.address)).to.equal(eb.paid);
+    // House money per winner <= fair-odds profit; alice's is dust, bob's is real.
+    expect(ea.seedPaid).to.be.lte(a.pw);
+    expect(eb.seedPaid).to.be.lte(b.pw);
+    expect(ea.seedPaid * 10n).to.be.lt(eb.seedPaid); // 0.004 vs 0.042 ETH: profit weights 40 : 420
+    // Player pot by stake*mult exactly; conservation to within division
+    // dust (two floors per winner: player pot and seed share).
+    const playerPot = r.distributable - seed;
+    expect(ea.paid - ea.seedPaid).to.equal((playerPot * a.w) / (a.w + b.w));
+    expect((await crash.reserve()) - reserveBefore).to.equal(ea.excess + eb.excess);
+    expect(r.distributable - (ea.paid + eb.paid + ea.excess + eb.excess)).to.be.lte(4n);
   });
 
   // ───────────────────────────── C4 ─────────────────────────────────────
+  /// A round whose whole seed is LOST to the house: the sole winner exits at
+  /// the max multiplier so the seed leaves the Vault for good (HIGH-1 means
+  /// a ~1x exit would return most of it as excess). Returns the settled id.
+  async function playSeedLosingRound(crash: any, beacon: any, alice: any, bob: any, label: string, delayBeforeLock = 0) {
+    const rid: bigint = await crash.currentRoundId();
+    await crash.connect(alice).placeBet(multiplierAt(MAX_ELAPSED), { value: ethers.parseEther("5") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
+    if (delayBeforeLock > 0) await networkHelpers.time.increase(delayBeforeLock);
+    await lock(crash);
+    let v = "";
+    for (let i = 0; i < 400 && !v; i++) {
+      const cand = ethers.keccak256(ethers.toUtf8Bytes(`${label}-${i}`));
+      const [, elapsed] = await crash._deriveCrash(cand);
+      if (elapsed >= BigInt(MAX_ELAPSED)) v = cand;
+    }
+    await revealWith(crash, beacon, rid, v);
+    await settle(crash, rid);
+    await crash.registerResult(rid, alice.address);
+    await crash.registerResult(rid, bob.address);
+    await networkHelpers.mine(REG + 1);
+    await crash.claim(rid, alice.address);
+    return rid;
+  }
+
   it("dailyDrawdownHaltsSeed", async () => {
-    const { crash, beacon, alice, bob } = await deploy({ dailyDrawdownBps: 1000n, seedNumerator: 1n, seedDenominator: 4n });
+    // Proposals: seed 5%/round, daily circuit 15%. The circuit is checked
+    // BEFORE each draw: four draws happen (5%, 4.75%, 4.51%, 4.29% -> the
+    // fourth is drawn at 14.26% down and leaves the Vault 18.55% down), so
+    // the FIFTH round seeds 0. (The reviewer's probe is exactly this
+    // arithmetic: ~0.37 of 2 ETH before the halt.)
+    // singlePayoutCapBps off (10000) so the max-exit winner really takes the
+    // whole seed and the Vault's loss per round is exactly the seed.
+    const { crash, beacon, alice, bob } = await deploy({ singlePayoutCapBps: 10000n });
     await crash.connect(alice).fundVault({ value: ethers.parseEther("1") });
     expect(await crash.drawdownWindowPeak()).to.equal(ethers.parseEther("1"));
-    await lock(crash); // void -> seeds 0.25 into the next round
-    expect(await crash.reserve()).to.equal(ethers.parseEther("0.75"));
-    expect(await crash.seedHaltReason()).to.equal(1); // already 25% below the window peak > 10%
-
-    // The seed of THIS round is lost to a winner; the NEXT round must seed 0.
-    const rid = await playSeededRound(crash, beacon, alice, bob, "c4-daily");
-    void rid;
+    await lock(crash); // void -> seeds 0.05 into the next round
+    let expected = ethers.parseEther("0.95");
+    expect(await crash.reserve()).to.equal(expected);
+    expect(await crash.seedHaltReason()).to.equal(0);
+    for (let i = 0; i < 3; i++) {
+      await playSeedLosingRound(crash, beacon, alice, bob, `c4-d${i}`);
+      expected -= seedFor(expected);
+      expect(await crash.reserve(), `after draw ${i + 2}`).to.equal(expected);
+      expect(await crash.seedHaltReason(), `after draw ${i + 2}`).to.equal(i < 2 ? 0 : 1);
+    }
+    expect(expected).to.equal(ethers.parseEther("0.81450625")); // 18.55% below the 1.0 peak
+    await playSeedLosingRound(crash, beacon, alice, bob, "c4-d-halt"); // the NEXT draw is halted
     const haltedId: bigint = await crash.currentRoundId();
     const halted = await crash.rounds(haltedId);
     expect(halted.pool).to.equal(0n);
     expect(halted.rolledOverFromPrevious).to.equal(0n);
+    expect(await crash.reserve()).to.equal(expected); // untouched: seed 0
     expect(await crash.nextSeed()).to.equal(0n);
+    expect(await crash.seedHaltReason()).to.equal(1);
     const evs = await crash.queryFilter(crash.filters.SeedHalted(haltedId));
     expect(evs.length).to.equal(1);
     expect(evs[0].args.reason).to.equal(1n);
@@ -319,29 +529,118 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("0.2") });
     expect(await crash.stakeOf(haltedId, alice.address)).to.equal(ethers.parseEther("0.2"));
 
-    // After the 24h window rolls, the peak resets to the current balance and
-    // seeding resumes.
+    // Review MED-2: after the 24h window rolls the peak does NOT reset to
+    // the depleted balance (which would re-arm a fresh 15% on top of the
+    // 18.55% already spent); it decays by exactly the allowed 15%:
+    //   newPeak = max(0.81450625, 1 * 0.85) = 0.85
+    // so the Vault is only 4.2% below the new peak and the budget left in
+    // the new window is ~10.8%, not 15% -- what a true rolling window
+    // would leave.
     await networkHelpers.time.increase(24 * 3600 + 1);
     expect(await crash.seedHaltReason()).to.equal(0);
     expect(await crash.nextSeed()).to.be.gt(0n);
     await crash.lockRound(); // voids (1 participant) and starts a seeded round
+    expect(await crash.drawdownWindowPeak()).to.equal(ethers.parseEther("0.85"));
     const resumed = await crash.rounds(await crash.currentRoundId());
-    expect(resumed.rolledOverFromPrevious).to.be.gt(0n);
+    expect(resumed.rolledOverFromPrevious).to.equal(seedFor(expected));
+  });
+
+  it("drawdownPeakDecaysAcrossWindows", async () => {
+    // Review MED-2, the boundary case itself: with the OLD reset-to-balance
+    // rule a Vault that had spent 14% of the daily 15% budget just before a
+    // boundary could spend ~15% more right after it (~2x). With decay the
+    // peak after n elapsed windows is prevPeak * 0.85^n, floored at the
+    // balance -- and a return of house money (rescued seed, capped-payout
+    // excess) never lifts the peak inside a window.
+    const { crash, beacon, alice, bob } = await deploy({ hwmDrawdownBps: 10000n, singlePayoutCapBps: 10000n });
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("1") });
+    await lock(crash); // draw 1 (0.05) out: reserve 0.95, peak 1
+    // Three lost rounds: each settle draws the next seed (draws 2..4), so
+    // the Vault sits at 0.95^4 = 0.8145 (18.55% down) with the 4th seed in
+    // flight. Note the roll happens at a round START (the draw), i.e. at the
+    // SETTLE of the previous round -- so the 24h delay goes before the
+    // lock of the round whose settle should roll the window.
+    for (let i = 0; i < 3; i++) await playSeedLosingRound(crash, beacon, alice, bob, `decay-${i}`);
+    expect(await crash.reserve()).to.equal(ethers.parseEther("0.81450625"));
+    expect(await crash.drawdownWindowPeak()).to.equal(ethers.parseEther("1"));
+    expect(await crash.seedHaltReason()).to.equal(1); // 18.55% > 15%: halted inside this window
+    // Boundary: under reset-to-balance the new peak would be 0.8145 and a
+    // fresh 15% (another ~0.12) could be spent right after 18.55% was --
+    // ~2.2x the daily budget in 24h. With decay: peak = max(0.8145, 1*0.85)
+    // = 0.85, so the Vault is 4.2% below the new peak and only ~10.8% of
+    // budget remains -- what a true rolling window would leave.
+    await playSeedLosingRound(crash, beacon, alice, bob, "decay-roll", 24 * 3600 + 1);
+    expect(await crash.drawdownWindowPeak()).to.equal(ethers.parseEther("0.85"));
+    expect(await crash.seedHaltReason()).to.equal(0); // seeding resumed, on the decayed peak
+    // The draw at that settle: 5% of 0.8145 -> reserve 0.77378.
+    const bal: bigint = await crash.reserve();
+    expect(bal).to.equal(ethers.parseEther("0.81450625") - seedFor(ethers.parseEther("0.81450625")));
+    // After 3 more idle windows the peak decays 0.85^n but never below the
+    // balance. The 1-participant void first RESCUES the in-flight seed
+    // (a return: does not lift the peak), so the balance the roll sees is
+    // bal + seed = 0.8145 again; then the new seed is drawn from it.
+    const inFlight: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
+    const balAtRoll = bal + inFlight;
+    expect(balAtRoll).to.equal(ethers.parseEther("0.81450625"));
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("0.2") });
+    await networkHelpers.time.increase(3 * 24 * 3600 + 1);
+    await crash.lockRound(); // 1 participant: void -> rescue -> roll (3 windows) -> re-seed
+    let expectedPeak = ethers.parseEther("0.85");
+    for (let i = 0; i < 3 && expectedPeak > balAtRoll; i++) expectedPeak = (expectedPeak * 8500n) / 10000n;
+    if (expectedPeak < balAtRoll) expectedPeak = balAtRoll;
+    expect(await crash.drawdownWindowPeak()).to.equal(expectedPeak);
+    expect(expectedPeak).to.equal(balAtRoll); // 0.85 * 0.85 = 0.7225 < 0.8145: floored at the balance after ONE decay step
+    expect(await crash.reserve()).to.equal(balAtRoll - seedFor(balAtRoll));
+
+    // Returns do not raise the peak: freeze the peak at the balance with a
+    // seed out, then let a capped payout's excess return more than the
+    // peak. hwm circuit is off here (10000) so only the daily peak matters.
+    const { crash: c2, beacon: b2 } = await deploy({ hwmDrawdownBps: 10000n });
+    await c2.connect(alice).fundVault({ value: ethers.parseEther("1") });
+    await lock(c2); // seed 0.05 out, reserve 0.95, peak 1
+    const rid: bigint = await c2.currentRoundId();
+    await c2.connect(alice).placeBet(10001n, { value: ethers.parseEther("0.1") }); // ~1x exit: her house money is 0.1*0.004 = dust; nearly the whole 0.05 seed returns as excess
+    await c2.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
+    await networkHelpers.time.increase(24 * 3600 + 1);
+    await c2.lockRound();
+    await revealWith(c2, b2, rid, await winnableRandomness(c2, "decay-return"));
+    await settle(c2, rid); // the roll at this start: peak = max(0.95, 1*0.85) = 0.95, then the next 5% is drawn -> reserve 0.9025
+    const peakBefore: bigint = await c2.drawdownWindowPeak();
+    await c2.registerResult(rid, alice.address);
+    await c2.registerResult(rid, bob.address);
+    await networkHelpers.mine(REG + 1);
+    const reserveBefore: bigint = await c2.reserve();
+    await c2.claim(rid, alice.address);
+    const returned = (await c2.reserve()) - reserveBefore;
+    expect(returned).to.be.gt(0n);
+    expect(reserveBefore + returned, "the return must exceed the peak for this case to bite").to.be.gt(peakBefore);
+    expect(await c2.drawdownWindowPeak(), "a returned excess must not lift the window peak").to.equal(peakBefore);
   });
 
   it("hwmDrawdownHaltsSeed", async () => {
-    const { crash, beacon, alice, bob } = await deploy({ hwmDrawdownBps: 5000n });
+    // Daily circuit off (10000) so only the HWM circuit acts; seeds at the
+    // 10% bytecode ceiling so the 50% line is reached in 7 lost rounds.
+    const { crash, beacon, alice, bob } = await deploy({ hwmDrawdownBps: 5000n, dailyDrawdownBps: 10000n, seedMaxBps: 1000n, singlePayoutCapBps: 10000n });
     await crash.connect(alice).fundVault({ value: ethers.parseEther("1") });
     expect(await crash.reserveHighWaterMark()).to.equal(ethers.parseEther("1"));
-    await lock(crash); // void -> seeds 0.5 (reserve 0.5 == exactly 50% of HWM: not yet below)
+    await lock(crash); // void -> seeds 0.1 (reserve 0.9)
     expect(await crash.seedHaltReason()).to.equal(0);
-    await playSeededRound(crash, beacon, alice, bob, "c4-hwm-1"); // 0.5 lost; next round seeds 0.25 -> reserve 0.25
-    expect(await crash.reserve()).to.equal(ethers.parseEther("0.25"));
-    expect(await crash.seedHaltReason()).to.equal(2); // 75% below HWM > 50%
-    await playSeededRound(crash, beacon, alice, bob, "c4-hwm-2");
+    let expected = ethers.parseEther("0.9");
+    for (let i = 0; i < 5; i++) {
+      await playSeedLosingRound(crash, beacon, alice, bob, `c4-hwm-${i}`);
+      expected -= expected / 10n;
+      expect(await crash.reserve()).to.equal(expected);
+      expect(await crash.seedHaltReason(), `round ${i}`).to.equal(0); // 0.9^6 = 0.531 still >= 0.5
+    }
+    await playSeedLosingRound(crash, beacon, alice, bob, "c4-hwm-last"); // draws to 0.9^7 = 0.478 < 50% of HWM
+    expected -= expected / 10n;
+    expect(await crash.reserve()).to.equal(expected);
+    expect(await crash.seedHaltReason()).to.equal(2);
+    await playSeedLosingRound(crash, beacon, alice, bob, "c4-hwm-halted"); // this round had a seed; the NEXT is halted
     const haltedId: bigint = await crash.currentRoundId();
     expect((await crash.rounds(haltedId)).rolledOverFromPrevious).to.equal(0n);
-    expect(await crash.reserve()).to.equal(ethers.parseEther("0.25")); // untouched: seed 0
+    expect(await crash.reserve()).to.equal(expected); // untouched: seed 0
+    expect(await crash.seedHaltReason()).to.equal(2);
     const evs = await crash.queryFilter(crash.filters.SeedHalted(haltedId));
     expect(evs.length).to.equal(1);
     expect(evs[0].args.reason).to.equal(2n);
@@ -349,9 +648,9 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("0.2") });
     // Refill lifts the HWM to the new balance: seeding resumes.
     await crash.connect(bob).fundVault({ value: ethers.parseEther("1") });
-    expect(await crash.reserveHighWaterMark()).to.equal(ethers.parseEther("1.25"));
+    expect(await crash.reserveHighWaterMark()).to.equal(expected + ethers.parseEther("1"));
     expect(await crash.seedHaltReason()).to.equal(0);
-    expect(await crash.nextSeed()).to.equal(ethers.parseEther("0.625"));
+    expect(await crash.nextSeed()).to.equal((expected + ethers.parseEther("1")) / 10n);
   });
 
   // ───────────────────────────── C5 ─────────────────────────────────────
@@ -398,10 +697,10 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     // the Vault exactly, via BOTH void paths, never stranding house money.
     const { crash, alice, bob } = await deploy();
     await crash.connect(alice).fundVault({ value: ethers.parseEther("1") });
-    await lock(crash); // voids the empty round 1 (seed 0); round 2 seeded with 0.5
+    await lock(crash); // voids the empty round 1 (seed 0); round 2 seeded with 5% = 0.05
     const rid2: bigint = await crash.currentRoundId();
-    expect((await crash.rounds(rid2)).rolledOverFromPrevious).to.equal(ethers.parseEther("0.5"));
-    expect(await crash.reserve()).to.equal(ethers.parseEther("0.5"));
+    expect((await crash.rounds(rid2)).rolledOverFromPrevious).to.equal(ethers.parseEther("0.05"));
+    expect(await crash.reserve()).to.equal(ethers.parseEther("0.95"));
     // Path 1: under-threshold void at lock.
     await lock(crash);
     expect(await crash.voided(rid2)).to.equal(true);
@@ -409,7 +708,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     // Vault back to 1.0 BEFORE the next seed was drawn, i.e. reserve == 1.0 - nextSeed.
     const rid3: bigint = await crash.currentRoundId();
     const seed3: bigint = (await crash.rounds(rid3)).rolledOverFromPrevious;
-    expect(seed3).to.equal(ethers.parseEther("0.5"));
+    expect(seed3).to.equal(ethers.parseEther("0.05"));
     expect((await crash.reserve()) + seed3).to.equal(ethers.parseEther("1"));
     // Path 2: reveal-timeout void of a LIVE round.
     await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("0.1") });
@@ -492,23 +791,24 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   // ─────────────── pool conservation under the payout cap ───────────────
   it("poolConservedUnderPayoutCap", async () => {
     // Property, fuzzed over >= 5 seeds with random stakes / auto targets /
-    // manual cash-outs / Vault sizes: for every winner,
-    //   paid_i + excessToVault_i == floor(D * w_i / W)   (exact)
-    //   excess_i == max(0, floor(seed * w_i / W) - cap)  (exact)
+    // manual cash-outs / Vault sizes: for every winner, with the HIGH-1
+    // split (player pot P = D - seed by w; seed by profit weight pw),
+    //   share_i  == floor(P * w_i / W) + floor(seed * pw_i / PW)
+    //   paid_i + excessToVault_i == share_i                        (exact)
+    //   excess_i == floor(seed*pw_i/PW) - min(that, pw_i, cap)      (exact)
     // so sum(paid) + sum(excess) == sum(share_i) <= D with the only slack
-    // being integer-division dust (< number of winners wei), and the Vault
+    // being integer-division dust (< 2 * winners wei), and the Vault
     // grows by exactly sum(excess). Nothing is minted or destroyed.
-    const CAP_BPS = 200n;
     for (const seed of [11, 12, 13, 14, 15, 16]) {
       const rand = prng(seed);
-      const { crash, beacon, signers } = await deploy({ singlePayoutCapBps: CAP_BPS });
+      const { crash, beacon, signers } = await deploy();
       const players = signers.slice(2, 6);
       const fund = ethers.parseEther((2 + Math.floor(rand() * 9)).toString());
       await crash.connect(players[0]).fundVault({ value: fund });
       await lock(crash); // void -> seeded round
       const rid: bigint = await crash.currentRoundId();
       const seedAmt: bigint = (await crash.rounds(rid)).rolledOverFromPrevious;
-      expect(seedAmt).to.equal(fund / 2n);
+      expect(seedAmt).to.equal(seedFor(fund));
 
       const AUTO = [0n, 10001n, multiplierAt(2), multiplierAt(5)];
       let playerPool = 0n;
@@ -529,6 +829,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       const D: bigint = r.distributable;
       expect(D).to.equal(seedAmt + (playerPool * (10000n - RAKE_BPS)) / 10000n);
       const W: bigint = r.totalWinningWeight;
+      const PW: bigint = r.totalWinningProfitWeight;
       const weights: Record<string, bigint> = {};
       for (const e of await crash.queryFilter(crash.filters.ResultRegistered(rid))) weights[e.args.player] = e.args.weight;
 
@@ -537,7 +838,6 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       let sumExcess = 0n;
       let sumShare = 0n;
       let winners = 0n;
-      const cap = (reserveAtLock * CAP_BPS) / 10000n;
       for (const p of players) {
         const w = weights[p.address] ?? 0n;
         if (w === 0n) {
@@ -545,9 +845,13 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
           continue;
         }
         winners++;
-        const share = (D * w) / W;
-        const seedShare = (seedAmt * w) / W;
-        const expectedExcess = seedShare > cap ? seedShare - cap : 0n;
+        const exitElapsed = (await crash.effectiveCashOutBlock(rid, p.address)) - r.lockBlock;
+        const mine = weightsAt(await crash.stakeOf(rid, p.address), exitElapsed);
+        expect(mine.w).to.equal(w);
+        const exp = splitPayout({ ...mine, W, PW, distributable: D, seed: seedAmt, reserveAtLock, singlePayoutCapBps: CAP_BPS });
+        const share = exp.paid + exp.excess;
+        const expectedExcess = exp.excess;
+        expect(exp.seedPaid, `seed ${seed}: house money <= fair-odds profit (HIGH-1)`).to.be.lte(mine.pw);
         const before: bigint = await crash.payments(p.address);
         await crash.claim(rid, p.address);
         const paid = (await crash.payments(p.address)) - before;
@@ -555,7 +859,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
         const excess: bigint = capEvs.length ? capEvs[0].args.excessToVault : 0n;
         expect(excess, `seed ${seed}: excess`).to.equal(expectedExcess);
         expect(paid + excess, `seed ${seed}: paid+excess`).to.equal(share);
-        expect(paid, `seed ${seed}: player-funded portion never capped`).to.be.gte(share - seedShare);
+        expect(paid, `seed ${seed}: player-funded portion never capped`).to.be.gte(share - exp.seedRaw);
         sumPaid += paid;
         sumExcess += excess;
         sumShare += share;
@@ -568,7 +872,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       }
       expect(sumPaid + sumExcess).to.equal(sumShare);
       expect(sumShare).to.be.lte(D);
-      expect(D - sumShare, `seed ${seed}: only division dust may remain`).to.be.lt(winners);
+      expect(D - sumShare, `seed ${seed}: only division dust may remain`).to.be.lt(2n * winners);
       expect((await crash.reserve()) - reserveBefore).to.equal(sumExcess);
     }
   });

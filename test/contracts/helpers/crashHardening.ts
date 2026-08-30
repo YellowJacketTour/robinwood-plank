@@ -1,19 +1,21 @@
 /**
  * Phase 3 hardening (spec docs/marketplank/SPEC-CRASH-GO-LIVE-HARDENING.md)
  * added seven REQUIRED fields to PlankCrashDrand's Config struct. These are
- * the TEST-FIXTURE defaults: chosen so every pre-existing suite keeps its
- * exact pre-hardening arithmetic (no effective seed cap below what num/den
- * already gives, no payout cap bite, circuits that cannot trip, and a max
- * multiplier equal to what maxElapsedBlocks already implied). They are NOT
- * the spec's proposed production values -- see scripts/deploy-casino.ts.
+ * the TEST-FIXTURE defaults, and (review MED-3) they ARE the spec's §6
+ * PROPOSED production values, so every suite exercises the caps and
+ * circuits that would actually ship instead of a "never binds" config that
+ * hid arithmetic. They remain PROPOSED, not ratified -- ratification lives
+ * in the spec, deploy values in scripts/deploy-casino.ts. A suite whose
+ * purpose is a specific formula (e.g. the Vault's num/den draw) overrides
+ * the field it needs, explicitly, at its own call site.
  */
 export const HARDENING_TEST_DEFAULTS = {
-  keeperRevealBps: 0n,
-  keeperLockBps: 0n,
-  seedMaxBps: 5000n, // == SEED_MAX_BPS_CEILING; every fixture uses num/den <= 1/2
-  singlePayoutCapBps: 10000n, // cap = 100% of reserveAtLock: never binds under fixtures
-  dailyDrawdownBps: 10000n, // a >100% drawdown is impossible: never trips
-  hwmDrawdownBps: 10000n, // reserve < 0 is impossible: never trips
+  keeperRevealBps: 100n, // (c) 1% of rake to the revealer -- PROPOSED
+  keeperLockBps: 100n, // (c) 1% of rake to the locker -- PROPOSED
+  seedMaxBps: 500n, // (b) <= 5% of the bankroll per round -- PROPOSED (ceiling 1000 in bytecode)
+  singlePayoutCapBps: 200n, // (b) 2% of reserveAtLock house-side per wallet -- PROPOSED
+  dailyDrawdownBps: 1500n, // (b) 15%/24h halts subsidy -- PROPOSED
+  hwmDrawdownBps: 5000n, // (b) 50% from high-water halts subsidy -- PROPOSED
 };
 
 /// Mirror of PlankCrashDrand._multiplierAt (pure, integer): 10000 + 40e + e^2/5.
@@ -27,4 +29,33 @@ export function multiplierAt(elapsedBlocks: number | bigint): bigint {
 /// implied, so maxMultiplierElapsedBlocks == maxElapsedBlocks.
 export function hardeningFor(maxElapsedBlocks: number | bigint) {
   return { ...HARDENING_TEST_DEFAULTS, maxMultiplierBps: multiplierAt(maxElapsedBlocks) };
+}
+
+/// Mirror of PlankCrashDrand._splitPayout (review HIGH-1 + hardening (b).2):
+/// (paid, excess) for a winner with weights (w, pw) of totals (W, PW).
+export function splitPayout(a: {
+  w: bigint;
+  pw: bigint;
+  W: bigint;
+  PW: bigint;
+  distributable: bigint;
+  seed: bigint;
+  reserveAtLock: bigint;
+  singlePayoutCapBps: bigint;
+}): { paid: bigint; excess: bigint; seedRaw: bigint; seedPaid: bigint } {
+  const playerPot = a.distributable > a.seed ? a.distributable - a.seed : 0n;
+  let paid = (playerPot * a.w) / a.W;
+  if (a.seed === 0n) return { paid, excess: 0n, seedRaw: 0n, seedPaid: 0n };
+  const seedRaw = a.PW > 0n ? (a.seed * a.pw) / a.PW : (a.seed * a.w) / a.W;
+  let seedPaid = seedRaw > a.pw ? a.pw : seedRaw;
+  const cap = (a.reserveAtLock * a.singlePayoutCapBps) / 10000n;
+  if (seedPaid > cap) seedPaid = cap;
+  paid += seedPaid;
+  return { paid, excess: seedRaw - seedPaid, seedRaw, seedPaid };
+}
+
+/// (stake*mult/10000, stake*(mult-10000)/10000) at `elapsed` blocks.
+export function weightsAt(stake: bigint, elapsed: number | bigint): { w: bigint; pw: bigint } {
+  const m = multiplierAt(elapsed);
+  return { w: (stake * m) / 10000n, pw: (stake * (m - 10000n)) / 10000n };
 }

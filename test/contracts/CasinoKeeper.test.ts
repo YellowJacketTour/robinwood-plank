@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor } from "./helpers/crashHardening.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor } from "./helpers/crashHardening.js";
 import { tick, biddersOf, type KeeperConfig } from "../../scripts/casino-keeper.js";
 
 /**
@@ -225,10 +225,13 @@ describe("Casino keeper — the loop runs itself", () => {
 
     const pool = ethers.parseEther("2");
     const rake = (pool * RAKE_BPS) / 10000n;
-    const keeperReward = (rake * 1000n) / 10000n;
+    // The keeper settled AND revealed this round (alice locked it), so under
+    // the PROPOSED fixture bounties it earns the settle reward plus the
+    // reveal bounty -- and NOT the lock bounty, which is alice's.
+    const keeperReward = (rake * 1000n) / 10000n + (rake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n;
 
-    // The keeper's credit is EXACTLY the settle reward -- never a share of
-    // any player's winnings.
+    // The keeper's credit is EXACTLY its advertised bounties -- never a
+    // share of any player's winnings.
     expect(await crash.payments(keeper.address)).to.equal(keeperReward);
     // Alice's winnings are escrowed to Alice, by the keeper's own call.
     expect(await crash.payments(alice.address)).to.be.gt(0n);

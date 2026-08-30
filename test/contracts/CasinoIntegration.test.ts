@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor } from "./helpers/crashHardening.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * End-to-end proof that the WHOLE unified plank.love economics loop
@@ -144,7 +144,10 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     // ── Rake accrued; push it through the distributor ──────────────
     const rake = (pool * RAKE_BPS) / 10000n;
     const keeperReward = (rake * KEEPER_REWARD_BPS) / 10000n;
-    const rakeToDistribute = rake - keeperReward;
+    // Hardening (c) under the PROPOSED fixture defaults: the locker and the
+    // revealer are bountied from the rake too (1% each), before the split.
+    const lockRevealRewards = (rake * HARDENING_TEST_DEFAULTS.keeperLockBps) / 10000n + (rake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n;
+    const rakeToDistribute = rake - keeperReward - lockRevealRewards;
     expect(await crash.accumulatedRake()).to.equal(rakeToDistribute);
 
     await crash.claimRake(); // credits distributor in the crash's escrow

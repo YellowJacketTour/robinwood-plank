@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor } from "./helpers/crashHardening.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * THE VAULT -- a perpetual, always-positive prize reserve that seeds every
@@ -147,13 +147,15 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
   });
 
   it("fundVault grows the reserve and nextSeed() is exactly floor(reserve * num/den)", async () => {
-    const { crash, alice } = await deploy({ seedNumerator: 1n, seedDenominator: 4n });
+    // num/den 1/20 == the PROPOSED seedMaxBps (500), so the formula under
+    // test is the binding one (a looser num/den would be capped to 5%).
+    const { crash, alice } = await deploy({ seedNumerator: 1n, seedDenominator: 20n });
     await crash.connect(alice).fundVault({ value: 1000n });
     expect(await crash.reserve()).to.equal(1000n);
-    expect(await crash.nextSeed()).to.equal(250n); // 1000 * 1/4
+    expect(await crash.nextSeed()).to.equal(50n); // 1000 * 1/20
     await crash.connect(alice).fundVault({ value: 234n });
     expect(await crash.reserve()).to.equal(1234n);
-    expect(await crash.nextSeed()).to.equal(308n); // floor(1234/4)
+    expect(await crash.nextSeed()).to.equal(61n); // floor(1234/20)
     await expect(crash.connect(alice).fundVault({ value: 0n })).to.be.revertedWithCustomError(crash, "NothingToFund");
   });
 
@@ -201,8 +203,10 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
     const settled = await crash.rounds(rid);
     const rake = settled.pool - settled.distributable;
     // NET rake: hardening (c) requires keeperRewardBps > 0, so this fixture
-    // pays 1 bps of the rake to the settler before the carve.
-    const netRake = rake - (rake * 1n) / 10000n;
+    // pays 1 bps of the rake to the settler, plus the PROPOSED 1% lock and
+    // 1% reveal bounties, before the carve.
+    const netRake =
+      rake - (rake * 1n) / 10000n - (rake * HARDENING_TEST_DEFAULTS.keeperLockBps) / 10000n - (rake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n;
     const expectedCarve = (netRake * 5000n) / 10000n;
 
     // reserve moved by: + seed returned/kept mechanics are internal, but the
@@ -257,9 +261,13 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
     // At/below the floor, it seeds nothing.
     await crash.connect(alice).fundVault({ value: floor });
     expect(await crash.nextSeed()).to.equal(0n);
-    // Above the floor, the draw is clamped so the remainder never dips below it.
-    await crash.connect(alice).fundVault({ value: floor }); // reserve = 2*floor
-    // floor(2F * 1/2) = F, and 2F - F = F == floor, allowed.
-    expect(await crash.nextSeed()).to.equal(floor);
+    // Just above the floor, the draw is clamped so the remainder never dips
+    // below it: reserve = 1.01F, the 5% (PROPOSED seedMaxBps) draw would be
+    // 0.0505F > the 0.01F headroom, so exactly the headroom is drawn.
+    await crash.connect(alice).fundVault({ value: floor / 100n }); // reserve = 1.01F
+    expect(await crash.nextSeed()).to.equal(floor / 100n);
+    // Well above the floor the cap, not the floor, binds: 5% of 2F.
+    await crash.connect(alice).fundVault({ value: floor - floor / 100n }); // reserve = 2F
+    expect(await crash.nextSeed()).to.equal((2n * floor * HARDENING_TEST_DEFAULTS.seedMaxBps) / 10000n);
   });
 });
