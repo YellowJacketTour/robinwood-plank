@@ -74,7 +74,7 @@ const STATE_BIGINT_KEYS = new Set([
   "iteration", "protectedPrincipal", "emissionBuffer", "cycle", "epoch",
   "cycleBase", "netPrize", "pendingFunding", "resetReserve", "rollover",
   "nextPrizeTarget", "highWaterPrize", "freshWagers", "grossRake",
-  "keeperRewards", "burned", "communityFunded", "crashFounderRake",
+  "keeperRewards", "burned", "communityFunded", "powerboardFunded", "crashFounderRake",
   "lotteryGrossConstituted", "lotteryFounderFees", "lotteryFounderFeesOnRollover",
   "playerCrashPayouts", "lotteryWinnerPayouts", "consolationPayouts",
   "vaultRemainders", "externalLotteryFunding",
@@ -90,7 +90,11 @@ export function parseSimulationState(raw: unknown): SimulationState {
     }
     return value;
   };
-  return revive(raw) as SimulationState;
+  const state = revive(raw) as SimulationState;
+  // Snapshots produced before per-round Powerboard provenance was introduced
+  // remain replayable; absence means no historically attributed contribution.
+  state.totals.powerboardFunded ??= 0n;
+  return state;
 }
 
 const EDITABLE_SIMULATION_AMOUNTS = new Set([

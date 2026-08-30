@@ -408,6 +408,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: BigInt(seat.accepted_target_bps ?? seat.requested_target_bps) })),
       crashBps: BigInt(room.crash_bps), lotteryOutcome,
     });
+    const powerboardFundingAdded = result.state.totals.powerboardFunded - prior.totals.powerboardFunded;
     // The simulator is the accounting authority. Deriving the payout from the
     // cumulative counter also covers a prize sealed and won in this iteration;
     // prior.lottery.netPrize is zero while an epoch is awaiting its next seal.
@@ -457,6 +458,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     await event(client, room, "round.settled", identity.id, commandId, {
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
       qualified: result.qualified, accounting: result.settlement, lotteryWinner,
+      powerboardFundingAdded: powerboardFundingAdded.toString(),
       powerboardDraw: { ...powerboardDraw, forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss") },
     });
     return { duplicate: false, version: room.version };

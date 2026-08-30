@@ -45,6 +45,8 @@ export interface SimulationTotals {
   keeperRewards: bigint;
   burned: bigint;
   communityFunded: bigint;
+  /** Cumulative community allocation actually routed into Powerboard liabilities. */
+  powerboardFunded: bigint;
   crashFounderRake: bigint;
   lotteryGrossConstituted: bigint;
   lotteryFounderFees: bigint;
@@ -92,6 +94,7 @@ const ZERO_TOTALS: SimulationTotals = {
   keeperRewards: 0n,
   burned: 0n,
   communityFunded: 0n,
+  powerboardFunded: 0n,
   crashFounderRake: 0n,
   lotteryGrossConstituted: 0n,
   lotteryFounderFees: 0n,
@@ -289,6 +292,7 @@ export function simulateIteration(
     // every qualified game without changing the ratified 20/40/40 split.
     const powerboardFunding = (split.community * policy.powerboardFundingBps) / BPS;
     state.lottery.pendingFunding += powerboardFunding;
+    state.totals.powerboardFunded += powerboardFunding;
     const communityReturn = (split.community - powerboardFunding) + settlement.vaultRemainder;
     const principal = (communityReturn * policy.protectedPrincipalBps) / BPS;
     state.protectedPrincipal += principal;
