@@ -4453,9 +4453,10 @@ function renderPrivateRoster(snapshot) {
     tag.textContent = `${member.isBot ? `CPU · ${(member.botProfile?.preset || "custom").toUpperCase()}` : member.id === snapshot.room.ownerUserId ? "HOST" : "PLAYER"}${member.id === snapshot.me.id ? " · YOU" : ""}`;
     identity.append(dot, name, tag);
     const result = document.createElement("span");
-    result.className = `private-player-state ${snapshot.room.phase === "settled" && seat?.survived ? "win" : ""}`;
+    const profitable = snapshot.room.phase === "settled" && BigInt(seat?.net || "0") > 0n;
+    result.className = `private-player-state ${profitable ? "win" : ""}`;
     result.textContent = !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
-      : snapshot.room.phase === "settled" ? `${seat.survived ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked` : "Crashed"} · ${privateCredits(seat.payout)} paid`
+      : snapshot.room.phase === "settled" ? `${!seat.survived ? "Crashed" : profitable ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · PROFIT` : `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · DILUTED`} · ${privateCredits(seat.payout)} paid`
       : seat.acceptedTargetBps ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · watching`
       : snapshot.room.phase === "running" ? `Flying · ${privateCredits(seat.stake)} cr` : `Committed · ${privateCredits(seat.stake)} cr`;
     row.append(identity, result);
@@ -4476,17 +4477,18 @@ function paintPrivateConclusion(snapshot, me, seat) {
     return;
   }
   const crash = (Number(snapshot.room.crashBps || 10000) / 10000).toFixed(2);
-  const won = Boolean(seat?.survived);
   const locked = seat?.acceptedTargetBps ? (Number(seat.acceptedTargetBps) / 10000).toFixed(2) : null;
   const net = BigInt(seat?.net || "0");
+  const survived = Boolean(seat?.survived);
+  const profitable = survived && net > 0n;
   const conclusionKey = `${snapshot.room.id}:${snapshot.room.currentRound}:${seat?.payout || "spectator"}`;
   if (privateConclusionKey === conclusionKey) return;
   privateConclusionKey = conclusionKey;
-  card.className = `result-card private-result show ${won ? "win" : "lose"}`;
+  card.className = `result-card private-result show ${profitable ? "win" : "lose"}`;
   card.replaceChildren();
   const eyebrow = document.createElement("div"); eyebrow.className = "result-tier"; eyebrow.textContent = `ROUND ${snapshot.room.currentRound} COMPLETE · CRASHED AT ${crash}×`;
   const headline = document.createElement("div"); headline.className = "result-mult";
-  headline.textContent = !seat ? "ROUND SETTLED" : won ? `LOCKED ${locked}×` : "CAUGHT IN THE CRASH";
+  headline.textContent = !seat ? "ROUND SETTLED" : !survived ? "CAUGHT IN THE CRASH" : profitable ? `PROFIT · LOCKED ${locked}×` : `LOCKED ${locked}× · POOL DILUTED`;
   const money = document.createElement("div"); money.className = "result-delta";
   money.textContent = !seat ? "You watched this round" : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
@@ -4494,9 +4496,11 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const founderTotal = BigInt(snapshot.simulation.totals?.crashFounderRake || "0") + BigInt(snapshot.simulation.totals?.lotteryFounderFees || "0");
   world.innerHTML = `<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span><span><small>LOTTERY PRIZE</small>${privateCredits(snapshot.simulation.lottery.netPrize)}</span><span><small>RESET RESERVE</small>${privateCredits(snapshot.simulation.lottery.resetReserve)}</span><span><small>FOUNDER TOTAL</small>${privateCredits(founderTotal)}</span>`;
   const note = document.createElement("div"); note.className = "private-result-note";
-  const settlementEvent = [...snapshot.events].reverse().find((event) => event.type === "round.settled" && event.payload?.lotteryWinner);
+  const settlementEvent = [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;
-  note.textContent = `${seat ? "Your payout is your parimutuel share of the round pool after the configured allocations—not stake × the displayed lock multiplier." : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
+  const allocation = settlementEvent?.payload?.accounting?.allocations?.find((entry) => entry.id === snapshot.me.id);
+  const base = allocation ? privateCredits(allocation.base) : null; const surplus = allocation ? privateCredits(allocation.surplus) : null;
+  note.textContent = `${seat ? `${base !== null ? `Exact settlement: ${base} base return + ${surplus} risk surplus = ${privateCredits(seat.payout)}. ` : ""}${survived && !profitable ? "You beat the crash, but too much stake also survived to cover every stake after the 4.50% routed rake; the bounded pool cannot manufacture the difference. " : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
   const next = document.createElement("div"); next.className = "private-result-next"; next.textContent = `RETURN TO THE TABLE · THEN PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
   card.append(eyebrow, headline, money, balance, world, note, next);
   if (privateMotionReduced()) {
