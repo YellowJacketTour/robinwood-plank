@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { initialSimulationState } from "../../lib/casino/simulation";
 import {
-  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, multiplierAt,
+  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt,
   parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
   simulationCrashBps,
 } from "../../lib/playtest-room-core";
@@ -12,6 +12,26 @@ test("room rules hash is canonical and stable across key order", () => {
   const b = canonicalJson({ a: { x: 3, y: 2 }, z: 1 });
   assert.equal(a, b);
   assert.match(playtestRulesHash(DEFAULT_PLAYTEST_POLICY), /^[0-9a-f]{64}$/);
+});
+
+test("admin scenario injection changes only allowlisted laboratory state", () => {
+  const initial = initialSimulationState(DEFAULT_PLAYTEST_POLICY);
+  const injected = injectSimulationState(initial, {
+    protectedPrincipal: "5000000",
+    "lottery.netPrize": "900000",
+    "lottery.highWaterPrize": "1",
+    "lottery.awaitingSeal": false,
+    "lottery.readyForDraw": true,
+    "totals.burned": "42000",
+  });
+  assert.equal(injected.protectedPrincipal, 5_000_000n);
+  assert.equal(injected.lottery.netPrize, 900_000n);
+  assert.equal(injected.lottery.highWaterPrize, 900_000n);
+  assert.equal(injected.lottery.readyForDraw, true);
+  assert.equal(injected.totals.burned, 42_000n);
+  assert.equal(initial.protectedPrincipal, 0n, "the authoritative prior snapshot is not mutated");
+  assert.throws(() => injectSimulationState(initial, { iteration: "999" }), /cannot be injected/);
+  assert.throws(() => injectSimulationState(initial, { "lottery.awaitingSeal": false, "lottery.readyForDraw": true }), /positive prize/);
 });
 
 test("policy and simulation state survive JSON without losing integer precision", () => {

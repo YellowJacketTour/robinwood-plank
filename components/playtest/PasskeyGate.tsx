@@ -38,14 +38,27 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
     finally { setBusy(false); }
   }
 
+  async function joinInvitedTable() {
+    setBusy(true); setMessage("");
+    try {
+      const result = await json<Identity>(await fetch("/api/playtest/session", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "joinInvite", invite }),
+      }));
+      if (result.roomId) window.location.assign(`/playtest/game?room=${encodeURIComponent(result.roomId)}`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not join the table."); }
+    finally { setBusy(false); }
+  }
+
   if (identity) return <section className="data-module rounded-xl border border-line p-6">
     <p className="text-xs font-black uppercase tracking-[0.12em] text-gold-400">{identity.isAdmin ? "Host console unlocked" : "Player admitted"}</p>
     <h2 className="mt-2 text-2xl text-gold-300">Welcome, {identity.displayName}</h2>
     <p className="mt-3 text-sm text-cream-muted">This session controls simulation credits only. It cannot sign transactions or move mainnet assets.</p>
     <div className="mt-5 flex flex-wrap gap-3">
-      <a className="min-h-11 rounded-md bg-gold-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-wood-950" href={invitePreview?.roomId ? `/playtest/game?room=${encodeURIComponent(invitePreview.roomId)}` : "/playtest/game"}>{identity.isAdmin ? "Open host console" : "Enter game"}</a>
+      {invitePreview?.roomId && invite ? <button className="min-h-11 rounded-md bg-gold-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-wood-950 disabled:opacity-40" disabled={busy} onClick={joinInvitedTable}>{busy ? "Joining…" : `Join ${invitePreview.roomName || "invited table"}`}</button>
+        : <a className="min-h-11 rounded-md bg-gold-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-wood-950" href="/playtest/game">{identity.isAdmin ? "Open host table" : "Enter game"}</a>}
       <button className="min-h-11 rounded-md border border-line-strong bg-panel-strong px-4 text-xs font-black uppercase tracking-wider text-gold-300" disabled={busy} onClick={signOut}>Sign out</button>
     </div>
+    {message ? <p className="mt-4 rounded-md bg-panel-strong p-3 text-sm text-red-400" role="alert">{message}</p> : null}
   </section>;
 
   return <section className="overflow-hidden rounded-2xl border border-gold-500/30 bg-panel shadow-2xl">
