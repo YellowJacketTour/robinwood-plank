@@ -162,6 +162,11 @@ export async function registerFromInvite(displayName: string, pin: string, invit
   return { ...registered, token: await createSession(registered.identity.id) };
 }
 
+export async function createPlaytestCohost(actor: PlaytestIdentity, displayName: string, pin: string): Promise<PlaytestIdentity> {
+  if (!actor.isAdmin) throw new Error("ADMIN_ONLY");
+  return createPersonalIdentity(displayName, pin, true);
+}
+
 export async function joinRoomFromInvite(identity: PlaytestIdentity, invite: string): Promise<string> {
   return withPostgresTransaction(async (client) => {
     const found = await client.query<{ room_id: string }>(
