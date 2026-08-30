@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { initialSimulationState } from "../../lib/casino/simulation";
 import {
+  bettingRoundId,
   canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt,
   parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
   simulationCrashBps,
 } from "../../lib/playtest-room-core";
+
+test("a multiplayer lobby advances once and keeps every commitment in one round", () => {
+  assert.equal(bettingRoundId("lobby", 0n), 1n, "the first-ever lobby opens round one");
+  assert.equal(bettingRoundId("settled", 16n), 17n, "the first post-settlement bet advances once");
+  assert.equal(bettingRoundId("lobby", 17n), 17n, "host and guests join the already-open lobby");
+  assert.throws(() => bettingRoundId("running", 17n), /closed/);
+});
 
 test("room rules hash is canonical and stable across key order", () => {
   const a = canonicalJson({ z: 1, a: { y: 2, x: 3 } });

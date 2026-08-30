@@ -7,7 +7,7 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 
@@ -282,7 +282,7 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase === "running") throw new PlaytestRoomError(409, "BETTING_CLOSED", "The current round is already running.");
-    const roundId = BigInt(room.current_round) + 1n;
+    const roundId = bettingRoundId(room.phase, BigInt(room.current_round));
     const prior = await client.query<{ stake: string }>(`SELECT stake::text FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2 AND user_id=$3 FOR UPDATE`, [roomId, roundId.toString(), identity.id]);
     const priorStake = BigInt(prior.rows[0]?.stake ?? "0");
     const balanceRow = await client.query<{ test_credit_balance: string }>(`SELECT test_credit_balance::text FROM playtest_room_members WHERE room_id=$1 AND user_id=$2 FOR UPDATE`, [roomId, identity.id]);
