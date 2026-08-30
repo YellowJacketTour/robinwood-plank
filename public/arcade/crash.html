@@ -72,6 +72,7 @@
     transition: opacity .5s ease, visibility .5s;
   }
   #boot.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+  #boot.context-recovery .boot-mark { max-width: 34rem; padding: 24px; text-align: center; line-height: 1.6; color: var(--ink); }
   #boot .boot-mark {
     font-family: var(--font-display); font-size: 15px; letter-spacing: 2px;
     color: var(--ink-dim); animation: bootPulse 1.4s ease-in-out infinite;
@@ -923,6 +924,8 @@ async function loadDeployAddresses() {
 //                            plank artifact drifting past
 const canvas = $("fx");
 const clock = new THREE.Clock();
+let renderSuspended = document.hidden;
+let webglContextLost = false;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -1012,10 +1015,17 @@ scene.fog = new THREE.FogExp2(0x1e2c4a, 0.012);
 const STAR_COUNT = 2200;
 const starGeo = new THREE.BufferGeometry();
 const starPos = new Float32Array(STAR_COUNT * 3);
+// Stable composition across refreshes and every participant. Environmental
+// dressing must not visibly teleport when the authoritative room rehydrates.
+let starSeed = 0x504c414e;
+function scenicRandom() {
+  starSeed = (Math.imul(starSeed, 1664525) + 1013904223) >>> 0;
+  return starSeed / 4294967296;
+}
 for (let i = 0; i < STAR_COUNT; i++) {
-  const r = 60 + Math.random() * 110;
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(Math.random() * 1.6 - 0.8);
+  const r = 60 + scenicRandom() * 110;
+  const theta = scenicRandom() * Math.PI * 2;
+  const phi = Math.acos(scenicRandom() * 1.6 - 0.8);
   starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
   starPos[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6 + 4;
   starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
@@ -1740,6 +1750,20 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
+canvas.addEventListener("webglcontextlost", (event) => {
+  event.preventDefault();
+  webglContextLost = true;
+  const boot = document.getElementById("boot");
+  boot.classList.remove("hide");
+  boot.classList.add("context-recovery");
+  boot.querySelector(".boot-mark").textContent = "RECONNECTING THE FLIGHT DECK · YOUR TABLE AND ROUND ARE SAFE ON THE SERVER";
+});
+canvas.addEventListener("webglcontextrestored", () => {
+  // Three owns interdependent targets and shader programs. A clean reload is
+  // safer than a half-restored frame; authoritative room state rehydrates.
+  window.location.reload();
+});
+
 // ── Multi-sensory feedback: sound + haptics ──────────────────────────────
 // 2026 crash/gambling UX research is explicit that combined visual+audio+
 // haptic feedback on every action is what makes an interface feel
@@ -1848,6 +1872,9 @@ const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress 
 let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
 let warpMix = 0; // 0..1, ramps up crossing the gate then decays
 let warpFlash = 0;
+let effectiveRenderTier = "balanced";
+let performanceFrames = 0;
+let performanceSeconds = 0;
 
 function skyColorAt(progress) {
   const bands = [
@@ -1868,8 +1895,28 @@ function skyColorAt(progress) {
 }
 
 function frame() {
+  if (renderSuspended || webglContextLost) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+
+  // Balanced mode is a performance target, not a fixed graphics preset.
+  // Sustained samples avoid oscillation: degrade after a real slow window,
+  // recover only with generous headroom. Simulation timing never depends on
+  // this visual tier; the authoritative clock continues independently.
+  if (PLAYTEST_MODE && privateQualityPreference === "balanced") {
+    performanceFrames++;
+    performanceSeconds += dt;
+    if (performanceFrames >= 180) {
+      const fps = performanceFrames / Math.max(performanceSeconds, 0.001);
+      if (fps < 48 && effectiveRenderTier !== "low") configureRenderQuality("low");
+      else if (fps > 57 && effectiveRenderTier !== "balanced") configureRenderQuality("balanced");
+      performanceFrames = 0;
+      performanceSeconds = 0;
+    }
+  }
 
   // Smooth per-frame extrapolation of the live multiplier -- see
   // multiplierAtBlocksBps() above for why this is safe. Runs every frame,
@@ -2133,10 +2180,12 @@ function frame() {
   // Selective bloom: hide the astronaut for the bloom-only render (its
   // flat art must never glow), restore it for the real frame, then
   // additively combine the two via mixPass inside the main composer.
-  if (chalkstronautSprite) chalkstronautSprite.visible = false;
-  bloomComposer.render();
-  if (chalkstronautSprite) chalkstronautSprite.visible = true;
-  mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
+  if (effectiveRenderTier !== "low") {
+    if (chalkstronautSprite) chalkstronautSprite.visible = false;
+    bloomComposer.render();
+    if (chalkstronautSprite) chalkstronautSprite.visible = true;
+    mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
+  }
   composer.render();
   dismissBoot();
   requestAnimationFrame(frame);
@@ -4285,12 +4334,28 @@ function privateMotionReduced() {
   return privateMotionPreference === "reduced" || (privateMotionPreference === "system" && prefersReducedMotion);
 }
 
+function configureRenderQuality(tier) {
+  effectiveRenderTier = tier;
+  const cap = tier === "high" ? 2 : tier === "low" ? 1 : 1.5;
+  const ratio = Math.min(window.devicePixelRatio || 1, cap);
+  // EffectComposer maintains its own pixel ratio. Updating only the renderer
+  // leaves post-processing at stale resolution and makes the quality setting
+  // largely cosmetic.
+  renderer.setPixelRatio(ratio);
+  composer.setPixelRatio(ratio);
+  bloomComposer.setPixelRatio(ratio);
+  mixPass.enabled = tier !== "low";
+  godRaysPass.enabled = tier !== "low";
+  lensFlarePass.enabled = tier !== "low";
+  performanceFrames = 0;
+  performanceSeconds = 0;
+  resize();
+}
+
 function applyPrivatePreferences() {
   document.body.dataset.privateMotion = privateMotionPreference;
   document.body.dataset.privateContrast = localStorage.getItem("plank-alpha:contrast") === "high" ? "high" : "standard";
-  const cap = privateQualityPreference === "high" ? 2 : privateQualityPreference === "low" ? 1 : 1.5;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
-  resize();
+  configureRenderQuality(privateQualityPreference === "high" ? "high" : privateQualityPreference === "low" ? "low" : "balanced");
 }
 
 function privateSessionKey(roomId, suffix) { return `plank-alpha:${roomId}:${suffix}`; }
@@ -4829,7 +4894,13 @@ async function startPrivatePlaytest() {
   menuDialog.querySelector("#privateFullscreen").onclick = async () => { try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); else await document.exitFullscreen(); } catch (_) {} }; menuDialog.querySelector("#privateMenuHelp").onclick = () => { menuDialog.close(); howDialog.showModal(); }; menuDialog.querySelector("#privateMenuClose").onclick = () => menuDialog.close();
   const welcome = document.createElement("dialog"); welcome.id = "privateWelcome"; welcome.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Your first shared flight</div><h2>Gather. Risk. Lock. Return.</h2><p class="private-menu-lede">PlankCrash is a live parimutuel table: friends share one bounded pool, but each player chooses when to lock their claim weight before the unknown crash.</p><div class="private-welcome-steps"><div class="private-welcome-step"><b>1 · GATHER</b>Pick test credits and commit. The friend roster confirms who is ready.</div><div class="private-welcome-step"><b>2 · FLY & LOCK</b>The host launches. Press the large action button whenever you choose; earlier is safer, later carries more weight.</div><div class="private-welcome-step"><b>3 · SETTLE & RETURN</b>Review your payout and every shared vault, lottery, reserve, and founder movement before opening the next round.</div></div><div class="private-welcome-trust">Refreshes, reconnects, menus, and backgrounding your phone do not erase accepted actions. The server—not the animation—owns the round. This alpha uses test credits and cannot move mainnet assets.</div><div class="private-menu-actions"><button id="privateWelcomeHelp">READ FULL RULES</button><button class="primary" id="privateWelcomeStart">ENTER THE TABLE</button></div></div>`; document.body.appendChild(welcome); welcome.querySelector("#privateWelcomeHelp").onclick = () => { welcome.close(); howDialog.showModal(); }; welcome.querySelector("#privateWelcomeStart").onclick = () => { localStorage.setItem("plank-alpha:onboarding-v3", "complete"); welcome.close(); };
   document.addEventListener("keydown", (event) => { if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || /INPUT|SELECT|TEXTAREA|BUTTON/.test(event.target?.tagName || "")) return; if ((event.key === "m" || event.key === "M") && !menuDialog.open) { event.preventDefault(); openMenu(); } else if (event.code === "Space" && uiState === "live-hold" && !document.querySelector("dialog[open]")) { event.preventDefault(); primaryBtn.click(); } });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshPrivatePlaytest(); });
+  document.addEventListener("visibilitychange", () => {
+    renderSuspended = document.hidden;
+    if (!document.hidden) {
+      clock.getDelta(); // discard the background gap before the next physics frame
+      void refreshPrivatePlaytest();
+    }
+  });
   window.addEventListener("online", () => { void refreshPrivatePlaytest(); startPrivateUpdates(); });
   window.addEventListener("pagehide", stopPrivateUpdates, { once: true });
   applyPrivatePreferences();
