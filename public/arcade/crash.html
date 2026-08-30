@@ -828,6 +828,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { PrivateLiveClock } from "./private-live-clock.js";
+import { verifyPrivateRound } from "./private-fairness.js";
 
 const { ethers } = window;
 const $ = (id) => document.getElementById(id);
@@ -3372,7 +3373,41 @@ $("rankPopClose").addEventListener("click", () => $("rankPopover").classList.rem
 const DRAND_CHAIN_HASH_FALLBACK = "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3";
 async function refreshVerifyPopover() {
   const body = $("verifyPopBody");
-  if (!body || !crash) return;
+  const sub = document.querySelector(".verify-pop-sub");
+  if (!body) return;
+  if (PLAYTEST_MODE) {
+    if (sub) sub.textContent = "Private alpha rounds seal a cryptographically random seed before launch. After settlement, the seed is revealed so this browser can independently recompute both the commitment and exact crash point.";
+    const round = privateSnapshot?.room;
+    if (!round?.commitment) {
+      body.innerHTML = '<div class="vf-row"><span class="vf-k">Round proof</span><span class="vf-v pending">launch a round first</span></div>';
+      return;
+    }
+    const short = (value) => `${value.slice(0, 10)}â€¦${value.slice(-8)}`;
+    if (round.phase !== "settled" || !round.reveal || !round.crashBps) {
+      body.innerHTML =
+        `<div class="vf-row"><span class="vf-k">Commitment</span><span class="vf-v">${short(round.commitment)}</span></div>` +
+        '<div class="vf-row"><span class="vf-k">Reveal</span><span class="vf-v pending">sealed until settlement</span></div>' +
+        '<div class="vf-note">The public event stream contains no crash point, reveal, deadline, or another reversible equivalent while the flight is live.</div>';
+      return;
+    }
+    try {
+      const proof = await verifyPrivateRound(round);
+      const status = proof.verified ? "VERIFIED" : "MISMATCH";
+      body.innerHTML =
+        `<div class="vf-row"><span class="vf-k">Proof status</span><span class="vf-v ${proof.verified ? "" : "pending"}">${status}</span></div>` +
+        `<div class="vf-row"><span class="vf-k">Commitment</span><span class="vf-v">${short(round.commitment)}</span></div>` +
+        `<div class="vf-row"><span class="vf-k">Revealed seed</span><span class="vf-v">${short(round.reveal)}</span></div>` +
+        `<div class="vf-row"><span class="vf-k">Commitment hash</span><span class="vf-v">${proof.commitmentMatches ? "matches" : "DOES NOT MATCH"}</span></div>` +
+        `<div class="vf-row"><span class="vf-k">Derived crash point</span><span class="vf-v">${proof.derivedCrashBps === null ? "invalid" : `${(Number(proof.derivedCrashBps) / 10000).toFixed(2)}x`}</span></div>` +
+        `<div class="vf-row"><span class="vf-k">Displayed result</span><span class="vf-v">${proof.crashMatches ? "matches" : "DOES NOT MATCH"}</span></div>` +
+        '<div class="vf-note">This proof runs locally with Web Crypto. It does not ask the game server whether its own result is valid.</div>';
+    } catch (_) {
+      body.innerHTML = '<div class="vf-row"><span class="vf-k">Proof status</span><span class="vf-v pending">verification failed</span></div>';
+    }
+    return;
+  }
+  if (sub) sub.textContent = "The crash point is derived from the League of Entropy public drand beacon, which no single party can control or predict.";
+  if (!crash) return;
   try {
     const roundId = await crash.currentRoundId();
     const round = await crash.rounds(roundId);
