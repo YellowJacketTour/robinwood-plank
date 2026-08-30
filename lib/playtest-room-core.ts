@@ -10,6 +10,7 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   // Explicit laboratory hypotheses. These are intentionally not described as
   // ratified mainnet parameters.
   protectedPrincipalBps: 5_000n,
+  powerboardFundingBps: 2_500n,
   crashSeed: 10_000n,
   emissionBufferCap: 1_000_000n,
   lotteryFounderFeeBps: 1_000n,
@@ -56,13 +57,16 @@ const POLICY_BIGINT_KEYS = new Set([
   "rakeBps", "keeperRewardBps", "protectedPrincipalBps", "crashSeed",
   "emissionBufferCap", "lotteryFounderFeeBps", "lotteryInitialBase",
   "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep",
-  "consolation", "minimumStake",
+  "consolation", "minimumStake", "powerboardFundingBps",
 ]);
 
 export function parsePolicy(raw: unknown): SimulationPolicy {
   const value = raw as Record<string, unknown>;
   const revived: Record<string, unknown> = { ...value };
-  for (const key of POLICY_BIGINT_KEYS) revived[key] = BigInt(String(value[key]));
+  for (const key of POLICY_BIGINT_KEYS) {
+    const fallback = key === "powerboardFundingBps" ? DEFAULT_PLAYTEST_POLICY.powerboardFundingBps : undefined;
+    revived[key] = BigInt(String(value[key] ?? fallback));
+  }
   return revived as unknown as SimulationPolicy;
 }
 
@@ -138,6 +142,16 @@ export function simulationCrashBps(revealHex: string): bigint {
   // P(crash >= x) ~= 1/x, discretized to bps, with a genuine 10,000x tail.
   // Rake remains an explicit pool allocation rather than hidden RNG edge.
   return bucket === 0n ? 10_000n : 100_000_000n / (10_000n - bucket);
+}
+
+export const PLAYTEST_POWERBOARD_ODDS = 16;
+
+/** Public, deterministic numbered draw derived from the already-committed reveal. */
+export function powerboardRoundDraw(revealHex: string) {
+  if (!/^[0-9a-f]{64}$/.test(revealHex)) throw new RangeError("invalid reveal");
+  const digest = createHash("sha256").update(`${revealHex}:powerboard:number`).digest();
+  const drawnNumber = digest.readUInt32BE(0) % PLAYTEST_POWERBOARD_ODDS + 1;
+  return { drawnNumber, winningNumber: 1, oddsOneIn: PLAYTEST_POWERBOARD_ODDS, rawHit: drawnNumber === 1 };
 }
 
 export function crashDurationMs(crashBps: bigint): number {

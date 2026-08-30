@@ -5,7 +5,7 @@ import {
   bettingRoundId,
   canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt,
   parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
-  simulationCrashBps,
+  simulationCrashBps, powerboardRoundDraw,
 } from "../../lib/playtest-room-core";
 
 test("a multiplayer lobby advances once and keeps every commitment in one round", () => {
@@ -13,6 +13,14 @@ test("a multiplayer lobby advances once and keeps every commitment in one round"
   assert.equal(bettingRoundId("settled", 16n), 17n, "the first post-settlement bet advances once");
   assert.equal(bettingRoundId("lobby", 17n), 17n, "host and guests join the already-open lobby");
   assert.throws(() => bettingRoundId("running", 17n), /closed/);
+});
+
+test("every committed reveal produces one bounded deterministic Powerboard number", () => {
+  const reveal = "ab".repeat(32);
+  const first = powerboardRoundDraw(reveal);
+  assert.deepEqual(first, powerboardRoundDraw(reveal));
+  assert.ok(first.drawnNumber >= 1 && first.drawnNumber <= first.oddsOneIn);
+  assert.equal(first.rawHit, first.drawnNumber === first.winningNumber);
 });
 
 test("room rules hash is canonical and stable across key order", () => {
