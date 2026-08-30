@@ -162,3 +162,20 @@ test("every allocation rule conserves distributable across deterministic fuzz", 
     }
   }
 });
+
+test("PFSS identical-strategy wallet splitting cannot increase aggregate payout", () => {
+  const unsplit = settleParimutuel("pfss", 9_550_000n, 50_000n, [
+    { id: "actor", stake: 3_000_000n, targetBps: 30_000n },
+    { id: "other", stake: 7_000_000n, targetBps: 20_000n },
+  ]);
+  const split = settleParimutuel("pfss", 9_550_000n, 50_000n, [
+    { id: "actor-a", stake: 1_000_000n, targetBps: 30_000n },
+    { id: "actor-b", stake: 1_000_000n, targetBps: 30_000n },
+    { id: "actor-c", stake: 1_000_000n, targetBps: 30_000n },
+    { id: "other", stake: 7_000_000n, targetBps: 20_000n },
+  ]);
+  const original = unsplit.allocations.find((seat) => seat.id === "actor")!.payout;
+  const aliases = split.allocations.filter((seat) => seat.id.startsWith("actor-")).reduce((sum, seat) => sum + seat.payout, 0n);
+  assert.ok(aliases <= original, "splitting identical linear weights must not create payout");
+  assert.ok(original - aliases <= 2n, "only per-allocation integer dust may differ");
+});

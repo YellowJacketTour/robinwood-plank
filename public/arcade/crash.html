@@ -638,6 +638,7 @@
         🪵 <b id="rankName">—</b>
       </span>
       <span>POOL <b id="poolStat">—</b></span>
+      <span id="creditQuoteStat" title="Display-only ETH/USD reference; settlement always uses exact integer credits.">USD <b id="creditQuote">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
     <div class="gear sfx-toggle" id="sfxBtn" title="Sound" role="button" aria-label="Toggle sound" aria-pressed="true">🔊</div>
@@ -3293,7 +3294,19 @@ async function refreshPowerboardUI() {
 
 $("pbStat").addEventListener("click", () => {
   $("pbPopover").classList.toggle("show");
-  refreshPowerboardUI();
+  if (PLAYTEST_MODE && privateSnapshot) {
+    const lottery = privateSnapshot.simulation.lottery;
+    const presentation = privateLotteryPresentation(privateSnapshot);
+    const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
+    const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, privateSnapshot.policy.lotteryFounderFeeBps);
+    $("pbPopBody").innerHTML =
+      '<div class="pb-row"><span class="pb-k">State</span><span class="pb-v hi">' + (BigInt(lottery.netPrize || "0") > 0n ? 'SEALED' : 'FUNDING') + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Visible net prize</span><span class="pb-v">' + privateCredits(lottery.netPrize) + ' cr</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Funding toward next seal</span><span class="pb-v">' + privateCredits(available) + ' / ' + privateCredits(required) + ' cr</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Next net target</span><span class="pb-v">' + privateCredits(lottery.nextPrizeTarget) + ' cr</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Protected reset reserve</span><span class="pb-v">' + privateCredits(lottery.resetReserve) + ' cr</span></div>' +
+      '<div class="pb-guarantee">' + presentation.detail + ' A prize appears only when its full net target and founder fee are already funded; no IOU is displayed as money.</div>';
+  } else refreshPowerboardUI();
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
 
@@ -3347,7 +3360,14 @@ async function refreshProgressionUI() {
 
 $("rankStat").addEventListener("click", () => {
   $("rankPopover").classList.toggle("show");
-  refreshProgressionUI();
+  if (PLAYTEST_MODE) {
+    document.querySelector(".rank-pop-sub").textContent = "Ranks belong to identity and reputation, not gambling price, odds, or permission to risk more. The alpha applies the same table rules to every economic participant.";
+    $("rankPopBody").innerHTML =
+      '<div class="pb-row"><span class="pb-k">Stake weight</span><span class="pb-v hi">LINEAR</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Lock-risk weight</span><span class="pb-v">stake × (lock − 1.00×)</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Wallet splitting</span><span class="pb-v">No aggregate weight gain</span></div>' +
+      '<div class="pb-guarantee">Per-wallet ranks cannot prove one human and are not called Sybil-resistant. Mainnet requires protocol-wide concentration limits, identity-aware responsible limits where legally required, and monitoring—not wager-to-unlock incentives.</div>';
+  } else refreshProgressionUI();
 });
 $("rankPopClose").addEventListener("click", () => $("rankPopover").classList.remove("show"));
 
@@ -4433,6 +4453,99 @@ function privateCredits(value) {
   try { return BigInt(value || "0").toLocaleString(); } catch { return "0"; }
 }
 
+// Laboratory denomination only. Production accounts in wei; a mutable quote
+// must never enter settlement, randomness, rank, or eligibility arithmetic.
+const PRIVATE_CREDITS_PER_ETH = 1_000_000n;
+let privateEthUsd = 0, privateEthPriceSource = "unavailable", privatePriceSocket = null;
+let privatePriceReconnect = null, privatePriceBackoffMs = 1_000;
+
+function privateCreditUsd(value) {
+  if (!(privateEthUsd > 0)) return "—";
+  try {
+    const credits = BigInt(value || "0"), whole = credits / PRIVATE_CREDITS_PER_ETH;
+    const eth = Number(whole) + Number(credits % PRIVATE_CREDITS_PER_ETH) / Number(PRIVATE_CREDITS_PER_ETH);
+    return new Intl.NumberFormat("en-US", { style:"currency", currency:"USD", maximumFractionDigits:2 }).format(eth * privateEthUsd);
+  } catch { return "—"; }
+}
+
+function paintPrivateCreditQuote() {
+  const quote = $("creditQuote"); if (!quote || !PLAYTEST_MODE) return;
+  quote.textContent = privateEthUsd > 0 ? `~${privateCreditUsd(PRIVATE_CREDITS_PER_ETH)} / 1M cr` : "unavailable";
+  const stat = $("creditQuoteStat");
+  if (stat) stat.title = privateEthUsd > 0
+    ? `1,000,000 test credits = 1 ETH; live ETH/USD from ${privateEthPriceSource}. Display only; never used for settlement.`
+    : "ETH/USD reference unavailable. Exact credit settlement is unaffected.";
+  if (privateSnapshot) {
+    const pool = privateSnapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
+    $("poolStat").title = `Approximate display value ${privateCreditUsd(pool)}. Exact pool: ${privateCredits(pool)} credits.`;
+  }
+}
+
+async function privatePriceRestFallback() {
+  try {
+    const response = await fetch("/api/market/eth-price", { cache:"no-store" });
+    const body = await response.json();
+    if (response.ok && Number(body.ethUsd) > 0) {
+      privateEthUsd = Number(body.ethUsd); privateEthPriceSource = body.source || "server reference"; paintPrivateCreditQuote();
+    }
+  } catch (_) {}
+}
+
+function startPrivateEthPrice() {
+  if (!PLAYTEST_MODE || privatePriceSocket || document.hidden) return;
+  void privatePriceRestFallback();
+  try {
+    const socket = new WebSocket("wss://advanced-trade-ws.coinbase.com"); privatePriceSocket = socket;
+    socket.onopen = () => {
+      privatePriceBackoffMs = 1_000;
+      socket.send(JSON.stringify({ type:"subscribe", product_ids:["ETH-USD"], channel:"ticker_batch" }));
+      socket.send(JSON.stringify({ type:"subscribe", channel:"heartbeats" }));
+    };
+    socket.onmessage = (message) => { try {
+      const body = JSON.parse(message.data);
+      for (const event of body.events || []) for (const ticker of event.tickers || []) if (ticker.product_id === "ETH-USD") {
+        const price = Number(ticker.price); if (Number.isFinite(price) && price > 0) {
+          privateEthUsd = price; privateEthPriceSource = "Coinbase Advanced Trade WebSocket"; paintPrivateCreditQuote();
+        }
+      }
+    } catch (_) {} };
+    socket.onerror = () => socket.close();
+    socket.onclose = () => {
+      if (privatePriceSocket === socket) privatePriceSocket = null;
+      if (!document.hidden && !privatePriceReconnect) {
+        privatePriceReconnect = setTimeout(() => { privatePriceReconnect = null; startPrivateEthPrice(); }, privatePriceBackoffMs);
+        privatePriceBackoffMs = Math.min(30_000, privatePriceBackoffMs * 2);
+      }
+    };
+  } catch (_) { void privatePriceRestFallback(); }
+}
+
+function stopPrivateEthPrice() {
+  if (privatePriceReconnect) { clearTimeout(privatePriceReconnect); privatePriceReconnect = null; }
+  if (privatePriceSocket) { const socket = privatePriceSocket; privatePriceSocket = null; socket.onclose = null; socket.close(); }
+}
+if (PLAYTEST_MODE) {
+  startPrivateEthPrice();
+  document.addEventListener("visibilitychange", () => document.hidden ? stopPrivateEthPrice() : startPrivateEthPrice());
+  window.addEventListener("pagehide", stopPrivateEthPrice, { once:true });
+}
+
+function privateMinimumLotteryGross(targetNet, feeBps) {
+  const target = BigInt(targetNet || "0"), fee = BigInt(feeBps || "0"), scale = 10_000n;
+  let low = target, high = (target * scale + (scale - fee) - 1n) / (scale - fee) + 1n;
+  while (low < high) { const mid = (low + high) / 2n; if (mid - (mid * fee) / scale >= target) high = mid; else low = mid + 1n; }
+  return low;
+}
+
+function privateLotteryPresentation(snapshot) {
+  const lottery = snapshot.simulation.lottery, prize = BigInt(lottery.netPrize || "0");
+  if (prize > 0n) return { label:`PRIZE ${privateCredits(prize)}`, detail:`Sealed prize ${privateCredits(prize)} credits (${privateCreditUsd(prize)})` };
+  const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
+  const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, snapshot.policy.lotteryFounderFeeBps);
+  const pct = required > 0n ? Number(available * 10_000n / required) / 100 : 100;
+  return { label:`FUNDING ${Math.min(100,pct).toFixed(1)}%`, detail:`Next net prize target ${privateCredits(lottery.nextPrizeTarget)} credits; ${privateCredits(available)} of ${privateCredits(required)} gross credits funded. Reset reserve ${privateCredits(lottery.resetReserve)}.` };
+}
+
 function renderPrivateRoster(snapshot) {
   $("scoreboard").classList.remove("show");
   $("liveBoard").classList.remove("show");
@@ -4591,10 +4704,15 @@ function paintPrivateSnapshot(snapshot) {
   $("playersStat").textContent = String(snapshot.members.length);
   const pool = snapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
   $("poolStat").textContent = `${privateCredits(pool)} CREDITS`;
+  paintPrivateCreditQuote();
   $("vaultAmt").textContent = privateCredits(snapshot.simulation.protectedPrincipal);
   $("vaultSeed").textContent = " protected";
-  $("pbTickets").textContent = `PRIZE ${privateCredits(snapshot.simulation.lottery.netPrize)}`;
-  $("pbJackpot").textContent = " Powerboard";
+  const lotteryPresentation = privateLotteryPresentation(snapshot);
+  $("pbTickets").textContent = lotteryPresentation.label;
+  $("pbStat").title = lotteryPresentation.detail;
+  $("pbJackpot").textContent = snapshot.simulation.lottery.netPrize === "0" ? " next prize" : " Powerboard";
+  $("rankName").textContent = "FAIR CAPS";
+  $("rankStat").title = "Alpha: ranks are reputation only. Economic caps apply equally to participants and cannot be unlocked by wagering more.";
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
   const seat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
