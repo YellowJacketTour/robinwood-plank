@@ -23,6 +23,18 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   minimumStake: 100n,
 };
 
+/**
+ * A settled table advances exactly once when the first participant commits.
+ * Once a lobby exists, every other participant must join that same round.
+ * Incrementing for every bet makes alternating clients continually invalidate
+ * one another's seats (guest opens N+1, host opens N+2, guest opens N+3).
+ */
+export function bettingRoundId(phase: "lobby" | "running" | "settled", currentRound: bigint): bigint {
+  if (phase === "running") throw new RangeError("betting is closed");
+  if (phase === "settled") return currentRound + 1n;
+  return currentRound > 0n ? currentRound : 1n;
+}
+
 export function canonicalJson(value: unknown): string {
   if (typeof value === "bigint") return JSON.stringify(value.toString());
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
