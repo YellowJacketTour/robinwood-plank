@@ -190,15 +190,22 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // stakes go to the group's own absorber, not to the house. No per-
     // round cap fixes that; only a bound on the cumulative subsidy does.
     // seedBudget is that bound, in wei: it is credited with every round's
-    // net rake (the rake the house actually retains after keeper bounties)
-    // and debited by every seed drawn, so at all times
-    //   sum(seeds drawn) - sum(seeds returned) <= bootstrap + sum(net rake)
+    // reserveCut -- the share of the net rake (rake minus keeper bounties)
+    // that actually ENTERS the Vault; the treasury's share never does and
+    // so can never be recycled (re-review NEW-5: crediting the whole net
+    // rake let seeds be paid out of reserve capital the treasury had
+    // already taken, and the Vault bled ~12-16% per 22 rounds down to the
+    // HWM circuit floor) -- and debited by every seed drawn, so at all
+    // times
+    //   sum(seeds drawn) - sum(seeds returned) <= bootstrap + sum(reserveCut)
     // and a round's seed is <= seedBudget * SEED_INCOME_MULTIPLE_BPS/10000
     // on top of every other cap. At 10000 bps the house recycles at most
-    // 100% of what it earned: "positive-sum for the community" is then
-    // literally true -- the community gets the rake back as seed, never
-    // more, so a colluding group can at best recover its own rake (minus
-    // keeper bounties) and can never net-extract house capital.
+    // 100% of the rake the Vault retained: after the bootstrap the seed is
+    // a rebate of rake the Vault took in, never a draw on its capital, so
+    // under honest play the Vault can lose at most the bootstrap
+    // (vaultNeverBleedsUnderHonestPlay), and a colluding group can at best
+    // recover its own retained rake and can never net-extract house
+    // capital beyond that bootstrap.
     // SEED_BOOTSTRAP: the constructor's seedBootstrapBudgetWei (<= reserveCap
     // /10 when capped) is the only allowance that exists before any rake
     // has been earned, so the first rounds can seed. PROPOSED values: spec
@@ -1121,15 +1128,17 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 revealReward = (rake * keeperRevealBps) / 10000;
         uint256 lockReward = (rake * keeperLockBps) / 10000;
         uint256 netRake = rake - keeperReward - revealReward - lockReward;
-        // NEW-1: the rake the house actually retains (after bounties) is the
-        // ONLY income that can ever be recycled as seed.
-        seedBudget += netRake;
         // Compound a share of the rake straight back into the Vault instead
         // of sending it all to the treasury -- this is the steady growth
         // engine that makes the prize pot grow on WINNING rounds too, not
         // just on busts. Player-facing rake is unchanged; this only
         // reallocates within the take (Vault vs treasury).
         uint256 reserveCut = (netRake * reserveShareBps) / 10000;
+        // NEW-1 / re-review NEW-5: ONLY the wei that actually entered the
+        // Vault (reserveCut) is income the Vault can recycle as seed. The
+        // treasury's share of the net rake left the house's bankroll and
+        // must not be spent from the reserve on the treasury's behalf.
+        seedBudget += reserveCut;
         if (reserveCut > 0) {
             _creditReserve(reserveCut);
             emit VaultGrew(roundId, reserveCut, reserve);
@@ -1353,8 +1362,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
      * to the PLAYER pot, so a group whose absorber always wins the player
      * pot nets seed/m - rake*stakes per round. The collusion bound is the
      * seed-income budget (seedBudget): cumulative seed <= bootstrap +
-     * cumulative net rake, so the group can never recover more house money
-     * than it paid the house.
+     * cumulative reserveCut (the rake the VAULT retained, re-review NEW-5),
+     * so the group can never recover more house money than it paid the
+     * Vault.
      */
     function _splitPayout(Round storage r, uint256 w, uint256 pw, uint256 W, uint256 PW, uint256 distributable)
         private

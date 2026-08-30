@@ -393,14 +393,17 @@ no dependency cycle since it only needs the crash's final address.
 
 ---
 
-## 9. The Vault — a perpetual, never-zero, always-compounding prize pot
+## 9. The Vault — a never-zero prize reserve that recycles the rake it keeps
 
 Every game is seeded from **the Vault** (`reserve`), a persistent prize reserve
 that is **mathematically incapable of reaching zero or going negative**, no matter
-how much players win.
+how much players win — and that, after its bootstrap, **only ever seeds out of rake
+it has itself taken in** (re-review NEW-5). It is not a subsidy engine and it is
+not a progressive pot that grows without limit; it is a rake rebate with a bankroll
+behind it.
 
-**The math (why it can never be emptied).** Each new round is seeded with only a
-*strict fraction* of the Vault:
+**The never-zero math.** Each new round is seeded with only a *strict fraction* of
+the Vault:
 
 ```
 seed = floor(reserve · seedNumerator / seedDenominator),   seedNumerator < seedDenominator
@@ -408,28 +411,60 @@ reserve ← reserve − seed
 ```
 
 Because `seedNumerator < seedDenominator`, integer division gives `seed ≤ reserve·num/den < reserve`
-for any `reserve ≥ 1`, so `reserve − seed` is strictly positive. A draw multiplies
-the balance by `(den−num)/den > 0` — a positive number times a positive number is
-positive. The Vault's **only** debit is this fractional seed; **winners are paid from
-the round pool, never from the Vault**, so no sequence of wins ever touches it. This
-is enforced at construction (`BadVaultConfig` rejects `num ≥ den`) and proven by a
-fuzz test that pays out far more than the Vault holds across mixed win/bust rounds
-while the Vault stays strictly positive (`PlankCrashDrandVault.test.ts`).
+for any `reserve ≥ 1`, so `reserve − seed` is strictly positive. The Vault's **only**
+debit is this fractional seed; **winners are paid from the round pool, never from
+the Vault**, so no sequence of wins ever touches it. This is enforced at construction
+(`BadVaultConfig` rejects `num ≥ den`) and proven by a fuzz test that pays out far
+more than the Vault holds across mixed win/bust rounds while the Vault stays strictly
+positive (`PlankCrashDrandVault.test.ts`).
 
-**The growth engine (why it always grows).** Three streams feed the Vault, so it
-compounds on winning rounds too, not just busts:
-1. **Rake carve** — `reserveShareBps` of every round's net rake flows into the Vault
-   instead of the treasury (default 40%). Player-facing rake is unchanged; this only
-   reallocates within the take, so *more of the rake comes back as prizes*.
+**The income budget (what the seed actually is).** The fraction above is only one
+of the caps. Every seed is ALSO bounded by `seedBudget`, a running wei balance that
+starts at the one-off bootstrap (`seedBootstrapBudgetWei`, ≤ 10% of the bankroll cap)
+and is thereafter credited ONLY with each settled round's `reserveCut` — the
+`reserveShareBps` share of the net rake (rake minus keeper bounties) that actually
+entered the Vault. Seeds are debited from it; a voided round's rescued seed, a
+busted round's returned seed and a capped payout's excess are credited back. So, after
+the bootstrap is spent:
+
+```
+seed(round n) ≤ trailing reserveCut ≈ rake × reserveShare × stakes(prior rounds)
+```
+
+At the deploy default (`rakeBps = 450`, `reserveShareBps = 4000`, bounties ≈ 7% of
+rake) that is ≈ 0.17% of the prior rounds' stakes. The seed is a **rebate of rake the
+Vault took in, not a Vault subsidy**: under honest play the Vault can never lose more
+than the bootstrap (`reserve + seed in flight + spilled ≥ reserve_start − bootstrap`,
+test `vaultNeverBleedsUnderHonestPlay`), and a colluding field can at best recover
+the rake the Vault kept, minus the bounties and treasury share it paid.
+
+**Where `seedMaxBps` binds.** The 5% per-round bankroll ceiling (`seedMaxBps`) and
+the `num/den` fraction only bind ABOVE the implied volume: with a 2 ETH bankroll the
+5% cap is 0.1 ETH, which the income budget reaches only once prior-round stakes
+exceed ≈ 60 ETH. Below that volume the seed is set by income, not by the Vault's
+size; the `num/den` "release fraction" no longer describes a steady state.
+
+**Three inflows.** The Vault is credited by:
+1. **Rake carve** — `reserveCut` = `reserveShareBps` of every round's net rake flows
+   into the Vault instead of the treasury (default 40%). Player-facing rake is
+   unchanged; this only reallocates within the take. This is ALSO the only recurring
+   seed income (above), so `reserveShareBps = 0` means a Vault that seeds only its
+   bootstrap and then stops.
 2. **Bust windfalls** — the entire pot of every fully-busted round rolls in whole
-   (`sweepBustedRound`), for big jackpot jumps.
-3. **Donations** — anyone can `fundVault()` to prime or boost the progressive pot;
-   only a fraction is released per round, so a donation compounds across many games.
+   (`sweepBustedRound`); the seed part of it returns to the budget, the player part
+   does not (players' losses are house income, never re-seeded).
+3. **Donations** — anyone can `fundVault()` to prime or boost the reserve. A donation
+   raises the bankroll (and the caps that key off it) but NOT the seed budget: it
+   cannot be seeded out faster than rake comes in.
 
-**Steady state.** With constant pool `P`, rake carve `c` per round and release
-fraction `α`, the reserve converges to `R* = c·P/α` and the per-round seed converges
-to `c·P` — a self-funding progressive pot sitting on a permanent, un-emptyable buffer.
-Set `α` small (default `1/8`) for a large, slow-to-fill, visibly-growing pot.
+**Steady state, honestly.** Over a run of rounds the Vault's balance moves by
+`Σ reserveCut + Σ bust windfalls − Σ seed paid`, and `Σ seed paid ≤ bootstrap + Σ reserveCut`:
+net of the one-off bootstrap it is non-decreasing, it grows by whatever rake rebate the
+winners' fair-odds and single-payout caps leave unclaimed plus busted pots, and any
+balance above `reserveCap` cascades to the Powerboard (§10). The earlier
+"`R* = c·P/α`, always-compounding, un-emptyable progressive pot" description was the
+pre-hardening formula and is withdrawn: the pot does not compound off a release
+fraction, it recycles income.
 
 **Optional hard floor.** `reserveFloorWei` clamps the draw so the Vault is never taken
 below a fixed floor `F` — a stronger guarantee (`reserve ≥ F`) than the geometric one
