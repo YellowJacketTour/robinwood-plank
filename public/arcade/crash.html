@@ -4661,7 +4661,15 @@ function paintPrivateSnapshot(snapshot) {
   const panelTitle = document.querySelector(".private-panel-title");
   if (panelTitle) panelTitle.textContent = snapshot.room.name;
   const launch = $("privateLaunch");
-  if (launch) { launch.hidden = !snapshot.room.isOwner; launch.disabled = snapshot.room.phase !== "lobby" || snapshot.seats.length === 0; }
+  if (launch) {
+    const queuedBots = snapshot.members.filter((member) => member.isBot && member.botProfile?.enabled && BigInt(member.balance) >= BigInt(snapshot.policy.minimumStake || "0")).length;
+    launch.hidden = !snapshot.room.isOwner;
+    // Synthetic strategies commit atomically inside the authoritative launch
+    // transaction. Requiring a pre-existing human seat here made a bot-only
+    // laboratory impossible even though the server correctly supports it.
+    launch.disabled = snapshot.room.phase !== "lobby" || (snapshot.seats.length === 0 && queuedBots === 0);
+    launch.title = queuedBots ? `${queuedBots} CPU participant${queuedBots === 1 ? "" : "s"} will commit when this round launches` : "Launch when committed players are ready";
+  }
   const solo = $("privateSolo");
   if (solo) { solo.hidden = !snapshot.room.isAdmin; solo.disabled = snapshot.room.phase === "running"; }
   const archive = $("privateArchive");
