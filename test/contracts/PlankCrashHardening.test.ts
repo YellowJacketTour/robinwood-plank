@@ -906,26 +906,34 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     // values), 8 rounds per m, m in {1.088, 1.25, 1.6, 2.6}.
     //
     // Bounds asserted (exact, in wei), per m over the whole run:
-    //   (1) houseMoneyPaid <= SEED_BOOTSTRAP + sum(netRake)
+    //   (1) houseMoneyPaid <= SEED_BOOTSTRAP + sum(reserveCut)
     //       where houseMoneyPaid = BANKROLL - (reserve + seed in flight),
-    //       netRake = rake - (settle + reveal + lock bounties) per settled
-    //       round -- cumulative house money paid out never exceeds
-    //       SEED_INCOME_MULTIPLE (100%) of the rake the house retained, plus
-    //       the one-off bootstrap allowance (0.02 ETH = 1% of the bankroll,
-    //       within the constructor's reserveCap/10 bound);
+    //       reserveCut = reserveShareBps of (rake - settle/reveal/lock
+    //       bounties) per settled round, i.e. the wei that actually
+    //       ENTERED the Vault (re-review NEW-5: the treasury's share never
+    //       did and is not recyclable) -- cumulative house money paid out
+    //       never exceeds SEED_INCOME_MULTIPLE (100%) of the rake the
+    //       VAULT retained, plus the one-off bootstrap allowance (0.02 ETH
+    //       = 1% of the bankroll, within the constructor's reserveCap/10
+    //       bound);
     //   (2) groupNet = sum(payments to A, B1..3) - sum(stakes)
-    //                <= SEED_BOOTSTRAP - sum(rake - netRake)
-    //       i.e. the group can at best recover its own retained rake, so
-    //       it nets at most the one-off bootstrap minus the keeper
-    //       bounties it paid. The bootstrap is the ONLY house money a
+    //                <= SEED_BOOTSTRAP - sum(rake - reserveCut)
+    //       i.e. the group can at best recover the rake the Vault kept, so
+    //       it nets at most the one-off bootstrap minus the bounties AND
+    //       the treasury share it paid. The bootstrap is the ONLY house money a
     //       colluding group can ever net, and it is a constructor input
     //       bounded by reserveCap/10 -- so each m is ALSO run with
     //       bootstrap 0 (the steady state once it is spent), where
-    //       groupNet <= -sum(bounties) < 0 is asserted strictly:
+    //       groupNet <= -sum(rake - reserveCut) < 0 is asserted strictly:
     //       collusion LOSES money.
+    // Each (m, bootstrap) runs at reserveShareBps in {0, 4000 (deploy
+    // default), 10000}: at 0 the Vault retains NO rake, so after the
+    // bootstrap the house pays exactly nothing.
     // On 0f21383 the seed is 5% of the reserve every round regardless of
     // income, so (1) fails (house pays ~seed/m per round against a rake
-    // budget of ~0.045*stakes*0.93) and (2) fails (group net > 0).
+    // budget of ~0.045*stakes*0.93) and (2) fails (group net > 0). On
+    // 1fdc931 the budget is credited with the whole net rake, so at share
+    // 4000 the house pays up to 2.5x the rake the Vault kept: (1) fails.
     const BANKROLL = ethers.parseEther("2");
     const BOOTSTRAP = ethers.parseEther("0.02");
     const A_STAKE = ethers.parseEther("0.01");
@@ -938,14 +946,17 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       for (let i = 0; i < 8; i++) h += Math.floor(rand() * 0x100000000).toString(16).padStart(8, "0");
       return h;
     };
-    for (const [m, bootstrap] of [10880n, 12500n, 16000n, 26000n].flatMap((x) => [
-      [x, BOOTSTRAP],
-      [x, 0n],
-    ])) {
+    for (const [m, bootstrap, share] of [10880n, 12500n, 16000n, 26000n].flatMap((x) =>
+      [0n, 4000n, 10000n].flatMap((sh) => [
+        [x, BOOTSTRAP, sh],
+        [x, 0n, sh],
+      ]),
+    )) {
       const { crash, beacon, signers } = await deploy({
         ...hardeningFor(MAXE),
         maxElapsedBlocks: MAXE,
         reserveCap: BANKROLL,
+        reserveShareBps: share,
         seedBootstrapBudgetWei: bootstrap,
       });
       const [A, B1, B2, B3] = signers.slice(2, 6);
@@ -956,8 +967,8 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       const eB: bigint = await crash._invertMultiplier(m);
       const mB = multiplierAt(eB); // the multiplier B's exit actually pays
       let sumStakes = 0n;
-      let sumNetRake = 0n;
-      let sumBounties = 0n;
+      let sumReserveCut = 0n;
+      let sumLeak = 0n; // rake - reserveCut: bounties + treasury share, never recyclable
       let seededRounds = 0;
       let bWins = 0;
       for (let i = 0; i < ROUNDS; i++) {
@@ -986,8 +997,9 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
           if (r.lockBlock + eff > cur) await networkHelpers.mine(Number(r.lockBlock + eff - cur));
           await crash.settleRound(rid);
         }
-        sumNetRake += rake - bounties;
-        sumBounties += bounties;
+        const reserveCut = ((rake - bounties) * share) / 10000n;
+        sumReserveCut += reserveCut;
+        sumLeak += rake - reserveCut;
         for (const p of group) await crash.registerResult(rid, p.address);
         await networkHelpers.mine(REG + 1);
         const r = await crash.rounds(rid);
@@ -999,21 +1011,23 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
         for (const p of group) await crash.claim(rid, p.address).catch(() => {});
       }
       expect(BOUNTY_BPS).to.equal(700n);
-      expect(seededRounds, `m=${m} b=${bootstrap}: probe must exercise seeded rounds`).to.be.gte(3);
+      // share 0: the bootstrap is the ONLY budget, spent in the first seeded round
+      const minSeeded = share > 0n ? 3 : bootstrap > 0n ? 1 : 0;
+      expect(seededRounds, `m=${m} b=${bootstrap} share=${share}: probe must exercise seeded rounds`).to.be.gte(minSeeded);
       const inFlight: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
       const houseNow: bigint = (await crash.reserve()) + inFlight;
       const houseMoneyPaid = BANKROLL - houseNow;
       let groupOut = 0n;
       for (const p of group) groupOut += await crash.payments(p.address);
       const groupNet = groupOut - sumStakes;
-      // (1) house money paid <= bootstrap + 100% of net rake retained
-      const tag = `m=${m} bootstrap=${ethers.formatEther(bootstrap)} (B won ${bWins}/${ROUNDS})`;
-      expect(houseMoneyPaid, `${tag}: house money paid (${ethers.formatEther(houseMoneyPaid)}) must be <= bootstrap + sum(netRake) (${ethers.formatEther(bootstrap + sumNetRake)})`).to.be.lte(
-        bootstrap + sumNetRake,
+      // (1) house money paid <= bootstrap + 100% of the rake the VAULT retained (NEW-5)
+      const tag = `m=${m} bootstrap=${ethers.formatEther(bootstrap)} share=${share} (B won ${bWins}/${ROUNDS})`;
+      expect(houseMoneyPaid, `${tag}: house money paid (${ethers.formatEther(houseMoneyPaid)}) must be <= bootstrap + sum(reserveCut) (${ethers.formatEther(bootstrap + sumReserveCut)})`).to.be.lte(
+        bootstrap + sumReserveCut,
       );
-      // (2) group net <= bootstrap - bounties paid; strictly negative once the bootstrap is spent
-      expect(groupNet, `${tag}: group net (${ethers.formatEther(groupNet)}) must be <= bootstrap - bounties (${ethers.formatEther(bootstrap - sumBounties)})`).to.be.lte(
-        bootstrap - sumBounties,
+      // (2) group net <= bootstrap - (rake - reserveCut); strictly negative once the bootstrap is spent
+      expect(groupNet, `${tag}: group net (${ethers.formatEther(groupNet)}) must be <= bootstrap - (rake - reserveCut) (${ethers.formatEther(bootstrap - sumLeak)})`).to.be.lte(
+        bootstrap - sumLeak,
       );
       if (bootstrap === 0n) expect(groupNet, `${tag}: collusion must lose money (group net ${ethers.formatEther(groupNet)})`).to.be.lt(0n);
     }
@@ -1021,11 +1035,15 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
 
   it("seedBoundedByHouseIncome", async () => {
     // NEW-1 bookkeeping: seedBudget starts at the bootstrap, every seed is
-    // <= it (and <= every other cap), settle credits exactly netRake, and a
-    // voided round's rescued seed / a capped payout's excess come back.
+    // <= it (and <= every other cap), settle credits exactly reserveCut --
+    // the wei that entered the Vault, NOT the whole net rake (re-review
+    // NEW-5) -- and a voided round's rescued seed / a capped payout's
+    // excess come back. reserveShareBps = 4000 (the deploy default) so the
+    // two differ.
     const BANKROLL = ethers.parseEther("2");
     const BOOTSTRAP = ethers.parseEther("0.05");
-    const { crash, beacon, alice, bob, Crash, cfg } = await deploy({ reserveCap: BANKROLL, seedBootstrapBudgetWei: BOOTSTRAP });
+    const SHARE = 4000n;
+    const { crash, beacon, alice, bob, Crash, cfg } = await deploy({ reserveCap: BANKROLL, reserveShareBps: SHARE, seedBootstrapBudgetWei: BOOTSTRAP });
     await expect(Crash.deploy({ ...cfg, reserveCap: BANKROLL, seedBootstrapBudgetWei: BANKROLL / 10n + 1n })).to.be.revertedWithCustomError(
       crash,
       "BadHardeningConfig",
@@ -1043,7 +1061,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     expect(await crash.seedBudget()).to.equal(0n); // the new round re-drew it
     rid = await crash.currentRoundId();
     expect((await crash.rounds(rid)).rolledOverFromPrevious).to.equal(BOOTSTRAP);
-    // Play it: budget after settle == netRake exactly (seed fully drawn).
+    // Play it: budget after settle == reserveCut exactly (seed fully drawn).
     const SA = ethers.parseEther("1");
     await crash.connect(alice).placeBet(10001n, { value: SA });
     await crash.connect(bob).placeBet(0n, { value: SA });
@@ -1055,11 +1073,16 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
       (rake * KEEPER_BPS) / 10000n -
       (rake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n -
       (rake * HARDENING_TEST_DEFAULTS.keeperLockBps) / 10000n;
+    const reserveCut = (netRake * SHARE) / 10000n;
+    expect(reserveCut).to.be.lt(netRake); // the treasury's 60% is NOT budget
+    const reserveBefore: bigint = await crash.reserve();
     await settle(crash, rid);
-    // settle credited netRake, then the next round drew min(netRake, 5% of reserve).
+    // settle credited reserveCut (to the Vault AND the budget), then the
+    // next round drew min(reserveCut, 5% of reserve).
     const nextSeed: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
-    expect(nextSeed).to.equal(netRake); // 0.087 ETH < 5% of the ~1.95 ETH Vault: the income bound binds
-    expect(await crash.seedBudget()).to.equal(netRake - nextSeed);
+    expect(nextSeed).to.equal(reserveCut); // ~0.035 ETH < 5% of the ~1.95 ETH Vault: the income bound binds
+    expect(await crash.seedBudget()).to.equal(reserveCut - nextSeed);
+    expect(await crash.reserve()).to.equal(reserveBefore + reserveCut - nextSeed); // budget == wei that entered
     // alice's ~1x exit returns almost the whole seed as excess -> budget back.
     await crash.registerResult(rid, alice.address);
     await crash.registerResult(rid, bob.address);
@@ -1070,6 +1093,86 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     expect(ev.length).to.equal(1);
     expect((await crash.seedBudget()) - before).to.equal(ev[0].args.excessToVault);
     expect(ev[0].args.excessToVault).to.be.gt(0n);
+  });
+
+  it("vaultNeverBleedsUnderHonestPlay", async () => {
+    // Re-review NEW-5. On 1fdc931 settle credited seedBudget with the WHOLE
+    // net rake while the Vault only retained reserveCut (reserveShareBps of
+    // it; deploy default 4000), so seeds were paid from reserve capital the
+    // treasury had already taken and the Vault bled ~12-16% per 22 rounds
+    // of honest play, ratcheting down to the HWM circuit floor. With the
+    // budget credited with reserveCut only, the seed after the bootstrap
+    // is a rebate of rake the Vault actually took in, so under honest play
+    // the Vault can never lose more than the bootstrap:
+    //   reserve_end + seedInFlight + spilledToJackpot >= reserve_start - bootstrap
+    // Fuzz: 5 PRNG seeds x reserveShareBps in {0, 4000, 10000}, 4 honest
+    // players with random stakes and random committed targets (or riding
+    // to the crash), unbiased PRNG randomness, 24 rounds, the day rolled
+    // every 6 rounds so the daily circuit re-arms and cannot mask a bleed.
+    const BANKROLL = ethers.parseEther("2");
+    const BOOTSTRAP = BANKROLL / 10n; // the proposed reserveCap/10
+    const ROUNDS = 24;
+    const ROUNDS_PER_DAY = 6;
+    for (const share of [0n, 4000n, 10000n]) {
+      for (const fuzz of [11, 22, 33, 44, 55]) {
+        const rand = prng(fuzz * 7919 + Number(share));
+        const unbiased = () => {
+          let h = "0x";
+          for (let i = 0; i < 8; i++) h += Math.floor(rand() * 0x100000000).toString(16).padStart(8, "0");
+          return h;
+        };
+        const { crash, beacon, signers } = await deploy({
+          reserveCap: BANKROLL,
+          reserveShareBps: share,
+          seedBootstrapBudgetWei: BOOTSTRAP,
+        });
+        const players = signers.slice(2, 6);
+        await crash.connect(signers[7]).fundVault({ value: BANKROLL });
+        const reserveStart: bigint = await crash.reserve();
+        expect(reserveStart).to.equal(BANKROLL);
+        await lock(crash); // void the empty round; the next one is seeded
+        let seededRounds = 0;
+        let minReserve = reserveStart;
+        for (let i = 0; i < ROUNDS; i++) {
+          if (i > 0 && i % ROUNDS_PER_DAY === 0) {
+            // roll the day: the open round's betting has expired, so void it
+            // (seed rescued, budget restored) and play the fresh one
+            await networkHelpers.time.increase(Number(await crash.DRAWDOWN_WINDOW()) + 1);
+            await lock(crash);
+          }
+          const rid: bigint = await crash.currentRoundId();
+          if ((await crash.rounds(rid)).rolledOverFromPrevious > 0n) seededRounds++;
+          for (const p of players) {
+            const stake = ethers.parseEther("0.05") + BigInt(Math.floor(rand() * 45)) * ethers.parseEther("0.01"); // 0.05..0.49
+            const ride = rand() < 0.25;
+            const target = ride ? 0n : multiplierAt(1 + Math.floor(rand() * MAX_ELAPSED)); // 1.004x .. cap
+            await crash.connect(p).placeBet(target, { value: stake });
+          }
+          await lock(crash);
+          await revealWith(crash, beacon, rid, unbiased());
+          await settle(crash, rid);
+          for (const p of players) await crash.registerResult(rid, p.address);
+          await networkHelpers.mine(REG + 1);
+          if ((await crash.rounds(rid)).totalWinningWeight === 0n) {
+            await crash.sweepBustedRound(rid);
+          } else {
+            for (const p of players) await crash.claim(rid, p.address).catch(() => {});
+          }
+          const now: bigint = await crash.reserve();
+          if (now < minReserve) minReserve = now;
+        }
+        const inFlight: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
+        let spilled = 0n;
+        for (const ev of await crash.queryFilter(crash.filters.VaultOverflow())) spilled += ev.args.spilledToJackpot;
+        const reserveEnd: bigint = await crash.reserve();
+        const tag = `share=${share} fuzz=${fuzz} (seeded ${seededRounds}/${ROUNDS} rounds, min reserve ${ethers.formatEther(minReserve)})`;
+        expect(seededRounds, `${tag}: must exercise seeded rounds`).to.be.gte(3);
+        expect(
+          reserveEnd + inFlight + spilled,
+          `${tag}: Vault end ${ethers.formatEther(reserveEnd)} + in flight ${ethers.formatEther(inFlight)} + spilled ${ethers.formatEther(spilled)} must be >= start - bootstrap (${ethers.formatEther(reserveStart - BOOTSTRAP)}) -- the Vault bled house capital`,
+        ).to.be.gte(reserveStart - BOOTSTRAP);
+      }
+    }
   });
 
   it("estimateEqualBettingAndLive", async () => {

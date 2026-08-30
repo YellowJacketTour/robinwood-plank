@@ -82,26 +82,39 @@ documented cause of most on-chain casino failures.
    in 6 rounds, group +0.136 ETH; reproduced: 18.5% in 8 rounds at m = 1.088 on 0f21383). In
    a parimutuel game the Vault seed is pure subsidy; no per-round or per-winner cap bounds
    what a coordinated field can extract. Only 2.7 does.
-7. **Seed bounded by HOUSE INCOME (re-review NEW-1, structural):** a rolling `seedBudget`
-   (wei) in bytecode. `settleRound` credits it with the round's **net rake** (rake minus the
-   keeper bounties — the rake the house actually retains, whether it lands in the Vault or
-   the treasury); every seed drawn is debited from it; a rescued seed (void), a busted
-   round's returned seed, and a capped payout's excess are credited back (never paid, never
-   spent). Each round's seed is
+7. **Seed bounded by HOUSE INCOME (re-review NEW-1, structural; NEW-5 corrected):** a
+   rolling `seedBudget` (wei) in bytecode. `settleRound` credits it with the round's
+   **`reserveCut`** — the `reserveShareBps` share of the net rake (rake minus the keeper
+   bounties) that actually ENTERS the Vault. Re-review NEW-5: crediting the whole net rake
+   (1fdc931) let seeds be paid out of reserve capital the treasury had already taken; at the
+   deploy default `reserveShareBps = 4000` the Vault bled ~12–16% per 22 rounds of honest
+   play and ratcheted down to the HWM circuit floor. Every seed drawn is debited from the
+   budget; a rescued seed (void), a busted round's returned seed, and a capped payout's
+   excess are credited back (never paid, never spent). Each round's seed is
    `≤ min(seedBudget × SEED_INCOME_MULTIPLE_BPS / 10⁴, reserve × SEED_MAX_BPS / 10⁴, drawdown circuits)`,
    so at all times **cumulative house money paid out ≤ `SEED_BOOTSTRAP_BUDGET_WEI` +
-   `SEED_INCOME_MULTIPLE` × cumulative net rake earned.** At the PROPOSED 10000 bps the house
-   recycles at most 100% of what it earned: "positive-sum for the community" becomes
-   literally true — the community gets the rake back as seed, never more, and a colluding
-   group can at best recover its own retained rake, netting at most the one-off bootstrap
-   minus the bounties it paid (strictly negative once the bootstrap is spent). The
-   bootstrap (`seedBootstrapBudgetWei`, constructor input, ≤ `reserveCap/10` enforced when
-   the Vault is capped) is the only allowance that exists before any rake has been earned.
+   `SEED_INCOME_MULTIPLE` × cumulative `reserveCut` earned.** At the PROPOSED 10000 bps the
+   house recycles 100% of the rake the Vault retains, and no more. The honest statement of
+   what that buys the community: the house recycles 100% of the rake the Vault retains; the
+   community's only structural leak is keeper bounties (≈7% of rake ≈ 0.3% of stakes at the
+   proposed constants) plus the treasury share of rake (`1 − reserveShareBps/10⁴` of the net
+   rake; 60% at the deploy default). It is NOT "positive-sum for the community" in any
+   literal sense — that leak leaves the table for good. A colluding group can at best
+   recover the rake the Vault kept, netting at most the one-off bootstrap minus the bounties
+   AND treasury share it paid (strictly negative once the bootstrap is spent). Under honest
+   play the Vault can never lose more than the bootstrap: `reserve + seed in flight +
+   spilled ≥ reserve_start − bootstrap` (test `vaultNeverBleedsUnderHonestPlay`, 5 seeds ×
+   `reserveShareBps ∈ {0, 4000, 10000}` × 24 rounds; FAILS on 1fdc931 at share 0 and 4000).
+   The bootstrap (`seedBootstrapBudgetWei`, constructor input, ≤ `reserveCap/10` enforced
+   when the Vault is capped) is the only allowance that exists before any rake has been
+   earned.
    Also: `autoCashOutBps == 10000` (elapsed 0, P(win) = 1) is rejected `BadAutoTarget` —
    every committed target takes ≥ 1 block of crash risk. Tests
    `colludingAbsorberIsNotProfitable` (reviewer's absorber + 3-winner probe at
    m ∈ {1.088, 1.25, 1.6, 2.6}, 8 rounds, unbiased PRNG randomness, with and without the
-   bootstrap; FAILS on 0f21383), `seedBoundedByHouseIncome`, `autoTargetMustExceedOneX`.
+   bootstrap, × `reserveShareBps ∈ {0, 4000, 10000}`; FAILS on 0f21383 and, at share 4000,
+   on 1fdc931), `seedBoundedByHouseIncome`, `autoTargetMustExceedOneX`,
+   `vaultNeverBleedsUnderHonestPlay`.
 3. **Daily-loss circuit:** rolling 24h window of `reserve` net change; if the drawdown
    exceeds `DAILY_DRAWDOWN_BPS`, the next round seeds 0 from reserve (players-only
    parimutuel continues — the game never stops, the house simply stops subsidizing).
@@ -150,8 +163,8 @@ betId)`. Always close betting before the target round. Tracked as Phase 3.1.
 | `KEEPER_REVEAL_BPS` / `KEEPER_LOCK_BPS` | 100 / 100 of rake | cheap calls, small bounty |
 | max multiplier cap | **OWNER MUST SUPPLY** (§2 open question 4) | not a Fable proposal |
 | `rakeBps` | must be > 0 (constructor reverts) | review LOW-2: every keeper bounty is bps OF THE RAKE, so rake 0 = the "nobody settles" failure (c) forbids |
-| `SEED_INCOME_MULTIPLE_BPS` (bytecode) | **10000** | re-review NEW-1 (§2.7): cumulative seed ≤ 100% of cumulative net rake (+ bootstrap) — the house recycles at most what it earned; the only sybil/collusion bound |
-| `SEED_BOOTSTRAP_BUDGET_WEI` (constructor `seedBootstrapBudgetWei`) | **`reserveCap/10` = 0.2 ETH at Stage-1** | re-review NEW-1: the only seed allowance before rake exists; constructor rejects > `reserveCap/10` on a capped Vault; it is the maximum a colluding group can ever net, once |
+| `SEED_INCOME_MULTIPLE_BPS` (bytecode) | **10000** | re-review NEW-1 (§2.7), corrected NEW-5: cumulative seed ≤ 100% of cumulative `reserveCut` (the rake the VAULT retained, not the whole net rake) + bootstrap — the Vault recycles at most what it took in; the only sybil/collusion bound |
+| `SEED_BOOTSTRAP_BUDGET_WEI` (constructor `seedBootstrapBudgetWei`) | **`reserveCap/10` = 0.2 ETH at Stage-1** | re-review NEW-1: the only seed allowance before rake exists; constructor rejects > `reserveCap/10` on a capped Vault. **NEW-7 — ratified as a MARKETING COST:** the bootstrap (≤ 10% of the bankroll) is ~93% extractable ONCE by a colluding group (`colludingAbsorberIsNotProfitable`: group net ≤ bootstrap − bounties − treasury share; with the Vault keeping 100% of the rake the ≈7% of rake in bounties is the group's only unavoidable cost). Budget it as customer acquisition, not as bankroll. **An UNCAPPED Vault (`reserveCap = 0`) must set `seedBootstrapBudgetWei` explicitly:** `scripts/deploy-casino.ts` derives it as `reserveCap/10` = 0, so an uncapped deploy that forgets it seeds nothing until rake exists, and the constructor cannot bound it (there is no cap to bound against) — owner-set, owner-owned |
 | minimum auto target | **10001 bps** (1.00x rejected) | re-review NEW-1 (b): `_invertMultiplier(10000) = 0` = a P(win)=1 absorber |
 | `estimatedPayout` cap base before lock | current `reserve` | re-review NEW-2: `reserveAtLock` is 0 during BETTING, which zeroed the seed portion of the virtual-lock estimate; test `estimateEqualBettingAndLive` |
 
