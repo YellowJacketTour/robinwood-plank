@@ -7,7 +7,8 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy, powerboardRoundDraw,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
+  PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 
@@ -187,6 +188,18 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       `SELECT sequence::text,event_type,command_id,public_payload,created_at FROM playtest_room_events
         WHERE room_id=$1 ORDER BY sequence DESC LIMIT 60`, [roomId],
     );
+    const simulation = parseSimulationState(room.simulation_state);
+    const eligibilityEpoch = simulation.lottery.awaitingSeal ? simulation.lottery.epoch + 1n : simulation.lottery.epoch;
+    const powerboard = await client.query<{ total_weight: string; my_weight: string; participant_count: string }>(
+      `SELECT COALESCE(SUM(weight),0)::text AS total_weight,
+              COALESCE(SUM(weight) FILTER (WHERE user_id=$3),0)::text AS my_weight,
+              COUNT(*)::text AS participant_count
+         FROM playtest_powerboard_tickets WHERE room_id=$1 AND epoch=$2`,
+      [roomId, eligibilityEpoch.toString(), identity.id],
+    );
+    const totalPowerboardWeight = BigInt(powerboard.rows[0]?.total_weight ?? "0");
+    const myPowerboardWeight = BigInt(powerboard.rows[0]?.my_weight ?? "0");
+    const voucherQuote = powerboardVoucherQuote(myPowerboardWeight, totalPowerboardWeight, simulation.lottery.netPrize);
     const revealVisible = room.phase === "settled" ? room.reveal : null;
     const crashVisible = room.phase === "settled" ? room.crash_bps : null;
     return {
@@ -203,6 +216,15 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         settledAt: room.settled_at?.toISOString() ?? null,
       },
       policy: room.policy, simulation: room.simulation_state,
+      powerboard: {
+        epoch: eligibilityEpoch.toString(),
+        totalWeight: totalPowerboardWeight.toString(),
+        myWeight: myPowerboardWeight.toString(),
+        participantCount: Number(powerboard.rows[0]?.participant_count ?? "0"),
+        hitOddsOneIn: PLAYTEST_POWERBOARD_ODDS,
+        allocationRule: "linear-stake-weight-v1",
+        quote: serializeBigInts(voucherQuote),
+      },
       members: members.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, balance: row.test_credit_balance, isBot: row.is_bot, botProfile: row.bot_profile })),
       seats: seats.rows.map((row) => ({
         userId: row.user_id, displayName: row.display_name, stake: row.stake,
@@ -422,14 +444,15 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
         );
       }
     }
+    const epochTickets = await client.query<{ user_id: string; display_name: string; weight: string }>(
+      `SELECT t.user_id,u.display_name,t.weight::text FROM playtest_powerboard_tickets t
+         JOIN playtest_users u ON u.id=t.user_id WHERE t.room_id=$1 AND t.epoch=$2 ORDER BY t.user_id`,
+      [roomId, eligibilityEpoch.toString()],
+    );
+    const epochTotalWeight = epochTickets.rows.reduce((sum, ticket) => sum + BigInt(ticket.weight), 0n);
     let lotteryWinner: { userId: string; displayName: string; payout: string; epoch: string } | null = null;
     if (result.lotteryEvent === "hit") {
-      const tickets = await client.query<{ user_id: string; display_name: string; weight: string }>(
-        `SELECT t.user_id,u.display_name,t.weight::text FROM playtest_powerboard_tickets t
-           JOIN playtest_users u ON u.id=t.user_id WHERE t.room_id=$1 AND t.epoch=$2 ORDER BY t.user_id`,
-        [roomId, eligibilityEpoch.toString()],
-      );
-      const winner = weightedTicketWinner(tickets.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, weight: BigInt(row.weight) })), `${room.reveal}:powerboard:ticket:${eligibilityEpoch}`);
+      const winner = weightedTicketWinner(epochTickets.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, weight: BigInt(row.weight) })), `${room.reveal}:powerboard:ticket:${eligibilityEpoch}`);
       if (!winner) throw new PlaytestRoomError(409, "NO_LOTTERY_TICKETS", "The current Powerboard epoch has no eligible tickets.");
       if (lotteryPayout <= 0n) throw new PlaytestRoomError(409, "NO_LOTTERY_PAYOUT", "The lottery hit did not produce a payable prize.");
       await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance+$3 WHERE room_id=$1 AND user_id=$2`, [roomId, winner.id, lotteryPayout.toString()]);
@@ -459,6 +482,10 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
       qualified: result.qualified, accounting: result.settlement, lotteryWinner,
       powerboardFundingAdded: powerboardFundingAdded.toString(),
+      powerboardPool: {
+        epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),
+        weights: epochTickets.rows.map((ticket) => ({ userId: ticket.user_id, weight: ticket.weight })),
+      },
       powerboardDraw: { ...powerboardDraw, forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss") },
     });
     return { duplicate: false, version: room.version };
