@@ -1,4 +1,4 @@
-import { createRoomInvite, currentPlaytestIdentity, playtestMutationOriginAllowed } from "@/lib/playtest-auth";
+import { createRoomInvite, currentPlaytestIdentity, playtestInviteUrl, playtestMutationOriginAllowed } from "@/lib/playtest-auth";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,6 @@ export async function POST(req: Request) {
     const body = await readJsonBody<{ roomId?: unknown }>(req);
     const roomId = typeof body.roomId === "string" ? body.roomId : null;
     const token = await createRoomInvite(identity, roomId);
-    const origin = new URL(req.url).origin;
-    return publicJson({ url: `${origin}/playtest?invite=${encodeURIComponent(token)}`, reusable: Boolean(roomId), expiresInDays: 7 }, 201);
+    return publicJson({ url: playtestInviteUrl(token), reusable: Boolean(roomId), expiresInDays: 7 }, 201);
   } catch (error) { return publicError(error, "Could not create an invitation."); }
 }

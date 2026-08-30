@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { cleanDisplayName, cleanPin, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestBootstrapAllowed, playtestEnabled, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256, usernameKey } from "../../lib/playtest-auth-core";
+import { cleanDisplayName, cleanPin, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestBootstrapAllowed, playtestEnabled, playtestInviteUrl, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256, usernameKey } from "../../lib/playtest-auth-core";
 
 const saved = {
   origin: process.env.PLANK_PLAYTEST_ORIGIN,
@@ -62,6 +62,15 @@ test("RP settings require HTTPS except loopback and bind RP to origin host", () 
   process.env.PLANK_PLAYTEST_ORIGIN = "http://plank.love";
   process.env.PLANK_PLAYTEST_RP_ID = "plank.love";
   assert.throws(() => playtestRp());
+});
+
+test("room invitations always use the configured public playtest origin", () => {
+  process.env.PLANK_PLAYTEST_ORIGIN = "https://plank.love/internal/path";
+  const token = "0123456789abcdefghij_INVITE";
+  assert.equal(playtestInviteUrl(token), `https://plank.love/playtest?invite=${token}`);
+  process.env.PLANK_PLAYTEST_ORIGIN = "https://private.plank.love";
+  assert.equal(playtestInviteUrl(token), `https://private.plank.love/playtest?invite=${token}`);
+  assert.throws(() => playtestInviteUrl("short"), /Invalid invitation/);
 });
 
 test("sessions use opaque 256-bit tokens and hardened host cookies", () => {

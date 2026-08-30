@@ -4807,12 +4807,26 @@ async function startPrivatePlaytest() {
   const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "launch"; launch.textContent = "LAUNCH WHEN EVERYONE IS READY"; launch.onclick = () => privatePlaytestCommand("start");
   const solo = document.createElement("button"); solo.id = "privateSolo"; solo.textContent = "SOLO LAB"; solo.title = "Admin: set the minimum-player gate to one for end-to-end host testing"; solo.onclick = () => privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers: 1 } });
   let showPrivateInvite = () => {};
+  const copyPrivateText = async (value) => {
+    if (!value) return false;
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); return true; }
+    } catch (_) {}
+    const fallback = document.createElement("textarea");
+    fallback.value = value; fallback.readOnly = true; fallback.setAttribute("aria-hidden", "true");
+    fallback.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(fallback); fallback.focus(); fallback.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (_) {}
+    fallback.remove();
+    return copied;
+  };
   const invite = document.createElement("button"); invite.textContent = "COPY INVITE"; invite.onclick = async () => {
     try {
       const result = await privateJson(await fetch("/api/playtest/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId: privateRoomId }) }));
       showPrivateInvite(result.url);
-      try { await navigator.clipboard.writeText(result.url); toast("Reusable table invitation copied", "success"); }
-      catch (_) { toast("Invitation ready · copy it from the open panel", "success"); }
+      if (await copyPrivateText(result.url)) toast("Reusable table invitation copied", "success");
+      else toast("Invitation ready · select COPY SECRET LINK in the open panel", "info");
     } catch (error) { toast(error.message, "error"); }
   };
   const archive = document.createElement("button"); archive.id = "privateArchive"; archive.textContent = "ARCHIVE"; archive.title = "Hide this accidental or completed test table"; archive.onclick = async () => {
@@ -4857,7 +4871,10 @@ async function startPrivatePlaytest() {
   const inviteDialog = document.createElement("dialog"); inviteDialog.id = "privateInvite"; inviteDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Reusable private table door</div><h2>Bring your friends aboard</h2><p class="private-menu-lede">Anyone with this secret link can create a unique username and four-digit PIN, then joins this exact table. The same link works for your whole invited group for seven days.</p><input class="private-invite-url" id="privateInviteUrl" aria-label="Reusable invitation URL" readonly style="width:100%;margin:18px 0"><div class="private-menu-actions"><button id="privateInviteCopy" class="primary">COPY SECRET LINK</button><a id="privateInviteOpen" target="_blank" rel="noopener">TEST IN NEW TAB</a><button id="privateInviteClose">RETURN TO TABLE</button></div></div>`; document.body.appendChild(inviteDialog);
   const inviteUrl = inviteDialog.querySelector("#privateInviteUrl"); const inviteOpen = inviteDialog.querySelector("#privateInviteOpen");
   showPrivateInvite = (url) => { inviteUrl.value = url; inviteOpen.href = url; if (!inviteDialog.open) inviteDialog.showModal(); inviteUrl.focus(); inviteUrl.select(); };
-  inviteDialog.querySelector("#privateInviteCopy").onclick = async () => { try { await navigator.clipboard.writeText(inviteUrl.value); toast("Reusable table invitation copied", "success"); } catch (_) { inviteUrl.focus(); inviteUrl.select(); } };
+  inviteDialog.querySelector("#privateInviteCopy").onclick = async () => {
+    if (await copyPrivateText(inviteUrl.value)) toast("Reusable table invitation copied", "success");
+    else { inviteUrl.focus(); inviteUrl.select(); toast("Copy is blocked by this browser · press Ctrl+C", "info"); }
+  };
   inviteDialog.querySelector("#privateInviteClose").onclick = () => inviteDialog.close();
 
   const simulationDialog = document.createElement("dialog"); simulationDialog.id = "privateSimulation"; simulationDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Host PIN · no-value scenario injection</div><h2>Table simulation controls</h2><p class="private-menu-lede">Change rules between rounds, place the Vault and Powerboard at specific test states, set cumulative burn counters, and adjust any friend's credits. Every injection is server-validated and labeled in the replay log; none of this can touch mainnet.</p><div id="privateAdminStatus" class="private-admin-status"></div>
