@@ -7,7 +7,7 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy, powerboardRoundDraw,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 
@@ -400,6 +400,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     );
     const policy = parsePolicy(room.policy);
     const prior = parseSimulationState(room.simulation_state);
+    const powerboardDraw = powerboardRoundDraw(room.reveal!);
     // Wagers made while funding the next prize belong to that next isolated
     // epoch, not to the already-consumed epoch number in the awaiting state.
     const eligibilityEpoch = prior.lottery.awaitingSeal ? prior.lottery.epoch + 1n : prior.lottery.epoch;
@@ -456,6 +457,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     await event(client, room, "round.settled", identity.id, commandId, {
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
       qualified: result.qualified, accounting: result.settlement, lotteryWinner,
+      powerboardDraw: { ...powerboardDraw, forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss") },
     });
     return { duplicate: false, version: room.version };
   });
@@ -471,13 +473,14 @@ export async function tickPlaytestRound(identity: PlaytestIdentity, roomId: stri
   );
   const reveal = found.rows[0]?.reveal;
   if (!reveal) throw new PlaytestRoomError(409, "NOT_RUNNING", "No committed round can be ticked.");
-  const lotterySample = createHash("sha256").update(`${reveal}:powerboard`).digest()[0];
-  const outcome: LotteryOutcome = lotterySample % 16 === 0 ? "hit" : "miss";
+  const draw = powerboardRoundDraw(reveal);
+  const outcome: LotteryOutcome = draw.rawHit ? "hit" : "miss";
   return settlePlaytestRound(identity, roomId, commandId, outcome, false);
 }
 
 const EDITABLE_POLICY_KEYS = new Set<keyof SimulationPolicy>([
   "keeperRewardBps", "protectedPrincipalBps", "crashSeed", "emissionBufferCap",
+  "powerboardFundingBps",
   "lotteryFounderFeeBps", "lotteryInitialBase", "lotteryMinimumIncrease",
   "lotteryBaseGrowthBps", "lotteryMinimumBaseStep", "consolation",
   "minimumPlayers", "minimumStake",

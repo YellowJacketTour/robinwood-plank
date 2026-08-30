@@ -14,6 +14,7 @@ const policy: SimulationPolicy = {
   rakeBps: 450n,
   keeperRewardBps: 0n,
   protectedPrincipalBps: 2_500n,
+  powerboardFundingBps: 2_500n,
   crashSeed: ETH / 100n,
   emissionBufferCap: ETH / 20n,
   lotteryFounderFeeBps: 500n,
@@ -53,6 +54,7 @@ test("ratified split, principal, emissions, and payouts conserve a qualified rou
     result.state.totals.grossRake,
     result.state.totals.burned + result.state.totals.communityFunded + result.state.totals.crashFounderRake,
   );
+  assert.ok(result.state.lottery.pendingFunding > 0n, "every qualified game funds Powerboard from community rake");
   const playerNetIn = result.state.totals.freshWagers
     - result.state.totals.burned
     - result.state.totals.crashFounderRake;

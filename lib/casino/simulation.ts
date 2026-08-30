@@ -13,6 +13,8 @@ export interface SimulationPolicy {
   rakeBps: bigint;
   keeperRewardBps: bigint;
   protectedPrincipalBps: bigint;
+  /** Share of the already-ratified community rake routed to Powerboard each qualified game. */
+  powerboardFundingBps: bigint;
   crashSeed: bigint;
   emissionBufferCap: bigint;
   lotteryFounderFeeBps: bigint;
@@ -106,6 +108,7 @@ export function validatePolicy(policy: SimulationPolicy): void {
     policy.rakeBps,
     policy.keeperRewardBps,
     policy.protectedPrincipalBps,
+    policy.powerboardFundingBps,
     policy.lotteryFounderFeeBps,
     policy.lotteryBaseGrowthBps,
   ];
@@ -281,7 +284,12 @@ export function simulateIteration(
     state.totals.playerCrashPayouts += settlement.totalPayout;
     state.totals.vaultRemainders += settlement.vaultRemainder;
 
-    const communityReturn = split.community + settlement.vaultRemainder;
+    // Powerboard is a subdivision of the existing community allocation, not
+    // a new rake or an unbacked liability. This makes its funding visible on
+    // every qualified game without changing the ratified 20/40/40 split.
+    const powerboardFunding = (split.community * policy.powerboardFundingBps) / BPS;
+    state.lottery.pendingFunding += powerboardFunding;
+    const communityReturn = (split.community - powerboardFunding) + settlement.vaultRemainder;
     const principal = (communityReturn * policy.protectedPrincipalBps) / BPS;
     state.protectedPrincipal += principal;
     state.emissionBuffer += communityReturn - principal;
