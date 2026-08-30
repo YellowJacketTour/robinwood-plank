@@ -50,6 +50,7 @@ test("ratified split, principal, emissions, and payouts conserve a qualified rou
   assert.equal(result.state.totals.grossRake, (2n * ETH * 450n) / 10_000n);
   assert.equal(result.state.totals.burned, (result.state.totals.grossRake * 2_000n) / 10_000n);
   assert.equal(result.state.totals.communityFunded, (result.state.totals.grossRake * 4_000n) / 10_000n);
+  assert.equal(result.state.totals.powerboardFunded, (result.state.totals.communityFunded * 2_500n) / 10_000n);
   assert.equal(
     result.state.totals.grossRake,
     result.state.totals.burned + result.state.totals.communityFunded + result.state.totals.crashFounderRake,

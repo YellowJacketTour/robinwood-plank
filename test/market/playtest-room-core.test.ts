@@ -58,6 +58,12 @@ test("policy and simulation state survive JSON without losing integer precision"
   assert.deepEqual(parseSimulationState(serializeBigInts(state)), state);
 });
 
+test("pre-Powerboard-provenance snapshots remain replayable", () => {
+  const legacy = serializeBigInts(initialSimulationState(DEFAULT_PLAYTEST_POLICY)) as Record<string, unknown>;
+  delete (legacy.totals as Record<string, unknown>).powerboardFunded;
+  assert.equal(parseSimulationState(legacy).totals.powerboardFunded, 0n);
+});
+
 test("laboratory crash fixture is deterministic, bounded, and committed separately", () => {
   const reveal = "f".repeat(64);
   const crash = simulationCrashBps(reveal);
