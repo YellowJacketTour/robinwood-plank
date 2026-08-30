@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { initialSimulationState, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
+import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
   crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
@@ -167,8 +168,8 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
     const roomResult = await client.query<RoomRow>(`SELECT * FROM playtest_rooms WHERE id=$1 AND archived_at IS NULL`, [roomId]);
     const room = roomResult.rows[0];
     if (!room) throw new PlaytestRoomError(404, "ROOM_NOT_FOUND", "Room not found.");
-    const members = await client.query<{ user_id: string; display_name: string; test_credit_balance: string }>(
-      `SELECT m.user_id,u.display_name,m.test_credit_balance::text
+    const members = await client.query<{ user_id: string; display_name: string; test_credit_balance: string; is_bot: boolean; bot_profile: PlaytestBotProfile | null }>(
+      `SELECT m.user_id,u.display_name,m.test_credit_balance::text,u.is_bot,m.bot_profile
          FROM playtest_room_members m JOIN playtest_users u ON u.id=m.user_id
         WHERE m.room_id=$1 ORDER BY m.joined_at`, [roomId],
     );
@@ -199,7 +200,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         settledAt: room.settled_at?.toISOString() ?? null,
       },
       policy: room.policy, simulation: room.simulation_state,
-      members: members.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, balance: row.test_credit_balance })),
+      members: members.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, balance: row.test_credit_balance, isBot: row.is_bot, botProfile: row.bot_profile })),
       seats: seats.rows.map((row) => ({
         userId: row.user_id, displayName: row.display_name, stake: row.stake,
         requestedTargetBps: row.requested_target_bps, acceptedTargetBps: row.accepted_target_bps,
@@ -302,8 +303,29 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     if (room.owner_user_id !== identity.id && !identity.isAdmin) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can launch.");
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "lobby" || BigInt(room.current_round) < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a lobby round with bets.");
-    const count = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2`, [roomId, room.current_round]);
     const policy = parsePolicy(room.policy);
+    const bots = await client.query<{ user_id: string; test_credit_balance: string; bot_profile: PlaytestBotProfile }>(
+      `SELECT user_id,test_credit_balance::text,bot_profile
+         FROM playtest_room_members
+        WHERE room_id=$1 AND bot_profile IS NOT NULL
+        ORDER BY user_id FOR UPDATE`, [roomId],
+    );
+    const committed: Array<{ id: string; stake: bigint; targetBps: bigint; preset: string }> = [];
+    for (const bot of bots.rows) {
+      try { validateBotProfile(bot.bot_profile); } catch { continue; }
+      const choice = botRoundCommitment({ roomId, roundId: BigInt(room.current_round), botId: bot.user_id, bankroll: BigInt(bot.test_credit_balance), minimumStake: policy.minimumStake, profile: bot.bot_profile });
+      if (!choice) continue;
+      const inserted = await client.query(
+        `INSERT INTO playtest_round_seats (room_id,round_id,user_id,stake,requested_target_bps,command_id)
+         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (room_id,round_id,user_id) DO NOTHING`,
+        [roomId, room.current_round, bot.user_id, choice.stake.toString(), choice.targetBps.toString(), randomUUID()],
+      );
+      if (inserted.rowCount) {
+        await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance-$3 WHERE room_id=$1 AND user_id=$2`, [roomId, bot.user_id, choice.stake.toString()]);
+        committed.push({ id: bot.user_id, ...choice, preset: bot.bot_profile.preset });
+      }
+    }
+    const count = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2`, [roomId, room.current_round]);
     if (Number(count.rows[0].count) < policy.minimumPlayers) throw new PlaytestRoomError(409, "MINIMUM_PLAYERS", `At least ${policy.minimumPlayers} players must bet.`);
     const reveal = randomBytes(32).toString("hex");
     const commitment = createHash("sha256").update(reveal, "hex").digest("hex");
@@ -318,6 +340,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       [roomId, room.version, commitment, reveal, crashBps.toString(), started, crashAt],
     );
     await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString(), crashAt: crashAt.toISOString() });
+    if (committed.length) await event(client, room, "bots.committed", identity.id, null, { count: committed.length, commitments: committed });
     return { duplicate: false, version: room.version };
   });
 }
@@ -359,10 +382,39 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     );
     const policy = parsePolicy(room.policy);
     const prior = parseSimulationState(room.simulation_state);
+    // Wagers made while funding the next prize belong to that next isolated
+    // epoch, not to the already-consumed epoch number in the awaiting state.
+    const eligibilityEpoch = prior.lottery.awaitingSeal ? prior.lottery.epoch + 1n : prior.lottery.epoch;
     const result = simulateIteration(prior, policy, {
       players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: BigInt(seat.accepted_target_bps ?? seat.requested_target_bps) })),
       crashBps: BigInt(room.crash_bps), lotteryOutcome,
     });
+    // The simulator is the accounting authority. Deriving the payout from the
+    // cumulative counter also covers a prize sealed and won in this iteration;
+    // prior.lottery.netPrize is zero while an epoch is awaiting its next seal.
+    const lotteryPayout = result.state.totals.lotteryWinnerPayouts - prior.totals.lotteryWinnerPayouts;
+    if (result.qualified) {
+      for (const seat of seats.rows) {
+        await client.query(
+          `INSERT INTO playtest_powerboard_tickets (room_id,epoch,user_id,weight) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (room_id,epoch,user_id) DO UPDATE SET weight=playtest_powerboard_tickets.weight+EXCLUDED.weight`,
+          [roomId, eligibilityEpoch.toString(), seat.user_id, seat.stake],
+        );
+      }
+    }
+    let lotteryWinner: { userId: string; displayName: string; payout: string; epoch: string } | null = null;
+    if (result.lotteryEvent === "hit") {
+      const tickets = await client.query<{ user_id: string; display_name: string; weight: string }>(
+        `SELECT t.user_id,u.display_name,t.weight::text FROM playtest_powerboard_tickets t
+           JOIN playtest_users u ON u.id=t.user_id WHERE t.room_id=$1 AND t.epoch=$2 ORDER BY t.user_id`,
+        [roomId, eligibilityEpoch.toString()],
+      );
+      const winner = weightedTicketWinner(tickets.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, weight: BigInt(row.weight) })), `${room.reveal}:powerboard:ticket:${eligibilityEpoch}`);
+      if (!winner) throw new PlaytestRoomError(409, "NO_LOTTERY_TICKETS", "The current Powerboard epoch has no eligible tickets.");
+      if (lotteryPayout <= 0n) throw new PlaytestRoomError(409, "NO_LOTTERY_PAYOUT", "The lottery hit did not produce a payable prize.");
+      await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance+$3 WHERE room_id=$1 AND user_id=$2`, [roomId, winner.id, lotteryPayout.toString()]);
+      lotteryWinner = { userId: winner.id, displayName: winner.displayName, payout: lotteryPayout.toString(), epoch: eligibilityEpoch.toString() };
+    }
     for (const allocation of result.settlement?.allocations ?? []) {
       const originalSeat = seats.rows.find((seat) => seat.user_id === allocation.id);
       const autoAccepted = allocation.survived && originalSeat?.accepted_target_bps === null;
@@ -385,7 +437,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     await client.query(`UPDATE playtest_rooms SET phase='settled',version=$2,simulation_state=$3,settled_at=$4 WHERE id=$1`, [roomId, room.version, JSON.stringify(room.simulation_state), room.settled_at]);
     await event(client, room, "round.settled", identity.id, commandId, {
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
-      qualified: result.qualified, accounting: result.settlement,
+      qualified: result.qualified, accounting: result.settlement, lotteryWinner,
     });
     return { duplicate: false, version: room.version };
   });
@@ -457,6 +509,77 @@ export async function adjustPlaytestCredit(identity: PlaytestIdentity, roomId: s
     await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [room.id, room.version]);
     await event(client, room, "admin.credit.adjusted", identity.id, commandId, { userId, balance });
     return { duplicate: false, version: room.version };
+  });
+}
+
+type BotCommand = {
+  operation?: unknown; count?: unknown; preset?: unknown; bankroll?: unknown;
+  ids?: unknown; profile?: unknown; resetBalance?: unknown;
+};
+
+/** Admin-only population laboratory. Synthetic participants are ordinary
+ * bankroll-constrained seats at settlement time; they receive no subsidy,
+ * crash knowledge, payout priority, or access credential. */
+export async function managePlaytestBots(identity: PlaytestIdentity, roomId: string, commandId: string, raw: unknown) {
+  if (!identity.isAdmin) throw new PlaytestRoomError(403, "ADMIN_ONLY", "The host PIN is required.");
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new PlaytestRoomError(400, "BAD_BOT_COMMAND", "Bot changes must be an object.");
+  const input = raw as BotCommand;
+  return withPostgresTransaction(async (client) => {
+    const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
+    if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
+    if (room.phase === "running") throw new PlaytestRoomError(409, "ROUND_ACTIVE", "Tune synthetic participants between rounds.");
+    let affected: string[] = [];
+    if (input.operation === "add") {
+      const count = Number(input.count);
+      const requestedPreset = String(input.preset);
+      const bankrollText = String(input.bankroll);
+      if (!Number.isSafeInteger(count) || count < 1 || count > 100) throw new PlaytestRoomError(400, "BAD_BOT_COUNT", "Add between 1 and 100 bots at once.");
+      if ((requestedPreset !== "mixed" && !BOT_PROFILE_NAMES.includes(requestedPreset as BotProfileName)) || !/^\d{1,30}$/.test(bankrollText) || BigInt(bankrollText) <= 0n) throw new PlaytestRoomError(400, "BAD_BOT_PROFILE", "Choose a valid profile and positive bankroll.");
+      const existing = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_room_members WHERE room_id=$1 AND bot_profile IS NOT NULL`, [roomId]);
+      if (Number(existing.rows[0].count) + count > 500) throw new PlaytestRoomError(409, "BOT_CAP", "A table supports at most 500 active synthetic participants.");
+      const mixedPopulation: BotProfileName[] = [
+        ...Array<BotProfileName>(25).fill("cautious"), ...Array<BotProfileName>(35).fill("balanced"),
+        ...Array<BotProfileName>(15).fill("bold"), ...Array<BotProfileName>(5).fill("whale"),
+        ...Array<BotProfileName>(8).fill("house-money"), ...Array<BotProfileName>(7).fill("break-even"),
+        ...Array<BotProfileName>(5).fill("wildcard"),
+      ];
+      for (let index = 0; index < count; index += 1) {
+        const preset = requestedPreset === "mixed"
+          ? mixedPopulation[(Number(existing.rows[0].count) + index) % mixedPopulation.length]
+          : requestedPreset as BotProfileName;
+        const id = randomUUID();
+        const ordinal = Number(existing.rows[0].count) + index + 1;
+        const displayName = `${preset.replace("-", " ")} bot ${ordinal}`.slice(0, 40);
+        const profile = botProfile(preset, BigInt(bankrollText));
+        const inviteHash = createHash("sha256").update(`playtest-bot:${id}`).digest("hex");
+        await client.query(`INSERT INTO playtest_users (id,display_name,invite_hash,is_bot) VALUES ($1,$2,$3,TRUE)`, [id, displayName, inviteHash]);
+        await client.query(`INSERT INTO playtest_room_members (room_id,user_id,test_credit_balance,bot_profile) VALUES ($1,$2,$3,$4)`, [roomId, id, bankrollText, JSON.stringify(profile)]);
+        affected.push(id);
+      }
+    } else if (input.operation === "update") {
+      const ids = Array.isArray(input.ids) ? [...new Set(input.ids.filter((id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 500) : [];
+      if (!ids.length) throw new PlaytestRoomError(400, "NO_BOTS", "Select at least one synthetic participant.");
+      validateBotProfile(input.profile);
+      const reset = input.resetBalance === true;
+      const changed = await client.query<{ user_id: string }>(
+        `UPDATE playtest_room_members m SET bot_profile=$3${reset ? ",test_credit_balance=$4" : ""}
+          FROM playtest_users u WHERE m.room_id=$1 AND m.user_id=u.id AND u.is_bot=TRUE AND m.user_id=ANY($2::uuid[])
+          RETURNING m.user_id`,
+        reset ? [roomId, ids, JSON.stringify(input.profile), input.profile.initialBankroll] : [roomId, ids, JSON.stringify(input.profile)],
+      );
+      affected = changed.rows.map((row) => row.user_id);
+    } else if (input.operation === "remove") {
+      const ids = Array.isArray(input.ids) ? [...new Set(input.ids.filter((id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 500) : [];
+      if (!ids.length) throw new PlaytestRoomError(400, "NO_BOTS", "Select at least one synthetic participant.");
+      const pending = await client.query<{ user_id: string; stake: string }>(`DELETE FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2 AND user_id=ANY($3::uuid[]) RETURNING user_id,stake::text`, [roomId, room.current_round, ids]);
+      for (const seat of pending.rows) await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance+$3 WHERE room_id=$1 AND user_id=$2`, [roomId, seat.user_id, seat.stake]);
+      const removed = await client.query<{ user_id: string }>(`DELETE FROM playtest_room_members m USING playtest_users u WHERE m.room_id=$1 AND m.user_id=u.id AND u.is_bot=TRUE AND m.user_id=ANY($2::uuid[]) RETURNING m.user_id`, [roomId, ids]);
+      affected = removed.rows.map((row) => row.user_id);
+    } else throw new PlaytestRoomError(400, "BAD_BOT_OPERATION", "Unknown synthetic-participant operation.");
+    room.version = String(BigInt(room.version) + 1n);
+    await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [roomId, room.version]);
+    await event(client, room, `admin.bots.${String(input.operation)}`, identity.id, commandId, { affected, configuration: input.operation === "remove" ? undefined : input, laboratoryOnly: true });
+    return { duplicate: false, version: room.version, affected };
   });
 }
 

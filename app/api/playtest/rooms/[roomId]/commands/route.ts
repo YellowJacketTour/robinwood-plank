@@ -2,7 +2,7 @@ import { currentPlaytestIdentity, playtestMutationOriginAllowed } from "@/lib/pl
 import {
   adjustPlaytestCredit, adjustPlaytestSimulation, lockPlaytestBet, placePlaytestBet, PlaytestRoomError,
   settlePlaytestRound, startPlaytestRound, tickPlaytestRound,
-  updatePlaytestPolicy,
+  managePlaytestBots, updatePlaytestPolicy,
 } from "@/lib/playtest-rooms";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 type CommandBody = {
   action?: unknown; commandId?: unknown; stake?: unknown;
-  targetBps?: unknown; lotteryOutcome?: unknown; policy?: unknown; simulation?: unknown; userId?: unknown; balance?: unknown;
+  targetBps?: unknown; lotteryOutcome?: unknown; policy?: unknown; simulation?: unknown; bots?: unknown; userId?: unknown; balance?: unknown;
 };
 
 function integer(value: unknown, field: string): bigint {
@@ -53,6 +53,8 @@ export async function POST(req: Request, context: { params: Promise<{ roomId: st
       result = await adjustPlaytestCredit(identity, roomId, body.commandId, body.userId, integer(body.balance, "balance"));
     } else if (body.action === "adminSimulation") {
       result = await adjustPlaytestSimulation(identity, roomId, body.commandId, body.simulation);
+    } else if (body.action === "adminBots") {
+      result = await managePlaytestBots(identity, roomId, body.commandId, body.bots);
     } else {
       return publicJson({ error: "BAD_ACTION", message: "Unknown laboratory command." }, 400);
     }
