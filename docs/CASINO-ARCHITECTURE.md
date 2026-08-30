@@ -9,6 +9,58 @@ Everything here is real, compiled, and tested (`npx hardhat test`, 186 passing
 as of this writing). Nothing in this doc is aspirational unless explicitly
 marked **OPEN**.
 
+## 0. Status (2026-08-29)
+
+- **Crash family (`PlankCrashDrand` + Bank/Rake/Powerboard/Progression/Fuel):
+  hardenings (a)(b)(c) implemented on branch `feat/cos-p3-crash-hardening` —
+  NOT deployed, constants NOT ratified.** Spec:
+  `docs/marketplank/SPEC-CRASH-GO-LIVE-HARDENING.md`; tests:
+  `test/contracts/PlankCrashHardening.test.ts` (C1–C8 + invariant I-a fuzz +
+  pool-conservation property).
+- (a) `placeBet(autoCashOutBps)` / `placeBetFor(player, autoCashOutBps)` commit
+  the auto target with the bet (immutable per round/player; carried stakes keep
+  it); `presetCashOut` REMOVED; `lockRound` stores `revealNotBefore` (beacon
+  emission time of `targetDrandRound` MINUS `CASHOUT_CLOSE_MARGIN_PERIODS` = 2
+  periods / 6 s, review MED-1); manual `cashOut` reverts `CashOutWindowClosed`
+  once `block.timestamp >= revealNotBefore`, revealed or not, AND (clock-
+  independent belt) once the beacon already holds the target round; settlement
+  uses `effectiveCashOutBlock = min(manual, lockBlock + invert(auto))`.
+- **The manual cash-out window is ~60 s (review LOW-5).** `lockRound` targets
+  the drand round `TARGET_ROUND_SAFETY_PERIODS` (20) periods after the next one,
+  so on quicknet (3 s) the target is emitted 60–63 s after lock and manual
+  cash-outs close 6 s before that: a player has roughly 54–57 s of live block
+  time after lock to choose an exit by hand; beyond it only the auto target
+  committed with the bet can fire. This is a product constant, not a bug: it
+  is what makes invariant I-a hold (no exit may be chosen once the randomness
+  can exist anywhere). The UI must show the countdown and default players to an
+  auto target; a longer manual window means a larger `TARGET_ROUND_SAFETY_
+  PERIODS` at the cost of a longer wait per round.
+- (b) `seedMaxBps` (immutable, bytecode ceiling `SEED_MAX_BPS_CEILING`=1000,
+  review MED-3), `singlePayoutCapBps` on the house-side (seed) share of any one
+  wallet's payout vs `reserveAtLock` — a per-wallet UX bound, NOT a sybil bound;
+  the excess is credited to the Vault (pool conserved, proven in-test),
+  `dailyDrawdownBps` (24h stepped window whose peak DECAYS by the allowed
+  drawdown per elapsed window instead of resetting to the balance, review
+  MED-2; seed returns never raise the peak) and `hwmDrawdownBps` circuits
+  force seed=0 while play continues, and an explicit owner-supplied
+  `maxMultiplierBps` (constructor-bounded) replaces the implicit block cap.
+- **Seed is distributed by PROFIT weight (review HIGH-1):** the player-funded
+  pot still splits by `stake × mult`, but the Vault seed splits by
+  `stake × (mult − 1)` and is capped per winner at that same amount — house
+  money never exceeds the fair-odds profit on the risk actually taken, so a
+  1.0001× auto exit (P = 0.9999) earns 0.4% of its stake instead of the whole
+  seed. Test `seedNotFarmableAtMinExit` reproduces the reviewer's 4-sybil probe:
+  18.5% of the bankroll in 7 rounds on the old key, ≤ the fair-odds bound
+  (0.06%) now. Spec §2.6.
+- (c) `keeperRewardBps` must be > 0 and `rakeBps` must be > 0 (constructor
+  reverts — review LOW-2, bounties are bps of the rake); `keeperRevealBps` /
+  `keeperLockBps` pay the revealer / locker from the rake at `settleRound`, all
+  via `_asyncTransfer` pull-payments.
+- `scripts/deploy-casino.ts` carries the spec's §6 PROPOSED values only
+  (loudly marked "PROPOSED — not ratified; do not deploy") and REVERTS unless
+  the owner supplies `CASINO_MAX_MULTIPLIER_BPS`. Sections below that describe
+  `presetCashOut` or a zero keeper reward predate this branch.
+
 ---
 
 ## 1. The one-paragraph version
@@ -170,7 +222,7 @@ carry a reward, so the loop does not depend on any single operator:
 | `lockRound` | anyone | — (cheap, and gates everything downstream) |
 | relay drand round to the beacon | anyone (`scripts/relay-drand.ts` exists) | — (shared across all consumers) |
 | `revealEntropy` | anyone | — |
-| `settleRound` | anyone | `keeperRewardBps` of the rake |
+| `settleRound` | anyone | `keeperRewardBps` of the rake (must be > 0 since hardening (c)); `lockRound`/`revealEntropy` callers get `keeperLockBps`/`keeperRevealBps` of the same rake at settlement |
 | `registerResult` / `claim` | **anyone, on any player's behalf** | — |
 | `sweepBustedRound` | anyone | — |
 | `executeBurn` | anyone | share of ETH spent |

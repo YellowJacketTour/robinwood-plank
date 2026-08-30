@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { HARDENING_TEST_DEFAULTS, hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * THE VAULT -- a perpetual, always-positive prize reserve that seeds every
@@ -36,7 +37,7 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.001"),
       maxStakePerWalletBps: 8000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 4n, // release 25% of the Vault per game
       reserveShareBps: 4000n, // compound 40% of the rake back in
@@ -45,25 +46,26 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED), // Phase 3 hardening fields (test defaults)
       ...over,
     };
     const crash: any = await (await ethers.getContractFactory("PlankCrashDrand")).deploy(cfg);
     return { crash, beacon, deployer, treasury, alice, bob };
   }
 
-  // Drive one full round to settlement. Alice presets an early cash-out (so
+  // Drive one full round to settlement. Alice commits an early auto cash-out (so
   // she WINS whenever the crash point is reached), Bob rides to the crash.
   // Returns the settled roundId.
   async function playRound(crash: any, beacon: any, alice: any, bob: any, seed: string) {
     const rid = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    // Hardening (a): Alice's auto target (the earliest possible cash-out,
+    // 1.0001x -> 1 block) is committed WITH her bet -- presetCashOut is
+    // gone -- so she wins whenever the crash point is >= 1 block.
+    await crash.connect(alice).placeBet(10001n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(BETTING + 1);
     await crash.lockRound();
     const r = await crash.rounds(rid);
-    // Alice presets the earliest possible cash-out BEFORE the drand round is
-    // due (valid window), so she wins whenever the crash point is >= 1 block.
-    await crash.connect(alice).presetCashOut(rid, 10001);
     const dueAt = DRAND_GENESIS + BigInt(r.targetDrandRound) * DRAND_PERIOD;
     await networkHelpers.time.increaseTo(dueAt);
     await beacon.setRandomness(r.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes(seed)));
@@ -145,13 +147,15 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
   });
 
   it("fundVault grows the reserve and nextSeed() is exactly floor(reserve * num/den)", async () => {
-    const { crash, alice } = await deploy({ seedNumerator: 1n, seedDenominator: 4n });
+    // num/den 1/20 == the PROPOSED seedMaxBps (500), so the formula under
+    // test is the binding one (a looser num/den would be capped to 5%).
+    const { crash, alice } = await deploy({ seedNumerator: 1n, seedDenominator: 20n });
     await crash.connect(alice).fundVault({ value: 1000n });
     expect(await crash.reserve()).to.equal(1000n);
-    expect(await crash.nextSeed()).to.equal(250n); // 1000 * 1/4
+    expect(await crash.nextSeed()).to.equal(50n); // 1000 * 1/20
     await crash.connect(alice).fundVault({ value: 234n });
     expect(await crash.reserve()).to.equal(1234n);
-    expect(await crash.nextSeed()).to.equal(308n); // floor(1234/4)
+    expect(await crash.nextSeed()).to.equal(61n); // floor(1234/20)
     await expect(crash.connect(alice).fundVault({ value: 0n })).to.be.revertedWithCustomError(crash, "NothingToFund");
   });
 
@@ -198,7 +202,12 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
     const { rid } = await playRound(crash, beacon, alice, bob, "grow");
     const settled = await crash.rounds(rid);
     const rake = settled.pool - settled.distributable;
-    const expectedCarve = (rake * 5000n) / 10000n;
+    // NET rake: hardening (c) requires keeperRewardBps > 0, so this fixture
+    // pays 1 bps of the rake to the settler, plus the PROPOSED 1% lock and
+    // 1% reveal bounties, before the carve.
+    const netRake =
+      rake - (rake * 1n) / 10000n - (rake * HARDENING_TEST_DEFAULTS.keeperLockBps) / 10000n - (rake * HARDENING_TEST_DEFAULTS.keeperRevealBps) / 10000n;
+    const expectedCarve = (netRake * 5000n) / 10000n;
 
     // reserve moved by: + seed returned/kept mechanics are internal, but the
     // carve specifically is observable via the VaultGrew event.
@@ -252,9 +261,13 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
     // At/below the floor, it seeds nothing.
     await crash.connect(alice).fundVault({ value: floor });
     expect(await crash.nextSeed()).to.equal(0n);
-    // Above the floor, the draw is clamped so the remainder never dips below it.
-    await crash.connect(alice).fundVault({ value: floor }); // reserve = 2*floor
-    // floor(2F * 1/2) = F, and 2F - F = F == floor, allowed.
-    expect(await crash.nextSeed()).to.equal(floor);
+    // Just above the floor, the draw is clamped so the remainder never dips
+    // below it: reserve = 1.01F, the 5% (PROPOSED seedMaxBps) draw would be
+    // 0.0505F > the 0.01F headroom, so exactly the headroom is drawn.
+    await crash.connect(alice).fundVault({ value: floor / 100n }); // reserve = 1.01F
+    expect(await crash.nextSeed()).to.equal(floor / 100n);
+    // Well above the floor the cap, not the floor, binds: 5% of 2F.
+    await crash.connect(alice).fundVault({ value: floor - floor / 100n }); // reserve = 2F
+    expect(await crash.nextSeed()).to.equal((2n * floor * HARDENING_TEST_DEFAULTS.seedMaxBps) / 10000n);
   });
 });

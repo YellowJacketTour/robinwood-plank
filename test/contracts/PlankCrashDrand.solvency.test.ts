@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * The single most important "no public risk" property, proven by brute
@@ -63,6 +64,7 @@ describe("PlankCrashDrand — conservation of ETH (no public fund risk)", () => 
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED_BLOCKS), // Phase 3 hardening fields (test defaults)
     });
     const crashAddr = await crash.getAddress();
     // PullPayment's constructor does `new Escrow()` -- the contract's first
@@ -128,7 +130,7 @@ describe("PlankCrashDrand — conservation of ETH (no public fund risk)", () => 
           // placeBet -- the only inbound ETH path
           const p = pick(players);
           const amt = ethers.parseEther(pick(["0.001", "0.005", "0.01", "0.02"]));
-          await crash.connect(p).placeBet({ value: amt });
+          await crash.connect(p).placeBet(0n, { value: amt });
           totalDeposited += amt;
         } else if (op === 3) {
           await crash.lockRound();
@@ -189,13 +191,13 @@ describe("PlankCrashDrand — conservation of ETH (no public fund risk)", () => 
   it("conserves ETH across 200 random ops (seed 1, rake 4.5%, keeper 10%)", async () => {
     await runFuzz(1, 450n, 1000n, 200);
   });
-  it("conserves ETH across 200 random ops (seed 7, rake 0%, keeper 0%)", async () => {
-    await runFuzz(7, 0n, 0n, 200);
+  it("conserves ETH across 200 random ops (seed 7, rake 1bps, keeper 1bps -- rake 0 and keeper 0 are both rejected, LOW-2)", async () => {
+    await runFuzz(7, 1n, 1n, 200);
   });
   it("conserves ETH across 200 random ops (seed 12345, rake 10%, keeper 50%)", async () => {
     await runFuzz(12345, 1000n, 5000n, 200);
   });
-  it("conserves ETH across 200 random ops (seed 98765, rake 2.5%, keeper 100%)", async () => {
-    await runFuzz(98765, 250n, 10000n, 200);
+  it("conserves ETH across 200 random ops (seed 98765, rake 2.5%, keeper 98% -- the whole rake budget with the 1%+1% lock/reveal bounties)", async () => {
+    await runFuzz(98765, 250n, 9800n, 200);
   });
 });
