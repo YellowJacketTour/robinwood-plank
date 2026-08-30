@@ -111,10 +111,21 @@ export function injectSimulationState(current: SimulationState, patch: unknown):
 
 export function simulationCrashBps(revealHex: string): bigint {
   if (!/^[0-9a-f]{64}$/.test(revealHex)) throw new RangeError("invalid reveal");
-  const sample = BigInt(`0x${revealHex.slice(0, 16)}`);
-  // Laboratory coverage distribution only: 1.00x..100.00x. Production uses
-  // the ratified committed randomness mapping, never this helper.
-  return 10_000n + sample % 990_001n;
+  let digest = revealHex;
+  const space = 1n << 256n;
+  const limit = space - (space % 10_000n);
+  let sample = BigInt(`0x${digest}`);
+  // Rejection sampling removes even the vanishing 2^256 modulo bias. Rehashing
+  // is deterministic and domain-local; it cannot be selected after commit.
+  while (sample >= limit) {
+    digest = createHash("sha256").update(digest, "hex").digest("hex");
+    sample = BigInt(`0x${digest}`);
+  }
+  const bucket = sample % 10_000n;
+  // Same inverse-survival species as the ratified crash contracts:
+  // P(crash >= x) ~= 1/x, discretized to bps, with a genuine 10,000x tail.
+  // Rake remains an explicit pool allocation rather than hidden RNG edge.
+  return bucket === 0n ? 10_000n : 100_000_000n / (10_000n - bucket);
 }
 
 export function crashDurationMs(crashBps: bigint): number {

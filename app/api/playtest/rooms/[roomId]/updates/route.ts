@@ -1,5 +1,6 @@
 import { currentPlaytestIdentity } from "@/lib/playtest-auth";
-import { playtestRoomSnapshot, playtestRoomVersion, PlaytestRoomError } from "@/lib/playtest-rooms";
+import { randomUUID } from "node:crypto";
+import { playtestRoomPollState, playtestRoomSnapshot, PlaytestRoomError, tickPlaytestRound } from "@/lib/playtest-rooms";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +32,23 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     const after = url.searchParams.get("after") || "-1";
     if (!/^-?\d{1,20}$/.test(after)) return publicJson({ error: "BAD_VERSION", message: "Invalid room version." }, 400);
     const deadline = Date.now() + 20_000;
-    let version = await playtestRoomVersion(identity, roomId);
-    while (!req.signal.aborted && version === after && Date.now() < deadline) {
+    let state = await playtestRoomPollState(identity, roomId);
+    while (!req.signal.aborted && state.version === after && Date.now() < deadline) {
+      if (state.due) {
+        // The long-poll worker is the blind keeper: clients receive neither
+        // crashAt nor a "due" bit. Concurrent workers safely converge through
+        // the room row lock and idempotent settlement transaction.
+        try { await tickPlaytestRound(identity, roomId, randomUUID()); } catch (error) {
+          if (!(error instanceof PlaytestRoomError) || !["ROUND_ACTIVE", "NOT_RUNNING"].includes(error.code)) throw error;
+        }
+        state = await playtestRoomPollState(identity, roomId);
+        if (state.version !== after) break;
+      }
       await pause(250, req.signal);
-      if (!req.signal.aborted) version = await playtestRoomVersion(identity, roomId);
+      if (!req.signal.aborted) state = await playtestRoomPollState(identity, roomId);
     }
     if (req.signal.aborted) return new Response(null, { status: 204 });
-    if (version === after) return publicJson({ unchanged: true, version, serverNow: new Date().toISOString() });
+    if (state.version === after) return publicJson({ unchanged: true, version: state.version, serverNow: new Date().toISOString() });
     return publicJson({ unchanged: false, snapshot: await playtestRoomSnapshot(identity, roomId) });
   } catch (error) {
     return error instanceof PlaytestRoomError
