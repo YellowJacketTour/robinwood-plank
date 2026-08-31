@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-08-31T20:04:14.555Z",
+  "network": "robinhood-testnet",
+  "chainId": 46630,
+  "crash": "0xa7d1278De93d0849499F15aa21574371F1C782d9",
+  "bank": "0xA88d841A5432b8FD71edd1d232f53c00bd6FbE1B",
+  "fuelBooster": "0x29A258cb3D2952d1efc1Ca50e7EB2b5849Fca1Ab",
+  "progression": "0x6f50A24bAbEaE2e05363EE7A1772Ee2823D7E2F7",
+  "powerboard": "0xbd9c12cA128188189092BADfC6385DFB38e1bE4c",
+  "beacon": "0x72976A8CbC792004DBB3E2c9957C72c0B579F40A",
+  "deployer": "0x1586Def0c9d1bB4Ca93179626A2ba85C6E9ae2aE",
+  "randomness": "permissionless-test-mock",
+  "value": "testnet-only-no-represented-value"
+}

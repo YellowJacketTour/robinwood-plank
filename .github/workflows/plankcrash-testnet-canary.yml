@@ -1,0 +1,60 @@
+name: PlankCrash signed testnet canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_testnet_only:
+        description: "Type ROBINHOOD-TESTNET-CANARY"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plankcrash-testnet-canary
+  cancel-in-progress: false
+
+jobs:
+  signed-canary:
+    if: ${{ inputs.confirm_testnet_only == 'ROBINHOOD-TESTNET-CANARY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOYER_PK: ${{ secrets.DEPLOYER_PK_TESTNET }}
+      ROBINHOOD_TESTNET_RPC_URL: ${{ vars.ROBINHOOD_TESTNET_RPC_URL }}
+      ROBINHOOD_TESTNET_CHAIN_ID: ${{ vars.ROBINHOOD_TESTNET_CHAIN_ID }}
+      PLANKCRASH_TESTNET_MANIFEST: config/plankcrash-testnet-canary.json
+      PLANKCRASH_CANARY_EVIDENCE: artifacts/plankcrash-testnet-canary/evidence.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install --global npm@11.6.2
+      - name: Refuse unsafe or incomplete configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${ROBINHOOD_TESTNET_CHAIN_ID}" = "46630"
+          test -n "${ROBINHOOD_TESTNET_RPC_URL}"
+          test -n "${DEPLOYER_PK}"
+          test "${ROBINHOOD_TESTNET_RPC_URL}" != "https://rpc.mainnet.chain.robinhood.com"
+      - run: npm ci
+      - run: npx hardhat compile
+      - run: npx tsx --test test/market/plankcrash-canary-evidence.test.ts
+      - name: Run non-invasive signed canary and collect receipt gas
+        run: npx hardhat run scripts/plankcrash-testnet-canary.ts --network robinhood-testnet
+      - name: Assert evidence contains no private-key-shaped field
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Eiq 'private.?key|simulateKey|DEPLOYER_PK' artifacts/plankcrash-testnet-canary/evidence.json
+      - name: Upload signed non-secret evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: plankcrash-signed-canary-${{ github.run_id }}
+          path: artifacts/plankcrash-testnet-canary/evidence.json
+          if-no-files-found: error
+          retention-days: 90

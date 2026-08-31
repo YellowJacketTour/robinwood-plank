@@ -55,6 +55,17 @@ jobs:
           set -euo pipefail
           npx hardhat run scripts/testnet-casino-setup.ts --network robinhood-testnet 2>&1 | tee plankcrash-testnet-deploy.log
 
+      - name: Exercise fresh-stack lifecycle and collect signed receipt gas
+        shell: bash
+        env:
+          PLANKCRASH_TESTNET_MANIFEST: public/arcade/deploy-addresses.testnet.json
+          PLANKCRASH_CANARY_EVIDENCE: artifacts/plankcrash-testnet-canary/evidence.json
+          CANARY_EXERCISE_FRESH_ROUND: "1"
+        run: |
+          set -euo pipefail
+          npx hardhat run scripts/plankcrash-testnet-canary.ts --network robinhood-testnet
+          ! grep -Eiq 'private.?key|simulateKey|DEPLOYER_PK' artifacts/plankcrash-testnet-canary/evidence.json
+
       - name: Upload non-secret rehearsal evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,3 +74,12 @@ jobs:
           path: plankcrash-testnet-deploy.log
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Upload signed canary and gas evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plankcrash-testnet-canary-${{ github.run_id }}
+          path: artifacts/plankcrash-testnet-canary/evidence.json
+          if-no-files-found: warn
+          retention-days: 90
