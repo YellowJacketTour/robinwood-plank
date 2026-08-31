@@ -31,3 +31,15 @@ test("settlement acknowledgement survives numeric/string round hydration and can
   assert.match(arcadeSource, /private-reveal-continue[^}]+pointer-events:auto/);
   assert.match(arcadeSource, /continueButton\.onclick = \(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); acknowledgePrivateSettlement\(\); \}/);
 });
+
+test("Powerboard conclusion has an authoritative settlement lane and never renders a blank art shell", () => {
+  assert.match(arcadeSource, /snapshot\.currentSettlement \|\|/);
+  assert.match(arcadeSource, /DRAW RECORD RECOVERING/);
+  assert.match(arcadeSource, /Orange Draw WebGL fallback/);
+  assert.match(arcadeSource, /private-powerball-fallback/);
+});
+
+test("an unsealed next prize cannot be rounded up and presented as funded", () => {
+  assert.match(arcadeSource, /available < required \? Math\.min\(99\.9, pct\) : 100/);
+  assert.match(arcadeSource, /NEXT PRIZE/);
+});

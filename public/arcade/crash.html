@@ -4629,7 +4629,8 @@ function privateLotteryPresentation(snapshot) {
   const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
   const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, snapshot.policy.lotteryFounderFeeBps);
   const pct = required > 0n ? Number(available * 10_000n / required) / 100 : 100;
-  return { label:`FUNDING ${Math.min(100,pct).toFixed(1)}%`, detail:`Next net prize target ${privateCredits(lottery.nextPrizeTarget)} credits; ${privateCredits(available)} of ${privateCredits(required)} gross credits funded. Reset reserve ${privateCredits(lottery.resetReserve)}.` };
+  const visiblePct = available < required ? Math.min(99.9, pct) : 100;
+  return { label:`NEXT PRIZE ${privateCredits(lottery.nextPrizeTarget)} · ${visiblePct.toFixed(1)}%`, detail:`Unsealed next-prize target ${privateCredits(lottery.nextPrizeTarget)} credits; ${privateCredits(available)} of ${privateCredits(required)} gross credits funded. Reset reserve ${privateCredits(lottery.resetReserve)}.` };
 }
 
 function renderPrivateRoster(snapshot) {
@@ -4694,7 +4695,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const money = document.createElement("div"); money.className = "result-delta";
   money.textContent = !seat ? "You watched this round" : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
-  const settlementEvent = [...snapshot.events].reverse().find((event) => event.type === "round.settled");
+  const settlementEvent = snapshot.currentSettlement || [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;
   const draw = settlementEvent?.payload?.powerboardDraw;
   const lotteryEvent = settlementEvent?.payload?.lotteryEvent;
@@ -4713,6 +4714,11 @@ function paintPrivateConclusion(snapshot, me, seat) {
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
+  } else {
+    const prize = BigInt(snapshot.simulation.lottery.netPrize || "0");
+    const target = BigInt(snapshot.simulation.lottery.nextPrizeTarget || "0");
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><div class="private-powerball-fallback" aria-hidden="true"><i></i><b>?</b></div><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>DRAW RECORD RECOVERING</h3><p class="private-powerball-rule">The flight is settled, but this client did not receive its committed numbered draw record. No result is being invented.</p><div class="private-powerball-outcome"><strong>REFRESHING AUTHORITATIVE RESULT</strong><span>${prize > 0n ? `Sealed prize ${privateCredits(prize)} credits` : `Next prize target ${privateCredits(target)} credits · still funding`}</span></div></div>`;
+    powerball.setAttribute("role", "status");
   }
   const world = document.createElement("div"); world.className = "private-result-world";
   const founderTotal = BigInt(snapshot.simulation.totals?.crashFounderRake || "0") + BigInt(snapshot.simulation.totals?.lotteryFounderFees || "0");
@@ -4729,7 +4735,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
   skip.onclick = () => { finishPrivateRevealImmediately(); card.dataset.reveal = "world"; skip.hidden = true; continueButton.focus(); };
   next.append(skip, continueButton);
   card.append(eyebrow, headline, money, balance, powerball, world, note, next);
-  if (draw) mountPrivatePowerOrange(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber);
+  if (draw) {
+    try { mountPrivatePowerOrange(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber); }
+    catch (error) {
+      console.error("[playtest] Orange Draw WebGL fallback", error);
+      powerball.classList.add("webgl-fallback");
+      const fallback = document.createElement("div"); fallback.className = "private-powerball-fallback"; fallback.setAttribute("aria-hidden", "true"); fallback.innerHTML = `<i></i><b>${draw.drawnNumber}</b>`; powerball.prepend(fallback);
+    }
+  }
   if (privateMotionReduced()) {
     card.dataset.reveal = "world";
     skip.hidden = true;
@@ -5040,6 +5053,7 @@ async function startPrivatePlaytest() {
     .private-powerball{position:relative;min-height:360px;margin:18px auto 0;overflow:hidden;border:1px solid rgba(233,180,63,.5);border-radius:12px;background:radial-gradient(circle at 25% 46%,rgba(174,125,255,.23),transparent 34%),linear-gradient(125deg,#0b0710,#1b120a 58%,#0d1f16);text-align:left;transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
     .private-powerball-haze{position:absolute;inset:0;background:radial-gradient(circle at 22% 50%,rgba(238,193,100,.25),transparent 30%),radial-gradient(circle at 70% 30%,rgba(174,125,255,.18),transparent 36%);animation:private-haze 3.2s ease-in-out infinite alternate}
     .private-powerball-canvas{position:absolute;z-index:1;left:0;top:0;width:48%;height:100%;filter:drop-shadow(0 22px 34px rgba(0,0,0,.65));opacity:.2;transform:translateY(6%) scale(.88);transition:opacity .7s,transform 1.1s cubic-bezier(.2,.8,.2,1),filter .7s}
+    .private-powerball-fallback{position:absolute;z-index:1;left:5%;top:14%;width:38%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#ffd76f 0 3%,#ff9b28 18%,#f26a16 58%,#8e2609 100%);box-shadow:inset -22px -28px 45px rgba(70,10,0,.48),inset 12px 10px 20px rgba(255,244,184,.35),0 28px 60px rgba(0,0,0,.6),0 0 44px rgba(255,121,31,.25);animation:private-orange-breathe 2.4s ease-in-out infinite alternate}.private-powerball-fallback:before{content:"";position:absolute;inset:8%;border:2px dotted rgba(255,225,148,.38);border-radius:50%}.private-powerball-fallback i{position:absolute;top:-7%;width:9%;height:20%;border-radius:80% 20% 70% 30%;background:#3f8b43;transform:rotate(32deg)}.private-powerball-fallback b{position:relative;width:38%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 22%,#fff,#fff1c7 55%,#d89a2d);color:#281207;font:900 clamp(28px,4vw,54px) var(--font-mono);box-shadow:0 10px 25px rgba(0,0,0,.48)}.webgl-fallback .private-powerball-canvas{display:none}@keyframes private-orange-breathe{to{transform:translateY(-8px) rotate(4deg) scale(1.025)}}
     .private-powerball-copy{position:relative;z-index:2;width:58%;margin-left:auto;padding:28px 28px 22px}.private-powerball-copy>small{color:#eec164;font:900 9px/1.3 var(--font-mono);letter-spacing:.16em}.private-powerball-copy h3{margin:7px 0;color:#fff2cf;font:400 clamp(22px,3vw,38px)/1 var(--font-display)}.private-powerball-rule{max-width:48ch;color:#c9b58a;font:700 11px/1.45 var(--font-mono)}
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
     .private-powerball-outcome{text-align:center}.private-powerball-outcome strong,.private-powerball-outcome span{display:block}.private-powerball-outcome strong{color:#eec164;font:900 13px/1.3 var(--font-mono)}.private-powerball.hit .private-powerball-outcome strong{color:#34d399}.private-powerball-outcome span{margin-top:5px;color:#c9b58a;font:700 9px var(--font-mono)}.private-powerball-ledger{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}.private-powerball-ledger span{padding:8px;border:1px solid rgba(233,180,63,.2);border-radius:6px;background:rgba(17,10,5,.72);color:#fff2cf;font:900 9px var(--font-mono);text-align:center}.private-powerball-ledger small{display:block;margin-bottom:4px;color:#c9b58a;font-size:7px;letter-spacing:.08em}.private-powerball-lab{margin-top:8px;padding:7px;border:1px solid rgba(255,77,106,.35);color:#ff8da0;font:900 8px var(--font-mono);text-align:center}

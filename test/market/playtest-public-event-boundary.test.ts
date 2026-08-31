@@ -35,3 +35,9 @@ test("bot event cannot broadcast host strategy configuration", () => {
   assert.doesNotMatch(payload, /configuration|bot_profile|profile|target/);
   assert.match(payload, /affected/);
 });
+
+test("the current settled round is not allowed to fall out of the bounded replay window", () => {
+  assert.match(source, /event_type='round\.settled'/);
+  assert.match(source, /round_id=\$2/);
+  assert.match(source, /currentSettlement:/);
+});
