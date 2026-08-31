@@ -35,8 +35,16 @@ test("settlement acknowledgement survives numeric/string round hydration and can
 test("Powerboard conclusion has an authoritative settlement lane and never renders a blank art shell", () => {
   assert.match(arcadeSource, /snapshot\.currentSettlement \|\|/);
   assert.match(arcadeSource, /DRAW RECORD RECOVERING/);
-  assert.match(arcadeSource, /Orange Draw WebGL fallback/);
-  assert.match(arcadeSource, /private-powerball-fallback/);
+  assert.match(arcadeSource, /lottery machine WebGL fallback/);
+  assert.match(arcadeSource, /private-lottery-fallback/);
+});
+
+test("Powerboard uses an air-mix lottery machine and selection tube instead of fruit theater", () => {
+  assert.match(arcadeSource, /function mountPrivateLotteryMachine/);
+  assert.match(arcadeSource, /transparent air chamber/);
+  assert.match(arcadeSource, /selection tube/);
+  assert.match(arcadeSource, /for\(let i=1;i<=16;i\+\+\)/);
+  assert.doesNotMatch(arcadeSource, /THE ORANGE KNOWS THE NUMBER/);
 });
 
 test("an unsealed next prize cannot be rounded up and presented as funded", () => {
