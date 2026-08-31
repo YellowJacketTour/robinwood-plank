@@ -190,7 +190,10 @@ async function main() {
     //    implied. NOT the proposed production values (see deploy-casino.ts).
     keeperRevealBps: 0n,
     keeperLockBps: 0n,
-    seedMaxBps: 5000n,
+    designatedKeeper: "0x0000000000000000000000000000000000000000", // keeper floor OFF (pure bps)
+    keeperFloorWei: 0n,
+    keeperEpochBudgetWei: 0n,
+    seedMaxBps: 500n, // <= SEED_MAX_BPS_CEILING (1000); was 5000 (pre-existing, exceeded ceiling)
     singlePayoutCapBps: 10000n,
     dailyDrawdownBps: 10000n,
     hwmDrawdownBps: 10000n,

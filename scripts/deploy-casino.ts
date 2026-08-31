@@ -98,6 +98,12 @@ async function main() {
   const SINGLE_PAYOUT_CAP_BPS = envBig("CASINO_SINGLE_PAYOUT_CAP_BPS", 200n); // (b) 2% of reserveAtLock house-side per player -- PROPOSED
   const DAILY_DRAWDOWN_BPS = envBig("CASINO_DAILY_DRAWDOWN_BPS", 1500n); // (b) 15%/24h halts subsidy -- PROPOSED
   const HWM_DRAWDOWN_BPS = envBig("CASINO_HWM_DRAWDOWN_BPS", 5000n); // (b) 50% from high-water halts subsidy -- PROPOSED
+  // Keeper liveness gas floor (workstream 1): OFF by default (pure bps = the farm-proof
+  // permissionless / off-chain-reimburse posture). Set CASINO_DESIGNATED_KEEPER to a
+  // real address to enable the designated-keeper floor; floor+budget must then be > 0.
+  const DESIGNATED_KEEPER = (process.env.CASINO_DESIGNATED_KEEPER || "0x0000000000000000000000000000000000000000").trim();
+  const KEEPER_FLOOR_WEI = envBig("CASINO_KEEPER_FLOOR_WEI", 0n); // PROPOSED — from measured testnet gas (B14)
+  const KEEPER_EPOCH_BUDGET_WEI = envBig("CASINO_KEEPER_EPOCH_BUDGET_WEI", 0n); // PROPOSED — per 24h epoch
   // (b) Max multiplier: OWNER MUST SUPPLY (spec §6 -- explicitly "not a
   // Fable proposal"). There is deliberately NO default: the constructor
   // needs 10000 < x <= _multiplierAt(maxElapsedBlocks), and this script
@@ -227,6 +233,10 @@ async function main() {
     // Phase 3 hardening -- PROPOSED — not ratified; do not deploy.
     keeperRevealBps: KEEPER_REVEAL_BPS,
     keeperLockBps: KEEPER_LOCK_BPS,
+    // Keeper liveness floor (workstream 1) — OFF by default; see the env vars above.
+    designatedKeeper: DESIGNATED_KEEPER,
+    keeperFloorWei: KEEPER_FLOOR_WEI,
+    keeperEpochBudgetWei: KEEPER_EPOCH_BUDGET_WEI,
     seedMaxBps: SEED_MAX_BPS,
     singlePayoutCapBps: SINGLE_PAYOUT_CAP_BPS,
     dailyDrawdownBps: DAILY_DRAWDOWN_BPS,
