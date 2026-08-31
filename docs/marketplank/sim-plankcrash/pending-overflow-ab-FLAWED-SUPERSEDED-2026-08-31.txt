@@ -1,0 +1,24 @@
+SUPERSEDED / FLAWED A/B RUN — preserved for provenance (owner requirement)
+==========================================================================
+This is the FIRST pending-overflow A/B run. It is FLAWED and its conclusion was
+INCONCLUSIVE, not wrong-but-usable: the loop funded the Vault to cap once and never
+generated busted rounds, so almost no overflow occurred and the baseline never exhibited
+the halt pathology. It therefore did NOT exercise the coupling it was meant to test.
+
+Flawed output (baseline halt ~0 at ALL sink rates — the tell that no overflow was generated):
+
+  sinkFail  engine      haltFrac   capViolations  maxReserveEth
+     0%    baseline     0.0007             0    1.900
+           variant      0.0007             0    1.900
+    30%    baseline     0.0007             0    1.902
+           variant      0.0007             0    1.900
+   100%    baseline     0.0007   1498.666...     127.236   (only the un-cap showed)
+           variant      0.0007             0    2.000
+
+ROOT CAUSE: no busted rounds (all bettors had a winner), and reserveShareBps 4000 not 5000,
+so reserve rarely exceeded cap -> no stranded overflow -> no inflated drawdown peak -> no halt.
+
+CORRECTED RUN: pending-overflow-ab-results.txt (reserveShareBps 5000 + ~35% busted rounds),
+which reproduces the pathology (baseline halt 0.850 at 30% sink failure) and shows the variant
+eliminates it (halt ~0, reserve capped). See pending-overflow-ab.mjs (current) for the corrected
+harness. This flawed file is retained ONLY as the record of the superseded run.

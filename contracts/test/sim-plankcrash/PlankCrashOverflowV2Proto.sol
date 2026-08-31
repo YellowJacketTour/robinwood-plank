@@ -1,11 +1,33 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST ONLY. NEVER DEPLOY. PROTOTYPE, NOT THE CANONICAL BUILD.
+//
+// PlankCrashOverflowV2Proto — a byte-level copy of contracts/PlankCrashDrand.sol
+// diff-modified to implement the pendingOverflow separation design of
+// docs/marketplank/DESIGN-PLANKCRASH-PENDING-OVERFLOW-SEPARATION-2026-08-31.md
+// (§3.2 skim-in-_creditReserve, §8.4 CEI deliverOverflow, §8.5 bounded gas
+// stipend, §8.6 events, §8.8 removal of every _spillOverflow call site).
+// It exists purely so the design can be validated ON-CHAIN by the stateful
+// differential test test/contracts/SimPlankCrashOverflowV2.test.ts.
+//
+// Delta vs the real contract (nothing else changed):
+//   + uint256 public pendingOverflow; uint256 public constant SINK_GAS_STIPEND
+//   + events OverflowQueued / OverflowDelivered / OverflowDeliveryFailed
+//   ~ _creditReserve(amount, raisesWindowPeak): skims any excess above
+//     reserveCap into pendingOverflow BEFORE touching hwm / window peak
+//   - _spillOverflow() and all five of its call sites REMOVED (fundVault,
+//     _applyProgression premium, settleRound reserveCut, sweepBustedRound,
+//     claim excess) — no game transition calls the sink, ever
+//   + deliverOverflow(): permissionless, nonReentrant, CEI (debit before call,
+//     exact restore on failure), forwards only SINK_GAS_STIPEND
+// ─────────────────────────────────────────────────────────────────────────────
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
-import {IDrandBeacon} from "./IDrandBeacon.sol";
-import {IPlankProgression} from "./IPlankProgression.sol";
+import {IDrandBeacon} from "../../IDrandBeacon.sol";
+import {IPlankProgression} from "../../IPlankProgression.sol";
 
 /// The Powerboard's funding surface -- the Vault cascades its overflow here,
 /// unifying the crash's compounding growth with the daily rolling jackpot.
@@ -72,7 +94,7 @@ interface IPlankJackpotSink {
  *     same way (voidStaleRound() as the fallback, keeperRewardBps as the
  *     incentive once a round DOES settle).
  */
-contract PlankCrashDrand is ReentrancyGuard, PullPayment {
+contract PlankCrashOverflowV2Proto is ReentrancyGuard, PullPayment {
     enum Phase {
         BETTING,
         LIVE,
@@ -300,7 +322,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // winners are paid from the round pool, never from the Vault, and the
     // Vault's ONLY outflow is that fractional seed. See _seedFromReserve().
     uint256 public reserve;
-        // reserve. Skimmed synchronously in _creditReserve the instant reserve
+    // ── V2 PROTO (design §3.1): ETH earmarked for the Powerboard, OUTSIDE
+    // reserve. Skimmed synchronously in _creditReserve the instant reserve
     // would exceed reserveCap; inert to seeding / drawdown / hwm /
     // reserveAtLock; moved ONLY by deliverOverflow(). ──────────────────────
     uint256 public pendingOverflow;
@@ -384,7 +407,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     event VaultFunded(address indexed from, uint256 amount, uint256 reserveAfter);
     event VaultGrew(uint256 indexed roundId, uint256 fromRake, uint256 reserveAfter);
     event VaultOverflow(uint256 spilledToJackpot, uint256 reserveAfter);
-        // remaining, so an indexer can reconstruct the overflow lifecycle. ─────
+    // ── V2 PROTO events (design §8.6): attempted / delivered / restored /
+    // remaining, so an indexer can reconstruct the overflow lifecycle. ─────
     event OverflowQueued(uint256 attempted, uint256 queued, uint256 pendingTotal);
     event OverflowDelivered(uint256 attempted, uint256 delivered, uint256 restored, uint256 remaining);
     event OverflowDeliveryFailed(uint256 attempted, uint256 delivered, uint256 restored, uint256 remaining);
@@ -736,7 +760,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// the money was drawn from).
     function _creditReserve(uint256 amount, bool raisesWindowPeak) private {
         uint256 bal = reserve + amount;
-                // pendingOverflow BEFORE it can touch the window peak / hwm. The
+        // ── V2 PROTO (design §3.2): skim anything above the cap into
+        // pendingOverflow BEFORE it can touch the window peak / hwm. The
         // reserve is capped synchronously; the excess is earmarked lottery
         // money, not house risk capital. Pure state change, no external call.
         uint256 cap = reserveCap;
@@ -781,7 +806,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         emit VaultFunded(msg.sender, msg.value, reserve);
     }
 
-        /// delivery of the earmarked overflow to the Powerboard sink. The ONLY
+    /// ── V2 PROTO (design §8.4/§8.5/§8.7): permissionless, retryable
+    /// delivery of the earmarked overflow to the Powerboard sink. The ONLY
     /// external call in the whole overflow path. CEI: debit before the call,
     /// restore EXACTLY on failure. Bounded gas (SINK_GAS_STIPEND). Success or
     /// failure moves ONLY pendingOverflow — never reserve / peak / hwm.
@@ -1174,7 +1200,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             _asyncTransfer(r.lockedBy, lockReward);
             emit KeeperRewarded(roundId, r.lockedBy, 0, lockReward);
         }
-                // _creditReserve; settleRound makes no sink call (design §8.8).
+        // V2 PROTO: _spillOverflow call site REMOVED — skim happens inside
+        // _creditReserve; settleRound makes no sink call (design §8.8).
 
         emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxMultiplierElapsedBlocks);
         _startRound();
@@ -1237,7 +1264,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         _creditReserve(amount);
         seedBudget += r.rolledOverFromPrevious; // NEW-1: the seed came back unpaid
         emit PoolRolledOver(roundId, amount);
-            }
+        // V2 PROTO: _spillOverflow call site REMOVED (skim in _creditReserve).
+    }
 
     /// Records `player`'s result. Callable BY ANYONE on any player's
     /// behalf -- deliberately, and load-bearing for "runs forever without
@@ -1334,7 +1362,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             _asyncTransfer(player, payout);
         }
         emit Claimed(roundId, player, payout);
-            }
+        // V2 PROTO: _spillOverflow call site REMOVED (skim in _creditReserve).
+    }
 
     /**
      * A winner's payout, as (paid, excess) with paid + excess == the

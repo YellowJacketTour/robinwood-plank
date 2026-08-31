@@ -245,15 +245,24 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       seedBootstrapBudgetWei: ethers.parseEther("0.1"), // NEW-1: <= reserveCap/10 on a capped Vault
     });
 
-    // Fund the Vault above its cap -> it caps, and the overflow lands in the jackpot.
+    // pendingOverflow model: funding above cap caps the reserve SYNCHRONOUSLY and QUEUES the
+    // excess into pendingOverflow (inert to economics) -- it is NOT pushed to the jackpot during
+    // the credit. Delivery is a separate permissionless deliverOverflow() call.
     await crash.connect(alice).fundVault({ value: ethers.parseEther("1.5") });
-    expect(await crash.reserve()).to.equal(ethers.parseEther("1")); // capped
-    expect(await pb.jackpot()).to.equal(ethers.parseEther("0.5")); // overflow cascaded
+    expect(await crash.reserve()).to.equal(ethers.parseEther("1")); // capped synchronously
+    expect(await crash.pendingOverflow()).to.equal(ethers.parseEther("0.5")); // excess queued, not pushed
+    expect(await pb.jackpot()).to.equal(0n); // no game/credit path calls the sink
 
-    // More growth keeps capping and spilling -- the jackpot keeps receiving.
+    // More growth keeps capping and accrues to pendingOverflow.
     await crash.connect(alice).fundVault({ value: ethers.parseEther("0.3") });
     expect(await crash.reserve()).to.equal(ethers.parseEther("1"));
+    expect(await crash.pendingOverflow()).to.equal(ethers.parseEther("0.8"));
+
+    // deliverOverflow() (permissionless) flushes the whole pending amount to the jackpot.
+    await crash.connect(alice).deliverOverflow();
+    expect(await crash.pendingOverflow()).to.equal(0n);
     expect(await pb.jackpot()).to.equal(ethers.parseEther("0.8"));
+    expect(await crash.reserve()).to.equal(ethers.parseEther("1")); // reserve untouched by delivery
   });
 
   it("respects a hard floor: the Vault is never drawn below reserveFloorWei", async () => {
