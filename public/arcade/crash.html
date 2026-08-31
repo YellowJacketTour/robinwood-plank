@@ -1937,6 +1937,12 @@ function frame() {
     const estBps = PLAYTEST_MODE && privateSnapshot?.room.phase === "running"
       ? privateLiveClock.sample(performance.now())
       : multiplierAtBlocksBps(estElapsedBlocks);
+    if (PLAYTEST_MODE && privateSnapshot?.room.phase === "running") {
+      const substatus = $("substatus");
+      if (substatus) substatus.textContent = privateLiveClock.isPredictionHeld(performance.now())
+        ? "SYNC HOLD · WAITING FOR AUTHORITATIVE TABLE CLOCK"
+        : "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
+    }
     const xStr = bpsToXStr(estBps);
     lastMult = Number(xStr);
     setMultReadout(xStr, "live");
@@ -4694,6 +4700,35 @@ function renderPrivateRoster(snapshot) {
   }
 }
 
+async function sharePrivateRoundResult(snapshot, seat, crash, locked, net) {
+  const outcome = !seat
+    ? `I watched PlankCrash round ${snapshot.room.currentRound} settle at ${crash}×.`
+    : !seat.survived
+      ? `I got caught at ${crash}× in PlankCrash round ${snapshot.room.currentRound}.`
+      : `I locked ${locked}× in PlankCrash round ${snapshot.room.currentRound}: ${net >= 0n ? "+" : ""}${privateCredits(net)} test credits net.`;
+  const text = `${outcome} Private alpha · simulation credits · independently verifiable after settlement.`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "PlankCrash round result", text });
+      return true;
+    }
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast("Round result copied · no private table link included", "success");
+      return true;
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") return false;
+  }
+  const fallback = document.createElement("textarea");
+  fallback.value = text; fallback.readOnly = true;
+  fallback.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+  document.body.appendChild(fallback); fallback.select();
+  try { document.execCommand("copy"); toast("Round result copied · no private table link included", "success"); }
+  finally { fallback.remove(); }
+  return true;
+}
+
 function paintPrivateConclusion(snapshot, me, seat) {
   const card = $("resultCard");
   if (snapshot.room.phase !== "settled") {
@@ -4759,11 +4794,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
   note.textContent = `${seat ? `${base !== null ? `Exact settlement: ${base} base return + ${surplus} risk surplus = ${privateCredits(seat.payout)}. ` : ""}${survived && !profitable ? "You beat the crash, but too much stake also survived to cover every stake after the 4.50% routed rake; the bounded pool cannot manufacture the difference. " : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
   const next = document.createElement("div"); next.className = "private-result-next";
   const skip = document.createElement("button"); skip.type = "button"; skip.className = "private-reveal-skip"; skip.textContent = "SKIP REVEAL";
+  const share = document.createElement("button"); share.type = "button"; share.className = "private-reveal-share"; share.textContent = "SHARE RESULT";
+  share.title = "Share the result story without exposing this private table or invitation";
+  share.onclick = (event) => { event.preventDefault(); event.stopPropagation(); void sharePrivateRoundResult(snapshot, seat, crash, locked, net); };
   const continueButton = document.createElement("button"); continueButton.type = "button"; continueButton.className = "private-reveal-continue"; continueButton.textContent = `REVIEW COMPLETE · PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
   continueButton.dataset.privateResultAction = "continue";
   continueButton.onclick = (event) => { event.preventDefault(); event.stopPropagation(); acknowledgePrivateSettlement(); };
   skip.onclick = () => { finishPrivateRevealImmediately(); card.dataset.reveal = "world"; skip.hidden = true; continueButton.focus(); };
-  next.append(skip, continueButton);
+  next.append(skip, share, continueButton);
   card.append(eyebrow, headline, money, balance, powerball, world, note, next);
   if (draw) {
     try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber); }
@@ -5046,6 +5084,16 @@ function startPrivateUpdates() {
         if (response.status === 204 || controller.signal.aborted) return;
         const update = await privateJson(response);
         if (update.snapshot) paintPrivateSnapshot(update.snapshot);
+        else if (update.unchanged && privateSnapshot?.room.phase === "running" && update.serverNow) {
+          privateLiveClock.synchronize({
+            roundKey: `${privateSnapshot.room.id}:${privateSnapshot.room.currentRound}`,
+            version: update.version,
+            phase: privateSnapshot.room.phase,
+            startedAt: privateSnapshot.room.startedAt,
+            crashAt: privateSnapshot.room.crashAt,
+            serverNow: update.serverNow,
+          }, performance.now());
+        }
         privateLastError = "";
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -5087,7 +5135,7 @@ async function startPrivatePlaytest() {
     .private-powerball-copy{position:relative;z-index:2;width:58%;margin-left:auto;padding:28px 28px 22px}.private-powerball-copy>small{color:#eec164;font:900 9px/1.3 var(--font-mono);letter-spacing:.16em}.private-powerball-copy h3{margin:7px 0;color:#fff2cf;font:400 clamp(22px,3vw,38px)/1 var(--font-display)}.private-powerball-rule{max-width:48ch;color:#c9b58a;font:700 11px/1.45 var(--font-mono)}
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
     .private-powerball-outcome{text-align:center}.private-powerball-outcome strong,.private-powerball-outcome span{display:block}.private-powerball-outcome strong{color:#eec164;font:900 13px/1.3 var(--font-mono)}.private-powerball.hit .private-powerball-outcome strong{color:#34d399}.private-powerball-outcome span{margin-top:5px;color:#c9b58a;font:700 9px var(--font-mono)}.private-powerball-ledger{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}.private-powerball-ledger span{padding:8px;border:1px solid rgba(233,180,63,.2);border-radius:6px;background:rgba(17,10,5,.72);color:#fff2cf;font:900 9px var(--font-mono);text-align:center}.private-powerball-ledger small{display:block;margin-bottom:4px;color:#c9b58a;font-size:7px;letter-spacing:.08em}.private-powerball-lab{margin-top:8px;padding:7px;border:1px solid rgba(255,77,106,.35);color:#ff8da0;font:900 8px var(--font-mono);text-align:center}
-    .private-reveal-skip,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:14px;pointer-events:auto}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
+    .private-reveal-skip,.private-reveal-share,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:140px 140px 1fr;gap:10px;margin-top:14px;pointer-events:auto}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-share{border:1px solid rgba(117,240,174,.45);background:#0c1a13;color:#75f0ae}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
     .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="drawn"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.2,.9,.25,1.35)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="powerball"] .private-result-next,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note,.private-result[data-reveal="drawn"] .private-result-next{opacity:0;transform:translateY(8px)}
     @keyframes private-ball-orbit{from{transform:rotate(0deg) translateX(37px) rotate(0deg)}to{transform:rotate(360deg) translateX(37px) rotate(-360deg)}}@keyframes private-haze{from{opacity:.55;transform:scale(1)}to{opacity:1;transform:scale(1.06)}}
     @media(max-width:700px){.private-result{padding:12px;max-height:86vh}.private-powerball{min-height:560px}.private-powerball-canvas{left:0;top:92px;width:100%;height:300px}.private-powerball-copy{width:auto;margin:0;padding:20px 16px}.private-powerball-copy h3{max-width:75%}.private-powerball-rule{max-width:70%}.private-powerball-drum{margin:250px auto 10px}.private-powerball-ledger{grid-template-columns:1fr}.private-result-next{grid-template-columns:1fr}.private-reveal-skip{order:2}}

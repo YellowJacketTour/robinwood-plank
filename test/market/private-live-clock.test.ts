@@ -41,6 +41,7 @@ test("polling does not restart ignition and the crash deadline caps flight", () 
   const originalStart = (clock as unknown as { startedPerfMs: number }).startedPerfMs;
   clock.synchronize(snapshot({ version: "11", serverNow: "2026-08-30T00:00:01.250Z" }), 5_250);
   assert.equal((clock as unknown as { startedPerfMs: number }).startedPerfMs, originalStart);
+  clock.synchronize(snapshot({ version: "12", serverNow: "2026-08-30T00:00:10.000Z" }), 14_000);
   assert.equal(clock.sample(20_000), Math.floor(10_000 * Math.exp(0.22 * 10)));
 });
 
@@ -50,4 +51,22 @@ test("a new round resets the monotonic floor", () => {
   assert.ok(clock.sample(8_000) > 10_000);
   clock.synchronize(snapshot({ roundKey: "room:8", version: "1", serverNow: "2026-08-30T00:00:00.000Z" }), 9_000);
   assert.equal(clock.sample(9_000), 10_000);
+});
+
+test("a stale client holds rather than inventing an unattainable multiplier", () => {
+  const clock = new PrivateLiveClock(LIVE_GROWTH_PER_SECOND, 2_500);
+  clock.synchronize(snapshot({ crashAt: null }), 5_000);
+  const held = clock.sample(7_500);
+  assert.equal(clock.sample(60_000), held);
+  assert.equal(clock.isPredictionHeld(7_500), false);
+  assert.equal(clock.isPredictionHeld(7_501), true);
+});
+
+test("an authoritative heartbeat releases a held clock without rewinding", () => {
+  const clock = new PrivateLiveClock(LIVE_GROWTH_PER_SECOND, 2_500);
+  clock.synchronize(snapshot({ crashAt: null }), 5_000);
+  const held = clock.sample(20_000);
+  clock.synchronize(snapshot({ version: "10", crashAt: null, serverNow: "2026-08-30T00:00:04.000Z" }), 8_000);
+  assert.ok(clock.sample(8_016) >= held);
+  assert.equal(clock.isPredictionHeld(8_016), false);
 });
