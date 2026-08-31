@@ -275,12 +275,6 @@ async function main() {
     burnEngine: await burnEngine.getAddress(),
     progression: progressionAddr,
     deployer: deployer.address,
-    // crash.html's Simulate button uses this for a true one-click "just
-    // play" experience on a hosted deploy (same idea as its hardcoded
-    // local Hardhat account, just sourced from here) -- fine to include
-    // since this manifest is gitignored (see .gitignore) and this is a
-    // throwaway burner funded with worthless testnet ETH, never a real key.
-    simulateKey: process.env.DEPLOYER_PK,
   };
   fs.writeFileSync(
     new URL("../public/arcade/deploy-addresses.testnet.json", import.meta.url),
