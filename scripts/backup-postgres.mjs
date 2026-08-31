@@ -53,6 +53,11 @@ async function main() {
       stdio: ["ignore", "inherit", "inherit"],
       windowsHide: true,
     });
+    const heartbeat = setInterval(() => {
+      console.error("[postgres-backup] pg_dump is still running");
+    }, 30_000);
+    heartbeat.unref();
+    child.once("close", () => clearInterval(heartbeat));
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (code === 0) resolve();
