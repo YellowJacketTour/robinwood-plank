@@ -26,7 +26,7 @@ test("running launch event cannot disclose outcome or deadline", () => {
 
 test("bet event cannot disclose an unexecuted auto-lock target", () => {
   const payload = payloadFor("bet.accepted");
-  assert.doesNotMatch(payload, /targetBps|requestedTarget/);
+  assert.doesNotMatch(payload, /targetBps|requestedTarget|autoLockEnabled/);
   assert.match(payload, /stake/);
 });
 

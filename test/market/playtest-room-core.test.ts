@@ -3,10 +3,16 @@ import test from "node:test";
 import { initialSimulationState } from "../../lib/casino/simulation";
 import {
   bettingRoundId,
-  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt,
+  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt,
   parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
   simulationCrashBps, powerboardRoundDraw, powerboardVoucherQuote,
 } from "../../lib/playtest-room-core";
+
+test("an unexecuted manual target can never become a retroactive winning lock", () => {
+  assert.equal(effectiveSettlementTarget(38_000n, 20_000n, null, false), 38_001n);
+  assert.equal(effectiveSettlementTarget(38_000n, 20_000n, null, true), 20_000n);
+  assert.equal(effectiveSettlementTarget(38_000n, 20_000n, 17_250n, false), 17_250n);
+});
 
 test("a multiplayer lobby advances once and keeps every commitment in one round", () => {
   assert.equal(bettingRoundId("lobby", 0n), 1n, "the first-ever lobby opens round one");

@@ -182,6 +182,21 @@ export function multiplierAt(startedAtMs: number, nowMs: number): bigint {
   return BigInt(Math.floor(10_000 * Math.exp(LIVE_GROWTH_PER_SECOND * elapsedSeconds)));
 }
 
+/** Settlement target authority:
+ * - an accepted live lock always wins precedence;
+ * - an explicitly armed auto-lock may execute its precommitted target;
+ * - a merely visible/manual target is not an action and must crash out. */
+export function effectiveSettlementTarget(
+  crashBps: bigint,
+  requestedTargetBps: bigint,
+  acceptedTargetBps: bigint | null,
+  autoLockEnabled: boolean,
+): bigint {
+  if (acceptedTargetBps !== null) return acceptedTargetBps;
+  if (autoLockEnabled) return requestedTargetBps;
+  return crashBps + 1n;
+}
+
 export function serializeBigInts(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (_key, child) => typeof child === "bigint" ? child.toString() : child));
 }
