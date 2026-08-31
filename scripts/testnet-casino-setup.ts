@@ -88,23 +88,29 @@ async function main() {
   const feeData = await ethers.provider.getFeeData();
   const baseFee = feeData.gasPrice ?? ethers.parseUnits("0.01", "gwei");
   const FEES = { maxFeePerGas: baseFee * 5n, maxPriorityFeePerGas: 0n };
+  // Robinhood Testnet's eth_estimateGas can return a deployment limit with
+  // effectively no execution margin. PlankV2TwapOracle consumed that exact
+  // estimate (696,696 gas) and reverted out-of-gas even though its constructor
+  // inputs were valid. Use an explicit deployment-only ceiling; unused gas is
+  // not charged, and ordinary configuration calls continue to be estimated.
+  const DEPLOY_FEES = { ...FEES, gasLimit: 12_000_000n };
   console.log("Using fee override:", ethers.formatUnits(FEES.maxFeePerGas, "gwei"), "gwei (real base fee:", ethers.formatUnits(baseFee, "gwei"), "gwei)");
 
   // ── Independent pieces first ────────────────────────────────────────
   const beacon = await (
     await ethers.getContractFactory("DrandBeaconMock")
-  ).deploy(DRAND_PERIOD, DRAND_GENESIS, FEES);
+  ).deploy(DRAND_PERIOD, DRAND_GENESIS, DEPLOY_FEES);
   await beacon.waitForDeployment();
 
-  const plank = await (await ethers.getContractFactory("MockERC20Burnable")).deploy(FEES);
+  const plank = await (await ethers.getContractFactory("MockERC20Burnable")).deploy(DEPLOY_FEES);
   await plank.waitForDeployment();
 
-  const weth = await (await ethers.getContractFactory("MockERC20Burnable")).deploy(FEES);
+  const weth = await (await ethers.getContractFactory("MockERC20Burnable")).deploy(DEPLOY_FEES);
   await weth.waitForDeployment();
 
   const pair = await (
     await ethers.getContractFactory("MockV2Pair")
-  ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("10"), ethers.parseEther("10000"), FEES);
+  ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("10"), ethers.parseEther("10000"), DEPLOY_FEES);
   await pair.waitForDeployment();
   const TWAP_WINDOW = 60n;
   const TWAP_MAX_STALE = 300n;
@@ -114,12 +120,12 @@ async function main() {
   const TWAP_MIN_RESERVE_WEI = ethers.parseEther("1");
   const oracle = await (
     await ethers.getContractFactory("PlankV2TwapOracle")
-  ).deploy(await pair.getAddress(), TWAP_WINDOW, TWAP_MAX_STALE, TWAP_MIN_RESERVE_WEI, FEES);
+  ).deploy(await pair.getAddress(), TWAP_WINDOW, TWAP_MAX_STALE, TWAP_MIN_RESERVE_WEI, DEPLOY_FEES);
   await oracle.waitForDeployment();
 
   const router = await (
     await ethers.getContractFactory("MockV2Router")
-  ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI, FEES);
+  ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI, DEPLOY_FEES);
   await router.waitForDeployment();
 
   const BURN_MAX_SLIPPAGE_BPS = 500n;
@@ -133,7 +139,7 @@ async function main() {
     MAX_ETH_PER_BURN,
     BURN_KEEPER_REWARD_BPS,
     BURN_MAX_SLIPPAGE_BPS,
-    FEES
+    DEPLOY_FEES
   );
   await burnEngine.waitForDeployment();
 
@@ -155,12 +161,12 @@ async function main() {
     jackpotBall: JACKPOT_BALL,
     consolationBps: CONSOLATION_BPS,
     mustHitByEpochs: MUST_HIT_EPOCHS,
-  }, FEES);
+  }, DEPLOY_FEES);
   await airdropPool.waitForDeployment();
 
   const distributor = await (
     await ethers.getContractFactory("PlankRakeDistributor")
-  ).deploy(await burnEngine.getAddress(), await airdropPool.getAddress(), treasury.address, BURN_BPS, AIRDROP_BPS, FEES);
+  ).deploy(await burnEngine.getAddress(), await airdropPool.getAddress(), treasury.address, BURN_BPS, AIRDROP_BPS, DEPLOY_FEES);
   await distributor.waitForDeployment();
 
   // SEEDLESS=1 deploys the TEST-ONLY PlankCrashDrandTestbed (seedingEnabled=false) — the private
@@ -208,7 +214,7 @@ async function main() {
     // Re-review NEW-1: seed-income budget bootstrap. LOCAL/TEST: reserveCap/10
     // (the constructor's own bound); production value is PROPOSED in deploy-casino.ts.
     seedBootstrapBudgetWei: SEEDLESS ? 0n : RESERVE_CAP / 10n, // testbed enforces zero-bootstrap when seedless
-  }, FEES);
+  }, DEPLOY_FEES);
   await crash.waitForDeployment();
 
   const crashAddr = await crash.getAddress();
@@ -219,14 +225,14 @@ async function main() {
     );
   }
 
-  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr], FEES);
+  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr], DEPLOY_FEES);
   await bank.waitForDeployment();
 
   const FUEL_MAX_PER_BURN = ethers.parseEther("0.01");
   const FUEL_MAX_PER_ROUND = ethers.parseEther("0.04");
   const fuelBooster = await (
     await ethers.getContractFactory("PlankFuelBooster")
-  ).deploy(await plank.getAddress(), await oracle.getAddress(), crashAddr, FUEL_MAX_PER_BURN, FUEL_MAX_PER_ROUND, FEES);
+  ).deploy(await plank.getAddress(), await oracle.getAddress(), crashAddr, FUEL_MAX_PER_BURN, FUEL_MAX_PER_ROUND, DEPLOY_FEES);
   await fuelBooster.waitForDeployment();
   // Small seed -- real testnet ETH is faucet-limited, keep this modest.
   await (await fuelBooster.fund({ value: ethers.parseEther("0.005"), ...FEES })).wait();
@@ -238,7 +244,7 @@ async function main() {
 
   const progression = await (
     await ethers.getContractFactory("PlankProgression")
-  ).deploy(crashAddr, await fuelBooster.getAddress(), await airdropPool.getAddress(), FEES);
+  ).deploy(crashAddr, await fuelBooster.getAddress(), await airdropPool.getAddress(), DEPLOY_FEES);
   await progression.waitForDeployment();
   const progressionAddr = await progression.getAddress();
   await (await crash.setProgression(progressionAddr, FEES)).wait();
