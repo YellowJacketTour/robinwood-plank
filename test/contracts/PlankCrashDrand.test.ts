@@ -240,7 +240,7 @@ describe("PlankCrashDrand", () => {
     }
   });
 
-  it("cashOut() is gated against the true crash point once drand has revealed it, same load-bearing property as PlankCrashV2", async () => {
+  it("SECURITY: cashOut() stays closed after drand reveal, so known future crash timing cannot be exploited", async () => {
     const { crash, beacon, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
@@ -255,7 +255,20 @@ describe("PlankCrashDrand", () => {
     const targetBlock = Number(round.lockBlock) + Number(effective);
     if (targetBlock - current > 0) await networkHelpers.mine(targetBlock - current);
 
-    await expect(crash.connect(alice).cashOut(roundId)).to.be.revertedWithCustomError(crash, "PastCrashPoint");
+    await expect(crash.connect(alice).cashOut(roundId)).to.be.revertedWithCustomError(crash, "AwaitingEntropyReveal");
+  });
+
+  it("SECURITY: revealing before the derived crash does not reopen discretionary cashOut", async () => {
+    const { crash, beacon, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    await waitForDueAndReveal(crash, beacon, roundId, "deliberately-long-tail-seed");
+    const round = await crash.rounds(roundId);
+    expect(round.entropyRevealed).to.equal(true);
+    await expect(crash.connect(alice).cashOut(roundId)).to.be.revertedWithCustomError(crash, "AwaitingEntropyReveal");
   });
 
   it("SECURITY REGRESSION: presetCashOut reverts once the target drand round is due, even if revealEntropy() has NOT been called on-chain yet -- closes the same class of exploit fixed in PlankCrashV2", async () => {

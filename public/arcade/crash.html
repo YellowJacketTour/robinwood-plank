@@ -830,10 +830,19 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { PrivateLiveClock } from "./private-live-clock.js";
 import { verifyPrivateRound } from "./private-fairness.js";
+import { persistFairnessEntry, readFairnessLedger } from "./fairness-ledger.js";
+import { ACTION_STAGES, actionStatusText, advanceActionState } from "./transaction-lifecycle.js";
 
 const { ethers } = window;
 const $ = (id) => document.getElementById(id);
 const PLAYTEST_MODE = new URLSearchParams(window.location.search).get("playtest") === "1";
+let chainActionState = null;
+
+function setChainAction(stage, details = {}) {
+  chainActionState = advanceActionState(chainActionState, stage, details);
+  const substatus = $("substatus");
+  if (substatus) substatus.textContent = actionStatusText(chainActionState);
+}
 
 // ── Deploy-address auto-sync ─────────────────────────────────────────────
 // Real bug this closes: every hardcoded address below (BANK_ADDR,
@@ -3352,8 +3361,10 @@ async function refreshProgressionUI() {
     if (lastKnownRank !== null && rankNum > lastKnownRank) {
       const chip = $("rankStat");
       if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
-      toast("Ranked up to " + rankName + "! Bigger bets unlocked.", "win");
-      if (typeof celebrate === "function") celebrate(4);
+      // Rank is disclosed as account state, never celebrated as a reason to
+      // increase stake. Responsible-game standards specifically prohibit
+      // product messaging that urges customers to raise what they wager.
+      toast("Account rank updated to " + rankName + ". Review your limits before playing.", "success");
     }
     lastKnownRank = rankNum;
 
@@ -3434,6 +3445,25 @@ async function refreshVerifyPopover() {
     try {
       const proof = await verifyPrivateRound(round);
       const status = proof.verified ? "VERIFIED" : "MISMATCH";
+      let ledgerHtml = "";
+      if (proof.verified) {
+        try {
+          const ledger = persistFairnessEntry(window.localStorage, {
+            roomId: round.id,
+            round: String(round.currentRound),
+            commitment: round.commitment,
+            reveal: round.reveal,
+            crashBps: String(round.crashBps),
+          });
+          ledgerHtml = `<div class="vf-row"><span class="vf-k">Local proof ledger</span><span class="vf-v">${ledger.length} settled round${ledger.length === 1 ? "" : "s"} retained</span></div>`;
+        } catch (ledgerError) {
+          const equivocation = String(ledgerError?.message || "").startsWith("FAIRNESS_EQUIVOCATION:");
+          ledgerHtml = `<div class="vf-row"><span class="vf-k">Local proof ledger</span><span class="vf-v pending">${equivocation ? "CONFLICT DETECTED" : "storage unavailable"}</span></div>`;
+        }
+      } else {
+        const retained = readFairnessLedger(window.localStorage).length;
+        ledgerHtml = `<div class="vf-row"><span class="vf-k">Local proof ledger</span><span class="vf-v pending">mismatch not recorded · ${retained} retained</span></div>`;
+      }
       body.innerHTML =
         `<div class="vf-row"><span class="vf-k">Proof status</span><span class="vf-v ${proof.verified ? "" : "pending"}">${status}</span></div>` +
         `<div class="vf-row"><span class="vf-k">Commitment</span><span class="vf-v">${short(round.commitment)}</span></div>` +
@@ -3441,6 +3471,7 @@ async function refreshVerifyPopover() {
         `<div class="vf-row"><span class="vf-k">Commitment hash</span><span class="vf-v">${proof.commitmentMatches ? "matches" : "DOES NOT MATCH"}</span></div>` +
         `<div class="vf-row"><span class="vf-k">Derived crash point</span><span class="vf-v">${proof.derivedCrashBps === null ? "invalid" : `${(Number(proof.derivedCrashBps) / 10000).toFixed(2)}x`}</span></div>` +
         `<div class="vf-row"><span class="vf-k">Displayed result</span><span class="vf-v">${proof.crashMatches ? "matches" : "DOES NOT MATCH"}</span></div>` +
+        ledgerHtml +
         '<div class="vf-note">This proof runs locally with Web Crypto. It does not ask the game server whether its own result is valid.</div>';
     } catch (_) {
       body.innerHTML = '<div class="vf-row"><span class="vf-k">Proof status</span><span class="vf-v pending">verification failed</span></div>';
@@ -3555,17 +3586,23 @@ async function doPlaceBet(viaButton) {
     });
   }
   try {
+    setChainAction(ACTION_STAGES.INTENT, { action: "bet" });
+    setChainAction(ACTION_STAGES.SIGNING);
     // Bank mode: the browser session key bets from the pre-funded buffer --
     // no wallet popup. Otherwise the classic per-bet path.
     const tx = bankMode && sessionBank
       ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount))
       : await crash.placeBet({ value: ethers.parseEther(betAmount) });
-    await tx.wait();
+    setChainAction(ACTION_STAGES.SUBMITTED, { hash: tx.hash });
+    const receipt = await tx.wait();
+    setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });
+    setChainAction(ACTION_STAGES.ACCEPTED);
     sfx.betPlaced(); haptic(30);
     toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH" + (bankMode ? " (instant, from buffer)" : ""), "success");
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
+    try { setChainAction(ACTION_STAGES.REJECTED, { message: friendlyRevertReason(err) }); } catch (_) { /* UI state must not mask the original error */ }
     sfx.error();
     toast("Bet failed: " + friendlyRevertReason(err), "error");
     return false;
@@ -3620,17 +3657,23 @@ async function doCashOut(viaButton) {
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "CASHING OUT…"; }
   if (PLAYTEST_MODE) return privatePlaytestCommand("lock");
   try {
+    setChainAction(ACTION_STAGES.INTENT, { action: "lock" });
     const roundId = await crash.currentRoundId();
     const liveBps = await crash.liveMultiplierBps(roundId);
+    setChainAction(ACTION_STAGES.SIGNING);
     const tx = bankMode && sessionBank
       ? await sessionBank.cashOutVia(crash.target, roundId)
       : await crash.cashOut(roundId);
-    await tx.wait();
+    setChainAction(ACTION_STAGES.SUBMITTED, { hash: tx.hash });
+    const receipt = await tx.wait();
+    setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });
+    setChainAction(ACTION_STAGES.ACCEPTED);
     sfx.cashOut(); haptic([20, 30, 20]);
     toast("Cashed out at " + bpsToXStr(liveBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""), "success");
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
+    try { setChainAction(ACTION_STAGES.REJECTED, { message: friendlyRevertReason(err) }); } catch (_) { /* preserve original error */ }
     // A real, meaningful outcome under V2's reveal/settle split, not a
     // generic failure: the round's true crash point was already revealed
     // and real elapsed blocks caught up to it between the decision and the
@@ -3993,8 +4036,13 @@ async function refresh() {
           // at the settle moment, not per poll.
           const claims = await crash.queryFilter(crash.filters.Claimed(roundId, signer.address));
           const payout = claims[0]?.args.payout ?? 0n;
-          showResultCard("win", cashOutMultX, `+${ethers.formatEther(payout)} ETH`, "CASHED OUT");
-          celebrate(cashOutMultX);
+          const net = payout - stake;
+          const profitable = net > 0n;
+          const delta = `${net >= 0n ? "+" : "-"}${ethers.formatEther(net >= 0n ? net : -net)} ETH net`;
+          showResultCard(profitable ? "win" : "lose", cashOutMultX, delta, profitable ? "PROFIT · CASHED OUT" : "CASHED OUT · RETURN BELOW STAKE");
+          // Never apply win-associated audio, haptics, particles, or glow to
+          // an equal-or-losing return. Payout is not profit in a parimutuel.
+          if (profitable) celebrate(cashOutMultX);
         } else if (
           !isClaimed &&
           attemptedClaimThisRound &&

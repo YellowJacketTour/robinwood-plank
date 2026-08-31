@@ -612,13 +612,17 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (betFundedBy[roundId][player] != msg.sender) revert NotFunder();
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
+        // The public beacon result is enough to compute the exact eventual
+        // crash point. Once it is due OR already stored here, accepting a new
+        // discretionary lock would give perfect information to the caller.
+        // The old post-reveal `elapsed < crash` path therefore was not fair:
+        // informed players could wait until the last known-safe block.
+        if (r.entropyRevealed || beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
             revert AwaitingEntropyReveal();
         }
         if (stakeOf[roundId][player] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][player] != 0) revert AlreadyCashedOut();
         uint256 elapsed = block.number - r.lockBlock;
-        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
         cashOutBlockOf[roundId][player] = block.number;
         r.provisionalWinningWeight += (stakeOf[roundId][player] * _multiplierAt(elapsed)) / 10000;
         emit CashedOut(roundId, player, block.number, false);
@@ -708,23 +712,21 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
      *      near-maximum-multiplier cash-out, while every other player is
      *      still genuinely guessing -- a real information asymmetry that
      *      transfers pool share from casual players to whoever runs this.
-     *      Fix: once the round is publicly due but not yet revealed
-     *      on-chain, cashOut() blocks (same as presetCashOut already did)
-     *      until someone calls the cheap, permissionless revealEntropy()
-     *      -- which, once the round is due, anyone (a keeper, or the
-     *      player themself) can call in the same block. This costs a
-     *      liveness window of at most "one more transaction," not funds.
+     *      Fix: the cash-out acceptance window closes permanently when the
+     *      target beacon round becomes due. Revealing on-chain must NOT
+     *      reopen it: after reveal every future safe block is known. Locks
+     *      accepted before that boundary remain provisional and settle
+     *      normally against the subsequently revealed crash point.
      */
     function cashOut(uint256 roundId) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
+        if (r.entropyRevealed || beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
             revert AwaitingEntropyReveal();
         }
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
         uint256 elapsed = block.number - r.lockBlock;
-        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
         cashOutBlockOf[roundId][msg.sender] = block.number;
         r.provisionalWinningWeight += (stakeOf[roundId][msg.sender] * _multiplierAt(elapsed)) / 10000;
         emit CashedOut(roundId, msg.sender, block.number, false);
