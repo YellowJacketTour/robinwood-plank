@@ -1,0 +1,31 @@
+# PlankCrash canonical reconciliation evidence manifest
+# branch reconcile/plankcrash-canonical @ 8065eaf; node v24.13.0
+# generated 2026-08-31T19:23:51Z by Fable (claude-fable-5). Non-self-referential.
+#
+# --- canonical + test contracts ---
+731232af7391a98b6027a2a338bd3e63fa051615d8b31996a11df2168cce9696  contracts/PlankCrashDrand.sol
+ab9e2b1591b40c17db85917a6e96487139ef34377c1af83ca9a8ae574b59b920  contracts/test/PlankCrashDrandTestbed.sol
+280ddd322a3553d75a92dcafb6c877b9b0a913724f62f8ec9373bce322211bf8  contracts/test/sim-plankcrash/PlankCrashOverflowV2Proto.sol
+b04b411492e2f7833d24d1f55a4bcc9f91c1ceeae238cab84838bcdc98c2798c  contracts/test/sim-plankcrash/FaultyJackpotSink.sol
+7a347641ccf5856d4011715ba15db7ff416dc5001c2e0228360c874c490cf6b0  contracts/test/sim-plankcrash/ToggleableJackpotSink.sol
+762a60e8a463e69bb3c48b90b665af666b3310c3c92cc587a7f15d588c37f02c  contracts/PlankPowerboard.sol
+c3c7dafa096366e3016b0aaee5f04eac2862290c54a48acbf84acf951fe6e37e  contracts/PlankPowerboardV2.sol
+# --- test suites ---
+a91dde9ff3ef45a444786ae1ca1f4ed113301562ba7b8bcf462da0ca73bf3130  test/contracts/PlankCrashDrandTestbed.test.ts
+f47c142e60e16c4deb3c0a6c3a0807b38898a1b5024e8d3e9da9c416889c71cb  test/contracts/PlankCrashKeeperLiveness.test.ts
+daa388246e27ddfd0b39b1f420e800c45b8a9997717cc256dec9380dc138a613  test/contracts/PlankPowerboardAdversarial.test.ts
+1c99e78c4d2ef9495eb0fbc14e28a9259cc5d02bfc49089328c5e0fea6958d84  test/contracts/FrontendSettlementDifferential.test.ts
+791d3deda710f0b4c37e5f178ded3b456e20315f49f5e2c2b15360458e37a25f  test/contracts/SimPlankCrashOverflowV2.test.ts
+0de90ef9bc8dd23355c80635646da8fe1b8fc9106c41f51f87c2e87802ec267d  test/contracts/SimPlankCrashRandomStateful.test.ts
+e90200c15bf1219cc0245cfb73884c2cbdb1d4b812faf69f50a87aff096067bd  test/contracts/helpers/crashHardening.ts
+# --- ABI + frontend + scripts ---
+9916b2c5e7fd8cdcbcecc5476a4646ef14ec0988766daf37e3db90fae418c202  public/arcade/plankcrashv2-abi.json
+d71fe4d90c14b4b6a30275f2c2a915086ec38fda3371947948c409e1a4b1915e  public/arcade/crash.html
+a3375e41a428dd79130c330b7fe3cdb2d9c80228d7d09495bad0225000b0a85b  scripts/deploy-casino.ts
+76c5c6bccb7801c701bf4aa69fb7ae0d48682045d6dda07b37f0c42a5216a3f7  scripts/local-casino-setup.ts
+a8522af676cf7bb5f65b0327fb53d6e2bf6e103f7b117d9714bf97571e4b1871  scripts/testnet-casino-setup.ts
+# --- sim evidence ---
+05c4c6405dac675ece9d98b4422cd14a295149e18c1027cec887e475132318bb  docs/marketplank/sim-plankcrash/engine.mjs
+834a8c808f6d707c7d8641db3487dafa931504bfcf266cd96a5fa97ebf89d273  docs/marketplank/sim-plankcrash/engine-v2.mjs
+badf0c8a5b2dee761257a8bf469f94eded435452f4a80b57eb4b7b28e3409e91  docs/marketplank/sim-plankcrash/overflow-v2-report.json
+6d07bd90720ddf1ec22ec51d63536f8e063bc2f56171f3cf1a9811708cbd964a  docs/marketplank/sim-plankcrash/random-stateful-summary.json
