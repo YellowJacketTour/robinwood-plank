@@ -32,7 +32,7 @@ async function setup(over: Record<string, unknown> = {}) {
     beacon: await beacon.getAddress(), ...hardeningFor(6969n), seedBootstrapBudgetWei: E("0.2"),
     ...over,
   };
-  const crash = await (await ethers.getContractFactory("PlankCrashDrand")).deploy(cfg);
+  const crash: any = await (await ethers.getContractFactory("PlankCrashDrand")).deploy(cfg);
   return { crash, beacon, sink, cfg, deployer, treasury, keeper, players };
 }
 
