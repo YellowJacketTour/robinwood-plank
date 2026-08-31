@@ -32,7 +32,7 @@ async function deployTestbed(over: Record<string, unknown> = {}) {
     ...hardeningFor(6969n), seedBootstrapBudgetWei: 0n, // zero-bootstrap for the seedless build
     ...over,
   };
-  const crash = await (await ethers.getContractFactory("PlankCrashDrandTestbed")).deploy(cfg);
+  const crash: any = await (await ethers.getContractFactory("PlankCrashDrandTestbed")).deploy(cfg);
   return { crash, beacon, pb, cfg, deployer };
 }
 
