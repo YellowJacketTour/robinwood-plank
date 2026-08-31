@@ -1,0 +1,47 @@
+{
+ "haltFrac": {
+  "v2proto_fail0": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "maxReserveEth": "2.0"
+  },
+  "baseline_fail0": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "capViolations": 0,
+   "maxReserveEth": "2.0"
+  },
+  "v2proto_fail30": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "maxReserveEth": "2.0"
+  },
+  "baseline_fail30": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "capViolations": 0,
+   "maxReserveEth": "2.0"
+  },
+  "v2proto_fail100": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "maxReserveEth": "2.0"
+  },
+  "baseline_fail100": {
+   "halts": 0,
+   "rounds": 30,
+   "frac": 0,
+   "capViolations": 0,
+   "maxReserveEth": "2.0"
+  }
+ },
+ "notes": [
+  "FINDING (on-chain, this campaign's regime — busted pots ~0.95 ETH vs cap 2 ETH): the BASELINE halts heavily even at 0% sink failure, because sweepBustedRound credits the windfall (raising drawdownWindowPeak above cap) BEFORE _spillOverflow drops reserve back to cap — the transient over-cap peak itself reads as a >15% drawdown. The failed-then-successful-spill pathology the design doc measured (0.85 at 30%) is a special case of this same coupling; the V2 skim-before-peak removes both.",
+  "The scripted V1..V16 differential vectors are REGRESSION evidence; the randomized stateful differential (SimPlankCrashRandomStateful.test.ts) is the fidelity evidence."
+ ]
+}

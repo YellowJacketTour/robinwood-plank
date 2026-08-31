@@ -1,0 +1,229 @@
+[
+ {
+  "label": "V0 deploy",
+  "snapshot": {
+   "reserve": "0",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "0",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "0",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V1 fundVault 1.5 (below cap)",
+  "snapshot": {
+   "reserve": "1500000000000000000",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "1500000000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1500000000000000000",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2a bets",
+  "snapshot": {
+   "reserve": "1500000000000000000",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "1500000000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1500000000000000000",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2b lock",
+  "snapshot": {
+   "reserve": "1500000000000000000",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "1500000000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1500000000000000000",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2c reveal",
+  "snapshot": {
+   "reserve": "1500000000000000000",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "1500000000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1500000000000000000",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2d settle",
+  "snapshot": {
+   "reserve": "1464757500000000000",
+   "seedBudget": "164757500000000000",
+   "reserveHighWaterMark": "1541850000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1541850000000000000",
+   "accumulatedRake": "41850000000000000",
+   "currentRoundId": "2",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2e register",
+  "snapshot": {
+   "reserve": "1464757500000000000",
+   "seedBudget": "164757500000000000",
+   "reserveHighWaterMark": "1541850000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1541850000000000000",
+   "accumulatedRake": "41850000000000000",
+   "currentRoundId": "2",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V2f claim alice",
+  "snapshot": {
+   "reserve": "1464757500000000000",
+   "seedBudget": "164757500000000000",
+   "reserveHighWaterMark": "1541850000000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "1541850000000000000",
+   "accumulatedRake": "41850000000000000",
+   "currentRoundId": "2",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V3 fundVault 3 (spill, sink OK)",
+  "snapshot": {
+   "reserve": "2000000000000000000",
+   "seedBudget": "164757500000000000",
+   "reserveHighWaterMark": "4464757500000000000",
+   "drawdownWindowStart": "1788202710",
+   "drawdownWindowPeak": "4464757500000000000",
+   "accumulatedRake": "41850000000000000",
+   "currentRoundId": "2",
+   "sinkBalance": "2464757500000000000",
+   "strandedOverflow": "0"
+  },
+  "mismatches": [
+   {
+    "field": "reserveHighWaterMark",
+    "chain": "2000000000000000000",
+    "model": "4464757500000000000"
+   },
+   {
+    "field": "drawdownWindowPeak",
+    "chain": "2000000000000000000",
+    "model": "4464757500000000000"
+   },
+   {
+    "field": "sinkBalance",
+    "chain": "0",
+    "model": "2464757500000000000"
+   },
+   {
+    "field": "contractBalance",
+    "chain": "4583700000000000000",
+    "model": "2118942500000000000"
+   }
+  ]
+ },
+ {
+  "label": "V15 second settle → next round must be seed-halted (hwm)",
+  "snapshot": {
+   "reserve": "990803750000000000",
+   "seedBudget": "99990803750000000000",
+   "reserveHighWaterMark": "1020925000000000000",
+   "drawdownWindowStart": "1788202822",
+   "drawdownWindowPeak": "1020925000000000000",
+   "accumulatedRake": "41850000000000000",
+   "currentRoundId": "3",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V16a funded to floor==cap",
+  "snapshot": {
+   "reserve": "2000000000000000000",
+   "seedBudget": "200000000000000000",
+   "reserveHighWaterMark": "2000000000000000000",
+   "drawdownWindowStart": "1788203056",
+   "drawdownWindowPeak": "2000000000000000000",
+   "accumulatedRake": "0",
+   "currentRoundId": "1",
+   "sinkBalance": "0",
+   "strandedOverflow": "0"
+  },
+  "mismatches": []
+ },
+ {
+  "label": "V16b busted sweep, sink reverting → stranded above floor",
+  "snapshot": {
+   "reserve": "3528000000000000000",
+   "seedBudget": "233480000000000000",
+   "reserveHighWaterMark": "3528000000000000000",
+   "drawdownWindowStart": "1788203056",
+   "drawdownWindowPeak": "3528000000000000000",
+   "accumulatedRake": "33480000000000000",
+   "currentRoundId": "2",
+   "sinkBalance": "33480000000000000",
+   "strandedOverflow": "1528000000000000000"
+  },
+  "mismatches": [
+   {
+    "field": "reserve",
+    "chain": "2000000000000000000",
+    "model": "3528000000000000000"
+   },
+   {
+    "field": "reserveHighWaterMark",
+    "chain": "2000000000000000000",
+    "model": "3528000000000000000"
+   },
+   {
+    "field": "drawdownWindowPeak",
+    "chain": "2000000000000000000",
+    "model": "3528000000000000000"
+   },
+   {
+    "field": "sinkBalance",
+    "chain": "0",
+    "model": "33480000000000000"
+   },
+   {
+    "field": "contractBalance",
+    "chain": "3594960000000000000",
+    "model": "3561480000000000000"
+   }
+  ]
+ }
+]

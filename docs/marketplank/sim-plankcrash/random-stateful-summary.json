@@ -1,0 +1,149 @@
+{
+ "classification": "This randomized stateful differential is the fidelity evidence; the scripted V1..V16 vectors in SimPlankCrashDifferential.test.ts are REGRESSION evidence, not formal proof.",
+ "phase1": [
+  {
+   "seed": 11,
+   "steps": 60,
+   "counts": {
+    "bet": 11,
+    "sinkToggle": 13,
+    "lock": 7,
+    "reveal": 3,
+    "settle": 2,
+    "claimRake": 2,
+    "fund": 9,
+    "voidStale": 2,
+    "sweep": 2,
+    "carryForward": 6,
+    "cashOut": 3
+   }
+  },
+  {
+   "seed": 23,
+   "steps": 60,
+   "counts": {
+    "fund": 8,
+    "bet": 12,
+    "sinkToggle": 12,
+    "lock": 7,
+    "reveal": 3,
+    "settle": 3,
+    "register": 6,
+    "claim": 3,
+    "voidStale": 1,
+    "carryForward": 3,
+    "claimRake": 2
+   }
+  },
+  {
+   "seed": 47,
+   "steps": 60,
+   "counts": {
+    "bet": 8,
+    "fund": 19,
+    "sinkToggle": 13,
+    "lock": 6,
+    "reveal": 2,
+    "settle": 2,
+    "register": 4,
+    "claim": 3,
+    "claimRake": 2,
+    "cashOut": 1
+   }
+  },
+  {
+   "seed": 89,
+   "steps": 60,
+   "counts": {
+    "lock": 14,
+    "fund": 18,
+    "sinkToggle": 12,
+    "bet": 7,
+    "reveal": 2,
+    "settle": 1,
+    "carryForward": 2,
+    "sweep": 1,
+    "voidStale": 1,
+    "claimRake": 1,
+    "cashOut": 1
+   }
+  },
+  {
+   "seed": 131,
+   "steps": 60,
+   "counts": {
+    "fund": 17,
+    "lock": 6,
+    "sinkToggle": 6,
+    "bet": 9,
+    "cashOut": 3,
+    "reveal": 3,
+    "settle": 2,
+    "register": 3,
+    "claimRake": 2,
+    "voidStale": 2,
+    "claim": 2,
+    "carryForward": 5
+   }
+  }
+ ],
+ "phase2": [
+  {
+   "seed": 7,
+   "steps": 60,
+   "counts": {
+    "fund": 12,
+    "bet": 6,
+    "lock": 8,
+    "sinkToggle": 8,
+    "forceEth": 1,
+    "carryForward": 5,
+    "deliver": 7,
+    "voidStale": 1,
+    "cashOut": 2,
+    "reveal": 2,
+    "settle": 2,
+    "claimRake": 1,
+    "register": 3,
+    "claim": 2
+   }
+  },
+  {
+   "seed": 61,
+   "steps": 60,
+   "counts": {
+    "lock": 11,
+    "sinkToggle": 13,
+    "bet": 7,
+    "deliver": 12,
+    "fund": 8,
+    "reveal": 1,
+    "settle": 1,
+    "sweep": 1,
+    "claimRake": 1,
+    "carryForward": 2,
+    "cashOut": 2,
+    "voidStale": 1
+   }
+  },
+  {
+   "seed": 199,
+   "steps": 60,
+   "counts": {
+    "bet": 7,
+    "lock": 8,
+    "sinkToggle": 11,
+    "fund": 8,
+    "carryForward": 3,
+    "forceEth": 4,
+    "reveal": 3,
+    "deliver": 7,
+    "settle": 3,
+    "claimRake": 2,
+    "sweep": 2,
+    "register": 1,
+    "cashOut": 1
+   }
+  }
+ ]
+}

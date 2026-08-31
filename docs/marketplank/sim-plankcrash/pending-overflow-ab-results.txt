@@ -1,0 +1,11 @@
+A/B: seed-halt fraction and reserve-cap invariant under sink failure (CORRECTED run)
+baseline = current contract semantics; variant = pendingOverflow design
+12 seeds x 1500 rounds; reserveShareBps 5000; ~35% busted rounds
+
+sinkFail    engine  haltFrac   capViol  maxReserveETH
+      0%  baseline    0.0008       0.0          2.000
+      0%   variant    0.0007       0.0          2.000
+     30%  baseline    0.8503     427.3          2.652
+     30%   variant    0.0007       0.0          2.000
+    100%  baseline    0.0007    1498.7        127.236
+    100%   variant    0.0007       0.0          2.000
