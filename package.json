@@ -41,7 +41,10 @@
     "market:reindex": "tsx scripts/reindex-chain-events.ts",
     "discover:compute-rarity": "tsx scripts/compute-rarity.ts",
     "dependencies:report": "node scripts/check-dependency-health.mjs",
-    "abi:arcade": "node scripts/export-arcade-abi.mjs"
+    "abi:arcade": "node scripts/export-arcade-abi.mjs",
+    "plankcrash:canary": "tsx scripts/plankcrash-testnet-canary.ts",
+    "plankcrash:audit-manifest": "tsx scripts/plankcrash-audit-manifest.ts",
+    "plankcrash:launch-gate": "tsx scripts/plankcrash-launch-gate.ts"
   },
   "engines": {
     "node": ">=20.9.0"
