@@ -160,6 +160,25 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     //    (settle) is REQUIRED > 0; reveal/lock bounties may be 0.
     uint256 public immutable keeperRevealBps;
     uint256 public immutable keeperLockBps;
+    // ── Keeper liveness (anti-farm). The bps bounties above are the
+    //    PERMISSIONLESS FALLBACK: rake-funded, so a manufactured round pays
+    //    more rake than it collects (farm-proof by construction — no floor).
+    //    An OPTIONAL designated-keeper gas floor closes the small-round
+    //    liveness gap WITHOUT a farm: the floor is paid ONLY when the
+    //    settling keeper == designatedKeeper (an address a coalition cannot
+    //    control), from a bounded, owner-funded keeperSubsidyReserve, capped
+    //    per epoch. designatedKeeper == address(0) => the floor is OFF and
+    //    the contract is pure bps (the private-alpha / off-chain-reimburse
+    //    posture). No registry, no governance — one immutable address.
+    address public immutable designatedKeeper;
+    uint256 public immutable keeperFloorWei;       // per-settle gas floor, top-up only
+    uint256 public immutable keeperEpochBudgetWei; // max floor top-up per DRAWDOWN_WINDOW epoch
+    uint256 public keeperSubsidyReserve;           // dedicated, owner-funded; NEVER reserve/pendingOverflow
+    uint256 public keeperFloorPaidThisEpoch;       // resets each epoch window
+    uint256 public keeperFloorEpochStart;
+    event KeeperFloorPaid(uint256 indexed roundId, address indexed keeper, uint256 topUp, uint256 subsidyRemaining);
+    event KeeperSubsidyFunded(uint256 amount, uint256 total);
+    event KeeperSubsidyDepleted(uint256 indexed roundId, uint256 shortfall);
     // ── Hardening (b): deterministic bankroll caps, all in bytecode ──────
     // Hard ceiling on the per-round seed as a fraction of the Vault, in
     // ADDITION to seedNumerator/seedDenominator: seed <= reserve*seedMaxBps
@@ -461,6 +480,10 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         //    HARDENING.md). Values are PROPOSED there, NOT ratified. ─────
         uint256 keeperRevealBps; // (c) bps of rake to whoever revealEntropy()'d
         uint256 keeperLockBps; // (c) bps of rake to whoever lockRound()'d
+        // Keeper liveness floor (all OPTIONAL; designatedKeeper==0 => OFF, pure bps):
+        address designatedKeeper;       // the only address the gas floor pays; 0 = off
+        uint256 keeperFloorWei;         // per-settle gas-floor top-up
+        uint256 keeperEpochBudgetWei;   // per-epoch cap on floor top-ups
         uint256 seedMaxBps; // (b) 0 < x <= SEED_MAX_BPS_CEILING
         uint256 singlePayoutCapBps; // (b) 0 < x <= 10000, of reserveAtLock
         uint256 dailyDrawdownBps; // (b) 0 < x <= 10000 (10000 = never trips)
@@ -523,6 +546,16 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         keeperRewardBps = cfg.keeperRewardBps;
         keeperRevealBps = cfg.keeperRevealBps;
         keeperLockBps = cfg.keeperLockBps;
+        // Keeper liveness floor wiring. When OFF (designatedKeeper==0), the floor
+        // params must be 0 too (no dormant surface). When ON, the floor is bounded
+        // by the epoch budget and paid only to the designated keeper from the
+        // separately-funded keeperSubsidyReserve.
+        designatedKeeper = cfg.designatedKeeper;
+        if (cfg.designatedKeeper == address(0)) {
+            if (cfg.keeperFloorWei != 0 || cfg.keeperEpochBudgetWei != 0) revert BadHardeningConfig();
+        }
+        keeperFloorWei = cfg.keeperFloorWei;
+        keeperEpochBudgetWei = cfg.keeperEpochBudgetWei;
         treasury = cfg.treasury;
 
         // Hardening (b): every cap is a bounded immutable.
@@ -779,6 +812,16 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (msg.value == 0) revert NothingToFund();
         _creditReserve(msg.value);
         emit VaultFunded(msg.sender, msg.value, reserve);
+    }
+
+    /// Fund the dedicated keeper-subsidy reserve (the designated-keeper gas floor).
+    /// Permissionless to fund (anyone may top it up); it is spent ONLY on the floor
+    /// top-up to the designated keeper. NEVER mixed with `reserve` or `pendingOverflow`,
+    /// so a subsidy payout can never touch house risk capital, seeding, or drawdown.
+    function fundKeeperSubsidy() external payable {
+        if (msg.value == 0) revert NothingToFund();
+        keeperSubsidyReserve += msg.value;
+        emit KeeperSubsidyFunded(msg.value, keeperSubsidyReserve);
     }
 
         /// delivery of the earmarked overflow to the Powerboard sink. The ONLY
@@ -1165,6 +1208,32 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (keeperReward > 0) {
             _asyncTransfer(msg.sender, keeperReward);
             emit KeeperRewarded(roundId, msg.sender, 2, keeperReward);
+        }
+        // Designated-keeper gas floor (anti-farm): pay a top-up ONLY if the settling
+        // keeper is the designated keeper (a coalition cannot be it), and only up to
+        // the per-epoch budget, from the dedicated subsidy reserve. A manufactured
+        // round by anyone else earns only the bps bounty above (farm-proof). The
+        // permissionless fallback keeper is unaffected — it still settles and earns bps.
+        if (designatedKeeper != address(0) && msg.sender == designatedKeeper && keeperFloorWei > keeperReward) {
+            // roll the floor-budget epoch window
+            if (block.timestamp >= keeperFloorEpochStart + DRAWDOWN_WINDOW) {
+                keeperFloorEpochStart = block.timestamp;
+                keeperFloorPaidThisEpoch = 0;
+            }
+            uint256 topUp = keeperFloorWei - keeperReward;
+            uint256 epochRoom = keeperEpochBudgetWei > keeperFloorPaidThisEpoch
+                ? keeperEpochBudgetWei - keeperFloorPaidThisEpoch : 0;
+            if (topUp > epochRoom) topUp = epochRoom;
+            if (topUp > keeperSubsidyReserve) {
+                emit KeeperSubsidyDepleted(roundId, topUp - keeperSubsidyReserve);
+                topUp = keeperSubsidyReserve;
+            }
+            if (topUp > 0) {
+                keeperSubsidyReserve -= topUp;          // EFFECT before pull-escrow
+                keeperFloorPaidThisEpoch += topUp;
+                _asyncTransfer(msg.sender, topUp);
+                emit KeeperFloorPaid(roundId, msg.sender, topUp, keeperSubsidyReserve);
+            }
         }
         if (revealReward > 0) {
             _asyncTransfer(r.revealedBy, revealReward);
