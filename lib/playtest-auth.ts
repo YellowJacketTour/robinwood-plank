@@ -162,6 +162,11 @@ export async function registerFromInvite(displayName: string, pin: string, invit
   return { ...registered, token: await createSession(registered.identity.id) };
 }
 
+export async function registerPublicPlayer(displayName: string, pin: string): Promise<{ identity: PlaytestIdentity; token: string }> {
+  const identity = await createPersonalIdentity(displayName, pin, false);
+  return { identity, token: await createSession(identity.id) };
+}
+
 export async function createPlaytestCohost(actor: PlaytestIdentity, displayName: string, pin: string): Promise<PlaytestIdentity> {
   if (!actor.isAdmin) throw new Error("ADMIN_ONLY");
   return createPersonalIdentity(displayName, pin, true);

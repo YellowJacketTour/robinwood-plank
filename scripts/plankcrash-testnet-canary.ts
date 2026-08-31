@@ -8,11 +8,14 @@
  * bet and measures the lock/reveal/settle write path.
  */
 import hardhat from "hardhat";
+import type { HardhatEthers } from "@nomicfoundation/hardhat-ethers/types";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { canonicalJson, normalizeAddresses, receiptGas, sha256Hex, TESTNET_CHAIN_ID } from "./lib/testnet-canary-evidence.js";
 
-const { ethers } = await hardhat.network.create();
+const connection = await hardhat.network.create();
+if (!("ethers" in connection)) throw new Error("Hardhat ethers plugin is unavailable");
+const ethers = connection.ethers as HardhatEthers;
 
 const MANIFEST_PATH = process.env.PLANKCRASH_TESTNET_MANIFEST ?? "public/arcade/deploy-addresses.testnet.json";
 const EVIDENCE_PATH = process.env.PLANKCRASH_CANARY_EVIDENCE ?? "artifacts/plankcrash-testnet-canary/evidence.json";

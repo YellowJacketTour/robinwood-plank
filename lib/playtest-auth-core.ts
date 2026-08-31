@@ -10,6 +10,10 @@ export function playtestEnabled(): boolean {
   return process.env.PLANK_PLAYTEST_ENABLED?.trim().toLowerCase() === "true";
 }
 
+export function playtestPublicRegistrationEnabled(): boolean {
+  return playtestEnabled() && process.env.PLANK_PLAYTEST_PUBLIC_REGISTRATION?.trim().toLowerCase() === "true";
+}
+
 /** Legacy enrollment is off by default after the laboratory moved to shared
  * PIN entry. Kept only as an explicit rollback switch. */
 export function playtestPasskeysEnabled(): boolean {

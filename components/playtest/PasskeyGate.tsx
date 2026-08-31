@@ -4,7 +4,7 @@ import { useState } from "react";
 
 type Identity = { displayName: string; isAdmin: boolean; roomId?: string | null };
 type InvitePreview = { roomId: string | null; roomName: string | null; joinCode: string | null; hostName: string | null } | null;
-type Props = { initialIdentity: Identity | null; adminConfigured: boolean; initialInvite: string; initialSetup: string; invitePreview: InvitePreview };
+type Props = { initialIdentity: Identity | null; adminConfigured: boolean; initialInvite: string; initialSetup: string; invitePreview: InvitePreview; publicRegistration: boolean };
 
 async function json<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T & { message?: string };
@@ -12,13 +12,14 @@ async function json<T>(response: Response): Promise<T> {
   return body;
 }
 
-export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: invite, initialSetup: setup, invitePreview }: Props) {
+export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: invite, initialSetup: setup, invitePreview, publicRegistration }: Props) {
   const [identity, setIdentity] = useState(initialIdentity);
   const [displayName, setDisplayName] = useState("");
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const mode = !adminConfigured && setup ? "bootstrap" : invite ? "register" : "login";
+  const [newPlayer, setNewPlayer] = useState(publicRegistration);
+  const mode = !adminConfigured && setup ? "bootstrap" : invite ? "register" : publicRegistration && newPlayer ? "registerPublic" : "login";
 
   async function enter() {
     setBusy(true); setMessage("");
@@ -69,16 +70,17 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
       {invitePreview?.joinCode ? <p className="mt-4 inline-flex rounded-md border border-gold-500/30 bg-black/20 px-3 py-2 font-mono text-xs font-black tracking-[0.14em] text-gold-300">TABLE {invitePreview.joinCode}</p> : null}
     </div> : null}
     <div className="p-6">
-    <h2 className="text-2xl text-gold-300">{mode === "bootstrap" ? "Claim the host account" : mode === "register" ? "Create your invited player" : "Return to the private playtest"}</h2>
-    <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This private table invitation remains reusable for the invited group for seven days. Choose a unique username and your own four-digit PIN." : "Enter your existing username and personal four- or six-digit PIN."}</p>
+    <h2 className="text-2xl text-gold-300">{mode === "bootstrap" ? "Claim the host account" : mode === "register" ? "Create your invited player" : mode === "registerPublic" ? "Create your test player" : "Return to the PlankCrash alpha"}</h2>
+    <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This table invitation remains reusable for the invited group for seven days. Choose a unique username and your own four-digit PIN." : mode === "registerPublic" ? "Choose a unique username and personal four-digit PIN. Test credits have no value and cannot leave the laboratory." : "Enter your existing username and personal four- or six-digit PIN."}</p>
+    {publicRegistration && !invite && mode !== "bootstrap" ? <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-line bg-black/20 p-1"><button type="button" className={`min-h-10 rounded-md text-xs font-black uppercase tracking-wider ${newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(true); setMessage(""); }}>New player</button><button type="button" className={`min-h-10 rounded-md text-xs font-black uppercase tracking-wider ${!newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(false); setMessage(""); }}>Returning</button></div> : null}
     <label className="mt-5 block text-xs font-black uppercase tracking-wider text-gold-300">Username
       <input autoComplete="nickname" className="mt-2 min-h-11 w-full rounded-md border border-line bg-panel-strong px-3 text-cream outline-none focus:border-line-strong" maxLength={40} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
     </label>
     <label className="mt-4 block text-xs font-black uppercase tracking-wider text-gold-300">Secret PIN
       <input aria-describedby="pin-help" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" className="mt-2 min-h-11 w-full rounded-md border border-line bg-panel-strong px-3 font-mono text-cream outline-none focus:border-line-strong" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))} />
     </label>
-    <p id="pin-help" className="mt-2 text-xs text-cream-muted">{mode === "bootstrap" ? "Exactly 6 digits. Keep this private." : mode === "register" ? "Exactly 4 digits. Remember it for future visits." : "Players use 4 digits; the host uses 6."}</p>
-    <button className="mt-5 min-h-11 w-full rounded-md bg-gold-500 px-4 text-xs font-black uppercase tracking-wider text-wood-950 disabled:opacity-40" disabled={busy || !displayName.trim() || (mode === "bootstrap" ? pin.length !== 6 : mode === "register" ? pin.length !== 4 : ![4, 6].includes(pin.length))} onClick={enter}>{busy ? "Entering…" : mode === "bootstrap" ? "Set host account" : mode === "register" ? "Create player and join" : "Enter playtest"}</button>
+    <p id="pin-help" className="mt-2 text-xs text-cream-muted">{mode === "bootstrap" ? "Exactly 6 digits. Keep this private." : mode === "register" || mode === "registerPublic" ? "Exactly 4 digits. Remember it for future visits." : "Players use 4 digits; the host uses 6."}</p>
+    <button className="mt-5 min-h-11 w-full rounded-md bg-gold-500 px-4 text-xs font-black uppercase tracking-wider text-wood-950 disabled:opacity-40" disabled={busy || !displayName.trim() || (mode === "bootstrap" ? pin.length !== 6 : mode === "register" || mode === "registerPublic" ? pin.length !== 4 : ![4, 6].includes(pin.length))} onClick={enter}>{busy ? "Entering…" : mode === "bootstrap" ? "Set host account" : mode === "register" ? "Create player and join" : mode === "registerPublic" ? "Create player" : "Enter playtest"}</button>
     {message ? <p className="mt-4 rounded-md bg-panel-strong p-3 text-sm text-red-400" role="alert">{message}</p> : null}
     <div className="mt-5 grid grid-cols-3 gap-2 border-t border-line pt-4 text-center text-[10px] font-bold uppercase tracking-wider text-cream-muted"><span>Gather</span><span>Fly</span><span>Settle &amp; grow</span></div>
     </div>

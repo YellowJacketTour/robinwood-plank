@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { adminConfigured, authenticatePersonalPin, bootstrapAdmin, cleanDisplayName, cleanPin, clearSessionCookie, currentPlaytestIdentity, joinRoomFromInvite, playtestBootstrapAllowed, playtestMutationOriginAllowed, registerFromInvite, PLAYTEST_SESSION_COOKIE, revokeSession, sessionCookie } from "@/lib/playtest-auth";
+import { adminConfigured, authenticatePersonalPin, bootstrapAdmin, cleanDisplayName, cleanPin, clearSessionCookie, currentPlaytestIdentity, joinRoomFromInvite, playtestBootstrapAllowed, playtestMutationOriginAllowed, playtestPublicRegistrationEnabled, registerFromInvite, registerPublicPlayer, PLAYTEST_SESSION_COOKIE, revokeSession, sessionCookie } from "@/lib/playtest-auth";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +37,11 @@ export async function POST(req: Request) {
       const pin = cleanPin(body.pin, 4);
       if (!pin || typeof body.invite !== "string" || body.invite.length < 20) return publicJson({ error: "BAD_INVITE", message: "Use a valid invitation and four-digit PIN." }, 400);
       authenticated = await registerFromInvite(displayName, pin, body.invite);
+    } else if (body.action === "registerPublic") {
+      if (!playtestPublicRegistrationEnabled()) return publicJson({ error: "INVITE_REQUIRED", message: "A valid playtest invitation is required." }, 403);
+      const pin = cleanPin(body.pin, 4);
+      if (!pin) return publicJson({ error: "BAD_PIN", message: "Choose a personal four-digit PIN." }, 400);
+      authenticated = await registerPublicPlayer(displayName, pin);
     } else {
       const pin = typeof body.pin === "string" && /^\d{4}(?:\d{2})?$/.test(body.pin) ? body.pin : null;
       if (!pin) return publicJson({ error: "BAD_PIN", message: "Enter your personal PIN." }, 400);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { cleanDisplayName, cleanPin, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestBootstrapAllowed, playtestEnabled, playtestInviteUrl, playtestMutationOriginAllowed, playtestRp, sessionCookie, sha256, usernameKey } from "../../lib/playtest-auth-core";
+import { cleanDisplayName, cleanPin, clearSessionCookie, inviteAllowed, newSessionToken, normalizeInvite, playtestBootstrapAllowed, playtestEnabled, playtestInviteUrl, playtestMutationOriginAllowed, playtestPublicRegistrationEnabled, playtestRp, sessionCookie, sha256, usernameKey } from "../../lib/playtest-auth-core";
 
 const saved = {
   origin: process.env.PLANK_PLAYTEST_ORIGIN,
@@ -8,13 +8,14 @@ const saved = {
   invites: process.env.PLANK_PLAYTEST_INVITE_HASHES,
   enabled: process.env.PLANK_PLAYTEST_ENABLED,
   bootstrap: process.env.PLANK_PLAYTEST_BOOTSTRAP_HASH,
+  publicRegistration: process.env.PLANK_PLAYTEST_PUBLIC_REGISTRATION,
 };
 
 afterEach(() => {
   const envNames: Record<string, string> = {
     origin: "PLANK_PLAYTEST_ORIGIN", rp: "PLANK_PLAYTEST_RP_ID",
     enabled: "PLANK_PLAYTEST_ENABLED", invites: "PLANK_PLAYTEST_INVITE_HASHES",
-    bootstrap: "PLANK_PLAYTEST_BOOTSTRAP_HASH",
+    bootstrap: "PLANK_PLAYTEST_BOOTSTRAP_HASH", publicRegistration: "PLANK_PLAYTEST_PUBLIC_REGISTRATION",
   };
   for (const [key, value] of Object.entries(saved)) {
     const env = envNames[key];
@@ -95,4 +96,14 @@ test("the unofficial laboratory fails closed unless explicitly enabled", () => {
   assert.equal(playtestEnabled(), false);
   assert.equal(playtestMutationOriginAllowed(new Request("https://play.plank.love/api", { headers: { origin: "https://play.plank.love" } })), false);
   assert.throws(() => playtestRp(), /disabled/);
+});
+
+test("public player enrollment requires both playtest and public-registration gates", () => {
+  delete process.env.PLANK_PLAYTEST_ENABLED;
+  process.env.PLANK_PLAYTEST_PUBLIC_REGISTRATION = "true";
+  assert.equal(playtestPublicRegistrationEnabled(), false);
+  process.env.PLANK_PLAYTEST_ENABLED = "true";
+  assert.equal(playtestPublicRegistrationEnabled(), true);
+  process.env.PLANK_PLAYTEST_PUBLIC_REGISTRATION = "false";
+  assert.equal(playtestPublicRegistrationEnabled(), false);
 });
