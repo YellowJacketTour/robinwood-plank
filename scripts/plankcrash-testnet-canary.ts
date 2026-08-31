@@ -18,6 +18,39 @@ const MANIFEST_PATH = process.env.PLANKCRASH_TESTNET_MANIFEST ?? "public/arcade/
 const EVIDENCE_PATH = process.env.PLANKCRASH_CANARY_EVIDENCE ?? "artifacts/plankcrash-testnet-canary/evidence.json";
 const EXPLORER_API = (process.env.ROBINHOOD_TESTNET_EXPLORER_API ?? "https://explorer.testnet.chain.robinhood.com/api/v2").replace(/\/$/, "");
 
+// Keep the non-invasive canary deployable from the default branch without
+// copying the unreleased canonical contract sources there. These fragments are
+// the exact read/write surface exercised below; the runtime code hashes are
+// independently recorded before any call is made.
+const CRASH_ABI = [
+  "function IS_TEST_BUILD() view returns (bool)",
+  "function seedingEnabled() view returns (bool)",
+  "function beacon() view returns (address)",
+  "function jackpotSink() view returns (address)",
+  "function progression() view returns (address)",
+  "function currentRoundId() view returns (uint256)",
+  "function participantCount(uint256) view returns (uint256)",
+  "function minPoolSize() view returns (uint256)",
+  "function rounds(uint256) view returns (uint8 phase,bool entropyRevealed,bool swept,uint64 targetDrandRound,uint256 bettingEndsAt,uint256 lockBlock,uint256 trueCrashElapsedBlocks,uint256 crashElapsedBlocks,uint256 crashMultiplierBps,uint256 pool,uint256 distributable,uint256 totalWinningWeight,uint256 provisionalWinningWeight,uint256 registrationDeadlineBlock,uint256 rolledOverFromPrevious,uint256 revealNotBefore,uint256 reserveAtLock,address lockedBy,address revealedBy)",
+  "function placeBet(uint256) payable",
+  "function lockRound()",
+  "function revealEntropy(uint256)",
+  "function settleRound(uint256)",
+];
+const BANK_ABI = ["function isGame(address) view returns (bool)"];
+const FUEL_ABI = ["function crash() view returns (address)", "function progression() view returns (address)"];
+const POWERBOARD_ABI = ["function beacon() view returns (address)", "function progression() view returns (address)"];
+const PROGRESSION_ABI = [
+  "function crash() view returns (address)",
+  "function fuelBooster() view returns (address)",
+  "function powerboard() view returns (address)",
+];
+const BEACON_ABI = [
+  "function isRoundAvailable(uint64) view returns (bool)",
+  "function randomnessOrZero(uint64) view returns (bytes32)",
+  "function setRandomness(uint64,bytes32)",
+];
+
 type TxEvidence = ReturnType<typeof receiptGas> & {
   operation: string;
   transactionHash: string;
@@ -71,9 +104,11 @@ async function main() {
   const addresses = normalizeAddresses(manifest);
   const [signer] = await ethers.getSigners();
   const signerAddress = await signer.getAddress();
-  if (typeof manifest.deployer === "string" && manifest.deployer.toLowerCase() !== signerAddress.toLowerCase()) {
-    throw new Error("Canary signer does not match deployment signer; use an explicit independently controlled canary key when available");
+  const expectedSigner = process.env.CANARY_EXPECTED_SIGNER;
+  if (expectedSigner && ethers.getAddress(expectedSigner).toLowerCase() !== signerAddress.toLowerCase()) {
+    throw new Error("Canary signer does not match CANARY_EXPECTED_SIGNER");
   }
+  const sameKeyAsDeployer = typeof manifest.deployer === "string" && manifest.deployer.toLowerCase() === signerAddress.toLowerCase();
 
   const codeHashes: Record<string, string> = {};
   for (const [name, address] of Object.entries(addresses)) {
@@ -82,12 +117,12 @@ async function main() {
     codeHashes[name] = ethers.keccak256(code);
   }
 
-  const crash = await ethers.getContractAt("PlankCrashDrandTestbed", addresses.crash, signer);
-  const bank = await ethers.getContractAt("PlankBank", addresses.bank, signer);
-  const fuel = await ethers.getContractAt("PlankFuelBooster", addresses.fuelBooster, signer);
-  const powerboard = await ethers.getContractAt("PlankPowerboard", addresses.powerboard, signer);
-  const progression = await ethers.getContractAt("PlankProgression", addresses.progression, signer);
-  const beacon = await ethers.getContractAt("DrandBeaconMock", addresses.beacon, signer);
+  const crash = await ethers.getContractAt(CRASH_ABI, addresses.crash, signer);
+  const bank = await ethers.getContractAt(BANK_ABI, addresses.bank, signer);
+  const fuel = await ethers.getContractAt(FUEL_ABI, addresses.fuelBooster, signer);
+  const powerboard = await ethers.getContractAt(POWERBOARD_ABI, addresses.powerboard, signer);
+  const progression = await ethers.getContractAt(PROGRESSION_ABI, addresses.progression, signer);
+  const beacon = await ethers.getContractAt(BEACON_ABI, addresses.beacon, signer);
 
   const assertions = {
     isTestBuild: await crash.IS_TEST_BUILD(),
@@ -154,7 +189,9 @@ async function main() {
     network: "robinhood-testnet",
     chainId: TESTNET_CHAIN_ID,
     signer: signerAddress,
-    signerRole: "deployment-key-canary (same-key; not independent attestation)",
+    signerRole: sameKeyAsDeployer
+      ? "deployment-key-canary (same-key; not independent attestation)"
+      : "separate-canary-key (control separation; independence still requires external custody evidence)",
     addresses,
     codeHashes,
     assertions,
@@ -163,7 +200,9 @@ async function main() {
     mode: process.env.CANARY_EXERCISE_FRESH_ROUND === "1" ? "fresh-stack-lifecycle" : "non-invasive-sentinel",
     limitations: [
       "DrandBeaconMock randomness is permissionless and manipulable; this is execution evidence, never fairness evidence.",
-      "The deployment signer is reused because no separately controlled canary key is configured; this is signed provenance, not independent review.",
+      sameKeyAsDeployer
+        ? "The deployment signer is reused because no separately controlled canary key is configured; this is signed provenance, not independent review."
+        : "A signer distinct from the manifest deployer was used; address separation alone does not prove independent custody or independent review.",
       "Blockscout supplies creation transaction discovery; every hash, status, address, block and gas value is independently re-read from the chain RPC receipt.",
       "Testnet ETH has no represented value and no result authorizes mainnet or real-value play.",
     ],

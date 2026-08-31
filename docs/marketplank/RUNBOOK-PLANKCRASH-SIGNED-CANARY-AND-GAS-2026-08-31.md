@@ -30,6 +30,8 @@ confirmation: ROBINHOOD-TESTNET-CANARY
 
 The only credential is `DEPLOYER_PK_TESTNET`, consumed by the runner as a signer. It is never serialized. The artifact is rejected if it contains a private-key-shaped field name.
 
+The script also supports migration to a separately held key without a code change: point the Hardhat signer at that canary credential and set `CANARY_EXPECTED_SIGNER` to its public address. The evidence will classify it as separate from the deployment address. The workflow deliberately remains on the existing deployment secret until separate custody is provisioned.
+
 ## Evidence interpretation
 
 - Deployment receipt gas is real Robinhood-testnet execution evidence for these exact bytecodes and constructor arguments.
