@@ -163,9 +163,16 @@ async function main() {
   ).deploy(await burnEngine.getAddress(), await airdropPool.getAddress(), treasury.address, BURN_BPS, AIRDROP_BPS, FEES);
   await distributor.waitForDeployment();
 
+  // SEEDLESS=1 deploys the TEST-ONLY PlankCrashDrandTestbed (seedingEnabled=false) — the private
+  // alpha vehicle. 46630 (this testnet) is in the testbed's chain-id allowlist. The production
+  // PlankCrashDrand has no seed-disable surface.
+  const SEEDLESS = process.env.SEEDLESS === "1";
+  const crashFactory = SEEDLESS ? "PlankCrashDrandTestbed" : "PlankCrashDrand";
+  if (SEEDLESS) console.log("  SEEDLESS private-alpha build: PlankCrashDrandTestbed (seed disabled)");
   const crash = await (
-    await ethers.getContractFactory("PlankCrashDrand")
+    await ethers.getContractFactory(crashFactory)
   ).deploy({
+    ...(SEEDLESS ? { seedingEnabled: false } : {}),
     bettingDurationSeconds: BETTING_SECONDS,
     roundIntervalSeconds: 0,
     maxAwaitBlocks: MAX_AWAIT_BLOCKS,
@@ -200,7 +207,7 @@ async function main() {
     maxMultiplierBps: 10000n + BigInt(MAX_ELAPSED_BLOCKS) * 40n + (BigInt(MAX_ELAPSED_BLOCKS) * BigInt(MAX_ELAPSED_BLOCKS)) / 5n,
     // Re-review NEW-1: seed-income budget bootstrap. LOCAL/TEST: reserveCap/10
     // (the constructor's own bound); production value is PROPOSED in deploy-casino.ts.
-    seedBootstrapBudgetWei: RESERVE_CAP / 10n,
+    seedBootstrapBudgetWei: SEEDLESS ? 0n : RESERVE_CAP / 10n, // testbed enforces zero-bootstrap when seedless
   }, FEES);
   await crash.waitForDeployment();
 
