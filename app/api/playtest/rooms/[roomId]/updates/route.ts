@@ -38,7 +38,10 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     const url = new URL(req.url);
     const after = url.searchParams.get("after") || "-1";
     if (!/^-?\d{1,20}$/.test(after)) return publicJson({ error: "BAD_VERSION", message: "Invalid room version." }, 400);
-    const deadline = Date.now() + 20_000;
+    // A short heartbeat is an economic UX boundary, not decorative traffic:
+    // it lets clients interpolate smoothly while bounding how far a stale
+    // tab may visually run ahead of authoritative server time.
+    const deadline = Date.now() + 2_000;
     let state = await playtestRoomPollState(identity, roomId);
     while (!req.signal.aborted && state.version === after && Date.now() < deadline) {
       if (state.due) {
