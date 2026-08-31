@@ -733,6 +733,7 @@
     <div class="payout-note" title="Your payout isn't stake × multiplier — everyone who cashes out in time splits the pot by (their stake × their own multiplier). Cashing out earlier than others grows your share; more people cashing out late shrinks everyone's per-share.">
       ⓘ Payout = your share of the shared pot, split by stake × your cash-out multiplier — not a fixed stake × multiplier payout
     </div>
+    <div class="payout-note" id="maxPayableDisclosure" title="The settlement ceiling: a crash above this multiplier still pays, but only up to this cap. Your auto cash-out target cannot be set above it."></div>
     <div class="avatar-row" id="avatarRow" style="display:none"></div>
     <div class="stake-row" id="stakeRow">
       <button class="chip active" data-amt="0.01">0.01</button>
@@ -2600,6 +2601,19 @@ async function connectToChain(rpcUrl, address, pk, label) {
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);
   maxElapsedBlocksCache = await crash.maxElapsedBlocks();
+  // FOUR-CEILING pre-bet disclosure: the MAX PAYABLE multiplier (settlement ceiling) is
+  // mult(maxElapsedBlocks). A player's auto target cannot exceed it (the contract reverts
+  // BadAutoTarget), and any crash above it settles at this cap. Disclose it before the bet.
+  try {
+    const maxPayableBps = multiplierAtBlocksBps(Number(maxElapsedBlocksCache));
+    const maxPayableX = (maxPayableBps / 10000).toFixed(0);
+    const noteEl = document.querySelector(".payout-note");
+    if (noteEl) {
+      noteEl.setAttribute("data-maxpayable", maxPayableX);
+      const capLine = document.getElementById("maxPayableDisclosure");
+      if (capLine) capLine.textContent = `Max payable multiplier: ${maxPayableX}x — a crash above this settles at the cap.`;
+    }
+  } catch (_) { /* disclosure is best-effort; never blocks the bet UI */ }
   // Bind the instant-play helpers to the same signer/chain.
   try {
     bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
@@ -3335,11 +3349,23 @@ async function refreshVerifyPopover() {
       try {
         const randomness = await beaconContract.randomnessOrZero(round.targetDrandRound);
         randomnessHtml = `<span class="vf-v">${randomness.slice(0, 10)}…${randomness.slice(-8)}</span>`;
-        const effective = round.trueCrashElapsedBlocks < maxElapsedBlocksCache ? round.trueCrashElapsedBlocks : maxElapsedBlocksCache;
-        const derivedBps = multiplierAtBlocksBps(Number(effective));
+        // FOUR CEILINGS, disclosed truthfully:
+        //  - TRUE derived crash = what the RNG produced (uncapped display value);
+        //  - SETTLEMENT crash = min(true, maxElapsedBlocks) = what the contract actually PAID.
+        // When the true value exceeds the settlement ceiling, we show BOTH and say so — the
+        // display number is never presented as a payout it wasn't.
+        const trueBlocks = Number(round.trueCrashElapsedBlocks);
+        const capped = round.trueCrashElapsedBlocks > maxElapsedBlocksCache;
+        const effective = capped ? maxElapsedBlocksCache : round.trueCrashElapsedBlocks;
+        const trueBps = multiplierAtBlocksBps(trueBlocks);
+        const settledBps = multiplierAtBlocksBps(Number(effective));
         derivedHtml =
           `<div class="vf-row"><span class="vf-k">Derived elapsed blocks</span><span class="vf-v">${round.trueCrashElapsedBlocks}</span></div>` +
-          `<div class="vf-row"><span class="vf-k">Derived crash point</span><span class="vf-v">${(derivedBps / 10000).toFixed(2)}x</span></div>`;
+          `<div class="vf-row"><span class="vf-k">True derived crash</span><span class="vf-v">${(trueBps / 10000).toFixed(2)}x</span></div>` +
+          (capped
+            ? `<div class="vf-row"><span class="vf-k">Settled at (cap)</span><span class="vf-v">${(settledBps / 10000).toFixed(2)}x</span></div>` +
+              `<div class="vf-row"><span class="vf-k" style="color:var(--ink-dim)">Note</span><span class="vf-v" style="color:var(--ink-dim)">crash reached ${(trueBps / 10000).toFixed(2)}x — payouts settle at the ${(settledBps / 10000).toFixed(2)}x cap</span></div>`
+            : `<div class="vf-row"><span class="vf-k">Settlement crash</span><span class="vf-v">${(settledBps / 10000).toFixed(2)}x</span></div>`);
       } catch (_) { /* beacon read failed -- leave as pending */ }
     }
     body.innerHTML =
