@@ -12,6 +12,7 @@ export const runtime = "nodejs";
 type CommandBody = {
   action?: unknown; commandId?: unknown; stake?: unknown;
   targetBps?: unknown; lotteryOutcome?: unknown; policy?: unknown; simulation?: unknown; bots?: unknown; userId?: unknown; balance?: unknown;
+  autoLockEnabled?: unknown;
 };
 
 function integer(value: unknown, field: string): bigint {
@@ -38,7 +39,8 @@ export async function POST(req: Request, context: { params: Promise<{ roomId: st
     }
     let result: unknown;
     if (body.action === "bet") {
-      result = await placePlaytestBet(identity, roomId, body.commandId, integer(body.stake, "stake"), integer(body.targetBps, "targetBps"));
+      if (typeof body.autoLockEnabled !== "boolean") throw new PlaytestRoomError(400, "BAD_AUTO_LOCK", "autoLockEnabled must be boolean.");
+      result = await placePlaytestBet(identity, roomId, body.commandId, integer(body.stake, "stake"), integer(body.targetBps, "targetBps"), body.autoLockEnabled);
     } else if (body.action === "start") {
       result = await startPlaytestRound(identity, roomId, body.commandId);
     } else if (body.action === "lock") {

@@ -3545,6 +3545,7 @@ async function doPlaceBet(viaButton) {
     return privatePlaytestCommand("bet", {
       stake: String(Math.max(1, Math.round(Number(betAmount) * 1_000_000))),
       targetBps: String(Math.round(autoTarget * 10_000)),
+      autoLockEnabled: autoPlay,
     });
   }
   try {

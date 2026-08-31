@@ -7,7 +7,7 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, injectSimulationState, multiplierAt, parsePolicy,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt, parsePolicy,
   PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
@@ -176,11 +176,11 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
     );
     const seats = await client.query<{
       user_id: string; display_name: string; stake: string; requested_target_bps: string;
-      accepted_target_bps: string | null; payout: string | null; net: string | null;
+      accepted_target_bps: string | null; auto_lock_enabled: boolean; payout: string | null; net: string | null;
       survived: boolean | null; locked_at: Date | null;
     }>(
       `SELECT s.user_id,u.display_name,s.stake::text,s.requested_target_bps::text,
-              s.accepted_target_bps::text,s.payout::text,s.net::text,s.survived,s.locked_at
+              s.accepted_target_bps::text,s.auto_lock_enabled,s.payout::text,s.net::text,s.survived,s.locked_at
          FROM playtest_round_seats s JOIN playtest_users u ON u.id=s.user_id
         WHERE s.room_id=$1 AND s.round_id=$2 ORDER BY s.placed_at`, [roomId, room.current_round],
     );
@@ -243,6 +243,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         // auditable after the outcome is immutable.
         requestedTargetBps: row.user_id === identity.id || room.phase === "settled" ? row.requested_target_bps : null,
         acceptedTargetBps: row.accepted_target_bps,
+        autoLockEnabled: row.auto_lock_enabled,
         payout: row.payout, net: row.net, survived: row.survived, lockedAt: row.locked_at?.toISOString() ?? null,
       })),
       events: events.rows.reverse().map((row) => ({ sequence: row.sequence, type: row.event_type, commandId: row.command_id, payload: row.public_payload, at: row.created_at.toISOString() })),
@@ -311,7 +312,7 @@ async function duplicateCommand(client: PoolClient, roomId: string, commandId: s
   return Boolean(found.rows[0]);
 }
 
-export async function placePlaytestBet(identity: PlaytestIdentity, roomId: string, commandId: string, stake: bigint, targetBps: bigint) {
+export async function placePlaytestBet(identity: PlaytestIdentity, roomId: string, commandId: string, stake: bigint, targetBps: bigint, autoLockEnabled: boolean) {
   if (stake <= 0n || targetBps < 10_100n || targetBps > 1_000_000n) throw new PlaytestRoomError(400, "BAD_BET", "Stake or target is outside the laboratory range.");
   return withPostgresTransaction(async (client) => {
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
@@ -325,12 +326,12 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
     if (stake > available) throw new PlaytestRoomError(409, "INSUFFICIENT_TEST_CREDITS", "Not enough test credits.");
     await client.query(`UPDATE playtest_room_members SET test_credit_balance=$3 WHERE room_id=$1 AND user_id=$2`, [roomId, identity.id, (available - stake).toString()]);
     await client.query(
-      `INSERT INTO playtest_round_seats (room_id,round_id,user_id,stake,requested_target_bps,command_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO playtest_round_seats (room_id,round_id,user_id,stake,requested_target_bps,auto_lock_enabled,command_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (room_id,round_id,user_id) DO UPDATE SET
          stake=EXCLUDED.stake, requested_target_bps=EXCLUDED.requested_target_bps,
-         command_id=EXCLUDED.command_id, placed_at=NOW()`,
-      [roomId, roundId.toString(), identity.id, stake.toString(), targetBps.toString(), commandId],
+         auto_lock_enabled=EXCLUDED.auto_lock_enabled, command_id=EXCLUDED.command_id, placed_at=NOW()`,
+      [roomId, roundId.toString(), identity.id, stake.toString(), targetBps.toString(), autoLockEnabled, commandId],
     );
     room.version = String(BigInt(room.version) + 1n); room.current_round = roundId.toString();
     await client.query(`UPDATE playtest_rooms SET version=$2,current_round=$3,phase='lobby',commitment=NULL,reveal=NULL,crash_bps=NULL,started_at=NULL,crash_at=NULL,settled_at=NULL WHERE id=$1`, [roomId, room.version, room.current_round]);
@@ -360,8 +361,8 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       const choice = botRoundCommitment({ roomId, roundId: BigInt(room.current_round), botId: bot.user_id, bankroll: BigInt(bot.test_credit_balance), minimumStake: policy.minimumStake, profile: bot.bot_profile });
       if (!choice) continue;
       const inserted = await client.query(
-        `INSERT INTO playtest_round_seats (room_id,round_id,user_id,stake,requested_target_bps,command_id)
-         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (room_id,round_id,user_id) DO NOTHING`,
+        `INSERT INTO playtest_round_seats (room_id,round_id,user_id,stake,requested_target_bps,auto_lock_enabled,command_id)
+         VALUES ($1,$2,$3,$4,$5,TRUE,$6) ON CONFLICT (room_id,round_id,user_id) DO NOTHING`,
         [roomId, room.current_round, bot.user_id, choice.stake.toString(), choice.targetBps.toString(), randomUUID()],
       );
       if (inserted.rowCount) {
@@ -428,8 +429,8 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "running" || !room.crash_at || !room.crash_bps) throw new PlaytestRoomError(409, "NOT_RUNNING", "No round is currently running.");
     if (Date.now() < room.crash_at.getTime()) throw new PlaytestRoomError(409, "ROUND_ACTIVE", "The round has not crashed yet.");
-    const seats = await client.query<{ user_id: string; stake: string; requested_target_bps: string; accepted_target_bps: string | null }>(
-      `SELECT user_id,stake::text,requested_target_bps::text,accepted_target_bps::text
+    const seats = await client.query<{ user_id: string; stake: string; requested_target_bps: string; accepted_target_bps: string | null; auto_lock_enabled: boolean }>(
+      `SELECT user_id,stake::text,requested_target_bps::text,accepted_target_bps::text,auto_lock_enabled
          FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2 ORDER BY user_id FOR UPDATE`,
       [roomId, room.current_round],
     );
@@ -440,7 +441,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     // epoch, not to the already-consumed epoch number in the awaiting state.
     const eligibilityEpoch = prior.lottery.awaitingSeal ? prior.lottery.epoch + 1n : prior.lottery.epoch;
     const result = simulateIteration(prior, policy, {
-      players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: BigInt(seat.accepted_target_bps ?? seat.requested_target_bps) })),
+      players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: effectiveSettlementTarget(BigInt(room.crash_bps!), BigInt(seat.requested_target_bps), seat.accepted_target_bps === null ? null : BigInt(seat.accepted_target_bps), seat.auto_lock_enabled) })),
       crashBps: BigInt(room.crash_bps), lotteryOutcome,
     });
     const powerboardFundingAdded = result.state.totals.powerboardFunded - prior.totals.powerboardFunded;
@@ -473,7 +474,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     }
     for (const allocation of result.settlement?.allocations ?? []) {
       const originalSeat = seats.rows.find((seat) => seat.user_id === allocation.id);
-      const autoAccepted = allocation.survived && originalSeat?.accepted_target_bps === null;
+      const autoAccepted = allocation.survived && originalSeat?.accepted_target_bps === null && originalSeat.auto_lock_enabled;
       const autoLockedAt = autoAccepted && room.started_at
         ? new Date(room.started_at.getTime() + crashDurationMs(allocation.targetBps))
         : null;
