@@ -188,6 +188,16 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       `SELECT sequence::text,event_type,command_id,public_payload,created_at FROM playtest_room_events
         WHERE room_id=$1 ORDER BY sequence DESC LIMIT 60`, [roomId],
     );
+    // A busy bot table can outgrow the general replay window. The current
+    // conclusion is authoritative presentation state and must remain directly
+    // addressable after refresh instead of becoming an empty theater shell.
+    const currentSettlement = room.phase === "settled"
+      ? await client.query<{ sequence: string; public_payload: unknown; created_at: Date }>(
+        `SELECT sequence::text,public_payload,created_at FROM playtest_room_events
+          WHERE room_id=$1 AND round_id=$2 AND event_type='round.settled'
+          ORDER BY sequence DESC LIMIT 1`, [roomId, room.current_round],
+      )
+      : null;
     const simulation = parseSimulationState(room.simulation_state);
     const eligibilityEpoch = simulation.lottery.awaitingSeal ? simulation.lottery.epoch + 1n : simulation.lottery.epoch;
     const powerboard = await client.query<{ total_weight: string; my_weight: string; participant_count: string }>(
@@ -236,6 +246,9 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         payout: row.payout, net: row.net, survived: row.survived, lockedAt: row.locked_at?.toISOString() ?? null,
       })),
       events: events.rows.reverse().map((row) => ({ sequence: row.sequence, type: row.event_type, commandId: row.command_id, payload: row.public_payload, at: row.created_at.toISOString() })),
+      currentSettlement: currentSettlement?.rows[0]
+        ? { sequence: currentSettlement.rows[0].sequence, type: "round.settled", payload: currentSettlement.rows[0].public_payload, at: currentSettlement.rows[0].created_at.toISOString() }
+        : null,
       me: { id: identity.id, displayName: identity.displayName, isAdmin: identity.isAdmin },
     };
   });
