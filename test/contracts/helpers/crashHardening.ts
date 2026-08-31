@@ -25,6 +25,11 @@ export const HARDENING_TEST_DEFAULTS = {
   // value, by colludingAbsorberIsNotProfitable / seedBoundedByHouseIncome,
   // which override this at their own call sites.
   seedBootstrapBudgetWei: 10n ** 24n, // 1,000,000 ETH: budget effectively off (fixture cap is 0 = uncapped)
+  // Keeper-liveness gas floor: OFF by default (pure bps, the farm-proof permissionless
+  // fallback / private-alpha posture). A suite testing the designated floor overrides these.
+  designatedKeeper: "0x0000000000000000000000000000000000000000",
+  keeperFloorWei: 0n,
+  keeperEpochBudgetWei: 0n,
 };
 
 /// Mirror of PlankCrashDrand._multiplierAt (pure, integer): 10000 + 40e + e^2/5.
