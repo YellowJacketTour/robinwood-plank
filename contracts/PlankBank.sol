@@ -5,7 +5,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 
 /// Minimal surface the bank needs on a casino game (PlankCrashDrand).
 interface IPlankGame {
-    function placeBetFor(address player) external payable;
+    function placeBetFor(address player, uint256 autoCashOutBps) external payable;
     function cashOutFor(uint256 roundId, address player) external;
 }
 
@@ -131,8 +131,8 @@ contract PlankBank is ReentrancyGuard {
 
     // ── Play: root-key path (no session needed) ─────────────────────────
 
-    function bet(address game, uint256 amount) external nonReentrant {
-        _bet(msg.sender, game, amount, msg.sender);
+    function bet(address game, uint256 amount, uint256 autoCashOutBps) external nonReentrant {
+        _bet(msg.sender, game, amount, autoCashOutBps, msg.sender);
     }
 
     function cashOut(address game, uint256 roundId) external nonReentrant {
@@ -141,12 +141,18 @@ contract PlankBank is ReentrancyGuard {
 
     // ── Play: session-key path (instant, no wallet popup) ───────────────
 
-    function betVia(address game, uint256 amount) external nonReentrant {
+    /// The third argument is the player's precommitted auto-cashout target,
+    /// never an entropy input.
+    function betVia(address game, uint256 amount, uint256 autoCashOutBps) external nonReentrant {
+        _betVia(game, amount, autoCashOutBps);
+    }
+
+    function _betVia(address game, uint256 amount, uint256 autoCashOutBps) private {
         Session storage s = _liveSession(msg.sender);
         uint256 newSpent = uint256(s.spent) + amount;
         if (newSpent > s.spendCap) revert CapExceeded();
         s.spent = uint128(newSpent);
-        _bet(s.player, game, amount, msg.sender);
+        _bet(s.player, game, amount, autoCashOutBps, msg.sender);
     }
 
     function cashOutVia(address game, uint256 roundId) external nonReentrant {
@@ -167,12 +173,12 @@ contract PlankBank is ReentrancyGuard {
 
     // ── Internals ───────────────────────────────────────────────────────
 
-    function _bet(address player, address game, uint256 amount, address by) private {
+    function _bet(address player, address game, uint256 amount, uint256 autoCashOutBps, address by) private {
         if (!isGame[game]) revert NotAGame();
         uint256 bal = balanceOf[player];
         if (amount == 0 || amount > bal) revert InsufficientBalance();
         balanceOf[player] = bal - amount;
-        IPlankGame(game).placeBetFor{value: amount}(player);
+        IPlankGame(game).placeBetFor{value: amount}(player, autoCashOutBps);
         emit BetPlaced(player, game, by, amount);
     }
 

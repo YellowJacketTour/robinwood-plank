@@ -45,7 +45,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { Contract, JsonRpcProvider, Wallet, hexlify, randomBytes, type Provider, type Signer } from "ethers";
-import { fetchRound, parseG1 } from "./relay-drand.js";
+import { fetchRoundFromApis, parseG1 } from "./relay-drand.js";
 
 const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
@@ -97,8 +97,8 @@ export type KeeperConfig = {
    * loop is self-driving, not dependent on an out-of-band caller. */
   burnEngine?: string;
   oracle?: string;
-  /** drand HTTP relay + chain hash, only needed when not using a mock beacon. */
-  drandApi?: string;
+  /** Independent drand HTTP relays + pinned chain hash (production requires >=2). */
+  drandApis?: string[];
   drandChainHash?: string;
   /** LOCAL DEV ONLY -- see KEEPER_MOCK_BEACON in the header. */
   mockBeacon?: boolean;
@@ -199,9 +199,9 @@ export async function tick(
             await attempt(actions, "mockBeacon.setRandomness", () =>
               mock.setRandomness(r.targetDrandRound, filler)
             );
-          } else if (cfg.drandApi && cfg.drandChainHash) {
+          } else if (cfg.drandApis && cfg.drandChainHash) {
             try {
-              const drand = await fetchRound(cfg.drandApi, cfg.drandChainHash, BigInt(r.targetDrandRound));
+              const drand = await fetchRoundFromApis(cfg.drandApis, cfg.drandChainHash, BigInt(r.targetDrandRound));
               const sig = parseG1(drand.signature);
               await attempt(actions, "beacon.submitRound", () => beacon.submitRound(r.targetDrandRound, sig),
                 `drand round ${r.targetDrandRound}`);
@@ -307,9 +307,9 @@ export async function tick(
           await attempt(actions, "mockBeacon.setRandomness(draw)", () =>
             mock.setRandomness(e.targetDrandRound, filler));
         }
-      } else if (cfg.drandApi && cfg.drandChainHash) {
+      } else if (cfg.drandApis && cfg.drandChainHash) {
         try {
-          const drand = await fetchRound(cfg.drandApi, cfg.drandChainHash, BigInt(e.targetDrandRound));
+          const drand = await fetchRoundFromApis(cfg.drandApis, cfg.drandChainHash, BigInt(e.targetDrandRound));
           await attempt(actions, "beacon.submitRound(draw)", () =>
             beacon.submitRound(e.targetDrandRound, parseG1(drand.signature)));
         } catch {
@@ -339,7 +339,9 @@ async function main() {
     distributor: required("DISTRIBUTOR_ADDRESS"),
     burnEngine: process.env.BURN_ENGINE_ADDRESS?.trim() || undefined,
     oracle: process.env.ORACLE_ADDRESS?.trim() || undefined,
-    drandApi: process.env.DRAND_API?.trim() || "https://api.drand.sh",
+    drandApis: (process.env.DRAND_APIS || process.env.DRAND_API ||
+      "https://api.drand.sh,https://api2.drand.sh,https://drand.cloudflare.com")
+      .split(/[\s,]+/).filter(Boolean),
     drandChainHash: process.env.DRAND_CHAIN_HASH?.trim(),
     mockBeacon: process.env.KEEPER_MOCK_BEACON === "1",
   };

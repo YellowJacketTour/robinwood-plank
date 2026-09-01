@@ -137,15 +137,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 public immutable bettingDurationSeconds;
     uint256 public immutable roundIntervalSeconds;
     uint256 public immutable genesisTimestamp;
-    // How long, in blocks, this contract will wait for ANYONE to relay
-    // the target round to the beacon and call revealEntropy() before
-    // voidStaleRound() becomes callable. Unlike blockhash's real
-    // 256-block EVM expiry (PlankCrashV2) or an oracle-network outage
-    // (VRF/Entropy), a drand round's signature is permanently, publicly
-    // fetchable forever once its time passes -- this window exists
-    // purely as an anti-griefing/keeper-liveness safety net (nobody
-    // bonded to relay/reveal promptly), not because the entropy itself
-    // could ever become unavailable.
+    // Legacy deployment/config compatibility only. A production drand result
+    // never expires, so this value MUST NOT authorize an outcome-dependent
+    // void. See voidStaleRound(), which fails closed permanently.
     uint256 public immutable maxAwaitBlocks;
     uint256 public immutable maxElapsedBlocks;
     uint256 public immutable registrationWindowBlocks;
@@ -302,6 +296,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // remains a real, disclosed assumption about sequencer timestamp
     // jump size, not a mathematical guarantee.
     uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 20;
+    bytes32 public constant RESULT_DOMAIN = keccak256("PLANKCRASH_RESULT_V1");
 
     uint256 public currentRoundId;
     // THE VAULT -- a perpetual, always-positive prize reserve that seeds
@@ -386,6 +381,12 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     mapping(uint256 => mapping(address => bool)) public carriedForward;
 
     event RoundStarted(uint256 indexed roundId, uint256 bettingEndsAt);
+    event RoundEnvelopeCommitted(
+        uint256 indexed roundId,
+        uint256 bettingEndsAt,
+        uint64 targetDrandRound,
+        uint256 revealNotBefore
+    );
     event BetPlaced(uint256 indexed roundId, address indexed player, uint256 amount);
     event RoundLocked(uint256 indexed roundId, uint256 lockBlock, uint64 targetDrandRound);
     event RoundVoided(uint256 indexed roundId, uint256 rolledOverPool, string reason);
@@ -439,6 +440,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error NothingToFund();
     error ProgressionAlreadySet();
     error NotDeployer();
+    error ProductionRoundCannotVoid();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -636,6 +638,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.bettingEndsAt = (currentRoundId == 1 || roundIntervalSeconds == 0)
             ? block.timestamp + bettingDurationSeconds
             : _nextSlot();
+        // Bind the randomness envelope before any stake is visible. A keeper
+        // cannot select a target after observing the field.
+        r.targetDrandRound =
+            beacon.nextRoundAfter(r.bettingEndsAt) +
+            uint64(TARGET_ROUND_SAFETY_PERIODS);
+        uint256 period = beacon.period();
+        r.revealNotBefore =
+            beacon.genesisTimestamp() +
+            (uint256(r.targetDrandRound) - 1) * period -
+            CASHOUT_CLOSE_MARGIN_PERIODS * period;
+        if (drandRoundToRoundId[r.targetDrandRound] != 0) revert BadHardeningConfig();
+        drandRoundToRoundId[r.targetDrandRound] = currentRoundId;
         // Seed the new pot with a STRICT FRACTION of the Vault. Tracked in
         // rolledOverFromPrevious so a void returns exactly this seed to the
         // Vault (see _rescueSeed) -- the seed has no owning player.
@@ -643,6 +657,12 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.pool = seeded;
         r.rolledOverFromPrevious = seeded;
         emit RoundStarted(currentRoundId, r.bettingEndsAt);
+        emit RoundEnvelopeCommitted(
+            currentRoundId,
+            r.bettingEndsAt,
+            r.targetDrandRound,
+            r.revealNotBefore
+        );
         if (seeded > 0) emit VaultSeeded(currentRoundId, seeded, reserve);
     }
 
@@ -1036,25 +1056,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         r.phase = Phase.LIVE;
         r.lockBlock = block.number;
-        r.targetDrandRound = beacon.nextRoundAfter(block.timestamp) + uint64(TARGET_ROUND_SAFETY_PERIODS);
-        drandRoundToRoundId[r.targetDrandRound] = id;
-        // Hardening (a): the first second at which the target round's
-        // signature can exist ANYWHERE, by the beacon's own schedule (drand
-        // convention: round 1 is emitted AT genesis, so round R is emitted
-        // at genesis + (R-1)*period -- the same convention the beacon's
-        // currentRoundAt() uses), MINUS a margin of CASHOUT_CLOSE_MARGIN_
-        // PERIODS (review MED-1): the gate is evaluated against the CHAIN
-        // clock, which can lag wall-clock by a sequencer delta; the margin
-        // is what makes "chain time < revealNotBefore" imply "wall time <
-        // emission" for delta < margin. Underflow-safe: targetDrandRound is
-        // >= TARGET_ROUND_SAFETY_PERIODS + 1 periods after now.
-        uint256 period = beacon.period();
-        r.revealNotBefore =
-            beacon.genesisTimestamp() +
-            (uint256(r.targetDrandRound) - 1) *
-            period -
-            CASHOUT_CLOSE_MARGIN_PERIODS *
-            period;
+        // targetDrandRound and revealNotBefore were committed in _startRound.
         // Hardening (b): the base of this round's single-payout cap.
         r.reserveAtLock = reserve;
         // Hardening (c): remember who to pay at settlement.
@@ -1154,7 +1156,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         bytes32 randomness = beacon.randomnessOrZero(r.targetDrandRound);
         if (randomness == bytes32(0)) revert RandomnessNotYetAvailable();
 
-        (uint256 trueMultiplierBps, uint256 trueElapsed) = _deriveCrash(randomness);
+        (uint256 trueMultiplierBps, uint256 trueElapsed) =
+            _deriveCrash(resultSeed(roundId, r.targetDrandRound, randomness));
         r.trueCrashElapsedBlocks = trueElapsed;
         r.entropyRevealed = true;
         r.revealedBy = msg.sender; // hardening (c): paid at settleRound
@@ -1249,22 +1252,10 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         _startRound();
     }
 
-    /// Anti-griefing liveness fallback -- see maxAwaitBlocks's own
-    /// comment for why this exists despite drand signatures never
-    /// actually expiring (unlike blockhash's real 256-block window).
-    function voidStaleRound(uint256 roundId) external nonReentrant {
-        Round storage r = rounds[roundId];
-        if (r.phase != Phase.LIVE) revert BadPhase();
-        if (r.entropyRevealed) revert EntropyAlreadyRevealed();
-        if (block.number <= r.lockBlock + maxAwaitBlocks) revert TooEarly();
-
-        emit RoundVoided(roundId, r.pool, "reveal-timeout");
-        voided[roundId] = true;
-        r.phase = Phase.SETTLED;
-        // See lockRound's under-threshold void: recycle the seed so it is
-        // never locked in a voided round.
-        _rescueSeed(r);
-        _startRound();
+    /// Drand results do not expire. A timeout refund would create an
+    /// outcome-selective relay/void option, so production fails closed.
+    function voidStaleRound(uint256) external pure {
+        revert ProductionRoundCannotVoid();
     }
 
     /// Returns a voided round's rolled-over SEED to pendingRollover so it
@@ -1525,6 +1516,26 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         }
         multiplierBps = (10000 * 10000) / (10000 - r);
         elapsedBlocks = _invertMultiplier(multiplierBps);
+    }
+
+    /// Domain-separate the public beacon output across chain, deployment,
+    /// consumer, game round, and target round.
+    function resultSeed(uint256 roundId, uint64 targetDrandRound, bytes32 drandRandomness)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                RESULT_DOMAIN,
+                block.chainid,
+                address(this),
+                address(beacon),
+                roundId,
+                targetDrandRound,
+                drandRandomness
+            )
+        );
     }
 
     // ── View helpers for the frontend ────────────────────────────────────

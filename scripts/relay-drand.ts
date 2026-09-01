@@ -122,6 +122,36 @@ export async function fetchRound(
   return value;
 }
 
+/** Require independent transports to agree before spending relay gas. The
+ * on-chain BLS verifier remains authoritative; this quorum removes a single
+ * HTTP origin as a liveness or equivocation dependency. */
+export async function fetchRoundFromApis(
+  apis: readonly string[],
+  chainHash: string,
+  round: bigint | "latest"
+): Promise<DrandRound> {
+  const unique = [...new Set(apis.map((api) => api.trim().replace(/\/$/, "")).filter(Boolean))];
+  if (unique.length < 2) throw new Error("DRAND_APIS must contain at least two distinct relay origins");
+  const settled = await Promise.allSettled(unique.map((api) => fetchRound(api, chainHash, round)));
+  const values = settled
+    .filter((item): item is PromiseFulfilledResult<DrandRound> => item.status === "fulfilled")
+    .map((item) => item.value);
+  if (values.length < 2) throw new Error("fewer than two independent drand relays responded");
+  if (round === "latest") return values.reduce((best, value) => value.round > best.round ? value : best);
+
+  const expected = round.toString();
+  const counts = new Map<string, { count: number; value: DrandRound }>();
+  for (const value of values) {
+    if (BigInt(value.round).toString() !== expected) continue;
+    const key = `${value.round}:${value.signature.toLowerCase()}`;
+    const prior = counts.get(key);
+    counts.set(key, { count: (prior?.count ?? 0) + 1, value });
+  }
+  const agreed = [...counts.values()].find((entry) => entry.count >= 2);
+  if (!agreed) throw new Error(`drand relays did not reach 2-origin agreement for round ${expected}`);
+  return agreed.value;
+}
+
 function result(
   vault: string,
   state: VaultState,
@@ -320,7 +350,9 @@ async function main(): Promise<void> {
   const provider = new JsonRpcProvider(required("RPC_URL"));
   const wallet = new Wallet(required("RELAYER_PRIVATE_KEY"), provider);
   const beacon = new Contract(required("BEACON_ADDRESS"), BEACON_ABI, wallet);
-  const api = process.env.DRAND_API?.trim() || "https://api.drand.sh";
+  const apis = (process.env.DRAND_APIS || process.env.DRAND_API ||
+    "https://api.drand.sh,https://api2.drand.sh,https://drand.cloudflare.com")
+    .split(/[\s,]+/).filter(Boolean);
   const chainHash = required("DRAND_CHAIN_HASH").replace(/^0x/, "");
   const vaults = parseVaultAddresses();
 
@@ -336,7 +368,7 @@ async function main(): Promise<void> {
 
   const relayExactRound = async (round: bigint): Promise<void> => {
     if (await beacon.isRoundAvailable(round)) return;
-    const data = await fetchRound(api, chainHash, round);
+    const data = await fetchRoundFromApis(apis, chainHash, round);
     if (BigInt(data.round) !== round) {
       throw new Error(
         `drand returned round ${data.round} when ${round.toString()} was requested`
@@ -358,7 +390,7 @@ async function main(): Promise<void> {
 
   if (vaults.length === 0) {
     if (!process.env.ROUND) {
-      const latest = await fetchRound(api, chainHash, "latest");
+      const latest = await fetchRoundFromApis(apis, chainHash, "latest");
       await relayExactRound(BigInt(latest.round));
     }
     return;
@@ -375,7 +407,7 @@ async function main(): Promise<void> {
           return { round: BigInt(pending[0]), available: Boolean(pending[1]) };
         },
         latestDrandRound: async () =>
-          BigInt((await fetchRound(api, chainHash, "latest")).round),
+          BigInt((await fetchRoundFromApis(apis, chainHash, "latest")).round),
         relayExactRound,
         isRoundAvailable: async (round) =>
           Boolean(await beacon.isRoundAvailable(round)),
