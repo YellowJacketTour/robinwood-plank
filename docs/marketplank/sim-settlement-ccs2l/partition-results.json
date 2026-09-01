@@ -1,0 +1,44 @@
+{
+  "seed": "20260831",
+  "acceptance": "aggregate house-bonus gain of ANY partition <= survivorCount wei (rounding dust)",
+  "totalCases": 39680,
+  "worstGainWeiAcrossAllSearches": "0",
+  "failures": 0,
+  "searches": {
+    "S1-same-lock-2part-grid": {
+      "cases": 22680,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S1-same-lock-1wei-extreme": {
+      "cases": 720,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S1-same-lock-kpart": {
+      "cases": 1440,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S1-same-lock-skewed": {
+      "cases": 1440,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S2-adjacent-lock": {
+      "cases": 8400,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S3-multi-target": {
+      "cases": 1200,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    },
+    "S4-multi-wallet-binding-cap": {
+      "cases": 3800,
+      "worstGainWei": "0",
+      "bound": "survivorCount wei"
+    }
+  }
+}

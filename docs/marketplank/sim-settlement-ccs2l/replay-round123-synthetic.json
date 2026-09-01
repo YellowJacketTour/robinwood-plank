@@ -1,0 +1,186 @@
+{
+  "synthetic": true,
+  "note": "round-123-SHAPED synthetic replay under ccs-2l v1.1; no real export exists in-repo",
+  "input": {
+    "roundId": "123-SYNTHETIC",
+    "label": "SYNTHETIC round-123-shaped scenario (no real export exists in-repo)",
+    "crashBps": "400000",
+    "seedWei": "50000000",
+    "rakeBps": "300",
+    "reserveAtLockWei": "10000000000",
+    "seats": [
+      {
+        "id": "DegenAlt",
+        "stakeWei": "2000000000",
+        "targetBps": "398300"
+      },
+      {
+        "id": "early1",
+        "stakeWei": "3000000000",
+        "targetBps": "14000"
+      },
+      {
+        "id": "early2",
+        "stakeWei": "2500000000",
+        "targetBps": "15000"
+      },
+      {
+        "id": "early3",
+        "stakeWei": "2000000000",
+        "targetBps": "18000"
+      },
+      {
+        "id": "early4",
+        "stakeWei": "4000000000",
+        "targetBps": "20000"
+      },
+      {
+        "id": "early5",
+        "stakeWei": "1500000000",
+        "targetBps": "22000"
+      },
+      {
+        "id": "early6",
+        "stakeWei": "2000000000",
+        "targetBps": "25000"
+      },
+      {
+        "id": "mid1",
+        "stakeWei": "1500000000",
+        "targetBps": "32000"
+      },
+      {
+        "id": "mid2",
+        "stakeWei": "1000000000",
+        "targetBps": "45000"
+      },
+      {
+        "id": "buster",
+        "stakeWei": "500000000",
+        "targetBps": "420000"
+      }
+    ]
+  },
+  "output": {
+    "rule": "ccs-2l",
+    "playerDistributable": "19400000000",
+    "seedH": "50000000",
+    "crashBps": "400000",
+    "survivorStake": "19500000000",
+    "allBust": false,
+    "totalPlayerPaid": "19400000000",
+    "totalBonus": "49999996",
+    "totalPayout": "19449999996",
+    "houseReturned": "4",
+    "bustedToReserve": "0",
+    "treasuryCapResidue": "0",
+    "allocations": [
+      {
+        "id": "DegenAlt",
+        "survived": true,
+        "stake": "2000000000",
+        "targetBps": "398300",
+        "playerPayout": "3294895691",
+        "houseBonus": "18794719",
+        "payout": "3313690410",
+        "net": "1313690410"
+      },
+      {
+        "id": "early1",
+        "survived": true,
+        "stake": "3000000000",
+        "targetBps": "14000",
+        "playerPayout": "2495859398",
+        "houseBonus": "2574443",
+        "payout": "2498433841",
+        "net": "-501566159"
+      },
+      {
+        "id": "early2",
+        "survived": true,
+        "stake": "2500000000",
+        "targetBps": "15000",
+        "playerPayout": "2121893701",
+        "houseBonus": "2585274",
+        "payout": "2124478975",
+        "net": "-375521025"
+      },
+      {
+        "id": "early3",
+        "survived": true,
+        "stake": "2000000000",
+        "targetBps": "18000",
+        "playerPayout": "1786329347",
+        "houseBonus": "2998213",
+        "payout": "1789327560",
+        "net": "-210672440"
+      },
+      {
+        "id": "early4",
+        "survived": true,
+        "stake": "4000000000",
+        "targetBps": "20000",
+        "playerPayout": "3675308117",
+        "houseBonus": "7071289",
+        "payout": "3682379406",
+        "net": "-317620594"
+      },
+      {
+        "id": "early5",
+        "survived": true,
+        "stake": "1500000000",
+        "targetBps": "22000",
+        "playerPayout": "1413061954",
+        "houseBonus": "3016355",
+        "payout": "1416078309",
+        "net": "-83921691"
+      },
+      {
+        "id": "early6",
+        "survived": true,
+        "stake": "2000000000",
+        "targetBps": "25000",
+        "playerPayout": "1946354146",
+        "houseBonus": "4673865",
+        "payout": "1951028011",
+        "net": "-48971989"
+      },
+      {
+        "id": "mid1",
+        "survived": true,
+        "stake": "1500000000",
+        "targetBps": "32000",
+        "playerPayout": "1549955656",
+        "houseBonus": "4449797",
+        "payout": "1554405453",
+        "net": "54405453"
+      },
+      {
+        "id": "mid2",
+        "survived": true,
+        "stake": "1000000000",
+        "targetBps": "45000",
+        "playerPayout": "1116341990",
+        "houseBonus": "3836041",
+        "payout": "1120178031",
+        "net": "120178031"
+      },
+      {
+        "id": "buster",
+        "survived": false,
+        "stake": "500000000",
+        "targetBps": "420000",
+        "playerPayout": "0",
+        "houseBonus": "0",
+        "payout": "0",
+        "net": "-500000000"
+      }
+    ],
+    "meta": {
+      "mode": "normal",
+      "lambda": "243565981437",
+      "playerDust": "6",
+      "dustIndex": 0
+    }
+  }
+}

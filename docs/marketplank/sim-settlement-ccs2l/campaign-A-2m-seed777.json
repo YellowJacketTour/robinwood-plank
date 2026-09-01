@@ -1,0 +1,135 @@
+{
+  "variant": "A",
+  "playerWeight": "ln",
+  "rounds": 2000000,
+  "seed": "777",
+  "elapsedMs": 84624,
+  "solvencyFailures": 0,
+  "modes": {
+    "normal": 1667904,
+    "floor-degenerate": 0,
+    "no-survivor": 332096
+  },
+  "allBustRounds": 332096,
+  "identity": {
+    "stakedWei": "52225032926190491731510325",
+    "playerPaidWei": "45309394356704513964644245",
+    "rakeWei": "1566750987785714752935744",
+    "allBustPlayerRedirectedWei": "5348887581700263013930336",
+    "openCarryWei": "0",
+    "exact": true,
+    "playerLayerRTP": 0.867580005,
+    "oneMinusEffectiveRake": 0.867580005,
+    "playerRtpEqualsOneMinusEffectiveRakeWeiExact": true
+  },
+  "houseLayer": {
+    "seedDrawnWei": "8513698078341757014697056",
+    "bonusPaidWei": "5350069789778842034702266",
+    "houseReturnedWei": "1749744225597129619988714",
+    "allBustSeedReturnedWei": "1413884062965785360006076",
+    "reserveStartWei": "2000000000000000000000",
+    "reserveEndWei": "817791921420979228070",
+    "reserveMinWei": "341509003771385635432",
+    "carryPeakWei": "0",
+    "sniperCarryHarvestWei": "0"
+  },
+  "flows": {
+    "rakeSplit": {
+      "burnWei": "313350197557142950587148",
+      "communityPowerboardWei": "626700395114285901174297",
+      "foundersWei": "626700395114285901174299"
+    },
+    "treasuryPlayerPotCapResidueWei": "0"
+  },
+  "aggregateRTP": 0.970022636,
+  "perStrategy": {
+    "early": {
+      "seats": 4501858,
+      "survivalRate": 0.8048336931107112,
+      "stakedWei": "38903935178216862830767884",
+      "paidWei": "40516241591397305923456688",
+      "rtp": 1.041443,
+      "rtpPlayerLayer": 0.953108,
+      "rtpHouseBonus": 0.088335,
+      "lifetimesCompleted": 4397,
+      "ruinProbabilityPer1000Bets": 0
+    },
+    "mid": {
+      "seats": 4504320,
+      "survivalRate": 0.3061372193805058,
+      "stakedWei": "1516606944244979515693483",
+      "paidWei": "990017755878395453834767",
+      "rtp": 0.652784,
+      "rtpPlayerLayer": 0.484999,
+      "rtpHouseBonus": 0.167785,
+      "lifetimesCompleted": 4933,
+      "ruinProbabilityPer1000Bets": 0.718224204338131
+    },
+    "greedy": {
+      "seats": 4500918,
+      "survivalRate": 0.05126620836016119,
+      "stakedWei": "1719965550133174465392727",
+      "paidWei": "251479750847610702120514",
+      "rtp": 0.146212,
+      "rtpPlayerLayer": 0.099953,
+      "rtpHouseBonus": 0.046258,
+      "lifetimesCompleted": 14346,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "mixed": {
+      "seats": 4501826,
+      "survivalRate": 0.3872282047329239,
+      "stakedWei": "3469428204159899177865874",
+      "paidWei": "3102977438835047730521107",
+      "rtp": 0.894377,
+      "rtpPlayerLayer": 0.78687,
+      "rtpHouseBonus": 0.107506,
+      "lifetimesCompleted": 4399,
+      "ruinProbabilityPer1000Bets": 0.003182541486701523
+    },
+    "adversarial": {
+      "seats": 4501127,
+      "survivalRate": 0.3988612185348247,
+      "stakedWei": "2005050570022470749419761",
+      "paidWei": "1546160771440467343585681",
+      "rtp": 0.771133,
+      "rtpPlayerLayer": 0.594303,
+      "rtpHouseBonus": 0.176829,
+      "lifetimesCompleted": 4397,
+      "ruinProbabilityPer1000Bets": 0.0011371389583807142
+    },
+    "sniper": {
+      "seats": 4499281,
+      "survivalRate": 0.5116390818888618,
+      "stakedWei": "4610046479413104992370596",
+      "paidWei": "4252586838084528845827754",
+      "rtp": 0.92246,
+      "rtpPlayerLayer": 0.737664,
+      "rtpHouseBonus": 0.184796,
+      "lifetimesCompleted": 4392,
+      "ruinProbabilityPer1000Bets": 0
+    }
+  },
+  "byBankroll": {
+    "lt10": {
+      "seats": 9563323,
+      "stakedWei": "796927877231194923292025",
+      "rtp": 0.879368
+    },
+    "10to100": {
+      "seats": 12724715,
+      "stakedWei": "11916467202701543497142996",
+      "rtp": 0.760512
+    },
+    "100to1k": {
+      "seats": 4721292,
+      "stakedWei": "39511637846257753311075304",
+      "rtp": 1.035038
+    },
+    "gte1k": {
+      "seats": 0,
+      "stakedWei": "0",
+      "rtp": 0
+    }
+  }
+}

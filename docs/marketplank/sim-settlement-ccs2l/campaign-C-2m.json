@@ -1,0 +1,135 @@
+{
+  "variant": "C",
+  "playerWeight": "ln",
+  "rounds": 2000000,
+  "seed": "20260831",
+  "elapsedMs": 79754,
+  "solvencyFailures": 0,
+  "modes": {
+    "normal": 1666357,
+    "floor-degenerate": 0,
+    "no-survivor": 333643
+  },
+  "allBustRounds": 333643,
+  "identity": {
+    "stakedWei": "53001288487855654764312391",
+    "playerPaidWei": "45942026299466145001762539",
+    "rakeWei": "1590038654635669643918900",
+    "allBustPlayerRedirectedWei": "5469223533753840118630952",
+    "openCarryWei": "0",
+    "exact": true,
+    "playerLayerRTP": 0.866809611,
+    "oneMinusEffectiveRake": 0.866809611,
+    "playerRtpEqualsOneMinusEffectiveRakeWeiExact": true
+  },
+  "houseLayer": {
+    "seedDrawnWei": "11574071550913958630687883",
+    "bonusPaidWei": "5470530844197174426793059",
+    "houseReturnedWei": "4177100121438114460508145",
+    "allBustSeedReturnedWei": "1926440585278669743386679",
+    "reserveStartWei": "2000000000000000000000",
+    "reserveEndWei": "692689556665691837893",
+    "reserveMinWei": "199535477294587375851",
+    "carryPeakWei": "183280504747979727815",
+    "sniperCarryHarvestWei": "819675803533856788065732"
+  },
+  "flows": {
+    "rakeSplit": {
+      "burnWei": "318007730927133928783780",
+      "communityPowerboardWei": "636015461854267857567560",
+      "foundersWei": "636015461854267857567560"
+    },
+    "treasuryPlayerPotCapResidueWei": "0"
+  },
+  "aggregateRTP": 0.970024665,
+  "perStrategy": {
+    "early": {
+      "seats": 4503705,
+      "survivalRate": 0.8043628523626658,
+      "stakedWei": "39101538739980827386823203",
+      "paidWei": "40724069713461302738246143",
+      "rtp": 1.041495,
+      "rtpPlayerLayer": 0.958768,
+      "rtpHouseBonus": 0.082727,
+      "lifetimesCompleted": 4400,
+      "ruinProbabilityPer1000Bets": 0
+    },
+    "mid": {
+      "seats": 4500549,
+      "survivalRate": 0.3057862496331003,
+      "stakedWei": "1500797640232356497165953",
+      "paidWei": "989755920020518011353108",
+      "rtp": 0.659486,
+      "rtpPlayerLayer": 0.489981,
+      "rtpHouseBonus": 0.169505,
+      "lifetimesCompleted": 4778,
+      "ruinProbabilityPer1000Bets": 0.6000418585182085
+    },
+    "greedy": {
+      "seats": 4500350,
+      "survivalRate": 0.05104780739275834,
+      "stakedWei": "1724949025478676611472447",
+      "paidWei": "267634927275173654081598",
+      "rtp": 0.155155,
+      "rtpPlayerLayer": 0.100851,
+      "rtpHouseBonus": 0.054303,
+      "lifetimesCompleted": 14232,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "mixed": {
+      "seats": 4503188,
+      "survivalRate": 0.3867668860371808,
+      "stakedWei": "3567259564123252269146359",
+      "paidWei": "3208279402031572884719168",
+      "rtp": 0.899368,
+      "rtpPlayerLayer": 0.791813,
+      "rtpHouseBonus": 0.107554,
+      "lifetimesCompleted": 4398,
+      "ruinProbabilityPer1000Bets": 0.00045475216007276033
+    },
+    "adversarial": {
+      "seats": 4504605,
+      "survivalRate": 0.39788261123894325,
+      "stakedWei": "2086225838497385309184759",
+      "paidWei": "1629574864757755331504372",
+      "rtp": 0.781111,
+      "rtpPlayerLayer": 0.60463,
+      "rtpHouseBonus": 0.176481,
+      "lifetimesCompleted": 4398,
+      "ruinProbabilityPer1000Bets": 0.0018190086402910413
+    },
+    "sniper": {
+      "seats": 4502927,
+      "survivalRate": 0.510337165137254,
+      "stakedWei": "5020517679543156690519670",
+      "paidWei": "4593242316116996808651209",
+      "rtp": 0.914894,
+      "rtpPlayerLayer": 0.688652,
+      "rtpHouseBonus": 0.226241,
+      "lifetimesCompleted": 4396,
+      "ruinProbabilityPer1000Bets": 0.019563239308462238
+    }
+  },
+  "byBankroll": {
+    "lt10": {
+      "seats": 11267676,
+      "stakedWei": "1221571914655605170673710",
+      "rtp": 0.952793
+    },
+    "10to100": {
+      "seats": 11026349,
+      "stakedWei": "11686216181192491654429258",
+      "rtp": 0.759134
+    },
+    "100to1k": {
+      "seats": 4721221,
+      "stakedWei": "40091505940215533886867411",
+      "rtp": 1.032028
+    },
+    "gte1k": {
+      "seats": 78,
+      "stakedWei": "1994451792024052342012",
+      "rtp": 0.843257
+    }
+  }
+}

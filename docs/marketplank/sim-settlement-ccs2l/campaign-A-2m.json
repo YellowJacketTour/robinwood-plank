@@ -1,0 +1,135 @@
+{
+  "variant": "A",
+  "playerWeight": "ln",
+  "rounds": 2000000,
+  "seed": "20260831",
+  "elapsedMs": 81621,
+  "solvencyFailures": 0,
+  "modes": {
+    "normal": 1666357,
+    "floor-degenerate": 0,
+    "no-survivor": 333643
+  },
+  "allBustRounds": 333643,
+  "identity": {
+    "stakedWei": "52290104434570471651285286",
+    "playerPaidWei": "45338116073233305867780118",
+    "rakeWei": "1568703133037114150528619",
+    "allBustPlayerRedirectedWei": "5383285228300051632976549",
+    "openCarryWei": "0",
+    "exact": true,
+    "playerLayerRTP": 0.867049637,
+    "oneMinusEffectiveRake": 0.867049637,
+    "playerRtpEqualsOneMinusEffectiveRakeWeiExact": true
+  },
+  "houseLayer": {
+    "seedDrawnWei": "8593492272797799788430868",
+    "bonusPaidWei": "5384315222301449390757557",
+    "houseReturnedWei": "1774737311342714747365897",
+    "allBustSeedReturnedWei": "1434439739153635650307414",
+    "reserveStartWei": "2000000000000000000000",
+    "reserveEndWei": "970005998602242218992",
+    "reserveMinWei": "353802706683900261612",
+    "carryPeakWei": "0",
+    "sniperCarryHarvestWei": "0"
+  },
+  "flows": {
+    "rakeSplit": {
+      "burnWei": "313740626607422830105723",
+      "communityPowerboardWei": "627481253214845660211447",
+      "foundersWei": "627481253214845660211449"
+    },
+    "treasuryPlayerPotCapResidueWei": "0"
+  },
+  "aggregateRTP": 0.970019697,
+  "perStrategy": {
+    "early": {
+      "seats": 4503705,
+      "survivalRate": 0.8043628523626658,
+      "stakedWei": "38972048193335323550919183",
+      "paidWei": "40585418071699150925607604",
+      "rtp": 1.041398,
+      "rtpPlayerLayer": 0.952682,
+      "rtpHouseBonus": 0.088716,
+      "lifetimesCompleted": 4400,
+      "ruinProbabilityPer1000Bets": 0
+    },
+    "mid": {
+      "seats": 4500549,
+      "survivalRate": 0.3057862496331003,
+      "stakedWei": "1515122143948596540232546",
+      "paidWei": "990100254069329525990386",
+      "rtp": 0.653478,
+      "rtpPlayerLayer": 0.484475,
+      "rtpHouseBonus": 0.169003,
+      "lifetimesCompleted": 4917,
+      "ruinProbabilityPer1000Bets": 0.7215781980882652
+    },
+    "greedy": {
+      "seats": 4500350,
+      "survivalRate": 0.05104780739275834,
+      "stakedWei": "1722329507812802313428266",
+      "paidWei": "252973871829502631108165",
+      "rtp": 0.146878,
+      "rtpPlayerLayer": 0.100155,
+      "rtpHouseBonus": 0.046723,
+      "lifetimesCompleted": 14356,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "mixed": {
+      "seats": 4503188,
+      "survivalRate": 0.3867668860371808,
+      "stakedWei": "3467669940206586750898523",
+      "paidWei": "3102687402738045583184083",
+      "rtp": 0.894747,
+      "rtpPlayerLayer": 0.78673,
+      "rtpHouseBonus": 0.108016,
+      "lifetimesCompleted": 4398,
+      "ruinProbabilityPer1000Bets": 0.0009095043201455207
+    },
+    "adversarial": {
+      "seats": 4504605,
+      "survivalRate": 0.39788261123894325,
+      "stakedWei": "2004724373289663871008329",
+      "paidWei": "1544875978461936614963635",
+      "rtp": 0.770617,
+      "rtpPlayerLayer": 0.591589,
+      "rtpHouseBonus": 0.179027,
+      "lifetimesCompleted": 4398,
+      "ruinProbabilityPer1000Bets": 0.004092769440654843
+    },
+    "sniper": {
+      "seats": 4502927,
+      "survivalRate": 0.510337165137254,
+      "stakedWei": "4608210275977498624798439",
+      "paidWei": "4246375716736789977683802",
+      "rtp": 0.92148,
+      "rtpPlayerLayer": 0.735537,
+      "rtpHouseBonus": 0.185943,
+      "lifetimesCompleted": 4395,
+      "ruinProbabilityPer1000Bets": 0
+    }
+  },
+  "byBankroll": {
+    "lt10": {
+      "seats": 9545503,
+      "stakedWei": "791008985417981759051173",
+      "rtp": 0.877797
+    },
+    "10to100": {
+      "seats": 12752779,
+      "stakedWei": "11933237999439009326655469",
+      "rtp": 0.760782
+    },
+    "100to1k": {
+      "seats": 4717030,
+      "stakedWei": "39565527814700420166212096",
+      "rtp": 1.034973
+    },
+    "gte1k": {
+      "seats": 12,
+      "stakedWei": "329635013060399366548",
+      "rtp": 0.595297
+    }
+  }
+}

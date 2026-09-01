@@ -1,0 +1,29 @@
+{
+  "_comment": "PRIVATE CANARY room policy for ccs-2l (PREPARED, NOT DEPLOYED). Apply via the playtest host console patch (updatePlaytestPolicy) to ONE private, admin-owned, staging-database room only. The global DEFAULT_PLAYTEST_POLICY stays pfss. Procedure + abort criteria + rollback: docs/marketplank/DESIGN-PLANKCRASH-CCS2L-INTEGRATION-2026-08-31.md section 8.",
+  "policyPatch": {
+    "allocationRule": "ccs-2l"
+  },
+  "expectedCommitmentDescriptor": {
+    "rule": "ccs-2l",
+    "version": 1,
+    "paramsHash": "0xbfa05cce17a89480a879c4aea43ba1538764931a333c64e0a7c66852097f4f9f",
+    "params": { "floorBps": "7500", "playerWeight": "ln", "houseCapBps": "1000" }
+  },
+  "perRoundAssertions": [
+    "round.launched event carries the expectedCommitmentDescriptor verbatim",
+    "sum(playerPayout) == playerDistributable (any-survivor rounds)",
+    "sum(houseBonus) + houseReturned == seed",
+    "sum(houseBonus) <= min(seed, reserveAtLock * 1000 / 10000)",
+    "treasury cap residue absent (structural)"
+  ],
+  "abortOn": [
+    "any assertion failure",
+    "SettlementRuleMismatch on replay",
+    "any simulation invariant throw (negative liability, principal decrease)"
+  ],
+  "rollback": {
+    "step1": "patch allocationRule back to pfss between rounds (mid-round changes are refused by design)",
+    "step2": "settled ccs-2l rounds are NOT restated; their committed descriptors replay them under ccs-2l forever",
+    "step3": "code withdrawal = revert the integration commits; replayCommittedRound still honors recorded descriptors"
+  }
+}
