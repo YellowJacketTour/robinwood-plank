@@ -63,3 +63,8 @@ test("multiplier art filters non-finite and regressing samples", () => {
   assert.match(arcadeSource, /if \(!Number\.isFinite\(value\)\) continue/);
   assert.match(arcadeSource, /Math\.max\(1, value, samples\.length \? samples\[samples\.length - 1\] : 1\)/);
 });
+
+test("fixed result overlays reset the base centered-card transform", () => {
+  const fixedResultRules = arcadeSource.match(/\.result-card\.private-result\.show\{position:fixed[^}]+transform:none\}/g) || [];
+  assert.equal(fixedResultRules.length, 3, "phone, desktop, and landscape overlays must not inherit translate(-50%, -50%)");
+});
