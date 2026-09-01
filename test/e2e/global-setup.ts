@@ -103,6 +103,10 @@ export default async function globalSetup() {
         ORACLE_ADDRESS: manifest.oracle,
         BURN_ENGINE_ADDRESS: manifest.burnEngine,
         KEEPER_MOCK_BEACON: "1",
+        // Browser tests need a long enough deterministic flight to observe
+        // the accepted-bet and cash-out states. Production remains genuinely
+        // random; this only selects a mock-beacon fixture on chain 31337.
+        KEEPER_MOCK_MIN_CRASH_BPS: "50000",
         KEEPER_INTERVAL_MS: "1500",
       },
     }

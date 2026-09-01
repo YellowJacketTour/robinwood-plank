@@ -2273,7 +2273,7 @@ const BANK_ABI = [
   "function withdrawAll()",
   "function grantSession(address key, uint128 spendCap, uint64 expiry)",
   "function revokeSession(address key)",
-  "function betVia(address game, uint256 amount)",
+  "function betVia(address game, uint256 amount, uint256 autoCashOutBps)",
   "function cashOutVia(address game, uint256 roundId)",
   "function balanceOf(address) view returns (uint256)",
   "function sessions(address key) view returns (address player, uint128 spendCap, uint128 spent, uint64 expiry, bool revoked)",
@@ -2874,7 +2874,7 @@ async function startBotBettor() {
       // Absent (the normal case), behavior is unchanged -- still 0.01 ETH.
       let botAmt = "0.01";
       try { botAmt = localStorage.getItem("plankcrash_bot_bet_eth") || "0.01"; } catch (_) {}
-      await (await botCrash.placeBet({ value: ethers.parseEther(botAmt) })).wait();
+      await (await botCrash.placeBet(20_000n, { value: ethers.parseEther(botAmt) })).wait();
       toast("Bot bettor (Bob) placed a real " + botAmt + " ETH bet");
     } catch {
       /* races with the real player's own bet timing -- silent by design */
@@ -3705,9 +3705,10 @@ async function doPlaceBet(viaButton) {
     setChainAction(ACTION_STAGES.SIGNING);
     // Bank mode: the browser session key bets from the pre-funded buffer --
     // no wallet popup. Otherwise the classic per-bet path.
+    const committedTargetBps = BigInt(Math.round(autoTarget * 10_000));
     const tx = bankMode && sessionBank
-      ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount))
-      : await crash.placeBet({ value: ethers.parseEther(betAmount) });
+      ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount), committedTargetBps)
+      : await crash.placeBet(committedTargetBps, { value: ethers.parseEther(betAmount) });
     setChainAction(ACTION_STAGES.SUBMITTED, { hash: tx.hash });
     const receipt = await tx.wait();
     setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openCrash, simulateConnect } from "./helpers";
 
-test("placing a bet flips the primary button into CASH OUT NOW with no console errors", async ({ page }) => {
+test("placing a bet exposes cash-out and cashing out completes without console errors", async ({ page }) => {
   const errors = await openCrash(page);
   await simulateConnect(page);
 
@@ -12,16 +12,7 @@ test("placing a bet flips the primary button into CASH OUT NOW with no console e
   // confirms and the player's stake is live in the round.
   await expect(page.getByRole("button", { name: "CASH OUT NOW" })).toBeVisible({ timeout: 40_000 });
 
-  expect(errors, `console errors: ${errors.join("\n")}`).toEqual([]);
-});
-
-test("cashing out mid-round completes without console errors", async ({ page }) => {
-  const errors = await openCrash(page);
-  await simulateConnect(page);
-
-  await page.getByRole("button", { name: /^LAUNCH · /, exact: false }).click();
   const cashOutBtn = page.getByRole("button", { name: "CASH OUT NOW" });
-  await expect(cashOutBtn).toBeVisible({ timeout: 40_000 });
 
   await page.waitForTimeout(1000); // let the multiplier tick a bit above 1.00x first
   await cashOutBtn.click();

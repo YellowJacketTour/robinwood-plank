@@ -17,7 +17,11 @@ export async function openCrash(page: Page) {
 /** Enter Simulate mode -- the no-wallet local-test-account path every other spec builds on. */
 export async function simulateConnect(page: Page) {
   await page.getByRole("button", { name: "▶ Simulate — no wallet needed" }).click();
-  await expect(page.getByRole("button", { name: /LAUNCH · /, exact: false })).toBeVisible({ timeout: 30_000 });
+  // Connection is phase-independent. A shared live chain may already be in
+  // flight or settlement, so requiring a LAUNCH label made an otherwise
+  // healthy connection test wait for the next round and intermittently fail.
+  await expect(page.getByText(/^ROUND \d+$/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/^POOL [\d.]+ ETH$/)).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -33,5 +37,6 @@ export async function connectAs(page: Page, name: "Alice" | "Bob" | "Carol") {
   await page.getByRole("textbox", { name: "0x..." }).fill(crash);
   await page.getByRole("button", { name: new RegExp("^" + name + " 0x") }).click();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.getByRole("button", { name: /LAUNCH · /, exact: false })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/^ROUND \d+$/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/^POOL [\d.]+ ETH$/)).toBeVisible({ timeout: 30_000 });
 }

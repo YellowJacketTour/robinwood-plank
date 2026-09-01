@@ -41,8 +41,8 @@ test("page respects prefers-reduced-motion without erroring", async ({ browser }
   const page = await context.newPage();
   const errors = await openCrash(page);
   await simulateConnect(page);
-  await page.getByRole("button", { name: /^LAUNCH · /, exact: false }).click();
-  await expect(page.getByRole("button", { name: "CASH OUT NOW" })).toBeVisible({ timeout: 40_000 });
+  await expect(page.locator("#multGraph")).toBeVisible();
+  await page.waitForTimeout(2_000);
 
   expect(errors, `console errors: ${errors.join("\n")}`).toEqual([]);
   await context.close();

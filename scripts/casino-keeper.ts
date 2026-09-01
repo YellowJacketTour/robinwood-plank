@@ -40,11 +40,14 @@
  *                         DrandBeaconMock instead of relaying a real drand
  *                         signature, so the full loop can be exercised
  *                         against the local stack.
+ *   KEEPER_MOCK_MIN_CRASH_BPS  LOCAL TEST ONLY -- search deterministic
+ *                         mock input until the domain-separated crash is
+ *                         at least this value. Never used with real drand.
  */
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Contract, JsonRpcProvider, Wallet, hexlify, randomBytes, type Provider, type Signer } from "ethers";
+import { AbiCoder, Contract, JsonRpcProvider, Wallet, hexlify, keccak256, randomBytes, toBeHex, type Provider, type Signer } from "ethers";
 import { fetchRoundFromApis, parseG1 } from "./relay-drand.js";
 
 const CRASH_ABI = [
@@ -102,7 +105,33 @@ export type KeeperConfig = {
   drandChainHash?: string;
   /** LOCAL DEV ONLY -- see KEEPER_MOCK_BEACON in the header. */
   mockBeacon?: boolean;
+  /** LOCAL TEST ONLY -- deterministic lower bound for browser tests. */
+  mockMinCrashBps?: bigint;
 };
+
+const RESULT_DOMAIN = keccak256(Buffer.from("PLANKCRASH_RESULT_V1"));
+const abiCoder = AbiCoder.defaultAbiCoder();
+
+async function mockRandomness(
+  provider: Provider,
+  cfg: KeeperConfig,
+  roundId: bigint,
+  targetDrandRound: bigint
+): Promise<string> {
+  if (!cfg.mockMinCrashBps) return hexlify(randomBytes(32));
+  const chainId = (await provider.getNetwork()).chainId;
+  for (let candidate = 1n; candidate <= 100_000n; candidate += 1n) {
+    const filler = toBeHex(candidate, 32);
+    const seed = keccak256(abiCoder.encode(
+      ["bytes32", "uint256", "address", "address", "uint256", "uint64", "bytes32"],
+      [RESULT_DOMAIN, chainId, cfg.crash, cfg.beacon, roundId, targetDrandRound, filler]
+    ));
+    const residue = BigInt(seed) % 10_000n;
+    const multiplierBps = residue === 0n ? 10_000n : 100_000_000n / (10_000n - residue);
+    if (multiplierBps >= cfg.mockMinCrashBps) return filler;
+  }
+  throw new Error("could not find bounded mock randomness for requested crash floor");
+}
 
 const ORACLE_ABI = ["function update()"];
 const BURN_ENGINE_ABI = [
@@ -195,7 +224,7 @@ export async function tick(
             // standing in for a real drand signature, not a security
             // property; production reads genuine BLS-verified randomness.
             const mock = new Contract(cfg.beacon, MOCK_BEACON_ABI, signer);
-            const filler = hexlify(randomBytes(32));
+            const filler = await mockRandomness(provider, cfg, id, BigInt(r.targetDrandRound));
             await attempt(actions, "mockBeacon.setRandomness", () =>
               mock.setRandomness(r.targetDrandRound, filler)
             );
@@ -344,6 +373,9 @@ async function main() {
       .split(/[\s,]+/).filter(Boolean),
     drandChainHash: process.env.DRAND_CHAIN_HASH?.trim(),
     mockBeacon: process.env.KEEPER_MOCK_BEACON === "1",
+    mockMinCrashBps: process.env.KEEPER_MOCK_MIN_CRASH_BPS
+      ? BigInt(process.env.KEEPER_MOCK_MIN_CRASH_BPS)
+      : undefined,
   };
 
   console.log("casino-keeper: gas-only signer", await signer.getAddress());

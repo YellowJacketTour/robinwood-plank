@@ -156,6 +156,9 @@ test("a playtest commitment always carries its displayed pre-launch lock target"
   );
   assert.match(arcadeSource, /REPEAT&nbsp;/);
   assert.match(arcadeSource, /auto-lock .*armed/);
+  assert.match(arcadeSource, /function betVia\(address game, uint256 amount, uint256 autoCashOutBps\)/);
+  assert.match(arcadeSource, /crash\.placeBet\(committedTargetBps,/);
+  assert.match(arcadeSource, /sessionBank\.betVia\(crash\.target, ethers\.parseEther\(betAmount\), committedTargetBps\)/);
 });
 
 test("multiplier art filters non-finite and regressing samples", () => {
