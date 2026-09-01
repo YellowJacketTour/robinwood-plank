@@ -9,7 +9,7 @@ type Identity = { id: string; displayName: string; isAdmin: boolean };
 type RoomItem = { id: string; joinCode: string; name: string; phase: string; owner: boolean; members: number };
 type Snapshot = {
   serverNow: string;
-  room: { id: string; joinCode: string; name: string; isOwner: boolean; isAdmin: boolean; rulesHash: string; phase: "lobby" | "running" | "settled"; version: string; currentRound: string; commitment: string | null; reveal: string | null; crashBps: string | null; startedAt: string | null; crashAt: string | null };
+  room: { id: string; joinCode: string; name: string; isOwner: boolean; isAdmin: boolean; rulesHash: string; phase: "lobby" | "running" | "settled"; version: string; currentRound: string; commitment: string | null; reveal: string | null; crashBps: string | null; startedAt: string | null; crashAt: string | null; settledAt: string | null; nextLaunchAt: string | null };
   policy: Record<string, string | number>;
   simulation: { iteration: string; protectedPrincipal: string; emissionBuffer: string; lottery: { netPrize: string; highWaterPrize: string; pendingFunding: string; resetReserve: string }; totals: Record<string, string> };
   members: Array<{ id: string; displayName: string; balance: string }>;
@@ -47,6 +47,7 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [receipt, setReceipt] = useState<VisibleCommand | null>(null);
   const [now, setNow] = useState(0);
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const [dismissedResultRound, setDismissedResultRound] = useState<string | null>(null);
   const generation = useRef(0);
 
   const loadRooms = useCallback(async () => {
@@ -172,6 +173,8 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
     return Math.floor(10_000 * Math.exp(LIVE_GROWTH_PER_SECOND * Math.max(0, now + clockOffsetMs - Date.parse(snap.room.startedAt)) / 1_000));
   }, [snap?.room.startedAt, snap?.room.phase, now, clockOffsetMs]);
   const deadlinePassed = Boolean(snap?.room.crashAt && now + clockOffsetMs >= Date.parse(snap.room.crashAt));
+  const nextLaunchMs = snap?.room.nextLaunchAt ? Date.parse(snap.room.nextLaunchAt) - (now + clockOffsetMs) : null;
+  const showResult = Boolean(snap?.room.phase === "settled" && dismissedResultRound !== snap.room.currentRound && (nextLaunchMs === null || nextLaunchMs > 5_000));
   const shownBps = snap ? presentedMultiplierBps({ phase: snap.room.phase, liveBps, crashBps: snap.room.crashBps, deadlinePassed }) : 10_000;
   const freshness = transport === "reconnecting" ? "offline" : connectionState(lastSuccessAt, now);
   const me = snap?.members.find((item) => item.id === identity.id);
@@ -194,6 +197,10 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
             <div className="flex flex-wrap justify-between border-b border-line px-4 py-3 text-xs"><span>Room <b className="font-mono text-gold-300">{snap.room.joinCode}</b></span><span>Round #{snap.room.currentRound} · v{snap.room.version}</span><span>{snap.room.phase.toUpperCase()}</span></div>
             <div className="relative">
               <PlankCrashScene phase={snap.room.phase} liveMultiplier={shownBps / 10_000} crashMultiplier={snap.room.crashBps ? Number(snap.room.crashBps) / 10_000 : null} deadlinePassed={deadlinePassed} />
+              {showResult ? <section role="dialog" aria-label={`Round ${snap.room.currentRound} results`} className="absolute inset-3 z-30 overflow-auto rounded-2xl border border-gold-400 bg-panel-strong/95 p-5 shadow-2xl backdrop-blur sm:inset-8">
+                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-gold-400">Round {snap.room.currentRound} complete</p><h2 className="mt-2 font-display text-3xl text-cream">Crashed at {multi(snap.room.crashBps)}</h2><p className="mt-2 text-sm text-cream-muted">Next flight launches automatically in {Math.max(0, Math.ceil((nextLaunchMs ?? 0) / 1_000))} seconds.</p></div><button type="button" onClick={() => setDismissedResultRound(snap.room.currentRound)} className="min-h-11 rounded border border-line px-4 text-sm">Close</button></div>
+                <div className="mt-5 grid gap-2">{snap.seats.map((resultSeat) => { const net = signedNet(resultSeat.stake, resultSeat.payout); return <div key={resultSeat.userId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-line bg-panel-soft p-3"><div><b>{resultSeat.displayName}</b><p className="text-xs text-cream-muted">{resultSeat.survived ? `Locked ${multi(resultSeat.acceptedTargetBps)}` : "Caught in the crash"}</p></div><div className={`text-right font-mono ${net !== null && net > 0n ? "text-emerald-300" : "text-rose-300"}`}><div>{resultSeat.payout ? credits(resultSeat.payout) : "0"} paid</div><small>{net === null ? "pending" : `${net > 0n ? "+" : ""}${net.toLocaleString()} net`}</small></div></div>; })}</div>
+              </section> : null}
               <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-4 sm:px-6 sm:pb-6">
                 {snap.room.commitment && <p className="mx-auto mb-3 max-w-xl truncate rounded bg-panel-strong px-3 py-2 text-center font-mono text-[10px] text-cream-muted">commit {snap.room.commitment}</p>}
                 <button onClick={() => command("lock")} disabled={Boolean(busy) || snap.room.phase !== "running" || deadlinePassed || Boolean(seat?.acceptedTargetBps) || (receipt?.action === "lock" && receipt.status === "unknown")} className="mx-auto block min-h-20 w-full max-w-xl rounded-xl border-2 border-gold-300 bg-gold-500 px-5 text-2xl font-black uppercase text-wood-950 shadow-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold-300 disabled:opacity-40">{seat?.acceptedTargetBps ? `Locked ${multi(seat.acceptedTargetBps)}` : deadlinePassed ? "Awaiting settlement" : busy === "lock" ? "Sending…" : receipt?.action === "lock" && receipt.status === "unknown" ? "Lock status unknown" : "Lock now"}</button>

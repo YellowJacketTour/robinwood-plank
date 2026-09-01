@@ -27,6 +27,8 @@ type RoomRow = {
   settled_at: Date | null; created_at: Date;
 };
 
+export const PLAYTEST_INTERMISSION_MS = 30_000;
+
 function roomCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = randomBytes(8);
@@ -224,6 +226,9 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         // crash point. It becomes auditable only after settlement.
         crashAt: room.phase === "settled" ? room.crash_at?.toISOString() ?? null : null,
         settledAt: room.settled_at?.toISOString() ?? null,
+        nextLaunchAt: room.settled_at
+          ? new Date(room.settled_at.getTime() + PLAYTEST_INTERMISSION_MS).toISOString()
+          : null,
       },
       policy: room.policy, simulation: room.simulation_state,
       powerboard: {
@@ -333,8 +338,15 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
          auto_lock_enabled=EXCLUDED.auto_lock_enabled, command_id=EXCLUDED.command_id, placed_at=NOW()`,
       [roomId, roundId.toString(), identity.id, stake.toString(), targetBps.toString(), autoLockEnabled, commandId],
     );
-    room.version = String(BigInt(room.version) + 1n); room.current_round = roundId.toString();
-    await client.query(`UPDATE playtest_rooms SET version=$2,current_round=$3,phase='lobby',commitment=NULL,reveal=NULL,crash_bps=NULL,started_at=NULL,crash_at=NULL,settled_at=NULL WHERE id=$1`, [roomId, room.version, room.current_round]);
+    room.version = String(BigInt(room.version) + 1n);
+    if (room.phase === "settled") {
+      // Queue the next-round seat without erasing the conclusion theater.
+      // The authoritative auto-launch advances current_round atomically.
+      await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [roomId, room.version]);
+    } else {
+      room.current_round = roundId.toString();
+      await client.query(`UPDATE playtest_rooms SET version=$2,current_round=$3,phase='lobby',commitment=NULL,reveal=NULL,crash_bps=NULL,started_at=NULL,crash_at=NULL,settled_at=NULL WHERE id=$1`, [roomId, room.version, room.current_round]);
+    }
     // Stake is shared table state; the requested auto-lock is private player
     // strategy until it executes (or the immutable round settles).
     await event(client, room, "bet.accepted", identity.id, commandId, { stake });
@@ -342,12 +354,19 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
   });
 }
 
-export async function startPlaytestRound(identity: PlaytestIdentity, roomId: string, commandId: string) {
+export async function startPlaytestRound(identity: PlaytestIdentity, roomId: string, commandId: string, automated = false) {
   return withPostgresTransaction(async (client) => {
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
-    if (room.owner_user_id !== identity.id && !identity.isAdmin) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can launch.");
+    if (!automated && room.owner_user_id !== identity.id && !identity.isAdmin) throw new PlaytestRoomError(403, "OWNER_ONLY", "Only the room host can launch.");
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
-    if (room.phase !== "lobby" || BigInt(room.current_round) < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a lobby round with bets.");
+    if (room.phase === "running") throw new PlaytestRoomError(409, "NOT_READY", "The current round is already running.");
+    if (automated) {
+      if (room.phase !== "settled" || !room.settled_at) throw new PlaytestRoomError(409, "NOT_READY", "No settled intermission is ready.");
+      if (Date.now() < room.settled_at.getTime() + PLAYTEST_INTERMISSION_MS) throw new PlaytestRoomError(409, "INTERMISSION_ACTIVE", "The 30-second table intermission is still active.");
+    }
+    const launchRound = room.phase === "settled" ? BigInt(room.current_round) + 1n : BigInt(room.current_round);
+    if (launchRound < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a round with bets.");
+    room.current_round = launchRound.toString();
     const policy = parsePolicy(room.policy);
     // An invitation means "join the next flight", not "silently spectate".
     // Seat only humans who arrived after the most recent settlement, and only
@@ -420,8 +439,8 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     room.commitment = commitment; room.reveal = reveal; room.crash_bps = crashBps.toString();
     room.started_at = started; room.crash_at = crashAt;
     await client.query(
-      `UPDATE playtest_rooms SET phase='running',version=$2,commitment=$3,reveal=$4,crash_bps=$5,started_at=$6,crash_at=$7,settled_at=NULL WHERE id=$1`,
-      [roomId, room.version, commitment, reveal, crashBps.toString(), started, crashAt],
+      `UPDATE playtest_rooms SET phase='running',version=$2,current_round=$3,commitment=$4,reveal=$5,crash_bps=$6,started_at=$7,crash_at=$8,settled_at=NULL WHERE id=$1`,
+      [roomId, room.version, room.current_round, commitment, reveal, crashBps.toString(), started, crashAt],
     );
     // Never publish crashAt while the round is live. A deadline is merely the
     // unrevealed crash multiplier expressed in time, so exposing it defeats
@@ -551,13 +570,15 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
 /** Permissionless laboratory keeper. The lottery branch is derived from the
  * already committed round reveal, so a caller cannot choose it after crash. */
 export async function tickPlaytestRound(identity: PlaytestIdentity, roomId: string, commandId: string) {
-  const found = await postgresQuery<{ reveal: string | null }>(
-    `SELECT r.reveal FROM playtest_rooms r
+  const found = await postgresQuery<{ phase: "running" | "settled" | "lobby"; reveal: string | null; settled_at: Date | null }>(
+    `SELECT r.phase,r.reveal,r.settled_at FROM playtest_rooms r
        JOIN playtest_room_members m ON m.room_id=r.id AND m.user_id=$2
       WHERE r.id=$1 AND r.archived_at IS NULL`, [roomId, identity.id],
   );
-  const reveal = found.rows[0]?.reveal;
-  if (!reveal) throw new PlaytestRoomError(409, "NOT_RUNNING", "No committed round can be ticked.");
+  const row = found.rows[0];
+  if (row?.phase === "settled") return startPlaytestRound(identity, roomId, commandId, true);
+  const reveal = row?.reveal;
+  if (!reveal || row?.phase !== "running") throw new PlaytestRoomError(409, "NOT_RUNNING", "No committed round can be ticked.");
   const draw = powerboardRoundDraw(reveal);
   const outcome: LotteryOutcome = draw.rawHit ? "hit" : "miss";
   return settlePlaytestRound(identity, roomId, commandId, outcome, false);
@@ -623,7 +644,8 @@ export async function adjustPlaytestCredit(identity: PlaytestIdentity, roomId: s
 export async function playtestRoomPollState(identity: PlaytestIdentity, roomId: string): Promise<{ version: string; due: boolean }> {
   const result = await postgresQuery<{ version: string; due: boolean }>(
     `SELECT r.version::text,
-            (r.phase='running' AND r.crash_at IS NOT NULL AND r.crash_at<=NOW()) AS due
+            ((r.phase='running' AND r.crash_at IS NOT NULL AND r.crash_at<=NOW()) OR
+             (r.phase='settled' AND r.settled_at IS NOT NULL AND r.settled_at + INTERVAL '30 seconds'<=NOW())) AS due
        FROM playtest_rooms r
        JOIN playtest_room_members m ON m.room_id=r.id AND m.user_id=$2
       WHERE r.id=$1 AND r.archived_at IS NULL`, [roomId, identity.id],

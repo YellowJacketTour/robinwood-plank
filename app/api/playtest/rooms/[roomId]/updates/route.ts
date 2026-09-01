@@ -39,7 +39,7 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
         // crashAt nor a "due" bit. Concurrent workers safely converge through
         // the room row lock and idempotent settlement transaction.
         try { await tickPlaytestRound(identity, roomId, randomUUID()); } catch (error) {
-          if (!(error instanceof PlaytestRoomError) || !["ROUND_ACTIVE", "NOT_RUNNING"].includes(error.code)) throw error;
+          if (!(error instanceof PlaytestRoomError) || !["ROUND_ACTIVE", "NOT_RUNNING", "NOT_READY", "INTERMISSION_ACTIVE", "MINIMUM_PLAYERS"].includes(error.code)) throw error;
         }
         state = await playtestRoomPollState(identity, roomId);
         if (state.version !== after) break;
