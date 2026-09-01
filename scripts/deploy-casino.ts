@@ -86,7 +86,7 @@ async function main() {
   // ── Ratified economics (overridable) ───────────────────────────────
   const RAKE_BPS = envBig("CASINO_RAKE_BPS", 450n); // 4.5% total
   const KEEPER_REWARD_BPS = envBig("CASINO_KEEPER_REWARD_BPS", 0n); // dev-run keeper
-  const BURN_BPS = envBig("CASINO_BURN_BPS", 2000n); // 20% of rake = 0.9% of pool
+  const BURN_BPS = envBig("CASINO_BURN_BPS", 4000n); // 40% of net rake; founder receives the 20% remainder
   const AIRDROP_BPS = envBig("CASINO_AIRDROP_BPS", 4000n); // 40% of rake = 1.8% of pool
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
 

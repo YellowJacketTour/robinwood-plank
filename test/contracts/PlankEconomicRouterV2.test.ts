@@ -19,7 +19,7 @@ describe("PlankEconomicRouterV2", function () {
 
     const keeperAmount = (gross * 100n) / 10_000n;
     const net = gross - keeperAmount;
-    const burnAmount = (net * 2_000n) / 10_000n;
+    const burnAmount = (net * 4_000n) / 10_000n;
     const communityAmount = (net * 4_000n) / 10_000n;
     const foundersAmount = net - burnAmount - communityAmount;
     expect(await router.keeperEscrow(keeper.address)).to.equal(keeperAmount);
@@ -47,10 +47,10 @@ describe("PlankEconomicRouterV2", function () {
     const Factory = await ethers.getContractFactory("PlankEconomicRouterV2");
     const router = await Factory.deploy(burn.address, community.address, founders.address, [source.address], 0, rulesHash);
     await router.connect(source).routeRake(ethers.ZeroAddress, { value: 10_000n });
-    await expect(() => router.claimBurn()).to.changeEtherBalance(ethers, burn, 2_000n);
-    expect(await router.accountedBalance()).to.equal(8_000n);
+    await expect(() => router.claimBurn()).to.changeEtherBalance(ethers, burn, 4_000n);
+    expect(await router.accountedBalance()).to.equal(6_000n);
     await expect(() => router.claimCommunity()).to.changeEtherBalance(ethers, community, 4_000n);
-    await expect(() => router.claimFounders()).to.changeEtherBalance(ethers, founders, 4_000n);
+    await expect(() => router.claimFounders()).to.changeEtherBalance(ethers, founders, 2_000n);
     expect(await router.accountedBalance()).to.equal(0n);
   });
 });

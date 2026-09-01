@@ -370,7 +370,7 @@ export function simulateIteration(
 
     // Powerboard is a subdivision of the existing community allocation, not
     // a new rake or an unbacked liability. This makes its funding visible on
-    // every qualified game without changing the ratified 20/40/40 split.
+    // every qualified game without changing the ratified 40/40/20 split.
     const powerboardFunding = (split.community * policy.powerboardFundingBps) / BPS;
     state.lottery.pendingFunding += powerboardFunding;
     state.totals.powerboardFunded += powerboardFunding;

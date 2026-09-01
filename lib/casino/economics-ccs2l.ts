@@ -36,7 +36,7 @@
  * NO SURVIVOR — the separately-ratified busted-round allocation: the whole
  * distributable returns to the reserve.
  *
- * The 20/40/40 ratified split applies ONLY to actual rake; there is no
+ * The 40/40/20 ratified split applies ONLY to actual rake; there is no
  * player-pot cap residue in this rule, structurally.
  */
 

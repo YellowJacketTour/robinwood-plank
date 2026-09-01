@@ -405,8 +405,10 @@
      the character for attention. */
   .mult-graph {
     position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%);
-    z-index: 12; width: min(620px, 86vw); height: 112px; pointer-events: none; opacity: 1;
-    border-bottom: 1px solid rgba(255, 200, 87, .32);
+    z-index: 12; width: min(680px, 88vw); height: 132px; pointer-events: none; opacity: 1;
+    border-left: 1px solid rgba(255, 200, 87, .18);
+    border-bottom: 1px solid rgba(255, 200, 87, .38);
+    background: repeating-linear-gradient(0deg,transparent 0 31px,rgba(255,255,255,.035) 32px),repeating-linear-gradient(90deg,transparent 0 84px,rgba(255,255,255,.035) 85px);
     filter: drop-shadow(0 0 7px rgba(255, 200, 87, .72));
   }
 
@@ -434,6 +436,8 @@
   }
   .chip.active { border-color: var(--accent); color: var(--ink); background: rgba(255,90,60,0.1); }
   .chip:disabled { opacity: 0.35; cursor: default; }
+  .stake-value-quote{min-height:22px;margin:-5px auto 9px;text-align:center;color:#b8c5bf;font:700 11px/1.35 var(--font-mono);letter-spacing:.02em}
+  .stake-value-quote b{color:var(--gold);font-size:12px}.stake-value-quote span{color:#72e5ad}
 
   .primary-btn {
     width: 100%; max-width: 520px; margin: 0 auto; display: block;
@@ -744,6 +748,7 @@
       <button class="chip" data-amt="0.05">0.05</button>
       <button class="chip" data-amt="0.1">0.10</button>
     </div>
+    <div class="stake-value-quote" id="stakeValueQuote" aria-live="polite"></div>
     <div class="stake-row" id="autoRow" style="opacity:.55">
       <button class="chip" id="autoToggle" title="Repeat this stake and target automatically in future rounds">REPEAT&nbsp;▶</button>
       <span style="display:flex;align-items:center;gap:6px;font:600 13px/1 inherit;color:var(--muted,#9aa7bd);letter-spacing:.02em">
@@ -1062,6 +1067,23 @@ const PAD_REST_Y = -4.6;
 const padGroup = new THREE.Group();
 
 const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: 0.55, metalness: 0.6 });
+// Wide concrete apron and illuminated perimeter restore the readable
+// launch-site silhouette at phone and desktop framing. The operational
+// deck remains raised above it, so this reads as one complete complex—not
+// a floating disc or an isolated gantry.
+const apron = new THREE.Mesh(
+  new THREE.CylinderGeometry(6.2, 6.5, 0.28, 32),
+  new THREE.MeshStandardMaterial({ color: 0x252c35, roughness: 0.82, metalness: 0.18 })
+);
+apron.position.y = -0.38;
+padGroup.add(apron);
+const perimeter = new THREE.Mesh(
+  new THREE.RingGeometry(5.45, 5.72, 48),
+  new THREE.MeshBasicMaterial({ color: 0x4fc9ff, transparent:true, opacity:.68, side:THREE.DoubleSide })
+);
+perimeter.rotation.x = -Math.PI / 2;
+perimeter.position.y = -0.21;
+padGroup.add(perimeter);
 const deck = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.9, 0.5, 8), deckMat);
 padGroup.add(deck);
 
@@ -1154,6 +1176,7 @@ padGroup.add(towerGroup);
 // astronaut, so it visibly stands on and launches from a real pad. The
 // fade-out in frame() anchors to this same PAD_REST_Y.
 padGroup.position.set(0, PAD_REST_Y, 0);
+padGroup.scale.setScalar(1.12);
 scene.add(padGroup);
 
 // ── satellites: real geometry with metal/roughness PBR values so the sun
@@ -2400,13 +2423,31 @@ function drawMultGraph() {
   }
   if (samples.length < 2) return;
 
-  const maxX = Math.max(2, samples[samples.length - 1].x * 1.08);
+  const maxX = Math.max(2, samples[samples.length - 1].x * 1.14);
   const startTime=samples[0].t,endTime=Math.max(startTime+1,samples[samples.length-1].t);
+  // Keep a real time horizon ahead of the live trace. Scaling every frame
+  // from first sample to newest made the path occupy the full canvas from
+  // the instant of launch, so it looked like a static finished chart. The
+  // endpoint now travels across the plot in real time; the horizon expands
+  // in stable ten-second bands for unusually long flights.
+  const elapsedMs = endTime - startTime;
+  const horizonMs = Math.max(12_000, Math.ceil((elapsedMs + 2_000) / 10_000) * 10_000);
   const pad = 6;
   const toXY = (sample) => [
-    pad + ((sample.t-startTime)/(endTime-startTime)) * (w - pad * 2),
+    pad + Math.min(1, (sample.t-startTime)/horizonMs) * (w - pad * 2),
     h - pad - ((sample.x - 1) / (maxX - 1)) * (h - pad * 2),
   ];
+
+  const area = multGraphCtx.createLinearGradient(0, 0, 0, h);
+  area.addColorStop(0, "rgba(255,200,87,.24)");
+  area.addColorStop(1, "rgba(255,200,87,0)");
+  multGraphCtx.beginPath();
+  const [firstX, firstY] = toXY(samples[0]);
+  multGraphCtx.moveTo(firstX, h - pad); multGraphCtx.lineTo(firstX, firstY);
+  for (let i = 1; i < samples.length; i++) { const [x,y] = toXY(samples[i]); multGraphCtx.lineTo(x,y); }
+  const [areaEndX] = toXY(samples[samples.length - 1]);
+  multGraphCtx.lineTo(areaEndX, h - pad); multGraphCtx.closePath();
+  multGraphCtx.fillStyle = area; multGraphCtx.fill();
 
   multGraphCtx.lineWidth = 4;
   multGraphCtx.lineJoin = "round";
@@ -2508,6 +2549,7 @@ document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
     document.querySelectorAll(".chip[data-amt]").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     betAmount = chip.dataset.amt;
+    paintPrivateStakeQuote();
     // Real bug: this set betAmount correctly, but nothing re-rendered the
     // primary button's own "LAUNCH · 0.01 ETH" text -- it only picked up
     // the new amount on the NEXT poll (previously up to 1.2s, now up to
@@ -4743,6 +4785,17 @@ function privateCreditUsd(value) {
   } catch { return "—"; }
 }
 
+function paintPrivateStakeQuote() {
+  const target = $("stakeValueQuote");
+  if (!target || !PLAYTEST_MODE) return;
+  const credits = BigInt(Math.max(1, Math.round(Number(betAmount) * 1_000_000)));
+  const eth = Number(credits) / Number(PRIVATE_CREDITS_PER_ETH);
+  const ethLabel = eth < .001 ? eth.toFixed(4) : eth.toFixed(3);
+  const usd = privateEthUsd > 0 ? ` <span>≈ ${privateCreditUsd(credits)}</span>` : " <span>USD quote loading…</span>";
+  target.innerHTML = `<b>${privateCredits(credits)} CREDITS</b> = ${ethLabel} ETH${usd}`;
+  target.title = "Display reference only. Settlement uses exact integer test credits; market price never enters game math.";
+}
+
 function paintPrivateCreditQuote() {
   const quote = $("creditQuote"); if (!quote || !PLAYTEST_MODE) return;
   quote.textContent = privateEthUsd > 0 ? `~${privateCreditUsd(PRIVATE_CREDITS_PER_ETH)} / 1M cr` : "unavailable";
@@ -4855,6 +4908,7 @@ function renderPrivateRoster(snapshot) {
     row.append(identity, result);
     board.appendChild(row);
   }
+  paintPrivateStakeQuote();
 }
 
 function celebratePrivateJackpot() {
@@ -5632,6 +5686,7 @@ async function startPrivatePlaytest() {
     chip.textContent = credits >= 1000 ? `${credits / 1000}K` : index === 0 ? `$1 MIN · ${credits}` : String(credits);
   });
   betAmount = "0.0005";
+  paintPrivateStakeQuote();
   $("primaryBtn").textContent = "CONNECTING TO PRIVATE TABLE…";
   $("btnSub").textContent = "No wallet · no value · authoritative multiplayer simulation";
   await refreshPrivatePlaytest();

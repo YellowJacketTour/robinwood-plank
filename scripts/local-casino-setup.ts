@@ -88,7 +88,7 @@ async function main() {
 
   // ── Split of that rake (bps of the rake, must sum to <= 10000) ─────
   // 1.8 / 1.8 / 0.9 points of the pool -> 40% / 40% / 20% of the rake.
-  const BURN_BPS = 2000n; // 20% of rake = 0.9% of pool -> buys + burns $PLANK
+  const BURN_BPS = 4000n; // 40% burn / 40% community / 20% founder
   const AIRDROP_BPS = 4000n; // 40% of rake = 1.8% of pool -> the rolling community jackpot
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
   const BURN_KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)

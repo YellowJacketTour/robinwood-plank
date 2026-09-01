@@ -164,7 +164,7 @@ test("multiplier art filters non-finite and regressing samples", () => {
     /function recordMultGraphSample\(value, at = performance\.now\(\)\)/
   );
   assert.match(arcadeSource, /Math\.max\(1, x, prior\?\.x \|\| 1\)/);
-  assert.match(arcadeSource, /\(sample\.t-startTime\)\/\(endTime-startTime\)/);
+  assert.match(arcadeSource, /\(sample\.t-startTime\)\/horizonMs/);
   assert.match(
     arcadeSource,
     /reconstructPrivateMultGraph\(snapshot, liveBps, receivedPerfMs\)/
@@ -222,6 +222,17 @@ test("public alpha exposes the dollar-reference floor and permanent RTP evolutio
   assert.match(arcadeSource, /snapshot\.evolution\?\.effectiveRakeBps/);
   assert.match(arcadeSource, /Wallet count never advances this meter/);
   assert.match(arcadeSource, /topbar \.stats>span:not\(\.vault-stat\):not\(\.pb-stat\):not\(\.rank-stat\)/);
+  assert.match(arcadeSource, /id="stakeValueQuote"/);
+  assert.match(arcadeSource, /CREDITS<\/b> = \$\{ethLabel\} ETH/);
+  assert.match(arcadeSource, /paintPrivateStakeQuote\(\)/);
+});
+
+test("the live curve advances across a stable time horizon and the launch complex is complete", () => {
+  assert.match(arcadeSource, /const horizonMs = Math\.max\(12_000/);
+  assert.match(arcadeSource, /Math\.min\(1, \(sample\.t-startTime\)\/horizonMs\)/);
+  assert.match(arcadeSource, /createLinearGradient\(0, 0, 0, h\)/);
+  assert.match(arcadeSource, /new THREE\.CylinderGeometry\(6\.2, 6\.5, 0\.28, 32\)/);
+  assert.match(arcadeSource, /new THREE\.RingGeometry\(5\.45, 5\.72, 48\)/);
 });
 
 test("the marketing deck is a responsive visual system map rather than a prose brief", () => {
@@ -231,6 +242,9 @@ test("the marketing deck is a responsive visual system map rather than a prose b
   assert.equal((mechanicsDeckSource.match(/class="ball(?: win)?"/g) || []).length, 16);
   assert.match(mechanicsDeckSource, /@media\(max-width:440px\)/);
   assert.match(mechanicsDeckSource, /grid-template-columns:repeat\(8,1fr\)/);
+  assert.match(mechanicsDeckSource, />40 BURN</);
+  assert.match(mechanicsDeckSource, />40 BOARD</);
+  assert.match(mechanicsDeckSource, />20 FOUNDER</);
 });
 
 test("returning invitees can choose login and rejoin the invited room in one action", () => {

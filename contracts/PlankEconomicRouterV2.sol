@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// mutated or imported.
 contract PlankEconomicRouterV2 is ReentrancyGuard {
     uint256 private constant BPS = 10_000;
-    uint256 public constant BURN_BPS = 2_000;
+    uint256 public constant BURN_BPS = 4_000;
     uint256 public constant COMMUNITY_BPS = 4_000;
     uint256 public constant MAX_KEEPER_BPS = 500;
 

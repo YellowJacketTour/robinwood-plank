@@ -27,7 +27,7 @@ export type AllocationRule = "stake-multiplier" | "stake-only" | "pfss" | "ccs-2
 //   sum(houseBonus) + houseReturned == seed EXACTLY
 //   house layer is PARTITION-INVARIANT (global reserve cap + linear caps only)
 //   treasury receives ZERO player-pot cap residue (structural)
-//   houseReturned -> protected reserve; ratified 20/40/40 applies to rake only.
+//   houseReturned -> protected reserve; ratified 40/40/20 applies to rake only.
 
 export interface Seat {
   id: string;
@@ -172,13 +172,13 @@ export function roundEconomics(seed: bigint, stakes: readonly bigint[], rakeBps:
   return { seed, playerPool, gross, rake: playerPool - playerDistributable, distributable };
 }
 
-/** Ratified one-pass 20/40/40 split of net player rake. */
+/** Ratified one-pass 40% burn / 40% community / 20% founder split of net player rake. */
 export function ratifiedRakeSplit(grossRake: bigint, keeperRewardBps = 0n) {
   if (grossRake < 0n) throw new RangeError("negative rake");
   if (keeperRewardBps < 0n || keeperRewardBps > BPS) throw new RangeError("invalid keeper reward");
   const keeper = (grossRake * keeperRewardBps) / BPS;
   const netRake = grossRake - keeper;
-  const burn = (netRake * 2_000n) / BPS;
+  const burn = (netRake * 4_000n) / BPS;
   const community = (netRake * 4_000n) / BPS;
   const founders = netRake - burn - community;
   return { grossRake, keeper, netRake, burn, community, founders };
