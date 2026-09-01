@@ -1,0 +1,17 @@
+{
+  "generated": "2026-08-31",
+  "sha256": {
+    "docs/marketplank/sim-settlement-ccs/engine.mjs": "8759bb851fbb3865d27314f6f97a2659b5e44e7bdf9f849d73e88e483f82f170",
+    "docs/marketplank/sim-settlement-ccs/run.mjs": "7f96a552d0662b83c304b73e82c3b19918958eff2c20e25bc9f9bcbedb5eede3",
+    "docs/marketplank/sim-settlement-ccs/replay.mjs": "56a71a688258fbd93c66adceea1239f5d4a7329d78b79fb73cf2701b15b254d9",
+    "docs/marketplank/sim-settlement-ccs/campaign.mjs": "c22aa607a991d082866d9b99277749252726542e156612dd9a2d7f0735157719",
+    "docs/marketplank/sim-settlement-ccs/results.md": "3a713a8cc5362f2f5f3b897aae48a3f0c80e584a43a82b8b1d00efc27cc16747",
+    "docs/marketplank/sim-settlement-ccs/results.json": "1f14183ba2da20ce00006da2fefa3bf32d749f70f757e70e92c75f55be233608",
+    "docs/marketplank/sim-settlement-ccs/campaign-200k.json": "4abe6422c1bac3b13d20fefa9df71d178986f9a97de764a592563998d2ddeb52",
+    "docs/marketplank/sim-settlement-ccs/campaign-2m.json": "fe669e8f0619cf938878a057e388bac0781a30cbbb6c5d6ac82aeebd725219fb",
+    "docs/marketplank/sim-settlement-ccs/campaign-2m-seed777.json": "dcc95db680aa38644a4a594fbab82e7fe1c37493e531c8456eab271ac1521b6a",
+    "contracts/test/PlankCcsSettlement.sol": "48fec474e31bb4720e7df9465db7c1f74772956fc7fa79ff84dcd230c1a0ea03",
+    "test/contracts/PlankCcsSettlement.test.ts": "44dbe1c4a1637021bdf1a7d37a87a007d8289bbbe95be29c2da7226ff629e03c",
+    "../robinwood-plank-crash/docs/marketplank/DESIGN-PLANKCRASH-CONTINUOUS-CAPPED-SETTLEMENT-2026-08-31.md": "1f98d9b97121e8cf0432680e905c298ad08905c38cc56577b973cfd942c46c48"
+  }
+}

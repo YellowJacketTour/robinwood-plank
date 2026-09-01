@@ -1,0 +1,70 @@
+{
+  "rounds": 200000,
+  "seed": "20260831",
+  "elapsedMs": 9567,
+  "solvencyFailures": 0,
+  "modes": {
+    "interior": 73824,
+    "cap-excess": 95414,
+    "floor-scaled": 0,
+    "all-bust": 30762
+  },
+  "flows": {
+    "rakeTotalWei": "42134740891581689636753",
+    "vaultDustWei": "144789752156941246744913",
+    "maxSingleRoundInteriorDustWei": "95247345",
+    "capExcessWei": "399449900232622758349621",
+    "capExcessSplit": {
+      "burnWei": "79889980046524551631819",
+      "communityWei": "159779960093049103301775",
+      "foundersWei": "159779960093049103416027"
+    }
+  },
+  "perStrategy": {
+    "early": {
+      "seats": 540405,
+      "survivalRate": 0.8043467399450412,
+      "stakedWei": "537520000958157012384306",
+      "paidWei": "474156334672553106016561",
+      "rtp": 0.882118,
+      "lifetimesCompleted": 400,
+      "ruinProbabilityPer1000Bets": 0
+    },
+    "mid": {
+      "seats": 539643,
+      "survivalRate": 0.3057206338264371,
+      "stakedWei": "224855389958893039140711",
+      "paidWei": "107051321248928004495208",
+      "rtp": 0.476089,
+      "lifetimesCompleted": 800,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "greedy": {
+      "seats": 541755,
+      "survivalRate": 0.05085693717639893,
+      "stakedWei": "218166611304597122847346",
+      "paidWei": "17025585450927408498641",
+      "rtp": 0.078039,
+      "lifetimesCompleted": 1645,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "mixed": {
+      "seats": 541428,
+      "survivalRate": 0.3861880065308776,
+      "stakedWei": "227610176544290637682865",
+      "paidWei": "108424138267772466110939",
+      "rtp": 0.476358,
+      "lifetimesCompleted": 802,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "adversarial": {
+      "seats": 541223,
+      "survivalRate": 0.39660361810196537,
+      "stakedWei": "196339184286785172546501",
+      "paidWei": "113456190131396304749093",
+      "rtp": 0.577858,
+      "lifetimesCompleted": 476,
+      "ruinProbabilityPer1000Bets": 1
+    }
+  }
+}

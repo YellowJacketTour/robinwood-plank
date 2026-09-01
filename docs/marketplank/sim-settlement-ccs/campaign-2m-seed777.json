@@ -1,0 +1,70 @@
+{
+  "rounds": 2000000,
+  "seed": "777",
+  "elapsedMs": 93589,
+  "solvencyFailures": 0,
+  "modes": {
+    "interior": 695066,
+    "cap-excess": 996027,
+    "floor-scaled": 0,
+    "all-bust": 308907
+  },
+  "flows": {
+    "rakeTotalWei": "375318352962555986902368",
+    "vaultDustWei": "1312157380347001042939337",
+    "maxSingleRoundInteriorDustWei": "99383361",
+    "capExcessWei": "3648930881122787518014733",
+    "capExcessSplit": {
+      "burnWei": "729786176224557503204582",
+      "communityWei": "1459572352449115006807700",
+      "foundersWei": "1459572352449115008002451"
+    }
+  },
+  "perStrategy": {
+    "early": {
+      "seats": 5394735,
+      "survivalRate": 0.8042734258494625,
+      "stakedWei": "4545727990406569690974754",
+      "paidWei": "4029411602766796229292595",
+      "rtp": 0.886417,
+      "lifetimesCompleted": 5200,
+      "ruinProbabilityPer1000Bets": 0
+    },
+    "mid": {
+      "seats": 5399724,
+      "survivalRate": 0.3055609879319758,
+      "stakedWei": "1928952658573398700215035",
+      "paidWei": "899890729820441200170013",
+      "rtp": 0.466517,
+      "lifetimesCompleted": 9950,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "greedy": {
+      "seats": 5400322,
+      "survivalRate": 0.05134027193193295,
+      "stakedWei": "2095296876747535441368702",
+      "paidWei": "159073020244110182810349",
+      "rtp": 0.075919,
+      "lifetimesCompleted": 19022,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "mixed": {
+      "seats": 5401236,
+      "survivalRate": 0.3872487704666117,
+      "stakedWei": "2054996133839840919830037",
+      "paidWei": "983737153786203640986712",
+      "rtp": 0.478705,
+      "lifetimesCompleted": 10367,
+      "ruinProbabilityPer1000Bets": 1
+    },
+    "adversarial": {
+      "seats": 5399425,
+      "survivalRate": 0.3979738583275071,
+      "stakedWei": "1885638105851188111398062",
+      "paidWei": "1122084794368637062670483",
+      "rtp": 0.595069,
+      "lifetimesCompleted": 7286,
+      "ruinProbabilityPer1000Bets": 0.9993137524018666
+    }
+  }
+}
