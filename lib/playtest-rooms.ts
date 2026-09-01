@@ -386,8 +386,23 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     let policy = parsePolicy(room.policy);
     // The public laboratory advances legacy tables at the round boundary,
     // never mid-flight. Historical rounds retain their committed descriptor.
-    if (policy.allocationRule !== "ccs-2l") {
-      policy = { ...policy, allocationRule: "ccs-2l" };
+    const legacyPrizeProfile = policy.powerboardFundingBps === 2_500n
+      && policy.lotteryInitialBase === 100_000n
+      && policy.lotteryMinimumIncrease === 1_000n
+      && policy.lotteryBaseGrowthBps === 100n
+      && policy.lotteryMinimumBaseStep === 1_000n;
+    if (policy.allocationRule !== "ccs-2l" || legacyPrizeProfile) {
+      policy = {
+        ...policy,
+        allocationRule: "ccs-2l",
+        ...(legacyPrizeProfile ? {
+          powerboardFundingBps: DEFAULT_PLAYTEST_POLICY.powerboardFundingBps,
+          lotteryInitialBase: DEFAULT_PLAYTEST_POLICY.lotteryInitialBase,
+          lotteryMinimumIncrease: DEFAULT_PLAYTEST_POLICY.lotteryMinimumIncrease,
+          lotteryBaseGrowthBps: DEFAULT_PLAYTEST_POLICY.lotteryBaseGrowthBps,
+          lotteryMinimumBaseStep: DEFAULT_PLAYTEST_POLICY.lotteryMinimumBaseStep,
+        } : {}),
+      };
       validatePolicy(policy);
       room.policy = serializeBigInts(policy);
       room.rules_hash = playtestRulesHash(policy);

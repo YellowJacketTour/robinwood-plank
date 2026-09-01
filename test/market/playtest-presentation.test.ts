@@ -166,6 +166,8 @@ test("multiplier art filters non-finite and regressing samples", () => {
     /reconstructPrivateMultGraph\(snapshot, liveBps, receivedPerfMs\)/
   );
   assert.match(arcadeSource, /Math\.exp\(0\.22 \* seconds\)/);
+  assert.match(arcadeSource, /privateGraphNextPaintAt = liveGraphNow \+ 50/);
+  assert.match(arcadeSource, /reconstructPrivateMultGraph\(privateSnapshot, estBps, liveGraphNow\)/);
   assert.match(arcadeSource, /privateGraphRound !== roundKey/);
 });
 

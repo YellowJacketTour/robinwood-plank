@@ -405,7 +405,9 @@
      the character for attention. */
   .mult-graph {
     position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%);
-    width: min(560px, 86vw); height: 90px; pointer-events: none; opacity: 0.85;
+    z-index: 12; width: min(620px, 86vw); height: 112px; pointer-events: none; opacity: 1;
+    border-bottom: 1px solid rgba(255, 200, 87, .32);
+    filter: drop-shadow(0 0 7px rgba(255, 200, 87, .72));
   }
 
   /* ── bottom control deck ─────────────────────────────────────────── */
@@ -1937,6 +1939,11 @@ function frame() {
     const estBps = PLAYTEST_MODE && privateSnapshot?.room.phase === "running"
       ? privateLiveClock.sample(performance.now())
       : multiplierAtBlocksBps(estElapsedBlocks);
+    const liveGraphNow = performance.now();
+    if (PLAYTEST_MODE && privateSnapshot?.room.phase === "running" && liveGraphNow >= privateGraphNextPaintAt) {
+      privateGraphNextPaintAt = liveGraphNow + 50;
+      reconstructPrivateMultGraph(privateSnapshot, estBps, liveGraphNow);
+    }
     const xStr = bpsToXStr(estBps);
     lastMult = Number(xStr);
     setMultReadout(xStr, "live");
@@ -2336,6 +2343,7 @@ let bettingEndsAtEstimateMs = null;
 // convention: a rising stock-ticker-style curve for the live round, and an
 // always-visible strip of recent real crash points) ─────────────────────
 let multGraphSamples = [];
+let privateGraphNextPaintAt = 0;
 const multGraphCanvas = $("multGraph");
 const multGraphCtx = multGraphCanvas.getContext("2d");
 
@@ -2353,13 +2361,12 @@ function clearMultGraph() {
   multGraphCtx.clearRect(0, 0, rect.width, rect.height);
 }
 
-// Cool-to-warm color for a given multiplier, matching every real crash
-// game's line-graph convention (blue at 1.0x trending gold/red as it climbs).
+// Gold-to-red contrast remains legible across both the pale and deep-blue sky.
 function multGraphColor(x) {
   const t = Math.max(0, Math.min(1, (x - 1) / 6));
-  const r = Math.round(80 + t * 175);
-  const g = Math.round(160 - t * 60);
-  const b = Math.round(255 - t * 220);
+  const r = 255;
+  const g = Math.round(210 - t * 135);
+  const b = Math.round(80 - t * 20);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -2401,9 +2408,11 @@ function drawMultGraph() {
     h - pad - ((sample.x - 1) / (maxX - 1)) * (h - pad * 2),
   ];
 
-  multGraphCtx.lineWidth = 3;
+  multGraphCtx.lineWidth = 4;
   multGraphCtx.lineJoin = "round";
   multGraphCtx.lineCap = "round";
+  multGraphCtx.shadowBlur = 8;
+  multGraphCtx.shadowColor = "rgba(255, 200, 87, .68)";
   for (let i = 1; i < samples.length; i++) {
     const [x0, y0] = toXY(samples[i - 1]);
     const [x1, y1] = toXY(samples[i]);
@@ -4857,7 +4866,7 @@ function reconstructPrivateMultGraph(snapshot, endBps, receivedPerfMs) {
   const startedMs = Date.parse(snapshot.room.startedAt || "");
   const endWallMs = snapshot.room.phase === "settled"
     ? Date.parse(snapshot.room.crashAt || snapshot.serverNow)
-    : Date.parse(snapshot.serverNow);
+    : Date.now() + privateServerOffsetMs;
   if (!Number.isFinite(startedMs) || !Number.isFinite(endWallMs) || endWallMs < startedMs) return;
   const durationSeconds = Math.max(0, (endWallMs - startedMs) / 1000);
   const endX = Math.max(1, Number(endBps || 10000) / 10000);

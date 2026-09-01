@@ -167,11 +167,12 @@ export function initialSimulationState(policy: SimulationPolicy): SimulationStat
 }
 
 function nextCycleBase(base: bigint, policy: SimulationPolicy): bigint {
-  const percentageStep = (base * policy.lotteryBaseGrowthBps) / BPS;
+  const effectiveBase = base > policy.lotteryInitialBase ? base : policy.lotteryInitialBase;
+  const percentageStep = (effectiveBase * policy.lotteryBaseGrowthBps) / BPS;
   const step = percentageStep > policy.lotteryMinimumBaseStep
     ? percentageStep
     : policy.lotteryMinimumBaseStep;
-  return base + step;
+  return effectiveBase + step;
 }
 
 function sealFromFunding(state: SimulationState, policy: SimulationPolicy): boolean {
@@ -228,7 +229,11 @@ function applyLotteryOutcome(
       : state.lottery.netPrize;
     state.totals.consolationPayouts += consolation;
     state.lottery.rollover = state.lottery.netPrize - consolation;
-    state.lottery.nextPrizeTarget = state.lottery.netPrize + policy.lotteryMinimumIncrease;
+    const rolloverTarget = state.lottery.netPrize + policy.lotteryMinimumIncrease;
+    const progressiveTarget = nextCycleBase(state.lottery.cycleBase, policy);
+    state.lottery.nextPrizeTarget = rolloverTarget > progressiveTarget
+      ? rolloverTarget
+      : progressiveTarget;
     state.lottery.netPrize = 0n;
     state.lottery.awaitingSeal = true;
     state.lottery.readyForDraw = false;
