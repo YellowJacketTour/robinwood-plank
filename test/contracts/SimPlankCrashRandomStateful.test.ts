@@ -85,6 +85,13 @@ async function deployPair(kind: "baseline" | "v2") {
     dailyDrawdownBps: cfg.dailyDrawdownBps, hwmDrawdownBps: cfg.hwmDrawdownBps,
     maxMultiplierBps: cfg.maxMultiplierBps, registrationWindowBlocks: BigInt(REG),
     seedBootstrapBudgetWei: cfg.seedBootstrapBudgetWei,
+    ...(kind === "baseline" ? {
+      resultSeedContext: {
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        crashAddress: await crash.getAddress(),
+        beaconAddress: await beacon.getAddress(),
+      },
+    } : {}),
   };
   // CANONICAL BRANCH: the real PlankCrashDrand now carries pendingOverflow, so BOTH the "baseline"
   // (canonical contract) and the proto are modeled by EngineV2. Phase 1 is now a live differential
@@ -281,7 +288,11 @@ async function randomWalk(ctx: any, seed: number, steps: number) {
           model.revealEntropy(id, BigInt(rnd), deployer.address);
         },
       });
-      if (rng() < 0.5) {
+      // The production contract deliberately has no timeout-void path: a
+      // drand result never expires and remains permissionlessly revealable.
+      // The test-only V2 prototype retains the old action solely for its
+      // pre-production state-machine coverage.
+      if (kind === "v2" && rng() < 0.5) {
         actions.push({
           name: "voidStale",
           run: async () => {

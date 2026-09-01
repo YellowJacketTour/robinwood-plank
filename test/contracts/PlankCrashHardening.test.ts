@@ -77,9 +77,12 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
   /// Finds a randomness value whose crash point is >= 1 block (so a 1.0001x
   /// auto target wins) and <= the cap -- deterministic per label.
   async function winnableRandomness(crash: any, label: string) {
+    const rid: bigint = await crash.currentRoundId();
+    const round = await crash.rounds(rid);
     for (let i = 0; i < 50; i++) {
       const v = ethers.keccak256(ethers.toUtf8Bytes(`${label}-${i}`));
-      const [, elapsed] = await crash._deriveCrash(v);
+      const resultSeed = await crash.resultSeed(rid, round.targetDrandRound, v);
+      const [, elapsed] = await crash._deriveCrash(resultSeed);
       if (elapsed >= 1n && elapsed <= BigInt(MAX_ELAPSED)) return v;
     }
     throw new Error("no winnable randomness found");
@@ -91,6 +94,13 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     if (r.revealNotBefore > now) await networkHelpers.time.increaseTo(r.revealNotBefore);
     await beacon.setRandomness(r.targetDrandRound, randomness);
     await (signer ? crash.connect(signer) : crash).revealEntropy(rid);
+  }
+
+  async function elapsedForRandomness(crash: any, rid: bigint, randomness: string) {
+    const round = await crash.rounds(rid);
+    const seed = await crash.resultSeed(rid, round.targetDrandRound, randomness);
+    const [, elapsed] = await crash._deriveCrash(seed);
+    return elapsed as bigint;
   }
 
   async function settle(crash: any, rid: bigint, signer?: any) {
@@ -297,7 +307,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     let v = "";
     for (let i = 0; i < 400 && !v; i++) {
       const cand = ethers.keccak256(ethers.toUtf8Bytes(`c3-max-${i}`));
-      const [, elapsed] = await crash._deriveCrash(cand);
+      const elapsed = await elapsedForRandomness(crash, rid, cand);
       if (elapsed >= BigInt(MAX_ELAPSED)) v = cand;
     }
     expect(v, "no capped-crash randomness found").to.not.equal("");
@@ -432,7 +442,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     let v = "";
     for (let i = 0; i < 400 && !v; i++) {
       const cand = ethers.keccak256(ethers.toUtf8Bytes(`split-${i}`));
-      const [, elapsed] = await crash._deriveCrash(cand);
+      const elapsed = await elapsedForRandomness(crash, rid, cand);
       if (elapsed >= 10n && elapsed <= BigInt(MAX_ELAPSED)) v = cand;
     }
     await revealWith(crash, beacon, rid, v);
@@ -480,7 +490,7 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     let v = "";
     for (let i = 0; i < 400 && !v; i++) {
       const cand = ethers.keccak256(ethers.toUtf8Bytes(`${label}-${i}`));
-      const [, elapsed] = await crash._deriveCrash(cand);
+      const elapsed = await elapsedForRandomness(crash, rid, cand);
       if (elapsed >= BigInt(MAX_ELAPSED)) v = cand;
     }
     await revealWith(crash, beacon, rid, v);
@@ -710,18 +720,15 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     const seed3: bigint = (await crash.rounds(rid3)).rolledOverFromPrevious;
     expect(seed3).to.equal(ethers.parseEther("0.05"));
     expect((await crash.reserve()) + seed3).to.equal(ethers.parseEther("1"));
-    // Path 2: reveal-timeout void of a LIVE round.
+    // Production LIVE rounds cannot be voided after observing (or delaying)
+    // their permanent drand result. The seed remains attached until the
+    // permissionless reveal/settle path accounts for it.
     await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("0.1") });
     await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("0.1") });
     await lock(crash);
     await networkHelpers.mine(AWAIT + 1);
-    await crash.voidStaleRound(rid3);
-    expect((await crash.rounds(rid3)).rolledOverFromPrevious).to.equal(0n);
-    const rid4: bigint = await crash.currentRoundId();
-    expect((await crash.reserve()) + (await crash.rounds(rid4)).rolledOverFromPrevious).to.equal(ethers.parseEther("1"));
-    // And the players' stakes are recoverable, untouched.
-    await crash.connect(alice).carryForwardStake(rid3);
-    expect(await crash.stakeOf(rid4, alice.address)).to.equal(ethers.parseEther("0.1"));
+    await expect(crash.voidStaleRound(rid3)).to.be.revertedWithCustomError(crash, "ProductionRoundCannotVoid");
+    expect((await crash.rounds(rid3)).rolledOverFromPrevious).to.equal(seed3);
   });
 
   // ───────────────────────────── C7 ─────────────────────────────────────

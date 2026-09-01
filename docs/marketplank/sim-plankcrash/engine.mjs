@@ -10,6 +10,8 @@
 // values; campaigns: a synthetic clock), so the model replicates the state
 // transition math, never guesses chain timing.
 
+import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
+
 export const BPS = 10000n;
 export const DRAWDOWN_WINDOW = 86400n;
 export const SEED_INCOME_MULTIPLE_BPS = 10000n;
@@ -30,6 +32,14 @@ export function deriveCrash(entropyBig) {
   if (r === 0n) return { multiplierBps: 10000n, elapsedBlocks: 0n };
   const m = (10000n * 10000n) / (10000n - r);
   return { multiplierBps: m, elapsedBlocks: invertMultiplier(m) };
+}
+export const RESULT_DOMAIN = keccak256(toUtf8Bytes("PLANKCRASH_RESULT_V1"));
+export function deriveResultSeed({ chainId, crashAddress, beaconAddress, roundId, targetDrandRound, drandRandomness }) {
+  const encoded = AbiCoder.defaultAbiCoder().encode(
+    ["bytes32", "uint256", "address", "address", "uint256", "uint64", "bytes32"],
+    [RESULT_DOMAIN, chainId, crashAddress, beaconAddress, roundId, targetDrandRound, drandRandomness],
+  );
+  return BigInt(keccak256(encoded));
 }
 export function weightsAt(stake, elapsed) {
   const m = multiplierAt(elapsed);
@@ -261,7 +271,16 @@ export class Engine {
 
   revealEntropy(roundId, entropyBig, keeper) {
     const r = this.round(roundId);
-    const { elapsedBlocks } = deriveCrash(entropyBig);
+    const ctx = this.cfg.resultSeedContext;
+    const resultEntropy = ctx
+      ? deriveResultSeed({
+          ...ctx,
+          roundId: BigInt(roundId),
+          targetDrandRound: BigInt(r.targetDrandRound),
+          drandRandomness: `0x${BigInt(entropyBig).toString(16).padStart(64, "0")}`,
+        })
+      : BigInt(entropyBig);
+    const { elapsedBlocks } = deriveCrash(resultEntropy);
     r.trueCrashElapsedBlocks = elapsedBlocks;
     r.entropyRevealed = true;
     r.revealedBy = keeper;

@@ -176,15 +176,16 @@ describe("PlankCrashDrand", () => {
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await networkHelpers.time.increase(BETTING_SECONDS + 1);
-    const lockTime = BigInt(await networkHelpers.time.latest()) + 1n; // +1 for the lockRound tx's own block
+    const committedBeforeBettingClosed = await crash.rounds(roundId);
     await crash.lockRound();
 
     const round = await crash.rounds(roundId);
-    const expectedMinimalRound =
-      (lockTime - DRAND_GENESIS_TIME) / DRAND_PERIOD + 1n + 1n + TARGET_ROUND_SAFETY_PERIODS; // beacon's own nextRoundAfter is currentRoundAt+1
-    expect(BigInt(round.targetDrandRound)).to.be.gte(expectedMinimalRound);
+    // The envelope is committed when the round starts, before any bet, so a
+    // locker cannot choose a randomness target after observing the field.
+    expect(round.targetDrandRound).to.equal(committedBeforeBettingClosed.targetDrandRound);
+    expect(round.revealNotBefore).to.equal(committedBeforeBettingClosed.revealNotBefore);
     const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
-    expect(dueAt).to.be.gt(lockTime);
+    expect(dueAt).to.be.gt(BigInt(await networkHelpers.time.latest()));
   });
 
   it("revealEntropy rejects a round whose randomness hasn't been relayed to the beacon yet", async () => {
@@ -333,24 +334,28 @@ describe("PlankCrashDrand", () => {
     );
   });
 
-  it("voidStaleRound rescues a round nobody reveals for, and the stake carries forward", async () => {
-    const { crash, alice, bob } = await deployAll();
+  it("a delayed drand round cannot be voided and remains permissionlessly revealable and settleable", async () => {
+    const { crash, beacon, alice, bob, carol } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await closeBettingAndLock(crash);
 
-    // Deliberately never relay to the beacon or call revealEntropy --
-    // simulates nobody bothering to relay the round promptly.
-    await expect(crash.voidStaleRound(roundId)).to.be.revertedWithCustomError(crash, "TooEarly");
+    await expect(crash.voidStaleRound(roundId)).to.be.revertedWithCustomError(crash, "ProductionRoundCannotVoid");
     await networkHelpers.mine(MAX_AWAIT_BLOCKS + 1);
-
-    await crash.voidStaleRound(roundId);
-    expect(await crash.voided(roundId)).to.equal(true);
-
-    await crash.connect(alice).carryForwardStake(roundId);
-    const nextRoundId = await crash.currentRoundId();
-    expect(await crash.stakeOf(nextRoundId, alice.address)).to.equal(ethers.parseEther("0.01"));
+    await expect(crash.connect(carol).voidStaleRound(roundId)).to.be.revertedWithCustomError(crash, "ProductionRoundCannotVoid");
+    const r = await crash.rounds(roundId);
+    const now = BigInt(await networkHelpers.time.latest());
+    if (r.revealNotBefore > now) await networkHelpers.time.increaseTo(r.revealNotBefore);
+    await beacon.setRandomness(r.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes("late-but-permanent")));
+    await crash.connect(carol).revealEntropy(roundId);
+    const revealed = await crash.rounds(roundId);
+    const target = revealed.lockBlock + revealed.trueCrashElapsedBlocks;
+    const current = BigInt(await ethers.provider.getBlockNumber());
+    if (target > current) await networkHelpers.mine(Number(target - current));
+    await crash.connect(carol).settleRound(roundId);
+    expect((await crash.rounds(roundId)).phase).to.equal(2n);
+    expect(await crash.voided(roundId)).to.equal(false);
   });
 
   it("settleRound splits the rake and pays the keeper reward, exactly like PlankCrashV2", async () => {

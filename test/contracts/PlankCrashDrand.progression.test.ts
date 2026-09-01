@@ -156,13 +156,13 @@ describe("PlankCrashDrand x PlankProgression integration", () => {
       await networkHelpers.time.increase(BETTING_SECONDS + 1);
       await (await crash.lockRound()).wait();
       const r = await crash.rounds(roundId);
-      // r=0 -> immediate 1.00x crash, but the beacon's own "not yet
-      // available" sentinel IS bytes32(0) -- use the smallest NONZERO
-      // value that's still ≡ 0 (mod 10000) so _deriveCrash sees r=0
-      // without also looking unset to the beacon itself.
-      const immediateCrash = ethers.zeroPadValue(ethers.toBeHex(10000n), 32);
-      await beacon.setRandomness(r.targetDrandRound, immediateCrash);
+      const randomness = ethers.keccak256(ethers.toUtf8Bytes(`progression-${i}`));
+      await beacon.setRandomness(r.targetDrandRound, randomness);
       await (await crash.revealEntropy(roundId)).wait();
+      const revealed = await crash.rounds(roundId);
+      const target = revealed.lockBlock + revealed.trueCrashElapsedBlocks;
+      const current = BigInt(await ethers.provider.getBlockNumber());
+      if (target > current) await networkHelpers.mine(Number(target - current));
       await (await crash.settleRound(roundId)).wait();
       i++;
     }
