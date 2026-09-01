@@ -2369,7 +2369,16 @@ function drawMultGraph() {
   if (!w || !h) return;
   sizeMultGraph();
   multGraphCtx.clearRect(0, 0, w, h);
-  const samples = multGraphSamples;
+  // Poll repetition and phase boundaries may repeat or slightly regress a
+  // sample. Paint one finite monotonic path so the curve never kinks backward
+  // or creates a stray near-vertical endpoint.
+  const samples = [];
+  for (const raw of multGraphSamples) {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) continue;
+    const next = Math.max(1, value, samples.length ? samples[samples.length - 1] : 1);
+    if (!samples.length || Math.abs(next - samples[samples.length - 1]) >= .001) samples.push(next);
+  }
   if (samples.length < 2) return;
 
   const maxX = Math.max(2, samples[samples.length - 1] * 1.08);
@@ -3668,10 +3677,9 @@ document.addEventListener("keydown", (e) => {
 })();
 
 primaryBtn.addEventListener("click", async () => {
-  if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled" && !samePrivateRound(privateSettlementAcknowledgedRound, privateSnapshot.room.currentRound)) {
-    acknowledgePrivateSettlement();
-    return;
-  }
+  // The result theater has its own close controls. The main action must always
+  // commit; consuming its first click as an acknowledgement made betting look
+  // broken and created a race against the automatic launch deadline.
   if (uiState === "betting-open") { await doPlaceBet(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
   else if (uiState === "live-hold") { await doCashOut(true); PLAYTEST_MODE ? await refreshPrivatePlaytest() : refresh(); }
 });
@@ -4393,6 +4401,7 @@ let privateFirstSnapshot = true;
 let privateSessionCommitted = 0n;
 let privateSessionStart = Date.now();
 let privateSessionInitialBalance = null;
+let privateServerOffsetMs = 0;
 const privateLiveClock = new PrivateLiveClock();
 let privateMotionPreference = localStorage.getItem("plank-alpha:motion") || "system";
 let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || "balanced";
@@ -4565,7 +4574,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber) {
     gustClock-=dt;
     if(gustClock<=0){
       gustClock=.055+randomUnit()*.085;
-      const gust=new THREE.Vector3(randomSigned()*.65,.65+randomUnit()*1.15,randomSigned()*.45);
+      const gust=new THREE.Vector3(randomSigned()*.9,randomSigned()*.95,randomSigned()*.7);
       for(const entry of balls) if(!(revealed&&entry===selected)) entry.velocity.addScaledVector(gust,.22+randomUnit()*.28);
     }
     for(const entry of balls){
@@ -4574,7 +4583,10 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber) {
       // A turbulent upward air column plus a changing cross-flow keeps the
       // chamber mixing; crypto-sourced gusts above prevent a repeating orbit.
       v.x+=(-p.x*.75+Math.sin(now*.0021+p.y*2.7)*.85)*dt;
-      v.y+=(1.1-p.y*.2+Math.cos(now*.0017+p.x*2.2)*.42)*dt;
+      // Counter-rotating air flow keeps the full chamber occupied instead of
+      // pinning every ball against the ceiling. The selected result remains
+      // server-committed; this motion is presentation only.
+      v.y+=(-p.y*1.15+Math.cos(now*.0017+p.x*2.2)*.9)*dt;
       v.z+=(-p.z*.9+Math.sin(now*.0013+p.x*3.1)*.5)*dt;
       v.multiplyScalar(Math.exp(-.34*dt));
       const speed=v.length();if(speed>3.4)v.multiplyScalar(3.4/speed);
@@ -4732,12 +4744,13 @@ function renderPrivateRoster(snapshot) {
   board.replaceChildren();
   for (const member of snapshot.members) {
     const seat = snapshot.seats.find((candidate) => candidate.userId === member.id);
+    const queuedSeat = snapshot.nextRoundSeats?.find((candidate) => candidate.userId === member.id);
     const row = document.createElement("div");
     row.className = `private-player${member.id === snapshot.me.id ? " me" : ""}`;
     const identity = document.createElement("div");
     identity.className = "private-player-identity";
     const dot = document.createElement("span");
-    dot.className = `private-player-dot ${seat ? "committed" : "waiting"}`;
+    dot.className = `private-player-dot ${seat || queuedSeat ? "committed" : "waiting"}`;
     const name = document.createElement("strong");
     name.textContent = member.displayName;
     const tag = document.createElement("small");
@@ -4746,7 +4759,8 @@ function renderPrivateRoster(snapshot) {
     const result = document.createElement("span");
     const profitable = snapshot.room.phase === "settled" && BigInt(seat?.net || "0") > 0n;
     result.className = `private-player-state ${profitable ? "win" : ""}`;
-    result.textContent = !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
+    result.textContent = queuedSeat ? `Ready round ${Number(snapshot.room.currentRound) + 1} · ${privateCredits(queuedSeat.stake)} cr`
+      : !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
       : snapshot.room.phase === "settled" ? `${!seat.survived ? "Crashed" : profitable ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · PROFIT` : `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · DILUTED`} · ${privateCredits(seat.payout)} paid`
       : seat.acceptedTargetBps ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · watching`
       : snapshot.room.phase === "running" ? `Flying · ${privateCredits(seat.stake)} cr` : `Committed · ${privateCredits(seat.stake)} cr`;
@@ -4754,6 +4768,33 @@ function renderPrivateRoster(snapshot) {
     board.appendChild(row);
   }
 }
+
+function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat = null, me = null) {
+  if (!snapshot || snapshot.room.phase !== "settled") return;
+  const deadline = Date.parse(snapshot.room.nextLaunchAt || "");
+  const now = Date.now() + privateServerOffsetMs;
+  const remainingMs = Number.isFinite(deadline) ? Math.max(0, deadline - now) : 0;
+  const seconds = Math.ceil(remainingMs / 1000);
+  const nextRound = Number(snapshot.room.currentRound) + 1;
+  const clock = `AUTO-LAUNCH IN 0:${String(seconds).padStart(2, "0")}`;
+  $("substatus").textContent = `${clock} · COMMITMENTS CLOSE AT LAUNCH`;
+  if (queuedSeat) {
+    updatePrimaryButton("waiting", { sub: `${clock} · ${privateCredits(queuedSeat.stake)} credits queued` });
+    primaryBtn.textContent = `READY FOR ROUND ${nextRound}`;
+  } else {
+    updatePrimaryButton("betting-open", { sub: `${clock}${me ? ` · balance ${privateCredits(me.balance)} credits` : ""}` });
+    primaryBtn.textContent = `COMMIT ${privateCredits(BigInt(Math.max(1, Math.round(Number(betAmount) * 1_000_000))))} · ROUND ${nextRound}`;
+  }
+  if (seconds <= 5 && !samePrivateRound(privateSettlementAcknowledgedRound, snapshot.room.currentRound)) acknowledgePrivateSettlement();
+}
+
+window.setInterval(() => {
+  if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled") {
+    const me = privateSnapshot.members.find((member) => member.id === privateSnapshot.me.id);
+    const queued = privateSnapshot.nextRoundSeats?.find((seat) => seat.userId === privateSnapshot.me.id);
+    updatePrivateIntermissionAction(privateSnapshot, queued, me);
+  }
+}, 250);
 
 function paintPrivateConclusion(snapshot, me, seat) {
   const card = $("resultCard");
@@ -4914,6 +4955,7 @@ function tellPrivateReconnectStory(snapshot, seat) {
 
 function paintPrivateSnapshot(snapshot) {
   const receivedPerfMs = performance.now();
+  privateServerOffsetMs = Date.parse(snapshot.serverNow) - Date.now();
   const roundKey = `${snapshot.room.id}:${snapshot.room.currentRound}`;
   if (!privateLiveClock.synchronize({
     roundKey,
@@ -4946,6 +4988,7 @@ function paintPrivateSnapshot(snapshot) {
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
   const seat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
+  const queuedSeat = snapshot.nextRoundSeats?.find((candidate) => candidate.userId === snapshot.me.id);
   if (privateSessionInitialBalance === null && me) {
     const initialKey = privateSessionKey(snapshot.room.id, "initial-balance");
     const startKey = privateSessionKey(snapshot.room.id, "started-at");
@@ -4999,7 +5042,7 @@ function paintPrivateSnapshot(snapshot) {
       spawnParticles(0xff4d6a, privateMotionReduced() ? 0 : 60, 3.5);
       sfx.crash(); haptic([50, 30, 80]);
     }
-    updatePrimaryButton("betting-open", { sub: `This opens round ${Number(snapshot.room.currentRound) + 1} and marks you ready` });
+    updatePrivateIntermissionAction(snapshot, queuedSeat, me);
   }
   renderPrivateRoster(snapshot);
   paintPrivateConclusion(snapshot, me, seat);
@@ -5145,7 +5188,7 @@ async function startPrivatePlaytest() {
     #privateCoachCue{margin:10px 0 2px;padding:10px;border-left:2px solid #ffc857;border-radius:0 8px 8px 0;background:rgba(255,200,87,.06);color:#d8cdb8;font:600 10px/1.5 var(--font-mono)}#privateSessionStats{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:9px}#privateSessionStats span{padding:7px 4px;border:1px solid rgba(255,255,255,.08);border-radius:7px;text-align:center;font:800 10px var(--font-mono)}#privateSessionStats small{display:block;margin-bottom:3px;color:#6f7c74;font-size:7px;letter-spacing:.08em}#privateSessionStats .positive{color:#75f0ae}#privateSessionStats .negative{color:#ff9bad}
     #privateRoster{display:flex;flex-direction:column;gap:6px}.private-player{display:grid;gap:4px;padding:9px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.025)}.private-player.me{border-color:rgba(61,220,132,.35);background:rgba(61,220,132,.055)}.private-player-identity{display:flex;align-items:center;gap:7px}.private-player-identity strong{font-size:12px}.private-player-identity small{margin-left:auto;color:#78857d;font:700 8px var(--font-mono);letter-spacing:.08em}.private-player-dot{width:7px;height:7px;border-radius:50%;background:#778078}.private-player-dot.committed{background:#3ddc84;box-shadow:0 0 8px rgba(61,220,132,.6)}.private-player-state{padding-left:14px;color:#aeb7b1;font:600 10px/1.3 var(--font-mono)}.private-player-state.win{color:#75f0ae}
     .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions [hidden]{display:none!important}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
-    .result-card.private-result{width:min(590px,calc(100% - 360px));padding:26px 30px;background:rgba(5,9,12,.94);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:480px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
+    .result-card.private-result{width:min(860px,calc(100% - 40px));padding:22px 26px;background:rgba(5,9,12,.96);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:680px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
     .private-result-world{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
     .private-powerball{position:relative;min-height:360px;margin:18px auto 0;overflow:hidden;border:1px solid rgba(233,180,63,.5);border-radius:12px;background:radial-gradient(circle at 25% 46%,rgba(174,125,255,.23),transparent 34%),linear-gradient(125deg,#0b0710,#1b120a 58%,#0d1f16);text-align:left;transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
@@ -5191,6 +5234,7 @@ async function startPrivatePlaytest() {
     #privateMenu,#privateWelcome,#privateInvite,#privateSimulation{width:min(760px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;border:1px solid rgba(255,200,87,.38);border-radius:18px;padding:0;background:#07100c;color:#efe6d4;box-shadow:0 28px 110px rgba(0,0,0,.82)}#privateMenu::backdrop,#privateWelcome::backdrop,#privateInvite::backdrop,#privateSimulation::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(7px)}.private-menu-inner{padding:clamp(18px,4vw,30px)}.private-menu-kicker{color:#75f0ae;font:800 9px var(--font-mono);letter-spacing:.16em;text-transform:uppercase}.private-menu-inner h2{margin:7px 0 5px;color:#ffc857;font:400 clamp(27px,5vw,42px)/1 var(--font-display)}.private-menu-lede{max-width:650px;margin:0;color:#aeb9b1;font:600 11px/1.55 var(--font-mono)}.private-setting-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:18px 0}.private-setting{display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.025);font:700 10px var(--font-mono)}.private-setting span{color:#d9cfbd}.private-setting select,.private-setting button,.private-setting input,.private-invite-url{min-height:44px;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:0 10px;background:#122018;color:#f3ead9;font:700 11px var(--font-mono)}.private-setting-check{flex-direction:row;align-items:center;justify-content:space-between}.private-setting-check input{width:24px;height:24px;accent-color:#3ddc84}.private-menu-actions{display:flex;flex-wrap:wrap;gap:8px}.private-menu-actions button,.private-menu-actions a{min-height:44px;flex:1;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:#13221a;color:#eee4d2;font:800 11px var(--font-mono);cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none}.private-menu-actions .primary{border-color:#ffc857;background:#ffc857;color:#09100c}.private-welcome-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}.private-welcome-step{padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:linear-gradient(150deg,rgba(61,220,132,.07),rgba(255,200,87,.025));font:600 10px/1.5 var(--font-mono)}.private-welcome-step b{display:block;margin-bottom:7px;color:#75f0ae;font-size:11px}.private-welcome-trust{margin:12px 0;padding:12px;border-left:2px solid #ffc857;background:rgba(255,200,87,.05);color:#d2c6b2;font:600 10px/1.5 var(--font-mono)}.private-admin-section{margin:15px 0;padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:rgba(255,255,255,.025)}.private-admin-section h3{margin:0 0 4px;color:#ffc857;font:800 12px var(--font-mono)}.private-admin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.private-admin-grid .private-setting{padding:9px}.private-admin-status{min-height:20px;margin:8px 0;color:#75f0ae;font:700 10px var(--font-mono)}
     body[data-private-motion="reduced"] .result-card.private-result *{transition:none!important}body[data-private-motion="reduced"] #privateReconnect{transition:none!important}body[data-private-contrast="high"] #privateTablePanel,body[data-private-contrast="high"] #privateHud,body[data-private-contrast="high"] #privateJourney{background:#020504;border-color:#ffc857;color:#fff}body[data-private-contrast="high"] #privateCoachCue{color:#fff}
     body[data-playtest="true"] .deck{padding-right:350px}
+    @media(min-width:901px){body[data-playtest="true"]:has(.private-result.show) .deck{padding-right:0}body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{opacity:.12;pointer-events:none;transform:translateX(102%)}.result-card.private-result{position:fixed;inset:150px 24px 150px 24px;width:min(900px,calc(100vw - 48px));max-height:none;margin:auto;overflow:auto;overscroll-behavior:contain}.private-powerball{min-height:330px}.private-powerball-canvas{width:54%}.private-powerball-copy{width:50%;padding:24px 24px 18px}}
     @media(min-width:701px) and (max-width:900px){#privateHud{top:50px;left:8px;right:8px;max-width:none;display:grid;grid-template-columns:minmax(0,1fr)}#privateHud select{width:100%;max-width:none}#privateHudStatus{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar{padding-top:86px;height:auto}#privateJourney{position:relative;z-index:35;top:auto;left:auto;width:auto;margin:55px 10px 0}#privateTablePanel{position:relative;z-index:35;top:auto;right:auto;width:auto;max-height:none;margin:8px 10px}.private-host-actions{grid-template-columns:repeat(2,1fr)}body[data-playtest="true"] .deck{padding-right:18px}.result-card.private-result{width:min(590px,calc(100% - 24px))}.private-result-world{grid-template-columns:1fr 1fr}.stage{min-height:58vh}.private-how-grid,.private-welcome-steps,.private-setting-grid,.private-admin-grid{grid-template-columns:1fr}}
     @media(max-width:900px) and (orientation:landscape){#privateJourney{display:none}#privateTablePanel{max-height:38dvh}.stage{min-height:72dvh}.result-card.private-result{inset:6px;width:auto;max-width:none}.private-powerball{min-height:330px}.private-powerball-canvas{position:absolute;left:0;top:0;width:46%;height:100%}.private-powerball-copy{display:block;width:56%;margin-left:auto;padding:18px}.private-powerball-drum{margin:10px auto}}
   `;

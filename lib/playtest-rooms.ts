@@ -187,6 +187,16 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
          FROM playtest_round_seats s JOIN playtest_users u ON u.id=s.user_id
         WHERE s.room_id=$1 AND s.round_id=$2 ORDER BY s.placed_at`, [roomId, room.current_round],
     );
+    // A settled table accepts commitments for the following round while its
+    // completed seats remain visible in the results story. Expose both ledgers
+    // so the client can confirm that a commitment was queued immediately.
+    const nextRoundSeats = room.phase === "settled"
+      ? await client.query<{ user_id: string; display_name: string; stake: string; requested_target_bps: string; auto_lock_enabled: boolean }>(
+        `SELECT s.user_id,u.display_name,s.stake::text,s.requested_target_bps::text,s.auto_lock_enabled
+           FROM playtest_round_seats s JOIN playtest_users u ON u.id=s.user_id
+          WHERE s.room_id=$1 AND s.round_id=$2 ORDER BY s.placed_at`, [roomId, room.current_round + 1],
+      )
+      : null;
     const events = await client.query<{ sequence: string; event_type: string; command_id: string | null; public_payload: unknown; created_at: Date }>(
       `SELECT sequence::text,event_type,command_id,public_payload,created_at FROM playtest_room_events
         WHERE room_id=$1 ORDER BY sequence DESC LIMIT 60`, [roomId],
@@ -251,6 +261,11 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         acceptedTargetBps: row.accepted_target_bps,
         autoLockEnabled: row.auto_lock_enabled,
         payout: row.payout, net: row.net, survived: row.survived, lockedAt: row.locked_at?.toISOString() ?? null,
+      })),
+      nextRoundSeats: (nextRoundSeats?.rows ?? []).map((row) => ({
+        userId: row.user_id, displayName: row.display_name, stake: row.stake,
+        requestedTargetBps: row.user_id === identity.id ? row.requested_target_bps : null,
+        autoLockEnabled: row.auto_lock_enabled,
       })),
       events: events.rows.reverse().map((row) => ({ sequence: row.sequence, type: row.event_type, commandId: row.command_id, payload: row.public_payload, at: row.created_at.toISOString() })),
       currentSettlement: currentSettlement?.rows[0]

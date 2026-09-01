@@ -51,3 +51,15 @@ test("an unsealed next prize cannot be rounded up and presented as funded", () =
   assert.match(arcadeSource, /available < required \? Math\.min\(99\.9, pct\) : 100/);
   assert.match(arcadeSource, /NEXT PRIZE/);
 });
+
+test("settled intermission exposes a real countdown and the main action commits in one click", () => {
+  assert.match(arcadeSource, /AUTO-LAUNCH IN 0:/);
+  assert.match(arcadeSource, /snapshot\.room\.nextLaunchAt/);
+  assert.match(arcadeSource, /snapshot\.nextRoundSeats\?\.find/);
+  assert.doesNotMatch(arcadeSource, /primaryBtn\.addEventListener\("click", async \(\) => \{\s*if \(PLAYTEST_MODE && privateSnapshot\?\.room\.phase === "settled"/);
+});
+
+test("multiplier art filters non-finite and regressing samples", () => {
+  assert.match(arcadeSource, /if \(!Number\.isFinite\(value\)\) continue/);
+  assert.match(arcadeSource, /Math\.max\(1, value, samples\.length \? samples\[samples\.length - 1\] : 1\)/);
+});
