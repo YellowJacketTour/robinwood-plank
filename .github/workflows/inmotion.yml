@@ -158,6 +158,11 @@ jobs:
       - run: npm run lint:inmotion
       - run: npx tsc --noEmit
       - run: npm run db:migrate
+      # CCS-2L settlement gates. The wei-exact JS<->Solidity differential
+      # (test/contracts/PlankCcs2LSettlement.test.ts) runs inside `npm test`
+      # via test:contracts; this step adds the node-only simulation invariants
+      # and the house-layer partition-invariance proof (exit 1 on any failure).
+      - run: npm run test:ccs2l
       - run: npm test
       - run: npm run test:postgres
       - run: npm run build
