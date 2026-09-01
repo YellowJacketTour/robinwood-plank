@@ -4,9 +4,17 @@ import { initialSimulationState } from "../../lib/casino/simulation";
 import {
   bettingRoundId,
   canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt,
-  parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
+  newcomerSeatPlan, parsePolicy, parseSimulationState, playtestRulesHash, serializeBigInts,
   simulationCrashBps, powerboardRoundDraw, powerboardVoucherQuote,
 } from "../../lib/playtest-room-core";
+
+test("a genuine newcomer receives exactly one affordable welcome-flight seat", () => {
+  assert.deepEqual(newcomerSeatPlan(50_000n, 10_000n), {
+    stake: 10_000n, targetBps: 20_000n, autoLockEnabled: false,
+  });
+  assert.equal(newcomerSeatPlan(9_999n, 10_000n), null);
+  assert.equal(newcomerSeatPlan(50_000n, 0n), null);
+});
 
 test("an unexecuted manual target can never become a retroactive winning lock", () => {
   assert.equal(effectiveSettlementTarget(38_000n, 20_000n, null, false), 38_001n);

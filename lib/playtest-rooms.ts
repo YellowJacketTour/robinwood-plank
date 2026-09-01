@@ -7,7 +7,7 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt, parsePolicy,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt, newcomerSeatPlan, parsePolicy,
   PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
@@ -349,6 +349,45 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "lobby" || BigInt(room.current_round) < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a lobby round with bets.");
     const policy = parsePolicy(room.policy);
+    // An invitation means "join the next flight", not "silently spectate".
+    // Seat only humans who arrived after the most recent settlement, and only
+    // for this welcome flight. Established/offline members are never auto-bet.
+    const newcomers = await client.query<{ user_id: string; test_credit_balance: string }>(
+      `SELECT m.user_id,m.test_credit_balance::text
+         FROM playtest_room_members m
+         JOIN playtest_users u ON u.id=m.user_id AND u.is_bot=FALSE
+         JOIN playtest_rooms r ON r.id=m.room_id
+        WHERE m.room_id=$1
+          AND m.joined_at>COALESCE(
+            (SELECT MAX(e.created_at) FROM playtest_room_events e
+              WHERE e.room_id=$1 AND e.event_type='round.settled'),
+            r.created_at
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM playtest_round_seats s
+             WHERE s.room_id=m.room_id AND s.round_id=$2 AND s.user_id=m.user_id
+          )
+        ORDER BY m.joined_at FOR UPDATE OF m`,
+      [roomId, room.current_round],
+    );
+    const welcomed: string[] = [];
+    for (const newcomer of newcomers.rows) {
+      const plan = newcomerSeatPlan(BigInt(newcomer.test_credit_balance), policy.minimumStake);
+      if (!plan) continue;
+      const inserted = await client.query(
+        `INSERT INTO playtest_round_seats
+           (room_id,round_id,user_id,stake,requested_target_bps,auto_lock_enabled,command_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+        [roomId, room.current_round, newcomer.user_id, plan.stake.toString(), plan.targetBps.toString(), plan.autoLockEnabled, randomUUID()],
+      );
+      if (!inserted.rowCount) continue;
+      await client.query(
+        `UPDATE playtest_room_members SET test_credit_balance=test_credit_balance-$3
+          WHERE room_id=$1 AND user_id=$2`,
+        [roomId, newcomer.user_id, plan.stake.toString()],
+      );
+      welcomed.push(newcomer.user_id);
+    }
     const bots = await client.query<{ user_id: string; test_credit_balance: string; bot_profile: PlaytestBotProfile }>(
       `SELECT user_id,test_credit_balance::text,bot_profile
          FROM playtest_room_members
@@ -388,6 +427,9 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     // unrevealed crash multiplier expressed in time, so exposing it defeats
     // commit/reveal even when crash_bps and reveal remain private.
     await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString() });
+    if (welcomed.length) await event(client, room, "newcomers.seated", identity.id, null, {
+      count: welcomed.length, stake: policy.minimumStake, targetBps: 20_000n, autoLockEnabled: false,
+    });
     if (committed.length) await event(client, room, "bots.committed", identity.id, null, {
       count: committed.length,
       presets: committed.reduce<Record<string, number>>((counts, bot) => {

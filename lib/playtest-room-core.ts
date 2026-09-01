@@ -36,6 +36,14 @@ export function bettingRoundId(phase: "lobby" | "running" | "settled", currentRo
   return currentRound > 0n ? currentRound : 1n;
 }
 
+/** A newly joined human gets one minimum-stake, manual-lock seat on the next
+ * launch so following an invite actually enters the shared flight. This is
+ * deliberately not recurring auto-bet: later wagers require player intent. */
+export function newcomerSeatPlan(balance: bigint, minimumStake: bigint) {
+  if (minimumStake <= 0n || balance < minimumStake) return null;
+  return { stake: minimumStake, targetBps: 20_000n, autoLockEnabled: false } as const;
+}
+
 export function canonicalJson(value: unknown): string {
   if (typeof value === "bigint") return JSON.stringify(value.toString());
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
