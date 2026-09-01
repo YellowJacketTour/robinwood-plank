@@ -4413,6 +4413,8 @@ let privateLastError = "";
 let privateConclusionKey = "";
 let privateRevealTimers = [];
 let privateSettlementAcknowledgedRound = null;
+let privatePendingCommitment = null;
+let privateGraphRound = null;
 let privateFirstSnapshot = true;
 let privateSessionCommitted = 0n;
 let privateSessionStart = Date.now();
@@ -4480,9 +4482,21 @@ async function privatePlaytestCommand(action, extra = {}) {
       body: JSON.stringify({ action, commandId: crypto.randomUUID(), ...extra }),
     }));
     if (action === "bet" && extra.stake) {
+      const queuedRound = Number(privateSnapshot?.room?.currentRound || 0) + (privateSnapshot?.room?.phase === "settled" ? 1 : 0);
+      privatePendingCommitment = {
+        roomId: privateRoomId, round: queuedRound, stake: String(extra.stake),
+        requestedTargetBps: String(extra.targetBps || "10000"), autoLockEnabled: Boolean(extra.autoLockEnabled),
+      };
       privateSessionCommitted += BigInt(extra.stake);
       sessionStorage.setItem(privateSessionKey(privateRoomId, "committed"), privateSessionCommitted.toString());
       toast(`Round commitment accepted · ${privateCredits(extra.stake)} credits`, "success");
+      if (privateSnapshot?.room.phase === "settled") {
+        const me = privateSnapshot.members.find((member) => member.id === privateSnapshot.me.id);
+        updatePrivateIntermissionAction(privateSnapshot, privatePendingCommitment, me);
+      } else if (privateSnapshot?.room.phase === "lobby") {
+        updatePrimaryButton("waiting", { sub: `${privateCredits(extra.stake)} credits committed` });
+        primaryBtn.textContent = `READY FOR ROUND ${queuedRound}`;
+      }
     }
     if (action === "lock" && command.result?.acceptedTargetBps) {
       toast(`Lock accepted at ${(Number(command.result.acceptedTargetBps) / 10_000).toFixed(2)}×`, "success");
@@ -4580,7 +4594,8 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
     new THREE.Vector3(2.34,.92,0),new THREE.Vector3(2.42,.05,0),outlet,
   ],false,"centripetal");
   const tube = new THREE.Mesh(new THREE.TubeGeometry(tubeCurve,72,.31,24,false),glass); machine.add(tube);
-  const throat = new THREE.Mesh(new THREE.ConeGeometry(.48,.66,32,1,true),glass); throat.position.copy(capture).add(new THREE.Vector3(-.22,-.2,0));throat.rotation.z=-Math.PI/3.2;machine.add(throat);
+  // The capture mouth and transfer tube retain one ball-clear internal
+  // diameter throughout; there is no decorative taper narrower than a ball.
   const gate = new THREE.Mesh(new THREE.TorusGeometry(.34,.045,12,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.78,roughness:.2,emissive:0x3b2800}));gate.position.set(1.68,1.39,0);gate.rotation.y=Math.PI/2;machine.add(gate);
   const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.22,-1.55,0); machine.add(plinth);
   const cradle = new THREE.Mesh(new THREE.TorusGeometry(.35,.075,12,40),metal);cradle.position.set(2.22,-1.28,0);cradle.rotation.x=Math.PI/2;machine.add(cradle);
@@ -4814,6 +4829,50 @@ function renderPrivateRoster(snapshot) {
   }
 }
 
+function celebratePrivateJackpot() {
+  if (privateMotionReduced()) { sfx.win(); haptic([40,50,40,70,100]); return; }
+  document.querySelector(".private-jackpot-fireworks")?.remove();
+  const sky = document.createElement("div");
+  sky.className = "private-jackpot-fireworks";
+  const colors = ["#ffc857", "#75f0ae", "#7dd3fc", "#c4a1ff", "#ff5b72"];
+  for (let burst = 0; burst < 7; burst++) {
+    const originX = 12 + Math.random() * 76, originY = 12 + Math.random() * 50;
+    for (let ray = 0; ray < 24; ray++) {
+      const spark = document.createElement("i"), angle = (Math.PI * 2 * ray) / 24;
+      const distance = 55 + Math.random() * 105;
+      spark.style.cssText = `--x:${originX}vw;--y:${originY}vh;--dx:${Math.cos(angle)*distance}px;--dy:${Math.sin(angle)*distance}px;--delay:${burst*.24}s;--c:${colors[(ray+burst)%colors.length]}`;
+      sky.appendChild(spark);
+    }
+  }
+  document.body.appendChild(sky);
+  sfx.win(); haptic([40,40,50,40,70,60,110]);
+  window.setTimeout(() => sky.remove(), 5200);
+}
+
+// The private laboratory's authoritative clock follows x(t)=e^(0.22t).
+// Reconstruct that continuous path between authoritative timestamps instead
+// of drawing straight chords between sparse network polls. The last point is
+// pinned to the server value, so the picture and settlement can never diverge.
+function reconstructPrivateMultGraph(snapshot, endBps, receivedPerfMs) {
+  const startedMs = Date.parse(snapshot.room.startedAt || "");
+  const endWallMs = snapshot.room.phase === "settled"
+    ? Date.parse(snapshot.room.crashAt || snapshot.serverNow)
+    : Date.parse(snapshot.serverNow);
+  if (!Number.isFinite(startedMs) || !Number.isFinite(endWallMs) || endWallMs < startedMs) return;
+  const durationSeconds = Math.max(0, (endWallMs - startedMs) / 1000);
+  const endX = Math.max(1, Number(endBps || 10000) / 10000);
+  const startPerf = receivedPerfMs - durationSeconds * 1000;
+  const divisions = Math.max(24, Math.min(180, Math.ceil(durationSeconds * 12)));
+  multGraphSamples = [];
+  for (let i = 0; i <= divisions; i++) {
+    const ratio = i / divisions;
+    const seconds = durationSeconds * ratio;
+    const derived = Math.exp(0.22 * seconds);
+    multGraphSamples.push({ t: startPerf + seconds * 1000, x: i === divisions ? endX : Math.min(endX, derived) });
+  }
+  drawMultGraph();
+}
+
 function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat = null, me = null) {
   if (!snapshot || snapshot.room.phase !== "settled") return;
   const deadline = Date.parse(snapshot.room.nextLaunchAt || "");
@@ -4822,6 +4881,12 @@ function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat 
   const seconds = Math.ceil(remainingMs / 1000);
   const nextRound = Number(snapshot.room.currentRound) + 1;
   const clock = `AUTO-LAUNCH IN 0:${String(seconds).padStart(2, "0")}`;
+  const countdown = $("privateIntermissionCountdown");
+  if (countdown) {
+    countdown.hidden = false;
+    countdown.innerHTML = `<small>NEXT FLIGHT</small><strong>${seconds}</strong><span>SECONDS</span>`;
+    countdown.classList.toggle("urgent", seconds <= 5);
+  }
   $("substatus").textContent = `${clock} · COMMITMENTS CLOSE AT LAUNCH`;
   if (queuedSeat) {
     updatePrimaryButton("waiting", { sub: `${clock} · ${privateCredits(queuedSeat.stake)} credits queued` });
@@ -4836,7 +4901,9 @@ function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat 
 window.setInterval(() => {
   if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled") {
     const me = privateSnapshot.members.find((member) => member.id === privateSnapshot.me.id);
-    const queued = privateSnapshot.nextRoundSeats?.find((seat) => seat.userId === privateSnapshot.me.id);
+    const queued = privateSnapshot.nextRoundSeats?.find((seat) => seat.userId === privateSnapshot.me.id) ||
+      (privatePendingCommitment?.roomId === privateSnapshot.room.id &&
+       privatePendingCommitment?.round === Number(privateSnapshot.room.currentRound) + 1 ? privatePendingCommitment : null);
     updatePrivateIntermissionAction(privateSnapshot, queued, me);
   }
 }, 250);
@@ -4932,6 +4999,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   if (privateMotionReduced()) {
     card.dataset.reveal = "world";
     skip.hidden = true;
+    if (winner) celebratePrivateJackpot();
   } else {
     card.dataset.reveal = "crash";
     queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "personal"; }, 500);
@@ -4939,7 +5007,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
     for (let index = 0; index < 7; index += 1) queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) sfx.powerboardTumble(); }, 1_450 + index * 120);
     queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "drawn"; }, 2_450);
     queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "ejected"; sfx.powerboardLand(); haptic([20, 45, 40]); } }, 4_050);
-    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "world"; winner ? sfx.win() : sfx.powerboardMiss(); if (winner) { haptic([35, 40, 35, 40, 80]); spawnParticles(0xe9b43f, 120, 5); } } }, 4_800);
+    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "world"; if (winner) { celebratePrivateJackpot(); spawnParticles(0xe9b43f, 180, 6); } else sfx.powerboardMiss(); } }, 4_800);
   }
 }
 
@@ -5018,8 +5086,15 @@ function paintPrivateSnapshot(snapshot) {
     serverNow: snapshot.serverNow,
   }, receivedPerfMs)) return;
   privateSnapshot = snapshot;
+  if (privateGraphRound !== roundKey) {
+    privateGraphRound = roundKey;
+    multGraphSamples = [];
+    clearMultGraph();
+  }
   const prior = phaseState;
   phaseState = snapshot.room.phase === "lobby" ? "betting" : snapshot.room.phase === "running" ? "live" : "crashed";
+  const intermissionCountdown = $("privateIntermissionCountdown");
+  if (intermissionCountdown && snapshot.room.phase !== "settled") intermissionCountdown.hidden = true;
   $("roundLabel").textContent = `ROUND ${snapshot.room.currentRound}`;
   $("playersStat").textContent = String(snapshot.members.length);
   const pool = snapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
@@ -5039,8 +5114,34 @@ function paintPrivateSnapshot(snapshot) {
   $("rankStat").title = "Alpha: ranks are reputation only. Economic caps apply equally to participants and cannot be unlocked by wagering more.";
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
-  const seat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
-  const queuedSeat = snapshot.nextRoundSeats?.find((candidate) => candidate.userId === snapshot.me.id);
+  const authoritativeSeat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
+  if (authoritativeSeat && privatePendingCommitment &&
+      privatePendingCommitment.roomId === snapshot.room.id &&
+      privatePendingCommitment.round === Number(snapshot.room.currentRound)) {
+    privatePendingCommitment = null;
+  }
+  const seat = authoritativeSeat || (privatePendingCommitment &&
+    privatePendingCommitment.roomId === snapshot.room.id &&
+    privatePendingCommitment.round === Number(snapshot.room.currentRound) && snapshot.room.phase === "lobby" ? {
+      userId: snapshot.me.id, stake: privatePendingCommitment.stake,
+      requestedTargetBps: privatePendingCommitment.requestedTargetBps,
+      autoLockEnabled: privatePendingCommitment.autoLockEnabled, acceptedTargetBps: null,
+    } : null);
+  const authoritativeQueuedSeat = snapshot.nextRoundSeats?.find((candidate) => candidate.userId === snapshot.me.id);
+  if (authoritativeQueuedSeat && privatePendingCommitment &&
+      privatePendingCommitment.roomId === snapshot.room.id &&
+      privatePendingCommitment.round === Number(snapshot.room.currentRound) + 1) {
+    privatePendingCommitment = null;
+  }
+  const pendingForThisState = privatePendingCommitment &&
+    privatePendingCommitment.roomId === snapshot.room.id &&
+    privatePendingCommitment.round === Number(snapshot.room.currentRound) + (snapshot.room.phase === "settled" ? 1 : 0);
+  const queuedSeat = authoritativeQueuedSeat || (pendingForThisState ? {
+    userId: snapshot.me.id,
+    stake: privatePendingCommitment.stake,
+    requestedTargetBps: privatePendingCommitment.requestedTargetBps,
+    autoLockEnabled: privatePendingCommitment.autoLockEnabled,
+  } : null);
   if (privateSessionInitialBalance === null && me) {
     const initialKey = privateSessionKey(snapshot.room.id, "initial-balance");
     const startKey = privateSessionKey(snapshot.room.id, "started-at");
@@ -5076,8 +5177,7 @@ function paintPrivateSnapshot(snapshot) {
     setMultReadout(x.toFixed(2), "live");
     $("substatus").textContent = "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
-    recordMultGraphSample(x, receivedPerfMs);
-    drawMultGraph();
+    reconstructPrivateMultGraph(snapshot, liveBps, receivedPerfMs);
     updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps ? "cashed" : "live-hold", {
       sub: seat?.acceptedTargetBps ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` : `Balance ${privateCredits(me?.balance)} credits`,
     });
@@ -5088,6 +5188,7 @@ function paintPrivateSnapshot(snapshot) {
     setMultReadout(x.toFixed(2), "crashed");
     $("substatus").textContent = "CRASHED · SETTLED FROM COMMITTED OUTCOME";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
+    reconstructPrivateMultGraph(snapshot, crashBps, receivedPerfMs);
     if (prior !== "crashed") {
       crashedAt = performance.now();
       spawnParticles(0xff4d6a, privateMotionReduced() ? 0 : 60, 3.5);
@@ -5235,6 +5336,7 @@ async function startPrivatePlaytest() {
     #privateHud button,#privateHud a{min-height:34px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 10px;background:#14221b;color:#f5ecdc;font:700 11px inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}
     #privateHud select{min-height:34px;max-width:240px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 8px;background:#07100c;color:#f5ecdc;font:700 11px inherit}
     #privateHud button.primary{border-color:#3ddc84;color:#8dffc0}#privateHud button:disabled{opacity:.4;cursor:not-allowed}
+    body[data-playtest="true"] .toast-log{top:150px;left:18px;transform:none;align-items:flex-start;max-width:min(420px,calc(100vw - 390px))}
     #privateJourney{position:fixed;z-index:83;top:108px;left:18px;display:flex;align-items:center;width:min(720px,calc(100vw - 372px));padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(5,9,11,.78);backdrop-filter:blur(8px)}
     #privateJourney span{position:relative;flex:1;padding-top:13px;color:#69766f;text-align:center;font:800 9px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase}#privateJourney span:before{content:"";position:absolute;top:2px;left:50%;width:7px;height:7px;border-radius:50%;background:#354039;transform:translateX(-50%)}#privateJourney span:not(:last-child):after{content:"";position:absolute;left:calc(50% + 7px);right:calc(-50% + 7px);top:5px;height:1px;background:#354039}#privateJourney span.complete{color:#8ea198}#privateJourney span.complete:before,#privateJourney span.complete:not(:last-child):after{background:#3ddc84}#privateJourney span.active{color:#ffc857}#privateJourney span.active:before{background:#ffc857;box-shadow:0 0 12px rgba(255,200,87,.7)}
     #privateTablePanel{position:fixed;z-index:84;right:14px;top:58px;width:320px;max-height:calc(100vh - 76px);overflow:auto;padding:14px;border:1px solid rgba(255,200,87,.28);border-radius:14px;background:rgba(5,9,9,.92);backdrop-filter:blur(14px);box-shadow:0 18px 60px rgba(0,0,0,.45);color:#f4ead7;font-family:inherit}
@@ -5247,6 +5349,8 @@ async function startPrivatePlaytest() {
     .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions [hidden]{display:none!important}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
     .result-card.private-result{width:min(860px,calc(100% - 40px));padding:22px 26px;background:rgba(5,9,12,.96);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:680px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
     .private-result-world{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
+    #privateIntermissionCountdown{position:fixed;z-index:44;left:50%;top:clamp(155px,20vh,220px);transform:translateX(-50%);display:grid;grid-template-columns:auto auto;grid-template-areas:"label number" "unit number";align-items:center;gap:0 14px;min-width:240px;padding:12px 18px;border:1px solid rgba(255,200,87,.65);border-radius:16px;background:rgba(4,8,11,.9);box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 30px rgba(255,200,87,.1);backdrop-filter:blur(10px);pointer-events:none;text-align:right}#privateIntermissionCountdown[hidden]{display:none}#privateIntermissionCountdown small{grid-area:label;color:#ffc857;font:900 10px var(--font-mono);letter-spacing:.16em}#privateIntermissionCountdown strong{grid-area:number;color:#fff2cf;font:400 clamp(54px,7vw,92px)/.8 var(--font-display);font-variant-numeric:tabular-nums}#privateIntermissionCountdown span{grid-area:unit;color:#8fa19a;font:800 9px var(--font-mono);letter-spacing:.18em}#privateIntermissionCountdown.urgent{border-color:#ff5b72;box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 42px rgba(255,77,106,.3)}#privateIntermissionCountdown.urgent strong{color:#ff5b72}
+    .private-jackpot-fireworks{position:fixed;inset:0;z-index:110;overflow:hidden;pointer-events:none;background:radial-gradient(circle at 50% 60%,rgba(255,200,87,.12),transparent 42%)}.private-jackpot-fireworks i{position:absolute;left:var(--x);top:var(--y);width:7px;height:7px;border-radius:50%;background:var(--c);box-shadow:0 0 12px var(--c),0 0 24px var(--c);opacity:0;animation:private-firework 1.65s cubic-bezier(.16,.7,.2,1) var(--delay) both}@keyframes private-firework{0%{opacity:0;transform:translate(0,0) scale(.2)}12%{opacity:1}72%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.05)}}
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
     .private-powerball{position:relative;min-height:360px;margin:18px auto 0;overflow:hidden;border:1px solid rgba(233,180,63,.5);border-radius:12px;background:radial-gradient(circle at 25% 46%,rgba(174,125,255,.23),transparent 34%),linear-gradient(125deg,#0b0710,#1b120a 58%,#0d1f16);text-align:left;transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
     .private-powerball-haze{position:absolute;inset:0;background:radial-gradient(circle at 22% 50%,rgba(238,193,100,.25),transparent 30%),radial-gradient(circle at 70% 30%,rgba(174,125,255,.18),transparent 36%);animation:private-haze 3.2s ease-in-out infinite alternate}
@@ -5264,6 +5368,7 @@ async function startPrivatePlaytest() {
       body[data-playtest="true"] .topbar{min-height:52px;padding:8px max(10px,env(safe-area-inset-right)) 8px max(10px,env(safe-area-inset-left));overflow:hidden;gap:8px}
       body[data-playtest="true"] .topbar::-webkit-scrollbar{display:none}
       body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:6px}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat){display:none}body[data-playtest="true"] .topbar .rank-stat{display:none}body[data-playtest="true"] .topbar .gear{flex:0 0 38px;width:38px;height:38px}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
+      body[data-playtest="true"] .toast-log{top:auto;right:max(8px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));max-width:none;align-items:stretch}
       #privateHud{top:calc(52px + env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));max-width:none;display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:6px}
       #privateHud select,#privateHud button,#privateHud a{min-height:48px;font-size:12px}
       #privateHudStatus{padding:0 6px;font-size:10px}
@@ -5277,6 +5382,7 @@ async function startPrivatePlaytest() {
       .stage{min-height:52dvh}.controls{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
       body[data-playtest="true"]:has(.private-result.show) #privateHud,body[data-playtest="true"]:has(.private-result.show) #privateJourney,body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{visibility:hidden;pointer-events:none}
       .result-card.private-result,.result-card.private-result.show{position:fixed;z-index:95;inset:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));width:auto;max-height:none;margin:0;padding:12px;overflow:auto;overscroll-behavior:contain;border-radius:14px;transform:none}
+      #privateIntermissionCountdown{z-index:70;top:auto;bottom:calc(88px + env(safe-area-inset-bottom));min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
       .private-result .result-mult{font-size:clamp(30px,11vw,46px);line-height:.98}.private-result-balance{font-size:12px}
       .private-powerball{min-height:0;margin-top:12px;display:flex;flex-direction:column}
       .private-powerball-canvas{position:relative;left:auto;top:auto;width:100%;height:clamp(190px,32dvh,270px);min-height:190px;order:2}
@@ -5357,6 +5463,7 @@ async function startPrivatePlaytest() {
   hud.append(picker, status);
   document.body.appendChild(hud);
   const journey = document.createElement("nav"); journey.id = "privateJourney"; journey.setAttribute("aria-label", "Round journey"); journey.innerHTML = '<span data-stage="gather">Gather & commit</span><span data-stage="launch">Launch</span><span data-stage="fly">Fly & lock</span><span data-stage="settle">Settle</span><span data-stage="powerboard">Powerball</span><span data-stage="return">Return</span>'; document.body.appendChild(journey);
+  const countdown = document.createElement("div"); countdown.id = "privateIntermissionCountdown"; countdown.hidden = true; countdown.setAttribute("role", "timer"); countdown.setAttribute("aria-live", "polite"); document.body.appendChild(countdown);
   const reconnect = document.createElement("div"); reconnect.id = "privateReconnect"; reconnect.setAttribute("role", "status"); document.body.appendChild(reconnect);
   const panel = document.createElement("aside"); panel.id = "privateTablePanel"; panel.setAttribute("aria-label", "Private table and friends");
   const panelToggle = document.createElement("button"); panelToggle.id = "privateTableToggle"; panelToggle.type = "button"; panelToggle.setAttribute("aria-expanded", "false"); panelToggle.textContent = "TABLE Â· TAP TO OPEN"; panelToggle.onclick = () => { const open = panel.classList.toggle("mobile-open"); panelToggle.setAttribute("aria-expanded", String(open)); panelToggle.textContent = `TABLE Â· ${privateSnapshot?.members?.length || 0} PLAYERS Â· TAP TO ${open ? "CLOSE" : "OPEN"}`; };
@@ -5370,7 +5477,8 @@ async function startPrivatePlaytest() {
   const session = document.createElement("div"); session.id = "privateSessionStats";
   const playerSection = document.createElement("section"); playerSection.className = "private-panel-section"; playerSection.innerHTML = '<div class="private-panel-label">Players and readiness</div><div id="privateRoster"></div>';
   const hostSection = document.createElement("section"); hostSection.className = "private-panel-section"; const hostLabel = document.createElement("div"); hostLabel.id = "privateControlLabel"; hostLabel.className = "private-panel-label"; hostLabel.textContent = "Table and game";
-  const actions = document.createElement("div"); actions.className = "private-host-actions"; archive.className = "danger"; actions.append(launch, solo, invite, simulation, newTable, archive); hostSection.append(hostLabel, actions);
+  const mechanics = document.createElement("a"); mechanics.href = "/playtest/plankcrash-system.html"; mechanics.target = "_blank"; mechanics.rel = "noopener"; mechanics.textContent = "SYSTEM & MATH";
+  const actions = document.createElement("div"); actions.className = "private-host-actions"; archive.className = "danger"; actions.append(launch, solo, invite, simulation, newTable, mechanics, archive); hostSection.append(hostLabel, actions);
   const how = document.createElement("button"); how.id = "privateHowButton"; how.textContent = "HOW TO PLAY";
   const menu = document.createElement("button"); menu.id = "privateMenuButton"; menu.textContent = "GAME MENU"; menu.setAttribute("aria-keyshortcuts", "M");
   const leave = document.createElement("a"); leave.id = "privateLeaveTable"; leave.href = "/playtest"; leave.target = "_top"; leave.className = "leave"; leave.textContent = "LEAVE TABLE"; actions.append(how, leave);

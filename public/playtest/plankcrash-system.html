@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PlankCrash — One Flight, Two Shared Economies</title>
+    <meta
+      name="description"
+      content="The mechanics, mathematics and economic purpose of PlankCrash and the Powerboard."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #fff1d2;
+        --dim: #aab6b0;
+        --green: #54e6a0;
+        --gold: #ffc857;
+        --red: #ff5b72;
+        --panel: #09110f;
+        --line: #26382f;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(
+            circle at 78% 8%,
+            #21204b 0,
+            transparent 30%
+          ),
+          radial-gradient(circle at 10% 45%, #143a2c 0, transparent 28%),
+          #040708;
+        color: var(--ink);
+        font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .page {
+        width: min(1180px, calc(100% - 32px));
+        margin: auto;
+        padding: 48px 0 64px;
+      }
+      header {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 32px;
+        align-items: end;
+        padding-bottom: 30px;
+        border-bottom: 1px solid var(--line);
+      }
+      .kicker {
+        color: var(--green);
+        font-weight: 900;
+        letter-spacing: 0.16em;
+      }
+      h1 {
+        max-width: 900px;
+        margin: 0.2em 0;
+        font: 900 clamp(42px, 8vw, 96px) / 0.88 Impact, Haettenschweiler,
+          sans-serif;
+        letter-spacing: 0.01em;
+      }
+      header p {
+        margin: 0;
+        color: var(--dim);
+        font-size: 16px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 20px;
+      }
+      .chips span {
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--green);
+        font-size: 11px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 14px;
+        margin-top: 16px;
+      }
+      .card {
+        grid-column: span 4;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: linear-gradient(
+          150deg,
+          rgba(255, 255, 255, 0.035),
+          rgba(255, 255, 255, 0.012)
+        );
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+      }
+      .wide {
+        grid-column: span 8;
+      }
+      .full {
+        grid-column: 1/-1;
+      }
+      .num {
+        color: var(--gold);
+        font-weight: 900;
+        font-size: 11px;
+        letter-spacing: 0.13em;
+      }
+      h2 {
+        margin: 7px 0 10px;
+        font: 800 23px/1.05 system-ui, sans-serif;
+      }
+      p {
+        margin: 8px 0;
+        color: var(--dim);
+      }
+      b {
+        color: var(--ink);
+      }
+      .formula {
+        margin: 13px 0;
+        padding: 12px;
+        border-left: 2px solid var(--gold);
+        background: #060b0a;
+        color: #fff;
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 7px;
+      }
+      .flow div {
+        padding: 11px 8px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        text-align: center;
+        font-size: 11px;
+      }
+      .flow b {
+        display: block;
+        color: var(--green);
+        margin-bottom: 4px;
+      }
+      .ledger {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .ledger div {
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+      }
+      .ledger strong {
+        display: block;
+        color: var(--gold);
+        font-size: 18px;
+      }
+      .refs a {
+        color: #8ed8ff;
+      }
+      .note {
+        color: #cfdbc8;
+        font-size: 12px;
+      }
+      footer {
+        margin-top: 22px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        color: #7f9087;
+        font-size: 11px;
+      }
+      @media (max-width: 800px) {
+        header {
+          grid-template-columns: 1fr;
+        }
+        .card,
+        .wide {
+          grid-column: 1/-1;
+        }
+        .flow {
+          grid-template-columns: 1fr 1fr;
+        }
+        .ledger {
+          grid-template-columns: 1fr 1fr;
+        }
+        .page {
+          width: min(100% - 20px, 1180px);
+          padding-top: 24px;
+        }
+      }
+      @media print {
+        body {
+          background: #fff;
+          color: #111;
+        }
+        .page {
+          width: 100%;
+          padding: 0;
+        }
+        .card {
+          box-shadow: none;
+          background: #fff;
+        }
+        .card,
+        p,
+        header p,
+        .note,
+        footer {
+          color: #333;
+        }
+        :root {
+          --line: #bbb;
+          --ink: #111;
+        }
+        a {
+          color: #111;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <div class="kicker">PLANKCRASH × POWERBOARD</div>
+          <h1>One flight. Two shared economies. Every credit accounted for.</h1>
+          <div class="chips">
+            <span>PARIMUTUEL SETTLEMENT</span
+            ><span>CONTINUOUS HAZARD PRICING</span
+            ><span>PARTITION-INVARIANT CAPS</span><span>ROLLING LOTTERY</span>
+          </div>
+        </div>
+        <p>
+          PlankCrash is a multiplayer timing game built around a simple choice:
+          commit before launch, then choose how long to remain exposed to an
+          accelerating flight. The crash round resolves skill and risk against a
+          bounded shared pool. Every qualified flight also compounds a second,
+          slower story: the Powerboard prize.
+        </p>
+      </header>
+      <section class="grid">
+        <article class="card full">
+          <div class="num">THE ROUND IN SIX BEATS</div>
+          <div class="flow">
+            <div><b>1 · GATHER</b>Choose a stake and target</div>
+            <div><b>2 · COMMIT</b>Reserve a seat</div>
+            <div><b>3 · LAUNCH</b>Outcome is committed</div>
+            <div><b>4 · FLY</b>Multiplier accelerates</div>
+            <div><b>5 · LOCK</b>Secure claim weight</div>
+            <div><b>6 · SETTLE</b>Crash + Powerboard reveal</div>
+          </div>
+        </article>
+        <article class="card wide">
+          <div class="num">01 · THE FLIGHT</div>
+          <h2>Timing creates claim weight—not a fixed-odds promise.</h2>
+          <p>
+            The displayed multiplier follows an exponential clock,
+            <b>x(t)=e<sup>0.22t</sup></b
+            >. A player survives only when the accepted lock precedes the
+            committed crash. Locking later increases settlement weight, but also
+            increases the probability of losing the stake.
+          </p>
+          <div class="formula">
+            Survival law: Pr(crash ≥ m) = 1/m &nbsp;·&nbsp; cumulative hazard:
+            H(m) = −ln(1/m) = ln(m)
+          </div>
+          <p>
+            This is why the settlement weight uses <b>wᵢ=sᵢ·ln(mᵢ)</b>: stake
+            measures capital exposed; ln(m) measures endured crash hazard. The
+            two quantities are continuous, so there are no artificial multiplier
+            buckets to game.
+          </p>
+        </article>
+        <article class="card">
+          <div class="num">02 · PLAYER POOL</div>
+          <h2>Survivors divide what players supplied.</h2>
+          <p>
+            After the disclosed 4.50% routed rake, the player layer is fully
+            distributed to survivors. Each survivor first receives a 75% stake
+            floor when feasible; the remaining premium clears pro rata by hazard
+            weight.
+          </p>
+          <div class="formula">
+            pᵢ = f·sᵢ + λ·sᵢ·ln(mᵢ), with λ chosen so Σpᵢ = player distributable
+          </div>
+          <p>
+            No survivor is promised stake × multiplier. Performance changes
+            relative claim on a finite pool.
+          </p>
+        </article>
+        <article class="card">
+          <div class="num">03 · HOUSE LAYER</div>
+          <h2>A bounded bonus, never an open liability.</h2>
+          <p>
+            A separate seed may add upside. Its total availability is globally
+            capped at 10% of reserve-at-lock, then divided by the same linear
+            stake × hazard weight and constrained by additive fair-odds caps.
+          </p>
+          <div class="formula">
+            Havail=min(H, 10%·reserveAtLock) &nbsp;·&nbsp; bonusᵢ≤sᵢ(mᵢ−1)
+          </div>
+          <p>
+            Because every constraint is identity-independent and homogeneous in
+            stake, splitting one position among wallets cannot increase its
+            aggregate economic claim.
+          </p>
+        </article>
+        <article class="card">
+          <div class="num">04 · CONSERVATION</div>
+          <h2>The ledger closes every round.</h2>
+          <p>
+            Player stakes, any bounded seed, payouts, rake and reserve returns
+            reconcile exactly in integer credits. If everyone crashes, the
+            distributable is returned to the reserve. Unused house capacity also
+            returns to reserve rather than becoming an undisclosed fee.
+          </p>
+          <div class="formula">
+            player pool + seed = survivor payouts + routed rake + reserve return
+          </div>
+        </article>
+        <article class="card">
+          <div class="num">05 · THE VAULT</div>
+          <h2>Durability is a first-class game state.</h2>
+          <p>
+            The Vault is protected principal and bounded emission capacity, not
+            a promise that every round can pay every displayed multiplier. Caps
+            limit exposure; unspent capacity returns; designated overflow can
+            fund the independent Powerboard path without entering crash-round
+            risk calculations.
+          </p>
+        </article>
+        <article class="card wide">
+          <div class="num">06 · POWERBOARD</div>
+          <h2>Every qualified flight advances a slower, rarer payoff.</h2>
+          <p>
+            A defined share of the community allocation funds the Powerboard. A
+            prize seals only when its stated target is fully funded. Each
+            eligible player receives linear voucher weight from qualified
+            participation; within a winning epoch, prize ownership is
+            proportional to voucher weight, so dividing the same stake among
+            identities creates no extra weight.
+          </p>
+          <div class="formula">
+            voucher shareᵢ = weightᵢ / Σweight &nbsp;·&nbsp; combined chanceᵢ =
+            draw-hit probability × voucher shareᵢ
+          </div>
+          <p>
+            The draw displays one sphere for every equally eligible result. In
+            the current 16-ball configuration, each committed result has
+            probability 1/16. A miss rolls the funded prize forward. A hit pays
+            the selected voucher winner, preserves a reset reserve, and begins
+            the next prize cycle from its defined base.
+          </p>
+        </article>
+        <article class="card full">
+          <div class="num">07 · WHERE VALUE MOVES</div>
+          <div class="ledger">
+            <div>
+              <strong>4.50%</strong>gross routed rake on qualified player pools
+            </div>
+            <div>
+              <strong>20 / 40 / 40</strong>burn, community and founder split of
+              actual rake
+            </div>
+            <div>
+              <strong>25%</strong>of the community allocation feeds Powerboard
+              funding
+            </div>
+            <div>
+              <strong>30 sec</strong>review and recommit interval before the
+              next automatic flight
+            </div>
+          </div>
+          <p class="note">
+            Ranks and experience are reputation and progression signals; they do
+            not buy superior settlement caps. Test credits have no cash value.
+            USD equivalents are display quotations, not redemption promises.
+          </p>
+        </article>
+        <article class="card full refs">
+          <div class="num">DESIGN BASIS</div>
+          <h2>Why this structure</h2>
+          <p>
+            Parimutuel markets make realized returns depend on the whole field,
+            not a bookmaker’s fixed promise. That property gives PlankCrash a
+            naturally bounded player layer. The continuous hazard transform
+            rewards endured risk without creating discrete timing cliffs.
+            Global, additive constraints keep economics invariant to wallet
+            partitioning. The second prize loop turns repeated rounds into a
+            compounding communal objective while keeping lottery liabilities
+            separately funded.
+          </p>
+          <p class="note">
+            Reference foundations:
+            <a
+              href="https://academic.oup.com/ej/article-abstract/106/437/846/5159159"
+              >Terrell & Farmer, optimal betting and efficiency in parimutuel
+              markets</a
+            >;
+            <a href="https://academic.oup.com/oep/article/78/1/90/8244336"
+              >Whelan, market structure and returns in betting markets</a
+            >;
+            <a
+              href="https://academic.oup.com/gji/article-abstract/199/1/60/721467"
+              >Zechar & Zhuang, parimutuel redistribution and bounded returns</a
+            >;
+            <a href="https://datatracker.ietf.org/doc/html/rfc9381"
+              >IRTF RFC 9381, verifiable-random-function properties and
+              limitations</a
+            >. The formulas above describe the active public playtest policy and
+            its deterministic settlement implementation.
+          </p>
+        </article>
+      </section>
+      <footer>
+        <span>PLANKCRASH · PUBLIC ALPHA MECHANICS BRIEF</span
+        ><span>PLAY FOR POSITION. BUILD THE BOARD.</span>
+      </footer>
+    </main>
+  </body>
+</html>
