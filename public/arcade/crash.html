@@ -4544,12 +4544,73 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber) {
   const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.15,-1.55,0); machine.add(plinth);
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,2.65,28,1,true),glass); tube.position.set(1.58,.1,0); machine.add(tube);
   const makeLabel = (number) => { const c=document.createElement("canvas"); c.width=c.height=128; const x=c.getContext("2d"); x.fillStyle="#f9fbff";x.beginPath();x.arc(64,64,58,0,Math.PI*2);x.fill();x.strokeStyle="#33516e";x.lineWidth=6;x.stroke();x.fillStyle="#08111d";x.font="900 52px monospace";x.textAlign="center";x.textBaseline="middle";x.fillText(String(number),64,68); const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t; };
+  const randomUnit=()=>{const values=new Uint32Array(1);crypto.getRandomValues(values);return values[0]/4294967296;};
+  const randomSigned=()=>randomUnit()*2-1;
+  const ballRadius=.255, chamberRadii=new THREE.Vector3(1.36,1.28,.82);
   const balls=[];
-  for(let i=1;i<=16;i++){ const group=new THREE.Group(), ball=new THREE.Mesh(new THREE.SphereGeometry(.255,20,14),new THREE.MeshStandardMaterial({color:i===drawNumber?0xf1c84b:0xf4f7fb,roughness:.3,metalness:.04})); group.add(ball); const texture=makeLabel(i), label=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:true}));label.scale.set(.35,.35,1);label.position.z=.235;group.add(label); const angle=i*2.399963;group.position.set(Math.cos(angle)*(1.05-(i%3)*.12),-1.05+(i%6)*.41,Math.sin(angle)*.8);machine.add(group);balls.push({group,texture,phase:angle,number:i}); }
+  for(let i=1;i<=16;i++){
+    const group=new THREE.Group(), material=new THREE.MeshStandardMaterial({color:0xf4f7fb,roughness:.3,metalness:.04});
+    const ball=new THREE.Mesh(new THREE.SphereGeometry(ballRadius,20,14),material); group.add(ball);
+    const texture=makeLabel(i), label=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:true}));label.scale.set(.35,.35,1);label.position.z=.235;group.add(label);
+    const angle=i*2.399963, ring=.45+(i%4)*.2;
+    group.position.set(Math.cos(angle)*ring,-.9+(i%6)*.34,Math.sin(angle)*ring*.58);
+    const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
+    machine.add(group);balls.push({group,texture,material,velocity,number:i,rotation:new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize()});
+  }
   const selected=balls.find((ball)=>ball.number===Number(drawNumber)) || balls[0];
-  let raf=0,disposed=false,last=performance.now(),selection=0;
+  let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
+  const intake=new THREE.Vector3(1.25,-.88,0),tubeBottom=new THREE.Vector3(1.58,-1.02,0),tubeTop=new THREE.Vector3(1.58,1.56,0),pedestal=new THREE.Vector3(2.15,-1.26,0);
   const resize=()=>{const d=Math.min(devicePixelRatio||1,1.5),w=Math.max(2,Math.round(canvas.clientWidth*d)),h=Math.max(2,Math.round(canvas.clientHeight*d));if(canvas.width!==w||canvas.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}};
-  const render=(now)=>{if(disposed)return;resize();const dt=Math.min(.04,(now-last)/1000);last=now;const stage=card.dataset.reveal||"crash",revealed=stage==="drawn"||stage==="world";selection=privateMotionReduced()?(revealed?1:0):THREE.MathUtils.damp(selection,revealed?1:0,4.7,dt);balls.forEach((entry,index)=>{if(entry===selected){const a=Math.min(1,selection*1.7),b=Math.max(0,(selection-.58)/.42);entry.group.position.set(THREE.MathUtils.lerp(Math.cos(entry.phase),1.58,a),THREE.MathUtils.lerp(-.35,1.05,a)-b*2.35,0);entry.group.scale.setScalar(1+b*.55);}else{entry.phase+=dt*(1.5+(index%5)*.12);const radius=1.05-(index%3)*.1;entry.group.position.x=Math.cos(entry.phase)*radius;entry.group.position.z=Math.sin(entry.phase)*.72;entry.group.position.y=Math.sin(entry.phase*1.7+index)*1.08;entry.group.rotation.y+=dt*2.2;}});machine.rotation.y=Math.sin(now*.00025)*.08;renderer.render(scene,camera);raf=requestAnimationFrame(render);};
+  const mixBalls=(dt,now,revealed)=>{
+    gustClock-=dt;
+    if(gustClock<=0){
+      gustClock=.055+randomUnit()*.085;
+      const gust=new THREE.Vector3(randomSigned()*.65,.65+randomUnit()*1.15,randomSigned()*.45);
+      for(const entry of balls) if(!(revealed&&entry===selected)) entry.velocity.addScaledVector(gust,.22+randomUnit()*.28);
+    }
+    for(const entry of balls){
+      if(revealed&&entry===selected) continue;
+      const p=entry.group.position,v=entry.velocity;
+      // A turbulent upward air column plus a changing cross-flow keeps the
+      // chamber mixing; crypto-sourced gusts above prevent a repeating orbit.
+      v.x+=(-p.x*.75+Math.sin(now*.0021+p.y*2.7)*.85)*dt;
+      v.y+=(1.1-p.y*.2+Math.cos(now*.0017+p.x*2.2)*.42)*dt;
+      v.z+=(-p.z*.9+Math.sin(now*.0013+p.x*3.1)*.5)*dt;
+      v.multiplyScalar(Math.exp(-.34*dt));
+      const speed=v.length();if(speed>3.4)v.multiplyScalar(3.4/speed);
+      p.addScaledVector(v,dt);
+      const q=new THREE.Vector3(p.x/chamberRadii.x,p.y/chamberRadii.y,p.z/chamberRadii.z);
+      if(q.lengthSq()>1){
+        q.normalize();p.set(q.x*chamberRadii.x,q.y*chamberRadii.y,q.z*chamberRadii.z);
+        const normal=new THREE.Vector3(q.x/chamberRadii.x,q.y/chamberRadii.y,q.z/chamberRadii.z).normalize();
+        if(v.dot(normal)>0)v.addScaledVector(normal,-1.82*v.dot(normal));
+      }
+    }
+    // Equal-mass impulse resolution makes every visible contact deflect both
+    // balls instead of letting sprites ghost through each other.
+    for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){
+      const a=balls[i],b=balls[j];if(revealed&&(a===selected||b===selected))continue;
+      const delta=b.group.position.clone().sub(a.group.position),distance=delta.length(),minimum=ballRadius*2;
+      if(distance>=minimum)continue;
+      const normal=distance>.0001?delta.multiplyScalar(1/distance):new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize();
+      const correction=(minimum-Math.max(distance,.0001))*.505;a.group.position.addScaledVector(normal,-correction);b.group.position.addScaledVector(normal,correction);
+      const closing=b.velocity.clone().sub(a.velocity).dot(normal);
+      if(closing<0){const impulse=-(1+.88)*closing/2;a.velocity.addScaledVector(normal,-impulse);b.velocity.addScaledVector(normal,impulse);}
+    }
+    for(const entry of balls){if(revealed&&entry===selected)continue;entry.group.rotation.x+=entry.rotation.x*dt*4;entry.group.rotation.y+=entry.rotation.y*dt*4;entry.group.rotation.z+=entry.rotation.z*dt*4;}
+  };
+  const moveSelected=(progress)=>{
+    if(!capturedAt)capturedAt=selected.group.position.clone();
+    let local;
+    if(progress<.2){local=progress/.2;selected.group.position.lerpVectors(capturedAt,intake,local*local*(3-2*local));}
+    else if(progress<.32){local=(progress-.2)/.12;selected.group.position.lerpVectors(intake,tubeBottom,local);}
+    else if(progress<.68){local=(progress-.32)/.36;selected.group.position.lerpVectors(tubeBottom,tubeTop,local);}
+    else {local=Math.min(1,(progress-.68)/.32);selected.group.position.lerpVectors(tubeTop,pedestal,local);selected.group.position.y+=Math.sin(local*Math.PI)*.72;}
+    selected.group.rotation.x+=.11;selected.group.rotation.y+=.16;
+    selected.group.scale.setScalar(1+Math.max(0,(progress-.68)/.32)*.5);
+    selected.material.color.lerp(new THREE.Color(0xf1c84b),.055);
+  };
+  const render=(now)=>{if(disposed)return;resize();const dt=Math.min(.025,(now-last)/1000);last=now;const stage=card.dataset.reveal||"crash",revealed=stage==="drawn"||stage==="ejected"||stage==="world";selection=privateMotionReduced()?(revealed?1:0):THREE.MathUtils.damp(selection,revealed?1:0,2.7,dt);mixBalls(dt,now,revealed);if(revealed)moveSelected(selection);machine.rotation.y=Math.sin(now*.00025)*.05;renderer.render(scene,camera);raf=requestAnimationFrame(render);};
   raf=requestAnimationFrame(render);
   privatePowerOrangeDispose=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(raf);scene.traverse((object)=>{object.geometry?.dispose?.();if(object.material){(Array.isArray(object.material)?object.material:[object.material]).forEach((material)=>material.dispose?.());}});balls.forEach((ball)=>ball.texture.dispose());renderer.dispose();privatePowerOrangeDispose=null;};
 }
@@ -4723,7 +4784,9 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const headline = document.createElement("div"); headline.className = "result-mult";
   headline.textContent = !seat ? "ROUND SETTLED" : !survived ? "CAUGHT IN THE CRASH" : profitable ? `PROFIT · LOCKED ${locked}×` : `LOCKED ${locked}× · POOL DILUTED`;
   const money = document.createElement("div"); money.className = "result-delta";
-  money.textContent = !seat ? "You watched this round" : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
+  money.textContent = !seat ? "You watched this round" : !survived
+    ? `${privateCredits(seat.stake)} credits lost · 0 returned`
+    : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
   const settlementEvent = snapshot.currentSettlement || [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;
@@ -4740,7 +4803,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const mySettledVoucher = settledPool?.weights?.find((voucher) => voucher.userId === snapshot.me.id);
     const myWeight = BigInt(mySettledVoucher?.weight || snapshot.powerboard?.myWeight || "0"), totalWeight = BigInt(settledPool?.totalWeight || snapshot.powerboard?.totalWeight || "0");
     const mySharePpm = totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n;
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>LIVE NUMBER DRAW</h3><p class="private-powerball-rule">Sixteen numbered balls mix in the transparent air chamber. The committed result rises through the selection tube, then locks on the display pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}</span></div><div class="private-powerball-ledger"><span><small>YOUR EPOCH VOUCHER</small>${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>NEXT STATE</small>${winner ? "HIGHER RESET BASE" : lotteryEvent === "miss" ? "ROLLOVER" : "COMPOUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>LIVE NUMBER DRAW</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}</span></div><div class="private-powerball-ledger"><span><small>YOUR EPOCH VOUCHER</small>${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>NEXT STATE</small>${winner ? "HIGHER RESET BASE" : lotteryEvent === "miss" ? "ROLLOVER" : "COMPOUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
@@ -4781,8 +4844,9 @@ function paintPrivateConclusion(snapshot, me, seat) {
     queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "personal"; }, 500);
     queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "powerball"; sfx.powerboardCharge(); haptic(20); } }, 1_050);
     for (let index = 0; index < 7; index += 1) queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) sfx.powerboardTumble(); }, 1_450 + index * 120);
-    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "drawn"; sfx.powerboardLand(); haptic([20, 45, 40]); } }, 2_450);
-    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "world"; winner ? sfx.win() : sfx.powerboardMiss(); if (winner) { haptic([35, 40, 35, 40, 80]); spawnParticles(0xe9b43f, 120, 5); } } }, 3_350);
+    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) card.dataset.reveal = "drawn"; }, 2_450);
+    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "ejected"; sfx.powerboardLand(); haptic([20, 45, 40]); } }, 4_050);
+    queuePrivateReveal(() => { if (privateConclusionKey === conclusionKey) { card.dataset.reveal = "world"; winner ? sfx.win() : sfx.powerboardMiss(); if (winner) { haptic([35, 40, 35, 40, 80]); spawnParticles(0xe9b43f, 120, 5); } } }, 4_800);
   }
 }
 
@@ -5088,7 +5152,7 @@ async function startPrivatePlaytest() {
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
     .private-powerball-outcome{text-align:center}.private-powerball-outcome strong,.private-powerball-outcome span{display:block}.private-powerball-outcome strong{color:#eec164;font:900 13px/1.3 var(--font-mono)}.private-powerball.hit .private-powerball-outcome strong{color:#34d399}.private-powerball-outcome span{margin-top:5px;color:#c9b58a;font:700 9px var(--font-mono)}.private-powerball-ledger{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}.private-powerball-ledger span{padding:8px;border:1px solid rgba(233,180,63,.2);border-radius:6px;background:rgba(17,10,5,.72);color:#fff2cf;font:900 9px var(--font-mono);text-align:center}.private-powerball-ledger small{display:block;margin-bottom:4px;color:#c9b58a;font-size:7px;letter-spacing:.08em}.private-powerball-lab{margin-top:8px;padding:7px;border:1px solid rgba(255,77,106,.35);color:#ff8da0;font:900 8px var(--font-mono);text-align:center}
     .private-reveal-skip,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:14px;pointer-events:auto}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
-    .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="drawn"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.2,.9,.25,1.35)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="powerball"] .private-result-next,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note,.private-result[data-reveal="drawn"] .private-result-next{opacity:0;transform:translateY(8px)}
+    .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="ejected"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="ejected"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.2,.9,.25,1.35)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="powerball"] .private-result-next,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note,.private-result[data-reveal="drawn"] .private-result-next{opacity:0;transform:translateY(8px)}
     @keyframes private-ball-orbit{from{transform:rotate(0deg) translateX(37px) rotate(0deg)}to{transform:rotate(360deg) translateX(37px) rotate(-360deg)}}@keyframes private-haze{from{opacity:.55;transform:scale(1)}to{opacity:1;transform:scale(1.06)}}
     @media(max-width:700px){.private-result{padding:12px;max-height:86vh}.private-powerball{min-height:560px}.private-powerball-canvas{left:0;top:92px;width:100%;height:300px}.private-powerball-copy{width:auto;margin:0;padding:20px 16px}.private-powerball-copy h3{max-width:75%}.private-powerball-rule{max-width:70%}.private-powerball-drum{margin:250px auto 10px}.private-powerball-ledger{grid-template-columns:1fr}.private-result-next{grid-template-columns:1fr}.private-reveal-skip{order:2}}
     @media(prefers-reduced-motion:reduce){.private-powerball-haze,.private-powerball-drum i{animation:none}.private-powerball-canvas,.private-powerball-drum b,.private-powerball{transition:none!important}}
