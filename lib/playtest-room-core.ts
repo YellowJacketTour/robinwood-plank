@@ -6,6 +6,9 @@ export const PLAYTEST_RULES_SCHEMA = "plank.live-lab.v1";
 
 export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   rakeBps: 450n,
+  rakeFloorBps: 250n,
+  rakeStepBps: 25n,
+  rakeVolumeStep: 25_000_000n,
   keeperRewardBps: 0n,
   // Explicit laboratory hypotheses. These are intentionally not described as
   // ratified mainnet parameters.
@@ -21,7 +24,9 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   consolation: 0n,
   allocationRule: "ccs-2l",
   minimumPlayers: 2,
-  minimumStake: 100n,
+  // 500 credits = 0.0005 ETH, about $1.22 at the current public reference.
+  // Test credits have no cash value; this is a conservative UX analogue.
+  minimumStake: 500n,
 };
 
 /**
@@ -62,7 +67,8 @@ export function playtestRulesHash(policy: SimulationPolicy): string {
 }
 
 const POLICY_BIGINT_KEYS = new Set([
-  "rakeBps", "keeperRewardBps", "protectedPrincipalBps", "crashSeed",
+  "rakeBps", "rakeFloorBps", "rakeStepBps", "rakeVolumeStep",
+  "keeperRewardBps", "protectedPrincipalBps", "crashSeed",
   "emissionBufferCap", "lotteryFounderFeeBps", "lotteryInitialBase",
   "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep",
   "consolation", "minimumStake", "powerboardFundingBps",
@@ -72,7 +78,9 @@ export function parsePolicy(raw: unknown): SimulationPolicy {
   const value = raw as Record<string, unknown>;
   const revived: Record<string, unknown> = { ...value };
   for (const key of POLICY_BIGINT_KEYS) {
-    const fallback = key === "powerboardFundingBps" ? DEFAULT_PLAYTEST_POLICY.powerboardFundingBps : undefined;
+    const fallback = key in DEFAULT_PLAYTEST_POLICY
+      ? DEFAULT_PLAYTEST_POLICY[key as keyof SimulationPolicy]
+      : undefined;
     revived[key] = BigInt(String(value[key] ?? fallback));
   }
   return revived as unknown as SimulationPolicy;

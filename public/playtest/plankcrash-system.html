@@ -83,6 +83,30 @@
         gap: 14px;
         margin-top: 16px;
       }
+      .metric-strip {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+        margin: 18px 0 8px;
+      }
+      .metric {
+        min-height: 105px; padding: 14px; border: 1px solid var(--line);
+        border-radius: 14px; background: rgba(4, 9, 8, .78);
+        display: flex; flex-direction: column; justify-content: space-between;
+      }
+      .metric strong { color: var(--gold); font: 900 clamp(22px, 3vw, 38px)/1 system-ui,sans-serif; }
+      .metric span { color: var(--dim); font-size: 10px; letter-spacing: .11em; text-transform: uppercase; }
+      .value-map { display:grid; grid-template-columns: 2fr 54px 1.4fr 54px 1.4fr; align-items:stretch; gap:8px; }
+      .value-node { border:1px solid var(--line); border-radius:14px; padding:16px; display:grid; place-items:center; text-align:center; min-height:105px; }
+      .value-node strong { display:block; color:var(--green); font:900 28px/1 system-ui,sans-serif; }
+      .value-node.gold strong { color:var(--gold); }
+      .value-arrow { display:grid; place-items:center; color:var(--gold); font-size:30px; }
+      .split-bar { height:18px; display:flex; overflow:hidden; border-radius:999px; margin-top:12px; border:1px solid var(--line); }
+      .split-bar i:nth-child(1){width:20%;background:#ff765f}.split-bar i:nth-child(2){width:40%;background:#54e6a0}.split-bar i:nth-child(3){width:40%;background:#ffc857}
+      .stairs { display:grid; grid-template-columns:repeat(9,1fr); align-items:end; gap:5px; height:180px; padding-top:20px; }
+      .stepbar { min-width:0; border:1px solid rgba(84,230,160,.42); border-radius:8px 8px 3px 3px; background:linear-gradient(180deg,rgba(84,230,160,.34),rgba(84,230,160,.08)); display:flex; flex-direction:column; justify-content:flex-start; align-items:center; padding:7px 2px; font-size:9px; }
+      .stepbar b { color:var(--green); font-size:12px; }.stepbar small{color:var(--dim);font-size:8px}
+      .equation-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+      .equation { border:1px solid var(--line); border-radius:12px; padding:14px; background:#060b0a; overflow-wrap:anywhere; }
+      .equation b{display:block;color:var(--gold);font-size:11px;margin-bottom:8px}.equation code{color:#fff;font-size:12px}
       .card {
         grid-column: span 4;
         padding: 22px;
@@ -190,10 +214,19 @@
         .ledger {
           grid-template-columns: 1fr 1fr;
         }
+        .metric-strip { grid-template-columns:1fr 1fr; }
+        .metric:last-child { grid-column:1/-1; }
+        .value-map { grid-template-columns:1fr; }.value-arrow{transform:rotate(90deg);height:30px}
+        .stairs { overflow-x:auto; grid-template-columns:repeat(9,64px); padding-bottom:8px; }
+        .equation-grid { grid-template-columns:1fr 1fr; }
         .page {
           width: min(100% - 20px, 1180px);
           padding-top: 24px;
         }
+      }
+      @media (max-width: 440px) {
+        .metric-strip,.ledger,.equation-grid{grid-template-columns:1fr}.metric:last-child{grid-column:auto}
+        .metric{min-height:82px}h1{font-size:43px}.card{padding:16px}
       }
       @media print {
         body {
@@ -245,7 +278,47 @@
           slower story: the Powerboard prize.
         </p>
       </header>
+      <section class="metric-strip" aria-label="Active public alpha constants">
+        <div class="metric"><strong>500 cr</strong><span>$1-reference minimum<br />0.0005 ETH</span></div>
+        <div class="metric"><strong>95.50%</strong><span>starting player purse RTP</span></div>
+        <div class="metric"><strong>97.50%</strong><span>permanent unlocked ceiling</span></div>
+        <div class="metric"><strong>1 / 16</strong><span>committed Powerboard gate</span></div>
+        <div class="metric"><strong>1M+</strong><span>credit progressive cycle base</span></div>
+      </section>
       <section class="grid">
+        <article class="card full">
+          <div class="num">VALUE MAP &middot; ONE QUALIFIED ROUND</div>
+          <div class="value-map">
+            <div class="value-node"><div><strong>100%</strong>PLAYER STAKES<br /><small>qualified notional advances evolution</small></div></div>
+            <div class="value-arrow">&#10132;</div>
+            <div class="value-node"><div><strong>95.50%+</strong>PLAYER PURSE<br /><small>rises permanently as rake unlocks</small></div></div>
+            <div class="value-arrow">&#10132;</div>
+            <div class="value-node gold"><div><strong>4.50%&#8595;</strong>ROUTED RAKE<div class="split-bar" title="20% burn, 40% community, 40% founder"><i></i><i></i><i></i></div><small>20 burn &middot; 40 community &middot; 40 founder</small></div></div>
+          </div>
+        </article>
+        <article class="card full">
+          <div class="num">PERMANENT EVOLUTION &middot; 25M QUALIFIED CREDITS PER STEP</div>
+          <div class="stairs" aria-label="RTP increases from 95.5 to 97.5 percent">
+            <div class="stepbar" style="height:52%"><b>95.50</b><small>0M</small></div>
+            <div class="stepbar" style="height:58%"><b>95.75</b><small>25M</small></div>
+            <div class="stepbar" style="height:64%"><b>96.00</b><small>50M</small></div>
+            <div class="stepbar" style="height:70%"><b>96.25</b><small>75M</small></div>
+            <div class="stepbar" style="height:76%"><b>96.50</b><small>100M</small></div>
+            <div class="stepbar" style="height:82%"><b>96.75</b><small>125M</small></div>
+            <div class="stepbar" style="height:88%"><b>97.00</b><small>150M</small></div>
+            <div class="stepbar" style="height:94%"><b>97.25</b><small>175M</small></div>
+            <div class="stepbar" style="height:100%"><b>97.50</b><small>200M+</small></div>
+          </div>
+        </article>
+        <article class="card full">
+          <div class="num">FOUR EQUATIONS &middot; THE WHOLE MACHINE</div>
+          <div class="equation-grid">
+            <div class="equation"><b>FLIGHT</b><code>x(t)=e<sup>0.22t</sup></code></div>
+            <div class="equation"><b>PLAYER PURSE</b><code>D=(1-r<sub>tier</sub>)&Sigma;s</code></div>
+            <div class="equation"><b>CLAIM WEIGHT</b><code>w<sub>i</sub>=s<sub>i</sub>&middot;ln(m<sub>i</sub>)</code></div>
+            <div class="equation"><b>EVOLUTION</b><code>r=max(2.5%,4.5%-0.25%&lfloor;Q/25M&rfloor;)</code></div>
+          </div>
+        </article>
         <article class="card full">
           <div class="num">THE ROUND IN SIX BEATS</div>
           <div class="flow">
@@ -282,8 +355,9 @@
           <div class="num">02 · PLAYER POOL</div>
           <h2>Survivors divide what players supplied.</h2>
           <p>
-            After the disclosed 4.50% routed rake, the player layer is fully
-            distributed to survivors. Each survivor first receives a 75% stake
+            After the disclosed tiered rake (4.50% initially, permanently
+            declining toward 2.50%), the player layer is fully distributed to
+            survivors. Each survivor first receives a 75% stake
             floor when feasible; the remaining premium clears pro rata by hazard
             weight.
           </p>
@@ -363,7 +437,8 @@
           <div class="num">07 · WHERE VALUE MOVES</div>
           <div class="ledger">
             <div>
-              <strong>4.50%</strong>gross routed rake on qualified player pools
+              <strong>4.50% â†’ 2.50%</strong>permanent rake staircase advanced
+              only by qualified economic volume
             </div>
             <div>
               <strong>20 / 40 / 40</strong>burn, community and founder split of

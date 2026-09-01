@@ -12,6 +12,10 @@ import { DEFAULT_CCS2L_PARAMS, settleCcs2L, type Ccs2LSettlement } from "./econo
 
 export interface SimulationPolicy {
   rakeBps: bigint;
+  /** Permanent qualified-volume rake staircase. */
+  rakeFloorBps: bigint;
+  rakeStepBps: bigint;
+  rakeVolumeStep: bigint;
   keeperRewardBps: bigint;
   protectedPrincipalBps: bigint;
   /** Share of the already-ratified community rake routed to Powerboard each qualified game. */
@@ -92,6 +96,35 @@ export interface IterationResult {
    */
   settlement?: ReturnType<typeof settleParimutuel> | Ccs2LSettlement;
   lotteryEvent: "none" | "funding" | "sealed" | "miss" | "hit";
+  effectiveRakeBps: bigint;
+  evolutionTier: bigint;
+}
+
+export interface EvolutionQuote {
+  effectiveRakeBps: bigint;
+  tier: bigint;
+  qualifiedVolume: bigint;
+  nextMilestoneVolume: bigint | null;
+  volumeRemaining: bigint;
+}
+
+export function evolutionQuote(policy: SimulationPolicy, qualifiedVolume: bigint): EvolutionQuote {
+  if (qualifiedVolume < 0n) throw new RangeError("negative qualified volume");
+  const possibleDrop = policy.rakeBps - policy.rakeFloorBps;
+  const maxTiers = possibleDrop === 0n ? 0n : (possibleDrop + policy.rakeStepBps - 1n) / policy.rakeStepBps;
+  const earnedTiers = qualifiedVolume / policy.rakeVolumeStep;
+  const tier = earnedTiers < maxTiers ? earnedTiers : maxTiers;
+  const rawDrop = tier * policy.rakeStepBps;
+  const drop = rawDrop < possibleDrop ? rawDrop : possibleDrop;
+  const effectiveRakeBps = policy.rakeBps - drop;
+  const nextMilestoneVolume = tier < maxTiers ? (tier + 1n) * policy.rakeVolumeStep : null;
+  return {
+    effectiveRakeBps,
+    tier,
+    qualifiedVolume,
+    nextMilestoneVolume,
+    volumeRemaining: nextMilestoneVolume === null ? 0n : nextMilestoneVolume - qualifiedVolume,
+  };
 }
 
 const ZERO_TOTALS: SimulationTotals = {
@@ -115,6 +148,8 @@ const ZERO_TOTALS: SimulationTotals = {
 export function validatePolicy(policy: SimulationPolicy): void {
   const bounded = [
     policy.rakeBps,
+    policy.rakeFloorBps,
+    policy.rakeStepBps,
     policy.keeperRewardBps,
     policy.protectedPrincipalBps,
     policy.powerboardFundingBps,
@@ -123,7 +158,9 @@ export function validatePolicy(policy: SimulationPolicy): void {
   ];
   if (bounded.some((value) => value < 0n || value > BPS)) throw new RangeError("invalid bps policy");
   if (policy.lotteryFounderFeeBps === BPS) throw new RangeError("lottery fee consumes prize");
-  if (policy.rakeBps !== 450n) throw new RangeError("simulation requires ratified 4.50% rake");
+  if (policy.rakeFloorBps > policy.rakeBps || policy.rakeStepBps <= 0n || policy.rakeVolumeStep <= 0n) {
+    throw new RangeError("invalid evolutionary rake policy");
+  }
   if (policy.minimumPlayers < 1 || !Number.isSafeInteger(policy.minimumPlayers)) {
     throw new RangeError("invalid minimum players");
   }
@@ -281,11 +318,12 @@ export function simulateIteration(
     && input.players.every((player) => player.stake >= policy.minimumStake);
   let settlement: IterationResult["settlement"];
   let seed = 0n;
+  const evolution = evolutionQuote(policy, prior.totals.freshWagers);
   if (qualified) {
     seed = state.emissionBuffer < policy.crashSeed ? state.emissionBuffer : policy.crashSeed;
     state.emissionBuffer -= seed;
     const stakes = input.players.map((player) => player.stake);
-    const economics = roundEconomics(seed, stakes, policy.rakeBps);
+    const economics = roundEconomics(seed, stakes, evolution.effectiveRakeBps);
     const split = ratifiedRakeSplit(economics.rake, policy.keeperRewardBps);
     // Undistributed value returning to the Vault this iteration. For the
     // parimutuel rules this is the classic vaultRemainder; for ccs-2l it is
@@ -348,7 +386,15 @@ export function simulateIteration(
 
   const lotteryEvent = applyLotteryOutcome(state, policy, input.lotteryOutcome);
   assertSimulationInvariants(prior, state, policy, qualified);
-  return { state, qualified, seed, settlement, lotteryEvent };
+  return {
+    state,
+    qualified,
+    seed,
+    settlement,
+    lotteryEvent,
+    effectiveRakeBps: evolution.effectiveRakeBps,
+    evolutionTier: evolution.tier,
+  };
 }
 
 export function accountedAssets(state: SimulationState): bigint {

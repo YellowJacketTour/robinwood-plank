@@ -212,6 +212,14 @@ test("phone presentation uses a collapsible table sheet and exclusive result the
   assert.match(arcadeSource, /height:clamp\(190px,32dvh,270px\)/);
 });
 
+test("public alpha exposes the dollar-reference floor and permanent RTP evolution on phones", () => {
+  assert.match(arcadeSource, /playtestAmounts = \["0\.0005", "0\.001", "0\.005", "0\.01"\]/);
+  assert.match(arcadeSource, /\$1 MIN/);
+  assert.match(arcadeSource, /snapshot\.evolution\?\.effectiveRakeBps/);
+  assert.match(arcadeSource, /Wallet count never advances this meter/);
+  assert.match(arcadeSource, /topbar \.stats>span:not\(\.vault-stat\):not\(\.pb-stat\):not\(\.rank-stat\)/);
+});
+
 test("returning invitees can choose login and rejoin the invited room in one action", () => {
   assert.match(gateSource, /\(publicRegistration \|\| invite\)/);
   assert.match(gateSource, />Returning player</);

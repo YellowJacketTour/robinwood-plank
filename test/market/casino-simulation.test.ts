@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   accountedAssets,
+  evolutionQuote,
   initialSimulationState,
   seededSimulationRandom,
   serializeSimulationState,
@@ -12,6 +13,9 @@ import {
 const ETH = 10n ** 18n;
 const policy: SimulationPolicy = {
   rakeBps: 450n,
+  rakeFloorBps: 250n,
+  rakeStepBps: 25n,
+  rakeVolumeStep: 25_000_000n,
   keeperRewardBps: 0n,
   protectedPrincipalBps: 2_500n,
   powerboardFundingBps: 2_500n,
@@ -60,6 +64,44 @@ test("ratified split, principal, emissions, and payouts conserve a qualified rou
     - result.state.totals.burned
     - result.state.totals.crashFounderRake;
   assert.equal(playerNetIn, result.state.totals.playerCrashPayouts + accountedAssets(result.state));
+});
+
+test("qualified volume permanently lowers rake without wallet-count or rank shortcuts", () => {
+  const evolving: SimulationPolicy = {
+    ...policy,
+    allocationRule: "ccs-2l",
+    minimumStake: 500n,
+    crashSeed: 0n,
+    rakeVolumeStep: 2_000n,
+    rakeStepBps: 25n,
+    rakeFloorBps: 400n,
+  };
+  const players = [
+    { id: "a", stake: 1_000n, targetBps: 11_000n },
+    { id: "b", stake: 1_000n, targetBps: 11_000n },
+  ];
+  let state = initialSimulationState(evolving);
+  const first = simulateIteration(state, evolving, { players, crashBps: 20_000n, lotteryOutcome: "none" });
+  assert.equal(first.effectiveRakeBps, 450n);
+  assert.equal(first.settlement?.totalPayout, 1_910n);
+  state = first.state;
+  const second = simulateIteration(state, evolving, { players, crashBps: 20_000n, lotteryOutcome: "none" });
+  assert.equal(second.effectiveRakeBps, 425n);
+  assert.equal(second.settlement?.totalPayout, 1_915n);
+  state = second.state;
+  const third = simulateIteration(state, evolving, { players, crashBps: 20_000n, lotteryOutcome: "none" });
+  assert.equal(third.effectiveRakeBps, 400n);
+  assert.equal(third.settlement?.totalPayout, 1_920n);
+  assert.equal(evolutionQuote(evolving, third.state.totals.freshWagers).effectiveRakeBps, 400n);
+
+  const unqualified = simulateIteration(third.state, evolving, {
+    players: [{ id: "sybil", stake: 499n, targetBps: 11_000n }],
+    crashBps: 20_000n,
+    lotteryOutcome: "none",
+  });
+  assert.equal(unqualified.qualified, false);
+  assert.equal(unqualified.state.totals.freshWagers, third.state.totals.freshWagers);
+  assert.equal(unqualified.effectiveRakeBps, 400n);
 });
 
 test("misses seal only at a strictly larger net prize and charge rollover fee", () => {

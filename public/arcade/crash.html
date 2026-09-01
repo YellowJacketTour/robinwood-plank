@@ -665,7 +665,7 @@
        silent revert the first time a bet is rejected. -->
   <div id="rankPopover" class="rank-popover">
     <div class="rank-pop-head">🪵 Rank <span class="rank-pop-close" id="rankPopClose" role="button" aria-label="Close rank details" tabindex="0">✕</span></div>
-    <div class="rank-pop-sub">Playing rounds and wagering ETH raises your rank, which raises your max bet and lowers the entry fee on larger bets. Sapling → Stick → Board → Plank → Big Beam → Wooden Whale.</div>
+    <div class="rank-pop-sub">Ranks record participation and reputation. Public-alpha pricing, minimum stake, settlement weight, and caps are table-wide rules; reputation never buys better odds.</div>
     <div id="rankPopBody"></div>
   </div>
 
@@ -3407,6 +3407,25 @@ async function refreshProgressionUI() {
 $("rankStat").addEventListener("click", () => {
   $("rankPopover").classList.toggle("show");
   if (PLAYTEST_MODE) {
+    const evolution = privateSnapshot?.evolution || {};
+    const rake = Number(evolution.effectiveRakeBps ?? privateSnapshot?.policy?.rakeBps ?? 450);
+    const floor = Number(privateSnapshot?.policy?.rakeFloorBps ?? 250);
+    const step = Number(privateSnapshot?.policy?.rakeStepBps ?? 25);
+    const milestone = BigInt(privateSnapshot?.policy?.rakeVolumeStep ?? "25000000");
+    const volume = BigInt(evolution.qualifiedVolume ?? "0");
+    const withinTier = milestone > 0n ? volume % milestone : 0n;
+    const progress = evolution.nextMilestoneVolume == null ? 100 : Number((withinTier * 10_000n) / milestone) / 100;
+    document.querySelector(".rank-pop-sub").textContent = "TABLE EVOLUTION · Economic volume lowers protocol rake permanently. Rank never changes price, odds, settlement weight, or the $1-reference floor.";
+    $("rankPopBody").innerHTML =
+      `<div class="pb-row"><span class="pb-k">Player RTP</span><span class="pb-v hi">${(100-rake/100).toFixed(2)}%</span></div>` +
+      `<div class="pb-row"><span class="pb-k">Permanent floor</span><span class="pb-v">${(100-floor/100).toFixed(2)}% RTP</span></div>` +
+      `<div class="pb-row"><span class="pb-k">Next unlock</span><span class="pb-v">+${(step/100).toFixed(2)}% RTP</span></div>` +
+      `<div class="rank-bar-track"><div class="rank-bar-fill" style="width:${progress.toFixed(1)}%"></div></div>` +
+      `<div class="rank-bar-label">${evolution.nextMilestoneVolume == null ? "MAXIMUM PLAYER-PURSE TIER UNLOCKED" : `${privateCredits(evolution.volumeRemaining)} qualified credits to next tier`}</div>` +
+      '<div class="pb-row"><span class="pb-k">Crash weight</span><span class="pb-v">stake × ln(lock)</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Wallet splitting</span><span class="pb-v">0 aggregate gain</span></div>' +
+      '<div class="pb-guarantee">Only qualified staked notional advances the meter. More wallets do not. Ranks remain reputation-only and cannot unlock larger economic rights.</div>';
+    return;
     document.querySelector(".rank-pop-sub").textContent = "Ranks belong to identity and reputation, not gambling price, odds, or permission to risk more. The alpha applies the same table rules to every economic participant.";
     $("rankPopBody").innerHTML =
       '<div class="pb-row"><span class="pb-k">Stake weight</span><span class="pb-v hi">LINEAR</span></div>' +
@@ -4988,7 +5007,8 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const note = document.createElement("div"); note.className = "private-result-note";
   const allocation = settlementEvent?.payload?.accounting?.allocations?.find((entry) => entry.id === snapshot.me.id);
   const base = allocation ? privateCredits(allocation.base) : null; const surplus = allocation ? privateCredits(allocation.surplus) : null;
-  note.textContent = `${seat ? `${base !== null ? `Exact settlement: ${base} base return + ${surplus} risk surplus = ${privateCredits(seat.payout)}. ` : ""}${survived && !profitable ? "You beat the crash, but too much stake also survived to cover every stake after the 4.50% routed rake; the bounded pool cannot manufacture the difference. " : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
+  const settledRakeBps = Number(settlementEvent?.publicPayload?.effectiveRakeBps ?? snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
+  note.textContent = `${seat ? `${base !== null ? `Exact settlement: ${base} base return + ${surplus} risk surplus = ${privateCredits(seat.payout)}. ` : ""}${survived && !profitable ? `You beat the crash, but too much stake also survived to cover every stake after the ${(settledRakeBps / 100).toFixed(2)}% routed rake; the bounded pool cannot manufacture the difference. ` : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
   const next = document.createElement("div"); next.className = "private-result-next";
   const skip = document.createElement("button"); skip.type = "button"; skip.className = "private-reveal-skip"; skip.textContent = "SKIP REVEAL";
   const continueButton = document.createElement("button"); continueButton.type = "button"; continueButton.className = "private-reveal-continue"; continueButton.textContent = `REVIEW COMPLETE · PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
@@ -5119,8 +5139,13 @@ function paintPrivateSnapshot(snapshot) {
     ? `Your epoch ${snapshot.powerboard.epoch} voucher has ${privateCredits(voucherWeight)} of ${privateCredits(snapshot.powerboard.totalWeight)} linear weight; current combined jackpot chance is about 1 in ${privateCredits(voucherOdds)}. Click for the full ledger.`
     : lotteryPresentation.detail;
   $("pbJackpot").textContent = snapshot.simulation.lottery.netPrize === "0" ? " next prize" : " Powerboard";
-  $("rankName").textContent = "FAIR CAPS";
-  $("rankStat").title = "Alpha: ranks are reputation only. Economic caps apply equally to participants and cannot be unlocked by wagering more.";
+  const effectiveRakeBps = Number(snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
+  const evolutionTier = Number(snapshot.evolution?.tier ?? 0);
+  const nextMilestone = snapshot.evolution?.nextMilestoneVolume;
+  $("rankName").textContent = `RTP ${(100 - effectiveRakeBps / 100).toFixed(2)}%`;
+  $("rankStat").title = nextMilestone == null
+    ? `Evolution tier ${evolutionTier}: the permanent ${Number(snapshot.policy.rakeFloorBps) / 100}% rake floor is unlocked.`
+    : `Evolution tier ${evolutionTier}: ${privateCredits(snapshot.evolution.volumeRemaining)} more qualified credits permanently lowers rake by ${Number(snapshot.policy.rakeStepBps) / 100}%. Wallet count never advances this meter.`;
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
   const authoritativeSeat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
@@ -5376,7 +5401,7 @@ async function startPrivatePlaytest() {
       body[data-playtest="true"]{padding-bottom:calc(76px + env(safe-area-inset-bottom));overflow-x:hidden}
       body[data-playtest="true"] .topbar{min-height:52px;padding:8px max(10px,env(safe-area-inset-right)) 8px max(10px,env(safe-area-inset-left));overflow:hidden;gap:8px}
       body[data-playtest="true"] .topbar::-webkit-scrollbar{display:none}
-      body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:6px}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat){display:none}body[data-playtest="true"] .topbar .rank-stat{display:none}body[data-playtest="true"] .topbar .gear{flex:0 0 38px;width:38px;height:38px}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
+      body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:5px}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat):not(.rank-stat){display:none}body[data-playtest="true"] .topbar .rank-stat{display:inline-flex;padding:3px 7px;font-size:10px}body[data-playtest="true"] .topbar .gear{flex:0 0 38px;width:38px;height:38px}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
       body[data-playtest="true"] .toast-log{top:auto;right:max(8px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));max-width:none;align-items:stretch}
       #privateHud{top:calc(52px + env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));max-width:none;display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:6px}
       #privateHud select,#privateHud button,#privateHud a{min-height:48px;font-size:12px}
@@ -5505,7 +5530,7 @@ async function startPrivatePlaytest() {
 
   const simulationDialog = document.createElement("dialog"); simulationDialog.id = "privateSimulation"; simulationDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Host PIN · no-value scenario injection</div><h2>Table simulation controls</h2><p class="private-menu-lede">Change rules between rounds, place the Vault and Powerboard at specific test states, set cumulative burn counters, and adjust any friend's credits. Every injection is server-validated and labeled in the replay log; none of this can touch mainnet.</p><div id="privateAdminStatus" class="private-admin-status"></div>
     <section class="private-admin-section"><h3>QUICK TEST SETUP</h3><p class="private-menu-lede">Start with a useful population in one click, then use the detailed controls only when a scenario needs exact tuning.</p><div class="private-menu-actions"><button data-quick-sim="solo" class="primary">SOLO + 8 MIXED CPU</button><button data-quick-sim="friends">FRIENDS + 8 CPU</button><button data-quick-sim="stress">100-CPU STRESS</button></div></section>
-    <section class="private-admin-section"><h3>TABLE & RAKE ROUTING</h3><p class="private-menu-lede">Basis points use 10,000 = 100%. The ratified 4.50% rake and PFSS allocation remain locked.</p><div class="private-admin-grid">
+    <section class="private-admin-section"><h3>TABLE & RAKE ROUTING</h3><p class="private-menu-lede">Basis points use 10,000 = 100%. Qualified economic volume permanently lowers rake from 4.50% toward 2.50%; wallet count never advances it. CCS-2L settlement remains locked.</p><div class="private-admin-grid">
       <label class="private-setting"><span>Minimum players</span><input data-policy="minimumPlayers" inputmode="numeric"></label><label class="private-setting"><span>Minimum stake</span><input data-policy="minimumStake" inputmode="numeric"></label><label class="private-setting"><span>Vault share of routed rake (bps)</span><input data-policy="protectedPrincipalBps" inputmode="numeric"></label><label class="private-setting"><span>Powerboard share of community rake (bps)</span><input data-policy="powerboardFundingBps" inputmode="numeric"></label><label class="private-setting"><span>Keeper reward (bps)</span><input data-policy="keeperRewardBps" inputmode="numeric"></label><label class="private-setting"><span>Crash seed per round</span><input data-policy="crashSeed" inputmode="numeric"></label><label class="private-setting"><span>Emission buffer cap</span><input data-policy="emissionBufferCap" inputmode="numeric"></label>
     </div><div class="private-menu-actions"><button id="privateApplyRules" class="primary">APPLY TABLE RULES</button></div></section>
     <section class="private-admin-section"><h3>LOTTERY ENGINE RULES</h3><div class="private-admin-grid">
@@ -5599,8 +5624,14 @@ async function startPrivatePlaytest() {
   if (localStorage.getItem("plank-alpha:onboarding-v3") !== "complete") welcome.showModal();
   $("simBtn").classList.add("hide");
   document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
-    chip.textContent = Number(chip.dataset.amt) * 1_000_000 >= 1000 ? `${Number(chip.dataset.amt) * 1000}K` : String(Number(chip.dataset.amt) * 1_000_000);
+    const playtestAmounts = ["0.0005", "0.001", "0.005", "0.01"];
+    const index = [...document.querySelectorAll(".chip[data-amt]")].indexOf(chip);
+    chip.dataset.amt = playtestAmounts[index];
+    chip.classList.toggle("active", index === 0);
+    const credits = Number(chip.dataset.amt) * 1_000_000;
+    chip.textContent = credits >= 1000 ? `${credits / 1000}K` : index === 0 ? `$1 MIN · ${credits}` : String(credits);
   });
+  betAmount = "0.0005";
   $("primaryBtn").textContent = "CONNECTING TO PRIVATE TABLE…";
   $("btnSub").textContent = "No wallet · no value · authoritative multiplayer simulation";
   await refreshPrivatePlaytest();

@@ -86,6 +86,14 @@ test("policy and simulation state survive JSON without losing integer precision"
   assert.deepEqual(parseSimulationState(serializeBigInts(state)), state);
 });
 
+test("public policy starts at a conservative one-dollar-reference floor", () => {
+  assert.equal(DEFAULT_PLAYTEST_POLICY.minimumStake, 500n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.rakeBps, 450n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.rakeFloorBps, 250n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.rakeStepBps, 25n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.rakeVolumeStep, 25_000_000n);
+});
+
 test("pre-Powerboard-provenance snapshots remain replayable", () => {
   const legacy = serializeBigInts(initialSimulationState(DEFAULT_PLAYTEST_POLICY)) as Record<string, unknown>;
   delete (legacy.totals as Record<string, unknown>).powerboardFunded;

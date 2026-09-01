@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { initialSimulationState, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
+import { evolutionQuote, initialSimulationState, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
@@ -212,6 +212,8 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       )
       : null;
     const simulation = parseSimulationState(room.simulation_state);
+    const snapshotPolicy = parsePolicy(room.policy);
+    const evolution = evolutionQuote(snapshotPolicy, simulation.totals.freshWagers);
     const eligibilityEpoch = simulation.lottery.awaitingSeal ? simulation.lottery.epoch + 1n : simulation.lottery.epoch;
     const powerboard = await client.query<{ total_weight: string; my_weight: string; participant_count: string }>(
       `SELECT COALESCE(SUM(weight),0)::text AS total_weight,
@@ -242,6 +244,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
           : null,
       },
       policy: room.policy, simulation: room.simulation_state,
+      evolution: serializeBigInts(evolution),
       powerboard: {
         epoch: eligibilityEpoch.toString(),
         totalWeight: totalPowerboardWeight.toString(),
@@ -383,6 +386,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     const launchRound = room.phase === "settled" ? BigInt(room.current_round) + 1n : BigInt(room.current_round);
     if (launchRound < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a round with bets.");
     room.current_round = launchRound.toString();
+    const storedPolicy = room.policy as Record<string, unknown>;
     let policy = parsePolicy(room.policy);
     // The public laboratory advances legacy tables at the round boundary,
     // never mid-flight. Historical rounds retain their committed descriptor.
@@ -391,7 +395,11 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       && policy.lotteryMinimumIncrease === 1_000n
       && policy.lotteryBaseGrowthBps === 100n
       && policy.lotteryMinimumBaseStep === 1_000n;
-    if (policy.allocationRule !== "ccs-2l" || legacyPrizeProfile) {
+    const legacyEvolutionProfile = storedPolicy.rakeFloorBps === undefined
+      || storedPolicy.rakeStepBps === undefined
+      || storedPolicy.rakeVolumeStep === undefined;
+    const legacyMinimumStake = policy.minimumStake === 100n;
+    if (policy.allocationRule !== "ccs-2l" || legacyPrizeProfile || legacyEvolutionProfile || legacyMinimumStake) {
       policy = {
         ...policy,
         allocationRule: "ccs-2l",
@@ -402,6 +410,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
           lotteryBaseGrowthBps: DEFAULT_PLAYTEST_POLICY.lotteryBaseGrowthBps,
           lotteryMinimumBaseStep: DEFAULT_PLAYTEST_POLICY.lotteryMinimumBaseStep,
         } : {}),
+        ...(legacyMinimumStake ? { minimumStake: DEFAULT_PLAYTEST_POLICY.minimumStake } : {}),
       };
       validatePolicy(policy);
       room.policy = serializeBigInts(policy);
@@ -488,6 +497,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       commitment,
       startedAt: started.toISOString(),
       settlement: settlementDescriptor(policy.allocationRule),
+      evolution: serializeBigInts(evolutionQuote(policy, parseSimulationState(room.simulation_state).totals.freshWagers)),
     });
     if (welcomed.length) await event(client, room, "newcomers.seated", identity.id, null, {
       count: welcomed.length, stake: policy.minimumStake, targetBps: 20_000n, autoLockEnabled: false,
@@ -600,6 +610,8 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
       qualified: result.qualified, accounting: result.settlement, lotteryWinner,
       settlement: settlementDescriptor(policy.allocationRule),
+      effectiveRakeBps: result.effectiveRakeBps.toString(),
+      evolutionTier: result.evolutionTier.toString(),
       powerboardFundingAdded: powerboardFundingAdded.toString(),
       powerboardPool: {
         epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),
