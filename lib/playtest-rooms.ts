@@ -11,6 +11,7 @@ import {
   PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
+import { settlementDescriptor } from "@/lib/casino/settlement-rules";
 
 export class PlaytestRoomError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -445,7 +446,11 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     // Never publish crashAt while the round is live. A deadline is merely the
     // unrevealed crash multiplier expressed in time, so exposing it defeats
     // commit/reveal even when crash_bps and reveal remain private.
-    await event(client, room, "round.launched", identity.id, commandId, { commitment, startedAt: started.toISOString() });
+    await event(client, room, "round.launched", identity.id, commandId, {
+      commitment,
+      startedAt: started.toISOString(),
+      settlement: settlementDescriptor(policy.allocationRule),
+    });
     if (welcomed.length) await event(client, room, "newcomers.seated", identity.id, null, {
       count: welcomed.length, stake: policy.minimumStake, targetBps: 20_000n, autoLockEnabled: false,
     });
@@ -556,6 +561,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     await event(client, room, "round.settled", identity.id, commandId, {
       crashBps: room.crash_bps, reveal: room.reveal, lotteryEvent: result.lotteryEvent,
       qualified: result.qualified, accounting: result.settlement, lotteryWinner,
+      settlement: settlementDescriptor(policy.allocationRule),
       powerboardFundingAdded: powerboardFundingAdded.toString(),
       powerboardPool: {
         epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),

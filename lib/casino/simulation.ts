@@ -8,6 +8,7 @@ import {
   type AllocationRule,
   type Seat,
 } from "./economics";
+import { DEFAULT_CCS2L_PARAMS, settleCcs2L, type Ccs2LSettlement } from "./economics-ccs2l";
 
 export interface SimulationPolicy {
   rakeBps: bigint;
@@ -84,7 +85,12 @@ export interface IterationResult {
   state: SimulationState;
   qualified: boolean;
   seed: bigint;
-  settlement?: ReturnType<typeof settleParimutuel>;
+  /**
+   * Parimutuel rules yield a Settlement; "ccs-2l" yields a Ccs2LSettlement.
+   * Both expose allocations[{id, payout, net, survived, ...}] so downstream
+   * seat accounting (lib/playtest-rooms.ts) is rule-agnostic.
+   */
+  settlement?: ReturnType<typeof settleParimutuel> | Ccs2LSettlement;
   lotteryEvent: "none" | "funding" | "sealed" | "miss" | "hit";
 }
 
@@ -268,7 +274,7 @@ export function simulateIteration(
 
   const qualified = input.players.length >= policy.minimumPlayers
     && input.players.every((player) => player.stake >= policy.minimumStake);
-  let settlement: ReturnType<typeof settleParimutuel> | undefined;
+  let settlement: IterationResult["settlement"];
   let seed = 0n;
   if (qualified) {
     seed = state.emissionBuffer < policy.crashSeed ? state.emissionBuffer : policy.crashSeed;
@@ -276,7 +282,41 @@ export function simulateIteration(
     const stakes = input.players.map((player) => player.stake);
     const economics = roundEconomics(seed, stakes, policy.rakeBps);
     const split = ratifiedRakeSplit(economics.rake, policy.keeperRewardBps);
-    settlement = settleParimutuel(policy.allocationRule, economics.distributable, input.crashBps, input.players);
+    // Undistributed value returning to the Vault this iteration. For the
+    // parimutuel rules this is the classic vaultRemainder; for ccs-2l it is
+    // houseReturned (+ bustedToReserve on all-bust rounds) — the protected-
+    // reserve routing, which here flows back into the emission buffer (the
+    // seed's source) and is NEVER split through the community/principal path.
+    let vaultRemainder = 0n;
+    let reserveReturn = 0n;
+    if (policy.allocationRule === "ccs-2l") {
+      // reserveAtLock = the emission buffer snapshot after the seed draw:
+      // the funds actually still protecting the house when locks are accepted.
+      const ccs = settleCcs2L(
+        economics.distributable - seed,
+        seed,
+        input.crashBps,
+        input.players,
+        state.emissionBuffer,
+        DEFAULT_CCS2L_PARAMS,
+      );
+      settlement = ccs;
+      reserveReturn = ccs.houseReturned + ccs.bustedToReserve;
+      state.totals.playerCrashPayouts += ccs.totalPayout;
+      state.emissionBuffer += reserveReturn;
+      state.totals.vaultRemainders += reserveReturn;
+    } else {
+      const parimutuel = settleParimutuel(
+        policy.allocationRule,
+        economics.distributable,
+        input.crashBps,
+        input.players,
+      );
+      settlement = parimutuel;
+      vaultRemainder = parimutuel.vaultRemainder;
+      state.totals.playerCrashPayouts += parimutuel.totalPayout;
+      state.totals.vaultRemainders += vaultRemainder;
+    }
 
     state.totals.freshWagers += economics.playerPool;
     state.totals.grossRake += split.grossRake;
@@ -284,8 +324,6 @@ export function simulateIteration(
     state.totals.burned += split.burn;
     state.totals.communityFunded += split.community;
     state.totals.crashFounderRake += split.founders;
-    state.totals.playerCrashPayouts += settlement.totalPayout;
-    state.totals.vaultRemainders += settlement.vaultRemainder;
 
     // Powerboard is a subdivision of the existing community allocation, not
     // a new rake or an unbacked liability. This makes its funding visible on
@@ -293,7 +331,7 @@ export function simulateIteration(
     const powerboardFunding = (split.community * policy.powerboardFundingBps) / BPS;
     state.lottery.pendingFunding += powerboardFunding;
     state.totals.powerboardFunded += powerboardFunding;
-    const communityReturn = (split.community - powerboardFunding) + settlement.vaultRemainder;
+    const communityReturn = (split.community - powerboardFunding) + vaultRemainder;
     const principal = (communityReturn * policy.protectedPrincipalBps) / BPS;
     state.protectedPrincipal += principal;
     state.emissionBuffer += communityReturn - principal;

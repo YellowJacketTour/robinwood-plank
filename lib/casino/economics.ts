@@ -9,7 +9,25 @@
 export const BPS = 10_000n;
 export const MIN_TARGET_BPS = 10_100n;
 
-export type AllocationRule = "stake-multiplier" | "stake-only" | "pfss";
+export type AllocationRule = "stake-multiplier" | "stake-only" | "pfss" | "ccs-2l";
+
+// "ccs-2l" is settled by settleCcs2L() in ./economics-ccs2l (two purses:
+// player distributable + house seed), NOT by settleParimutuel() below, which
+// takes a single merged `distributable`. Callers that hold the round's
+// (seed, stakes, rakeBps) should dispatch:
+//
+//   import { settleCcs2L, DEFAULT_CCS2L_PARAMS } from "./economics-ccs2l";
+//   const econ = roundEconomics(seed, stakes, rakeBps);
+//   const s = settleCcs2L(econ.distributable - econ.seed, econ.seed,
+//                         crashBps, seats, reserveAtLock, DEFAULT_CCS2L_PARAMS);
+//
+// Invariants (proven in docs/marketplank/sim-settlement-ccs2l/ and
+// DESIGN-PLANKCRASH-CCS2L-INTEGRATION-2026-08-31.md):
+//   sum(playerPayout) == playerDistributable EXACTLY when any survivor exists
+//   sum(houseBonus) + houseReturned == seed EXACTLY
+//   house layer is PARTITION-INVARIANT (global reserve cap + linear caps only)
+//   treasury receives ZERO player-pot cap residue (structural)
+//   houseReturned -> protected reserve; ratified 20/40/40 applies to rake only.
 
 export interface Seat {
   id: string;
@@ -67,6 +85,11 @@ export function settleParimutuel(
   crashBps: bigint,
   seats: readonly Seat[],
 ): Settlement {
+  if (rule === "ccs-2l") {
+    throw new RangeError(
+      "ccs-2l is two-purse: use settleCcs2L(playerDistributable, seedH, ...) from ./economics-ccs2l",
+    );
+  }
   assertInputs(distributable, crashBps, seats);
 
   const survived = seats.map((seat) => seat.targetBps <= crashBps);
