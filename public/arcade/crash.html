@@ -743,7 +743,7 @@
       <button class="chip" data-amt="0.1">0.10</button>
     </div>
     <div class="stake-row" id="autoRow" style="opacity:.55">
-      <button class="chip" id="autoToggle" title="Bet every round and cash out at your target automatically">AUTO&nbsp;▶</button>
+      <button class="chip" id="autoToggle" title="Repeat this stake and target automatically in future rounds">REPEAT&nbsp;▶</button>
       <span style="display:flex;align-items:center;gap:6px;font:600 13px/1 inherit;color:var(--muted,#9aa7bd);letter-spacing:.02em">
         cash&nbsp;out&nbsp;at
         <input id="autoTargetInput" type="number" min="1.1" step="0.1" value="2.0"
@@ -2363,6 +2363,18 @@ function multGraphColor(x) {
   return `rgb(${r},${g},${b})`;
 }
 
+function recordMultGraphSample(value, at = performance.now()) {
+  const x = Number(value), t = Number(at);
+  if (!Number.isFinite(x) || !Number.isFinite(t)) return;
+  const prior = multGraphSamples[multGraphSamples.length - 1];
+  const next = { t: prior ? Math.max(prior.t, t) : t, x: Math.max(1, x, prior?.x || 1) };
+  // Keep the newest clock coordinate even while the multiplier is between
+  // visible hundredths; otherwise a quiet interval collapses horizontally.
+  if (prior && next.t - prior.t < 40 && Math.abs(next.x - prior.x) < .001) return;
+  multGraphSamples.push(next);
+  if (multGraphSamples.length > 500) multGraphSamples.shift();
+}
+
 function drawMultGraph() {
   const rect = multGraphCanvas.getBoundingClientRect();
   const w = rect.width, h = rect.height;
@@ -2374,34 +2386,35 @@ function drawMultGraph() {
   // or creates a stray near-vertical endpoint.
   const samples = [];
   for (const raw of multGraphSamples) {
-    const value = Number(raw);
-    if (!Number.isFinite(value)) continue;
-    const next = Math.max(1, value, samples.length ? samples[samples.length - 1] : 1);
-    if (!samples.length || Math.abs(next - samples[samples.length - 1]) >= .001) samples.push(next);
+    const value = Number(raw?.x), time = Number(raw?.t);
+    if (!Number.isFinite(value) || !Number.isFinite(time)) continue;
+    const prior = samples[samples.length - 1];
+    samples.push({t:prior ? Math.max(prior.t,time) : time,x:Math.max(1,value,prior?.x||1)});
   }
   if (samples.length < 2) return;
 
-  const maxX = Math.max(2, samples[samples.length - 1] * 1.08);
+  const maxX = Math.max(2, samples[samples.length - 1].x * 1.08);
+  const startTime=samples[0].t,endTime=Math.max(startTime+1,samples[samples.length-1].t);
   const pad = 6;
-  const toXY = (i, v) => [
-    pad + (i / (samples.length - 1)) * (w - pad * 2),
-    h - pad - ((v - 1) / (maxX - 1)) * (h - pad * 2),
+  const toXY = (sample) => [
+    pad + ((sample.t-startTime)/(endTime-startTime)) * (w - pad * 2),
+    h - pad - ((sample.x - 1) / (maxX - 1)) * (h - pad * 2),
   ];
 
   multGraphCtx.lineWidth = 3;
   multGraphCtx.lineJoin = "round";
   multGraphCtx.lineCap = "round";
   for (let i = 1; i < samples.length; i++) {
-    const [x0, y0] = toXY(i - 1, samples[i - 1]);
-    const [x1, y1] = toXY(i, samples[i]);
-    multGraphCtx.strokeStyle = multGraphColor(samples[i]);
+    const [x0, y0] = toXY(samples[i - 1]);
+    const [x1, y1] = toXY(samples[i]);
+    multGraphCtx.strokeStyle = multGraphColor(samples[i].x);
     multGraphCtx.beginPath();
     multGraphCtx.moveTo(x0, y0);
     multGraphCtx.lineTo(x1, y1);
     multGraphCtx.stroke();
   }
-  const [lx, ly] = toXY(samples.length - 1, samples[samples.length - 1]);
-  multGraphCtx.fillStyle = multGraphColor(samples[samples.length - 1]);
+  const [lx, ly] = toXY(samples[samples.length - 1]);
+  multGraphCtx.fillStyle = multGraphColor(samples[samples.length - 1].x);
   multGraphCtx.beginPath();
   multGraphCtx.arc(lx, ly, 4, 0, Math.PI * 2);
   multGraphCtx.fill();
@@ -2516,7 +2529,7 @@ let autoBusy = false; // a bet/cashout tx is in flight
     toggle.classList.toggle("active", autoPlay);
     toggle.style.background = autoPlay ? "var(--accent-2,#3ddc84)" : "";
     toggle.style.color = autoPlay ? "#04210f" : "";
-    toggle.innerHTML = autoPlay ? "AUTO&nbsp;⏸" : "AUTO&nbsp;▶";
+    toggle.innerHTML = autoPlay ? "REPEAT&nbsp;⏸" : "REPEAT&nbsp;▶";
     $("autoRow").style.outline = autoPlay ? "1px solid rgba(61,220,132,.5)" : "none";
   }
   toggle.addEventListener("click", () => {
@@ -3554,7 +3567,10 @@ async function doPlaceBet(viaButton) {
     return privatePlaytestCommand("bet", {
       stake: String(Math.max(1, Math.round(Number(betAmount) * 1_000_000))),
       targetBps: String(Math.round(autoTarget * 10_000)),
-      autoLockEnabled: autoPlay,
+      // The visible "cash out at" field is part of this commitment. Repeat
+      // play is a separate convenience; turning repeat off must not silently
+      // strip the target the player just submitted.
+      autoLockEnabled: true,
     });
   }
   try {
@@ -3927,8 +3943,7 @@ async function refresh() {
       // it can still catch the estimate up when the chain runs ahead, but
       // can never make the display un-climb.
       launchAt = Math.min(launchAt, impliedLaunchAt);
-      multGraphSamples.push(Number(bpsToXStr(liveBps)));
-      if (multGraphSamples.length > 400) multGraphSamples.shift();
+      recordMultGraphSample(Number(bpsToXStr(liveBps)));
       drawMultGraph();
       $("substatus").textContent = "IN FLIGHT";
       if (!hasStake) updatePrimaryButton("watching");
@@ -4544,7 +4559,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   if (!canvas) return;
   const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true, powerPreference:"high-performance" });
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
-  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(32, 1, .1, 30); camera.position.set(0, .15, 7.2);
+  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(32, 1, .1, 30); camera.position.set(.45, .12, 8.6);camera.lookAt(.45,-.08,0);
   scene.add(new THREE.HemisphereLight(0xddecff, 0x060810, 2.5));
   const key = new THREE.DirectionalLight(0xffffff, 4.4); key.position.set(-3, 5, 5); scene.add(key);
   const cyan = new THREE.PointLight(0x55d6ff, 15, 10); cyan.position.set(2, 0, 3); scene.add(cyan);
@@ -4555,28 +4570,33 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   const rimTop = new THREE.Mesh(new THREE.TorusGeometry(1.53,.075,12,64),metal); rimTop.rotation.x=Math.PI/2; rimTop.position.y=1.42; machine.add(rimTop);
   const rimBottom = rimTop.clone(); rimBottom.position.y=-1.42; machine.add(rimBottom);
   const base = new THREE.Mesh(new THREE.CylinderGeometry(1.85,2.1,.42,48),metal); base.position.y=-1.78; machine.add(base);
-  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.15,-1.55,0); machine.add(plinth);
-  const tube = new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,2.65,28,1,true),glass); tube.position.set(1.58,.1,0); machine.add(tube);
-  const makeLabel = (number) => { const c=document.createElement("canvas"); c.width=c.height=256; const x=c.getContext("2d"); x.clearRect(0,0,256,256);x.fillStyle="#f8fbff";x.beginPath();x.arc(128,128,116,0,Math.PI*2);x.fill();x.strokeStyle="#5ba7d1";x.lineWidth=10;x.stroke();x.fillStyle="#07121d";x.font=`900 ${number>9?92:112}px monospace`;x.textAlign="center";x.textBaseline="middle";x.fillText(String(number),128,136); const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t; };
+  // A real pneumatic path: the chamber's capture head feeds one continuous
+  // transparent tube, through a visible gate, into a presentation cradle.
+  // The result sphere travels along this exact centerline; it never teleports
+  // between disconnected props.
+  const capture = new THREE.Vector3(1.08,1.02,0), outlet = new THREE.Vector3(2.22,-1.05,0);
+  const tubeCurve = new THREE.CatmullRomCurve3([
+    capture,new THREE.Vector3(1.42,1.34,0),new THREE.Vector3(1.92,1.38,0),
+    new THREE.Vector3(2.34,.92,0),new THREE.Vector3(2.42,.05,0),outlet,
+  ],false,"centripetal");
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(tubeCurve,72,.31,24,false),glass); machine.add(tube);
+  const throat = new THREE.Mesh(new THREE.ConeGeometry(.48,.66,32,1,true),glass); throat.position.copy(capture).add(new THREE.Vector3(-.22,-.2,0));throat.rotation.z=-Math.PI/3.2;machine.add(throat);
+  const gate = new THREE.Mesh(new THREE.TorusGeometry(.34,.045,12,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.78,roughness:.2,emissive:0x3b2800}));gate.position.set(1.68,1.39,0);gate.rotation.y=Math.PI/2;machine.add(gate);
+  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.22,-1.55,0); machine.add(plinth);
+  const cradle = new THREE.Mesh(new THREE.TorusGeometry(.35,.075,12,40),metal);cradle.position.set(2.22,-1.28,0);cradle.rotation.x=Math.PI/2;machine.add(cradle);
+  const blowerGrille=new THREE.Mesh(new THREE.CylinderGeometry(1.18,1.18,.05,48),new THREE.MeshStandardMaterial({color:0x17202a,metalness:.8,roughness:.32}));blowerGrille.position.y=-1.43;machine.add(blowerGrille);
+  for(let i=0;i<12;i++){const vane=new THREE.Mesh(new THREE.BoxGeometry(.92,.018,.025),metal);vane.position.y=-1.39;vane.rotation.y=i*Math.PI/6;machine.add(vane);}
+  // The number is printed into the ball's single continuous surface map.
+  // There are no decals, sprites, cards, or raised sticker edges.
+  const makeBallSkin = (number) => { const c=document.createElement("canvas");c.width=1024;c.height=512;const x=c.getContext("2d");const gradient=x.createLinearGradient(0,0,0,512);gradient.addColorStop(0,"#ffffff");gradient.addColorStop(.5,"#edf5fa");gradient.addColorStop(1,"#c9e1ed");x.fillStyle=gradient;x.fillRect(0,0,1024,512);x.fillStyle="#12394f";x.strokeStyle="rgba(255,255,255,.9)";x.lineWidth=7;x.font=`900 ${number>9?92:112}px monospace`;x.textAlign="center";x.textBaseline="middle";for(const [u,v] of [[.125,.28],[.375,.5],[.625,.28],[.875,.5],[.125,.72],[.625,.72]]){const px=u*1024,py=v*512;x.strokeText(String(number),px,py);x.fillText(String(number),px,py);}const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());t.wrapS=THREE.RepeatWrapping;t.generateMipmaps=true;return t; };
   const randomUnit=()=>{const values=new Uint32Array(1);crypto.getRandomValues(values);return values[0]/4294967296;};
   const randomSigned=()=>randomUnit()*2-1;
   const ballRadius=.255, chamberRadii=new THREE.Vector3(1.36,1.28,.82);
   const balls=[];
   const population=Math.max(2,Math.min(64,Math.trunc(Number(populationSize)||16)));
   for(let i=1;i<=population;i++){
-    const group=new THREE.Group(), material=new THREE.MeshPhysicalMaterial({color:0xf4f8fb,roughness:.22,metalness:.02,clearcoat:.7,clearcoatRoughness:.18});
+    const group=new THREE.Group(), texture=makeBallSkin(i), material=new THREE.MeshPhysicalMaterial({map:texture,color:0xffffff,roughness:.2,metalness:0,clearcoat:.78,clearcoatRoughness:.16});
     const ball=new THREE.Mesh(new THREE.SphereGeometry(ballRadius,32,24),material); group.add(ball);
-    // Real geometry decals ride on the rotating sphere. Sprite billboards
-    // rendered as square cards and could visually detach from the ball.
-    // Six repeated number patches mirror physical draw balls and keep the
-    // identity legible while the same sphere tumbles through the chamber.
-    const texture=makeLabel(i), labelMaterial=new THREE.MeshBasicMaterial({map:texture,transparent:true,alphaTest:.18,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
-    const patchGeometry=new THREE.CircleGeometry(.122,28),d=ballRadius+.002;
-    for(const face of [
-      {p:[0,0,d],r:[0,0,0]},{p:[0,0,-d],r:[0,Math.PI,0]},
-      {p:[d,0,0],r:[0,Math.PI/2,0]},{p:[-d,0,0],r:[0,-Math.PI/2,0]},
-      {p:[0,d,0],r:[-Math.PI/2,0,0]},{p:[0,-d,0],r:[Math.PI/2,0,0]},
-    ]){const patch=new THREE.Mesh(patchGeometry,labelMaterial);patch.position.set(...face.p);patch.rotation.set(...face.r);patch.renderOrder=2;group.add(patch);}
     const angle=i*2.399963, ring=.45+(i%4)*.2;
     group.position.set(Math.cos(angle)*ring,-.9+(i%6)*.34,Math.sin(angle)*ring*.58);
     const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
@@ -4585,7 +4605,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   const selected=balls.find((ball)=>ball.number===Number(drawNumber));
   if(!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
   let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
-  const intake=new THREE.Vector3(1.25,-.88,0),tubeBottom=new THREE.Vector3(1.58,-1.02,0),tubeTop=new THREE.Vector3(1.58,1.56,0),pedestal=new THREE.Vector3(2.15,-1.26,0);
+  const pedestal=new THREE.Vector3(2.22,-1.25,0);
   const resize=()=>{const d=Math.min(devicePixelRatio||1,1.5),w=Math.max(2,Math.round(canvas.clientWidth*d)),h=Math.max(2,Math.round(canvas.clientHeight*d));if(canvas.width!==w||canvas.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}};
   const mixBalls=(dt,now,revealed)=>{
     gustClock-=dt;
@@ -4631,10 +4651,16 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   const moveSelected=(progress)=>{
     if(!capturedAt)capturedAt=selected.group.position.clone();
     let local;
-    if(progress<.2){local=progress/.2;selected.group.position.lerpVectors(capturedAt,intake,local*local*(3-2*local));}
-    else if(progress<.32){local=(progress-.2)/.12;selected.group.position.lerpVectors(intake,tubeBottom,local);}
-    else if(progress<.68){local=(progress-.32)/.36;selected.group.position.lerpVectors(tubeBottom,tubeTop,local);}
-    else {local=Math.min(1,(progress-.68)/.32);selected.group.position.lerpVectors(tubeTop,pedestal,local);selected.group.position.y+=Math.sin(local*Math.PI)*.72;}
+    if(progress<.26){
+      // Visible suction inside the chamber into the flared capture throat.
+      local=progress/.26;const eased=local*local*(3-2*local);selected.group.position.lerpVectors(capturedAt,capture,eased);
+    }else if(progress<.88){
+      // Constrained motion through the same continuous glass tube geometry.
+      local=(progress-.26)/.62;selected.group.position.copy(tubeCurve.getPointAt(Math.min(1,local)));
+    }else{
+      // The outlet gate releases into the adjacent physical cradle.
+      local=Math.min(1,(progress-.88)/.12);selected.group.position.lerpVectors(outlet,pedestal,local*local*(3-2*local));
+    }
     selected.group.rotation.x+=.11;selected.group.rotation.y+=.16;
     selected.group.scale.setScalar(1+Math.max(0,(progress-.68)/.32)*.5);
     selected.material.color.lerp(new THREE.Color(0xf1c84b),.055);
@@ -4778,11 +4804,11 @@ function renderPrivateRoster(snapshot) {
     const result = document.createElement("span");
     const profitable = snapshot.room.phase === "settled" && BigInt(seat?.net || "0") > 0n;
     result.className = `private-player-state ${profitable ? "win" : ""}`;
-    result.textContent = queuedSeat ? `Ready round ${Number(snapshot.room.currentRound) + 1} · ${privateCredits(queuedSeat.stake)} cr`
+    result.textContent = queuedSeat ? `Ready round ${Number(snapshot.room.currentRound) + 1} · ${privateCredits(queuedSeat.stake)} cr · ${queuedSeat.requestedTargetBps ? `auto-lock ${(Number(queuedSeat.requestedTargetBps) / 10000).toFixed(2)}×` : "auto-lock armed"}`
       : !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
       : snapshot.room.phase === "settled" ? `${!seat.survived ? "Crashed" : profitable ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · PROFIT` : `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · DILUTED`} · ${privateCredits(seat.payout)} paid`
       : seat.acceptedTargetBps ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · watching`
-      : snapshot.room.phase === "running" ? `Flying · ${privateCredits(seat.stake)} cr` : `Committed · ${privateCredits(seat.stake)} cr`;
+      : snapshot.room.phase === "running" ? `${seat.autoLockEnabled ? seat.requestedTargetBps ? `Auto-lock ${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}× armed` : "Auto-lock armed" : "Flying"} · ${privateCredits(seat.stake)} cr` : `Committed · ${privateCredits(seat.stake)} cr · ${seat.autoLockEnabled ? seat.requestedTargetBps ? `auto-lock ${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}×` : "auto-lock armed" : "manual lock"}`;
     row.append(identity, result);
     board.appendChild(row);
   }
@@ -5050,8 +5076,7 @@ function paintPrivateSnapshot(snapshot) {
     setMultReadout(x.toFixed(2), "live");
     $("substatus").textContent = "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
-    multGraphSamples.push(x);
-    if (multGraphSamples.length > 400) multGraphSamples.shift();
+    recordMultGraphSample(x, receivedPerfMs);
     drawMultGraph();
     updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps ? "cashed" : "live-hold", {
       sub: seat?.acceptedTargetBps ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` : `Balance ${privateCredits(me?.balance)} credits`,
@@ -5269,7 +5294,7 @@ async function startPrivatePlaytest() {
     #privateMenu,#privateWelcome,#privateInvite,#privateSimulation{width:min(760px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;border:1px solid rgba(255,200,87,.38);border-radius:18px;padding:0;background:#07100c;color:#efe6d4;box-shadow:0 28px 110px rgba(0,0,0,.82)}#privateMenu::backdrop,#privateWelcome::backdrop,#privateInvite::backdrop,#privateSimulation::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(7px)}.private-menu-inner{padding:clamp(18px,4vw,30px)}.private-menu-kicker{color:#75f0ae;font:800 9px var(--font-mono);letter-spacing:.16em;text-transform:uppercase}.private-menu-inner h2{margin:7px 0 5px;color:#ffc857;font:400 clamp(27px,5vw,42px)/1 var(--font-display)}.private-menu-lede{max-width:650px;margin:0;color:#aeb9b1;font:600 11px/1.55 var(--font-mono)}.private-setting-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:18px 0}.private-setting{display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.025);font:700 10px var(--font-mono)}.private-setting span{color:#d9cfbd}.private-setting select,.private-setting button,.private-setting input,.private-invite-url{min-height:44px;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:0 10px;background:#122018;color:#f3ead9;font:700 11px var(--font-mono)}.private-setting-check{flex-direction:row;align-items:center;justify-content:space-between}.private-setting-check input{width:24px;height:24px;accent-color:#3ddc84}.private-menu-actions{display:flex;flex-wrap:wrap;gap:8px}.private-menu-actions button,.private-menu-actions a{min-height:44px;flex:1;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:#13221a;color:#eee4d2;font:800 11px var(--font-mono);cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none}.private-menu-actions .primary{border-color:#ffc857;background:#ffc857;color:#09100c}.private-welcome-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}.private-welcome-step{padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:linear-gradient(150deg,rgba(61,220,132,.07),rgba(255,200,87,.025));font:600 10px/1.5 var(--font-mono)}.private-welcome-step b{display:block;margin-bottom:7px;color:#75f0ae;font-size:11px}.private-welcome-trust{margin:12px 0;padding:12px;border-left:2px solid #ffc857;background:rgba(255,200,87,.05);color:#d2c6b2;font:600 10px/1.5 var(--font-mono)}.private-admin-section{margin:15px 0;padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:rgba(255,255,255,.025)}.private-admin-section h3{margin:0 0 4px;color:#ffc857;font:800 12px var(--font-mono)}.private-admin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.private-admin-grid .private-setting{padding:9px}.private-admin-status{min-height:20px;margin:8px 0;color:#75f0ae;font:700 10px var(--font-mono)}
     body[data-private-motion="reduced"] .result-card.private-result *{transition:none!important}body[data-private-motion="reduced"] #privateReconnect{transition:none!important}body[data-private-contrast="high"] #privateTablePanel,body[data-private-contrast="high"] #privateHud,body[data-private-contrast="high"] #privateJourney{background:#020504;border-color:#ffc857;color:#fff}body[data-private-contrast="high"] #privateCoachCue{color:#fff}
     body[data-playtest="true"] .deck{padding-right:350px}
-    @media(min-width:901px){body[data-playtest="true"]:has(.private-result.show) .deck{padding-right:0}body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{opacity:.12;pointer-events:none;transform:translateX(102%)}.result-card.private-result,.result-card.private-result.show{position:fixed;inset:150px 24px 150px 24px;width:min(900px,calc(100vw - 48px));max-height:none;margin:auto;overflow:auto;overscroll-behavior:contain;transform:none}.private-powerball{min-height:330px}.private-powerball-canvas{width:54%}.private-powerball-copy{width:50%;padding:24px 24px 18px}}
+    @media(min-width:901px){body[data-playtest="true"]:has(.private-result.show) .deck{padding-right:0}body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{opacity:.12;pointer-events:none;transform:translateX(102%)}.result-card.private-result,.result-card.private-result.show{position:fixed;inset:140px auto auto 50%;width:min(900px,calc(100vw - 48px));height:auto;max-height:calc(100dvh - 154px);margin:0;overflow:auto;overscroll-behavior:contain;transform:translateX(-50%)}.private-powerball{min-height:330px}.private-powerball-canvas{width:54%}.private-powerball-copy{width:50%;padding:24px 24px 18px}}
     @media(min-width:701px) and (max-width:900px){#privateHud{top:50px;left:8px;right:8px;max-width:none;display:grid;grid-template-columns:minmax(0,1fr)}#privateHud select{width:100%;max-width:none}#privateHudStatus{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar{padding-top:86px;height:auto}#privateJourney{position:relative;z-index:35;top:auto;left:auto;width:auto;margin:55px 10px 0}#privateTablePanel{position:relative;z-index:35;top:auto;right:auto;width:auto;max-height:none;margin:8px 10px}.private-host-actions{grid-template-columns:repeat(2,1fr)}body[data-playtest="true"] .deck{padding-right:18px}.result-card.private-result{width:min(590px,calc(100% - 24px))}.private-result-world{grid-template-columns:1fr 1fr}.stage{min-height:58vh}.private-how-grid,.private-welcome-steps,.private-setting-grid,.private-admin-grid{grid-template-columns:1fr}}
     @media(max-width:900px) and (orientation:landscape){#privateJourney{display:none}#privateTablePanel{max-height:38dvh}.stage{min-height:72dvh}.result-card.private-result,.result-card.private-result.show{position:fixed;inset:6px;width:auto;max-width:none;transform:none}.private-powerball{min-height:330px}.private-powerball-canvas{position:absolute;left:0;top:0;width:46%;height:100%}.private-powerball-copy{display:block;width:56%;margin-left:auto;padding:18px}.private-powerball-drum{margin:10px auto}}
   `;

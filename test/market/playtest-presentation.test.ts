@@ -46,8 +46,12 @@ test("Powerboard uses an air-mix lottery machine and selection tube instead of f
   assert.match(arcadeSource, /equally eligible numbered balls/);
   assert.match(arcadeSource, /selection tube/);
   assert.match(arcadeSource, /for\(let i=1;i<=population;i\+\+\)/);
-  assert.match(arcadeSource, /new THREE\.CircleGeometry\(\.122,28\)/);
+  assert.match(arcadeSource, /const makeBallSkin = \(number\)/);
+  assert.match(arcadeSource, /MeshPhysicalMaterial\(\{map:texture/);
   assert.doesNotMatch(arcadeSource, /new THREE\.Sprite\(new THREE\.SpriteMaterial\(\{map:texture/);
+  assert.doesNotMatch(arcadeSource, /new THREE\.CircleGeometry\(\.122,28\)/);
+  assert.match(arcadeSource, /new THREE\.TubeGeometry\(tubeCurve,72,\.31,24,false\)/);
+  assert.match(arcadeSource, /selected\.group\.position\.copy\(tubeCurve\.getPointAt/);
   assert.match(arcadeSource, /const selected=balls\.find\(\(ball\)=>ball\.number===Number\(drawNumber\)\);/);
   assert.match(arcadeSource, /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, draw\.drawnNumber, draw\.oddsOneIn\)/);
   assert.match(arcadeSource, /\$\{perBallChance\}% each/);
@@ -74,14 +78,23 @@ test("accepted bets and locks cannot lose their authoritative repaint behind an 
   assert.match(arcadeSource, /Lock accepted at/);
 });
 
+test("a playtest commitment always carries its displayed pre-launch lock target", () => {
+  assert.match(arcadeSource, /targetBps: String\(Math\.round\(autoTarget \* 10_000\)\),\s*\/\/[^]*?autoLockEnabled: true/);
+  assert.match(arcadeSource, /REPEAT&nbsp;/);
+  assert.match(arcadeSource, /auto-lock .*armed/);
+});
+
 test("multiplier art filters non-finite and regressing samples", () => {
-  assert.match(arcadeSource, /if \(!Number\.isFinite\(value\)\) continue/);
-  assert.match(arcadeSource, /Math\.max\(1, value, samples\.length \? samples\[samples\.length - 1\] : 1\)/);
+  assert.match(arcadeSource, /function recordMultGraphSample\(value, at = performance\.now\(\)\)/);
+  assert.match(arcadeSource, /Math\.max\(1, x, prior\?\.x \|\| 1\)/);
+  assert.match(arcadeSource, /\(sample\.t-startTime\)\/\(endTime-startTime\)/);
+  assert.match(arcadeSource, /recordMultGraphSample\(x, receivedPerfMs\)/);
 });
 
 test("fixed result overlays reset the base centered-card transform", () => {
   const fixedResultRules = arcadeSource.match(/\.result-card\.private-result\.show\{position:fixed[^}]+transform:none\}/g) || [];
-  assert.equal(fixedResultRules.length, 3, "phone, desktop, and landscape overlays must not inherit translate(-50%, -50%)");
+  assert.equal(fixedResultRules.length, 2, "phone and landscape overlays must not inherit the base centered transform");
+  assert.match(arcadeSource, /inset:140px auto auto 50%[^}]+height:auto[^}]+transform:translateX\(-50%\)/);
 });
 
 test("phone presentation uses a collapsible table sheet and exclusive result theater", () => {
