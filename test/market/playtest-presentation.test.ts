@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { connectionState, presentedMultiplierBps, signedNet } from "../../lib/playtest-presentation";
 
 const arcadeSource = readFileSync(new URL("../../public/arcade/crash.html", import.meta.url), "utf8");
+const gateSource = readFileSync(new URL("../../components/playtest/PasskeyGate.tsx", import.meta.url), "utf8");
+const sessionRouteSource = readFileSync(new URL("../../app/api/playtest/session/route.ts", import.meta.url), "utf8");
 
 test("the visible multiplier freezes at the committed crash point", () => {
   assert.equal(presentedMultiplierBps({ phase: "running", liveBps: 42_000, crashBps: "23500", deadlinePassed: false }), 23_500);
@@ -67,4 +69,19 @@ test("multiplier art filters non-finite and regressing samples", () => {
 test("fixed result overlays reset the base centered-card transform", () => {
   const fixedResultRules = arcadeSource.match(/\.result-card\.private-result\.show\{position:fixed[^}]+transform:none\}/g) || [];
   assert.equal(fixedResultRules.length, 3, "phone, desktop, and landscape overlays must not inherit translate(-50%, -50%)");
+});
+
+test("phone presentation uses a collapsible table sheet and exclusive result theater", () => {
+  assert.match(arcadeSource, /#privateTablePanel\.mobile-open\{transform:translateY\(0\)\}/);
+  assert.match(arcadeSource, /#privateTableToggle\{position:sticky/);
+  assert.match(arcadeSource, /:has\(\.private-result\.show\) #privateTablePanel\{visibility:hidden;pointer-events:none\}/);
+  assert.match(arcadeSource, /\.result-card\.private-result\.show\{position:fixed;z-index:95/);
+  assert.match(arcadeSource, /height:clamp\(190px,32dvh,270px\)/);
+});
+
+test("returning invitees can choose login and rejoin the invited room in one action", () => {
+  assert.match(gateSource, /\(publicRegistration \|\| invite\)/);
+  assert.match(gateSource, />Returning player</);
+  assert.match(gateSource, /newPlayer && invite \? "register"/);
+  assert.match(sessionRouteSource, /roomId = await joinRoomFromInvite\(identity, body\.invite\)/);
 });

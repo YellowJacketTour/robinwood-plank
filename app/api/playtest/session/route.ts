@@ -49,7 +49,15 @@ export async function POST(req: Request) {
       if (!authenticated) return publicJson({ error: "BAD_PIN", message: "Username or PIN is incorrect." }, 401);
     }
     const { identity, token } = authenticated;
-    const response = publicJson({ displayName: identity.displayName, isAdmin: identity.isAdmin, roomId: "roomId" in authenticated ? authenticated.roomId : null }, 201);
+    let roomId = "roomId" in authenticated ? authenticated.roomId : null;
+    // A returning player arriving through a reusable table invitation should
+    // resume the existing identity and cross the same doorway in one action.
+    // Requiring a second join after PIN authentication made valid returners
+    // look indistinguishable from failed registrations.
+    if (!roomId && body.action !== "register" && typeof body.invite === "string" && body.invite.length >= 20) {
+      roomId = await joinRoomFromInvite(identity, body.invite);
+    }
+    const response = publicJson({ displayName: identity.displayName, isAdmin: identity.isAdmin, roomId }, 201);
     response.headers.append("Set-Cookie", sessionCookie(token));
     return response;
   } catch (error) {

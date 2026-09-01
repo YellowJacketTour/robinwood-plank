@@ -18,8 +18,8 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [newPlayer, setNewPlayer] = useState(publicRegistration);
-  const mode = !adminConfigured && setup ? "bootstrap" : invite ? "register" : publicRegistration && newPlayer ? "registerPublic" : "login";
+  const [newPlayer, setNewPlayer] = useState(Boolean(invite) || publicRegistration);
+  const mode = !adminConfigured && setup ? "bootstrap" : newPlayer && invite ? "register" : newPlayer && publicRegistration ? "registerPublic" : "login";
 
   async function enter() {
     setBusy(true); setMessage("");
@@ -72,7 +72,7 @@ export function PasskeyGate({ initialIdentity, adminConfigured, initialInvite: i
     <div className="p-6">
     <h2 className="text-2xl text-gold-300">{mode === "bootstrap" ? "Claim the host account" : mode === "register" ? "Create your invited player" : mode === "registerPublic" ? "Create your test player" : "Return to the PlankCrash alpha"}</h2>
     <p className="mt-2 text-sm text-cream-muted">{mode === "bootstrap" ? "Choose your permanent host username and enter the six-digit PIN you want to use. This can happen only once." : mode === "register" ? "This table invitation remains reusable for the invited group for seven days. Choose a unique username and your own four-digit PIN." : mode === "registerPublic" ? "Choose a unique username and personal four-digit PIN. Test credits have no value and cannot leave the laboratory." : "Enter your existing username and personal four- or six-digit PIN."}</p>
-    {publicRegistration && !invite && mode !== "bootstrap" ? <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-line bg-black/20 p-1"><button type="button" className={`min-h-10 rounded-md text-xs font-black uppercase tracking-wider ${newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(true); setMessage(""); }}>New player</button><button type="button" className={`min-h-10 rounded-md text-xs font-black uppercase tracking-wider ${!newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(false); setMessage(""); }}>Returning</button></div> : null}
+    {(publicRegistration || invite) && mode !== "bootstrap" ? <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-line bg-black/20 p-1"><button type="button" className={`min-h-11 rounded-md px-2 text-xs font-black uppercase tracking-wider ${newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(true); setMessage(""); }}>New player</button><button type="button" className={`min-h-11 rounded-md px-2 text-xs font-black uppercase tracking-wider ${!newPlayer ? "bg-gold-500 text-wood-950" : "text-gold-300"}`} onClick={() => { setNewPlayer(false); setMessage(""); }}>Returning player</button></div> : null}
     <label className="mt-5 block text-xs font-black uppercase tracking-wider text-gold-300">Username
       <input autoComplete="nickname" className="mt-2 min-h-11 w-full rounded-md border border-line bg-panel-strong px-3 text-cream outline-none focus:border-line-strong" maxLength={40} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
     </label>
