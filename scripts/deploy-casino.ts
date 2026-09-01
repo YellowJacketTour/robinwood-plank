@@ -23,7 +23,7 @@
  *   CASINO_DRAND_BEACON    the already-deployed shared DrandBeacon (reuse the
  *                          same one MarketplankVault uses -- one audited
  *                          randomness surface for the whole protocol)
- *   CASINO_TREASURY        the dev/ops treasury (receives the 1.8% dev leg)
+ *   CASINO_TREASURY        the founder/ops treasury (receives 20% of routed rake)
  *
  * Tunable params (sane ratified defaults if unset) are read from env too --
  * see below.
@@ -74,6 +74,9 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   const net = await ethers.provider.getNetwork();
   console.log(`Deploying casino from ${deployer.address} on chainId ${net.chainId}`);
+  if (net.chainId !== 4663n) {
+    throw new Error(`Production casino deploy is pinned to Robinhood mainnet chainId 4663; got ${net.chainId}`);
+  }
 
   // ── Real infrastructure (all required) ─────────────────────────────
   const PLANK = required("CASINO_PLANK_TOKEN");
@@ -82,6 +85,47 @@ async function main() {
   const V2_ROUTER = required("CASINO_V2_ROUTER");
   const BEACON = required("CASINO_DRAND_BEACON");
   const TREASURY = required("CASINO_TREASURY");
+
+  // Fail closed before deploying value-moving contracts. Addresses alone are
+  // insufficient: a typo, counterfeit pair, or router from another factory
+  // would invalidate both the TWAP floor and the intended burn route.
+  for (const [label, address] of Object.entries({ PLANK, WETH, V2_PAIR, V2_ROUTER, BEACON })) {
+    if ((await ethers.provider.getCode(address)) === "0x") {
+      throw new Error(`${label} has no contract code at ${address}`);
+    }
+  }
+  const pair = new ethers.Contract(
+    V2_PAIR,
+    [
+      "function token0() view returns (address)",
+      "function token1() view returns (address)",
+      "function factory() view returns (address)",
+    ],
+    ethers.provider
+  );
+  const router = new ethers.Contract(
+    V2_ROUTER,
+    ["function factory() view returns (address)", "function WETH() view returns (address)"],
+    ethers.provider
+  );
+  const [token0, token1, pairFactory, routerFactory, routerWeth] = await Promise.all([
+    pair.token0() as Promise<string>,
+    pair.token1() as Promise<string>,
+    pair.factory() as Promise<string>,
+    router.factory() as Promise<string>,
+    router.WETH() as Promise<string>,
+  ]);
+  const canonical = (address: string) => ethers.getAddress(address);
+  const pairTokens = new Set([canonical(token0), canonical(token1)]);
+  if (pairTokens.size !== 2 || !pairTokens.has(canonical(PLANK)) || !pairTokens.has(canonical(WETH))) {
+    throw new Error(`CASINO_V2_PAIR is not exactly PLANK/WETH (token0=${token0}, token1=${token1})`);
+  }
+  if (canonical(pairFactory) !== canonical(routerFactory)) {
+    throw new Error(`Pair/router factory mismatch (${pairFactory} != ${routerFactory})`);
+  }
+  if (canonical(routerWeth) !== canonical(WETH)) {
+    throw new Error(`Router WETH mismatch (${routerWeth} != ${WETH})`);
+  }
 
   // ── Ratified economics (overridable) ───────────────────────────────
   const RAKE_BPS = envBig("CASINO_RAKE_BPS", 450n); // 4.5% total
@@ -117,9 +161,9 @@ async function main() {
     }
     return BigInt(v);
   })();
-  const BURN_BPS = envBig("CASINO_BURN_BPS", 2000n); // 20% of rake = 0.9% of pool
-  const AIRDROP_BPS = envBig("CASINO_AIRDROP_BPS", 4000n); // 40% of rake = 1.8% of pool
-  // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
+  const BURN_BPS = envBig("CASINO_BURN_BPS", 4000n); // 40% of routed rake
+  const AIRDROP_BPS = envBig("CASINO_AIRDROP_BPS", 4000n); // 40% to Powerboard
+  // remainder (20% of routed rake) -> founder/operations treasury
 
   const BETTING_SECONDS = envNum("CASINO_BETTING_SECONDS", 30);
   const ROUND_INTERVAL_SECONDS = envNum("CASINO_ROUND_INTERVAL_SECONDS", 0);
@@ -163,14 +207,19 @@ async function main() {
   const BURN_MAX_SLIPPAGE_BPS = envBig("CASINO_BURN_MAX_SLIPPAGE_BPS", 300n); // 3%
   const TWAP_WINDOW = envBig("CASINO_TWAP_WINDOW_SECONDS", 1800n); // 30 min
   const TWAP_MAX_STALE = envBig("CASINO_TWAP_MAX_STALE_SECONDS", 7200n); // 2 h
-  // MEDIUM-severity fix, 2026-08-18: the deploy-time reserve floor
-  // PlankV2TwapOracle's constructor now enforces (see that contract's own
-  // header). This default (1 ETH-equivalent of each reserve) is a SANITY
-  // floor, not a real liquidity target -- the operator MUST override
-  // CASINO_TWAP_MIN_RESERVE_WEI with a value reflecting the REAL intended
-  // pool's actual depth before a real mainnet deploy, or this floor will
-  // silently accept a pool far too shallow for genuine sandwich resistance.
-  const TWAP_MIN_RESERVE_WEI = envBig("CASINO_TWAP_MIN_RESERVE_WEI", ethers.parseEther("1"));
+  // The reserve threshold is intentionally mandatory: it must be ratified
+  // from measured canonical-pool depth, not inherited from a generic default.
+  const TWAP_MIN_RESERVE_WEI = (() => {
+    const v = process.env.CASINO_TWAP_MIN_RESERVE_WEI?.trim();
+    if (!v) {
+      throw new Error(
+        "CASINO_TWAP_MIN_RESERVE_WEI is required and must be ratified from measured canonical-pool depth"
+      );
+    }
+    const parsed = BigInt(v);
+    if (parsed <= 0n) throw new Error("CASINO_TWAP_MIN_RESERVE_WEI must be positive");
+    return parsed;
+  })();
 
   // ── 1. TWAP oracle over the canonical deep pair ────────────────────
   const oracle = await (

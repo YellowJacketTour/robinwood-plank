@@ -65,10 +65,10 @@ async function main() {
   const MAX_ELAPSED_BLOCKS = 1800; // ~180s real; honestly-advertisable ~73x ceiling (see the contract)
   const REGISTRATION_WINDOW_BLOCKS = 50;
   // RATIFIED RAKE: 4.5% total, memetically anchored to the 8.1% NFT
-  // royalty -- the dev/ops take is 1.8% of the pool, matched 1:1 by 1.8%
-  // straight back to the community jackpot, plus 0.9% to the burn. So of
-  // every 4.5 points taken, 2.7 (60%) returns to players as jackpot + token
-  // burn, and 1.8 covers real dev bills. Low total rake is deliberate: it
+  // rake -- routed 40% burn / 40% Powerboard / 20% founder-operations
+  // each to the community jackpot and burn, with 0.9% for founder/operations.
+  // So of every 4.5 points routed, 3.6 (80%) advances community mechanics.
+  // Low total rake is deliberate: it
   // is the single biggest driver of how long a bankroll survives, and
   // therefore of lifetime plays (the low-rake poker-room lesson).
   const RAKE_BPS = 450n; // 4.5% of the pool
@@ -87,10 +87,10 @@ async function main() {
   const KEEPER_REWARD_BPS = 1n; // hardening (c): the constructor rejects 0; 1 bps keeps local rake math ~unchanged
 
   // ── Split of that rake (bps of the rake, must sum to <= 10000) ─────
-  // 1.8 / 1.8 / 0.9 points of the pool -> 40% / 40% / 20% of the rake.
-  const BURN_BPS = 2000n; // 20% of rake = 0.9% of pool -> buys + burns $PLANK
+  // 1.8 / 1.8 / 0.9 points of the pool -> burn / Powerboard / founder.
+  const BURN_BPS = 4000n; // 40% of rake -> buys + burns $PLANK
   const AIRDROP_BPS = 4000n; // 40% of rake = 1.8% of pool -> the rolling community jackpot
-  // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
+  // remainder (20% of rake = 0.9% of pool) -> founder/operations treasury
   const BURN_KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)
   const MAX_ETH_PER_BURN = ethers.parseEther("1");
   // 24h is the real, deliberate production cadence; under TEST_RIG this is

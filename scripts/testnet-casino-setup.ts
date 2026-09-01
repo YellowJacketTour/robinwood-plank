@@ -64,7 +64,7 @@ async function main() {
   const MAX_STAKE_BPS = STRICT ? 6000n : 10000n;
   const KEEPER_REWARD_BPS = 1n; // hardening (c): the constructor rejects 0; 1 bps keeps local rake math ~unchanged
 
-  const BURN_BPS = 2000n;
+  const BURN_BPS = 4000n;
   const AIRDROP_BPS = 4000n;
   const BURN_KEEPER_REWARD_BPS = 100n;
   const MAX_ETH_PER_BURN = ethers.parseEther("0.1");
