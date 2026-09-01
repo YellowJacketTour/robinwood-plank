@@ -617,7 +617,16 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
         epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),
         weights: epochTickets.rows.map((ticket) => ({ userId: ticket.user_id, weight: ticket.weight })),
       },
-      powerboardDraw: { ...powerboardDraw, forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss") },
+      powerboardDraw: {
+        ...powerboardDraw,
+        // A uniform sample exists every round, but it is a payable draw only
+        // when the simulator actually had a fully funded sealed prize. This
+        // prevents a funding-round sample of ball 1 from masquerading as an
+        // unpaid jackpot hit in every connected client's presentation.
+        drawActive: result.lotteryEvent === "hit" || result.lotteryEvent === "miss",
+        payableHit: result.lotteryEvent === "hit",
+        forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss"),
+      },
     });
     return { duplicate: false, version: room.version };
   });

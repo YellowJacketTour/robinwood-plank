@@ -836,7 +836,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
-import { PrivateLiveClock } from "./private-live-clock.js";
+import { PrivateLiveClock, privateCurveDurationSeconds } from "./private-live-clock.js";
 import { verifyPrivateRound } from "./private-fairness.js";
 import { persistFairnessEntry, readFairnessLedger } from "./fairness-ledger.js";
 import { ACTION_STAGES, actionStatusText, advanceActionState } from "./transaction-lifecycle.js";
@@ -5016,8 +5016,14 @@ function reconstructPrivateMultGraph(snapshot, endBps, receivedPerfMs) {
     ? Date.parse(snapshot.room.crashAt || snapshot.serverNow)
     : Date.now() + privateServerOffsetMs;
   if (!Number.isFinite(startedMs) || !Number.isFinite(endWallMs) || endWallMs < startedMs) return;
-  const durationSeconds = Math.max(0, (endWallMs - startedMs) / 1000);
   const endX = Math.max(1, Number(endBps || 10000) / 10000);
+  // Build the trace in the multiplier's own authoritative domain. A delayed
+  // snapshot can make the monotonic presentation clock slightly ahead of the
+  // latest wall-clock timestamp. Using wall time for every interior point but
+  // force-pinning that newer multiplier at the end produced a false vertical
+  // spike. Since x(t)=exp(kt), ln(endX)/k is the unique elapsed time matching
+  // the displayed endpoint and gives every intermediate point the same curve.
+  const durationSeconds = privateCurveDurationSeconds(endBps);
   const startPerf = receivedPerfMs - durationSeconds * 1000;
   const divisions = Math.max(24, Math.min(180, Math.ceil(durationSeconds * 12)));
   multGraphSamples = [];
@@ -5102,12 +5108,13 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const winner = settlementEvent?.payload?.lotteryWinner;
   const draw = settlementEvent?.payload?.powerboardDraw;
   const lotteryEvent = settlementEvent?.payload?.lotteryEvent;
-  const powerball = document.createElement("section"); powerball.className = `private-powerball ${winner ? "hit" : "miss"}`;
+  const drawActive = Boolean(draw?.drawActive ?? ["hit", "miss"].includes(lotteryEvent));
+  const powerball = document.createElement("section"); powerball.className = `private-powerball ${winner ? "hit" : drawActive ? "miss" : "funding"}`;
   if (draw) {
     const outcome = winner ? `JACKPOT · ${winner.displayName} WINS ${privateCredits(winner.payout)}`
       : lotteryEvent === "miss" ? "NO MATCH · PRIZE ROLLS FORWARD"
       : lotteryEvent === "sealed" ? "NO PAYOUT · NEXT PRIZE NOW SEALED"
-      : "NO PAYOUT · POWERBOARD FUNDING GROWS";
+      : "FUNDING MIX · NO ACTIVE PRIZE DRAW";
     const fundingAdded = BigInt(settlementEvent?.payload?.powerboardFundingAdded || "0");
     const settledPool = settlementEvent?.payload?.powerboardPool;
     const mySettledVoucher = settledPool?.weights?.find((voucher) => voucher.userId === snapshot.me.id);
@@ -5115,12 +5122,17 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const mySharePpm = totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n;
     const drawPopulation = Math.max(1, Number(draw.oddsOneIn));
     const perBallChance = (100 / drawPopulation).toFixed(2);
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>LIVE NUMBER DRAW</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : "COMPOUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    const drawLedger = drawActive
+      ? `Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}`
+      : `Funding sample ${draw.drawnNumber} · winning gate inactive until the prize is fully sealed`;
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
     const drawCanvas = powerball.querySelector(".private-powerball-canvas");
     drawCanvas.removeAttribute("aria-hidden");
     drawCanvas.setAttribute("role", "img");
     drawCanvas.setAttribute("aria-label", `Lottery air chamber containing ${drawPopulation} equally eligible numbered balls; ball ${draw.drawnNumber} is selected`);
-    powerball.querySelector(".private-powerball-rule").textContent = `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal.`;
+    powerball.querySelector(".private-powerball-rule").textContent = drawActive
+      ? `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal.`
+      : `The chamber is mixing while the next prize is funded. Ball ${draw.drawnNumber} is a committed transparency sample, not a payable draw; the winning gate activates only after the full prize and reset reserve are sealed.`;
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");

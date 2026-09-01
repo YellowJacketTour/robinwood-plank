@@ -85,6 +85,13 @@ test("Powerboard conclusion has an authoritative settlement lane and never rende
   assert.match(arcadeSource, /private-lottery-fallback/);
 });
 
+test("funding samples cannot masquerade as unpaid jackpot draws", () => {
+  assert.match(arcadeSource, /draw\?\.drawActive/);
+  assert.match(arcadeSource, /FUNDING MIX · NO ACTIVE PRIZE DRAW/);
+  assert.match(arcadeSource, /winning gate inactive until the prize is fully sealed/);
+  assert.match(arcadeSource, /drawActive \? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"/);
+});
+
 test("Powerboard uses an air-mix lottery machine and selection tube instead of fruit theater", () => {
   assert.match(arcadeSource, /function mountPrivateLotteryMachine/);
   assert.match(arcadeSource, /equally eligible numbered balls/);

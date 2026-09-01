@@ -1,5 +1,13 @@
 export const PRIVATE_LIVE_GROWTH_PER_SECOND = 0.22;
 
+/** Unique elapsed time whose exponential curve terminates at endBps. */
+export function privateCurveDurationSeconds(endBps, growthPerSecond = PRIVATE_LIVE_GROWTH_PER_SECOND) {
+  const bps = Number(endBps);
+  const growth = Number(growthPerSecond);
+  if (!Number.isFinite(bps) || bps < 10_000 || !Number.isFinite(growth) || growth <= 0) return 0;
+  return Math.log(bps / 10_000) / growth;
+}
+
 /**
  * Smooth presentation clock for an authoritative live round.
  *
