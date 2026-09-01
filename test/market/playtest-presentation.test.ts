@@ -66,6 +66,14 @@ test("settled intermission exposes a real countdown and the main action commits 
   assert.doesNotMatch(arcadeSource, /primaryBtn\.addEventListener\("click", async \(\) => \{\s*if \(PLAYTEST_MODE && privateSnapshot\?\.room\.phase === "settled"/);
 });
 
+test("accepted bets and locks cannot lose their authoritative repaint behind an in-flight refresh", () => {
+  assert.match(arcadeSource, /let privateRefreshQueued = false/);
+  assert.match(arcadeSource, /if \(privateRefreshBusy\) \{ privateRefreshQueued = true; return; \}/);
+  assert.match(arcadeSource, /if \(privateRefreshQueued\) queueMicrotask\(\(\) => \{ void refreshPrivatePlaytest\(\); \}\)/);
+  assert.match(arcadeSource, /Round commitment accepted/);
+  assert.match(arcadeSource, /Lock accepted at/);
+});
+
 test("multiplier art filters non-finite and regressing samples", () => {
   assert.match(arcadeSource, /if \(!Number\.isFinite\(value\)\) continue/);
   assert.match(arcadeSource, /Math\.max\(1, value, samples\.length \? samples\[samples\.length - 1\] : 1\)/);

@@ -4389,6 +4389,7 @@ let privateRoomId = null;
 let privateRooms = [];
 let privateSnapshot = null;
 let privateRefreshBusy = false;
+let privateRefreshQueued = false;
 let privateUpdatesAbort = null;
 let privateUpdatesGeneration = 0;
 let privateCrashTimer = null;
@@ -4458,7 +4459,7 @@ async function privateJson(response) {
 async function privatePlaytestCommand(action, extra = {}) {
   if (!privateRoomId) return false;
   try {
-    await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
+    const command = await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, commandId: crypto.randomUUID(), ...extra }),
@@ -4466,6 +4467,10 @@ async function privatePlaytestCommand(action, extra = {}) {
     if (action === "bet" && extra.stake) {
       privateSessionCommitted += BigInt(extra.stake);
       sessionStorage.setItem(privateSessionKey(privateRoomId, "committed"), privateSessionCommitted.toString());
+      toast(`Round commitment accepted · ${privateCredits(extra.stake)} credits`, "success");
+    }
+    if (action === "lock" && command.result?.acceptedTargetBps) {
+      toast(`Lock accepted at ${(Number(command.result.acceptedTargetBps) / 10_000).toFixed(2)}×`, "success");
     }
     if (action !== "tick") sfx.click();
     await refreshPrivatePlaytest();
@@ -5114,8 +5119,12 @@ function paintPrivateSnapshot(snapshot) {
 }
 
 async function refreshPrivatePlaytest() {
-  if (privateRefreshBusy) return;
+  // A command-triggered refresh must never disappear behind an older request.
+  // Remember one trailing refresh so the authoritative accepted bet/lock is
+  // painted immediately after the in-flight response completes.
+  if (privateRefreshBusy) { privateRefreshQueued = true; return; }
   privateRefreshBusy = true;
+  privateRefreshQueued = false;
   try {
     if (!privateRoomId) {
       const listed = await privateJson(await fetch("/api/playtest/rooms", { cache: "no-store" }));
@@ -5147,6 +5156,7 @@ async function refreshPrivatePlaytest() {
     }
   } finally {
     privateRefreshBusy = false;
+    if (privateRefreshQueued) queueMicrotask(() => { void refreshPrivatePlaytest(); });
   }
 }
 
