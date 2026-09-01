@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * PlankBank conservation fuzz. The single invariant that matters for a
@@ -48,7 +49,7 @@ describe("PlankBank -- conservation of ETH under randomized session-key play", (
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.001"),
       maxStakePerWalletBps: 10000n, // disabled -- irrelevant to this invariant, avoid spurious reverts
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 8n,
       reserveShareBps: 0n,
@@ -57,6 +58,7 @@ describe("PlankBank -- conservation of ETH under randomized session-key play", (
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED_BLOCKS), // Phase 3 hardening fields (test defaults)
     });
     const crashAddr = await crash.getAddress();
     const bank: any = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
@@ -135,10 +137,10 @@ describe("PlankBank -- conservation of ETH under randomized session-key play", (
           await bank.connect(p).revokeSession(sk.address).catch(() => {});
         } else if (op === 5) {
           // session-key bet path
-          await bank.connect(sk).betVia(await crash.getAddress(), ethers.parseEther(pick(["0.01", "0.02", "0.05"]))).catch(() => {});
+          await bank.connect(sk).betVia(await crash.getAddress(), ethers.parseEther(pick(["0.01", "0.02", "0.05"])), 0n).catch(() => {});
         } else if (op === 6) {
           // root-key bet path
-          await bank.connect(p).bet(await crash.getAddress(), ethers.parseEther(pick(["0.01", "0.02"]))).catch(() => {});
+          await bank.connect(p).bet(await crash.getAddress(), ethers.parseEther(pick(["0.01", "0.02"])), 0n).catch(() => {});
         } else if (op === 7) {
           const roundId = await crash.currentRoundId();
           await bank.connect(sk).cashOutVia(await crash.getAddress(), roundId).catch(() => {});

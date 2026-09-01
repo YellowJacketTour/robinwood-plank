@@ -267,16 +267,15 @@ describe("PlankCrashV2 — randomized invariants", () => {
     expect(totals.reveal, "entropy reveals").to.be.greaterThan(0);
     expect(totals.settle, "settlements").to.be.greaterThan(0);
     expect(totals.register, "registrations").to.be.greaterThan(0);
+    expect(totals.claim, "claims").to.be.greaterThan(0);
     expect(totals.cashOut + totals.presetCashOut, "cash-outs").to.be.greaterThan(0);
-    // claim, presetCashOut and carryForwardStake are NOT asserted nonzero here,
-    // honestly: all three need a narrow real-world window (pre-reveal LIVE for
-    // presetCashOut; a fully registered, elapsed claim window for claim; an
-    // actually-voided round for carryForwardStake) that
+    // presetCashOut and carryForwardStake are NOT asserted nonzero here,
+    // honestly: both need a narrow real-world window (pre-reveal LIVE for
+    // presetCashOut; an actually-voided round for carryForwardStake) that
     // this run's op weights don't reliably hit within the step budget --
     // confirmed via FUZZ_DEBUG=1, not assumed. Both are already covered
     // by dedicated scenarios in PlankCrashV2.test.ts (4 tests for
-    // presetCashOut alone, with exact claim accounting covered by the
-    // dedicated settlement tests); this fuzz's real job is finding EMERGENT bugs
+    // presetCashOut alone); this fuzz's real job is finding EMERGENT bugs
     // from unexpected interleaving of the core lifecycle, which it does.
   });
 });

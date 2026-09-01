@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * _invertMultiplier was rewritten from a LINEAR SEARCH (up to 200,000 loop
@@ -49,7 +50,7 @@ describe("PlankCrashDrand._invertMultiplier -- binary search matches the old lin
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.005"),
       maxStakePerWalletBps: 6000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 8n,
       reserveShareBps: 0n,
@@ -58,6 +59,7 @@ describe("PlankCrashDrand._invertMultiplier -- binary search matches the old lin
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(1800), // Phase 3 hardening fields (test defaults)
     });
     void deployer;
     return crash;

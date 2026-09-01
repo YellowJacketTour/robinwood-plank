@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * PlankFuelBooster -- "burn $PLANK to fuel the pad, never your own odds."
@@ -49,7 +50,7 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.001"),
       maxStakePerWalletBps: 8000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 4n,
       reserveShareBps: 0n,
@@ -58,6 +59,7 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
       jackpotSink: ethers.ZeroAddress,
       treasury: deployer.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(30), // Phase 3 hardening fields (test defaults)
     });
 
     const booster: any = await (
@@ -266,8 +268,8 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
     // Alice places a real bet, unrelated to fuel-burning. Bet BEFORE priming
     // the oracle -- priming advances chain time past the (30s) betting
     // window, which would otherwise close it first.
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await prime(oracle);
     const stakeBefore = await crash.stakeOf(await crash.currentRoundId(), alice.address);
     const cashBefore = await crash.cashOutBlockOf(await crash.currentRoundId(), alice.address);
@@ -315,8 +317,8 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
       await (await booster.setProgression(await progression.getAddress())).wait();
 
       expect((await progression.statsOf(alice.address)).fuelBurns).to.equal(0n);
-      await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-      await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+      await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+      await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
       await prime(oracle);
       const amt = ethers.parseEther("10");
       await plank.connect(alice).approve(await booster.getAddress(), amt);

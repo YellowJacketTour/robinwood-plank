@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { hardeningFor } from "./helpers/crashHardening.js";
 
 /**
  * The "whole field busted" case -- the single most important economic
@@ -38,7 +39,7 @@ describe("PlankCrashDrand — busted-round rollover", () => {
       minParticipants: 2n,
       minPoolSize: ethers.parseEther("0.01"),
       maxStakePerWalletBps: 6000n,
-      keeperRewardBps: 0n,
+      keeperRewardBps: 1n, // hardening (c): must be > 0
       seedNumerator: 1n,
       seedDenominator: 2n,
       reserveShareBps: 0n,
@@ -47,6 +48,7 @@ describe("PlankCrashDrand — busted-round rollover", () => {
       jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
+      ...hardeningFor(MAX_ELAPSED_BLOCKS), // Phase 3 hardening fields (test defaults)
     });
     return { crash, beacon, deployer, treasury, alice, bob, keeper };
   }
@@ -54,8 +56,8 @@ describe("PlankCrashDrand — busted-round rollover", () => {
   /// Runs one full round in which NEITHER player cashes out.
   async function runFullyBustedRound(crash: any, beacon: any, alice: any, bob: any, seed: string) {
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
     await crash.lockRound();
 
@@ -135,8 +137,8 @@ describe("PlankCrashDrand — busted-round rollover", () => {
 
     // And the seed is a real, spendable pot: a fresh pair of bettors now play
     // for their own stakes PLUS the seeded money they never paid in.
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     const funded = await crash.rounds(seededId);
     expect(funded.pool).to.equal(seed + ethers.parseEther("2"));
   });
@@ -144,8 +146,8 @@ describe("PlankCrashDrand — busted-round rollover", () => {
   it("a round WITH a winner cannot be swept -- the sweep is only ever a rescue for a fully-busted pot", async () => {
     const { crash, beacon, alice, bob } = await deploy();
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
     await crash.lockRound();
 
@@ -174,8 +176,8 @@ describe("PlankCrashDrand — busted-round rollover", () => {
   it("AUTOMATION: a keeper can register a winner on that player's behalf -- an offline winner no longer forfeits", async () => {
     const { crash, beacon, alice, bob, keeper } = await deploy();
     const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(alice).placeBet(0n, { value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("1") });
     await networkHelpers.time.increase(6);
     await crash.lockRound();
     await crash.connect(alice).cashOut(roundId);
