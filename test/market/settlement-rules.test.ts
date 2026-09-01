@@ -83,8 +83,8 @@ test("tampered or drifted records are refused, never defaulted", () => {
   assert.throws(() => replayCommittedRound(badVersion), SettlementRuleMismatch);
 });
 
-test("the live playtest default remains pfss; ccs-2l is selectable, not default", () => {
-  assert.equal(DEFAULT_PLAYTEST_POLICY.allocationRule, "pfss");
+test("the public playtest defaults to the proven ccs-2l rule", () => {
+  assert.equal(DEFAULT_PLAYTEST_POLICY.allocationRule, "ccs-2l");
   const policy: SimulationPolicy = { ...DEFAULT_PLAYTEST_POLICY, allocationRule: "ccs-2l" };
   const state = initialSimulationState(policy);
   const result = simulateIteration(state, policy, {

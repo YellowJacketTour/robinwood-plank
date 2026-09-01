@@ -368,7 +368,15 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     const launchRound = room.phase === "settled" ? BigInt(room.current_round) + 1n : BigInt(room.current_round);
     if (launchRound < 1n) throw new PlaytestRoomError(409, "NOT_READY", "The room needs a round with bets.");
     room.current_round = launchRound.toString();
-    const policy = parsePolicy(room.policy);
+    let policy = parsePolicy(room.policy);
+    // The public laboratory advances legacy tables at the round boundary,
+    // never mid-flight. Historical rounds retain their committed descriptor.
+    if (policy.allocationRule !== "ccs-2l") {
+      policy = { ...policy, allocationRule: "ccs-2l" };
+      validatePolicy(policy);
+      room.policy = serializeBigInts(policy);
+      room.rules_hash = playtestRulesHash(policy);
+    }
     // An invitation means "join the next flight", not "silently spectate".
     // Seat only humans who arrived after the most recent settlement, and only
     // for this welcome flight. Established/offline members are never auto-bet.
@@ -440,8 +448,8 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     room.commitment = commitment; room.reveal = reveal; room.crash_bps = crashBps.toString();
     room.started_at = started; room.crash_at = crashAt;
     await client.query(
-      `UPDATE playtest_rooms SET phase='running',version=$2,current_round=$3,commitment=$4,reveal=$5,crash_bps=$6,started_at=$7,crash_at=$8,settled_at=NULL WHERE id=$1`,
-      [roomId, room.version, room.current_round, commitment, reveal, crashBps.toString(), started, crashAt],
+      `UPDATE playtest_rooms SET phase='running',version=$2,current_round=$3,commitment=$4,reveal=$5,crash_bps=$6,started_at=$7,crash_at=$8,settled_at=NULL,policy=$9,rules_hash=$10 WHERE id=$1`,
+      [roomId, room.version, room.current_round, commitment, reveal, crashBps.toString(), started, crashAt, JSON.stringify(room.policy), room.rules_hash],
     );
     // Never publish crashAt while the round is live. A deadline is merely the
     // unrevealed crash multiplier expressed in time, so exposing it defeats

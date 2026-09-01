@@ -19,7 +19,7 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   lotteryBaseGrowthBps: 100n,
   lotteryMinimumBaseStep: 1_000n,
   consolation: 0n,
-  allocationRule: "pfss",
+  allocationRule: "ccs-2l",
   minimumPlayers: 2,
   minimumStake: 100n,
 };
