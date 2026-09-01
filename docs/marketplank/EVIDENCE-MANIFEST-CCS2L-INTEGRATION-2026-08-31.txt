@@ -1,0 +1,75 @@
+EVIDENCE MANIFEST — CCS-2L SETTLEMENT INTEGRATION (v1.1 partition-invariant house cap)
+Date: 2026-08-31 · Branch: integrate/ccs2l-settlement (worktree robinwood-plank-cos-crash)
+Author model: claude-fable-5
+This manifest is NON-SELF-REFERENTIAL: it hashes other artifacts; its own
+integrity is fixed by the git commit that contains it.
+
+INTEGRATION COMMITS (on top of 49e1032):
+  ffa3177  evidence(ccs2l): archive prior settlement studies (single-purse CCS REJECTED)
+  6446fa8  feat(ccs2l): partition-invariant house cap (v1.1) + proofs + post-fix 2M campaigns
+  72c2f1c  feat(ccs2l): integrate ccs-2l AllocationRule + rule-version registry + commitment persistence
+  d781243  feat(ccs2l): production-shaped Solidity library + wei-exact differential in CI
+  (+ the commit containing this manifest)
+
+SHA256 OF KEY ARTIFACTS (full per-file list: sim-settlement-ccs2l/manifest.json):
+  3bf4e6f9b6ffac9e271cc9574740145426d85ac24bfdced632f7f0919f6ad173  docs/marketplank/sim-settlement-ccs2l/manifest.json (26 entries)
+  a0f35b7f42edf32791f35327697332db01f926603dd01414ede0810f81658cc3  docs/marketplank/DESIGN-PLANKCRASH-CCS2L-INTEGRATION-2026-08-31.md
+  c4841664b9fb2971501609e8706d5dcfa2c90a24374504df956fce627b0b3b85  contracts/lib/PlankCcs2LMath.sol
+  a388342cc7b1c7d4c03709f28b3e246d84ab20a56b5cc7abe0823e370a95a3b2  lib/casino/settlement-rules.ts
+  816755166ca91e65f16fa9a3eb49d3712a853260d884aabc77299fd98bb5849b  docs/marketplank/sim-settlement-ccs2l/partition-results.json
+  NOTE: manifest.json was regenerated after a final edit to candidate.diff;
+  verify any file against manifest.json, and manifest.json against the hash above.
+
+RESULTS (each reproducible by the exact command shown):
+  Partition-invariance proof (acceptance criterion):
+    node docs/marketplank/sim-settlement-ccs2l/partition.mjs
+    -> 39,680 cases (same-lock grid/extremes/k-part, adjacent-lock,
+       multi-target, multi-wallet under binding global cap), worst aggregate
+       house-bonus gain 0 wei (bound: < survivorCount wei), exit 0.
+  Property suite: node docs/marketplank/sim-settlement-ccs2l/run.mjs
+    -> 619,221 checks, 0 failures, exit 0.
+  Scenarios: node docs/marketplank/sim-settlement-ccs2l/scenarios.mjs -> 0 failures.
+  Post-fix campaigns (2,000,000 rounds each; 0 solvency failures; player-RTP
+  == 1 - effective-rake wei-exact flag true in every JSON):
+    node docs/marketplank/sim-settlement-ccs2l/campaign.mjs A 2000000 20260831 campaign-A-2m.json
+    node docs/marketplank/sim-settlement-ccs2l/campaign.mjs A 2000000 777 campaign-A-2m-seed777.json
+    node docs/marketplank/sim-settlement-ccs2l/campaign.mjs B 2000000 20260831 campaign-B-2m.json
+    node docs/marketplank/sim-settlement-ccs2l/campaign.mjs C 2000000 20260831 campaign-C-2m.json
+    (plus the three 200k runs; variant C retained as REJECTED control only)
+  Synthetic round-123 replay (no real export exists in-repo):
+    node docs/marketplank/sim-settlement-ccs2l/replay.mjs
+  Wei-exact JS<->Solidity differential + EIP-170 size + gas:
+    npm run test:ccs2l-differential          -> 6 passing
+    deployed harness size 2,841 bytes; gas n=2/10/50/100:
+    73,899 / 158,600 / 669,807 / 1,310,767
+  Registry/replay/persistence tests:
+    npx tsx --test test/market/settlement-rules.test.ts   -> 8 pass, 0 fail
+  Full repository suites (2026-08-31, this branch):
+    npm run test:market    -> 992 tests, 959 pass, 0 fail, 33 skipped
+    npm run test:contracts -> 362 passing, 10 failing — ALL 10 in the
+      PlankCrashDrand family (SimPlankCrashRandomStateful x4, PlankCrashDrand
+      x2, PlankCrashDrand x PlankProgression x1, Phase-3 hardening x3),
+      PRE-EXISTING: caused by the UNCOMMITTED live-production working-tree
+      drift in the protected contracts/PlankCrashDrand.sol (adds
+      trueCrashElapsedBlocks and changes settle/void gating) vs the committed
+      differential model. git diff 49e1032..HEAD touches none of those files;
+      not attributable to this integration and not fixable here without
+      committing a protected file.
+    npm run lint:inmotion  -> exit 0 (new files included)
+    npx tsc --noEmit -p tsconfig.hardhat.json -> 0 errors in CCS-2L files
+      (pre-existing errors in unrelated legacy tests remain untouched)
+  CI: .github/workflows/inmotion.yml runs `npm run test:ccs2l` + `npm test`.
+
+PROTECTED FILES — NEVER STAGED OR COMMITTED (verified before every git add;
+they remain modified-uncommitted in the working tree, exactly as found):
+  contracts/PlankCrashDrand.sol · public/arcade/crash.html ·
+  public/arcade/functions/rpc.js · scripts/casino-keeper.ts ·
+  scripts/relay-drand.ts · docs/marketplank/sim-plankcrash/random-stateful-summary.json
+Nothing on this branch touched master or the live deployment.
+
+STANDING QUALIFICATIONS (also in the design doc §9):
+  (1) "player RTP == 1 - rake" is an AGGREGATE player-layer identity, not an
+      individual promise — strategy outcomes vary enormously.
+  (2) Production-candidate quality = wallet-split house-cap eliminated (DONE
+      here) AND production integration reproducing the test-only evidence —
+      NOT audit-complete.
