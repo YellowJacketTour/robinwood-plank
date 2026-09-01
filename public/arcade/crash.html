@@ -4534,7 +4534,7 @@ function mountPrivatePowerOrange(canvas, card, drawNumber) {
   privatePowerOrangeDispose = () => { if (disposed) return; disposed = true; cancelAnimationFrame(raf); orangeScene.traverse((object) => { object.geometry?.dispose?.(); if (object.material) { const materials = Array.isArray(object.material) ? object.material : [object.material]; materials.forEach((material) => { material.map?.dispose?.(); material.dispose?.(); }); } }); labelTexture.dispose(); orangeRenderer.dispose(); privatePowerOrangeDispose = null; };
 }
 
-function mountPrivateLotteryMachine(canvas, card, drawNumber) {
+function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 16) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
   if (!canvas) return;
   const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true, powerPreference:"high-performance" });
@@ -4552,21 +4552,33 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber) {
   const base = new THREE.Mesh(new THREE.CylinderGeometry(1.85,2.1,.42,48),metal); base.position.y=-1.78; machine.add(base);
   const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.15,-1.55,0); machine.add(plinth);
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,2.65,28,1,true),glass); tube.position.set(1.58,.1,0); machine.add(tube);
-  const makeLabel = (number) => { const c=document.createElement("canvas"); c.width=c.height=128; const x=c.getContext("2d"); x.fillStyle="#f9fbff";x.beginPath();x.arc(64,64,58,0,Math.PI*2);x.fill();x.strokeStyle="#33516e";x.lineWidth=6;x.stroke();x.fillStyle="#08111d";x.font="900 52px monospace";x.textAlign="center";x.textBaseline="middle";x.fillText(String(number),64,68); const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t; };
+  const makeLabel = (number) => { const c=document.createElement("canvas"); c.width=c.height=256; const x=c.getContext("2d"); x.clearRect(0,0,256,256);x.fillStyle="#f8fbff";x.beginPath();x.arc(128,128,116,0,Math.PI*2);x.fill();x.strokeStyle="#5ba7d1";x.lineWidth=10;x.stroke();x.fillStyle="#07121d";x.font=`900 ${number>9?92:112}px monospace`;x.textAlign="center";x.textBaseline="middle";x.fillText(String(number),128,136); const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t; };
   const randomUnit=()=>{const values=new Uint32Array(1);crypto.getRandomValues(values);return values[0]/4294967296;};
   const randomSigned=()=>randomUnit()*2-1;
   const ballRadius=.255, chamberRadii=new THREE.Vector3(1.36,1.28,.82);
   const balls=[];
-  for(let i=1;i<=16;i++){
-    const group=new THREE.Group(), material=new THREE.MeshStandardMaterial({color:0xf4f7fb,roughness:.3,metalness:.04});
-    const ball=new THREE.Mesh(new THREE.SphereGeometry(ballRadius,20,14),material); group.add(ball);
-    const texture=makeLabel(i), label=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:true}));label.scale.set(.35,.35,1);label.position.z=.235;group.add(label);
+  const population=Math.max(2,Math.min(64,Math.trunc(Number(populationSize)||16)));
+  for(let i=1;i<=population;i++){
+    const group=new THREE.Group(), material=new THREE.MeshPhysicalMaterial({color:0xf4f8fb,roughness:.22,metalness:.02,clearcoat:.7,clearcoatRoughness:.18});
+    const ball=new THREE.Mesh(new THREE.SphereGeometry(ballRadius,32,24),material); group.add(ball);
+    // Real geometry decals ride on the rotating sphere. Sprite billboards
+    // rendered as square cards and could visually detach from the ball.
+    // Six repeated number patches mirror physical draw balls and keep the
+    // identity legible while the same sphere tumbles through the chamber.
+    const texture=makeLabel(i), labelMaterial=new THREE.MeshBasicMaterial({map:texture,transparent:true,alphaTest:.18,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
+    const patchGeometry=new THREE.CircleGeometry(.122,28),d=ballRadius+.002;
+    for(const face of [
+      {p:[0,0,d],r:[0,0,0]},{p:[0,0,-d],r:[0,Math.PI,0]},
+      {p:[d,0,0],r:[0,Math.PI/2,0]},{p:[-d,0,0],r:[0,-Math.PI/2,0]},
+      {p:[0,d,0],r:[-Math.PI/2,0,0]},{p:[0,-d,0],r:[Math.PI/2,0,0]},
+    ]){const patch=new THREE.Mesh(patchGeometry,labelMaterial);patch.position.set(...face.p);patch.rotation.set(...face.r);patch.renderOrder=2;group.add(patch);}
     const angle=i*2.399963, ring=.45+(i%4)*.2;
     group.position.set(Math.cos(angle)*ring,-.9+(i%6)*.34,Math.sin(angle)*ring*.58);
     const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
     machine.add(group);balls.push({group,texture,material,velocity,number:i,rotation:new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize()});
   }
-  const selected=balls.find((ball)=>ball.number===Number(drawNumber)) || balls[0];
+  const selected=balls.find((ball)=>ball.number===Number(drawNumber));
+  if(!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
   let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
   const intake=new THREE.Vector3(1.25,-.88,0),tubeBottom=new THREE.Vector3(1.58,-1.02,0),tubeTop=new THREE.Vector3(1.58,1.56,0),pedestal=new THREE.Vector3(2.15,-1.26,0);
   const resize=()=>{const d=Math.min(devicePixelRatio||1,1.5),w=Math.max(2,Math.round(canvas.clientWidth*d)),h=Math.max(2,Math.round(canvas.clientHeight*d));if(canvas.width!==w||canvas.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}};
@@ -4846,7 +4858,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const mySettledVoucher = settledPool?.weights?.find((voucher) => voucher.userId === snapshot.me.id);
     const myWeight = BigInt(mySettledVoucher?.weight || snapshot.powerboard?.myWeight || "0"), totalWeight = BigInt(settledPool?.totalWeight || snapshot.powerboard?.totalWeight || "0");
     const mySharePpm = totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n;
+    const drawPopulation = Math.max(1, Number(draw.oddsOneIn));
+    const perBallChance = (100 / drawPopulation).toFixed(2);
     powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>LIVE NUMBER DRAW</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : "COMPOUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    const drawCanvas = powerball.querySelector(".private-powerball-canvas");
+    drawCanvas.removeAttribute("aria-hidden");
+    drawCanvas.setAttribute("role", "img");
+    drawCanvas.setAttribute("aria-label", `Lottery air chamber containing ${drawPopulation} equally eligible numbered balls; ball ${draw.drawnNumber} is selected`);
+    powerball.querySelector(".private-powerball-rule").textContent = `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal.`;
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
@@ -4872,7 +4891,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   next.append(skip, continueButton);
   card.append(eyebrow, headline, money, balance, powerball, world, note, next);
   if (draw) {
-    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber); }
+    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber, draw.oddsOneIn); }
     catch (error) {
       console.error("[playtest] lottery machine WebGL fallback", error);
       powerball.classList.add("webgl-fallback");

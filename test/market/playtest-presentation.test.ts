@@ -43,9 +43,14 @@ test("Powerboard conclusion has an authoritative settlement lane and never rende
 
 test("Powerboard uses an air-mix lottery machine and selection tube instead of fruit theater", () => {
   assert.match(arcadeSource, /function mountPrivateLotteryMachine/);
-  assert.match(arcadeSource, /transparent air chamber/);
+  assert.match(arcadeSource, /equally eligible numbered balls/);
   assert.match(arcadeSource, /selection tube/);
-  assert.match(arcadeSource, /for\(let i=1;i<=16;i\+\+\)/);
+  assert.match(arcadeSource, /for\(let i=1;i<=population;i\+\+\)/);
+  assert.match(arcadeSource, /new THREE\.CircleGeometry\(\.122,28\)/);
+  assert.doesNotMatch(arcadeSource, /new THREE\.Sprite\(new THREE\.SpriteMaterial\(\{map:texture/);
+  assert.match(arcadeSource, /const selected=balls\.find\(\(ball\)=>ball\.number===Number\(drawNumber\)\);/);
+  assert.match(arcadeSource, /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, draw\.drawnNumber, draw\.oddsOneIn\)/);
+  assert.match(arcadeSource, /\$\{perBallChance\}% each/);
   assert.doesNotMatch(arcadeSource, /THE ORANGE KNOWS THE NUMBER/);
 });
 
