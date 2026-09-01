@@ -19,6 +19,10 @@ const sessionRouteSource = readFileSync(
   new URL("../../app/api/playtest/session/route.ts", import.meta.url),
   "utf8"
 );
+const mechanicsDeckSource = readFileSync(
+  new URL("../../public/playtest/plankcrash-system.html", import.meta.url),
+  "utf8"
+);
 
 test("the visible multiplier freezes at the committed crash point", () => {
   assert.equal(
@@ -218,6 +222,15 @@ test("public alpha exposes the dollar-reference floor and permanent RTP evolutio
   assert.match(arcadeSource, /snapshot\.evolution\?\.effectiveRakeBps/);
   assert.match(arcadeSource, /Wallet count never advances this meter/);
   assert.match(arcadeSource, /topbar \.stats>span:not\(\.vault-stat\):not\(\.pb-stat\):not\(\.rank-stat\)/);
+});
+
+test("the marketing deck is a responsive visual system map rather than a prose brief", () => {
+  assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Accelerating multiplier curve"/);
+  assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Flow diagram of credits"/);
+  assert.match(mechanicsDeckSource, /class="evolution"/);
+  assert.equal((mechanicsDeckSource.match(/class="ball(?: win)?"/g) || []).length, 16);
+  assert.match(mechanicsDeckSource, /@media\(max-width:440px\)/);
+  assert.match(mechanicsDeckSource, /grid-template-columns:repeat\(8,1fr\)/);
 });
 
 test("returning invitees can choose login and rejoin the invited room in one action", () => {
