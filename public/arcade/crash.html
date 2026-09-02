@@ -2445,19 +2445,19 @@ function drawMultGraph() {
   }
   if (samples.length < 2) return;
 
-  const maxX = Math.max(2, samples[samples.length - 1].x * 1.14);
   const startTime=samples[0].t,endTime=Math.max(startTime+1,samples[samples.length-1].t);
-  // Keep a real time horizon ahead of the live trace. Scaling every frame
-  // from first sample to newest made the path occupy the full canvas from
-  // the instant of launch, so it looked like a static finished chart. The
-  // endpoint now travels across the plot in real time; the horizon expands
-  // in stable ten-second bands for unusually long flights.
+  // Both axes share one future time horizon. Deriving the vertical ceiling
+  // from the current endpoint pinned every live value near the top while the
+  // trace was still near the left edge. This viewport instead asks where the
+  // same exponential law will be at the right edge, so the endpoint travels
+  // right and rises with its actual acceleration.
   const elapsedMs = endTime - startTime;
-  const horizonMs = Math.max(12_000, Math.ceil((elapsedMs + 2_000) / 10_000) * 10_000);
+  const horizonMs = Math.max(4_000, Math.ceil((elapsedMs + 1_000) / 4_000) * 4_000);
+  const horizonMultiplier = Math.exp(0.22 * horizonMs / 1000);
   const pad = 6;
   const toXY = (sample) => [
     pad + Math.min(1, (sample.t-startTime)/horizonMs) * (w - pad * 2),
-    h - pad - ((sample.x - 1) / (maxX - 1)) * (h - pad * 2),
+    h - pad - Math.min(1, (sample.x - 1) / (horizonMultiplier - 1)) * (h - pad * 2),
   ];
 
   const area = multGraphCtx.createLinearGradient(0, 0, 0, h);
@@ -4785,8 +4785,9 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
     const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
     machine.add(group);balls.push({group,texture,material,velocity,number:i,rotation:new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize()});
   }
-  const selected=balls.find((ball)=>ball.number===Number(drawNumber));
-  if(!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
+  const hasActiveDraw=drawNumber!==null&&drawNumber!==undefined;
+  const selected=hasActiveDraw?balls.find((ball)=>ball.number===Number(drawNumber)):null;
+  if(hasActiveDraw&&!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
   let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
   const pedestal=new THREE.Vector3(2.22,-1.25,0);
   const resize=()=>{const d=Math.min(devicePixelRatio||1,1.5),w=Math.max(2,Math.round(canvas.clientWidth*d)),h=Math.max(2,Math.round(canvas.clientHeight*d));if(canvas.width!==w||canvas.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}};
@@ -4832,6 +4833,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
     for(const entry of balls){if(revealed&&entry===selected)continue;entry.group.rotation.x+=entry.rotation.x*dt*4;entry.group.rotation.y+=entry.rotation.y*dt*4;entry.group.rotation.z+=entry.rotation.z*dt*4;}
   };
   const moveSelected=(progress)=>{
+    if(!selected)return;
     if(!capturedAt)capturedAt=selected.group.position.clone();
     let local;
     if(progress<.26){
@@ -4848,7 +4850,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
     selected.group.scale.setScalar(1+Math.max(0,(progress-.68)/.32)*.5);
     selected.material.color.lerp(new THREE.Color(0xf1c84b),.055);
   };
-  const render=(now)=>{if(disposed)return;resize();const dt=Math.min(.025,(now-last)/1000);last=now;const stage=card.dataset.reveal||"crash",revealed=stage==="drawn"||stage==="ejected"||stage==="world";selection=privateMotionReduced()?(revealed?1:0):THREE.MathUtils.damp(selection,revealed?1:0,2.7,dt);mixBalls(dt,now,revealed);if(revealed)moveSelected(selection);machine.rotation.y=Math.sin(now*.00025)*.05;renderer.render(scene,camera);raf=requestAnimationFrame(render);};
+  const render=(now)=>{if(disposed)return;resize();const dt=Math.min(.025,(now-last)/1000);last=now;const stage=card.dataset.reveal||"crash",revealed=hasActiveDraw&&(stage==="drawn"||stage==="ejected"||stage==="world");selection=privateMotionReduced()?(revealed?1:0):THREE.MathUtils.damp(selection,revealed?1:0,2.7,dt);mixBalls(dt,now,revealed);if(revealed)moveSelected(selection);machine.rotation.y=Math.sin(now*.00025)*.05;renderer.render(scene,camera);raf=requestAnimationFrame(render);};
   raf=requestAnimationFrame(render);
   privatePowerOrangeDispose=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(raf);scene.traverse((object)=>{object.geometry?.dispose?.();if(object.material){(Array.isArray(object.material)?object.material:[object.material]).forEach((material)=>material.dispose?.());}});balls.forEach((ball)=>ball.texture.dispose());renderer.dispose();privatePowerOrangeDispose=null;};
 }
@@ -5147,15 +5149,17 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const perBallChance = (100 / drawPopulation).toFixed(2);
     const drawLedger = drawActive
       ? `Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}`
-      : `Funding sample ${draw.drawnNumber} · winning gate inactive until the prize is fully sealed`;
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div><div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+      : "MIXING ONLY · no result ball is selected while the prize is funding";
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${drawActive ? draw.drawnNumber : "—"}</b></div><div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
     const drawCanvas = powerball.querySelector(".private-powerball-canvas");
     drawCanvas.removeAttribute("aria-hidden");
     drawCanvas.setAttribute("role", "img");
-    drawCanvas.setAttribute("aria-label", `Lottery air chamber containing ${drawPopulation} equally eligible numbered balls; ball ${draw.drawnNumber} is selected`);
+    drawCanvas.setAttribute("aria-label", drawActive
+      ? `Lottery air chamber containing ${drawPopulation} equally eligible numbered balls; ball ${draw.drawnNumber} is selected`
+      : `Lottery air chamber mixing ${drawPopulation} equally eligible numbered balls; no result ball is selected while the prize is funding`);
     powerball.querySelector(".private-powerball-rule").textContent = drawActive
       ? `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal.`
-      : `The chamber is mixing while the next prize is funded. Ball ${draw.drawnNumber} is a committed transparency sample, not a payable draw; the winning gate activates only after the full prize and reset reserve are sealed.`;
+      : "The chamber is mixing while the next prize is funded. All eligible balls remain inside the chamber; no result is selected until the full prize and reset reserve are sealed.";
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
@@ -5182,11 +5186,11 @@ function paintPrivateConclusion(snapshot, me, seat) {
   next.append(skip, continueButton);
   card.append(eyebrow, headline, money, balance, powerball, world, note, next);
   if (draw) {
-    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, draw.drawnNumber, draw.oddsOneIn); }
+    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, drawActive ? draw.drawnNumber : null, draw.oddsOneIn); }
     catch (error) {
       console.error("[playtest] lottery machine WebGL fallback", error);
       powerball.classList.add("webgl-fallback");
-      const fallback = document.createElement("div"); fallback.className = "private-lottery-fallback"; fallback.setAttribute("aria-hidden", "true"); fallback.innerHTML = `<i></i><i></i><i></i><b>${draw.drawnNumber}</b>`; powerball.prepend(fallback);
+      const fallback = document.createElement("div"); fallback.className = "private-lottery-fallback"; fallback.setAttribute("aria-hidden", "true"); fallback.innerHTML = `<i></i><i></i><i></i><b>${drawActive ? draw.drawnNumber : "—"}</b>`; powerball.prepend(fallback);
     }
   }
   if (privateMotionReduced()) {

@@ -94,7 +94,10 @@ test("the cinematic boot curtain can never block the playable table", () => {
 test("funding samples cannot masquerade as unpaid jackpot draws", () => {
   assert.match(arcadeSource, /draw\?\.drawActive/);
   assert.match(arcadeSource, /FUNDING MIX · NO ACTIVE PRIZE DRAW/);
-  assert.match(arcadeSource, /winning gate inactive until the prize is fully sealed/);
+  assert.match(arcadeSource, /no result ball is selected while the prize is funding/);
+  assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : "—"/);
+  assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : null/);
+  assert.doesNotMatch(arcadeSource, /Funding sample \$\{draw\.drawnNumber\}/);
   assert.match(arcadeSource, /drawActive \? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"/);
 });
 
@@ -120,11 +123,11 @@ test("Powerboard uses an air-mix lottery machine and selection tube instead of f
   );
   assert.match(
     arcadeSource,
-    /const selected=balls\.find\(\(ball\)=>ball\.number===Number\(drawNumber\)\);/
+    /const selected=hasActiveDraw\?balls\.find\(\(ball\)=>ball\.number===Number\(drawNumber\)\):null;/
   );
   assert.match(
     arcadeSource,
-    /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, draw\.drawnNumber, draw\.oddsOneIn\)/
+    /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, drawActive \? draw\.drawnNumber : null, draw\.oddsOneIn\)/
   );
   assert.match(arcadeSource, /\$\{perBallChance\}% each/);
   assert.doesNotMatch(arcadeSource, /THE ORANGE KNOWS THE NUMBER/);
@@ -251,8 +254,10 @@ test("public alpha exposes the dollar-reference floor and permanent RTP evolutio
 });
 
 test("the live curve advances across a stable time horizon and the launch complex is complete", () => {
-  assert.match(arcadeSource, /const horizonMs = Math\.max\(12_000/);
+  assert.match(arcadeSource, /const horizonMs = Math\.max\(4_000/);
+  assert.match(arcadeSource, /const horizonMultiplier = Math\.exp\(0\.22 \* horizonMs \/ 1000\)/);
   assert.match(arcadeSource, /Math\.min\(1, \(sample\.t-startTime\)\/horizonMs\)/);
+  assert.match(arcadeSource, /\(sample\.x - 1\) \/ \(horizonMultiplier - 1\)/);
   assert.match(arcadeSource, /createLinearGradient\(0, 0, 0, h\)/);
   assert.match(arcadeSource, /new THREE\.CylinderGeometry\(6\.2, 6\.5, 0\.28, 32\)/);
   assert.match(arcadeSource, /new THREE\.RingGeometry\(5\.45, 5\.72, 48\)/);
