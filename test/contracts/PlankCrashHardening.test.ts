@@ -1111,7 +1111,12 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
     // budget credited with reserveCut only, the seed after the bootstrap
     // is a rebate of rake the Vault actually took in, so under honest play
     // the Vault can never lose more than the bootstrap:
-    //   reserve_end + seedInFlight + spilledToJackpot >= reserve_start - bootstrap
+    //   reserve_end + seedInFlight + pendingOverflow + deliveredOverflow
+    //     >= reserve_start - bootstrap
+    // pendingOverflow replaced the old synchronous VaultOverflow push: queued
+    // Powerboard capital remains held by this contract until a permissionless
+    // delivery succeeds, so both sides of that escrow lifecycle belong in the
+    // conservation identity.
     // Fuzz: 5 PRNG seeds x reserveShareBps in {0, 4000, 10000}, 4 honest
     // players with random stakes and random committed targets (or riding
     // to the crash), unbiased PRNG randomness, 24 rounds, the day rolled
@@ -1169,14 +1174,15 @@ describe("PlankCrashDrand — Phase 3 go-live hardening (a)(b)(c)", () => {
           if (now < minReserve) minReserve = now;
         }
         const inFlight: bigint = (await crash.rounds(await crash.currentRoundId())).rolledOverFromPrevious;
-        let spilled = 0n;
-        for (const ev of await crash.queryFilter(crash.filters.VaultOverflow())) spilled += ev.args.spilledToJackpot;
+        const pendingOverflow: bigint = await crash.pendingOverflow();
+        let deliveredOverflow = 0n;
+        for (const ev of await crash.queryFilter(crash.filters.OverflowDelivered())) deliveredOverflow += ev.args.delivered;
         const reserveEnd: bigint = await crash.reserve();
         const tag = `share=${share} fuzz=${fuzz} (seeded ${seededRounds}/${ROUNDS} rounds, min reserve ${ethers.formatEther(minReserve)})`;
         expect(seededRounds, `${tag}: must exercise seeded rounds`).to.be.gte(3);
         expect(
-          reserveEnd + inFlight + spilled,
-          `${tag}: Vault end ${ethers.formatEther(reserveEnd)} + in flight ${ethers.formatEther(inFlight)} + spilled ${ethers.formatEther(spilled)} must be >= start - bootstrap (${ethers.formatEther(reserveStart - BOOTSTRAP)}) -- the Vault bled house capital`,
+          reserveEnd + inFlight + pendingOverflow + deliveredOverflow,
+          `${tag}: Vault end ${ethers.formatEther(reserveEnd)} + in flight ${ethers.formatEther(inFlight)} + pending overflow ${ethers.formatEther(pendingOverflow)} + delivered overflow ${ethers.formatEther(deliveredOverflow)} must be >= start - bootstrap (${ethers.formatEther(reserveStart - BOOTSTRAP)}) -- the Vault bled house capital`,
         ).to.be.gte(reserveStart - BOOTSTRAP);
       }
     }
