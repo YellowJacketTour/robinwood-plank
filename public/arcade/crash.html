@@ -1996,11 +1996,16 @@ function frame() {
     // Private multiplayer and the on-chain game deliberately have
     // different authoritative curves. Never run the private exponential
     // timeline through the legacy quadratic block curve.
-    const estBps = PLAYTEST_MODE && privateSnapshot?.room.phase === "running"
+    // The lagged private presentation keeps extrapolating per-frame through
+    // the settled-phase replay window (the display timeline runs δ behind
+    // authoritative settlement).
+    const privateFlightDisplayed = PLAYTEST_MODE && privateSnapshot &&
+      (privateSnapshot.room.phase === "running" || privateLaggedReplayMsRemaining(performance.now()) > 0);
+    const estBps = privateFlightDisplayed
       ? privateLiveClock.sample(performance.now())
       : multiplierAtBlocksBps(estElapsedBlocks);
     const liveGraphNow = performance.now();
-    if (PLAYTEST_MODE && privateSnapshot?.room.phase === "running" && liveGraphNow >= privateGraphNextPaintAt) {
+    if (privateFlightDisplayed && liveGraphNow >= privateGraphNextPaintAt) {
       // Repaint at display cadence (rAF already gates this call): the old
       // 50ms throttle dropped the live graph to ~20fps, a second visible
       // source of chop on top of the horizon snapping.
@@ -2032,6 +2037,10 @@ function frame() {
     // full intensity around 5x (mExact-1)/4 == 1 at mExact==5), same
     // "most rounds have already crashed by here" design target as before.
     targetVelocityNorm = Math.min(1, (mExact - 1) / 4);
+    // Ignition hold: during [T, T+δ] the authoritative round is running but
+    // the lagged display holds the rocket ON THE PAD at exactly 1.00x —
+    // engines visibly burning (thruster/rumble floor) with zero altitude.
+    if (privateFlightDisplayed && estBps <= 10_000) targetVelocityNorm = Math.max(targetVelocityNorm, 0.14);
   } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
     const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
     // FUELING phase: on the launchpad the rocket charges from 0.00 up to
@@ -4657,6 +4666,26 @@ let privateSessionStart = Date.now();
 let privateSessionInitialBalance = null;
 let privateServerOffsetMs = 0;
 const privateLiveClock = new PrivateLiveClock();
+// Server-published presentation lag δ (see lib/playtest-live-shared.ts): the
+// display plays the true timeline δ late, and a manual lock is granted at the
+// multiplier the lagged display was showing at the tap. Clamped [600, 2000].
+let privateDisplayLagMs = 1000;
+let privateLaggedReplayTimer = null;
+
+function privateClampDisplayLagMs(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1000;
+  return Math.min(2000, Math.max(600, Math.round(parsed)));
+}
+
+// While the room row is already "settled" (server settlement runs on
+// authoritative time) the δ-lagged display may still be replaying the tail of
+// the flight and the crash; the results theater must wait for it.
+function privateLaggedReplayMsRemaining(perfMs) {
+  if (!privateSnapshot || privateSnapshot.room.phase !== "settled") return 0;
+  if (privateLiveClock.deadlinePerfMs === null) return 0;
+  return Math.max(0, privateLiveClock.deadlinePerfMs - perfMs);
+}
 let privateMotionPreference = localStorage.getItem("plank-alpha:motion") || "system";
 let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || "balanced";
 
@@ -4789,7 +4818,9 @@ async function privatePlaytestCommand(action, extra = {}) {
       }
     }
     if (action === "lock" && command.result?.acceptedTargetBps) {
-      toast(`Lock accepted at ${(Number(command.result.acceptedTargetBps) / 10_000).toFixed(2)}×`, "success");
+      // Displayed == redeemable: the server grants the multiplier the lagged
+      // display was showing at the tap, so this receipt matches the readout.
+      toast(`Lock granted at ${(Number(command.result.acceptedTargetBps) / 10_000).toFixed(2)}× — the multiplier you were shown`, "success");
     }
     if (action !== "tick") sfx.click();
     await refreshPrivatePlaytest();
@@ -5210,10 +5241,18 @@ function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat 
 
 window.setInterval(() => {
   if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled") {
+    // While the δ-lagged display is still replaying the flight tail and the
+    // crash, the intermission theater (countdown, commit button, descent)
+    // must not preempt it; the scheduled lagged-crash repaint takes over.
+    if (privateLaggedReplayMsRemaining(performance.now()) > 0) return;
     // The room version is static through the intermission, so no snapshot
     // repaint arrives to flip the descent on -- derive it here from the
-    // same server settledAt clock (state-derived, not animation state).
-    const settledAtMs = Date.parse(privateSnapshot.room.settledAt || "");
+    // same server settledAt clock (state-derived, not animation state),
+    // measured from the LAGGED crash render.
+    const settledAtMs = Math.max(
+      Date.parse(privateSnapshot.room.settledAt || "") || -Infinity,
+      Number.isFinite(Date.parse(privateSnapshot.room.crashAt || "")) ? Date.parse(privateSnapshot.room.crashAt) + privateDisplayLagMs : -Infinity,
+    );
     if (Number.isFinite(settledAtMs) && (Date.now() + privateServerOffsetMs) - settledAtMs > 1100) {
       targetFlightProgress = 0;
       if (privateMotionReduced() && flightProgress > 0) { flightProgress = 0; flightVel = 0; }
@@ -5236,6 +5275,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
     return;
   }
   if (samePrivateRound(privateSettlementAcknowledgedRound, snapshot.room.currentRound)) {
+    card.classList.remove("show");
+    return;
+  }
+  // Results must never appear before the δ-lagged crash has rendered: the
+  // theater sequences off the lagged display clock (the scheduled repaint at
+  // the lagged crash instant re-enters here), while server settlement has
+  // already completed on authoritative time.
+  if (privateLaggedReplayMsRemaining(performance.now()) > 0) {
     card.classList.remove("show");
     return;
   }
@@ -5389,7 +5436,7 @@ function updatePrivateJourney(snapshot, me, seat) {
     const cues = {
       gather: seat ? "Your commitment is intact. The host launches when the table is ready." : "Choose a stake below and commit. That reserves your seat in the shared round.",
       launch: snapshot.room.isOwner ? "Your friends can see who is ready. Launch when the table feels assembled." : "You are ready. The host controls the shared launch.",
-      fly: !seat ? "You are spectating this flight. Watch how lock decisions shape the shared settlement." : seat.acceptedTargetBps ? `You secured ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×. Watch the rest of the table finish the story.` : "The multiplier is rising. Lock now whenever you want to secure your parimutuel claim weight.",
+      fly: !seat ? "You are spectating this flight. Watch how lock decisions shape the shared settlement." : seat.acceptedTargetBps ? `You secured ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×. Watch the rest of the table finish the story.` : "The multiplier is rising. Lock whenever you want: your lock is granted at the multiplier you were shown.",
       settle: "The crash is known. Review your result, the group outcome, and what this round changed.",
       powerboard: "The flight is accounted. Reveal this round's committed Powerboard number and funded win-or-rollover outcome.",
       return: `The story is accounted for. Choose your stake when you are ready to open round ${Number(snapshot.room.currentRound) + 1}.`,
@@ -5422,6 +5469,7 @@ function tellPrivateReconnectStory(snapshot, seat) {
 function paintPrivateSnapshot(snapshot) {
   const receivedPerfMs = performance.now();
   privateServerOffsetMs = Date.parse(snapshot.serverNow) - Date.now();
+  privateDisplayLagMs = privateClampDisplayLagMs(snapshot.room.displayLagMs);
   const roundKey = `${snapshot.room.id}:${snapshot.room.currentRound}`;
   if (!privateLiveClock.synchronize({
     roundKey,
@@ -5430,6 +5478,7 @@ function paintPrivateSnapshot(snapshot) {
     startedAt: snapshot.room.startedAt,
     crashAt: snapshot.room.crashAt,
     serverNow: snapshot.serverNow,
+    displayLagMs: privateDisplayLagMs,
   }, receivedPerfMs)) return;
   privateSnapshot = snapshot;
   if (privateGraphRound !== roundKey) {
@@ -5438,11 +5487,15 @@ function paintPrivateSnapshot(snapshot) {
     clearMultGraph();
   }
   const prior = phaseState;
-  phaseState = snapshot.room.phase === "lobby" ? "betting" : snapshot.room.phase === "running" ? "live" : "crashed";
+  // The lagged display sequences off its own clock: a settled room whose
+  // δ-late crash has not rendered yet is still presented as a live flight.
+  const laggedReplayRemainingMs = privateLaggedReplayMsRemaining(receivedPerfMs);
+  phaseState = snapshot.room.phase === "lobby" ? "betting"
+    : snapshot.room.phase === "running" || laggedReplayRemainingMs > 0 ? "live" : "crashed";
   // CSS hook for phase-conditional composition (mobile intermission stack).
-  document.body.dataset.privatePhase = snapshot.room.phase;
+  document.body.dataset.privatePhase = laggedReplayRemainingMs > 0 ? "running" : snapshot.room.phase;
   const intermissionCountdown = $("privateIntermissionCountdown");
-  if (intermissionCountdown && snapshot.room.phase !== "settled") intermissionCountdown.hidden = true;
+  if (intermissionCountdown && (snapshot.room.phase !== "settled" || laggedReplayRemainingMs > 0)) intermissionCountdown.hidden = true;
   $("roundLabel").textContent = `ROUND ${snapshot.room.currentRound}`;
   $("playersStat").textContent = String(snapshot.members.length);
   const pool = snapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
@@ -5512,8 +5565,17 @@ function paintPrivateSnapshot(snapshot) {
   const armedSource = authoritativeSeat || authoritativeQueuedSeat;
   if (armedSource && typeof armedSource.autoLockEnabled === "boolean") privateAutoLockArmed = armedSource.autoLockEnabled;
   renderPrivateAutoLockChip();
-  let liveBps = snapshot.room.phase === "running" ? privateLiveClock.sample(receivedPerfMs) : 10000;
+  let liveBps = snapshot.room.phase === "running" || laggedReplayRemainingMs > 0 ? privateLiveClock.sample(receivedPerfMs) : 10000;
   schedulePrivateCrashTick(snapshot);
+  if (privateLaggedReplayTimer) { window.clearTimeout(privateLaggedReplayTimer); privateLaggedReplayTimer = null; }
+  if (laggedReplayRemainingMs > 0) {
+    // Repaint at the lagged crash instant so the crash presentation (readout,
+    // sfx, descent, results theater) fires exactly δ after the true crash.
+    privateLaggedReplayTimer = window.setTimeout(() => {
+      privateLaggedReplayTimer = null;
+      if (privateSnapshot === snapshot) paintPrivateSnapshot(snapshot);
+    }, laggedReplayRemainingMs + 20);
+  }
 
   if (phaseState === "betting") {
     flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
@@ -5533,7 +5595,10 @@ function paintPrivateSnapshot(snapshot) {
     // doing so through the legacy quadratic inverse caused the 1.00/1.01
     // oscillation and repeatedly replayed the ignition kick.
     setMultReadout(x.toFixed(2), "live");
-    $("substatus").textContent = "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
+    // Truthful lock copy: the number on screen IS the number a lock grants
+    // (the server prices manual locks by the same lagged law the display
+    // runs on: m(arrival − δ)). Displayed == redeemable.
+    $("substatus").textContent = "LIVE · A LOCK IS GRANTED AT THE MULTIPLIER YOU SEE";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
     reconstructPrivateMultGraph(snapshot, liveBps, receivedPerfMs);
     // An armed auto target that the live multiplier has crossed HAS
@@ -5542,10 +5607,11 @@ function paintPrivateSnapshot(snapshot) {
     // that instant, never a still-live lock button.
     const autoExecuted = Boolean(seat && !seat.acceptedTargetBps && seat.autoLockEnabled &&
       seat.requestedTargetBps && liveBps >= Number(seat.requestedTargetBps));
-    updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps || autoExecuted ? "cashed" : "live-hold", {
+    updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps || autoExecuted ? "cashed" : liveBps <= 10_000 ? "waiting" : "live-hold", {
       sub: seat?.acceptedTargetBps
         ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×`
         : autoExecuted ? `Auto-locked at ${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}×`
+        : liveBps <= 10_000 ? "Ignition hold · locks open at liftoff"
         : `Balance ${privateCredits(me?.balance)} credits`,
     });
     if (autoPlay) void autoPlayTick(1, snapshot.room.currentRound, Boolean(seat), Boolean(seat?.acceptedTargetBps), liveBps);
@@ -5564,7 +5630,11 @@ function paintPrivateSnapshot(snapshot) {
     // already parked -- the animation is presentation only.
     const crashAltitude = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
     const settledAtMs = Date.parse(snapshot.room.settledAt || "");
-    const sinceSettledMs = Number.isFinite(settledAtMs) ? (Date.now() + privateServerOffsetMs) - settledAtMs : Infinity;
+    // The display timeline runs δ late, so the "moment of crash" the descent
+    // beat is measured from is the LAGGED crash render, not raw settledAt.
+    const laggedCrashWallMs = Date.parse(snapshot.room.crashAt || "") + privateDisplayLagMs;
+    const crashRenderedAtMs = Number.isFinite(laggedCrashWallMs) ? Math.max(settledAtMs || -Infinity, laggedCrashWallMs) : settledAtMs;
+    const sinceSettledMs = Number.isFinite(crashRenderedAtMs) ? (Date.now() + privateServerOffsetMs) - crashRenderedAtMs : Infinity;
     if (sinceSettledMs > 1100) {
       targetFlightProgress = 0;
       if (privateMotionReduced()) { flightProgress = 0; flightVel = 0; }

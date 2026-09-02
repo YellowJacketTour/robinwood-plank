@@ -398,7 +398,11 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
     await v.game.locator(".private-reveal-skip").click({ timeout: 5_000 }).catch(() => {});
     await v.game.locator(".private-reveal-continue").click({ timeout: 5_000 }).catch(() => {});
   }
-  await viewers[0].page.waitForTimeout(2_500);
+  // The δ-lagged presentation (displayLagMs, default 1000ms) renders the
+  // crash — and therefore starts the return descent — about δ later than the
+  // raw settlement, so give the parked steady state that extra beat before
+  // measuring the intermission geometry invariants.
+  await viewers[0].page.waitForTimeout(4_000);
   await capture("5-intermission");
 
   // R6 + R3: the landed rocket (projected to screen space) must sit clear

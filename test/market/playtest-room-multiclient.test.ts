@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  deriveRoundClock, msToReachMultiplierBps, multiplierBpsAtMs,
+  DEFAULT_DISPLAY_LAG_MS, deriveRoundClock, laggedLockGrantBps, msToReachMultiplierBps, multiplierBpsAtMs,
 } from "../../lib/playtest-live-shared";
 import {
-  bettingRoundId, crashDurationMs, effectiveSettlementTarget, multiplierAt,
+  bettingRoundId, crashDurationMs, effectiveSettlementTarget,
 } from "../../lib/playtest-room-core";
+
+const LAG = DEFAULT_DISPLAY_LAG_MS;
 
 /**
  * Deterministic in-memory model of the authoritative room protocol, driven by
@@ -76,9 +78,14 @@ class FakeRoom {
   lock(userId: string, commandId: string, nowMs: number) {
     if (this.commands.has(commandId)) return { duplicate: true };
     if (this.phase !== "running" || this.startedAtMs === null || this.crashAtMs === null) throw new Error("NOT_RUNNING");
+    // FAIL-CLOSED FIRST, on ARRIVAL time: after the authoritative crash no
+    // lock can succeed, whatever its lagged grant would have been.
     if (nowMs >= this.crashAtMs) throw new Error("TOO_LATE");
     this.commands.add(commandId);
-    const accepted = multiplierAt(this.startedAtMs, nowMs);
+    // HONEST LOCK GRANT: m(arrival − δ) — what the lagged display showed.
+    const grant = laggedLockGrantBps(this.startedAtMs, nowMs, LAG);
+    if (grant === null) throw new Error("NOT_FLYING");
+    const accepted = BigInt(grant);
     if (accepted < 10_100n) throw new Error("TOO_EARLY");
     const seat = this.roundSeats(this.currentRound).get(userId);
     if (!seat || seat.acceptedTargetBps !== null) throw new Error("NO_ACTIVE_BET");
@@ -151,12 +158,15 @@ test("3 clients, 5 sequential automatic rounds: one shared round id, no early la
     // Betting is closed during flight (stale client state cannot mutate it).
     assert.throws(() => room.bet("bob", cmd(), 1_000n, 15_000n, false, startedAt + 10), /BETTING_CLOSED/);
 
-    // Boundary timing: a lock at crashAt-1ms is accepted at the true live
-    // multiplier; a lock at crashAt fails closed.
+    // Boundary timing: a lock ARRIVING at crashAt-1ms is accepted at the
+    // honest lagged grant m(arrival − δ) — necessarily below the crash — and
+    // a lock arriving at crashAt fails closed regardless of its lagged grant.
     const crashAt = room.crashAtMs!;
     if (round === 1) {
       const early = room.lock("bob", cmd(), crashAt - 1);
       assert.ok(!early.duplicate && early.accepted! <= room.crashBps!);
+      assert.equal(early.accepted, BigInt(multiplierBpsAtMs(crashAt - 1 - LAG - room.startedAtMs!)),
+        "grant is exactly what the δ-lagged display was showing");
       assert.throws(() => room.lock("cara", cmd(), crashAt), /TOO_LATE|AUTO_TARGET_EXECUTED/);
     }
 
@@ -201,7 +211,7 @@ test("a single participant's commitment does not advance the round for others", 
   assert.equal(room.currentRound, 1n, "the visible settled round is untouched until launch");
 });
 
-test("locked commitment presentation: accepted lock equals the live law at the accepted instant", () => {
+test("locked commitment presentation: accepted lock equals the LAGGED law at the arrival instant", () => {
   const room = new FakeRoom();
   const now = 2_000_000;
   room.bet("alice", "a1", 1_000n, 990_000n, false, now);
@@ -209,7 +219,9 @@ test("locked commitment presentation: accepted lock equals the live law at the a
   room.launch("l1", now, false, 100_000n);
   const at = room.startedAtMs! + 4_000;
   const { accepted } = room.lock("alice", "la", at);
-  assert.equal(accepted, BigInt(multiplierBpsAtMs(4_000)), "lock is priced by the shared M(t)");
+  // Reconciled to the lagged model (2026-09-02): the grant is the multiplier
+  // the δ-lagged display was showing at arrival — m(arrival − δ), not m(arrival).
+  assert.equal(accepted, BigInt(multiplierBpsAtMs(4_000 - LAG)), "lock is priced by the shared lagged law");
   // Idempotent retry of the same lock command.
   assert.deepEqual(room.lock("alice", "la", at + 100), { duplicate: true });
   // A second manual lock for the same seat/round fails closed.
@@ -233,7 +245,8 @@ test("pre-launch auto-lock disarm re-commits the seat; no auto target fires; a l
   room.launch("l1", now + 100, false, 40_000n); // crashes at 4.0x
   // The flight passes 2.0x: nothing auto-fires (the seat is disarmed) and a
   // LATER manual lock at ~2.5x is accepted -- exactly what the owner tried.
-  const at25 = room.startedAtMs! + msToReachMultiplierBps(25_000);
+  // Arrival δ later than the lagged display reaching 2.5x (display-time law).
+  const at25 = room.startedAtMs! + LAG + msToReachMultiplierBps(25_000);
   const { accepted } = room.lock("owner", "lo", at25);
   assert.ok(accepted >= 25_000n, "manual lock accepted after the old auto altitude");
   room.settle("s1", room.crashAtMs!);
@@ -252,10 +265,50 @@ test("post-launch auto-lock change is impossible; the armed target executes; a l
   assert.throws(() => room.bet("owner", "o2", 10_000n, 20_000n, false, room.startedAtMs! + 5), /BETTING_CLOSED/);
   const seat = room.seats.get("1")!.get("owner")!;
   assert.equal(seat.autoLockEnabled, true, "server truth stays ARMED -- the UI must show it armed");
-  // Once the live law crosses the armed target, manual lock is already dead.
-  const past = room.startedAtMs! + msToReachMultiplierBps(20_000) + 5;
+  // Once the LAGGED display crosses the armed target, a manual lock is dead
+  // (the grant would meet/exceed the already-executed auto ceiling).
+  const past = room.startedAtMs! + LAG + msToReachMultiplierBps(20_000) + 5;
   assert.throws(() => room.lock("owner", "lo", past), /AUTO_TARGET_EXECUTED/);
   room.settle("s1", room.crashAtMs!);
   assert.equal(seat.settledTarget, 20_000n, "settlement executes the committed 2.0x auto target exactly");
   assert.equal(seat.survived, true);
+});
+
+// ── Latency-lagged honest lock grant (2026-09-02) ────────────────────────
+
+test("fast-observer exploit is dead: arrival after the true crash rejects TOO_LATE even though its lagged grant is below the crash", () => {
+  const room = new FakeRoom();
+  const now = 5_000_000;
+  room.bet("alice", "a1", 1_000n, 990_000n, false, now);
+  room.bet("bob", "b1", 1_000n, 990_000n, false, now);
+  room.launch("l1", now, false, 30_000n); // crashes at 3.0x
+  const crashAt = room.crashAtMs!;
+  // 1ms after the authoritative crash: a raw-feed watcher now KNOWS the
+  // crash. The lagged grant m(arrival − δ) is far below 3.0x and would have
+  // survived — but arrival-after-crash always fails closed.
+  const grantIfHonest = laggedLockGrantBps(room.startedAtMs!, crashAt + 1, LAG)!;
+  assert.ok(BigInt(grantIfHonest) < room.crashBps!, "the would-be grant is indeed below the crash");
+  assert.throws(() => room.lock("alice", "fast", crashAt + 1), /TOO_LATE/);
+  // 1ms BEFORE the crash the same seat is PAID at exactly the lagged grant.
+  const paid = room.lock("alice", "ok", crashAt - 1);
+  assert.equal(paid.accepted, BigInt(laggedLockGrantBps(room.startedAtMs!, crashAt - 1, LAG)!));
+  room.settle("s1", crashAt + 20);
+  const seat = room.seats.get("1")!.get("alice")!;
+  assert.equal(seat.settledTarget, paid.accepted, "settled receipt shows the granted multiplier");
+  assert.equal(seat.survived, true, "arrival before crash with lagged grant below crash is PAID");
+});
+
+test("a lock arriving while the lagged display is still pre-liftoff rejects NOT_FLYING", () => {
+  const room = new FakeRoom();
+  const now = 6_000_000;
+  room.bet("alice", "a1", 1_000n, 990_000n, false, now);
+  room.bet("bob", "b1", 1_000n, 990_000n, false, now);
+  room.launch("l1", now, false, 100_000n);
+  const T = room.startedAtMs!;
+  // Authoritative flight is running, but the honest lagged display still
+  // shows the ignition hold: the player could not have seen a flight yet.
+  assert.throws(() => room.lock("alice", "l0", T), /NOT_FLYING/);
+  assert.throws(() => room.lock("alice", "l1x", T + LAG - 1), /NOT_FLYING/);
+  // At T+δ the display shows exactly 1.00x — below the 1.01x open.
+  assert.throws(() => room.lock("alice", "l2", T + LAG), /TOO_EARLY/);
 });

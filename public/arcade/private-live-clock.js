@@ -27,9 +27,17 @@ export class PrivateLiveClock {
     this.deadlinePerfMs = null;
     this.lastBps = 10_000;
     this.lastVersion = -1n;
+    this.displayLagMs = 0;
   }
 
-  synchronize({ roundKey, version, phase, startedAt, crashAt, serverNow }, receivedPerfMs) {
+  /**
+   * `displayLagMs` is the server-published presentation lag δ: the whole
+   * timeline (liftoff, curve, crash) renders δ late. During [T, T+δ] the
+   * rocket burns on the pad at exactly 1.00x — the ignition hold — which is
+   * also precisely the law a manual lock is granted under (m(arrival − δ)),
+   * so the readout a player taps on is the multiplier the server grants.
+   */
+  synchronize({ roundKey, version, phase, startedAt, crashAt, serverNow, displayLagMs }, receivedPerfMs) {
     const parsedVersion = BigInt(version || 0);
     const isNewRound = roundKey !== this.roundKey;
     if (!isNewRound && parsedVersion < this.lastVersion) return false;
@@ -38,13 +46,25 @@ export class PrivateLiveClock {
       this.roundKey = roundKey;
     }
     this.lastVersion = parsedVersion;
-    if (phase !== "running" || !startedAt || !serverNow) return true;
+    const lag = Number(displayLagMs);
+    if (Number.isFinite(lag) && lag > 0) this.displayLagMs = lag;
+    // "settled" keeps anchoring: the authoritative crashAt is only published
+    // at settlement, and the δ-lagged display still has the flight tail and
+    // the crash itself left to render after the room row flips.
+    if ((phase !== "running" && phase !== "settled") || !startedAt || !serverNow) return true;
 
     const serverNowMs = Date.parse(serverNow);
     const startedAtMs = Date.parse(startedAt);
     if (!Number.isFinite(serverNowMs) || !Number.isFinite(startedAtMs)) return false;
-    const authoritativeElapsedMs = Math.max(0, serverNowMs - startedAtMs);
-    const candidateStartedPerfMs = receivedPerfMs - authoritativeElapsedMs;
+    // May be NEGATIVE during the server pre-roll (startedAt is scheduled in
+    // the future). Clamping it at 0 used to slide the presentation start up
+    // to the whole pre-roll early — which both launched the display before
+    // the authoritative T and silently cancelled the δ lag. computeBps()
+    // already clamps its own elapsed time at 0, so a future start is safe.
+    const authoritativeElapsedMs = serverNowMs - startedAtMs;
+    // Lagged presentation: the display flight clock starts δ after the
+    // authoritative launch instant, so liftoff and the crash render δ late.
+    const candidateStartedPerfMs = receivedPerfMs - authoritativeElapsedMs + this.displayLagMs;
 
     // Establish once, then accept only forward corrections. A later start
     // would make elapsed time and the visible multiplier move backwards.

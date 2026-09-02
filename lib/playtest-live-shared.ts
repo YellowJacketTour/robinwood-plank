@@ -167,6 +167,111 @@ export function deriveRoundClock(input: RoundClockInput): RoundClockView {
   return { kind: "lobby" };
 }
 
+// ── Latency-lagged presentation clock ────────────────────────────────────
+//
+// The client renders the flight at display-time = server-time − δ, where δ is
+// a server-published room constant (displayLagMs). Choosing δ: it must exceed
+// the p99 one-way client→server latency plus an input-latency margin, so that
+// the multiplier a player was LOOKING AT when they tapped is never newer than
+// what the server can honestly grant on arrival. ServerClockSync bounds the
+// client's clock estimate by rtt/2 per observation; the long-poll transport
+// this game ships on tolerates mobile round trips up to ~800ms (rtt/2 ≤
+// 400ms one-way p99) before the sync anchor is considered stale, and a touch
+// tap plus command dispatch adds ~100–150ms. 400 (one-way p99) + 150 (input)
+// + 400 (clock-estimate error bound, rtt/2 of the worst accepted anchor)
+// ≈ 950ms, so the default is 1000ms, clamped into [600, 2000]ms.
+//
+// Semantics: T=0 (startedAt) remains the AUTHORITATIVE launch — the
+// countdown is unchanged and ignition effects begin at T — but LIFTOFF
+// (altitude > 0, first curve pixel, readout above 1.00x) renders at T+δ:
+// the "ignition hold". The crash likewise renders δ late; server settlement
+// proceeds on authoritative time regardless.
+
+export const MIN_DISPLAY_LAG_MS = 600;
+export const MAX_DISPLAY_LAG_MS = 2_000;
+export const DEFAULT_DISPLAY_LAG_MS = 1_000;
+
+export function clampDisplayLagMs(displayLagMs: number | null | undefined): number {
+  const value = Number(displayLagMs);
+  if (!Number.isFinite(value)) return DEFAULT_DISPLAY_LAG_MS;
+  return Math.min(MAX_DISPLAY_LAG_MS, Math.max(MIN_DISPLAY_LAG_MS, Math.round(value)));
+}
+
+export type LaggedRoundClockView =
+  | { kind: "lobby" }
+  | { kind: "countdown"; remainingMs: number; displaySeconds: number }
+  /** T ≤ serverNow < T+δ: the rocket burns on the pad (position == pad
+   * anchor, readout exactly 1.00x); ignition visuals run, altitude stays 0. */
+  | { kind: "ignition"; sinceIgnitionMs: number; holdRemainingMs: number }
+  | { kind: "flight"; flightMs: number; bps: number }
+  | { kind: "crashed"; flightMs: number }
+  | { kind: "intermission"; remainingMs: number; displaySeconds: number };
+
+/**
+ * The ONE lagged display clock, used by both the browser presentation and any
+ * server-side reasoning about what an honest display was showing. It simply
+ * plays the true timeline delayed by δ:
+ *   display-t ≤ 0 (of the lagged clock)  → pad anchor (countdown/ignition);
+ *   display flight time                  → serverNow − T − δ (monotone, ≥ 0);
+ *   crash renders                        → at crashAt + δ.
+ * A phase="settled" room whose lagged crash has not yet rendered keeps
+ * replaying the flight; intermission may only begin after the lagged crash.
+ */
+export function deriveLaggedRoundClock(input: RoundClockInput, displayLagMs: number): LaggedRoundClockView {
+  const lag = clampDisplayLagMs(displayLagMs);
+  const now = input.serverNowMs;
+  const started = input.startedAtMs;
+  const laggedCrashAtMs = input.crashAtMs === null ? null : input.crashAtMs + lag;
+  if (started !== null && (input.phase === "running" || input.phase === "settled") && now >= started) {
+    if (laggedCrashAtMs !== null && now >= laggedCrashAtMs) {
+      // The lagged crash has rendered. A still-running room freezes on the
+      // crashed frame until the keeper settles; a settled room shows the
+      // crashed frame exactly at the lagged crash instant, then hands the
+      // display to the intermission branch below.
+      if (input.phase === "running" || now === laggedCrashAtMs) {
+        return { kind: "crashed", flightMs: input.crashAtMs! - started };
+      }
+    } else if (now < started + lag) {
+      // Ignition hold: burning on the pad, altitude 0, readout exactly 1.00x.
+      return { kind: "ignition", sinceIgnitionMs: now - started, holdRemainingMs: started + lag - now };
+    } else {
+      const flightMs = now - started - lag;
+      return { kind: "flight", flightMs, bps: multiplierBpsAtMs(flightMs) };
+    }
+  }
+  if (input.phase === "running" && started !== null) {
+    // Pre-roll: identical to the un-lagged clock (countdown is UNCHANGED).
+    const remainingMs = Math.max(0, started - now);
+    return { kind: "countdown", remainingMs, displaySeconds: countdownDisplaySeconds(remainingMs) };
+  }
+  if (input.phase === "settled") {
+    if (input.nextLaunchAtMs !== null) {
+      const remainingMs = Math.max(0, input.nextLaunchAtMs - now);
+      return { kind: "intermission", remainingMs, displaySeconds: countdownDisplaySeconds(remainingMs) };
+    }
+    return { kind: "intermission", remainingMs: 0, displaySeconds: 0 };
+  }
+  return { kind: "lobby" };
+}
+
+/**
+ * HONEST LOCK GRANT law: a manual lock request that ARRIVED (server receipt
+ * time, never a client timestamp) at arrivalServerMs is granted the
+ * multiplier an honest lagged display was showing at the tap:
+ *   grant = m(arrivalServerMs − δ − startedAtMs)  in integer bps,
+ * computed from the SAME shared law kernel. Returns null when
+ * arrival − δ < launch (the display was still pre-liftoff → reject, do not
+ * grant). FAIL-CLOSED is enforced by the CALLER and is mandatory: a request
+ * arriving at or after the authoritative crash time must be rejected
+ * TOO_LATE before this law is ever consulted.
+ */
+export function laggedLockGrantBps(startedAtMs: number, arrivalServerMs: number, displayLagMs: number): number | null {
+  const lag = clampDisplayLagMs(displayLagMs);
+  const laggedFlightMs = arrivalServerMs - lag - startedAtMs;
+  if (laggedFlightMs < 0) return null;
+  return multiplierBpsAtMs(laggedFlightMs);
+}
+
 /**
  * Monotonic server-time estimator.
  *

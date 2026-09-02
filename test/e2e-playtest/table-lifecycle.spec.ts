@@ -161,7 +161,11 @@ test("a new table + invite runs 3 automatic fake-mainnet rounds for two isolated
       });
       if (lock.status === 200) { manualLockAccepted += 1; break; }
       const code = String(lock.json.error);
-      if (code !== "TOO_EARLY") break; // e.g. crashed first — legitimate outcome
+      // NOT_FLYING = the δ-lagged display has not lifted off yet (ignition
+      // hold); TOO_EARLY = the lagged display is below the 1.01x open. Both
+      // are pre-liftoff states worth retrying; anything else (e.g. crashed
+      // first) is a legitimate terminal outcome for this round.
+      if (code !== "TOO_EARLY" && code !== "NOT_FLYING") break;
       await guest.waitForTimeout(400);
     }
 

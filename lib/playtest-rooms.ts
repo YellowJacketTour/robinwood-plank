@@ -7,11 +7,17 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, multiplierAt, newcomerSeatPlan, parsePolicy,
+  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, newcomerSeatPlan, parsePolicy,
   PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
   parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 import { settlementDescriptor } from "@/lib/casino/settlement-rules";
+import { clampDisplayLagMs, DEFAULT_DISPLAY_LAG_MS, laggedLockGrantBps } from "@/lib/playtest-live-shared";
+
+/** Server-published presentation lag δ for every room (see the choice
+ * rationale in lib/playtest-live-shared.ts). Clients render the flight at
+ * display-time = server-time − δ; manual locks are granted at m(arrival − δ). */
+export const PLAYTEST_DISPLAY_LAG_MS = clampDisplayLagMs(DEFAULT_DISPLAY_LAG_MS);
 
 export class PlaytestRoomError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -234,6 +240,10 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         isOwner: room.owner_user_id === identity.id || identity.isAdmin, isAdmin: identity.isAdmin, rulesHash: room.rules_hash,
         phase: room.phase, version: room.version, currentRound: room.current_round,
         commitment: room.commitment, reveal: revealVisible, crashBps: crashVisible,
+        // Room constant: how far behind authoritative time this table's
+        // presentation runs, and therefore the exact law a manual lock is
+        // granted under (m(arrival − displayLagMs)).
+        displayLagMs: PLAYTEST_DISPLAY_LAG_MS,
         startedAt: room.started_at?.toISOString() ?? null,
         // The exact deadline is economically equivalent to the unrevealed
         // crash point. It becomes auditable only after settlement.
@@ -519,8 +529,18 @@ export async function lockPlaytestBet(identity: PlaytestIdentity, roomId: string
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "running" || !room.started_at || !room.crash_at) throw new PlaytestRoomError(409, "NOT_RUNNING", "No round is currently running.");
     const now = Date.now();
+    // FAIL-CLOSED, checked FIRST and on server ARRIVAL time only: a request
+    // arriving after the authoritative crash is rejected regardless of what
+    // its lagged grant would have been. A fast observer watching the raw feed
+    // gains nothing by tapping once the crash is known — arrival-after-crash
+    // always fails.
     if (now >= room.crash_at.getTime()) throw new PlaytestRoomError(409, "TOO_LATE", "The authoritative crash deadline has passed.");
-    const accepted = multiplierAt(room.started_at.getTime(), now);
+    // HONEST LOCK GRANT: the multiplier an honest δ-lagged display was
+    // showing when the player tapped — m(arrival − δ), the SAME shared law
+    // kernel that settles. No client timestamp is trusted anywhere.
+    const grantBps = laggedLockGrantBps(room.started_at.getTime(), now, PLAYTEST_DISPLAY_LAG_MS);
+    if (grantBps === null) throw new PlaytestRoomError(409, "NOT_FLYING", "The displayed flight has not lifted off yet.");
+    const accepted = BigInt(grantBps);
     if (accepted < 10_100n) throw new PlaytestRoomError(409, "TOO_EARLY", "Lock opens at 1.01x.");
     const seat = await client.query<{ requested_target_bps: string; accepted_target_bps: string | null; auto_lock_enabled: boolean }>(
       `SELECT requested_target_bps::text,accepted_target_bps::text,auto_lock_enabled
@@ -540,7 +560,7 @@ export async function lockPlaytestBet(identity: PlaytestIdentity, roomId: string
     if (!updated.rowCount) throw new PlaytestRoomError(409, "NO_ACTIVE_BET", "No unlocked bet exists for this round.");
     room.version = String(BigInt(room.version) + 1n);
     await client.query(`UPDATE playtest_rooms SET version=$2 WHERE id=$1`, [roomId, room.version]);
-    await event(client, room, "lock.accepted", identity.id, commandId, { acceptedTargetBps: accepted, serverAcceptedAt: new Date(now).toISOString() });
+    await event(client, room, "lock.accepted", identity.id, commandId, { acceptedTargetBps: accepted, serverAcceptedAt: new Date(now).toISOString(), displayLagMs: PLAYTEST_DISPLAY_LAG_MS });
     return { duplicate: false, acceptedTargetBps: accepted.toString(), version: room.version };
   });
 }
