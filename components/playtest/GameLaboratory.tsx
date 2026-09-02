@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LIVE_GROWTH_PER_SECOND } from "@/lib/playtest-live-shared";
+import { deriveRoundClock, ServerClockSync } from "@/lib/playtest-live-shared";
 import PlankCrashScene from "@/components/playtest/PlankCrashScene";
 import { connectionState, presentedMultiplierBps, signedNet, type VisibleCommand } from "@/lib/playtest-presentation";
 
@@ -14,6 +14,7 @@ type Snapshot = {
   simulation: { iteration: string; protectedPrincipal: string; emissionBuffer: string; lottery: { netPrize: string; highWaterPrize: string; pendingFunding: string; resetReserve: string }; totals: Record<string, string> };
   members: Array<{ id: string; displayName: string; balance: string }>;
   seats: Array<{ userId: string; displayName: string; stake: string; requestedTargetBps: string; acceptedTargetBps: string | null; payout: string | null; survived: boolean | null }>;
+  nextRoundSeats?: Array<{ userId: string; displayName: string; stake: string; requestedTargetBps: string | null }>;
   events: Array<{ sequence: string; type: string; commandId: string | null; at: string }>;
 };
 
@@ -45,10 +46,26 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const [transport, setTransport] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const [receipt, setReceipt] = useState<VisibleCommand | null>(null);
-  const [now, setNow] = useState(0);
-  const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  // One presentation tick: perf timestamp, wall timestamp, and the current
+  // monotonic server-time estimate — sampled together off-render so React
+  // renders stay pure while the countdown ticks.
+  const [tick, setTick] = useState<{ perfMs: number; wallMs: number; serverNowMs: number | null }>(
+    { perfMs: 0, wallMs: 0, serverNowMs: null },
+  );
   const [dismissedResultRound, setDismissedResultRound] = useState<string | null>(null);
   const generation = useRef(0);
+  // Monotonic server-time estimate anchored to performance.now(): a local
+  // wall-clock jump can neither rush nor stall the countdown.
+  const serverClock = useRef(new ServerClockSync());
+  const sampleTick = useCallback(() => {
+    const perfMs = performance.now();
+    setTick({ perfMs, wallMs: Date.now(), serverNowMs: serverClock.current.now(perfMs) });
+  }, []);
+  const observeServerNow = useCallback((serverNowIso: string | undefined, sentPerfMs: number) => {
+    if (!serverNowIso) return;
+    serverClock.current.observe(Date.parse(serverNowIso), sentPerfMs, performance.now());
+    sampleTick();
+  }, [sampleTick]);
 
   const loadRooms = useCallback(async () => {
     const result = await json<{ rooms: RoomItem[] }>(await fetch("/api/playtest/rooms", { cache: "no-store" }));
@@ -57,10 +74,12 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
   const loadRoom = useCallback(async (id: string, quiet = false) => {
     const current = ++generation.current;
     try {
+      const sentPerf = performance.now();
       const result = await json<Snapshot>(await fetch(`/api/playtest/rooms/${id}`, { cache: "no-store" }));
-      if (current === generation.current) { setClockOffsetMs(Date.parse(result.serverNow) - Date.now()); setSnap(result); }
+      observeServerNow(result.serverNow, sentPerf);
+      if (current === generation.current) setSnap(result);
     } catch (error) { if (!quiet) setNotice(error instanceof Error ? error.message : "Room unavailable."); }
-  }, []);
+  }, [observeServerNow]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadRooms().catch((error) => setNotice(String(error))); }, 0);
@@ -73,9 +92,10 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
       let after = "-1";
       while (!controller.signal.aborted) {
         try {
+          const sentPerf = performance.now();
           const result = await json<{ unchanged: boolean; version: string; serverNow?: string; snapshot?: Snapshot }>(await fetch(`/api/playtest/rooms/${selected}/updates?after=${encodeURIComponent(after)}`, { cache: "no-store", signal: controller.signal }));
-          if (result.snapshot) { setClockOffsetMs(Date.parse(result.snapshot.serverNow) - Date.now()); setSnap(result.snapshot); after = result.snapshot.room.version; }
-          else { if (result.serverNow) setClockOffsetMs(Date.parse(result.serverNow) - Date.now()); after = result.version; }
+          if (result.snapshot) { observeServerNow(result.snapshot.serverNow, sentPerf); setSnap(result.snapshot); after = result.snapshot.room.version; }
+          else { observeServerNow(result.serverNow, sentPerf); after = result.version; }
           setLastSuccessAt(Date.now()); setTransport("live");
         } catch {
           if (controller.signal.aborted) break;
@@ -86,11 +106,20 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
     };
     void run();
     return () => controller.abort();
-  }, [selected]);
+  }, [selected, observeServerNow]);
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), snap?.room.phase === "running" ? 100 : 1_000);
+    const timer = window.setInterval(sampleTick, snap?.room.phase === "running" ? 100 : 250);
     return () => window.clearInterval(timer);
-  }, [snap?.room.phase]);
+  }, [snap?.room.phase, sampleTick]);
+  // Refresh/reconnect/background-resume resync: a quick snapshot fetch gives
+  // a tight round-trip bound and re-anchors the server clock.
+  useEffect(() => {
+    if (!selected) return;
+    const resync = () => { if (document.visibilityState === "visible") void loadRoom(selected, true); };
+    document.addEventListener("visibilitychange", resync);
+    const timer = window.setInterval(resync, 30_000);
+    return () => { document.removeEventListener("visibilitychange", resync); window.clearInterval(timer); };
+  }, [selected, loadRoom]);
 
   const roomAction = async (action: "create" | "join") => {
     setBusy(action); setNotice(`${action === "create" ? "Creating" : "Joining"} room…`);
@@ -168,22 +197,40 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
     finally { setBusy(null); }
   };
 
-  const liveBps = useMemo(() => {
-    if (!snap?.room.startedAt || snap.room.phase !== "running") return null;
-    return Math.floor(10_000 * Math.exp(LIVE_GROWTH_PER_SECOND * Math.max(0, now + clockOffsetMs - Date.parse(snap.room.startedAt)) / 1_000));
-  }, [snap?.room.startedAt, snap?.room.phase, now, clockOffsetMs]);
-  const deadlinePassed = Boolean(snap?.room.crashAt && now + clockOffsetMs >= Date.parse(snap.room.crashAt));
-  const nextLaunchMs = snap?.room.nextLaunchAt ? Date.parse(snap.room.nextLaunchAt) - (now + clockOffsetMs) : null;
+  // The ONE presentation clock: authoritative server timestamps interpreted
+  // on the monotonic server-time estimate. Flight visuals, the countdown,
+  // and command gating all derive from this single view.
+  const serverNowMs = tick.serverNowMs;
+  const roundClock = useMemo(() => {
+    if (!snap || serverNowMs === null) return { kind: "lobby" } as const;
+    return deriveRoundClock({
+      phase: snap.room.phase,
+      startedAtMs: snap.room.startedAt ? Date.parse(snap.room.startedAt) : null,
+      crashAtMs: snap.room.crashAt ? Date.parse(snap.room.crashAt) : null,
+      settledAtMs: snap.room.settledAt ? Date.parse(snap.room.settledAt) : null,
+      nextLaunchAtMs: snap.room.nextLaunchAt ? Date.parse(snap.room.nextLaunchAt) : null,
+      serverNowMs,
+    });
+  }, [snap, serverNowMs]);
+  const liveBps = roundClock.kind === "flight" ? roundClock.bps : null;
+  const deadlinePassed = Boolean(snap?.room.crashAt && serverNowMs !== null && serverNowMs >= Date.parse(snap.room.crashAt));
+  const nextLaunchMs = roundClock.kind === "intermission" ? roundClock.remainingMs : null;
   const showResult = Boolean(snap?.room.phase === "settled" && dismissedResultRound !== snap.room.currentRound && (nextLaunchMs === null || nextLaunchMs > 5_000));
   const shownBps = snap ? presentedMultiplierBps({ phase: snap.room.phase, liveBps, crashBps: snap.room.crashBps, deadlinePassed }) : 10_000;
-  const freshness = transport === "reconnecting" ? "offline" : connectionState(lastSuccessAt, now);
+  const freshness = transport === "reconnecting" ? "offline" : connectionState(lastSuccessAt, lastSuccessAt === null ? 0 : tick.wallMs);
   const me = snap?.members.find((item) => item.id === identity.id);
   const seat = snap?.seats.find((item) => item.userId === identity.id);
+  // A commitment stays visibly committed for the round it will fly in:
+  // the current lobby seat, or the queued next-round seat after settlement.
+  const pendingSeat = snap?.room.phase === "settled"
+    ? snap.nextRoundSeats?.find((item) => item.userId === identity.id) ?? null
+    : snap?.room.phase === "lobby" ? seat ?? null : null;
+  const inFlightWindow = roundClock.kind === "flight" || roundClock.kind === "countdown" || roundClock.kind === "crashed";
 
   return <div data-market-shell className="site-shell min-h-screen px-1 py-2 text-cream md:px-3">
     <div className="mx-auto max-w-[1500px]">
       <header className="rounded-xl border border-line bg-panel px-4 py-3 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[.18em] text-gold-400">Simulation · no value · test credits</p><h1 className="mt-1 font-display text-2xl text-gold-300">PlankCrash Private Table</h1></div><div className="flex flex-wrap gap-2 text-xs"><span className={`rounded-full border px-3 py-2 ${freshness === "live" ? "border-emerald-400/40 text-emerald-200" : freshness === "delayed" ? "border-gold-500 text-gold-300" : "border-line text-cream-muted"}`}>● {freshness === "live" ? "Authoritative live" : freshness === "delayed" ? "Updates delayed" : transport === "reconnecting" ? "Reconnecting" : "No live room"}</span><span className="rounded-full border border-line px-3 py-2">Clock {clockOffsetMs >= 0 ? "+" : ""}{clockOffsetMs} ms</span><span className="rounded-full border border-line px-3 py-2">{identity.displayName}</span></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[.18em] text-gold-400">Simulation · no value · test credits</p><h1 className="mt-1 font-display text-2xl text-gold-300">PlankCrash Private Table</h1></div><div className="flex flex-wrap gap-2 text-xs"><span className={`rounded-full border px-3 py-2 ${freshness === "live" ? "border-emerald-400/40 text-emerald-200" : freshness === "delayed" ? "border-gold-500 text-gold-300" : "border-line text-cream-muted"}`}>● {freshness === "live" ? "Authoritative live" : freshness === "delayed" ? "Updates delayed" : transport === "reconnecting" ? "Reconnecting" : "No live room"}</span><span className="rounded-full border border-line px-3 py-2">{serverNowMs !== null ? `Server clock ${serverNowMs - tick.wallMs >= 0 ? "+" : ""}${Math.round(serverNowMs - tick.wallMs)} ms` : "Clock syncing…"}</span><span className="rounded-full border border-line px-3 py-2">{identity.displayName}</span></div></div>
       </header>
       <p role="status" aria-live="polite" className="my-3 min-h-10 rounded-lg bg-white/5 px-3 py-2 text-sm text-cream-muted">{notice}</p>
 
@@ -196,18 +243,18 @@ export function GameLaboratory({ identity }: { identity: Identity }) {
           <div className="overflow-hidden rounded-2xl border border-line bg-panel-strong shadow-2xl">
             <div className="flex flex-wrap justify-between border-b border-line px-4 py-3 text-xs"><span>Room <b className="font-mono text-gold-300">{snap.room.joinCode}</b></span><span>Round #{snap.room.currentRound} · v{snap.room.version}</span><span>{snap.room.phase.toUpperCase()}</span></div>
             <div className="relative">
-              <PlankCrashScene phase={snap.room.phase} liveMultiplier={shownBps / 10_000} crashMultiplier={snap.room.crashBps ? Number(snap.room.crashBps) / 10_000 : null} deadlinePassed={deadlinePassed} />
+              <PlankCrashScene clock={roundClock} clockAtPerfMs={tick.perfMs} crashMultiplier={snap.room.crashBps ? Number(snap.room.crashBps) / 10_000 : shownBps / 10_000} />
               {showResult ? <section role="dialog" aria-label={`Round ${snap.room.currentRound} results`} className="absolute inset-3 z-30 overflow-auto rounded-2xl border border-gold-400 bg-panel-strong/95 p-5 shadow-2xl backdrop-blur sm:inset-8">
                 <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-gold-400">Round {snap.room.currentRound} complete</p><h2 className="mt-2 font-display text-3xl text-cream">Crashed at {multi(snap.room.crashBps)}</h2><p className="mt-2 text-sm text-cream-muted">Next flight launches automatically in {Math.max(0, Math.ceil((nextLaunchMs ?? 0) / 1_000))} seconds.</p></div><button type="button" onClick={() => setDismissedResultRound(snap.room.currentRound)} className="min-h-11 rounded border border-line px-4 text-sm">Close</button></div>
                 <div className="mt-5 grid gap-2">{snap.seats.map((resultSeat) => { const net = signedNet(resultSeat.stake, resultSeat.payout); return <div key={resultSeat.userId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-line bg-panel-soft p-3"><div><b>{resultSeat.displayName}</b><p className="text-xs text-cream-muted">{resultSeat.survived ? `Locked ${multi(resultSeat.acceptedTargetBps)}` : "Caught in the crash"}</p></div><div className={`text-right font-mono ${net !== null && net > 0n ? "text-emerald-300" : "text-rose-300"}`}><div>{resultSeat.payout ? credits(resultSeat.payout) : "0"} paid</div><small>{net === null ? "pending" : `${net > 0n ? "+" : ""}${net.toLocaleString()} net`}</small></div></div>; })}</div>
               </section> : null}
               <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-4 sm:px-6 sm:pb-6">
                 {snap.room.commitment && <p className="mx-auto mb-3 max-w-xl truncate rounded bg-panel-strong px-3 py-2 text-center font-mono text-[10px] text-cream-muted">commit {snap.room.commitment}</p>}
-                <button onClick={() => command("lock")} disabled={Boolean(busy) || snap.room.phase !== "running" || deadlinePassed || Boolean(seat?.acceptedTargetBps) || (receipt?.action === "lock" && receipt.status === "unknown")} className="mx-auto block min-h-20 w-full max-w-xl rounded-xl border-2 border-gold-300 bg-gold-500 px-5 text-2xl font-black uppercase text-wood-950 shadow-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold-300 disabled:opacity-40">{seat?.acceptedTargetBps ? `Locked ${multi(seat.acceptedTargetBps)}` : deadlinePassed ? "Awaiting settlement" : busy === "lock" ? "Sending…" : receipt?.action === "lock" && receipt.status === "unknown" ? "Lock status unknown" : "Lock now"}</button>
+                <button onClick={() => command("lock")} disabled={Boolean(busy) || roundClock.kind !== "flight" || Boolean(seat?.acceptedTargetBps) || (receipt?.action === "lock" && receipt.status === "unknown")} className="mx-auto block min-h-20 w-full max-w-xl rounded-xl border-2 border-gold-300 bg-gold-500 px-5 text-2xl font-black uppercase text-wood-950 shadow-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold-300 disabled:opacity-40">{seat?.acceptedTargetBps ? `Locked ${multi(seat.acceptedTargetBps)}` : roundClock.kind === "crashed" || deadlinePassed ? "Awaiting settlement" : roundClock.kind === "countdown" ? `Launching in ${roundClock.displaySeconds}…` : busy === "lock" ? "Sending…" : receipt?.action === "lock" && receipt.status === "unknown" ? "Lock status unknown" : "Lock now"}</button>
               </div>
             </div>
           </div>
-          <aside className="grid content-start gap-3"><Panel title="Your flight plan"><p className="text-sm text-cream-muted">Balance: {credits(me?.balance)}</p><div className="mt-3 grid grid-cols-2 gap-2"><label className="text-xs">Stake<input inputMode="numeric" value={stake} onChange={(e) => setStake(e.target.value.replace(/\D/g, ""))} className="mt-1 min-h-12 w-full rounded border border-line bg-panel-strong px-2" /></label><label className="text-xs">Auto-lock ×<input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} className="mt-1 min-h-12 w-full rounded border border-line bg-panel-strong px-2" /></label></div><button onClick={() => command("bet", { stake, targetBps: String(Math.round(Number(target) * 10_000)) })} disabled={Boolean(busy) || snap.room.phase === "running"} className="mt-3 min-h-12 w-full rounded bg-gold-500 font-black text-wood-950 disabled:opacity-40">Commit test credits</button>{seat && <p className="mt-3 text-xs">Stake {credits(seat.stake)} · target {multi(seat.requestedTargetBps)} · lock {multi(seat.acceptedTargetBps)}</p>}{snap.room.phase === "running" && deadlinePassed && <button onClick={() => command("tick")} disabled={Boolean(busy)} className="mt-3 min-h-12 w-full rounded border border-gold-400 text-gold-300 disabled:opacity-40">Settle as keeper</button>}</Panel>{snap.room.isOwner && <Panel title="Host controls"><button onClick={() => command("start")} disabled={Boolean(busy) || snap.room.phase === "running"} className="min-h-12 w-full rounded border border-emerald-400 text-emerald-200 disabled:opacity-40">Launch round</button><div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">{(["none", "miss", "hit"] as const).map((outcome) => <button key={outcome} onClick={() => command("settle", { lotteryOutcome: outcome })} disabled={Boolean(busy) || snap.room.phase !== "running" || !deadlinePassed} className="min-h-11 rounded border border-line text-xs uppercase disabled:opacity-40">{outcome}</button>)}</div></Panel>}</aside>
+          <aside className="grid content-start gap-3"><Panel title="Your flight plan"><p className="text-sm text-cream-muted">Balance: {credits(me?.balance)}</p><div className="mt-3 grid grid-cols-2 gap-2"><label className="text-xs">Stake<input inputMode="numeric" value={stake} onChange={(e) => setStake(e.target.value.replace(/\D/g, ""))} className="mt-1 min-h-12 w-full rounded border border-line bg-panel-strong px-2" /></label><label className="text-xs">Auto-lock ×<input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} className="mt-1 min-h-12 w-full rounded border border-line bg-panel-strong px-2" /></label></div><button onClick={() => command("bet", { stake, targetBps: String(Math.round(Number(target) * 10_000)), autoLockEnabled: true })} disabled={Boolean(busy) || inFlightWindow || Boolean(pendingSeat)} className="mt-3 min-h-12 w-full rounded bg-gold-500 font-black text-wood-950 disabled:opacity-40">{pendingSeat ? `Committed ${credits(pendingSeat.stake)} for next flight` : inFlightWindow ? "Betting closed" : "Commit test credits"}</button>{seat && <p className="mt-3 text-xs">Stake {credits(seat.stake)} · target {multi(seat.requestedTargetBps)} · lock {multi(seat.acceptedTargetBps)}</p>}{snap.room.phase === "running" && deadlinePassed && <button onClick={() => command("tick")} disabled={Boolean(busy)} className="mt-3 min-h-12 w-full rounded border border-gold-400 text-gold-300 disabled:opacity-40">Settle as keeper</button>}</Panel>{snap.room.isOwner && <Panel title="Host controls"><button onClick={() => command("start")} disabled={Boolean(busy) || snap.room.phase === "running"} className="min-h-12 w-full rounded border border-emerald-400 text-emerald-200 disabled:opacity-40">Launch round</button><div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">{(["none", "miss", "hit"] as const).map((outcome) => <button key={outcome} onClick={() => command("settle", { lotteryOutcome: outcome })} disabled={Boolean(busy) || snap.room.phase !== "running" || !deadlinePassed} className="min-h-11 rounded border border-line text-xs uppercase disabled:opacity-40">{outcome}</button>)}</div></Panel>}</aside>
         </section>
         {identity.isAdmin && <section className="mt-3"><Panel title="Admin simulation console">
           <p className="mb-4 text-xs text-cream-muted">Host-PIN controls are server-validated, room-scoped, and written to the authoritative replay log. Parameters can change only between rounds.</p>

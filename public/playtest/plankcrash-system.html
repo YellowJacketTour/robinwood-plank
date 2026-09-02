@@ -30,6 +30,9 @@
       }
       body {
         margin: 0;
+        /* The decorative orb arrows and flight rocket overhang their grid
+           cells; clip at the page edge so no viewport ever scrolls sideways. */
+        overflow-x: clip;
         background: radial-gradient(
             circle at 50% -10%,
             #5c3a1e88,
@@ -41,6 +44,10 @@
         width: min(1180px, 100%);
         margin: auto;
         padding: clamp(20px, 5vw, 68px);
+        /* Respect notches/home bars on phones (viewport-fit=cover). */
+        padding-left: max(clamp(20px, 5vw, 68px), env(safe-area-inset-left));
+        padding-right: max(clamp(20px, 5vw, 68px), env(safe-area-inset-right));
+        padding-bottom: max(clamp(20px, 5vw, 68px), env(safe-area-inset-bottom));
       }
       section {
         position: relative;
@@ -478,6 +485,17 @@
       @media(max-width:440px) {
         h1 {
           font-size: 52px;
+        }
+        /* The equation chip and rocket collide over the small flight card;
+           pin the chip inside the card and shrink the rocket emoji. */
+        .equation {
+          right: 8px;
+          bottom: 8px;
+          padding: 8px 10px;
+          font-size: 15px;
+        }
+        .rocket {
+          font-size: 34px;
         }
         .route {
           grid-template-columns: repeat(2, 1fr);

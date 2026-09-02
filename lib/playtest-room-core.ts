@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SimulationPolicy, SimulationState } from "@/lib/casino/simulation";
-import { LIVE_GROWTH_PER_SECOND } from "@/lib/playtest-live-shared";
+import { msToReachMultiplierBps, multiplierBpsAtMs } from "@/lib/playtest-live-shared";
 
 export const PLAYTEST_RULES_SCHEMA = "plank.live-lab.v1";
 
@@ -188,14 +188,15 @@ export function powerboardRoundDraw(revealHex: string) {
   return { drawnNumber, winningNumber: 1, oddsOneIn: PLAYTEST_POWERBOARD_ODDS, rawHit: drawnNumber === 1 };
 }
 
+/** Flight duration until the committed crash multiplier, via the ONE shared
+ * inverse of M(t) in lib/playtest-live-shared. */
 export function crashDurationMs(crashBps: bigint): number {
-  const multiplier = Number(crashBps) / 10_000;
-  return Math.max(350, Math.ceil(Math.log(multiplier) / LIVE_GROWTH_PER_SECOND * 1_000));
+  return Math.max(350, msToReachMultiplierBps(Number(crashBps)));
 }
 
+/** Authoritative multiplier at a server instant, via the ONE shared M(t). */
 export function multiplierAt(startedAtMs: number, nowMs: number): bigint {
-  const elapsedSeconds = Math.max(0, nowMs - startedAtMs) / 1_000;
-  return BigInt(Math.floor(10_000 * Math.exp(LIVE_GROWTH_PER_SECOND * elapsedSeconds)));
+  return BigInt(multiplierBpsAtMs(nowMs - startedAtMs));
 }
 
 /** Settlement target authority:
