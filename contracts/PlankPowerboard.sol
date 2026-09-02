@@ -13,6 +13,14 @@ import {IPlankProgression} from "./IPlankProgression.sol";
 /// source with NO code change.
 interface IWagerSource {
     function stakeOf(uint256 roundId, address player) external view returns (uint256);
+    /// Rounds strictly below this id are finished (settled or voided) --
+    /// every Plank Crash variant advances currentRoundId ONLY when the
+    /// previous round settles or voids, so `roundId < currentRoundId()`
+    /// is exactly "this round's stake actually went through settlement".
+    function currentRoundId() external view returns (uint256);
+    /// True when the round was voided (stakes carried forward, NO rake
+    /// taken). Public mapping getter on every Plank Crash variant.
+    function voided(uint256 roundId) external view returns (bool);
 }
 
 /**
@@ -173,6 +181,8 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     error NoStake();
     error AlreadyClaimed();
     error EpochNotClosed();
+    error SourceRoundNotFinal();
+    error SourceRoundVoided();
     error EpochAlreadyDrawn();
     error DrawNotYetRequested();
     error DrawAlreadyRequested();
@@ -273,6 +283,22 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         // there escrows ETH to address(0) -- permanently locked (not
         // stealable, but real ETH stranded). Reject it outright.
         if (player == address(0)) revert ZeroAddress();
+        // ── AUDIT 2026-09-02 HIGH fix: tickets only for RAKED, FINAL wagers.
+        // A crash round that VOIDS (under-threshold / whale-dominated) keeps
+        // stakeOf[round][player] nonzero forever (carryForwardStake needs it)
+        // and takes ZERO rake -- so before this gate, one solo stake could be
+        // deliberately void-cycled round after round (bet solo -> lockRound
+        // voids -> carryForwardStake), and EVERY voided roundId was a fresh
+        // (source, roundId, player) claim: unbounded wager-weighted tickets
+        // for gas only, while honest players pay rake per ticket batch. The
+        // same hole existed at the front of the round's life: claiming while
+        // the round was still BETTING/LIVE credited tickets for a stake whose
+        // round could still void afterwards. Both close here: the source
+        // round must be FINISHED (id strictly below the source's own
+        // currentRoundId -- every crash variant advances it only on settle or
+        // void) and must NOT have voided (rake was actually taken).
+        if (sourceRoundId >= IWagerSource(source).currentRoundId()) revert SourceRoundNotFinal();
+        if (IWagerSource(source).voided(sourceRoundId)) revert SourceRoundVoided();
         uint256 amount = IWagerSource(source).stakeOf(sourceRoundId, player);
         if (amount == 0) revert NoStake();
 

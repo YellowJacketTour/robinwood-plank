@@ -273,3 +273,50 @@ test("returning invitees can choose login and rejoin the invited room in one act
     /roomId = await joinRoomFromInvite\(identity, body\.invite\)/
   );
 });
+
+// ── AUDIT 2026-09-02 (Workstream F): the reveal animation is a deterministic
+// presentation of a COMMITTED result — never an entropy source — and every
+// place the displayed ball could diverge from the paid outcome is labeled. ──
+
+const roomsSource = readFileSync(
+  new URL("../../lib/playtest-rooms.ts", import.meta.url),
+  "utf8"
+);
+
+test("the displayed Powerboard ball is derived server-side from the committed reveal, never invented at display time", () => {
+  // Settlement derives the ball from the stored, pre-committed reveal…
+  assert.match(roomsSource, /powerboardRoundDraw\(room\.reveal!\)/);
+  // …and the winner selection is seeded by the same committed reveal.
+  assert.match(roomsSource, /\$\{room\.reveal\}:powerboard:ticket/);
+  // The client pins the authoritative number and throws rather than substituting.
+  assert.match(arcadeSource, /ball\.number===Number\(drawNumber\)/);
+  assert.match(arcadeSource, /Authoritative lottery result is outside the displayed ball population/);
+});
+
+test("a host-forced lab outcome that diverges from the reveal-derived ball is computed AND rendered as forced", () => {
+  // Server publishes the divergence flag whenever the paid outcome disagrees
+  // with the reveal-derived rawHit…
+  assert.match(roomsSource, /forcedForSimulation: ownerOnly && lotteryOutcome !== \(powerboardDraw\.rawHit \? "hit" : "miss"\)/);
+  assert.match(roomsSource, /payableHit: result\.lotteryEvent === "hit"/);
+  // …and the client renders the explicit banner off that flag, so a displayed
+  // ball can never silently masquerade as (or hide) a natural jackpot.
+  assert.match(arcadeSource, /draw\.forcedForSimulation \? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS<\/div>'/);
+});
+
+test("a displayed ball alone never implies a jackpot: celebration and payout copy key off the settled winner, not the ball", () => {
+  assert.match(arcadeSource, /if \(winner\) celebratePrivateJackpot\(\);/);
+  assert.match(arcadeSource, /if \(winner\) \{ celebratePrivateJackpot\(\);/);
+  // The card's hit/miss/funding class is winner-first, ball-never.
+  assert.match(arcadeSource, /\$\{winner \? "hit" : drawActive \? "miss" : "funding"\}/);
+});
+
+test("an interrupted animation or reload resumes the SAME committed result", () => {
+  // Snapshot restores the settled event independently of the replay window…
+  assert.match(arcadeSource, /snapshot\.currentSettlement \|\|/);
+  // …and the acknowledged-round marker is persisted and compared per round,
+  // so a reload either replays the identical committed ceremony or skips it —
+  // it can never roll a different result.
+  assert.match(arcadeSource, /sessionStorage\.setItem\(privateSessionKey\(privateSnapshot\.room\.id, "ack"\)/);
+  assert.match(arcadeSource, /privateSettlementAcknowledgedRound = sessionStorage\.getItem\(privateSessionKey\(snapshot\.room\.id, "ack"\)\)/);
+  assert.match(arcadeSource, /function samePrivateRound\(left, right\)/);
+});

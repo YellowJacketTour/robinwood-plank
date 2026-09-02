@@ -126,3 +126,13 @@ test("authoritative display curve is monotonic and reaches crash on its deadline
   assert.ok(multiplierAt(start, start + enormousDuration - 1) < enormous);
   assert.ok(multiplierAt(start, start + enormousDuration) >= enormous);
 });
+
+// AUDIT 2026-09-02 (Workstream F): authoritative fixture pinning the ball
+// derivation. If the sha256("<reveal>:powerboard:number") mapping ever
+// changes, replayed/settled rounds would silently present a DIFFERENT ball
+// than the one committed — this literal fixture makes that impossible to
+// miss. reveal = "ab" x 32 must always draw ball 11 of 16 (a miss).
+test("the committed-reveal → displayed-ball mapping is pinned by fixture", () => {
+  const draw = powerboardRoundDraw("ab".repeat(32));
+  assert.deepEqual(draw, { drawnNumber: 11, winningNumber: 1, oddsOneIn: 16, rawHit: false });
+});

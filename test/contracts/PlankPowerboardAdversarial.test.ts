@@ -66,6 +66,46 @@ describe("PlankPowerboard — adversarial economics", () => {
     expect(dbl, "double-claim must revert").to.equal(true);
   });
 
+  it("VOID-CYCLE FARM (AUDIT 2026-09-02 HIGH): a voided source round can never mint tickets", async () => {
+    const { pb, source, alice } = await deploy();
+    // The attack this closes: a crash round that VOIDS keeps stakeOf nonzero
+    // (carryForwardStake needs it) and takes ZERO rake, so one solo stake
+    // could be void-cycled forever — every voided roundId a fresh claim,
+    // unbounded tickets for gas only. Voided rounds must be worth 0 tickets.
+    await source.setStake(21, alice.address, ethers.parseEther("5"));
+    await source.setVoided(21, true);
+    await expect(pb.claimTickets(await source.getAddress(), 21, alice.address))
+      .to.be.revertedWithCustomError(pb, "SourceRoundVoided");
+    // The identical stake in a round that actually SETTLED (rake taken) claims fine.
+    await source.setStake(22, alice.address, ethers.parseEther("5"));
+    await pb.claimTickets(await source.getAddress(), 22, alice.address);
+    expect(await pb.ticketsOf(await pb.currentEpoch(), alice.address)).to.equal(ethers.parseEther("5"));
+    // And un-voiding later cannot resurrect the blocked claim into a double
+    // mint of the SAME claim id more than once (claim guard still applies).
+    await source.setVoided(21, false);
+    await pb.claimTickets(await source.getAddress(), 21, alice.address);
+    await expect(pb.claimTickets(await source.getAddress(), 21, alice.address))
+      .to.be.revertedWithCustomError(pb, "AlreadyClaimed");
+  });
+
+  it("PRE-SETTLEMENT CLAIM (AUDIT 2026-09-02): a round still in flight cannot mint tickets before its void/settle is known", async () => {
+    const { pb, source, alice } = await deploy();
+    // Claiming while the source round is the CURRENT (unfinished) round would
+    // credit tickets for a stake whose round could still void — bypassing the
+    // voided-round gate above. Finality (roundId < currentRoundId) is required.
+    await source.setCurrentRoundId(30);
+    await source.setStake(30, alice.address, ethers.parseEther("1")); // the live round
+    await expect(pb.claimTickets(await source.getAddress(), 30, alice.address))
+      .to.be.revertedWithCustomError(pb, "SourceRoundNotFinal");
+    await source.setStake(31, alice.address, ethers.parseEther("1")); // a future round
+    await expect(pb.claimTickets(await source.getAddress(), 31, alice.address))
+      .to.be.revertedWithCustomError(pb, "SourceRoundNotFinal");
+    // A strictly earlier (finished, non-voided) round claims normally.
+    await source.setStake(29, alice.address, ethers.parseEther("1"));
+    await pb.claimTickets(await source.getAddress(), 29, alice.address);
+    expect(await pb.ticketsOf(await pb.currentEpoch(), alice.address)).to.equal(ethers.parseEther("1"));
+  });
+
   it("SYBIL SPLIT: splitting one wager across N wallets yields the same total tickets (linear, no gain)", async () => {
     const { pb, source, alice, bob } = await deploy();
     const epoch = await pb.currentEpoch();
