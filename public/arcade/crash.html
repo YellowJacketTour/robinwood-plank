@@ -5648,7 +5648,7 @@ async function startPrivatePlaytest() {
       .stage{min-height:40dvh}.controls{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
       body[data-playtest="true"]:has(.private-result.show) #privateHud,body[data-playtest="true"]:has(.private-result.show) #privateJourney,body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{visibility:hidden;pointer-events:none}
       .result-card.private-result,.result-card.private-result.show{position:fixed;z-index:95;inset:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));width:auto;max-height:none;margin:0;padding:12px;overflow:auto;overscroll-behavior:contain;border-radius:14px;transform:none}
-      #privateIntermissionCountdown{z-index:70;top:auto;bottom:calc(72px + env(safe-area-inset-bottom));min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
+      #privateIntermissionCountdown{z-index:70;top:clamp(230px,34dvh,330px);bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
       .private-result .result-mult{font-size:clamp(30px,11vw,46px);line-height:.98}.private-result-balance{font-size:12px}
       .private-powerball{min-height:0;margin-top:12px;display:flex;flex-direction:column}
       .private-powerball-canvas{position:relative;left:auto;top:auto;width:100%;height:clamp(190px,32dvh,270px);min-height:190px;order:2}
