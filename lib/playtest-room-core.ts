@@ -208,8 +208,14 @@ export function effectiveSettlementTarget(
   acceptedTargetBps: bigint | null,
   autoLockEnabled: boolean,
 ): bigint {
+  // A pre-committed auto target is a ceiling, never a suggestion that a
+  // later manual request may raise. Manual play can improve safety only by
+  // locking earlier. This mirrors PlankCrashDrand.effectiveCashOutBlock().
+  if (autoLockEnabled) {
+    if (acceptedTargetBps !== null && acceptedTargetBps < requestedTargetBps) return acceptedTargetBps;
+    return requestedTargetBps;
+  }
   if (acceptedTargetBps !== null) return acceptedTargetBps;
-  if (autoLockEnabled) return requestedTargetBps;
   return crashBps + 1n;
 }
 

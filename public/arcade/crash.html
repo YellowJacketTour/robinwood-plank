@@ -3674,12 +3674,11 @@ const primaryBtn = $("primaryBtn");
 let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
 
 // ── AUTO-PLAY ────────────────────────────────────────────────────────────
-// One toggle and the whole loop runs hands-free: it places your bet at the
-// start of every round and cashes you out the instant the live multiplier
-// reaches your target. Everything else (lock, reveal, settle, next round)
-// is already automated by keeperTick + the poll, so with auto-play on the
-// only thing you ever do is decide when to stop. Per-round guards make each
-// action fire at most once, and a busy latch prevents overlapping txs.
+// One toggle repeats the already-complete bet commitment each round. The
+// target itself is committed with the bet and executes deterministically in
+// settlement; the browser must NOT race a second manual transaction when the
+// animation crosses it. Manual lock remains a distinct user action and may
+// only secure an earlier multiplier than the committed ceiling.
 // (State vars autoPlay/autoTarget/autoBetRound/autoCashRound/autoBusy are
 // declared above wireAutoPlay to avoid a temporal-dead-zone error.)
 
@@ -3762,6 +3761,9 @@ function friendlyRevertReason(err) {
   if (name === "AlreadyBet") {
     return "You've already got a bet in this round.";
   }
+  if (name === "AlreadyCashedOut") {
+    return "Your pre-locked or earlier manual multiplier is already secured.";
+  }
   return (err && (err.shortMessage || err.message)) || "unknown error";
 }
 
@@ -3785,7 +3787,18 @@ async function doCashOut(viaButton) {
     setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });
     setChainAction(ACTION_STAGES.ACCEPTED);
     sfx.cashOut(); haptic([20, 30, 20]);
-    toast("Cashed out at " + bpsToXStr(liveBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""), "success");
+    // The click-time quote is only intent. Report the block actually accepted
+    // by the contract, which is the only multiplier settlement will use.
+    let acceptedBps = liveBps;
+    try {
+      const acceptedLog = receipt.logs.map((log) => { try { return crash.interface.parseLog(log); } catch (_) { return null; } })
+        .find((entry) => entry?.name === "CashedOut");
+      const round = await crash.rounds(roundId);
+      if (acceptedLog && BigInt(acceptedLog.args.cashOutBlock) >= BigInt(round.lockBlock)) {
+        acceptedBps = BigInt(multiplierAtBlocksBps(Number(BigInt(acceptedLog.args.cashOutBlock) - BigInt(round.lockBlock))));
+      }
+    } catch (_) { /* retain the clearly provisional click quote as fallback */ }
+    toast("Lock accepted at " + bpsToXStr(acceptedBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""), "success");
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
@@ -3849,12 +3862,10 @@ async function autoPlayTick(phase, roundId, hasStake, hasCashedOut, liveBps) {
     if (phase === 0 && !hasStake && autoBetRound !== rid) {
       autoBusy = true; autoBetRound = rid;
       await doPlaceBet(false);
-    } else if (phase === 1 && hasStake && !hasCashedOut && autoCashRound !== rid) {
-      if (Number(liveBps) >= autoTarget * 10000) {
-        autoBusy = true; autoCashRound = rid;
-        await doCashOut(false);
-      }
     }
+    // No live auto-cash transaction: the multiplier was committed atomically
+    // with the bet and executes even if this tab disconnects or the sequencer
+    // delays the browser. A manual click remains available before that ceiling.
   } finally {
     autoBusy = false;
   }

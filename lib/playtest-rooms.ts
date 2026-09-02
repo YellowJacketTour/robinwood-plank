@@ -522,6 +522,16 @@ export async function lockPlaytestBet(identity: PlaytestIdentity, roomId: string
     if (now >= room.crash_at.getTime()) throw new PlaytestRoomError(409, "TOO_LATE", "The authoritative crash deadline has passed.");
     const accepted = multiplierAt(room.started_at.getTime(), now);
     if (accepted < 10_100n) throw new PlaytestRoomError(409, "TOO_EARLY", "Lock opens at 1.01x.");
+    const seat = await client.query<{ requested_target_bps: string; accepted_target_bps: string | null; auto_lock_enabled: boolean }>(
+      `SELECT requested_target_bps::text,accepted_target_bps::text,auto_lock_enabled
+         FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2 AND user_id=$3 FOR UPDATE`,
+      [roomId, room.current_round, identity.id],
+    );
+    const currentSeat = seat.rows[0];
+    if (!currentSeat || currentSeat.accepted_target_bps !== null) throw new PlaytestRoomError(409, "NO_ACTIVE_BET", "No unlocked bet exists for this round.");
+    if (currentSeat.auto_lock_enabled && accepted >= BigInt(currentSeat.requested_target_bps)) {
+      throw new PlaytestRoomError(409, "AUTO_TARGET_EXECUTED", "Your pre-locked multiplier already executed; a later manual lock cannot raise it.");
+    }
     const updated = await client.query(
       `UPDATE playtest_round_seats SET accepted_target_bps=$4,locked_at=NOW()
         WHERE room_id=$1 AND round_id=$2 AND user_id=$3 AND accepted_target_bps IS NULL`,

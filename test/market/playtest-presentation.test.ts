@@ -168,6 +168,13 @@ test("a playtest commitment always carries its displayed pre-launch lock target"
   assert.match(arcadeSource, /sessionBank\.betVia\(crash\.target, ethers\.parseEther\(betAmount\), committedTargetBps\)/);
 });
 
+test("pre-lock execution is authoritative and manual lock reports the included value", () => {
+  assert.match(arcadeSource, /browser must NOT race a second manual transaction/);
+  assert.doesNotMatch(arcadeSource, /Number\(liveBps\) >= autoTarget \* 10000/);
+  assert.match(arcadeSource, /entry\?\.name === "CashedOut"/);
+  assert.match(arcadeSource, /Lock accepted at/);
+});
+
 test("multiplier art filters non-finite and regressing samples", () => {
   assert.match(
     arcadeSource,

@@ -20,6 +20,8 @@ test("an unexecuted manual target can never become a retroactive winning lock", 
   assert.equal(effectiveSettlementTarget(38_000n, 20_000n, null, false), 38_001n);
   assert.equal(effectiveSettlementTarget(38_000n, 20_000n, null, true), 20_000n);
   assert.equal(effectiveSettlementTarget(38_000n, 20_000n, 17_250n, false), 17_250n);
+  assert.equal(effectiveSettlementTarget(38_000n, 20_000n, 17_250n, true), 17_250n);
+  assert.equal(effectiveSettlementTarget(38_000n, 20_000n, 25_000n, true), 20_000n);
 });
 
 test("a multiplayer lobby advances once and keeps every commitment in one round", () => {
