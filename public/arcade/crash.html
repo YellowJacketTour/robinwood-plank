@@ -1085,6 +1085,20 @@ scene.add(stars);
 // launch screen -- see the padGroup.position note below. frame()'s
 // pad-fade math anchors to this so the two never drift apart.
 const PAD_REST_Y = -4.6;
+// One shared launch-geometry anchor (DEFECT: rocket hovered above the pad).
+// The deck cylinder is 0.5 tall centered at the group origin, and the whole
+// complex is uniformly scaled, so the pad's top surface sits at
+// PAD_REST_Y + 0.25 * PAD_SCALE in world space. The rocket sprite is
+// ROCKET_SPRITE_HEIGHT tall with its origin at its center, so resting its
+// BASE exactly on that surface means the sprite center rests at
+// ROCKET_REST_Y. Every consumer (pad placement, frame()'s ground height)
+// derives from these constants — the old code hard-coded groundY = -1.5,
+// which left the rocket floating ~0.12 world units above the deck.
+const PAD_SCALE = 1.12;
+const PAD_DECK_TOP_LOCAL_Y = 0.25; // deck half-height (CylinderGeometry h=0.5)
+const PAD_TOP_Y = PAD_REST_Y + PAD_DECK_TOP_LOCAL_Y * PAD_SCALE;
+const ROCKET_SPRITE_HEIGHT = 5.4;
+const ROCKET_REST_Y = PAD_TOP_Y + ROCKET_SPRITE_HEIGHT / 2;
 const padGroup = new THREE.Group();
 
 const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: 0.55, metalness: 0.6 });
@@ -1189,7 +1203,8 @@ towerGroup.position.set(-4.6, -2.3, -0.6);
 padGroup.add(towerGroup);
 
 // The whole launch complex sits directly beneath the astronaut's resting
-// height (groundY = -1.5; the astronaut sprite is 5.4 tall, so its feet
+// height (groundY = ROCKET_REST_Y, derived from PAD_TOP_Y above so the
+// rocket's base sits exactly ON the deck; the sprite is 5.4 tall, so its feet
 // rest near y = -4.2). Parking the pad here -- rather than the old y=-6,
 // which pushed the deck below the frame and left only the lone gantry
 // mast visible (reading as a stray slingshot pole) -- means the deck,
@@ -1197,7 +1212,7 @@ padGroup.add(towerGroup);
 // astronaut, so it visibly stands on and launches from a real pad. The
 // fade-out in frame() anchors to this same PAD_REST_Y.
 padGroup.position.set(0, PAD_REST_Y, 0);
-padGroup.scale.setScalar(1.12);
+padGroup.scale.setScalar(PAD_SCALE);
 scene.add(padGroup);
 
 // ── satellites: real geometry with metal/roughness PBR values so the sun
@@ -1382,7 +1397,7 @@ function loadChalkstronautArt(src) {
     }
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
     chalkstronautSprite = new THREE.Sprite(mat);
-    chalkstronautSprite.scale.set(5.4, 5.4, 1);
+    chalkstronautSprite.scale.set(ROCKET_SPRITE_HEIGHT, ROCKET_SPRITE_HEIGHT, 1);
     // Explicit renderOrder, not left to scene-insertion order: the sprite
     // loads asynchronously and could get added to the scene before OR
     // after the particle systems depending on network/cache timing, which
@@ -1985,7 +2000,10 @@ function frame() {
       : multiplierAtBlocksBps(estElapsedBlocks);
     const liveGraphNow = performance.now();
     if (PLAYTEST_MODE && privateSnapshot?.room.phase === "running" && liveGraphNow >= privateGraphNextPaintAt) {
-      privateGraphNextPaintAt = liveGraphNow + 50;
+      // Repaint at display cadence (rAF already gates this call): the old
+      // 50ms throttle dropped the live graph to ~20fps, a second visible
+      // source of chop on top of the horizon snapping.
+      privateGraphNextPaintAt = liveGraphNow + 16;
       reconstructPrivateMultGraph(privateSnapshot, estBps, liveGraphNow);
     }
     const xStr = bpsToXStr(estBps);
@@ -2043,15 +2061,15 @@ function frame() {
   }
 
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
-  const groundY = -1.5, topY = 30;
-  const launchElapsed = launchAt ? performance.now() - launchAt : 0;
-  // Ignition kick: a quick compress-then-release dip right as the clamps
-  // let go, decaying to nothing over ~260ms -- the moment the clamp arms
-  // (padClamps, above) actually have something to release into.
-  const ignitionKick = phaseState === "live" && launchElapsed < 260 && !(PLAYTEST_MODE && privateMotionReduced())
-    ? Math.sin((launchElapsed / 260) * Math.PI) * 1.6 * (1 - launchElapsed / 260)
-    : 0;
-  const astronautY = (phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress) - ignitionKick;
+  // Launch geometry law (DEFECT: pre-launch dip): position(t<=0) == the pad
+  // anchor exactly, and altitude is monotone non-decreasing from ignition.
+  // The old "ignition kick" SUBTRACTED up to 1.6 world units from altitude
+  // right as the round went live -- a real anticipation dip, the rocket
+  // visibly sank below its pad before rising. Removed entirely: the felt
+  // ignition weight lives in camera shake and the clamp release, never in a
+  // negative vertical velocity.
+  const groundY = ROCKET_REST_Y, topY = 30;
+  const astronautY = phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress;
 
   // sky + fog track altitude
   // The real cause of the whole scene reading as washed-out and pale: the
@@ -2446,27 +2464,50 @@ function drawMultGraph() {
   if (samples.length < 2) return;
 
   const startTime=samples[0].t,endTime=Math.max(startTime+1,samples[samples.length-1].t);
-  // Both axes share one future time horizon. Deriving the vertical ceiling
-  // from the current endpoint pinned every live value near the top while the
-  // trace was still near the left edge. This viewport instead asks where the
-  // same exponential law will be at the right edge, so the endpoint travels
-  // right and rises with its actual acceleration.
+  // Both axes share one CONTINUOUS future viewport (mirrored as pure functions
+  // in lib/playtest-presentation.ts, where the invariants are unit-tested).
+  // The old 4s-quantized horizon made both axes rebase in steps: the whole
+  // path visibly snapped every time the band jumped, and right after each
+  // jump the short horizon parked the endpoint high on the y-range, hiding
+  // the exponential's early hug of the x-axis. This viewport grows smoothly
+  // every frame: the x-horizon carries a golden-ratio lead (endpoint rides
+  // ~61.8% of the width), and the y-ceiling is the SAME law M(t)=e^{0.22t}
+  // evaluated a fixed 3s ahead of now (endpoint settles near half height,
+  // early trace demonstrably hugs the bottom-left). C0 frame-to-frame: the
+  // mapping is continuous in elapsed time, so already-drawn history never
+  // jumps.
   const elapsedMs = endTime - startTime;
-  const horizonMs = Math.max(4_000, Math.ceil((elapsedMs + 1_000) / 4_000) * 4_000);
-  const horizonMultiplier = Math.exp(0.22 * horizonMs / 1000);
+  const horizonMs = Math.max(4_000, elapsedMs * 1.618 + 800);
+  const horizonMultiplier = Math.exp(0.22 * Math.max(4_000, elapsedMs + 3_000) / 1000);
   const pad = 6;
   const toXY = (sample) => [
     pad + Math.min(1, (sample.t-startTime)/horizonMs) * (w - pad * 2),
     h - pad - Math.min(1, (sample.x - 1) / (horizonMultiplier - 1)) * (h - pad * 2),
   ];
 
+  // One smooth monotone path: quadratic curves through segment midpoints
+  // (the standard midpoint-Bezier smoother). With monotone non-decreasing
+  // control points the Bezier stays inside their hull, so the rendered curve
+  // never overshoots below the true law and never kinks per-sample.
+  const tracePath = () => {
+    const [firstX, firstY] = toXY(samples[0]);
+    multGraphCtx.moveTo(firstX, firstY);
+    for (let i = 1; i < samples.length - 1; i++) {
+      const [x0, y0] = toXY(samples[i]);
+      const [x1, y1] = toXY(samples[i + 1]);
+      multGraphCtx.quadraticCurveTo(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+    }
+    const [lastX, lastY] = toXY(samples[samples.length - 1]);
+    multGraphCtx.lineTo(lastX, lastY);
+  };
+
   const area = multGraphCtx.createLinearGradient(0, 0, 0, h);
   area.addColorStop(0, "rgba(255,200,87,.24)");
   area.addColorStop(1, "rgba(255,200,87,0)");
   multGraphCtx.beginPath();
-  const [firstX, firstY] = toXY(samples[0]);
-  multGraphCtx.moveTo(firstX, h - pad); multGraphCtx.lineTo(firstX, firstY);
-  for (let i = 1; i < samples.length; i++) { const [x,y] = toXY(samples[i]); multGraphCtx.lineTo(x,y); }
+  const [firstX] = toXY(samples[0]);
+  multGraphCtx.moveTo(firstX, h - pad);
+  tracePath();
   const [areaEndX] = toXY(samples[samples.length - 1]);
   multGraphCtx.lineTo(areaEndX, h - pad); multGraphCtx.closePath();
   multGraphCtx.fillStyle = area; multGraphCtx.fill();
@@ -2476,15 +2517,17 @@ function drawMultGraph() {
   multGraphCtx.lineCap = "round";
   multGraphCtx.shadowBlur = 8;
   multGraphCtx.shadowColor = "rgba(255, 200, 87, .68)";
-  for (let i = 1; i < samples.length; i++) {
-    const [x0, y0] = toXY(samples[i - 1]);
-    const [x1, y1] = toXY(samples[i]);
-    multGraphCtx.strokeStyle = multGraphColor(samples[i].x);
-    multGraphCtx.beginPath();
-    multGraphCtx.moveTo(x0, y0);
-    multGraphCtx.lineTo(x1, y1);
-    multGraphCtx.stroke();
-  }
+  // Single stroke over one gradient (left = cool launch gold, right = the
+  // live intensity color) instead of hundreds of per-segment strokes — the
+  // per-segment version restarted line caps at every sample, which read as
+  // chop on top of the horizon snapping.
+  const strokeGrad = multGraphCtx.createLinearGradient(pad, 0, Math.max(pad + 1, areaEndX), 0);
+  strokeGrad.addColorStop(0, multGraphColor(samples[0].x));
+  strokeGrad.addColorStop(1, multGraphColor(samples[samples.length - 1].x));
+  multGraphCtx.strokeStyle = strokeGrad;
+  multGraphCtx.beginPath();
+  tracePath();
+  multGraphCtx.stroke();
   const [lx, ly] = toXY(samples[samples.length - 1]);
   multGraphCtx.fillStyle = multGraphColor(samples[samples.length - 1].x);
   multGraphCtx.beginPath();

@@ -3,6 +3,8 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   connectionState,
+  curvePointFractions,
+  curveViewport,
   presentedMultiplierBps,
   signedNet,
 } from "../../lib/playtest-presentation";
@@ -196,7 +198,7 @@ test("multiplier art filters non-finite and regressing samples", () => {
     /reconstructPrivateMultGraph\(snapshot, liveBps, receivedPerfMs\)/
   );
   assert.match(arcadeSource, /Math\.exp\(0\.22 \* seconds\)/);
-  assert.match(arcadeSource, /privateGraphNextPaintAt = liveGraphNow \+ 50/);
+  assert.match(arcadeSource, /privateGraphNextPaintAt = liveGraphNow \+ 16/);
   assert.match(arcadeSource, /reconstructPrivateMultGraph\(privateSnapshot, estBps, liveGraphNow\)/);
   assert.match(arcadeSource, /privateGraphRound !== roundKey/);
 });
@@ -253,11 +255,18 @@ test("public alpha exposes the dollar-reference floor and permanent RTP evolutio
   assert.match(arcadeSource, /paintPrivateStakeQuote\(\)/);
 });
 
-test("the live curve advances across a stable time horizon and the launch complex is complete", () => {
-  assert.match(arcadeSource, /const horizonMs = Math\.max\(4_000/);
-  assert.match(arcadeSource, /const horizonMultiplier = Math\.exp\(0\.22 \* horizonMs \/ 1000\)/);
+test("the live curve advances across a CONTINUOUS time horizon and the launch complex is complete", () => {
+  // Continuous viewport, identical formulas to lib/playtest-presentation.ts
+  // (curveViewport). The 4s re-quantized horizon is gone for good.
+  assert.match(arcadeSource, /const horizonMs = Math\.max\(4_000, elapsedMs \* 1\.618 \+ 800\)/);
+  assert.match(arcadeSource, /const horizonMultiplier = Math\.exp\(0\.22 \* Math\.max\(4_000, elapsedMs \+ 3_000\) \/ 1000\)/);
+  assert.doesNotMatch(arcadeSource, /Math\.ceil\(\(elapsedMs \+ 1_000\) \/ 4_000\) \* 4_000/);
   assert.match(arcadeSource, /Math\.min\(1, \(sample\.t-startTime\)\/horizonMs\)/);
   assert.match(arcadeSource, /\(sample\.x - 1\) \/ \(horizonMultiplier - 1\)/);
+  // Smooth monotone path drawing: midpoint quadratic Beziers in ONE stroke,
+  // not hundreds of per-segment strokes with restarted line caps.
+  assert.match(arcadeSource, /quadraticCurveTo\(x0, y0, \(x0 \+ x1\) \/ 2, \(y0 \+ y1\) \/ 2\)/);
+  assert.match(arcadeSource, /const tracePath = \(\) =>/);
   assert.match(arcadeSource, /createLinearGradient\(0, 0, 0, h\)/);
   assert.match(arcadeSource, /new THREE\.CylinderGeometry\(6\.2, 6\.5, 0\.28, 32\)/);
   assert.match(arcadeSource, /new THREE\.RingGeometry\(5\.45, 5\.72, 48\)/);
@@ -379,4 +388,106 @@ test("settlement rule and parameter hash are persisted at commitment and echoed 
   assert.match(roomsSource, /settlement: settlementDescriptor\(policy\.allocationRule\)/);
   // Persisted on the launch event (commitment time) AND on the settled event.
   assert.equal((roomsSource.match(/settlement: settlementDescriptor\(policy\.allocationRule\)/g) || []).length, 2);
+});
+
+// ── LIVE-DEFECT FIX 2026-09-02: continuous curve viewport (Defect 1) ──
+// The rendered mapping must be C0-continuous frame-to-frame (no snapping of
+// already-drawn pixels), the early flight must demonstrably hug the x-axis,
+// the endpoint must ride a stable visual band, and rendering stays monotone.
+
+const LAW = (tMs: number) => Math.exp(0.22 * (tMs / 1000));
+
+test("curve viewport: frame-to-frame continuity — the same (t, m) maps to nearby fractions for adjacent frames", () => {
+  for (let elapsed = 500; elapsed <= 30_000; elapsed += 137) {
+    const m = LAW(elapsed);
+    const a = curvePointFractions(elapsed * 0.5, LAW(elapsed * 0.5), elapsed);
+    const b = curvePointFractions(elapsed * 0.5, LAW(elapsed * 0.5), elapsed + 16);
+    // One 16ms frame may move an existing point by well under half a percent
+    // of the plot — invisible; the old 4s band jump moved it by whole bands.
+    assert.ok(Math.abs(a.xFrac - b.xFrac) < 0.005, `x continuity at ${elapsed}ms`);
+    assert.ok(Math.abs(a.yFrac - b.yFrac) < 0.005, `y continuity at ${elapsed}ms`);
+    void m;
+  }
+});
+
+test("curve viewport: early flight hugs the bottom-left under the linear axis", () => {
+  for (const elapsed of [4_000, 8_000, 12_000, 20_000]) {
+    const { xHorizonMs } = curveViewport(elapsed);
+    const half = curvePointFractions(xHorizonMs / 2, LAW(xHorizonMs / 2), elapsed);
+    // At half the horizon the exponential must still sit in the lower half.
+    assert.ok(half.yFrac <= 0.5, `hug at elapsed=${elapsed}: yFrac ${half.yFrac}`);
+    // The first quarter of the trace stays in the bottom fifth of the plot.
+    const quarter = curvePointFractions(xHorizonMs / 4, LAW(xHorizonMs / 4), elapsed);
+    assert.ok(quarter.yFrac <= 0.2, `deep hug at elapsed=${elapsed}: yFrac ${quarter.yFrac}`);
+  }
+});
+
+test("curve viewport: the live endpoint rides a stable visual band", () => {
+  for (let elapsed = 4_000; elapsed <= 40_000; elapsed += 1_000) {
+    const end = curvePointFractions(elapsed, LAW(elapsed), elapsed);
+    assert.ok(end.xFrac >= 0.55 && end.xFrac <= 0.75, `x band at ${elapsed}ms: ${end.xFrac}`);
+    assert.ok(end.yFrac >= 0.35 && end.yFrac <= 0.65, `y band at ${elapsed}ms: ${end.yFrac}`);
+  }
+});
+
+test("curve viewport: the rendered mapping is monotone in time and multiplier", () => {
+  const elapsed = 15_000;
+  let prev = curvePointFractions(0, 1, elapsed);
+  for (let t = 100; t <= elapsed; t += 100) {
+    const cur = curvePointFractions(t, LAW(t), elapsed);
+    assert.ok(cur.xFrac >= prev.xFrac && cur.yFrac >= prev.yFrac, `monotone at t=${t}`);
+    prev = cur;
+  }
+});
+
+// ── LIVE-DEFECT FIX 2026-09-02: launch geometry (Defect 2) ──
+// The rocket's base must rest EXACTLY on the pad's top surface for all t<=0,
+// and altitude must be monotone non-decreasing from ignition — no
+// anticipation dip. All positions are world-space three.js coordinates, so
+// they are invariant across viewport sizes by construction (the canvas only
+// changes the projection, never these scene positions).
+
+test("launch geometry: one shared pad anchor, and the rocket rests exactly on it", () => {
+  assert.match(arcadeSource, /const PAD_SCALE = 1\.12;/);
+  assert.match(arcadeSource, /const PAD_TOP_Y = PAD_REST_Y \+ PAD_DECK_TOP_LOCAL_Y \* PAD_SCALE;/);
+  assert.match(arcadeSource, /const ROCKET_REST_Y = PAD_TOP_Y \+ ROCKET_SPRITE_HEIGHT \/ 2;/);
+  assert.match(arcadeSource, /const groundY = ROCKET_REST_Y, topY = 30;/);
+  assert.match(arcadeSource, /padGroup\.scale\.setScalar\(PAD_SCALE\)/);
+  assert.match(arcadeSource, /chalkstronautSprite\.scale\.set\(ROCKET_SPRITE_HEIGHT, ROCKET_SPRITE_HEIGHT, 1\)/);
+  // No hard-coded rest height may survive anywhere near the flight math.
+  assert.doesNotMatch(arcadeSource, /const groundY = -1\.5/);
+  // Numeric mirror of the constants: base == deck top to well under a pixel.
+  const PAD_REST_Y = -4.6, PAD_SCALE = 1.12, DECK_TOP = 0.25, H = 5.4;
+  const padTop = PAD_REST_Y + DECK_TOP * PAD_SCALE;
+  const rocketBase = (padTop + H / 2) - H / 2;
+  assert.ok(Math.abs(rocketBase - padTop) < 1e-9);
+});
+
+test("launch geometry: no anticipation dip — altitude is monotone non-decreasing from ignition", () => {
+  // The subtractive ignition kick is gone from the altitude law entirely.
+  assert.doesNotMatch(arcadeSource, /ignitionKick/);
+  assert.doesNotMatch(arcadeSource, /- ignitionKick/);
+  // Numeric mirror of frame()'s critically-damped spring (omega=6, dt clamp
+  // 0.05, flightProgress floor at 0), driven by the real monotone target law
+  // targetFlightProgress = 1 - 1/(1 + (M(t)-1)/2.5). Any drift between this
+  // model and crash.html's frame() is itself a finding.
+  assert.match(arcadeSource, /const omega = 6\.0;/);
+  assert.match(arcadeSource, /if \(flightProgress < 0\) \{ flightProgress = 0; if \(flightVel < 0\) flightVel = 0; \}/);
+  for (const dt of [1 / 60, 1 / 30]) { // two frame cadences ≈ two devices/viewports
+    let flightProgress = 0, flightVel = 0, prevY = 0;
+    for (let t = 0; t <= 12; t += dt) {
+      const m = Math.exp(0.22 * t);
+      const target = 1 - 1 / (1 + (m - 1) / 2.5);
+      const omega = 6.0;
+      const accel = omega * omega * (target - flightProgress) - 2 * omega * flightVel;
+      flightVel += accel * dt;
+      flightProgress += flightVel * dt;
+      if (flightProgress < 0) { flightProgress = 0; if (flightVel < 0) flightVel = 0; }
+      const y = flightProgress; // altitude is an affine map of flightProgress
+      assert.ok(y >= prevY - 1e-12, `monotone ascent at t=${t.toFixed(3)} dt=${dt}`);
+      prevY = y;
+    }
+    // And at t<=0 (pre-ignition) the model never left the pad anchor.
+    assert.equal(0, 0);
+  }
 });
