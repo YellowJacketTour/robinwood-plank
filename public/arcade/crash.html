@@ -627,6 +627,17 @@
 </head>
 <body>
 <div id="boot"><div class="boot-mark">PLANKCRASH</div></div>
+<script>
+  // The cinematic curtain is presentation only. A slow font promise, a
+  // throttled background tab, or a browser/GPU that never produces the
+  // second WebGL frame must never make the authoritative table unusable.
+  // The module dismisses this as soon as the real scene is ready; this
+  // independent watchdog is the fail-open accessibility path.
+  window.__plankCrashBootWatchdog = window.setTimeout(function () {
+    var curtain = document.getElementById("boot");
+    if (curtain) curtain.classList.add("hide");
+  }, 8000);
+</script>
 <div id="app">
   <div class="topbar">
     <div class="brand">
@@ -2255,6 +2266,7 @@ function dismissBoot() {
 function maybeDismissBoot() {
   if (bootDismissed || bootFramesRendered < 2 || !bootFontReady) return;
   bootDismissed = true;
+  window.clearTimeout(window.__plankCrashBootWatchdog);
   document.getElementById("boot").classList.add("hide");
 }
 

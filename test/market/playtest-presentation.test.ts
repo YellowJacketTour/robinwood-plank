@@ -85,6 +85,12 @@ test("Powerboard conclusion has an authoritative settlement lane and never rende
   assert.match(arcadeSource, /private-lottery-fallback/);
 });
 
+test("the cinematic boot curtain can never block the playable table", () => {
+  assert.match(arcadeSource, /__plankCrashBootWatchdog = window\.setTimeout/);
+  assert.match(arcadeSource, /if \(curtain\) curtain\.classList\.add\("hide"\)/);
+  assert.match(arcadeSource, /window\.clearTimeout\(window\.__plankCrashBootWatchdog\)/);
+});
+
 test("funding samples cannot masquerade as unpaid jackpot draws", () => {
   assert.match(arcadeSource, /draw\?\.drawActive/);
   assert.match(arcadeSource, /FUNDING MIX · NO ACTIVE PRIZE DRAW/);
