@@ -168,10 +168,21 @@ test("accepted bets and locks cannot lose their authoritative repaint behind an 
 });
 
 test("a playtest commitment always carries its displayed pre-launch lock target", () => {
+  // The target travels with the bet, and whether it EXECUTES is the
+  // player's committed AUTO-LOCK choice -- never hardcoded true (that
+  // exact hardcode made the toggle cosmetic while the server kept the
+  // auto target armed).
   assert.match(
     arcadeSource,
-    /targetBps: String\(Math\.round\(autoTarget \* 10_000\)\),\s*\/\/[^]*?autoLockEnabled: true/
+    /targetBps: String\(Math\.round\(autoTarget \* 10_000\)\),\s*\/\/[^]*?autoLockEnabled: privateAutoLockArmed/
   );
+  assert.doesNotMatch(arcadeSource, /autoLockEnabled: true,\s*\}\);/);
+  // The disarm path is a REAL pre-launch server amendment, refused after launch.
+  assert.match(arcadeSource, /async function privateSetAutoLock\(desired\)/);
+  assert.match(arcadeSource, /auto-lock cannot change after launch/);
+  assert.match(arcadeSource, /AUTO-LOCK ✓/);
+  // Once the live law crosses an armed target, the UI shows LOCKED.
+  assert.match(arcadeSource, /const autoExecuted = Boolean\(seat && !seat\.acceptedTargetBps && seat\.autoLockEnabled/);
   assert.match(arcadeSource, /REPEAT&nbsp;/);
   assert.match(arcadeSource, /auto-lock .*armed/);
   assert.match(arcadeSource, /function betVia\(address game, uint256 amount, uint256 autoCashOutBps\)/);

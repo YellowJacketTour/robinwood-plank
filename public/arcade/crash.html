@@ -1923,6 +1923,7 @@ let targetFlightProgress = 0;
 // little inertia, and settles without stair-stepping. Replaces the old
 // exponential ease, which both lagged and stepped.
 let flightVel = 0;
+let rocketUprightMix = 0; // 0..1: crash tumble -> upright return-descent attitude
 let crashedAt = null;
 let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
@@ -2059,6 +2060,17 @@ function frame() {
     flightProgress += flightVel * dt;
     if (flightProgress < 0) { flightProgress = 0; if (flightVel < 0) flightVel = 0; }
   }
+  // Post-crash return descent (targetFlightProgress driven to 0 while the
+  // round is settled): the crash tumble eases back to an upright, controlled
+  // descent attitude, and once landed the craft is exactly parked -- no
+  // hover, no residual creep, motionless until the next ignition.
+  const rocketDescending = phaseState === "crashed" && targetFlightProgress === 0;
+  rocketUprightMix += ((rocketDescending ? 1 : 0) - rocketUprightMix) * Math.min(1, dt * 2.5);
+  if (rocketDescending && flightProgress < 0.002) { flightProgress = 0; flightVel = 0; }
+  // Presentation state exported for the e2e altitude-law assertions (this
+  // is a module script, so the bindings themselves are not reachable from
+  // an injected test function). Read-only telemetry, no game input.
+  window.__plankFlight = { p: flightProgress, t: targetFlightProgress };
 
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
   // Launch geometry law (DEFECT: pre-launch dip): position(t<=0) == the pad
@@ -2109,7 +2121,8 @@ function frame() {
 
   // clamp arms swing open at ignition and stay open through the crash
   // (the rocket doesn't re-cradle mid-round); beacon blinks continuously
-  padClampOpen += ((phaseState === "live" || phaseState === "crashed" ? 1 : 0) - padClampOpen) * Math.min(1, dt * 6);
+  // Clamps re-cradle the craft once the return descent has landed it.
+  padClampOpen += ((phaseState === "live" || (phaseState === "crashed" && (targetFlightProgress > 0 || flightProgress > 0.04)) ? 1 : 0) - padClampOpen) * Math.min(1, dt * 6);
   for (const clamp of padClamps) clamp.rotation.x = padClampOpen * 0.9;
   beacon.material.emissiveIntensity = 1.2 + Math.sin(t * 6) * 0.6;
 
@@ -2164,8 +2177,14 @@ function frame() {
     chalkstronautSprite.position.set(Math.sin(t * 0.4) * swayAmp, astronautY, 0);
     const accelLean = phaseState === "live" ? -Math.max(-0.25, Math.min(0.25, flightVel * 0.5)) : 0;
     chalkstronautSprite.material.rotation = phaseState === "crashed"
-      ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1
+      ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1 * (1 - rocketUprightMix)
       : Math.sin(t * 1.1) * 0.06 * (1 - velocityNorm) + accelLean;
+    // Screen-space rocket position for the e2e stage-stack assertions.
+    window.__plankRocketScreen = () => {
+      const projected = chalkstronautSprite.position.clone().project(camera);
+      const rect = document.querySelector("canvas#fx").getBoundingClientRect();
+      return { x: rect.left + (projected.x + 1) / 2 * rect.width, y: rect.top + (1 - projected.y) / 2 * rect.height };
+    };
     thrusterLight.position.copy(chalkstronautSprite.position).y -= 1;
     // Engine light flickers faster and burns hotter as velocityNorm rises
     // -- a real rocket's exhaust gets more violent under higher thrust,
@@ -3748,10 +3767,12 @@ async function doPlaceBet(viaButton) {
     return privatePlaytestCommand("bet", {
       stake: String(Math.max(1, Math.round(Number(betAmount) * 1_000_000))),
       targetBps: String(Math.round(autoTarget * 10_000)),
-      // The visible "cash out at" field is part of this commitment. Repeat
-      // play is a separate convenience; turning repeat off must not silently
-      // strip the target the player just submitted.
-      autoLockEnabled: true,
+      // The visible "cash out at" field is part of this commitment, but
+      // whether it EXECUTES automatically is the player's explicit choice:
+      // the AUTO-LOCK chip, committed server-side with the bet. Hardcoding
+      // true here once made the toggle cosmetic while the server kept the
+      // 2.0x auto target armed -- that mismatch is the bug this fixes.
+      autoLockEnabled: privateAutoLockArmed,
     });
   }
   try {
@@ -4625,6 +4646,10 @@ let privateConclusionKey = "";
 let privateRevealTimers = [];
 let privateSettlementAcknowledgedRound = null;
 let privatePendingCommitment = null;
+// Whether the "cash out at" target EXECUTES automatically. Committed
+// server-side with every bet; amendable pre-launch only (re-commit), and
+// always re-synced from the authoritative snapshot's own seat.
+let privateAutoLockArmed = true;
 let privateGraphRound = null;
 let privateFirstSnapshot = true;
 let privateSessionCommitted = 0n;
@@ -4682,6 +4707,60 @@ async function privateJson(response) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || body.error || `Request failed (${response.status})`);
   return body;
+}
+
+function renderPrivateAutoLockChip() {
+  const chip = document.getElementById("privateAutoLockChip");
+  if (!chip) return;
+  chip.textContent = privateAutoLockArmed ? "AUTO-LOCK ✓" : "AUTO-LOCK OFF";
+  chip.classList.toggle("active", privateAutoLockArmed);
+  chip.style.borderColor = privateAutoLockArmed ? "rgba(61,220,132,.6)" : "rgba(255,91,114,.55)";
+  chip.style.color = privateAutoLockArmed ? "#8dffc0" : "#ff9bad";
+}
+
+/** Arm or disarm auto-lock. If a seat is already committed this is a REAL
+ * server amendment (a re-commit of the same stake/target with the new
+ * auto-lock state) -- allowed only while commitments are open. After launch
+ * the committed state is immutable: fail closed, keep showing server truth. */
+async function privateSetAutoLock(desired) {
+  const snapshot = privateSnapshot;
+  const mine = (rows) => rows?.find?.((row) => row.userId === snapshot?.me?.id) || null;
+  const seat = (snapshot?.room?.phase === "settled" ? mine(snapshot?.nextRoundSeats) : mine(snapshot?.seats))
+    || (privatePendingCommitment?.roomId === privateRoomId ? {
+      userId: snapshot?.me?.id, stake: privatePendingCommitment.stake,
+      requestedTargetBps: privatePendingCommitment.requestedTargetBps,
+    } : null);
+  if (seat && snapshot?.room?.phase === "running") {
+    toast("Committed is committed — auto-lock cannot change after launch. It executes at your target.", "error");
+    return false;
+  }
+  privateAutoLockArmed = desired;
+  renderPrivateAutoLockChip();
+  if (seat) {
+    try {
+      await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bet", commandId: crypto.randomUUID(),
+          stake: String(seat.stake),
+          targetBps: String(seat.requestedTargetBps || Math.round(autoTarget * 10_000)),
+          autoLockEnabled: desired,
+        }),
+      }));
+      if (privatePendingCommitment?.roomId === privateRoomId) privatePendingCommitment.autoLockEnabled = desired;
+      toast(desired
+        ? `Auto-lock re-armed at ${(Number(seat.requestedTargetBps) / 10_000).toFixed(2)}× for this commitment`
+        : "Auto-lock disarmed for this commitment — manual lock only", "success");
+      await refreshPrivatePlaytest();
+    } catch (error) {
+      privateAutoLockArmed = !desired;
+      renderPrivateAutoLockChip();
+      toast(`Auto-lock change rejected: ${error.message}`, "error");
+      return false;
+    }
+  }
+  return true;
 }
 
 async function privatePlaytestCommand(action, extra = {}) {
@@ -5131,6 +5210,14 @@ function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat 
 
 window.setInterval(() => {
   if (PLAYTEST_MODE && privateSnapshot?.room.phase === "settled") {
+    // The room version is static through the intermission, so no snapshot
+    // repaint arrives to flip the descent on -- derive it here from the
+    // same server settledAt clock (state-derived, not animation state).
+    const settledAtMs = Date.parse(privateSnapshot.room.settledAt || "");
+    if (Number.isFinite(settledAtMs) && (Date.now() + privateServerOffsetMs) - settledAtMs > 1100) {
+      targetFlightProgress = 0;
+      if (privateMotionReduced() && flightProgress > 0) { flightProgress = 0; flightVel = 0; }
+    }
     const me = privateSnapshot.members.find((member) => member.id === privateSnapshot.me.id);
     const queued = privateSnapshot.nextRoundSeats?.find((seat) => seat.userId === privateSnapshot.me.id) ||
       (privatePendingCommitment?.roomId === privateSnapshot.room.id &&
@@ -5352,6 +5439,8 @@ function paintPrivateSnapshot(snapshot) {
   }
   const prior = phaseState;
   phaseState = snapshot.room.phase === "lobby" ? "betting" : snapshot.room.phase === "running" ? "live" : "crashed";
+  // CSS hook for phase-conditional composition (mobile intermission stack).
+  document.body.dataset.privatePhase = snapshot.room.phase;
   const intermissionCountdown = $("privateIntermissionCountdown");
   if (intermissionCountdown && snapshot.room.phase !== "settled") intermissionCountdown.hidden = true;
   $("roundLabel").textContent = `ROUND ${snapshot.room.currentRound}`;
@@ -5418,6 +5507,11 @@ function paintPrivateSnapshot(snapshot) {
     sessionStorage.setItem(initialKey, privateSessionInitialBalance.toString());
     sessionStorage.setItem(startKey, String(privateSessionStart));
   }
+  // The AUTO-LOCK chip always shows the SERVER's committed state for the
+  // player's live (or queued) seat -- never optimistic client state.
+  const armedSource = authoritativeSeat || authoritativeQueuedSeat;
+  if (armedSource && typeof armedSource.autoLockEnabled === "boolean") privateAutoLockArmed = armedSource.autoLockEnabled;
+  renderPrivateAutoLockChip();
   let liveBps = snapshot.room.phase === "running" ? privateLiveClock.sample(receivedPerfMs) : 10000;
   schedulePrivateCrashTick(snapshot);
 
@@ -5442,8 +5536,17 @@ function paintPrivateSnapshot(snapshot) {
     $("substatus").textContent = "LIVE CLAIM-WEIGHT FACTOR · SERVER-CLOCK ESTIMATE";
     targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
     reconstructPrivateMultGraph(snapshot, liveBps, receivedPerfMs);
-    updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps ? "cashed" : "live-hold", {
-      sub: seat?.acceptedTargetBps ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` : `Balance ${privateCredits(me?.balance)} credits`,
+    // An armed auto target that the live multiplier has crossed HAS
+    // deterministically executed server-side (a later manual lock is
+    // rejected as AUTO_TARGET_EXECUTED) -- so the UI must show LOCKED at
+    // that instant, never a still-live lock button.
+    const autoExecuted = Boolean(seat && !seat.acceptedTargetBps && seat.autoLockEnabled &&
+      seat.requestedTargetBps && liveBps >= Number(seat.requestedTargetBps));
+    updatePrimaryButton(!seat ? "watching" : seat.acceptedTargetBps || autoExecuted ? "cashed" : "live-hold", {
+      sub: seat?.acceptedTargetBps
+        ? `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×`
+        : autoExecuted ? `Auto-locked at ${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}×`
+        : `Balance ${privateCredits(me?.balance)} credits`,
     });
     if (autoPlay) void autoPlayTick(1, snapshot.room.currentRound, Boolean(seat), Boolean(seat?.acceptedTargetBps), liveBps);
   } else {
@@ -5451,7 +5554,23 @@ function paintPrivateSnapshot(snapshot) {
     const x = crashBps / 10000;
     setMultReadout(x.toFixed(2), "crashed");
     $("substatus").textContent = "CRASHED · SETTLED FROM COMMITTED OUTCOME";
-    targetFlightProgress = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
+    // Return descent: after a short beat for the crash moment to read, the
+    // craft is LOWERED back to the pad anchor for the next launch -- the
+    // same critically-damped spring that flies it up brings it down
+    // (monotone, no overshoot, ends exactly at flightProgress 0 ==
+    // ROCKET_REST_Y, then perfectly still until ignition). State-derived
+    // from the server's settledAt: a client joining or refreshing
+    // mid-intermission computes a large sinceSettled and renders the craft
+    // already parked -- the animation is presentation only.
+    const crashAltitude = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
+    const settledAtMs = Date.parse(snapshot.room.settledAt || "");
+    const sinceSettledMs = Number.isFinite(settledAtMs) ? (Date.now() + privateServerOffsetMs) - settledAtMs : Infinity;
+    if (sinceSettledMs > 1100) {
+      targetFlightProgress = 0;
+      if (privateMotionReduced()) { flightProgress = 0; flightVel = 0; }
+    } else {
+      targetFlightProgress = crashAltitude;
+    }
     reconstructPrivateMultGraph(snapshot, crashBps, receivedPerfMs);
     if (prior !== "crashed") {
       crashedAt = performance.now();
@@ -5603,6 +5722,7 @@ async function startPrivatePlaytest() {
     body[data-playtest="true"] .toast-log{top:150px;left:18px;transform:none;align-items:flex-start;max-width:min(420px,calc(100vw - 390px))}
     #privateJourney{position:fixed;z-index:83;top:108px;left:18px;display:flex;align-items:center;width:min(720px,calc(100vw - 372px));padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(5,9,11,.78);backdrop-filter:blur(8px)}
     #privateJourney span{position:relative;flex:1;padding-top:13px;color:#69766f;text-align:center;font:800 9px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase}#privateJourney span:before{content:"";position:absolute;top:2px;left:50%;width:7px;height:7px;border-radius:50%;background:#354039;transform:translateX(-50%)}#privateJourney span:not(:last-child):after{content:"";position:absolute;left:calc(50% + 7px);right:calc(-50% + 7px);top:5px;height:1px;background:#354039}#privateJourney span.complete{color:#8ea198}#privateJourney span.complete:before,#privateJourney span.complete:not(:last-child):after{background:#3ddc84}#privateJourney span.active{color:#ffc857}#privateJourney span.active:before{background:#ffc857;box-shadow:0 0 12px rgba(255,200,87,.7)}
+    #privateJourney span b{font:inherit;letter-spacing:inherit}#privateJourney span b.js{display:none}
     #privateTablePanel{position:fixed;z-index:84;right:14px;top:58px;width:320px;max-height:calc(100vh - 76px);overflow:auto;padding:14px;border:1px solid rgba(255,200,87,.28);border-radius:14px;background:rgba(5,9,9,.92);backdrop-filter:blur(14px);box-shadow:0 18px 60px rgba(0,0,0,.45);color:#f4ead7;font-family:inherit}
     #privateTableToggle{display:none;width:100%;min-height:44px;border:0;background:transparent;color:#ffc857;font:900 11px var(--font-mono);letter-spacing:.08em;text-align:left;cursor:pointer}
     .private-panel-kicker{font:800 10px/1.2 var(--font-mono);letter-spacing:.14em;color:#ffc857;text-transform:uppercase}.private-panel-title{margin:5px 0 2px;font:400 22px/1 var(--font-display)}
@@ -5613,7 +5733,7 @@ async function startPrivatePlaytest() {
     .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions [hidden]{display:none!important}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
     .result-card.private-result{width:min(860px,calc(100% - 40px));padding:22px 26px;background:rgba(5,9,12,.96);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:680px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
     .private-result-world{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
-    #privateIntermissionCountdown{position:fixed;z-index:44;left:50%;top:clamp(155px,20vh,220px);transform:translateX(-50%);display:grid;grid-template-columns:auto auto;grid-template-areas:"label number" "unit number";align-items:center;gap:0 14px;min-width:240px;padding:12px 18px;border:1px solid rgba(255,200,87,.65);border-radius:16px;background:rgba(4,8,11,.9);box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 30px rgba(255,200,87,.1);backdrop-filter:blur(10px);pointer-events:none;text-align:right}#privateIntermissionCountdown[hidden]{display:none}#privateIntermissionCountdown small{grid-area:label;color:#ffc857;font:900 10px var(--font-mono);letter-spacing:.16em}#privateIntermissionCountdown strong{grid-area:number;color:#fff2cf;font:400 clamp(54px,7vw,92px)/.8 var(--font-display);font-variant-numeric:tabular-nums}#privateIntermissionCountdown span{grid-area:unit;color:#8fa19a;font:800 9px var(--font-mono);letter-spacing:.18em}#privateIntermissionCountdown.urgent{border-color:#ff5b72;box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 42px rgba(255,77,106,.3)}#privateIntermissionCountdown.urgent strong{color:#ff5b72}
+    #privateIntermissionCountdown{position:absolute;z-index:44;left:50%;top:clamp(10px,6vh,48px);transform:translateX(-50%);display:grid;grid-template-columns:auto auto;grid-template-areas:"label number" "unit number";align-items:center;gap:0 14px;min-width:240px;padding:12px 18px;border:1px solid rgba(255,200,87,.65);border-radius:16px;background:rgba(4,8,11,.9);box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 30px rgba(255,200,87,.1);backdrop-filter:blur(10px);pointer-events:none;text-align:right}#privateIntermissionCountdown[hidden]{display:none}#privateIntermissionCountdown small{grid-area:label;color:#ffc857;font:900 10px var(--font-mono);letter-spacing:.16em}#privateIntermissionCountdown strong{grid-area:number;color:#fff2cf;font:400 clamp(54px,7vw,92px)/.8 var(--font-display);font-variant-numeric:tabular-nums}#privateIntermissionCountdown span{grid-area:unit;color:#8fa19a;font:800 9px var(--font-mono);letter-spacing:.18em}#privateIntermissionCountdown.urgent{border-color:#ff5b72;box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 42px rgba(255,77,106,.3)}#privateIntermissionCountdown.urgent strong{color:#ff5b72}
     .private-jackpot-fireworks{position:fixed;inset:0;z-index:110;overflow:hidden;pointer-events:none;background:radial-gradient(circle at 50% 60%,rgba(255,200,87,.12),transparent 42%)}.private-jackpot-fireworks i{position:absolute;left:var(--x);top:var(--y);width:7px;height:7px;border-radius:50%;background:var(--c);box-shadow:0 0 12px var(--c),0 0 24px var(--c);opacity:0;animation:private-firework 1.65s cubic-bezier(.16,.7,.2,1) var(--delay) both}@keyframes private-firework{0%{opacity:0;transform:translate(0,0) scale(.2)}12%{opacity:1}72%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.05)}}
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
     .private-powerball{position:relative;min-height:360px;margin:18px auto 0;overflow:hidden;border:1px solid rgba(233,180,63,.5);border-radius:12px;background:radial-gradient(circle at 25% 46%,rgba(174,125,255,.23),transparent 34%),linear-gradient(125deg,#0b0710,#1b120a 58%,#0d1f16);text-align:left;transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
@@ -5631,7 +5751,8 @@ async function startPrivatePlaytest() {
       body[data-playtest="true"]{padding-bottom:calc(76px + env(safe-area-inset-bottom));overflow-x:hidden;overflow-y:auto;height:auto}
       body[data-playtest="true"] #app{height:auto;min-height:100dvh}
       body[data-playtest="true"] .topbar,body[data-playtest="true"] #privateHud,body[data-playtest="true"] #privateJourney,body[data-playtest="true"] .history-ribbon,body[data-playtest="true"] .deck{flex:0 0 auto}
-      body[data-playtest="true"] .topbar{min-height:44px;padding:6px max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));flex-wrap:wrap;gap:5px 8px}
+      body[data-playtest="true"] .topbar{min-height:44px;padding:calc(6px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));flex-wrap:wrap;gap:5px 8px}
+      html{scroll-padding-top:calc(6px + env(safe-area-inset-top))}
       body[data-playtest="true"] .topbar .brand{flex:0 1 auto;min-width:0}body[data-playtest="true"] .topbar .brand .mark{font-size:15px}body[data-playtest="true"] .topbar .brand .round{white-space:nowrap}
       body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat):not(.rank-stat){display:none}body[data-playtest="true"] .topbar .vault-stat i,body[data-playtest="true"] .topbar .pb-stat i{display:none}body[data-playtest="true"] .topbar .vault-stat,body[data-playtest="true"] .topbar .pb-stat,body[data-playtest="true"] .topbar .rank-stat{display:inline-flex;min-width:0;max-width:100%;overflow:hidden;padding:3px 7px;font-size:10px;white-space:nowrap}body[data-playtest="true"] .topbar .gear{flex:0 0 38px;width:38px;height:38px}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
       body[data-playtest="true"] .toast-log{top:auto;right:max(8px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));max-width:none;align-items:stretch}
@@ -5639,16 +5760,33 @@ async function startPrivatePlaytest() {
       #privateHud select,#privateHud button,#privateHud a{min-height:48px;font-size:12px}
       #privateHudStatus{padding:0 6px;font-size:10px}
       #privateJourney{position:relative;z-index:35;top:auto;left:auto;width:auto;margin:6px max(8px,env(safe-area-inset-right)) 0 max(8px,env(safe-area-inset-left));padding:7px 3px;overflow-x:auto;scroll-snap-type:x proximity}
-      #privateJourney span{min-width:68px;scroll-snap-align:center;font-size:7px}
+      /* All six steps FIT on one row at phone widths: compressed labels,
+         no minimum width, and the container still scrolls as a fallback. */
+      #privateJourney{padding:7px 6px}
+      #privateJourney span{min-width:0;scroll-snap-align:center;font-size:7px}
+      #privateJourney span b.jl{display:none}#privateJourney span b.js{display:inline}
+      /* The AUTO-LOCK chip joins the repeat/cash-out row: wrap rather than
+         overflow the 320px viewport. */
+      #autoRow{flex-wrap:wrap;row-gap:6px}
       #privateTablePanel{position:fixed;z-index:88;top:auto;right:max(8px,env(safe-area-inset-right));bottom:max(8px,env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));width:auto;margin:0;padding:0 12px 12px;max-height:min(62dvh,560px);overflow:auto;overscroll-behavior:contain;transform:translateY(calc(100% - 52px));transition:transform .24s ease;box-shadow:0 -18px 50px rgba(0,0,0,.68)}
       #privateTablePanel.mobile-open{transform:translateY(0)}#privateTableToggle{position:sticky;z-index:3;top:0;display:block;background:linear-gradient(#07100c 76%,rgba(7,16,12,.88))}#privateTablePanel>.private-panel-kicker{margin-top:2px}#privateTablePanel:not(.mobile-open)>:not(#privateTableToggle){visibility:hidden;pointer-events:none}#privateTablePanel.mobile-open>:not(#privateTableToggle){visibility:visible}
       .private-code button,.private-host-actions button,.private-host-actions a{min-height:48px;touch-action:manipulation}
       .private-panel-title{font-size:20px}.private-host-actions{grid-template-columns:1fr 1fr}
-      body[data-playtest="true"] .deck{padding:0 max(8px,env(safe-area-inset-right)) calc(84px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+      body[data-playtest="true"] .deck{padding:0 max(8px,env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
       .stage{min-height:40dvh}.controls{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
       body[data-playtest="true"]:has(.private-result.show) #privateHud,body[data-playtest="true"]:has(.private-result.show) #privateJourney,body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{visibility:hidden;pointer-events:none}
       .result-card.private-result,.result-card.private-result.show{position:fixed;z-index:95;inset:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));width:auto;max-height:none;margin:0;padding:12px;overflow:auto;overscroll-behavior:contain;border-radius:14px;transform:none}
-      #privateIntermissionCountdown{z-index:70;top:clamp(230px,34dvh,330px);bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
+      /* Deliberate intermission stage stack (settled phase, phones):
+         countdown card top-center of the stage, auto-launch caption BELOW
+         the card, previous-round curve dimmed to a background trace, the
+         red crashed-multiplier readout removed (its number already lives in
+         the reveal card, scoreboard and history ribbon), and the rocket
+         untouched at its pad rest pose at the stage bottom. */
+      #privateIntermissionCountdown{z-index:70;top:10px;bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
+      body[data-playtest="true"][data-private-phase="settled"] .center-readout{justify-content:flex-start;padding-top:96px}
+      body[data-playtest="true"][data-private-phase="settled"] .center-readout .mult{display:none}
+      body[data-playtest="true"][data-private-phase="settled"] .center-readout .substatus{max-width:calc(100vw - 32px);padding:6px 10px;border-radius:8px;background:rgba(4,8,11,.55)}
+      body[data-playtest="true"][data-private-phase="settled"] .mult-graph{opacity:.3}
       .private-result .result-mult{font-size:clamp(30px,11vw,46px);line-height:.98}.private-result-balance{font-size:12px}
       .private-powerball{min-height:0;margin-top:12px;display:flex;flex-direction:column}
       .private-powerball-canvas{position:relative;left:auto;top:auto;width:100%;height:clamp(190px,32dvh,270px);min-height:190px;order:2}
@@ -5732,9 +5870,24 @@ async function startPrivatePlaytest() {
   // natural single-column flow (topbar -> HUD -> journey -> stage -> deck).
   const topbarAnchor = document.querySelector(".topbar");
   if (topbarAnchor) topbarAnchor.after(hud); else document.body.appendChild(hud);
-  const journey = document.createElement("nav"); journey.id = "privateJourney"; journey.setAttribute("aria-label", "Round journey"); journey.innerHTML = '<span data-stage="gather">Gather & commit</span><span data-stage="launch">Launch</span><span data-stage="fly">Fly & lock</span><span data-stage="settle">Settle</span><span data-stage="powerboard">Powerball</span><span data-stage="return">Return</span>'; hud.after(journey);
-  const countdown = document.createElement("div"); countdown.id = "privateIntermissionCountdown"; countdown.hidden = true; countdown.setAttribute("role", "timer"); countdown.setAttribute("aria-live", "polite"); document.body.appendChild(countdown);
+  const journey = document.createElement("nav"); journey.id = "privateJourney"; journey.setAttribute("aria-label", "Round journey"); journey.innerHTML = '<span data-stage="gather"><b class="jl">Gather & commit</b><b class="js">Commit</b></span><span data-stage="launch"><b class="jl">Launch</b><b class="js">Launch</b></span><span data-stage="fly"><b class="jl">Fly & lock</b><b class="js">Fly</b></span><span data-stage="settle"><b class="jl">Settle</b><b class="js">Settle</b></span><span data-stage="powerboard"><b class="jl">Powerball</b><b class="js">Power</b></span><span data-stage="return"><b class="jl">Return</b><b class="js">Return</b></span>'; hud.after(journey);
+  // The intermission countdown lives INSIDE the stage so its position is
+  // always relative to the scene it narrates: top-center of the stage,
+  // never straddling the rocket's pad rest pose at the stage bottom.
+  const countdown = document.createElement("div"); countdown.id = "privateIntermissionCountdown"; countdown.hidden = true; countdown.setAttribute("role", "timer"); countdown.setAttribute("aria-live", "polite");
+  const stageAnchor = document.querySelector(".stage");
+  if (stageAnchor) stageAnchor.appendChild(countdown); else document.body.appendChild(countdown);
   const reconnect = document.createElement("div"); reconnect.id = "privateReconnect"; reconnect.setAttribute("role", "status"); document.body.appendChild(reconnect);
+  // AUTO-LOCK is a real, committed choice -- give it a real control. It is
+  // part of the bet commitment; the chip re-commits pre-launch and refuses
+  // (honestly) after launch. Server snapshot truth re-syncs it every paint.
+  const autoLockChip = document.createElement("button");
+  autoLockChip.id = "privateAutoLockChip"; autoLockChip.type = "button"; autoLockChip.className = "chip";
+  autoLockChip.title = "Auto-lock executes your cash-out target automatically. Disarm BEFORE launch to lock manually only; after launch the commitment is immutable.";
+  autoLockChip.onclick = () => { void privateSetAutoLock(!privateAutoLockArmed); };
+  const autoRowAnchor = document.getElementById("autoRow");
+  if (autoRowAnchor) autoRowAnchor.appendChild(autoLockChip);
+  renderPrivateAutoLockChip();
   const panel = document.createElement("aside"); panel.id = "privateTablePanel"; panel.setAttribute("aria-label", "Private table and friends");
   const panelToggle = document.createElement("button"); panelToggle.id = "privateTableToggle"; panelToggle.type = "button"; panelToggle.setAttribute("aria-expanded", "false"); panelToggle.textContent = "TABLE · TAP TO OPEN"; panelToggle.onclick = () => { const open = panel.classList.toggle("mobile-open"); panelToggle.setAttribute("aria-expanded", String(open)); panelToggle.textContent = `TABLE · ${privateSnapshot?.members?.length || 0} PLAYERS · TAP TO ${open ? "CLOSE" : "OPEN"}`; };
   const kicker = document.createElement("div"); kicker.className = "private-panel-kicker"; kicker.textContent = "Private friend table";

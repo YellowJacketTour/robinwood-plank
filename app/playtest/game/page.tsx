@@ -8,7 +8,12 @@ export default async function PlaytestGamePage({ searchParams }: { searchParams:
   const [identity, query] = await Promise.all([currentPlaytestIdentity(), searchParams]);
   if (!identity) redirect("/playtest");
   const room = typeof query.room === "string" && /^[0-9a-f-]{36}$/i.test(query.room) ? query.room : "";
-  return <main id="main-content" className="fixed inset-0 bg-black">
+  // viewportFit "cover" (app/layout.tsx) extends this fixed shell under the
+  // iPhone status bar / home indicator, and env() safe-area values do NOT
+  // reliably propagate into the iframe document — so the shell itself keeps
+  // the game out of the unsafe strips. env() is 0 everywhere else.
+  return <main id="main-content" className="fixed inset-0 bg-black"
+    style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
     <iframe
       src={`/arcade/crash.html?playtest=1${room ? `&room=${encodeURIComponent(room)}` : ""}`}
       title="PlankCrash private multiplayer table"

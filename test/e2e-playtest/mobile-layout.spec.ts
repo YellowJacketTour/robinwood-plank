@@ -67,6 +67,7 @@ type Geometry = {
   rects: Record<string, { left: number; top: number; right: number; bottom: number; width: number; height: number } | null>;
   bottomRects: Record<string, { left: number; top: number; right: number; bottom: number; width: number; height: number } | null>;
   offenders: Array<{ selector: string; left: number; right: number; width: number }>;
+  journeyFit: { scrollWidth: number; clientWidth: number } | null;
 };
 
 /** Selectors whose geometry we track inside the game iframe. */
@@ -75,15 +76,24 @@ const TRACKED: Record<string, string> = {
   payoutNote: ".payout-note",
   quote: "#stakeValueQuote",
   stakeRow: "#stakeRow",
+  autoRow: "#autoRow",
   primaryBtn: "#actionBtn, .primary-btn",
   tableToggle: "#privateTableToggle",
   tablePanel: "#privateTablePanel:not(.mobile-open)",
   hud: "#privateHud",
   substatus: "#substatus",
+  topbar: ".topbar",
+  stage: ".stage",
+  countdown: "#privateIntermissionCountdown",
+  multReadout: "#multReadout",
 };
 
+/** Elements that are deliberately pointer-events:none / decorative but whose
+ *  GEOMETRY still matters (stage stack collisions, clipped readouts). */
+const GEOMETRY_ONLY = new Set(["substatus", "topbar", "stage", "countdown", "multReadout"]);
+
 async function measure(game: FrameLocator): Promise<Geometry> {
-  return game.locator("body").evaluate((body, tracked) => {
+  return game.locator("body").evaluate((body, { tracked, geometryOnly }) => {
     const doc = body.ownerDocument!;
     const de = doc.documentElement;
     const win = doc.defaultView!;
@@ -103,21 +113,26 @@ async function measure(game: FrameLocator): Promise<Geometry> {
     const collect = () => {
       const out: Geometry["rects"] = {};
       for (const [name, selector] of Object.entries(tracked)) {
-        const el = Array.from(doc.querySelectorAll(selector)).find((e) => visible(e) && interactive(e)) || null;
+        const el = Array.from(doc.querySelectorAll(selector)).find((e) => visible(e) && (geometryOnly.includes(name) || interactive(e))) || null;
         if (!el) { out[name] = null; continue; }
         const r = el.getBoundingClientRect();
         out[name] = { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
       }
       return out;
     };
+    // The first-content-row gate is judged at the very top of the page: the
+    // title row must be fully visible before any scrolling.
+    const scroller = doc.scrollingElement || de;
+    const prevScroll = scroller.scrollTop;
+    scroller.scrollTop = 0;
     const rects = collect();
     // Occlusion by fixed bottom chrome is judged at maximum scroll: content
     // scrolling beneath a bottom sheet is normal; being unreachable is not.
-    const scroller = doc.scrollingElement || de;
-    const prevScroll = scroller.scrollTop;
     scroller.scrollTop = scroller.scrollHeight;
     const bottomRects = collect();
     scroller.scrollTop = prevScroll;
+    const journeyEl = doc.querySelector("#privateJourney");
+    const journeyFit = journeyEl ? { scrollWidth: journeyEl.scrollWidth, clientWidth: journeyEl.clientWidth } : null;
     // Any visible element extending beyond the viewport horizontally.
     const offenders: Geometry["offenders"] = [];
     const vw = de.clientWidth;
@@ -144,12 +159,13 @@ async function measure(game: FrameLocator): Promise<Geometry> {
       scrollWidth: de.scrollWidth,
       clientWidth: de.clientWidth,
       bodyScrollWidth: body.scrollWidth,
-      mojibake: (body.innerText || "").includes("Â"),
+      mojibake: ((body as HTMLElement).innerText || "").includes("Â"),
       rects,
       bottomRects,
       offenders,
+      journeyFit,
     };
-  }, TRACKED);
+  }, { tracked: TRACKED, geometryOnly: Array.from(GEOMETRY_ONLY) });
 }
 
 function overlapArea(a: NonNullable<Geometry["rects"][string]>, b: NonNullable<Geometry["rects"][string]>): number {
@@ -158,8 +174,37 @@ function overlapArea(a: NonNullable<Geometry["rects"][string]>, b: NonNullable<G
   return w > 0 && h > 0 ? w * h : 0;
 }
 
-function assertGeometry(tag: string, width: number, g: Geometry, soft = false) {
+function assertGeometry(tag: string, width: number, g: Geometry, soft = false, phase = "") {
   const ex = soft ? expect.soft : expect;
+  // R1 gate: the first content row (PLANKCRASH · ROUND title bar) must be
+  // fully visible at the very top of the page — never clipped above y=0.
+  const tb = g.rects.topbar;
+  if (tb) ex(tb.top, `${tag}: topbar clipped at page top (top=${tb.top})`).toBeGreaterThanOrEqual(-0.5);
+  // R2 gate: at phone widths every phase-tracker step fits without needing
+  // an inner scroll (compressed labels), so RETURN can never be cut off.
+  if (width <= 700 && g.journeyFit) {
+    ex(g.journeyFit.scrollWidth, `${tag}: phase tracker overflows its container (${JSON.stringify(g.journeyFit)})`)
+      .toBeLessThanOrEqual(g.journeyFit.clientWidth + 1);
+  }
+  // R3 gates: deliberate intermission stage stack on phones.
+  if (phase.includes("intermission") && width <= 700) {
+    const stage = g.rects.stage; const card = g.rects.countdown; const caption = g.rects.substatus;
+    ex(card, `${tag}: intermission countdown card missing`).not.toBeNull();
+    ex(g.rects.multReadout, `${tag}: crashed multiplier readout still rendered mid-stage during intermission`).toBeNull();
+    if (stage && card && caption) {
+      ex(overlapArea(card, caption), `${tag}: countdown card overlaps auto-launch caption`).toBeLessThanOrEqual(1);
+      ex(caption.top, `${tag}: caption not BELOW the countdown card`).toBeGreaterThanOrEqual(card.bottom - 1);
+      for (const [name, r] of [["countdown card", card], ["caption", caption]] as const) {
+        ex(r.top, `${tag}: ${name} clipped above stage`).toBeGreaterThanOrEqual(stage.top - 1);
+        ex(r.left, `${tag}: ${name} clipped left of stage`).toBeGreaterThanOrEqual(stage.left - 1);
+        ex(r.right, `${tag}: ${name} clipped right of stage`).toBeLessThanOrEqual(stage.right + 1);
+        // Rocket rest/fall zone is the lower half of the stage: the card and
+        // caption must stay in the top half so text never straddles the sprite.
+        ex(r.bottom, `${tag}: ${name} intrudes into the rocket's half of the stage (${JSON.stringify(r)} vs stage ${JSON.stringify(stage)})`)
+          .toBeLessThanOrEqual(stage.top + stage.height * 0.58);
+      }
+    }
+  }
   ex(g.scrollWidth, `${tag}: horizontal page overflow (scrollWidth ${g.scrollWidth} vs clientWidth ${g.clientWidth}); offenders=${JSON.stringify(g.offenders)}`)
     .toBeLessThanOrEqual(g.clientWidth + 1);
   ex(g.mojibake, `${tag}: mojibake "Â" present in rendered text`).toBe(false);
@@ -179,8 +224,8 @@ function assertGeometry(tag: string, width: number, g: Geometry, soft = false) {
     ex(overlapArea(ra, rb), `${tag}: ${a} overlaps ${b} (${JSON.stringify(ra)} vs ${JSON.stringify(rb)})`).toBeLessThanOrEqual(4);
   }
   // At maximum scroll the fixed bottom sheet must not occlude the action
-  // button or the ETH/USD quote line.
-  for (const name of ["primaryBtn", "quote"] as const) {
+  // button, the REPEAT/cash-out row, the stake chips or the ETH/USD quote.
+  for (const name of ["primaryBtn", "quote", "stakeRow", "autoRow"] as const) {
     const panel = g.bottomRects.tablePanel; const r = g.bottomRects[name];
     if (!panel || !r) continue;
     ex(overlapArea(panel, r), `${tag}: table sheet occludes ${name} at max scroll (${JSON.stringify(panel)} vs ${JSON.stringify(r)})`).toBeLessThanOrEqual(4);
@@ -253,7 +298,20 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
     for (const v of viewers) {
       await v.page.screenshot({ path: testInfo.outputPath(`${phase}-${v.label}.png`), fullPage: false });
       const g = await measure(v.game);
-      assertGeometry(`${phase}@${v.label}`, v.width, g, true);
+      assertGeometry(`${phase}@${v.label}`, v.width, g, true, phase);
+      if (v.label === "390") {
+        // Safari with its chrome expanded: same 390pt width, much shorter
+        // visual viewport. Same page and session, temporarily resized -- an
+        // extra browser context here starves the dev server's long-poll
+        // budget and stalls the authoritative auto-tick.
+        await v.page.setViewportSize({ width: 390, height: 660 });
+        await v.page.waitForTimeout(400);
+        await v.page.screenshot({ path: testInfo.outputPath(`${phase}-390short.png`), fullPage: false });
+        const gs = await measure(v.game);
+        assertGeometry(`${phase}@390short`, v.width, gs, true, phase);
+        await v.page.setViewportSize({ width: 390, height: 844 });
+        await v.page.waitForTimeout(250);
+      }
     }
   };
 
@@ -270,6 +328,19 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
   await viewers[0].page.waitForTimeout(1_200);
   await capture("2-committed");
 
+  // ── R7 UI truth: AUTO-LOCK is a committed, amendable-only-pre-launch choice. ──
+  // Every bet above committed autoLockEnabled true; the chip must show it armed,
+  // and disarming BEFORE launch must be a real server amendment.
+  const disarmer = viewers.find((v) => v.label === "320")!;
+  await expect.soft(disarmer.game.locator("#privateAutoLockChip")).toHaveText(/AUTO-LOCK ✓/, { timeout: 10_000 });
+  await disarmer.game.locator("#privateAutoLockChip").click();
+  await disarmer.page.waitForTimeout(1_500);
+  const disarmedState = await api(disarmer.page, "GET", `/api/playtest/rooms/${roomId}`);
+  const disarmedSeat = (disarmedState.json.seats as Array<Json> | undefined)?.find(
+    (seat) => seat.userId === (disarmedState.json.me as Json | undefined)?.id);
+  expect.soft(disarmedSeat?.autoLockEnabled, "pre-launch disarm must clear the committed auto target server-side").toBe(false);
+  await expect.soft(disarmer.game.locator("#privateAutoLockChip")).toHaveText(/AUTO-LOCK OFF/);
+
   // ── Phase 3: flight. ──
   const start = await api(host, "POST", `/api/playtest/rooms/${roomId}/commands`, { action: "start", commandId: uuid() });
   expect(start.status, JSON.stringify(start.json)).toBe(200);
@@ -277,9 +348,49 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
   await viewers[0].page.waitForTimeout(1_500);
   await capture("3-flight");
 
+  // R7 fail-closed: after launch the auto-lock commitment is immutable. A
+  // disarm attempt mid-flight must be refused and the armed truth kept.
+  const flier = viewers.find((v) => v.label === "360")!;
+  const midFlight = await api(flier.page, "GET", `/api/playtest/rooms/${roomId}`);
+  if (String((midFlight.json.room as Json | undefined)?.phase) === "running") {
+    await flier.game.locator("#privateAutoLockChip").click().catch(() => {});
+    await flier.page.waitForTimeout(800);
+    const after = await api(flier.page, "GET", `/api/playtest/rooms/${roomId}`);
+    const seatAfter = (after.json.seats as Array<Json> | undefined)?.find(
+      (seat) => seat.userId === (after.json.me as Json | undefined)?.id);
+    if (String((after.json.room as Json | undefined)?.phase) === "running") {
+      expect.soft(seatAfter?.autoLockEnabled, "mid-flight disarm must be refused; server stays ARMED").toBe(true);
+      await expect.soft(flier.game.locator("#privateAutoLockChip")).toHaveText(/AUTO-LOCK ✓/);
+    }
+  }
+
+  // ── R6: post-crash return descent -- sampled from the moment of settlement. ──
+  const descentViewer = viewers.find((v) => v.label === "390")!;
+  const readFlight = () => descentViewer.game.locator("body").evaluate(
+    () => (window as unknown as { __plankFlight: { p: number; t: number } }).__plankFlight);
+
   // ── Phase 4: settled — crash reveal card / powerball ceremony. ──
   await waitForPhase(host, roomId, "settled", 120_000);
-  await viewers[0].page.waitForTimeout(2_000);
+  // R6 altitude law: from settlement the craft is LOWERED to the pad --
+  // monotone non-increasing samples until they equal the pad anchor
+  // (flightProgress 0 == ROCKET_REST_Y), then constant. Mid-descent
+  // screenshot taken while the samples are still moving.
+  const altitudes: number[] = [];
+  for (let i = 0; i < 18; i++) {
+    const sample = await readFlight();
+    altitudes.push(sample.p);
+    if (i === 4) await descentViewer.page.screenshot({ path: testInfo.outputPath("6-descent-mid-390.png"), fullPage: false });
+    await descentViewer.page.waitForTimeout(300);
+  }
+  const descentStart = altitudes.findIndex((p, i) => i > 0 && p < altitudes[i - 1] - 1e-4);
+  for (let i = Math.max(1, descentStart); i < altitudes.length; i++) {
+    expect.soft(altitudes[i], `descent not monotone at sample ${i}: ${altitudes.join(", ")}`)
+      .toBeLessThanOrEqual(altitudes[i - 1] + 0.004);
+  }
+  expect.soft(altitudes[altitudes.length - 1], `craft not parked at pad anchor: ${altitudes.join(", ")}`).toBe(0);
+  expect.soft(altitudes[altitudes.length - 2], "craft must be constant once landed").toBe(0);
+  await descentViewer.page.screenshot({ path: testInfo.outputPath("6-descent-parked-390.png"), fullPage: false });
+  await viewers[0].page.waitForTimeout(500);
   await capture("4-settled");
 
   // ── Phase 5: skip the reveal to the intermission/return state. ──
@@ -289,6 +400,21 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
   }
   await viewers[0].page.waitForTimeout(2_500);
   await capture("5-intermission");
+
+  // R6 + R3: the landed rocket (projected to screen space) must sit clear
+  // BELOW the countdown card and the auto-launch caption.
+  const parked = await readFlight();
+  expect.soft(parked.p, "rocket must be parked (flightProgress 0) during intermission").toBe(0);
+  expect.soft(parked.t, "descent target must be the pad anchor during intermission").toBe(0);
+  const rocketScreen = await descentViewer.game.locator("body").evaluate(() => {
+    const w = window as unknown as { __plankRocketScreen?: () => { x: number; y: number } };
+    return w.__plankRocketScreen ? w.__plankRocketScreen() : { x: 0, y: 1e9 };
+  });
+  const finalGeom = await measure(descentViewer.game);
+  const cardRect = finalGeom.rects.countdown;
+  const captionRect = finalGeom.rects.substatus;
+  if (cardRect) expect.soft(rocketScreen.y, `parked rocket (${JSON.stringify(rocketScreen)}) overlaps countdown card ${JSON.stringify(cardRect)}`).toBeGreaterThan(cardRect.bottom + 8);
+  if (captionRect) expect.soft(rocketScreen.y, `parked rocket (${JSON.stringify(rocketScreen)}) overlaps caption ${JSON.stringify(captionRect)}`).toBeGreaterThan(captionRect.bottom + 8);
 
   for (const v of viewers) await v.close();
   await hostContext.close();
