@@ -104,3 +104,40 @@ test("the public playtest defaults to the proven ccs-2l rule", () => {
 test("settleParimutuel refuses the two-purse rule", () => {
   assert.throws(() => settleParimutuel("ccs-2l", 9_550n, 20_000n, SEATS), RangeError);
 });
+
+// ── RATIFICATION 2026-09-02: per-seat payout decomposition telemetry ──
+// Every settled round's record must let the owner reconstruct floor part,
+// performance part, and house bonus per seat for the adversarial-multiplayer
+// evidence phase. The decomposition is additive reporting: it must sum
+// exactly, wei-for-wei, and never perturb the payout arithmetic.
+test("ccs-2l allocations expose an exact floor/performance/house decomposition", () => {
+  const settled = settleCcs2L(9_550n, 500n, 20_000n, SEATS, 100_000n, DEFAULT_CCS2L_PARAMS);
+  let floorSum = 0n;
+  let perfSum = 0n;
+  for (const allocation of settled.allocations) {
+    assert.equal(allocation.floorPayout + allocation.performancePayout, allocation.playerPayout);
+    assert.equal(allocation.playerPayout + allocation.houseBonus, allocation.payout);
+    if (!allocation.survived) {
+      assert.equal(allocation.floorPayout, 0n);
+      assert.equal(allocation.performancePayout, 0n);
+      assert.equal(allocation.houseBonus, 0n);
+    }
+    floorSum += allocation.floorPayout;
+    perfSum += allocation.performancePayout;
+  }
+  assert.equal(floorSum + perfSum, settled.totalPlayerPaid);
+  // Conservation identities are untouched by the added telemetry fields.
+  assert.equal(settled.totalPlayerPaid, 9_550n);
+  assert.equal(settled.totalBonus + settled.houseReturned, 500n);
+});
+
+test("all-bust ccs-2l rounds decompose to zero for every seat", () => {
+  const bustSeats = SEATS.map((seat) => ({ ...seat, targetBps: 1_000_000n }));
+  const settled = settleCcs2L(9_550n, 500n, 20_000n, bustSeats, 100_000n, DEFAULT_CCS2L_PARAMS);
+  assert.equal(settled.allBust, true);
+  for (const allocation of settled.allocations) {
+    assert.equal(allocation.floorPayout, 0n);
+    assert.equal(allocation.performancePayout, 0n);
+    assert.equal(allocation.payout, 0n);
+  }
+});

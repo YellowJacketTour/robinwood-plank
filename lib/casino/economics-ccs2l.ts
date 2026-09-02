@@ -70,6 +70,16 @@ export interface Ccs2LAllocation {
   stake: bigint;
   targetBps: bigint;
   playerPayout: bigint;
+  /**
+   * Telemetry decomposition of playerPayout (floorPayout + performancePayout
+   * === playerPayout, exactly). In "normal" mode floorPayout is the ratified
+   * f·s_i/BPS survivor floor and performancePayout is the hazard-weighted
+   * premium share plus any conservation dust; in "floor-degenerate" mode the
+   * whole prorated payment is floor-derived. Purely additive reporting —
+   * payout arithmetic is untouched.
+   */
+  floorPayout: bigint;
+  performancePayout: bigint;
   houseBonus: bigint;
   payout: bigint;
   net: bigint;
@@ -158,6 +168,7 @@ export function settleCcs2L(
   const allBust = survivorStake === 0n;
 
   let playerPaid = seats.map(() => 0n);
+  let floorPaid = seats.map(() => 0n);
   const bonuses = seats.map(() => 0n);
   let mode: Ccs2LSettlement["meta"]["mode"] = "no-survivor";
   let lambda = 0n;
@@ -178,12 +189,14 @@ export function settleCcs2L(
     if (sumFloors > playerDistributable) {
       mode = "floor-degenerate";
       playerPaid = floors.map((fl) => (fl > 0n ? (playerDistributable * fl) / sumFloors : 0n));
+      floorPaid = playerPaid.slice();
       weightsForDust = floors;
     } else {
       mode = "normal";
       const premium = playerDistributable - sumFloors;
       lambda = W > 0n ? (premium * CCS2L_LAMBDA_DENOM) / W : 0n;
       playerPaid = seats.map((s, i) => (survived[i] ? floors[i] + (premium * ws[i]) / W : 0n));
+      floorPaid = floors.slice();
       weightsForDust = ws;
     }
     const paidSum = playerPaid.reduce((a, b) => a + b, 0n);
@@ -223,6 +236,8 @@ export function settleCcs2L(
     stake: s.stake,
     targetBps: s.targetBps,
     playerPayout: playerPaid[i],
+    floorPayout: floorPaid[i],
+    performancePayout: playerPaid[i] - floorPaid[i],
     houseBonus: bonuses[i],
     payout: playerPaid[i] + bonuses[i],
     net: playerPaid[i] + bonuses[i] - s.stake,
