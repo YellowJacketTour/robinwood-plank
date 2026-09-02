@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  deriveRoundClock, multiplierBpsAtMs,
+  deriveRoundClock, msToReachMultiplierBps, multiplierBpsAtMs,
 } from "../../lib/playtest-live-shared";
 import {
   bettingRoundId, crashDurationMs, effectiveSettlementTarget, multiplierAt,
@@ -214,4 +214,48 @@ test("locked commitment presentation: accepted lock equals the live law at the a
   assert.deepEqual(room.lock("alice", "la", at + 100), { duplicate: true });
   // A second manual lock for the same seat/round fails closed.
   assert.throws(() => room.lock("alice", "la2", at + 200), /NO_ACTIVE_BET/);
+});
+
+// ── Auto-lock amendment contract (the "turned auto-lock off but 2.0x still
+// fired" bug). The committed auto target is part of the bet; disabling it is
+// only possible while commitments are open, as a REAL re-commit -- and after
+// launch the commitment is immutable and executes exactly as committed. ──
+
+test("pre-launch auto-lock disarm re-commits the seat; no auto target fires; a later manual lock stands", () => {
+  const room = new FakeRoom();
+  let now = 3_000_000;
+  room.bet("owner", "o1", 10_000n, 20_000n, true, now); // auto 2.0x armed
+  room.bet("bob", "b1", 10_000n, 20_000n, false, now);
+  // The disarm: same seat, same stake/target, autoLockEnabled false.
+  room.bet("owner", "o2", 10_000n, 20_000n, false, now + 10);
+  const seat = room.seats.get("1")!.get("owner")!;
+  assert.equal(seat.autoLockEnabled, false, "server state must show the auto target disarmed");
+  room.launch("l1", now + 100, false, 40_000n); // crashes at 4.0x
+  // The flight passes 2.0x: nothing auto-fires (the seat is disarmed) and a
+  // LATER manual lock at ~2.5x is accepted -- exactly what the owner tried.
+  const at25 = room.startedAtMs! + msToReachMultiplierBps(25_000);
+  const { accepted } = room.lock("owner", "lo", at25);
+  assert.ok(accepted >= 25_000n, "manual lock accepted after the old auto altitude");
+  room.settle("s1", room.crashAtMs!);
+  assert.equal(seat.settledTarget, accepted, "settlement uses the ACCEPTED manual lock only");
+  assert.equal(seat.survived, true);
+  assert.notEqual(seat.settledTarget, 20_000n, "the disarmed 2.0x auto target must NOT execute");
+});
+
+test("post-launch auto-lock change is impossible; the armed target executes; a later manual lock fails closed", () => {
+  const room = new FakeRoom();
+  const now = 4_000_000;
+  room.bet("owner", "o1", 10_000n, 20_000n, true, now); // auto 2.0x armed
+  room.bet("bob", "b1", 10_000n, 20_000n, false, now);
+  room.launch("l1", now + 100, false, 40_000n);
+  // Committed is committed: no amendment path exists once running.
+  assert.throws(() => room.bet("owner", "o2", 10_000n, 20_000n, false, room.startedAtMs! + 5), /BETTING_CLOSED/);
+  const seat = room.seats.get("1")!.get("owner")!;
+  assert.equal(seat.autoLockEnabled, true, "server truth stays ARMED -- the UI must show it armed");
+  // Once the live law crosses the armed target, manual lock is already dead.
+  const past = room.startedAtMs! + msToReachMultiplierBps(20_000) + 5;
+  assert.throws(() => room.lock("owner", "lo", past), /AUTO_TARGET_EXECUTED/);
+  room.settle("s1", room.crashAtMs!);
+  assert.equal(seat.settledTarget, 20_000n, "settlement executes the committed 2.0x auto target exactly");
+  assert.equal(seat.survived, true);
 });
