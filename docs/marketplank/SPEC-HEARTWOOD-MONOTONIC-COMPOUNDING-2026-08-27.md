@@ -2,6 +2,16 @@
 
 Status: normative design gate; not a claim that the current contracts implement every item.
 
+> **SPLIT-CANON CORRECTION 2026-09-02** (owner decision: the code is canon).
+> References to a "20/40/40" rake split below reflect a superseded pipeline.
+> The ratified, implemented split of net rake is **40% burn / 40% community
+> (Powerboard funding leg) / 20% founder** — `ratifiedRakeSplit`
+> (`lib/casino/economics.ts`) and `contracts/PlankEconomicRouterV2.sol`
+> (`BURN_BPS = 4_000`, `COMMUNITY_BPS = 4_000`, founder = remainder), with the
+> evolutionary rake 450 bps declining -25 bps per 25M qualified volume to a
+> 250 bps floor. See docs/CASINO-ARCHITECTURE.md SS5a. Historical analysis below
+> is preserved unmodified for the record.
+
 ## Ratified Plank economics are the constraint
 
 The state-of-the-art accounting design does not replace Plank's selected economics. It preserves the ratified gross crash rake and its economic destinations:

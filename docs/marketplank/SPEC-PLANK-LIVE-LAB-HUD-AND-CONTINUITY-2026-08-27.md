@@ -71,7 +71,7 @@ Valve's client/server literature supports prediction followed by authoritative r
 ### 6. Settlement and proof
 
 - Accounting identity: seed + wagers = rake + distributable; distributable = payouts + Vault remainder.
-- Rake waterfall: keeper first, then 20% burn / 40% community / remainder founders from net rake.
+- Rake waterfall: keeper first, then 40% burn / 40% community / 20% founder from net rake. (Corrected 2026-09-02 to the ratified code canon — `ratifiedRakeSplit`, `lib/casino/economics.ts`; the earlier "20% burn / 40% community / remainder founders" wording described a superseded split.)
 - Community waterfall: protected principal, emissions, crash seed, overflow to lottery.
 - Powerboard: constituted gross, recurring founder fee including rollover provenance, displayed net winner-take-all prize, higher fully covered reset base.
 - Fairness proof: commitment, randomness input, reveal, recomputed crash, pass/fail, implementation/source version.

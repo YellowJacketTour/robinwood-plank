@@ -4,6 +4,16 @@ Date: 2026-08-27
 
 Status: research-backed target architecture; implementation requires simulation, legal classification, independent audit, and versioned deployment.
 
+> **SPLIT-CANON CORRECTION 2026-09-02** (owner decision: the code is canon).
+> References to a "20/40/40" rake split below reflect a superseded pipeline.
+> The ratified, implemented split of net rake is **40% burn / 40% community
+> (Powerboard funding leg) / 20% founder** — `ratifiedRakeSplit`
+> (`lib/casino/economics.ts`) and `contracts/PlankEconomicRouterV2.sol`
+> (`BURN_BPS = 4_000`, `COMMUNITY_BPS = 4_000`, founder = remainder), with the
+> evolutionary rake 450 bps declining -25 bps per 25M qualified volume to a
+> 250 bps floor. See docs/CASINO-ARCHITECTURE.md SS5a. Historical analysis below
+> is preserved unmodified for the record.
+
 ## Thesis
 
 Plank should maximize durable community surplus, not merely gross wagering. A closed wagering pool is redistributive and becomes negative-sum after operating costs. Plank becomes broader-sense positive-sum only through entertainment utility, transparent founder-funded product development, sponsor and commerce revenue, useful software and market services, creator compensation, public goods, verifiable status artifacts, and community capital that produces future experiences.

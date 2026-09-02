@@ -81,11 +81,12 @@ marked **OPEN**.
 ## 1. The one-paragraph version
 
 Players bet ETH into a shared pari-mutuel pool on a crash game. A small **rake**
-(4.5%, of which only 1.8% is a real house edge — see §5a) is skimmed from each settled round. That rake — instead of
-leaking to a disconnected wallet — flows into a **distributor** that splits it
-three ways: a slice **buys and burns real $PLANK**, a slice **funds a
-Powerboard rolling jackpot** paid back to active bettors, and the remainder goes
-to the protocol treasury. Randomness for both the crash point and the raffle
+(4.50% declining to a 2.50% floor with volume, of which only 0.9% is a real house edge — see §5a) is skimmed from each settled round. That rake — instead of
+leaking to a disconnected wallet — flows into a **router** that splits it
+three ways: **40% buys and burns real $PLANK**, **40% funds the community leg**
+(Powerboard prizes, protected Vault principal, emission buffer) paid back to
+active bettors, and the **20% founder remainder** is the only leg that leaves
+the community. Randomness for both the crash point and the raffle
 draw comes from **one shared, verify-on-chain drand beacon** that the NFT vault
 already uses. The result is not positive-EV for any individual bet (a rake from
 a closed pool can't be), but it is **positive-sum for the community**: the rake
@@ -124,7 +125,7 @@ stays inside it.
 | Contract | Role | Trust surface |
 |---|---|---|
 | `PlankCrashDrand.sol` | The crash game. Reads randomness from the shared beacon; pays rake to whatever `treasury` it's configured with. | No owner, no admin. |
-| `PlankRakeDistributor.sol` | Immutable 3-way rake split (burn / jackpot / dev). Push-forwards on receipt. | No owner, no setter — changing the split needs a redeploy. |
+| `PlankRakeDistributor.sol` | Immutable 3-way rake split — ratified legs: burn / community / founder (see §5a; `PlankEconomicRouterV2.sol` is the ratified constants implementation). Push-forwards on receipt. | No owner, no setter — changing the split needs a redeploy. |
 | `PlankBurnEngine.sol` | Permissionless swap-and-burn. Caller supplies a real Universal-Router route; the contract verifies the real PLANK balance delta and burns it. | No owner. Swap output can only ever be burned, never redirected. |
 | `PlankPowerboard.sol` | Rolling jackpot. Wager-weighted tickets read from a source's own `stakeOf`; a daily Plank Ball draw either pays the whole pot or a consolation slice and rolls the rest over. | No owner. Source allowlist is immutable. |
 | `DrandBeacon.sol` | Shared, permissionless, verify-on-chain cache of drand rounds. | Deploy-time-verified drand key; no owner. |
@@ -143,8 +144,8 @@ two could not be confirmed live on Robinhood Chain (checked via `eth_getCode`).
 2. `claimRake()` moves the accrued rake into the crash's PullPayment escrow,
    credited to `treasury` — which on mainnet is the **distributor's** address.
 3. Anyone calls `crash.withdrawPayments(distributor)`. The distributor's
-   `receive()` fires and splits the ETH: `burnBps` → burn engine, `airdropBps`
-   → the Powerboard jackpot, remainder → dev/ops treasury.
+   `receive()` fires and splits the ETH per the ratified §5a legs: 40% → burn
+   engine, 40% → the community leg (Powerboard funding), 20% remainder → founder.
 4. A keeper calls `burnEngine.executeBurn(route, ethAmount, minPlankOut, deadline)`
    with a route built off-chain (Uniswap Trading API, the same aggregator this
    repo's frontend already uses). Real $PLANK is bought and burned.
@@ -277,38 +278,58 @@ void/rollover fallbacks are a safety net for when nobody does, not a substitute.
 
 ## 5a. RATIFIED: the rake and its split
 
-Decided, and wired into `scripts/local-casino-setup.ts`:
+> **CORRECTED 2026-09-02** (owner decision: reconcile canon to the code). An
+> earlier revision of this table read **40% dev / 40% jackpot / 20% burn** —
+> that described a superseded pipeline. The implemented, ratified split is
+> **40% burn / 40% community (→ Powerboard funding leg) / 20% founder**, as
+> coded in `ratifiedRakeSplit` (`lib/casino/economics.ts`) and hard-coded in
+> `contracts/PlankEconomicRouterV2.sol` (`BURN_BPS = 4_000`,
+> `COMMUNITY_BPS = 4_000`, founder = remainder). The code is canon; this
+> section now matches it exactly.
 
-| Leg | % of pool | % of rake | Purpose |
+**The rake itself is evolutionary, not flat.** Starting rake is **450 bps
+(4.50%)**, declining **−25 bps per 25,000,000 of qualified volume** to a
+permanent **250 bps (2.50%) floor**
+(`evolutionQuote`, `lib/casino/simulation.ts`):
+
+```
+effectiveRakeBps = 450 − min(floor(qualifiedVolume / 25_000_000) · 25, 200)
+```
+
+Wallet count never advances the meter — only rake-paid economic volume does.
+
+**The split**, applied after the keeper carve (`keeperRewardBps`, currently 0,
+comes off gross first), to net rake (`ratifiedRakeSplit`):
+
+| Leg | % of pool (at 4.50%) | % of rake | Purpose |
 |---|---|---|---|
-| **Dev / ops** | **1.80%** | 40% | Real bills. Memetically anchored to the 8.1% NFT royalty. |
-| **Rolling jackpot** | **1.80%** | 40% | Matched 1:1 with the dev take — straight back to players. |
-| **$PLANK burn** | **0.90%** | 20% | Deflation for holders. |
-| **Total rake** | **4.50%** | 100% | 60% of the *rake* returns to players. |
+| **$PLANK burn** | **1.80%** | 40% | Deflation accruing to all holders. `burn = netRake · 4000 / 10000`. |
+| **Community** | **1.80%** | 40% | Routed by `powerboardFundingBps` into Powerboard prize funding; the remainder splits `protectedPrincipalBps` into the monotone protected Vault principal, rest to the emission buffer (overflow cascades to the lottery). |
+| **Founder** | **0.90%** | 20% | The only leg that leaves the player/community economy. `founders = netRake − burn − community`. |
+| **Total rake** | **4.50% → 2.50%** | 100% | 80% of the *rake* stays inside the community. |
 
 **Read that table carefully — "4.5% rake" is NOT a 4.5% house edge.** Of every
-100 ETH wagered:
+100 ETH wagered at the starting rake:
 
 - **95.50** is paid straight back out as crash winnings (the distributable).
-- **1.80** returns to players as Powerboard jackpot prizes.
-- **0.90** buys and burns $PLANK (accrues to token holders — overlapping with
+- **1.80** returns to players as Powerboard prizes and Vault/reserve funding.
+- **1.80** buys and burns $PLANK (accrues to token holders — overlapping with
   players, but not identical to them, so don't count it as a direct rebate).
-- **1.80** is the only ETH that actually leaves the player economy (dev/ops).
+- **0.90** is the only ETH that actually leaves the player economy (founder).
 
-So the **true net house edge is 1.8%**, and **97.3% of wagered ETH comes back to
-players in ETH terms** (98.2% if you count the burn as community value). Never
-say "4.5% rake, 60% to players" without that breakdown — it reads as though
-players only get 60% of their money back, which is wrong by an order of
-magnitude.
+So the **true net house edge is 0.9%** (falling to 0.5% at the rake floor), and
+**97.3% of wagered ETH comes back to players in ETH terms** (99.1% if you count
+the burn as community value). Never say "4.5% rake" without that breakdown — it
+reads as though the house keeps 4.5%, which is wrong by 5×.
 
 Two deliberate choices worth keeping:
 - **The total rake is low on purpose.** Rake is the single biggest driver of how
   long a bankroll survives, and therefore of lifetime plays — the low-rake
   poker-room lesson. Don't creep it up.
-- **`keeperRewardBps` is 0** while the keeper is dev-run (settlement cost comes
-  out of the dev leg). It is carved from the rake *before* the split, so raising
-  it proportionally shrinks all three legs — only raise it if third-party
-  keepers are opened up.
+- **`keeperRewardBps` is 0** while the keeper is founder-run (settlement cost
+  comes out of the founder leg). It is carved from the rake *before* the split,
+  so raising it proportionally shrinks all three legs — only raise it if
+  third-party keepers are opened up.
 
 ## 6. OPEN decisions (business, not code)
 
