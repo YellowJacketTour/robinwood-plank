@@ -331,3 +331,52 @@ test("an interrupted animation or reload resumes the SAME committed result", () 
   assert.match(arcadeSource, /privateSettlementAcknowledgedRound = sessionStorage\.getItem\(privateSessionKey\(snapshot\.room\.id, "ack"\)\)/);
   assert.match(arcadeSource, /function samePrivateRound\(left, right\)/);
 });
+
+// ── OWNER DECISION 2026-09-02: founder-fee privacy ──
+// The founder fee remains exactly as implemented in the economics; founder
+// EARNINGS must never be rendered on a player-facing surface. The only
+// permitted founder references are the host-PIN simulation console (the fee
+// parameter and the injectable laboratory counter) and computational
+// identifiers that never render.
+
+const laboratorySource = readFileSync(
+  new URL("../../components/playtest/GameLaboratory.tsx", import.meta.url),
+  "utf8"
+);
+
+test("no player-facing string renders founder earnings", () => {
+  assert.doesNotMatch(arcadeSource, /FOUNDER TOTAL/);
+  assert.doesNotMatch(laboratorySource, /crashFounderRake/);
+  assert.doesNotMatch(laboratorySource, /\["Founders"/);
+  const allowed = /lotteryFounderFeeBps|crashFounderRake|lotteryFounderFees|privateMinimumLotteryGross|Founder fee \(bps\)|Cumulative founder rake|private-setting|private-admin/;
+  for (const line of arcadeSource.split("\n")) {
+    if (!/founder/i.test(line)) continue;
+    assert.ok(
+      allowed.test(line),
+      `founder reference outside the host console or computation: ${line.trim().slice(0, 160)}`
+    );
+  }
+});
+
+// ── RATIFICATION 2026-09-02: honest CCS-2L settlement disclosure ──
+// The player-facing round summary must disclose the player pot after rake,
+// the seat's hazard weight, the player-layer payout decomposition, any house
+// bonus, and the exact total returned + net — displayed == redeemable.
+
+test("the round summary discloses the full CCS-2L settlement decomposition", () => {
+  assert.match(arcadeSource, /accounting\?\.rule === "ccs-2l"/);
+  assert.match(arcadeSource, /Player pot after the \$\{\(settledRakeBps \/ 100\)\.toFixed\(2\)\}% routed rake/);
+  assert.match(arcadeSource, /hazard weight is stake × ln/);
+  assert.match(arcadeSource, /survivor floor \+ /);
+  assert.match(arcadeSource, /performance premium/);
+  assert.match(arcadeSource, /house bonus/);
+  assert.match(arcadeSource, /returned · /);
+  // Busted seats get honest copy, never an invented number.
+  assert.match(arcadeSource, /nothing is returned to busted seats/);
+});
+
+test("settlement rule and parameter hash are persisted at commitment and echoed at settlement", () => {
+  assert.match(roomsSource, /settlement: settlementDescriptor\(policy\.allocationRule\)/);
+  // Persisted on the launch event (commitment time) AND on the settled event.
+  assert.equal((roomsSource.match(/settlement: settlementDescriptor\(policy\.allocationRule\)/g) || []).length, 2);
+});
