@@ -259,10 +259,13 @@ jobs:
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy'))
     runs-on: ubuntu-latest
-    # The mandatory custom-format PostgreSQL backup now exceeds 15 minutes as
-    # durable market history grows. Keep the safety gate, but give pg_dump a
-    # bounded window large enough to finish before activation.
-    timeout-minutes: 30
+    # The mandatory custom-format PostgreSQL backup now exceeds 30 minutes as
+    # durable market and playtest history grows: every deploy on 2026-09-03
+    # was killed by this job timeout during pg_dump ("The operation was
+    # canceled") before activation, leaving production on a stale release.
+    # Keep the safety gate, but give the backup a window that cannot be the
+    # thing that blocks a release.
+    timeout-minutes: 120
     environment: inmotion-staging
     env:
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
