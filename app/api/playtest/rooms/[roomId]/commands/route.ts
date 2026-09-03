@@ -25,10 +25,12 @@ function integer(value: unknown, field: string): bigint {
 export async function POST(req: Request, context: { params: Promise<{ roomId: string }> }) {
   try {
     if (!playtestMutationOriginAllowed(req)) return publicJson({ error: "BAD_ORIGIN", message: "Cross-origin request rejected." }, 403);
-    const limited = rateLimit(req, { key: "playtest-room-command", limit: 120, windowMs: 60_000 });
-    if (limited) return limited;
     const identity = await currentPlaytestIdentity();
     if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
+    // Per signed-in player: a whole table on one WiFi must never 429 a
+    // friend's bet or lock because the neighbours are also playing.
+    const limited = rateLimit(req, { key: `playtest-room-command:${identity.id}`, limit: 120, windowMs: 60_000 });
+    if (limited) return limited;
     const body = await readJsonBody<CommandBody>(req);
     if (typeof body.commandId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.commandId)) {
       return publicJson({ error: "BAD_COMMAND_ID", message: "A UUID command ID is required." }, 400);

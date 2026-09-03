@@ -5874,7 +5874,13 @@ function paintPrivateSnapshot(snapshot) {
     // Synthetic strategies commit atomically inside the authoritative launch
     // transaction. Requiring a pre-existing human seat here made a bot-only
     // laboratory impossible even though the server correctly supports it.
-    launch.disabled = snapshot.room.phase !== "lobby" || (snapshot.seats.length === 0 && queuedBots === 0);
+    // The host can also launch the NEXT round by hand during a settled
+    // intermission (the server accepts a manual start from "settled"): if the
+    // automatic keeper is ever starved, the table must never be stuck at 0:00.
+    const queuedHumans = (snapshot.nextRoundSeats || []).length;
+    const settledReady = snapshot.room.phase === "settled" && (queuedHumans > 0 || queuedBots > 0);
+    launch.disabled = !((snapshot.room.phase === "lobby" && (snapshot.seats.length > 0 || queuedBots > 0)) || settledReady);
+    launch.textContent = settledReady ? `LAUNCH ROUND ${Number(snapshot.room.currentRound) + 1} NOW` : "LAUNCH WHEN EVERYONE IS READY";
     launch.title = queuedBots ? `${queuedBots} CPU participant${queuedBots === 1 ? "" : "s"} will commit when this round launches` : "Launch when committed players are ready";
   }
   const codeCopy = $("privateCodeCopy");
@@ -5980,6 +5986,16 @@ function startPrivateUpdates() {
         // settlement, and synchronized Powerboard ceremony.
         if (controller.signal.aborted) return;
         if (response.status === 204) continue;
+        if (response.status === 429) {
+          // Honor Retry-After instead of hammering the shared per-IP bucket
+          // every 0.9s (which kept every device on the same network starved
+          // and, since the long-poll worker is the keeper, froze the table).
+          const retryAfterS = Number(response.headers.get("Retry-After")) || 3;
+          const status = $("privateHudStatus");
+          if (status) status.textContent = `Table busy — resyncing in ${Math.min(20, Math.max(2, retryAfterS))}s…`;
+          await new Promise((resolve) => window.setTimeout(resolve, Math.min(20_000, Math.max(2_000, retryAfterS * 1000))));
+          continue;
+        }
         const update = await privateJson(response);
         if (update.snapshot) paintPrivateSnapshot(update.snapshot);
         privateLastError = "";

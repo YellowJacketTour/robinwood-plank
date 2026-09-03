@@ -9,6 +9,9 @@ test("an enabled bankroll-funded bot can unlock launch without a human seat", ()
   assert.ok(start >= 0, "queued bot launch gate is missing");
   const gate = source.slice(start, source.indexOf("launch.title", start));
   assert.match(gate, /member\.botProfile\?\.enabled/);
-  assert.match(gate, /queuedBots === 0/);
+  // Bots alone unlock a lobby launch; queued humans OR bots unlock a manual
+  // launch from a settled intermission (the table must never stick at 0:00).
+  assert.match(gate, /snapshot\.seats\.length > 0 \|\| queuedBots > 0/);
+  assert.match(gate, /settledReady = snapshot\.room\.phase === "settled" && \(queuedHumans > 0 \|\| queuedBots > 0\)/);
   assert.doesNotMatch(gate, /snapshot\.seats\.length === 0;/);
 });

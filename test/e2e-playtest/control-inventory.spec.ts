@@ -290,7 +290,23 @@ test("every player control is present, reachable and functional on mobile + desk
   const flightAndSettle = async (round: number, manualLocker: Surface, viewportTag: string) => {
     // Wait for the lagged display to lift off (lock opens at 1.01x): the
     // primary action becomes the live LOCK control naming its multiplier.
-    await expect(manualLocker.game.locator("#primaryBtn")).toHaveText(/LOCK NOW/, { timeout: 30_000 });
+    // A flight can crash inside the 1.5s pre-roll + δ display lag (e.g. 1.09×
+    // lasts ~400ms), in which case LOCK NOW never has a frame to render. That
+    // is the law, not a defect: tolerate it here; the lock proof is still
+    // required from at least one of the three rounds (see manualLockProven).
+    const liftoff = await (async () => {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const label = await manualLocker.game.locator("#primaryBtn").innerText().catch(() => "");
+        if (/LOCK NOW/.test(label)) return true;
+        const s = await snapshot(manualLocker.page, roomId);
+        if (String(room(s).phase) === "settled") return false;
+        await manualLocker.page.waitForTimeout(150);
+      }
+      return false;
+    })();
+    if (!liftoff) console.log(`[control-inventory] round ${round}@${viewportTag}: crashed before the lagged liftoff rendered; flight audit skipped for this round`);
+    if (liftoff) {
     await expect(manualLocker.game.locator("#primaryBtn")).toBeEnabled({ timeout: 5_000 });
     // Flights can last only a few seconds: audit the locker's own deck in
     // one beat (screenshot + geometry), then LOCK immediately.
@@ -341,6 +357,7 @@ test("every player control is present, reachable and functional on mobile + desk
         console.log(`[control-inventory] round ${round}@${viewportTag}: manual tap raced the crash; UI fell closed ("${label}")`);
       }
     }
+    } // liftoff
     const settled = await waitForPhase(host, roomId, "settled", 120_000);
     // Reveal card: crash multiplier, own lock, payout, net.
     for (const s of surfaces) await expect(s.game.locator("#resultCard.show")).toBeVisible({ timeout: 30_000 });

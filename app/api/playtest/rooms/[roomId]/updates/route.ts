@@ -22,10 +22,17 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  * workers; no process-local emitter can silently omit another worker's event. */
 export async function GET(req: Request, context: { params: Promise<{ roomId: string }> }) {
   try {
-    const limited = rateLimit(req, { key: "playtest-room-updates", limit: 90, windowMs: 60_000 });
-    if (limited) return limited;
+    // Per-IP: a whole household / venue on one NAT shares this bucket, and the
+    // long-poll worker IS the round keeper. 90/min starved multi-device tables
+    // (every 429 dropped the poll, so nobody advanced the settled room).
     const identity = await currentPlaytestIdentity();
     if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
+    // Keyed per signed-in player, not per IP: a household or venue on one NAT
+    // must never starve each other's long-poll (the poll worker IS the round
+    // keeper — starved polls froze settled tables at 0:00). 120/min per player
+    // still bounds abuse; a long-poll returns at most every 20s or on change.
+    const limited = rateLimit(req, { key: `playtest-room-updates:${identity.id}`, limit: 120, windowMs: 60_000 });
+    if (limited) return limited;
     const { roomId } = await context.params;
     if (!UUID.test(roomId)) return publicJson({ error: "BAD_ROOM_ID", message: "Invalid room identifier." }, 400);
     const url = new URL(req.url);
