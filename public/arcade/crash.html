@@ -5690,7 +5690,21 @@ function paintPrivateSnapshot(snapshot) {
   phaseState = snapshot.room.phase === "lobby" ? "betting"
     : snapshot.room.phase === "running" || laggedReplayRemainingMs > 0 ? "live" : "crashed";
   // CSS hook for phase-conditional composition (mobile intermission stack).
+  const previousPrivatePhase = document.body.dataset.privatePhase;
   document.body.dataset.privatePhase = laggedReplayRemainingMs > 0 ? "running" : snapshot.room.phase;
+  // The LOCK button is the most time-critical control in the game. On phones
+  // the players sheet is a fixed overlay above the deck, so an open sheet
+  // buried LOCK for the whole flight. Collapse it on the launch edge (a
+  // player may reopen it deliberately; the CSS below keeps LOCK on top even
+  // then).
+  if (document.body.dataset.privatePhase === "running" && previousPrivatePhase !== "running") {
+    const tablePanel = $("privateTablePanel");
+    const tableToggleBtn = $("privateTableToggle");
+    if (tablePanel?.classList.contains("mobile-open")) {
+      tablePanel.classList.remove("mobile-open");
+      tableToggleBtn?.setAttribute("aria-expanded", "false");
+    }
+  }
   const intermissionCountdown = $("privateIntermissionCountdown");
   if (intermissionCountdown && (snapshot.room.phase !== "settled" || laggedReplayRemainingMs > 0)) intermissionCountdown.hidden = true;
   $("roundLabel").textContent = `ROUND ${snapshot.room.currentRound}`;
@@ -6046,6 +6060,9 @@ async function startPrivatePlaytest() {
       /* The single primary action (COMMIT / LOCK) stays pinned inside the
          thumb zone above the table sheet while the deck is on screen. */
       body[data-playtest="true"] .deck .primary-btn{position:sticky;z-index:40;bottom:calc(64px + env(safe-area-inset-bottom));min-height:56px}
+      /* In flight the LOCK must never be buried: it sits above the players
+         sheet (z-index 88) even if a player reopens the sheet mid-flight. */
+      body[data-playtest="true"][data-private-phase="running"] .deck .primary-btn{z-index:90}
       /* Every deck control is a real 44px touch target on phones. */
       body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
       #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
