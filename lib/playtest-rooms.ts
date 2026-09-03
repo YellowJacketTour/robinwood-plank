@@ -200,7 +200,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       ? await client.query<{ user_id: string; display_name: string; stake: string; requested_target_bps: string; auto_lock_enabled: boolean }>(
         `SELECT s.user_id,u.display_name,s.stake::text,s.requested_target_bps::text,s.auto_lock_enabled
            FROM playtest_round_seats s JOIN playtest_users u ON u.id=s.user_id
-          WHERE s.room_id=$1 AND s.round_id=$2 ORDER BY s.placed_at`, [roomId, room.current_round + 1],
+          WHERE s.room_id=$1 AND s.round_id=$2 ORDER BY s.placed_at`, [roomId, (BigInt(room.current_round) + 1n).toString()],
       )
       : null;
     const events = await client.query<{ sequence: string; event_type: string; command_id: string | null; public_payload: unknown; created_at: Date }>(

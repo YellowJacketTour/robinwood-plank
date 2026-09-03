@@ -2032,6 +2032,11 @@ function frame() {
     const xStr = bpsToXStr(estBps);
     lastMult = Number(xStr);
     setMultReadout(xStr, "live");
+    // The LOCK control follows the lagged clock frame by frame: it OPENS at
+    // liftoff even when no new snapshot arrives after the ignition hold,
+    // names the multiplier it will be granted at (displayed == redeemable),
+    // and closes the instant an armed auto target has executed.
+    if (privateFlightDisplayed) privateSyncFlightAction(estBps, xStr);
     // Drive the ascent from the CONTINUOUS multiplier (estBps/10000), NOT
     // the 2-decimal display string -- feeding the rounded string made the
     // height jump in 0.01 steps (the stair-stepping). This compression maps
@@ -2702,13 +2707,16 @@ let autoBusy = false; // a bet/cashout tx is in flight
     autoBetRound = null;
     autoCashRound = null;
     renderToggle();
-    toast(autoPlay ? `Auto-play ON — betting ${betAmount} ETH, cashing at ${autoTarget}x` : "Auto-play OFF");
+    toast(autoPlay
+      ? PLAYTEST_MODE ? `REPEAT ON — committing ${Math.round(Number(betAmount) * 1_000_000).toLocaleString()} credits at ${autoTarget}× every round` : `Auto-play ON — betting ${betAmount} ETH, cashing at ${autoTarget}x`
+      : PLAYTEST_MODE ? "REPEAT OFF" : "Auto-play OFF");
   });
   targetInput.addEventListener("change", () => {
     const v = Number(targetInput.value);
     autoTarget = Number.isFinite(v) && v >= 1.1 ? v : 2.0;
     targetInput.value = String(autoTarget);
     if (autoPlay) toast(`Auto cash-out target: ${autoTarget}x`);
+    if (PLAYTEST_MODE) void privateAmendTarget();
   });
   renderToggle();
 })();
@@ -4028,6 +4036,8 @@ function updatePrimaryButton(state, opts = {}) {
       chips.forEach((c) => (c.disabled = true));
       break;
   }
+  const customStake = document.getElementById("privateCustomStake");
+  if (customStake) customStake.disabled = state !== "betting-open";
 }
 
 // ── keeper: auto lock / auto reveal / auto register / auto claim ────────
@@ -4939,6 +4949,95 @@ function privateCredits(value) {
   try { return BigInt(value || "0").toLocaleString(); } catch { return "0"; }
 }
 
+/** Committed-state line: stake, armed target and auto-lock state, from the
+ *  seat row the server returned (or the acknowledged pending commitment). */
+function privateCommitmentSummary(seat) {
+  const target = seat?.requestedTargetBps ? `${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}×` : `${autoTarget.toFixed(2)}×`;
+  const armed = typeof seat?.autoLockEnabled === "boolean" ? seat.autoLockEnabled : privateAutoLockArmed;
+  return `${privateCredits(seat?.stake)} cr committed · target ${target} · auto-lock ${armed ? "✓" : "off"}`;
+}
+
+function paintPrivateBalance(me) {
+  const readout = document.getElementById("privateBalanceReadout");
+  if (!readout) return;
+  readout.textContent = me ? `BALANCE ${privateCredits(me.balance)} CREDITS` : "";
+}
+
+/** The cash-out target field is part of the commitment. Changing it while a
+ *  seat is committed and commitments are still open re-commits the same
+ *  stake with the new target (same rule as the AUTO-LOCK chip); after launch
+ *  the commitment is immutable and the field change is refused. */
+async function privateAmendTarget() {
+  const snapshot = privateSnapshot;
+  const mine = (rows) => rows?.find?.((row) => row.userId === snapshot?.me?.id) || null;
+  const seat = (snapshot?.room?.phase === "settled" ? mine(snapshot?.nextRoundSeats) : mine(snapshot?.seats))
+    || (privatePendingCommitment?.roomId === privateRoomId ? privatePendingCommitment : null);
+  if (!seat) return false;
+  if (snapshot?.room?.phase === "running") {
+    toast("Committed is committed — the target cannot change after launch.", "error");
+    return false;
+  }
+  const targetBps = String(Math.round(autoTarget * 10_000));
+  if (String(seat.requestedTargetBps) === targetBps) return true;
+  try {
+    await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "bet", commandId: crypto.randomUUID(), stake: String(seat.stake), targetBps, autoLockEnabled: privateAutoLockArmed }),
+    }));
+    if (privatePendingCommitment?.roomId === privateRoomId) privatePendingCommitment.requestedTargetBps = targetBps;
+    toast(`Target re-committed at ${autoTarget.toFixed(2)}× for this commitment`, "success");
+    await refreshPrivatePlaytest();
+    return true;
+  } catch (error) {
+    toast(`Target change rejected: ${error.message}`, "error");
+    await refreshPrivatePlaytest();
+    return false;
+  }
+}
+
+/** Frame-derived primary action during a displayed flight. Snapshot paints
+ *  are event-driven (a quiet flight produces none after launch), so the
+ *  "waiting" ignition-hold state must be advanced from the presentation
+ *  clock itself; otherwise a manual locker is never offered LOCK. */
+function privateSyncFlightAction(liveBps, xStr) {
+  const snap = privateSnapshot;
+  if (!snap || phaseState !== "live" || !primaryBtn || primaryBtn.classList.contains("pending")) return;
+  const seat = snap.seats.find((candidate) => candidate.userId === snap.me.id);
+  if (!seat) return;
+  if (seat.acceptedTargetBps) {
+    if (uiState !== "cashed") updatePrimaryButton("cashed", { sub: `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` });
+    return;
+  }
+  const autoExecuted = Boolean(seat.autoLockEnabled && seat.requestedTargetBps && liveBps >= Number(seat.requestedTargetBps));
+  if (autoExecuted) {
+    if (uiState !== "cashed") updatePrimaryButton("cashed", { sub: `Auto-locked at ${(Number(seat.requestedTargetBps) / 10000).toFixed(2)}×` });
+    return;
+  }
+  if (liveBps <= 10_000) return;
+  if (uiState !== "live-hold") {
+    const me = snap.members.find((member) => member.id === snap.me.id);
+    updatePrimaryButton("live-hold", { sub: `Balance ${privateCredits(me?.balance)} credits` });
+  }
+  primaryBtn.textContent = `LOCK NOW · ${xStr}×`;
+}
+
+/** Phones: on every phase transition make sure the single primary action
+ *  (COMMIT / LOCK) sits inside the viewport's thumb zone. */
+function privateBringActionIntoView() {
+  if (window.innerWidth > 700 || !primaryBtn) return;
+  // Measure the button's NATURAL position (it is sticky on phones): scroll so
+  // that position sits just above the sticky line, so the pinned button never
+  // covers the stake / auto-lock row that scrolls beneath it.
+  const previous = primaryBtn.style.position;
+  primaryBtn.style.position = "static";
+  const rect = primaryBtn.getBoundingClientRect();
+  primaryBtn.style.position = previous;
+  const targetBottom = window.innerHeight - 72;
+  if (rect.top >= 0 && rect.bottom <= targetBottom) return;
+  try { window.scrollBy({ top: rect.bottom - targetBottom, behavior: privateMotionReduced() ? "auto" : "smooth" }); } catch (_) {}
+}
+
 let privatePowerOrangeDispose = null;
 function mountPrivatePowerOrange(canvas, card, drawNumber) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
@@ -5253,7 +5352,7 @@ function renderPrivateRoster(snapshot) {
     const result = document.createElement("span");
     const profitable = snapshot.room.phase === "settled" && BigInt(seat?.net || "0") > 0n;
     result.className = `private-player-state ${profitable ? "win" : ""}`;
-    result.textContent = queuedSeat ? `Ready round ${Number(snapshot.room.currentRound) + 1} · ${privateCredits(queuedSeat.stake)} cr · ${queuedSeat.requestedTargetBps ? `auto-lock ${(Number(queuedSeat.requestedTargetBps) / 10000).toFixed(2)}×` : "auto-lock armed"}`
+    result.textContent = queuedSeat ? `Ready round ${Number(snapshot.room.currentRound) + 1} · ${privateCredits(queuedSeat.stake)} cr · ${!queuedSeat.autoLockEnabled ? "manual lock" : queuedSeat.requestedTargetBps ? `auto-lock ${(Number(queuedSeat.requestedTargetBps) / 10000).toFixed(2)}×` : "auto-lock armed"}`
       : !seat ? `${member.isBot ? member.botProfile?.enabled ? "Queued next launch" : "Paused" : "Waiting"} · ${privateCredits(member.balance)} cr`
       : snapshot.room.phase === "settled" ? `${!seat.survived ? "Crashed" : profitable ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · PROFIT` : `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · DILUTED`} · ${privateCredits(seat.payout)} paid`
       : seat.acceptedTargetBps ? `${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}× locked · watching`
@@ -5330,11 +5429,14 @@ function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat 
   }
   $("substatus").textContent = `${clock} · COMMITMENTS CLOSE AT LAUNCH`;
   if (queuedSeat) {
-    updatePrimaryButton("waiting", { sub: `${clock} · ${privateCredits(queuedSeat.stake)} credits queued` });
+    updatePrimaryButton("waiting", { sub: `${clock} · ${privateCommitmentSummary(queuedSeat)}` });
     primaryBtn.textContent = `READY FOR ROUND ${nextRound}`;
   } else {
     updatePrimaryButton("betting-open", { sub: `${clock}${me ? ` · balance ${privateCredits(me.balance)} credits` : ""}` });
     primaryBtn.textContent = `COMMIT ${privateCredits(BigInt(Math.max(1, Math.round(Number(betAmount) * 1_000_000))))} · ROUND ${nextRound}`;
+    // REPEAT: the next round auto-launches straight from this intermission
+    // (no lobby), so the repeat commitment must be queued here.
+    if (autoPlay && privateLaggedReplayMsRemaining(performance.now()) <= 0) void autoPlayTick(0, nextRound, false, false, 0);
   }
   if (seconds <= 5 && !samePrivateRound(privateSettlementAcknowledgedRound, snapshot.room.currentRound)) acknowledgePrivateSettlement();
 }
@@ -5363,12 +5465,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
   if (snapshot.room.phase !== "settled") {
     clearPrivateRevealTimers();
     privateConclusionKey = "";
-    card.className = "result-card";
+    card.className = "result-card"; card.style.pointerEvents = "none";
     card.replaceChildren();
     return;
   }
   if (samePrivateRound(privateSettlementAcknowledgedRound, snapshot.room.currentRound)) {
-    card.classList.remove("show");
+    // A dismissed reveal card must never keep intercepting taps meant for
+    // the deck beneath it (its sticky "next" footer sat over the auto row).
+    card.classList.remove("show"); card.style.pointerEvents = "none"; card.setAttribute("aria-hidden", "true");
     return;
   }
   // Results must never appear before the δ-lagged crash has rendered: the
@@ -5376,7 +5480,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   // the lagged crash instant re-enters here), while server settlement has
   // already completed on authoritative time.
   if (privateLaggedReplayMsRemaining(performance.now()) > 0) {
-    card.classList.remove("show");
+    card.classList.remove("show"); card.style.pointerEvents = "none";
     return;
   }
   const crash = (Number(snapshot.room.crashBps || 10000) / 10000).toFixed(2);
@@ -5613,6 +5717,7 @@ function paintPrivateSnapshot(snapshot) {
     : `Evolution tier ${evolutionTier}: ${privateCredits(snapshot.evolution.volumeRemaining)} more qualified credits permanently lowers rake by ${Number(snapshot.policy.rakeStepBps) / 100}%. Wallet count never advances this meter.`;
 
   const me = snapshot.members.find((member) => member.id === snapshot.me.id);
+  paintPrivateBalance(me);
   const authoritativeSeat = snapshot.seats.find((candidate) => candidate.userId === snapshot.me.id);
   if (authoritativeSeat && privatePendingCommitment &&
       privatePendingCommitment.roomId === snapshot.room.id &&
@@ -5674,7 +5779,8 @@ function paintPrivateSnapshot(snapshot) {
     flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
     setMultReadout("0.00", "fueling");
     $("substatus").textContent = seat ? "BET COMMITTED · HOST MAY LAUNCH" : "BETTING OPEN · TEST CREDITS ONLY";
-    updatePrimaryButton(seat ? "waiting" : "betting-open", { sub: me ? `Balance ${privateCredits(me.balance)} credits` : "" });
+    updatePrimaryButton(seat ? "waiting" : "betting-open", { sub: seat ? privateCommitmentSummary(seat) : me ? `Balance ${privateCredits(me.balance)} credits` : "" });
+    if (seat) primaryBtn.textContent = `READY FOR ROUND ${snapshot.room.currentRound}`;
     if (autoPlay) void autoPlayTick(0, snapshot.room.currentRound, Boolean(seat), Boolean(seat?.acceptedTargetBps), 0);
   } else if (phaseState === "live") {
     if (prior !== "live") {
@@ -5735,6 +5841,7 @@ function paintPrivateSnapshot(snapshot) {
     }
     updatePrivateIntermissionAction(snapshot, queuedSeat, me);
   }
+  if (prior !== phaseState) privateBringActionIntoView();
   renderPrivateRoster(snapshot);
   paintPrivateConclusion(snapshot, me, seat);
   updatePrivateJourney(snapshot, me, seat);
@@ -5756,6 +5863,14 @@ function paintPrivateSnapshot(snapshot) {
     launch.disabled = snapshot.room.phase !== "lobby" || (snapshot.seats.length === 0 && queuedBots === 0);
     launch.title = queuedBots ? `${queuedBots} CPU participant${queuedBots === 1 ? "" : "s"} will commit when this round launches` : "Launch when committed players are ready";
   }
+  const codeCopy = $("privateCodeCopy");
+  if (codeCopy) {
+    codeCopy.disabled = !snapshot.room.isOwner;
+    codeCopy.textContent = snapshot.room.isOwner ? "COPY LINK" : "HOST SHARES LINK";
+    codeCopy.title = snapshot.room.isOwner ? "Copy a reusable invitation link" : "Only the table host can issue invitation links; share the invite code above by voice.";
+  }
+  const hudInvite = $("privateInviteButton");
+  if (hudInvite) hudInvite.hidden = !snapshot.room.isOwner;
   const solo = $("privateSolo");
   if (solo) { solo.hidden = !snapshot.room.isAdmin; solo.disabled = snapshot.room.phase === "running"; }
   const archive = $("privateArchive");
@@ -5771,7 +5886,7 @@ function paintPrivateSnapshot(snapshot) {
       ? `OPEN ROUND ${Number(snapshot.room.currentRound) + 1} · COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))}`
       : "RETURN TO TABLE · REVIEW COMPLETE"
     : `COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} TEST CREDITS`;
-  else if (uiState === "live-hold") primaryBtn.textContent = "LOCK CLAIM WEIGHT NOW";
+  else if (uiState === "live-hold") primaryBtn.textContent = `LOCK NOW · ${(Number(liveBps) / 10000).toFixed(2)}×`;
   const phase = $("privatePhaseGuide");
   const people = snapshot.members.filter((member) => !member.isBot);
   const peopleCommitted = snapshot.seats.filter((seat) => people.some((member) => member.id === seat.userId)).length;
@@ -5899,19 +6014,23 @@ async function startPrivatePlaytest() {
     .private-powerball-copy{position:relative;z-index:2;width:58%;margin-left:auto;padding:28px 28px 22px}.private-powerball-copy>small{color:#eec164;font:900 9px/1.3 var(--font-mono);letter-spacing:.16em}.private-powerball-copy h3{margin:7px 0;color:#fff2cf;font:400 clamp(22px,3vw,38px)/1 var(--font-display)}.private-powerball-rule{max-width:48ch;color:#c9b58a;font:700 11px/1.45 var(--font-mono)}
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
     .private-powerball-outcome{text-align:center}.private-powerball-outcome strong,.private-powerball-outcome span{display:block}.private-powerball-outcome strong{color:#eec164;font:900 13px/1.3 var(--font-mono)}.private-powerball.hit .private-powerball-outcome strong{color:#34d399}.private-powerball-outcome span{margin-top:5px;color:#c9b58a;font:700 9px var(--font-mono)}.private-powerball-ledger{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}.private-powerball-ledger span{padding:8px;border:1px solid rgba(233,180,63,.2);border-radius:6px;background:rgba(17,10,5,.72);color:#fff2cf;font:900 9px var(--font-mono);text-align:center}.private-powerball-ledger small{display:block;margin-bottom:4px;color:#c9b58a;font-size:7px;letter-spacing:.08em}.private-powerball-lab{margin-top:8px;padding:7px;border:1px solid rgba(255,77,106,.35);color:#ff8da0;font:900 8px var(--font-mono);text-align:center}
-    .private-reveal-skip,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:14px;pointer-events:auto}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
+    .private-reveal-skip,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:14px}.result-card.show .private-result-next{pointer-events:auto}.result-card:not(.show),.result-card:not(.show) *{pointer-events:none!important}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
     .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="ejected"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="ejected"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.2,.9,.25,1.35)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="powerball"] .private-result-next,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note,.private-result[data-reveal="drawn"] .private-result-next{opacity:0;transform:translateY(8px)}
     @keyframes private-ball-orbit{from{transform:rotate(0deg) translateX(37px) rotate(0deg)}to{transform:rotate(360deg) translateX(37px) rotate(-360deg)}}@keyframes private-haze{from{opacity:.55;transform:scale(1)}to{opacity:1;transform:scale(1.06)}}
     @media(max-width:700px){
       html,body{min-height:100%;min-height:100dvh;overscroll-behavior-y:none}
-      body[data-playtest="true"]{padding-bottom:calc(76px + env(safe-area-inset-bottom));overflow-x:hidden;overflow-y:auto;height:auto}
+      /* Phones scroll the VIEWPORT (html), not the body: a body-level
+         overflow made <body> the sticky scrollport, so the pinned primary
+         action never pinned. */
+      html:has(body[data-playtest="true"]){height:auto;overflow-x:hidden;overflow-y:auto}
+      body[data-playtest="true"]{padding-bottom:calc(76px + env(safe-area-inset-bottom));overflow:visible;height:auto}
       body[data-playtest="true"] #app{height:auto;min-height:100dvh}
       body[data-playtest="true"] .topbar,body[data-playtest="true"] #privateHud,body[data-playtest="true"] #privateJourney,body[data-playtest="true"] .history-ribbon,body[data-playtest="true"] .deck{flex:0 0 auto}
       body[data-playtest="true"] .topbar{min-height:44px;padding:calc(6px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));flex-wrap:wrap;gap:5px 8px}
       html{scroll-padding-top:calc(6px + env(safe-area-inset-top))}
       body[data-playtest="true"] .topbar .brand{flex:0 1 auto;min-width:0}body[data-playtest="true"] .topbar .brand .mark{font-size:15px}body[data-playtest="true"] .topbar .brand .round{white-space:nowrap}
-      body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat):not(.rank-stat){display:none}body[data-playtest="true"] .topbar .vault-stat i,body[data-playtest="true"] .topbar .pb-stat i{display:none}body[data-playtest="true"] .topbar .vault-stat,body[data-playtest="true"] .topbar .pb-stat,body[data-playtest="true"] .topbar .rank-stat{display:inline-flex;min-width:0;max-width:100%;overflow:hidden;padding:3px 7px;font-size:10px;white-space:nowrap}body[data-playtest="true"] .topbar .gear{flex:0 0 38px;width:38px;height:38px}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
-      body[data-playtest="true"] .toast-log{top:auto;right:max(8px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));max-width:none;align-items:stretch}
+      body[data-playtest="true"] .topbar .stats{margin-left:auto;gap:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%}body[data-playtest="true"] .topbar .stats>span:not(.vault-stat):not(.pb-stat):not(.rank-stat){display:none}body[data-playtest="true"] .topbar .vault-stat i,body[data-playtest="true"] .topbar .pb-stat i{display:none}body[data-playtest="true"] .topbar .vault-stat,body[data-playtest="true"] .topbar .pb-stat,body[data-playtest="true"] .topbar .rank-stat{display:inline-flex;min-width:0;max-width:100%;overflow:hidden;padding:3px 7px;font-size:10px;white-space:nowrap}body[data-playtest="true"] .topbar .gear{flex:0 0 44px;width:44px;height:44px}body[data-playtest="true"] .topbar .pb-stat{min-height:44px;align-items:center}body[data-playtest="true"] .topbar #verifyBtn,body[data-playtest="true"] .topbar #statsBtn{display:none}
+      body[data-playtest="true"] .toast-log{top:auto;right:max(8px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));max-width:none;align-items:stretch;pointer-events:none}body[data-playtest="true"] .toast-log *{pointer-events:none}
       #privateHud{position:relative;z-index:36;top:auto;left:auto;right:auto;max-width:none;display:grid;grid-template-columns:minmax(0,1fr);gap:5px;margin:4px max(8px,env(safe-area-inset-right)) 0 max(8px,env(safe-area-inset-left));padding:6px}
       #privateHud select,#privateHud button,#privateHud a{min-height:48px;font-size:12px}
       #privateHudStatus{padding:0 6px;font-size:10px}
@@ -5924,6 +6043,12 @@ async function startPrivatePlaytest() {
       /* The AUTO-LOCK chip joins the repeat/cash-out row: wrap rather than
          overflow the 320px viewport. */
       #autoRow{flex-wrap:wrap;row-gap:6px}
+      /* The single primary action (COMMIT / LOCK) stays pinned inside the
+         thumb zone above the table sheet while the deck is on screen. */
+      body[data-playtest="true"] .deck .primary-btn{position:sticky;z-index:40;bottom:calc(64px + env(safe-area-inset-bottom));min-height:56px}
+      /* Every deck control is a real 44px touch target on phones. */
+      body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
+      #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
       #privateTablePanel{position:fixed;z-index:88;top:auto;right:max(8px,env(safe-area-inset-right));bottom:max(8px,env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left));width:auto;margin:0;padding:0 12px 12px;max-height:min(62dvh,560px);overflow:auto;overscroll-behavior:contain;transform:translateY(calc(100% - 52px));transition:transform .24s ease;box-shadow:0 -18px 50px rgba(0,0,0,.68)}
       #privateTablePanel.mobile-open{transform:translateY(0)}#privateTableToggle{position:sticky;z-index:3;top:0;display:block;background:linear-gradient(#07100c 76%,rgba(7,16,12,.88))}#privateTablePanel>.private-panel-kicker{margin-top:2px}#privateTablePanel:not(.mobile-open)>:not(#privateTableToggle){visibility:hidden;pointer-events:none}#privateTablePanel.mobile-open>:not(#privateTableToggle){visibility:visible}
       .private-code button,.private-host-actions button,.private-host-actions a{min-height:48px;touch-action:manipulation}
@@ -5995,7 +6120,7 @@ async function startPrivatePlaytest() {
     fallback.remove();
     return copied;
   };
-  const invite = document.createElement("button"); invite.textContent = "COPY INVITE"; invite.onclick = async () => {
+  const invite = document.createElement("button"); invite.id = "privateInviteButton"; invite.textContent = "COPY INVITE"; invite.onclick = async () => {
     try {
       const result = await privateJson(await fetch("/api/playtest/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId: privateRoomId }) }));
       showPrivateInvite(result.url);
@@ -6050,7 +6175,7 @@ async function startPrivatePlaytest() {
   const panelTitle = document.createElement("div"); panelTitle.className = "private-panel-title"; panelTitle.textContent = "Play together";
   const code = document.createElement("div"); code.className = "private-code";
   const codeText = document.createElement("div"); codeText.innerHTML = '<small>Invite code</small><strong id="privateJoinCode">—</strong>';
-  const codeCopy = document.createElement("button"); codeCopy.textContent = "COPY LINK"; codeCopy.onclick = () => invite.click(); code.append(codeText, codeCopy);
+  const codeCopy = document.createElement("button"); codeCopy.id = "privateCodeCopy"; codeCopy.textContent = "COPY LINK"; codeCopy.onclick = () => invite.click(); code.append(codeText, codeCopy);
   const guide = document.createElement("div"); guide.id = "privatePhaseGuide"; guide.textContent = "Connecting to the authoritative table…";
   const coach = document.createElement("div"); coach.id = "privateCoachCue"; coach.textContent = "Restoring your place in the story";
   const session = document.createElement("div"); session.id = "privateSessionStats";
@@ -6177,6 +6302,27 @@ async function startPrivatePlaytest() {
     chip.textContent = credits >= 1000 ? `${credits / 1000}K` : index === 0 ? `$1 MIN · ${credits}` : String(credits);
   });
   betAmount = "0.0005";
+  const customStake = document.createElement("input");
+  customStake.id = "privateCustomStake"; customStake.type = "number"; customStake.inputMode = "numeric";
+  customStake.min = "500"; customStake.step = "1"; customStake.placeholder = "custom credits";
+  customStake.setAttribute("aria-label", "Custom stake in test credits");
+  customStake.className = "chip"; customStake.style.cssText = "width:120px;text-align:center;font:inherit";
+  customStake.addEventListener("change", () => {
+    const minimum = Number(privateSnapshot?.policy?.minimumStake || 500);
+    const credits = Math.floor(Number(customStake.value));
+    if (!Number.isFinite(credits) || credits < minimum) { customStake.value = ""; toast(`Custom stake must be at least ${minimum.toLocaleString()} credits`, "error"); return; }
+    customStake.value = String(credits);
+    document.querySelectorAll(".chip[data-amt]").forEach((c) => c.classList.remove("active"));
+    betAmount = String(credits / 1_000_000);
+    paintPrivateStakeQuote();
+    updatePrimaryButton(uiState);
+  });
+  document.querySelectorAll(".chip[data-amt]").forEach((chip) => chip.addEventListener("click", () => { customStake.value = ""; }));
+  $("stakeRow").appendChild(customStake);
+  const balance = document.createElement("div");
+  balance.id = "privateBalanceReadout"; balance.className = "stake-value-quote"; balance.setAttribute("aria-live", "polite");
+  balance.style.cssText = "color:#8dffc0;font-weight:800";
+  $("stakeValueQuote").after(balance);
   paintPrivateStakeQuote();
   $("primaryBtn").textContent = "CONNECTING TO PRIVATE TABLE…";
   $("btnSub").textContent = "No wallet · no value · authoritative multiplayer simulation";

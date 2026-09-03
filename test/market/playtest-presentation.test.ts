@@ -502,3 +502,24 @@ test("launch geometry: no anticipation dip — altitude is monotone non-decreasi
     assert.equal(0, 0);
   }
 });
+
+test("next-round seats are queried for the NEXT numeric round, never a string-concatenated one", () => {
+  // current_round arrives from pg as a bigint STRING; `+ 1` produced "11" and
+  // the settled snapshot's nextRoundSeats was always empty (queued players
+  // never showed in the roster and clients could not confirm their queue).
+  assert.doesNotMatch(roomsSource, /room\.current_round \+ 1\]/);
+  assert.match(roomsSource, /\(BigInt\(room\.current_round\) \+ 1n\)\.toString\(\)\]/);
+});
+
+test("every player control the inventory requires exists on the playtest surface", () => {
+  // docs/marketplank/CONTROL-INVENTORY-playtest-2026-09-03.md
+  assert.match(arcadeSource, /customStake\.id = "privateCustomStake"/);
+  assert.match(arcadeSource, /balance\.id = "privateBalanceReadout"/);
+  assert.match(arcadeSource, /LOCK NOW · \$\{xStr\}×/);
+  assert.match(arcadeSource, /function privateCommitmentSummary\(seat\)/);
+  assert.match(arcadeSource, /async function privateAmendTarget\(\)/);
+  assert.match(arcadeSource, /if \(autoPlay && privateLaggedReplayMsRemaining\(performance\.now\(\)\) <= 0\) void autoPlayTick\(0, nextRound/);
+  assert.match(arcadeSource, /\.deck \.primary-btn\{position:sticky/);
+  assert.match(arcadeSource, /html:has\(body\[data-playtest="true"\]\)\{height:auto;overflow-x:hidden;overflow-y:auto\}/);
+  assert.match(arcadeSource, /\.topbar \.gear\{flex:0 0 44px;width:44px;height:44px\}/);
+});
