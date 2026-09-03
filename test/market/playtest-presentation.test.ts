@@ -519,7 +519,10 @@ test("every player control the inventory requires exists on the playtest surface
   assert.match(arcadeSource, /function privateCommitmentSummary\(seat\)/);
   assert.match(arcadeSource, /async function privateAmendTarget\(\)/);
   assert.match(arcadeSource, /if \(autoPlay && privateLaggedReplayMsRemaining\(performance\.now\(\)\) <= 0\) void autoPlayTick\(0, nextRound/);
-  assert.match(arcadeSource, /\.deck \.primary-btn\{position:sticky/);
+  // The primary action (COMMIT / LOCK) is PINNED to the phone viewport above
+  // the table bar in every phase — never sticky-in-deck (that left it below
+  // the fold and under the table sheet on real iPhones).
+  assert.match(arcadeSource, /\.deck \.primary-btn\{position:fixed;[^}]*z-index:90/);
   assert.match(arcadeSource, /html:has\(body\[data-playtest="true"\]\)\{height:auto;overflow-x:hidden;overflow-y:auto\}/);
   assert.match(arcadeSource, /\.topbar \.gear\{flex:0 0 44px;width:44px;height:44px\}/);
 });

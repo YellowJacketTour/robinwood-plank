@@ -6059,10 +6059,14 @@ async function startPrivatePlaytest() {
       #autoRow,#stakeRow{flex-wrap:wrap;row-gap:6px}
       /* The single primary action (COMMIT / LOCK) stays pinned inside the
          thumb zone above the table sheet while the deck is on screen. */
-      body[data-playtest="true"] .deck .primary-btn{position:sticky;z-index:40;bottom:calc(64px + env(safe-area-inset-bottom));min-height:56px}
-      /* In flight the LOCK must never be buried: it sits above the players
-         sheet (z-index 88) even if a player reopens the sheet mid-flight. */
-      body[data-playtest="true"][data-private-phase="running"] .deck .primary-btn{z-index:90}
+      /* The single primary action (COMMIT pre-launch / LOCK in flight) is the
+         one control a player must always be able to reach. On phones it is
+         PINNED to the viewport above the collapsed table bar (52px + 8px
+         inset) in EVERY phase — never dependent on scroll position, never
+         below the fold, and above the players sheet (z-index 88) even when
+         the sheet is open. The deck reserves matching space underneath. */
+      body[data-playtest="true"] .deck .primary-btn{position:fixed;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));bottom:calc(72px + env(safe-area-inset-bottom));width:auto;z-index:90;min-height:56px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+      body[data-playtest="true"] .deck{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
       /* Every deck control is a real 44px touch target on phones. */
       body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
       #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
