@@ -6042,7 +6042,7 @@ async function startPrivatePlaytest() {
       #privateJourney span b.jl{display:none}#privateJourney span b.js{display:inline}
       /* The AUTO-LOCK chip joins the repeat/cash-out row: wrap rather than
          overflow the 320px viewport. */
-      #autoRow{flex-wrap:wrap;row-gap:6px}
+      #autoRow,#stakeRow{flex-wrap:wrap;row-gap:6px}
       /* The single primary action (COMMIT / LOCK) stays pinned inside the
          thumb zone above the table sheet while the deck is on screen. */
       body[data-playtest="true"] .deck .primary-btn{position:sticky;z-index:40;bottom:calc(64px + env(safe-area-inset-bottom));min-height:56px}

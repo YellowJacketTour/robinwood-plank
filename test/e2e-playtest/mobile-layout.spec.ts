@@ -410,9 +410,16 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
   const parked = await readFlight();
   expect.soft(parked.p, "rocket must be parked (flightProgress 0) during intermission").toBe(0);
   expect.soft(parked.t, "descent target must be the pad anchor during intermission").toBe(0);
-  const rocketScreen = await descentViewer.game.locator("body").evaluate(() => {
+  // Same coordinate frame as measure(): the page may have been auto-scrolled
+  // to bring the primary action into the thumb zone, and measure() reports
+  // rects at scrollTop 0, so project the rocket at scrollTop 0 as well.
+  const rocketScreen = await descentViewer.game.locator("body").evaluate((body) => {
     const w = window as unknown as { __plankRocketScreen?: () => { x: number; y: number } };
-    return w.__plankRocketScreen ? w.__plankRocketScreen() : { x: 0, y: 1e9 };
+    const scroller = body.ownerDocument!.scrollingElement || body.ownerDocument!.documentElement;
+    const prev = scroller.scrollTop; scroller.scrollTop = 0;
+    const out = w.__plankRocketScreen ? w.__plankRocketScreen() : { x: 0, y: 1e9 };
+    scroller.scrollTop = prev;
+    return out;
   });
   const finalGeom = await measure(descentViewer.game);
   const cardRect = finalGeom.rects.countdown;
