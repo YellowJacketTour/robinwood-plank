@@ -13,6 +13,7 @@ import {
   parseSimulationState, playtestRulesHash, rebasePlaytestLotteryTarget, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 import { settlementDescriptor } from "@/lib/casino/settlement-rules";
+import { activationPace, lotteryActivationQuote, lotteryShareOfPotPpm, seedShareBps, vaultGrowthBps, vaultShareOfPotPpm } from "@/lib/casino/economy-report";
 import { clampDisplayLagMs, DEFAULT_DISPLAY_LAG_MS, laggedLockGrantBps } from "@/lib/playtest-live-shared";
 
 /** Server-published presentation lag δ for every room (see the choice
@@ -173,6 +174,61 @@ export async function archivePlaytestRoom(identity: PlaytestIdentity, roomId: st
   });
 }
 
+const big = (value: unknown): bigint => { try { return BigInt(String(value ?? "0")); } catch { return 0n; } };
+
+/** Plain-language economy figures, derived with the SAME kernel functions
+ * the engine settles with. `recent` is newest-first round.settled payloads. */
+export function buildEconomyReport(
+  simulation: ReturnType<typeof parseSimulationState>,
+  policy: SimulationPolicy,
+  effectiveRakeBps: bigint,
+  recent: ReadonlyArray<{ round_id: string; public_payload: Record<string, unknown> }>,
+) {
+  const last = recent[0] ?? null;
+  const payload = last?.public_payload ?? {};
+  const hasProvenance = last !== null && "vaultBefore" in payload;
+  const vaultBefore = hasProvenance ? big(payload.vaultBefore) : null;
+  const vaultAdded = hasProvenance ? big(payload.vaultAdded) : null;
+  const seed = hasProvenance ? big(payload.seed) : null;
+  const reservesBeforeSeed = hasProvenance ? big(payload.reservesBeforeSeed) : null;
+  const activation = lotteryActivationQuote(simulation, policy);
+  const recentFunding = recent.map((row) => big(row.public_payload.powerboardFundingAdded));
+  const pace = activationPace(activation.remaining, recentFunding, BigInt(PLAYTEST_INTERMISSION_MS / 1000));
+  return {
+    schema: "plank.live-lab.economy.v1",
+    creditsPerEth: "1000000",
+    lastSettledRound: last?.round_id ?? null,
+    vault: {
+      principal: simulation.protectedPrincipal,
+      emissionBuffer: simulation.emissionBuffer,
+      previousPrincipal: vaultBefore,
+      addedThisRound: vaultAdded,
+      growthBps: vaultBefore === null || vaultAdded === null ? null : vaultGrowthBps(vaultBefore, vaultAdded),
+      genesisRound: vaultBefore === 0n,
+      shareOfPotPpm: vaultShareOfPotPpm(policy, effectiveRakeBps),
+      communityRetainedBps: 10_000n - policy.powerboardFundingBps,
+      retainedToVaultBps: policy.protectedPrincipalBps,
+      seedThisRound: seed,
+      reservesBeforeSeed,
+      seedShareBps: seed === null || reservesBeforeSeed === null ? null : seedShareBps(seed, reservesBeforeSeed),
+      seedPerRound: policy.crashSeed,
+      lifetimeAdded: simulation.protectedPrincipal,
+      lifetimeSeeded: simulation.totals.flightSeeded ?? 0n,
+    },
+    lottery: {
+      ...activation,
+      addedThisRound: last ? big(payload.powerboardFundingAdded) : null,
+      shareOfPotPpm: lotteryShareOfPotPpm(policy, effectiveRakeBps),
+      averageFundingPerRound: pace.averageFundingPerRound,
+      roundsSampled: pace.roundsSampled,
+      roundsToActivation: pace.roundsToActivation,
+      secondsToActivation: pace.secondsToActivation,
+      cadenceSeconds: PLAYTEST_INTERMISSION_MS / 1000,
+      hitOddsOneIn: PLAYTEST_POWERBOARD_ODDS,
+    },
+  };
+}
+
 export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: string) {
   return withPostgresTransaction(async (client) => {
     await requireMember(client, roomId, identity.id);
@@ -221,6 +277,13 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
     const simulation = parseSimulationState(room.simulation_state);
     const snapshotPolicy = parsePolicy(room.policy);
     const evolution = evolutionQuote(snapshotPolicy, simulation.totals.freshWagers);
+    // Economy panel: the LAST settled round's provenance (whatever phase the
+    // table is in now) plus the funding pace over the last 10 settlements.
+    const recentSettlements = await client.query<{ round_id: string; public_payload: Record<string, unknown> }>(
+      `SELECT round_id::text,public_payload FROM playtest_room_events
+        WHERE room_id=$1 AND event_type='round.settled' ORDER BY sequence DESC LIMIT 10`, [roomId],
+    );
+    const economy = buildEconomyReport(simulation, snapshotPolicy, evolution.effectiveRakeBps, recentSettlements.rows);
     const eligibilityEpoch = simulation.lottery.awaitingSeal ? simulation.lottery.epoch + 1n : simulation.lottery.epoch;
     const powerboard = await client.query<{ total_weight: string; my_weight: string; participant_count: string }>(
       `SELECT COALESCE(SUM(weight),0)::text AS total_weight,
@@ -256,6 +319,7 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       },
       policy: room.policy, simulation: room.simulation_state,
       evolution: serializeBigInts(evolution),
+      economy: serializeBigInts(economy),
       powerboard: {
         epoch: eligibilityEpoch.toString(),
         totalWeight: totalPowerboardWeight.toString(),
@@ -657,6 +721,17 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       effectiveRakeBps: result.effectiveRakeBps.toString(),
       evolutionTier: result.evolutionTier.toString(),
       powerboardFundingAdded: powerboardFundingAdded.toString(),
+      // Economy panel provenance (2026-09-03): the Vault movement, the flight
+      // seed and the reserves it was drawn against, so every player can see
+      // exactly what this round added to the Vault and what the Vault gave
+      // the game. All strings; additive.
+      seed: result.seed.toString(),
+      reservesBeforeSeed: (prior.protectedPrincipal + prior.emissionBuffer).toString(),
+      vaultBefore: prior.protectedPrincipal.toString(),
+      vaultAfter: result.state.protectedPrincipal.toString(),
+      vaultAdded: (result.state.protectedPrincipal - prior.protectedPrincipal).toString(),
+      emissionBufferAfter: result.state.emissionBuffer.toString(),
+      lotteryRemainingAfter: lotteryActivationQuote(result.state, policy).remaining.toString(),
       powerboardPool: {
         epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),
         weights: epochTickets.rows.map((ticket) => ({ userId: ticket.user_id, weight: ticket.weight })),

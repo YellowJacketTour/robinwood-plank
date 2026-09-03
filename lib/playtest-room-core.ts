@@ -136,7 +136,7 @@ const STATE_BIGINT_KEYS = new Set([
   "keeperRewards", "burned", "communityFunded", "powerboardFunded", "crashFounderRake",
   "lotteryGrossConstituted", "lotteryFounderFees", "lotteryFounderFeesOnRollover",
   "playerCrashPayouts", "lotteryWinnerPayouts", "consolationPayouts",
-  "vaultRemainders", "externalLotteryFunding",
+  "vaultRemainders", "externalLotteryFunding", "flightSeeded",
 ]);
 
 export function parseSimulationState(raw: unknown): SimulationState {
@@ -153,6 +153,7 @@ export function parseSimulationState(raw: unknown): SimulationState {
   // Snapshots produced before per-round Powerboard provenance was introduced
   // remain replayable; absence means no historically attributed contribution.
   state.totals.powerboardFunded ??= 0n;
+  state.totals.flightSeeded ??= 0n;
   return state;
 }
 

@@ -61,6 +61,9 @@ export interface SimulationTotals {
   consolationPayouts: bigint;
   vaultRemainders: bigint;
   externalLotteryFunding: bigint;
+  /** Cumulative emission-buffer credits seeded into flights (the Vault side's
+   * contribution to games). Additive; absent in pre-2026-09-03 snapshots. */
+  flightSeeded: bigint;
 }
 
 export interface LotteryState {
@@ -143,6 +146,7 @@ const ZERO_TOTALS: SimulationTotals = {
   consolationPayouts: 0n,
   vaultRemainders: 0n,
   externalLotteryFunding: 0n,
+  flightSeeded: 0n,
 };
 
 export function validatePolicy(policy: SimulationPolicy): void {
@@ -203,7 +207,9 @@ export function initialSimulationState(policy: SimulationPolicy): SimulationStat
   };
 }
 
-function nextCycleBase(base: bigint, policy: SimulationPolicy): bigint {
+/** The base the cycle ratchets to after the next paid jackpot; also the net
+ * target the reset reserve must cover before a draw is ever exposed. */
+export function nextCycleBase(base: bigint, policy: SimulationPolicy): bigint {
   const effectiveBase = base > policy.lotteryInitialBase ? base : policy.lotteryInitialBase;
   const percentageStep = (effectiveBase * policy.lotteryBaseGrowthBps) / BPS;
   const step = percentageStep > policy.lotteryMinimumBaseStep
@@ -322,6 +328,7 @@ export function simulateIteration(
   if (qualified) {
     seed = state.emissionBuffer < policy.crashSeed ? state.emissionBuffer : policy.crashSeed;
     state.emissionBuffer -= seed;
+    state.totals.flightSeeded = (state.totals.flightSeeded ?? 0n) + seed;
     const stakes = input.players.map((player) => player.stake);
     const economics = roundEconomics(seed, stakes, evolution.effectiveRakeBps);
     const split = ratifiedRakeSplit(economics.rake, policy.keeperRewardBps);

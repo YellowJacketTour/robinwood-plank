@@ -579,7 +579,40 @@ test("every player control the inventory requires exists on the playtest surface
   // The primary action (COMMIT / LOCK) is PINNED to the phone viewport above
   // the table bar in every phase — never sticky-in-deck (that left it below
   // the fold and under the table sheet on real iPhones).
-  assert.match(arcadeSource, /\.deck \.primary-btn\{position:fixed;[^}]*z-index:90/);
+  // Sticky, not fixed: fixed took the action out of flow, so at max scroll
+  // the stake/target/AUTO-LOCK/REPEAT rows rested underneath it (untappable).
+  assert.match(arcadeSource, /\.deck \.primary-btn\{position:sticky;[^}]*z-index:90/);
   assert.match(arcadeSource, /html:has\(body\[data-playtest="true"\]\)\{height:auto;overflow-x:hidden;overflow-y:auto\}/);
   assert.match(arcadeSource, /\.topbar \.gear\{flex:0 0 44px;width:44px;height:44px\}/);
+});
+
+test("the header speaks plain money: no ticket-weight jargon, and the economy panel shows credits · ETH · USD", () => {
+  // The two header chips and their paint code: no "WT" voucher-weight
+  // jargon anywhere in the playtest header path.
+  const headerPaint = arcadeSource.slice(arcadeSource.indexOf("const economyHeader = privateEconomyHeader(snapshot);"), arcadeSource.indexOf("const effectiveRakeBps = Number(snapshot.evolution?.effectiveRakeBps"));
+  assert.ok(headerPaint.length > 0, "header paint block present");
+  assert.doesNotMatch(headerPaint, /\bWT\b/);
+  assert.doesNotMatch(arcadeSource.slice(arcadeSource.indexOf("function privateEconomyHeader"), arcadeSource.indexOf("function privateEconomyHtml")), /\bWT\b/);
+  assert.match(arcadeSource, /`LOTTERY \$\{lotteryLead\} · ODDS \$\{odds\}`/, "lottery chip = prize-or-funded% + your odds");
+  assert.match(arcadeSource, /`\$\{privateCredits\(vault\.principal\)\} cr \(\$\{privateUsdShort\(vault\.principal\)\}\)`/, "vault chip = credits (USD)");
+  // Three-way money format, with the honest fallback when no quote exists.
+  assert.match(arcadeSource, /\$\{privateCredits\(credits\)\} cr · \$\{prefix\}\$\{privateCreditEth\(credits\)\} ETH · /);
+  assert.match(arcadeSource, /"USD unavailable"/);
+  assert.match(arcadeSource, /const PRIVATE_CREDITS_PER_ETH = 1_000_000n;/, "1 cr = 1e-6 ETH");
+  // The panel's required fields, in plain language.
+  for (const field of [
+    "Vault holds", "Added this round", "Where it comes from", "Contributed to games", "Lifetime added to vault", "Lifetime seeded into flights",
+    "Prize right now", "Needed to turn active", "Prize when active", "This round added", "At this table's pace", "Your odds this draw", "If you win you receive",
+    "ACTIVE — a numbered draw happens after each round", "FUNDING — no draw yet", "the seed buffer is still filling", "genesis round — vault starts at 0",
+  ]) assert.ok(arcadeSource.includes(field), `economy panel field missing: ${field}`);
+  // Every entry point: desktop chips, the mobile HUD button, the phone table
+  // sheet section, and the reveal card's tiles.
+  assert.match(arcadeSource, /\$\("vaultStat"\)\.addEventListener\("click", \(\) => togglePrivateEconomy\("vault"\)\)/);
+  assert.match(arcadeSource, /if \(PLAYTEST_MODE\) \{ togglePrivateEconomy\("lottery"\); return; \}/);
+  assert.match(arcadeSource, /economyButton\.id = "privateEconomyButton"/);
+  assert.match(arcadeSource, /economySection\.id = "privateEconomySection"/);
+  assert.match(arcadeSource, /tile\.addEventListener\("click", \(\) => openPrivateEconomy\(tile\.dataset\.econ\)\)/);
+  // Policy-derived, never hardcoded: the 0.315% line is computed from ppm.
+  assert.match(arcadeSource, /pot × \$\{privatePpmPct\(vault\.shareOfPotPpm\)\}/);
+  assert.doesNotMatch(arcadeSource, /0\.315%/);
 });

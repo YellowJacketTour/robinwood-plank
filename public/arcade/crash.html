@@ -136,6 +136,27 @@
   .pb-row .pb-k { color: #b3a3d9; }
   .pb-row .pb-v { font-variant-numeric: tabular-nums; font-weight: 600; color: #fff; }
   .pb-row .pb-v.hi { color: #dcc8ff; }
+  .economy-popover { width: min(440px, calc(100vw - 24px)); max-height: calc(100dvh - 70px); overflow: auto; overscroll-behavior: contain; z-index: 90; }
+  /* Desktop: the table panel is fixed at the right edge (right:14px, 320px
+     wide). Anchor the economy popover to its LEFT so it can never cover the
+     panel's controls (invite, launch, leave). */
+  @media (min-width: 701px) { body[data-playtest="true"] .economy-popover { right: 350px; } }
+  .economy-popover .pb-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .economy-popover .pb-row .pb-v, #privateEconomySheet .pb-row .pb-v { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+  .private-econ-section { margin-top: 10px; }
+  .private-econ-title { font-size: 12px; letter-spacing: .08em; font-weight: 800; color: #c9adff; margin: 6px 0 2px; display: flex; flex-direction: column; gap: 2px; }
+  .private-econ-title small { font-weight: 600; letter-spacing: 0; text-transform: none; color: #b3a3d9; font-size: 11px; }
+  .private-econ-section[data-econ="vault"] .private-econ-title { color: #8dffc0; }
+  #privateEconomySection { display: none; }
+  #privateEconomySheet .pb-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 0; border-top: 1px solid rgba(255,200,87,.14); font-size: 12px; }
+  #privateEconomySheet .pb-k { color: #c9b895; } #privateEconomySheet .pb-v { color: #fff; font-variant-numeric: tabular-nums; font-weight: 600; } #privateEconomySheet .pb-v.hi { color: #ffc857; }
+  #privateEconomySheet .pb-guarantee { font-size: 11px; }
+  .private-result-world > span[data-econ] { cursor: pointer; }
+  #privateEconomyButton { border-color: rgba(178,143,255,.5) !important; color: #dcc8ff !important; }
+  /* Phones: the economy lives in the table sheet (and the VAULT / LOTTERY
+     header chips open it); the extra HUD button would add a row that pushes
+     the deck's controls under the pinned action. */
+  @media (max-width: 700px) { #privateEconomySection { display: block; } #privateEconomyButton { display: none; } }
   .pb-guarantee { margin-top: 10px; padding: 8px 10px; background: rgba(178,143,255,0.08);
     border: 1px solid rgba(178,143,255,0.2); border-radius: 9px; font-size: 11px;
     color: #dcc8ff; line-height: 1.4; }
@@ -672,6 +693,14 @@
     <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose" role="button" aria-label="Close Powerboard details" tabindex="0">✕</span></div>
     <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
     <div id="pbPopBody"></div>
+  </div>
+
+  <!-- ECONOMY popover (private playtest): the Vault and the Powerboard
+       lottery in plain language, every figure as credits · ETH · USD. -->
+  <div id="economyPopover" class="pb-popover economy-popover" role="dialog" aria-label="Economy: vault and lottery">
+    <div class="pb-pop-head">⬢ Economy <span class="pb-pop-close" id="economyPopClose" role="button" aria-label="Close economy details" tabindex="0">✕</span></div>
+    <div class="pb-pop-sub">What is in the Vault, what it gives each game, what the lottery is worth, and what it still needs to turn active.</div>
+    <div id="economyPopBody"></div>
   </div>
 
   <!-- Rank popover: every wallet levels up by playing -- Sapling through
@@ -3503,6 +3532,7 @@ async function refreshPowerboardUI() {
 }
 
 $("pbStat").addEventListener("click", () => {
+  if (PLAYTEST_MODE) { togglePrivateEconomy("lottery"); return; }
   $("pbPopover").classList.toggle("show");
   if (PLAYTEST_MODE && privateSnapshot) {
     const lottery = privateSnapshot.simulation.lottery;
@@ -5031,14 +5061,23 @@ function privateBringActionIntoView() {
   // slot sits just above the pinned button's top edge: everything the player
   // must reach before acting (stake chips, cash-out target, AUTO-LOCK chip,
   // REPEAT) then sits above the pinned action instead of beneath it.
-  const previous = primaryBtn.style.position;
-  primaryBtn.style.position = "static";
-  const rect = primaryBtn.getBoundingClientRect();
-  primaryBtn.style.position = previous;
+  // The controls the player must reach (stake chips, cash-out target,
+  // AUTO-LOCK chip, REPEAT) live in the deck ABOVE the button's natural slot.
+  // The pinned button covers a fixed band at the bottom of the viewport, so
+  // scroll until the LAST of those rows clears that band's top edge. Anchoring
+  // on the button itself is not enough: at max scroll the rows can still come
+  // to rest underneath it.
   const pinnedTop = primaryBtn.getBoundingClientRect().top;
-  const targetBottom = Math.min(window.innerHeight - 72, pinnedTop - 8);
-  if (rect.top >= 0 && rect.bottom <= targetBottom) return;
-  try { window.scrollBy({ top: rect.bottom - targetBottom, behavior: privateMotionReduced() ? "auto" : "smooth" }); } catch (_) {}
+  const rows = [$("autoRow"), $("stakeRow")].filter(Boolean);
+  let lowest = -Infinity;
+  for (const row of rows) {
+    const b = row.getBoundingClientRect();
+    if (b.height > 0) lowest = Math.max(lowest, b.bottom);
+  }
+  if (lowest === -Infinity) return;
+  const clearance = pinnedTop - 10;
+  if (lowest <= clearance) return;
+  try { window.scrollBy({ top: lowest - clearance, behavior: privateMotionReduced() ? "auto" : "smooth" }); } catch (_) {}
 }
 
 let privatePowerOrangeDispose = null;
@@ -5260,6 +5299,7 @@ function paintPrivateStakeQuote() {
 function paintPrivateCreditQuote() {
   const quote = $("creditQuote"); if (!quote || !PLAYTEST_MODE) return;
   quote.textContent = privateEthUsd > 0 ? `~${privateCreditUsd(PRIVATE_CREDITS_PER_ETH)} / 1M cr` : "unavailable";
+  paintPrivateEconomy();
   const stat = $("creditQuoteStat");
   if (stat) stat.title = privateEthUsd > 0
     ? `1,000,000 test credits = 1 ETH; live ETH/USD from ${privateEthPriceSource}. Display only; never used for settlement.`
@@ -5324,6 +5364,135 @@ function privateMinimumLotteryGross(targetNet, feeBps) {
   let low = target, high = (target * scale + (scale - fee) - 1n) / (scale - fee) + 1n;
   while (low < high) { const mid = (low + high) / 2n; if (mid - (mid * fee) / scale >= target) high = mid; else low = mid + 1n; }
   return low;
+}
+
+// ── ECONOMY panel (2026-09-03): the Vault and the Powerboard lottery in plain
+// language, every money figure three ways (credits · ETH · USD). All numbers
+// come from snapshot.economy, which the server derives with the SAME kernel
+// functions the engine settles with; the client only formats. USD uses the
+// room's live quote (privateEthUsd) and is never invented.
+const PRIVATE_ECONOMY_CADENCE_FALLBACK = 30;
+function privateCreditEth(value, minFraction = 3) {
+  let credits; try { credits = BigInt(value || "0"); } catch { credits = 0n; }
+  const negative = credits < 0n; if (negative) credits = -credits;
+  const whole = credits / PRIVATE_CREDITS_PER_ETH;
+  let fraction = (credits % PRIVATE_CREDITS_PER_ETH).toString().padStart(6, "0");
+  while (fraction.length > minFraction && fraction.endsWith("0")) fraction = fraction.slice(0, -1);
+  return `${negative ? "-" : ""}${whole}${fraction.length ? "." + fraction : ""}`;
+}
+/** "X cr · Y ETH · $Z" (or "· USD unavailable" without a quote). */
+function privateMoney3(value, { sign = false } = {}) {
+  let credits; try { credits = BigInt(value || "0"); } catch { credits = 0n; }
+  const prefix = sign && credits > 0n ? "+" : "";
+  const usd = privateEthUsd > 0 ? privateCreditUsd(credits < 0n ? -credits : credits) : "USD unavailable";
+  return `${prefix}${privateCredits(credits)} cr · ${prefix}${privateCreditEth(credits)} ETH · ${credits < 0n ? "-" : prefix}${usd}`;
+}
+function privateUsdShort(value) { return privateEthUsd > 0 ? privateCreditUsd(value) : "USD n/a"; }
+function privatePct(bps, digits = 2) { return `${(Number(BigInt(bps || "0")) / 100).toFixed(digits)}%`; }
+function privatePpmPct(ppm, digits = 3) { return `${(Number(BigInt(ppm || "0")) / 10_000).toFixed(digits)}%`; }
+function privateHours(seconds) {
+  const s = Number(BigInt(seconds || "0")); if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min`;
+  return `${(s / 3600).toFixed(s < 36_000 ? 1 : 0)} h`;
+}
+function privateEconomyRow(k, v, hi) { return `<div class="pb-row"><span class="pb-k">${k}</span><span class="pb-v${hi ? " hi" : ""}">${v}</span></div>`; }
+function privateEconomyModel(snapshot) {
+  const economy = snapshot?.economy; if (!economy) return null;
+  const board = snapshot.powerboard || {};
+  const myWeight = BigInt(board.myWeight || "0"), totalWeight = BigInt(board.totalWeight || "0");
+  const hitOdds = BigInt(economy.lottery.hitOddsOneIn || board.hitOddsOneIn || 16);
+  const combinedOdds = BigInt(board.quote?.combinedOddsOneInCeil || (myWeight > 0n ? (totalWeight * hitOdds + myWeight - 1n) / myWeight : 0n));
+  return { economy, vault: economy.vault, lottery: economy.lottery, myWeight, totalWeight, hitOdds, combinedOdds };
+}
+function privateEconomyHeader(snapshot) {
+  const m = privateEconomyModel(snapshot);
+  if (!m) return { vault: privateCredits(snapshot.simulation.protectedPrincipal), lottery: privateLotteryPresentation(snapshot).label };
+  const { lottery, vault } = m;
+  const prize = BigInt(lottery.prizeNow || "0");
+  const phone = window.matchMedia("(max-width:700px)").matches;
+  const lotteryLead = lottery.status === "active" ? `PRIZE ${privateCredits(prize)} cr` : `${privatePct(lottery.fundedBps, phone ? 0 : 1)} FUNDED`;
+  const odds = m.combinedOdds > 0n ? `1 IN ${privateCredits(m.combinedOdds)}` : (phone ? "NO TICKETS" : "NO TICKETS YET");
+  // Phones: keep both chips to one short line each (a wrapped topbar pushes
+  // the whole deck down under the pinned action); USD lives in the panel.
+  if (phone) return { vault: `${privateCredits(vault.principal)} cr`, lottery: `${lotteryLead} · ${odds}` };
+  return { vault: `${privateCredits(vault.principal)} cr (${privateUsdShort(vault.principal)})`, lottery: `LOTTERY ${lotteryLead} · ODDS ${odds}` };
+}
+function privateEconomyHtml(snapshot) {
+  const m = privateEconomyModel(snapshot);
+  if (!m) return '<div class="pb-pop-sub">Economy figures arrive with the next table snapshot.</div>';
+  const { vault, lottery } = m;
+  const policy = snapshot.policy || {};
+  const usdNote = privateEthUsd > 0 ? `USD at the live ${privateEthPriceSource} quote (${privateCreditUsd(PRIVATE_CREDITS_PER_ETH)} per ETH); display only.` : "USD unavailable right now; credits and ETH are exact.";
+  const added = vault.addedThisRound == null ? null : BigInt(vault.addedThisRound);
+  const previous = vault.previousPrincipal == null ? null : BigInt(vault.previousPrincipal);
+  let growth;
+  if (added === null) growth = "no settled round yet";
+  else if (vault.genesisRound || previous === 0n) growth = `genesis round — vault starts at 0, first deposit ${privateMoney3(added, { sign: true })}`;
+  else growth = `grew ${privatePct(vault.growthBps ?? "0", 3)} this round (+${privateCredits(added)} ÷ ${privateCredits(previous)})`;
+  const retainedPct = privatePct(vault.communityRetainedBps, 0), toVaultPct = privatePct(vault.retainedToVaultBps, 0);
+  const seed = vault.seedThisRound == null ? null : BigInt(vault.seedThisRound);
+  const seedLine = seed === null ? "no settled round yet"
+    : seed === 0n ? `0 — the seed buffer is still filling (buffer now ${privateMoney3(vault.emissionBuffer)})`
+    : `${privateMoney3(seed)} from the emission buffer = ${privatePct(vault.seedShareBps ?? "0")} of the vault-side reserves (${privateCredits(vault.reservesBeforeSeed)} cr before the draw)`;
+  const remaining = BigInt(lottery.remaining || "0");
+  const pace = lottery.roundsToActivation == null ? "no lottery funding recorded yet"
+    : remaining === 0n ? "fully funded"
+    : `≈ ${privateCredits(lottery.roundsToActivation)} rounds ≈ ${privateHours(lottery.secondsToActivation)} (avg ${privateCredits(lottery.averageFundingPerRound)} cr/round over the last ${lottery.roundsSampled}, ${lottery.cadenceSeconds || PRIVATE_ECONOMY_CADENCE_FALLBACK}s cadence)`;
+  const oddsLine = m.combinedOdds > 0n ? `1 in ${privateCredits(m.combinedOdds)}` : "no tickets yet — every qualified bet earns tickets";
+  const derivation = `your tickets ${privateCredits(m.myWeight)} ÷ everyone's ${privateCredits(m.totalWeight)} × 1/${m.hitOdds}`;
+  const active = lottery.status === "active";
+  return `
+    <div class="private-econ-section" data-econ="vault">
+      <div class="private-econ-title">⬢ THE VAULT <small>protected principal · never decreases</small></div>
+      ${privateEconomyRow("Vault holds", privateMoney3(vault.principal), true)}
+      ${privateEconomyRow("Added this round", added === null ? "no settled round yet" : privateMoney3(added, { sign: true }))}
+      ${privateEconomyRow("Growth", growth)}
+      ${privateEconomyRow("Where it comes from", `${retainedPct} of the community rake share is kept back; ${toVaultPct} of that (pot × ${privatePpmPct(vault.shareOfPotPpm)}) goes to the vault each round`)}
+      ${privateEconomyRow("Contributed to games", `this round's flight was seeded with ${seedLine}`)}
+      ${privateEconomyRow("Seed budget per round", `${privateMoney3(vault.seedPerRound)} when the buffer can afford it`)}
+      ${privateEconomyRow("Lifetime added to vault", privateMoney3(vault.lifetimeAdded))}
+      ${privateEconomyRow("Lifetime seeded into flights", privateMoney3(vault.lifetimeSeeded))}
+    </div>
+    <div class="private-econ-section" data-econ="lottery">
+      <div class="private-econ-title">🎟 THE POWERBOARD LOTTERY <small>${active ? "ACTIVE — a numbered draw happens after each round" : "FUNDING — no draw yet"}</small></div>
+      ${privateEconomyRow("Prize right now", privateMoney3(lottery.prizeNow), true)}
+      ${privateEconomyRow("Needed to turn active", remaining === 0n ? "0 — active" : `${privateMoney3(remaining)} remaining`)}
+      ${privateEconomyRow("Funded", `${privatePct(lottery.fundedBps, 1)} of ${privateCredits(lottery.requiredTotal)} cr (${privateCredits(lottery.requiredGross)} prize gross + ${privateCredits(lottery.requiredReserve)} reset reserve)`)}
+      ${privateEconomyRow("Prize when active", `${privateMoney3(lottery.target)}, then the base ratchets to ${privateCredits(lottery.nextBase)} cr`)}
+      ${privateEconomyRow("This round added", lottery.addedThisRound == null ? "no settled round yet" : privateMoney3(lottery.addedThisRound, { sign: true }))}
+      ${privateEconomyRow("At this table's pace", pace)}
+      ${privateEconomyRow("Your odds this draw", oddsLine, true)}
+      ${privateEconomyRow("How", derivation)}
+      ${privateEconomyRow("If you win you receive", privateMoney3(lottery.target))}
+      ${privateEconomyRow("Lottery share of each pot", `pot × ${privatePpmPct(lottery.shareOfPotPpm)} (${privatePct(policy.powerboardFundingBps, 0)} of the community rake share)`)}
+    </div>
+    <div class="pb-guarantee">1 credit = 0.000001 ETH (1,000,000 cr = 1 ETH). ${usdNote} Test credits have no cash value.</div>`;
+}
+function paintPrivateEconomy() {
+  if (!PLAYTEST_MODE || !privateSnapshot) return;
+  const html = privateEconomyHtml(privateSnapshot);
+  const pop = $("economyPopBody"); if (pop && $("economyPopover")?.classList.contains("show")) pop.innerHTML = html;
+  const sheet = $("privateEconomySheet"); if (sheet) sheet.innerHTML = html;
+}
+function openPrivateEconomy(section) {
+  if (!PLAYTEST_MODE) return;
+  const phone = window.matchMedia("(max-width:700px)").matches;
+  $("pbPopover")?.classList.remove("show");
+  if (phone) {
+    const panel = $("privateTablePanel"), toggle = $("privateTableToggle");
+    if (panel && !panel.classList.contains("mobile-open")) { panel.classList.add("mobile-open"); toggle?.setAttribute("aria-expanded", "true"); }
+    paintPrivateEconomy();
+    const target = section ? $("privateEconomySheet")?.querySelector(`[data-econ="${section}"]`) : $("privateEconomySection");
+    (target || $("privateEconomySection"))?.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+  const pop = $("economyPopover"); if (!pop) return;
+  pop.classList.add("show"); paintPrivateEconomy();
+  if (section) pop.querySelector(`[data-econ="${section}"]`)?.scrollIntoView({ block: "start" });
+}
+function togglePrivateEconomy(section) {
+  const pop = $("economyPopover");
+  if (!window.matchMedia("(max-width:700px)").matches && pop?.classList.contains("show")) { pop.classList.remove("show"); return; }
+  openPrivateEconomy(section);
 }
 
 function privateLotteryPresentation(snapshot) {
@@ -5565,12 +5734,14 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const fundedGross = BigInt(worldLottery.rollover || "0") + BigInt(worldLottery.pendingFunding || "0");
   const requiredGross = privateMinimumLotteryGross(worldLottery.nextPrizeTarget, snapshot.policy?.lotteryFounderFeeBps);
   const fundedPct = requiredGross > 0n ? (fundedGross >= requiredGross ? 100 : Math.min(99.9, Number(fundedGross * 10_000n / requiredGross) / 100)) : 0;
-  const worldTiles = [`<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span>`];
-  if (sealedPrize > 0n) worldTiles.push(`<span><small>${winner ? "NEXT PRIZE BASE" : "LOTTERY PRIZE"}</small>${privateCredits(sealedPrize)}</span>`);
-  else worldTiles.push(`<span class="private-result-funding"><small>PRIZE FUNDING</small>${privateCredits(fundedGross)} / ${privateCredits(requiredGross)} · ${fundedPct.toFixed(1)}%</span>`);
-  if (worldReserve > 0n) worldTiles.push(`<span><small>RESET RESERVE</small>${privateCredits(worldReserve)}</span>`);
-  worldTiles.push(`<span><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)}</span>`);
+  const vaultUsd = privateEthUsd > 0 ? ` <small>${privateCreditUsd(snapshot.simulation.protectedPrincipal)}</small>` : "";
+  const worldTiles = [`<span data-econ="vault" role="button" tabindex="0" title="Open the economy panel"><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)} cr${vaultUsd}</span>`];
+  if (sealedPrize > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>${winner ? "NEXT PRIZE BASE" : "LOTTERY PRIZE"}</small>${privateCredits(sealedPrize)} cr</span>`);
+  else worldTiles.push(`<span class="private-result-funding" data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>PRIZE FUNDING</small>${privateCredits(fundedGross)} / ${privateCredits(requiredGross)} · ${fundedPct.toFixed(1)}%</span>`);
+  if (worldReserve > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>RESET RESERVE</small>${privateCredits(worldReserve)} cr</span>`);
+  worldTiles.push(`<span data-econ="vault" role="button" tabindex="0" title="Open the economy panel"><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)} cr</span>`);
   world.innerHTML = worldTiles.join("");
+  for (const tile of world.querySelectorAll("[data-econ]")) tile.addEventListener("click", () => openPrivateEconomy(tile.dataset.econ));
   world.dataset.tiles = String(worldTiles.length);
   const phoneSheet = window.matchMedia("(max-width:700px)").matches;
   const note = document.createElement(phoneSheet && seat ? "details" : "div"); note.className = "private-result-note";
@@ -5770,16 +5941,22 @@ function paintPrivateSnapshot(snapshot) {
   const pool = snapshot.seats.reduce((sum, seat) => sum + BigInt(seat.stake), 0n);
   $("poolStat").textContent = `${privateCredits(pool)} CREDITS`;
   paintPrivateCreditQuote();
-  $("vaultAmt").textContent = privateCredits(snapshot.simulation.protectedPrincipal);
-  $("vaultSeed").textContent = " protected";
-  const lotteryPresentation = privateLotteryPresentation(snapshot);
+  // Header chips are plain language (ECONOMY panel, 2026-09-03): the vault
+  // as credits + USD, the lottery as prize-or-funded% + your odds. No ticket
+  // weight jargon; the full three-way ledger is one click away.
+  const economyHeader = privateEconomyHeader(snapshot);
+  $("vaultAmt").textContent = economyHeader.vault;
+  $("vaultSeed").textContent = "";
+  $("vaultStat").title = "The protected Vault: kept back from every round's rake and never decreases. Click for the full economy panel.";
+  $("vaultStat").setAttribute("role", "button"); $("vaultStat").tabIndex = 0;
   const voucherWeight = BigInt(snapshot.powerboard?.myWeight || "0");
   const voucherOdds = BigInt(snapshot.powerboard?.quote?.combinedOddsOneInCeil || "0");
-  $("pbTickets").textContent = voucherWeight > 0n ? `${privateCredits(voucherWeight)} WT · 1/${privateCredits(voucherOdds)}` : lotteryPresentation.label;
+  $("pbTickets").textContent = economyHeader.lottery;
   $("pbStat").title = voucherWeight > 0n
-    ? `Your epoch ${snapshot.powerboard.epoch} voucher has ${privateCredits(voucherWeight)} of ${privateCredits(snapshot.powerboard.totalWeight)} linear weight; current combined jackpot chance is about 1 in ${privateCredits(voucherOdds)}. Click for the full ledger.`
-    : lotteryPresentation.detail;
-  $("pbJackpot").textContent = snapshot.simulation.lottery.netPrize === "0" ? " next prize" : " Powerboard";
+    ? `Your tickets this epoch: ${privateCredits(voucherWeight)} of ${privateCredits(snapshot.powerboard.totalWeight)}; combined jackpot chance about 1 in ${privateCredits(voucherOdds)}. Click for the full economy panel.`
+    : "Every qualified bet earns lottery tickets. Click for the full economy panel.";
+  $("pbJackpot").textContent = "";
+  paintPrivateEconomy();
   const effectiveRakeBps = Number(snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
   const evolutionTier = Number(snapshot.evolution?.tier ?? 0);
   const nextMilestone = snapshot.evolution?.nextMilestoneVolume;
@@ -6139,8 +6316,22 @@ async function startPrivatePlaytest() {
          inset) in EVERY phase — never dependent on scroll position, never
          below the fold, and above the players sheet (z-index 88) even when
          the sheet is open. The deck reserves matching space underneath. */
-      body[data-playtest="true"] .deck .primary-btn{position:fixed;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));bottom:calc(72px + env(safe-area-inset-bottom));width:auto;z-index:90;min-height:56px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
-      body[data-playtest="true"] .deck{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+      /* The primary action is STICKY inside the deck, not fixed to the
+         viewport: fixed positioning took it out of flow, so at max scroll the
+         stake / target / AUTO-LOCK / REPEAT rows came to rest underneath it
+         and could not be tapped. Sticky keeps it reachable in the thumb zone
+         while it still occupies real space that the rows sit above. */
+      /* Sticky with NO bottom offset: any offset lifts the button above its
+         natural slot, back over the rows it is supposed to sit below. The
+         clearance above the table bar comes from the deck's own bottom
+         padding, and scroll-margin keeps the rows clear when scrolled to. */
+      body[data-playtest="true"] .deck .primary-btn{position:sticky;bottom:calc(60px + env(safe-area-inset-bottom));margin-bottom:calc(60px + env(safe-area-inset-bottom));width:auto;z-index:90;min-height:56px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+      body[data-playtest="true"] .deck #stakeRow,body[data-playtest="true"] .deck #autoRow{scroll-margin-bottom:80px}
+      /* Clearance for the PINNED primary action: it occupies the band from
+         (72px + inset) to (72px + inset + 56px). The deck must reserve that
+         band PLUS a gap, or the auto-lock / target / REPEAT row scrolls to
+         rest underneath it and becomes untappable. */
+      body[data-playtest="true"] .deck{padding-bottom:calc(188px + env(safe-area-inset-bottom))}
       /* Every deck control is a real 44px touch target on phones. */
       body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
       #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
@@ -6254,7 +6445,20 @@ async function startPrivatePlaytest() {
       await refreshPrivatePlaytest(); startPrivateUpdates(); toast("New private table created", "success");
     } catch (error) { toast(error.message, "error"); }
   };
-  hud.append(picker, status);
+  const economyButton = document.createElement("button"); economyButton.id = "privateEconomyButton"; economyButton.type = "button"; economyButton.textContent = "VAULT & LOTTERY"; economyButton.title = "What is in the Vault, what it gives each game, and what the lottery is worth"; economyButton.onclick = () => togglePrivateEconomy();
+  hud.append(picker, status, economyButton);
+  $("vaultStat").addEventListener("click", () => togglePrivateEconomy("vault"));
+  $("vaultStat").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePrivateEconomy("vault"); } });
+  $("economyPopClose").addEventListener("click", () => $("economyPopover").classList.remove("show"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("economyPopover")?.classList.remove("show"); });
+  // Outside click/tap closes the popover so it can never sit over another
+  // control and swallow its taps (it once blocked COPY LINK in the panel).
+  document.addEventListener("pointerdown", (e) => {
+    const pop = $("economyPopover"); if (!pop?.classList.contains("show")) return;
+    const t = e.target; if (!(t instanceof Element)) return;
+    if (pop.contains(t) || t.closest("#privateEconomyButton, #vaultStat, #pbStat, #privateHudEconomy")) return;
+    pop.classList.remove("show");
+  }, true);
   // In flow right after the topbar: desktop styles position the HUD and
   // journey as fixed overlays, while narrow viewports lay them out in the
   // natural single-column flow (topbar -> HUD -> journey -> stage -> deck).
@@ -6296,7 +6500,8 @@ async function startPrivatePlaytest() {
   const menu = document.createElement("button"); menu.id = "privateMenuButton"; menu.textContent = "GAME MENU"; menu.setAttribute("aria-keyshortcuts", "M");
   const leave = document.createElement("a"); leave.id = "privateLeaveTable"; leave.href = "/playtest"; leave.target = "_top"; leave.className = "leave"; leave.textContent = "LEAVE TABLE"; actions.append(how, leave);
   actions.insertBefore(menu, how);
-  panel.append(panelToggle, kicker, panelTitle, code, guide, coach, session, playerSection, hostSection); $("app").appendChild(panel);
+  const economySection = document.createElement("section"); economySection.id = "privateEconomySection"; economySection.className = "private-panel-section"; economySection.innerHTML = '<div class="private-panel-label">Vault and lottery · credits · ETH · USD</div><div id="privateEconomySheet"></div>';
+  panel.append(panelToggle, kicker, panelTitle, code, guide, coach, session, economySection, playerSection, hostSection); $("app").appendChild(panel);
   const howDialog = document.createElement("dialog"); howDialog.id = "privateHow"; howDialog.innerHTML = '<div class="private-how-inner"><h2>One shared flight, fully accounted</h2><div class="private-how-grid"><div><b>1 · GATHER</b>Choose test credits and commit to reserve your seat.</div><div><b>2 · FLY</b>The host launches. Lock whenever you choose before the crash.</div><div><b>3 · SETTLE & GROW</b>The bounded pool is distributed and every lasting movement is shown.</div></div><p class="private-how-note">Your displayed lock multiplier determines parimutuel claim weight; it is not a fixed stake × multiplier promise. Refreshing never erases an accepted commitment or lock because the authoritative table lives on the server.</p><button class="private-how-close">RETURN TO TABLE</button></div>'; document.body.appendChild(howDialog); how.onclick = () => howDialog.showModal(); howDialog.querySelector(".private-how-close").onclick = () => howDialog.close();
   const inviteDialog = document.createElement("dialog"); inviteDialog.id = "privateInvite"; inviteDialog.innerHTML = `<div class="private-menu-inner"><div class="private-menu-kicker">Reusable private table door</div><h2>Bring your friends aboard</h2><p class="private-menu-lede">Anyone with this secret link can create a unique username and four-digit PIN, then joins this exact table. The same link works for your whole invited group for seven days.</p><input class="private-invite-url" id="privateInviteUrl" aria-label="Reusable invitation URL" readonly style="width:100%;margin:18px 0"><div class="private-menu-actions"><button id="privateInviteCopy" class="primary">COPY SECRET LINK</button><a id="privateInviteOpen" target="_blank" rel="noopener">TEST IN NEW TAB</a><button id="privateInviteClose">RETURN TO TABLE</button></div></div>`; document.body.appendChild(inviteDialog);
   const inviteUrl = inviteDialog.querySelector("#privateInviteUrl"); const inviteOpen = inviteDialog.querySelector("#privateInviteOpen");

@@ -423,7 +423,13 @@ test("every player control is present, reachable and functional on mobile + desk
   await setViewport(desktop, DESKTOP_VIEWPORTS[0], "d1280");
   try { await waitUntil(guest, roomId, (s) => Boolean(myQueued(s)), "REPEAT queued round 3", 12_000); }
   catch { failures.push("intermission@m390:repeat NOT FUNCTIONAL for round 3"); await mobile.game.locator("#primaryBtn").click(); await waitUntil(guest, roomId, (s) => Boolean(myQueued(s)), "guest queued 3", 12_000); }
-  await desktop.game.locator("#primaryBtn").click();
+  // The host may ALREADY be queued for round 3 (its own REPEAT, or a
+  // repeat armed earlier, commits during the intermission). Committing by
+  // hand is only possible when no seat is queued yet — a second COMMIT for
+  // an already-committed seat is correctly refused by the disabled button.
+  if (!myQueued(await snapshot(host, roomId))) {
+    await desktop.game.locator("#primaryBtn").click();
+  }
   await waitUntil(host, roomId, (s) => Boolean(myQueued(s)), "host queued 3", 12_000);
   await audit("committed");
   await waitForPhase(host, roomId, "running", 90_000);
