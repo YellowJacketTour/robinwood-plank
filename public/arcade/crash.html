@@ -5120,8 +5120,14 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   // The capture mouth and transfer tube retain one ball-clear internal
   // diameter throughout; there is no decorative taper narrower than a ball.
   const gate = new THREE.Mesh(new THREE.TorusGeometry(.34,.045,12,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.78,roughness:.2,emissive:0x3b2800}));gate.position.set(1.68,1.39,0);gate.rotation.y=Math.PI/2;machine.add(gate);
-  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.22,-1.55,0); machine.add(plinth);
-  const cradle = new THREE.Mesh(new THREE.TorusGeometry(.35,.075,12,40),metal);cradle.position.set(2.22,-1.28,0);cradle.rotation.x=Math.PI/2;machine.add(cradle);
+  // The gold reveal pedestal (plinth + cradle) exists ONLY when a committed
+  // result ball will land on it. While the prize is still funding there is
+  // no result, so there is no pedestal highlight and no placeholder ball.
+  const hasActiveDraw=drawNumber!==null&&drawNumber!==undefined;
+  if(hasActiveDraw){
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.22,-1.55,0); machine.add(plinth);
+    const cradle = new THREE.Mesh(new THREE.TorusGeometry(.35,.075,12,40),metal);cradle.position.set(2.22,-1.28,0);cradle.rotation.x=Math.PI/2;machine.add(cradle);
+  }
   const blowerGrille=new THREE.Mesh(new THREE.CylinderGeometry(1.18,1.18,.05,48),new THREE.MeshStandardMaterial({color:0x17202a,metalness:.8,roughness:.32}));blowerGrille.position.y=-1.43;machine.add(blowerGrille);
   for(let i=0;i<12;i++){const vane=new THREE.Mesh(new THREE.BoxGeometry(.92,.018,.025),metal);vane.position.y=-1.39;vane.rotation.y=i*Math.PI/6;machine.add(vane);}
   // The number is printed into the ball's single continuous surface map.
@@ -5140,7 +5146,6 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
     const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
     machine.add(group);balls.push({group,texture,material,velocity,number:i,rotation:new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize()});
   }
-  const hasActiveDraw=drawNumber!==null&&drawNumber!==undefined;
   const selected=hasActiveDraw?balls.find((ball)=>ball.number===Number(drawNumber)):null;
   if(hasActiveDraw&&!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
   let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
@@ -5210,6 +5215,7 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
   privatePowerOrangeDispose=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(raf);scene.traverse((object)=>{object.geometry?.dispose?.();if(object.material){(Array.isArray(object.material)?object.material:[object.material]).forEach((material)=>material.dispose?.());}});balls.forEach((ball)=>ball.texture.dispose());renderer.dispose();privatePowerOrangeDispose=null;};
 }
 
+let privateDockObserver = null;
 function clearPrivateRevealTimers() {
   for (const timer of privateRevealTimers) window.clearTimeout(timer);
   privateRevealTimers = [];
@@ -5527,7 +5533,8 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const drawLedger = drawActive
       ? `Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}`
       : "MIXING ONLY · no result ball is selected while the prize is funding";
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p><div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${drawActive ? draw.drawnNumber : "—"}</b></div><div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p>${drawActive ? `<div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div>` : ""}<div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    powerball.dataset.drawActive = drawActive ? "true" : "false";
     const drawCanvas = powerball.querySelector(".private-powerball-canvas");
     drawCanvas.removeAttribute("aria-hidden");
     drawCanvas.setAttribute("role", "img");
@@ -5547,11 +5554,27 @@ function paintPrivateConclusion(snapshot, me, seat) {
     powerball.setAttribute("role", "status");
   }
   const world = document.createElement("div"); world.className = "private-result-world";
-  // These four line items are independent community-facing balances, not a
+  // These line items are independent community-facing balances, not a
   // breakdown that claims to total anything. Operator earnings are deliberately
   // not rendered on any player-facing surface (owner decision 2026-09-02).
-  world.innerHTML = `<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span><span><small>${winner ? "NEXT PRIZE BASE" : "LOTTERY PRIZE"}</small>${privateCredits(snapshot.simulation.lottery.netPrize)}</span><span><small>RESET RESERVE</small>${privateCredits(snapshot.simulation.lottery.resetReserve)}</span><span><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)}</span>`;
-  const note = document.createElement("div"); note.className = "private-result-note";
+  // While the prize is UNSEALED there is no prize and no reset reserve to
+  // show; the honest state is funded/required gross (the same fee gross-up
+  // kernel the engine's funded gate uses), never "PRIZE 0".
+  const worldLottery = snapshot.simulation.lottery || {};
+  const sealedPrize = BigInt(worldLottery.netPrize || "0"), worldReserve = BigInt(worldLottery.resetReserve || "0");
+  const fundedGross = BigInt(worldLottery.rollover || "0") + BigInt(worldLottery.pendingFunding || "0");
+  const requiredGross = privateMinimumLotteryGross(worldLottery.nextPrizeTarget, snapshot.policy?.lotteryFounderFeeBps);
+  const fundedPct = requiredGross > 0n ? (fundedGross >= requiredGross ? 100 : Math.min(99.9, Number(fundedGross * 10_000n / requiredGross) / 100)) : 0;
+  const worldTiles = [`<span><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)}</span>`];
+  if (sealedPrize > 0n) worldTiles.push(`<span><small>${winner ? "NEXT PRIZE BASE" : "LOTTERY PRIZE"}</small>${privateCredits(sealedPrize)}</span>`);
+  else worldTiles.push(`<span class="private-result-funding"><small>PRIZE FUNDING</small>${privateCredits(fundedGross)} / ${privateCredits(requiredGross)} · ${fundedPct.toFixed(1)}%</span>`);
+  if (worldReserve > 0n) worldTiles.push(`<span><small>RESET RESERVE</small>${privateCredits(worldReserve)}</span>`);
+  worldTiles.push(`<span><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)}</span>`);
+  world.innerHTML = worldTiles.join("");
+  world.dataset.tiles = String(worldTiles.length);
+  const phoneSheet = window.matchMedia("(max-width:700px)").matches;
+  const note = document.createElement(phoneSheet && seat ? "details" : "div"); note.className = "private-result-note";
+  const noteLines = [];
   const accounting = settlementEvent?.payload?.accounting;
   const allocation = accounting?.allocations?.find((entry) => entry.id === snapshot.me.id);
   const settledRakeBps = Number(settlementEvent?.publicPayload?.effectiveRakeBps ?? snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
@@ -5566,13 +5589,37 @@ function paintPrivateConclusion(snapshot, me, seat) {
       const bonus = BigInt(allocation.houseBonus || "0");
       const netValue = BigInt(allocation.net || "0");
       settlementDetail = `${potLine}Your hazard weight is stake × ln(${(lockedBps / 10_000).toFixed(2)}) = stake × ${hazard}. Player-layer payout ${privateCredits(allocation.playerPayout)} (${privateCredits(allocation.floorPayout)} survivor floor + ${privateCredits(allocation.performancePayout)} performance premium)${bonus > 0n ? ` + ${privateCredits(bonus)} house bonus` : ""} = ${privateCredits(allocation.payout)} returned · ${netValue >= 0n ? "+" : ""}${privateCredits(netValue)} net. `;
+      // Same disclosed numbers, one per line, for the phone sheet.
+      noteLines.push(potLine.trim(), `Your hazard weight: stake × ln(${(lockedBps / 10_000).toFixed(2)}) = stake × ${hazard}`,
+        `Player-layer payout: ${privateCredits(allocation.playerPayout)}`, `= ${privateCredits(allocation.floorPayout)} survivor floor`, `+ ${privateCredits(allocation.performancePayout)} performance premium`);
+      if (bonus > 0n) noteLines.push(`+ ${privateCredits(bonus)} house bonus`);
+      noteLines.push(`= ${privateCredits(allocation.payout)} returned`, `${netValue >= 0n ? "+" : ""}${privateCredits(netValue)} net`);
     } else {
       settlementDetail = `${potLine}Your stake busted below the crash and is part of that pot; nothing is returned to busted seats. `;
+      noteLines.push(potLine.trim(), "Your stake busted below the crash and is part of that pot; nothing is returned to busted seats.");
     }
   } else if (allocation && allocation.base !== undefined) {
     settlementDetail = `Exact settlement: ${privateCredits(allocation.base)} base return + ${privateCredits(allocation.surplus)} risk surplus = ${privateCredits(seat?.payout)}. `;
+    noteLines.push(`Base return: ${privateCredits(allocation.base)}`, `+ risk surplus: ${privateCredits(allocation.surplus)}`, `= ${privateCredits(seat?.payout)} returned`);
   }
-  note.textContent = `${seat ? `${settlementDetail}${survived && !profitable ? `You beat the crash, but too much stake also survived to cover every stake after the ${(settledRakeBps / 100).toFixed(2)}% routed rake; the bounded pool cannot manufacture the difference. ` : ""}The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.` : "Commit below to take a seat in the next round."}${winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : ""}`;
+  const dilutionNote = survived && !profitable ? `You beat the crash, but too much stake also survived to cover every stake after the ${(settledRakeBps / 100).toFixed(2)}% routed rake; the bounded pool cannot manufacture the difference. ` : "";
+  const claimNote = "The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.";
+  const winnerNote = winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : "";
+  const noteText = `${seat ? `${settlementDetail}${dilutionNote}${claimNote}` : "Commit below to take a seat in the next round."}${winnerNote}`;
+  if (note.tagName === "DETAILS") {
+    // Phone sheet: collapsed by default, left-aligned, every disclosed number
+    // on its own line. Content is identical to the desktop paragraph.
+    note.classList.add("private-result-note--phone");
+    const summary = document.createElement("summary"); summary.textContent = "How this settled"; note.append(summary);
+    const body = document.createElement("div"); body.className = "private-result-note-body";
+    if (dilutionNote) noteLines.push(dilutionNote.trim());
+    noteLines.push(claimNote);
+    if (winnerNote) noteLines.push(winnerNote.trim());
+    for (const line of noteLines) { const p = document.createElement("p"); p.textContent = line; body.append(p); }
+    note.append(body);
+  } else {
+    note.textContent = noteText;
+  }
   const next = document.createElement("div"); next.className = "private-result-next";
   const skip = document.createElement("button"); skip.type = "button"; skip.className = "private-reveal-skip"; skip.textContent = "SKIP REVEAL";
   const continueButton = document.createElement("button"); continueButton.type = "button"; continueButton.className = "private-reveal-continue"; continueButton.textContent = `REVIEW COMPLETE · PREPARE ROUND ${Number(snapshot.room.currentRound) + 1}`;
@@ -5581,12 +5628,20 @@ function paintPrivateConclusion(snapshot, me, seat) {
   skip.onclick = () => { finishPrivateRevealImmediately(); card.dataset.reveal = "world"; skip.hidden = true; continueButton.focus(); };
   next.append(skip, continueButton);
   card.append(eyebrow, headline, money, balance, powerball, world, note, next);
+  if (privateDockObserver) { privateDockObserver.disconnect(); privateDockObserver = null; }
+  if (phoneSheet && "ResizeObserver" in window) {
+    // The action block is docked to the sheet's bottom edge; reserve exactly
+    // its height (plus safe area, already inside it) at the end of the
+    // scrolling content so it never covers the machine, tiles or note.
+    const reserve = () => card.style.setProperty("--private-dock-h", `${Math.ceil(next.getBoundingClientRect().height)}px`);
+    privateDockObserver = new ResizeObserver(reserve); privateDockObserver.observe(next); reserve();
+  } else card.style.removeProperty("--private-dock-h");
   if (draw) {
     try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, drawActive ? draw.drawnNumber : null, draw.oddsOneIn); }
     catch (error) {
       console.error("[playtest] lottery machine WebGL fallback", error);
       powerball.classList.add("webgl-fallback");
-      const fallback = document.createElement("div"); fallback.className = "private-lottery-fallback"; fallback.setAttribute("aria-hidden", "true"); fallback.innerHTML = `<i></i><i></i><i></i><b>${drawActive ? draw.drawnNumber : "—"}</b>`; powerball.prepend(fallback);
+      const fallback = document.createElement("div"); fallback.className = "private-lottery-fallback"; fallback.setAttribute("aria-hidden", "true"); fallback.innerHTML = `<i></i><i></i><i></i>${drawActive ? `<b>${draw.drawnNumber}</b>` : ""}`; powerball.prepend(fallback);
     }
   }
   if (privateMotionReduced()) {
@@ -6036,7 +6091,7 @@ async function startPrivatePlaytest() {
     #privateRoster{display:flex;flex-direction:column;gap:6px}.private-player{display:grid;gap:4px;padding:9px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.025)}.private-player.me{border-color:rgba(61,220,132,.35);background:rgba(61,220,132,.055)}.private-player-identity{display:flex;align-items:center;gap:7px}.private-player-identity strong{font-size:12px}.private-player-identity small{margin-left:auto;color:#78857d;font:700 8px var(--font-mono);letter-spacing:.08em}.private-player-dot{width:7px;height:7px;border-radius:50%;background:#778078}.private-player-dot.committed{background:#3ddc84;box-shadow:0 0 8px rgba(61,220,132,.6)}.private-player-state{padding-left:14px;color:#aeb7b1;font:600 10px/1.3 var(--font-mono)}.private-player-state.win{color:#75f0ae}
     .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions [hidden]{display:none!important}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
     .result-card.private-result{width:min(860px,calc(100% - 40px));padding:22px 26px;background:rgba(5,9,12,.96);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:680px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
-    .private-result-world{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
+    .private-result-world{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-top:14px}.private-result-world span{overflow-wrap:anywhere}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:7px;letter-spacing:.08em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
     #privateIntermissionCountdown{position:absolute;z-index:44;left:50%;top:clamp(10px,6vh,48px);transform:translateX(-50%);display:grid;grid-template-columns:auto auto;grid-template-areas:"label number" "unit number";align-items:center;gap:0 14px;min-width:240px;padding:12px 18px;border:1px solid rgba(255,200,87,.65);border-radius:16px;background:rgba(4,8,11,.9);box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 30px rgba(255,200,87,.1);backdrop-filter:blur(10px);pointer-events:none;text-align:right}#privateIntermissionCountdown[hidden]{display:none}#privateIntermissionCountdown small{grid-area:label;color:#ffc857;font:900 10px var(--font-mono);letter-spacing:.16em}#privateIntermissionCountdown strong{grid-area:number;color:#fff2cf;font:400 clamp(54px,7vw,92px)/.8 var(--font-display);font-variant-numeric:tabular-nums}#privateIntermissionCountdown span{grid-area:unit;color:#8fa19a;font:800 9px var(--font-mono);letter-spacing:.18em}#privateIntermissionCountdown.urgent{border-color:#ff5b72;box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 42px rgba(255,77,106,.3)}#privateIntermissionCountdown.urgent strong{color:#ff5b72}
     .private-jackpot-fireworks{position:fixed;inset:0;z-index:110;overflow:hidden;pointer-events:none;background:radial-gradient(circle at 50% 60%,rgba(255,200,87,.12),transparent 42%)}.private-jackpot-fireworks i{position:absolute;left:var(--x);top:var(--y);width:7px;height:7px;border-radius:50%;background:var(--c);box-shadow:0 0 12px var(--c),0 0 24px var(--c);opacity:0;animation:private-firework 1.65s cubic-bezier(.16,.7,.2,1) var(--delay) both}@keyframes private-firework{0%{opacity:0;transform:translate(0,0) scale(.2)}12%{opacity:1}72%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.05)}}
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
@@ -6114,13 +6169,21 @@ async function startPrivatePlaytest() {
       body[data-playtest="true"][data-private-phase="settled"] .center-readout .mult{display:none}
       body[data-playtest="true"][data-private-phase="settled"] .center-readout .substatus{max-width:calc(100vw - 32px);padding:3px 8px;border-radius:8px;background:rgba(4,8,11,.55);font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       body[data-playtest="true"][data-private-phase="settled"] .mult-graph{opacity:.3}
-      .private-result .result-mult{font-size:clamp(30px,11vw,46px);line-height:.98}.private-result-balance{font-size:12px}
+      .private-result .result-mult{font-size:clamp(24px,7.4vw,32px);line-height:1.02}.private-result-balance{font-size:12px}
+      /* Phone sheet: the docked action block is FIXED to the sheet's bottom
+         edge and the scrolling content reserves its measured height, so no
+         scroll position ever hides content beneath the buttons. */
+      /* backdrop-filter would make the sheet the containing block of its
+         fixed dock (the dock would then scroll with the content); the phone
+         sheet is opaque anyway, so drop it and let the dock pin to the viewport. */
+      .result-card.private-result,.result-card.private-result.show{padding-bottom:calc(var(--private-dock-h,150px) + 16px);backdrop-filter:none;-webkit-backdrop-filter:none}
+      .private-result-note--phone{max-width:none;margin:12px 0 0;text-align:left}.private-result-note--phone summary{cursor:pointer;list-style:none;color:#ffc857;font:800 11px/1.4 var(--font-mono);letter-spacing:.06em;padding:8px 0}.private-result-note--phone summary::-webkit-details-marker{display:none}.private-result-note--phone summary::after{content:" ▸";display:inline-block;transition:transform .2s}.private-result-note--phone[open] summary::after{transform:rotate(90deg)}.private-result-note-body p{margin:0 0 6px;padding-left:8px;border-left:2px solid rgba(255,200,87,.25);color:#c9d3cc;font:600 11px/1.5 var(--font-mono);overflow-wrap:anywhere}
       .private-powerball{min-height:0;margin-top:12px;display:flex;flex-direction:column}
-      .private-powerball-canvas{position:relative;left:auto;top:auto;width:100%;height:clamp(190px,32dvh,270px);min-height:190px;order:2}
+      .private-powerball-canvas{position:relative;left:auto;top:auto;width:100%;height:clamp(200px,32dvh,300px);max-height:max(200px,34dvh);min-height:0;order:2}
       .private-powerball-copy{display:contents}.private-powerball-copy>small,.private-powerball-copy h3,.private-powerball-rule{position:relative;z-index:3;margin-left:14px;margin-right:14px}
       .private-powerball-copy>small{order:0;margin-top:16px}.private-powerball-copy h3{order:1;max-width:none;font-size:30px}.private-powerball-rule{order:1;max-width:none;font-size:10px}
       .private-powerball-drum{order:3;margin:-58px auto 10px}.private-powerball-outcome{order:4;padding:0 12px}.private-powerball-ledger{order:5;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:0 8px 10px}.private-powerball-lab{order:6;margin:0 12px 12px}
-      .private-result-world{grid-template-columns:1fr 1fr}.private-result-next{grid-template-columns:1fr;position:sticky;bottom:-12px;padding:10px 0 calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent 0,#07100c 28%)}
+      .private-result-world{grid-template-columns:1fr 1fr}.private-result-world span:last-child:nth-child(odd){grid-column:1/-1}.private-result-next{grid-template-columns:1fr;position:fixed;z-index:96;left:max(6px,env(safe-area-inset-left));right:max(6px,env(safe-area-inset-right));bottom:max(6px,env(safe-area-inset-bottom));margin:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid rgba(255,255,255,.13);border-radius:0 0 14px 14px;background:#07100c}
       .private-reveal-skip,.private-reveal-continue{min-height:48px}.private-reveal-skip{order:2}
       #privateHow,#privateMenu,#privateWelcome,#privateInvite,#privateSimulation{width:calc(100vw - 16px);max-height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
       .private-menu-actions{display:grid;grid-template-columns:1fr}.private-menu-actions button,.private-menu-actions a,.private-setting select,.private-setting button,.private-setting input{min-height:48px}

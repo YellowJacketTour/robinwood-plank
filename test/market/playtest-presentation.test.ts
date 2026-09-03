@@ -97,7 +97,11 @@ test("funding samples cannot masquerade as unpaid jackpot draws", () => {
   assert.match(arcadeSource, /draw\?\.drawActive/);
   assert.match(arcadeSource, /FUNDING MIX · NO ACTIVE PRIZE DRAW/);
   assert.match(arcadeSource, /no result ball is selected while the prize is funding/);
-  assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : "—"/);
+  // No placeholder ball ("—") exists while funding: the drum / fallback
+  // result sphere is rendered only for an active draw (owner fix 2026-09-03).
+  assert.doesNotMatch(arcadeSource, /drawnNumber : "—"/);
+  assert.match(arcadeSource, /\$\{drawActive \? `<div class="private-powerball-drum"/);
+  assert.match(arcadeSource, /powerball\.dataset\.drawActive = drawActive \? "true" : "false"/);
   assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : null/);
   assert.doesNotMatch(arcadeSource, /Funding sample \$\{draw\.drawnNumber\}/);
   assert.match(arcadeSource, /drawActive \? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"/);
@@ -252,7 +256,13 @@ test("phone presentation uses a collapsible table sheet and exclusive result the
     arcadeSource,
     /\.result-card\.private-result\.show\{position:fixed;z-index:95/
   );
-  assert.match(arcadeSource, /height:clamp\(190px,32dvh,270px\)/);
+  // Phone machine canvas: ~32dvh, never above 34dvh, floor 200px; the docked
+  // action block is fixed to the sheet bottom with its height reserved.
+  assert.match(arcadeSource, /height:clamp\(200px,32dvh,300px\);max-height:max\(200px,34dvh\)/);
+  assert.match(arcadeSource, /padding-bottom:calc\(var\(--private-dock-h,150px\) \+ 16px\)/);
+  assert.match(arcadeSource, /\.private-result-next\{grid-template-columns:1fr;position:fixed;z-index:96/);
+  assert.match(arcadeSource, /\.result-mult\{font-size:clamp\(24px,7\.4vw,32px\)/);
+  assert.match(arcadeSource, /summary\.textContent = "How this settled"/);
 });
 
 test("public alpha exposes the dollar-reference floor and permanent RTP evolution on phones", () => {

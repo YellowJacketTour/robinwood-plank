@@ -168,6 +168,93 @@ async function measure(game: FrameLocator): Promise<Geometry> {
   }, { tracked: TRACKED, geometryOnly: Array.from(GEOMETRY_ONLY) });
 }
 
+type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+type RevealGeometry = {
+  viewportHeight: number;
+  drawActive: string | null;
+  strayBall: boolean;
+  titleFontPx: number;
+  noteTag: string | null;
+  noteOpen: boolean | null;
+  tiles: number;
+  tileLabels: string[];
+  atMaxScroll: Record<"next" | "canvas" | "world" | "note", Rect | null>;
+  atTop: Record<"next" | "canvas" | "world" | "note", Rect | null>;
+};
+
+/** Settled/reveal-phase geometry of the private result sheet, measured at
+ *  scrollTop 0 and at the sheet's maximum scroll (the sheet is its own
+ *  scroller; the docked action block is fixed to its bottom edge). */
+async function measureReveal(game: FrameLocator): Promise<RevealGeometry | null> {
+  return game.locator("body").evaluate((body) => {
+    const doc = body.ownerDocument!; const win = doc.defaultView!;
+    const card = doc.querySelector<HTMLElement>(".result-card.private-result.show");
+    if (!card) return null;
+    const visible = (el: Element | null) => {
+      if (!el) return false;
+      const s = win.getComputedStyle(el);
+      if (s.display === "none" || s.visibility === "hidden" || Number(s.opacity) === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 1 && r.height > 1;
+    };
+    const rect = (sel: string) => {
+      const el = card.querySelector(sel);
+      if (!el || !visible(el)) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const collect = () => ({ next: rect(".private-result-next"), canvas: rect(".private-powerball-canvas"), world: rect(".private-result-world"), note: rect(".private-result-note") });
+    const prev = card.scrollTop;
+    card.scrollTop = 0; const atTop = collect();
+    card.scrollTop = card.scrollHeight; const atMaxScroll = collect();
+    card.scrollTop = prev;
+    const powerball = card.querySelector(".private-powerball");
+    const note = card.querySelector<HTMLElement>(".private-result-note");
+    const title = card.querySelector(".result-mult");
+    return {
+      viewportHeight: win.innerHeight,
+      drawActive: powerball?.getAttribute("data-draw-active") ?? null,
+      strayBall: Array.from(card.querySelectorAll(".private-powerball-drum b, .private-lottery-fallback b")).some(visible),
+      titleFontPx: title ? parseFloat(win.getComputedStyle(title).fontSize) : 0,
+      noteTag: note ? note.tagName : null,
+      noteOpen: note && note.tagName === "DETAILS" ? (note as HTMLDetailsElement).open : null,
+      tiles: card.querySelectorAll(".private-result-world > span").length,
+      tileLabels: Array.from(card.querySelectorAll(".private-result-world > span > small")).map((el) => (el.textContent || "").trim()),
+      atMaxScroll, atTop,
+    };
+  });
+}
+
+function assertReveal(tag: string, width: number, g: RevealGeometry | null) {
+  const ex = expect.soft;
+  ex(g, `${tag}: private result sheet not shown`).not.toBeNull();
+  if (!g) return;
+  // Honest tiles: never a "PRIZE 0" / "RESET RESERVE 0" beside a funded total.
+  ex(g.tileLabels, `${tag}: PROTECTED VAULT tile missing`).toContain("PROTECTED VAULT");
+  ex(g.tileLabels, `${tag}: COMMUNITY FUNDED tile missing`).toContain("COMMUNITY FUNDED");
+  ex(g.tileLabels.includes("PRIZE FUNDING") !== g.tileLabels.includes("LOTTERY PRIZE") || g.tileLabels.includes("NEXT PRIZE BASE"),
+    `${tag}: exactly one of PRIZE FUNDING / LOTTERY PRIZE must be shown (${g.tileLabels.join(", ")})`).toBe(true);
+  // No stray placeholder ball while the prize is still funding.
+  if (g.drawActive === "false") ex(g.strayBall, `${tag}: placeholder ball rendered while funding`).toBe(false);
+  if (width > 700) return;
+  // Phone sheet: machine canvas capped, title clamped, explanation collapsed.
+  const canvas = g.atTop.canvas ?? g.atMaxScroll.canvas;
+  if (canvas) ex(canvas.height, `${tag}: machine canvas ${canvas.height}px > 34% of ${g.viewportHeight}px viewport`).toBeLessThanOrEqual(g.viewportHeight * 0.34 + 1);
+  ex(g.titleFontPx, `${tag}: headline font ${g.titleFontPx}px not clamped`).toBeLessThanOrEqual(32.5);
+  if (g.noteTag === "DETAILS") ex(g.noteOpen, `${tag}: "How this settled" must start collapsed`).toBe(false);
+  // Docked action block never covers content at max scroll, and is docked.
+  const next = g.atMaxScroll.next;
+  ex(next, `${tag}: docked action block not visible`).not.toBeNull();
+  if (next) {
+    ex(next.bottom, `${tag}: action block not docked at the sheet bottom (${JSON.stringify(next)})`).toBeLessThanOrEqual(g.viewportHeight + 1);
+    for (const name of ["canvas", "world", "note"] as const) {
+      const r = g.atMaxScroll[name];
+      if (!r) continue;
+      ex(overlapArea(next, r), `${tag}: docked buttons overlap ${name} at max scroll (${JSON.stringify(next)} vs ${JSON.stringify(r)})`).toBeLessThanOrEqual(1);
+    }
+  }
+}
+
 function overlapArea(a: NonNullable<Geometry["rects"][string]>, b: NonNullable<Geometry["rects"][string]>): number {
   const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
   const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
@@ -371,17 +458,41 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
 
   // ── Phase 4: settled — crash reveal card / powerball ceremony. ──
   await waitForPhase(host, roomId, "settled", 120_000);
+  // ── Phase 4b gate: reveal sheet at its final ("world") stage — docked
+  // actions, honest tiles, capped machine, no placeholder ball. Runs on the
+  // phone viewers IMMEDIATELY at settlement (concurrently with the R6 descent
+  // sampling below): the sheet auto-acknowledges itself late in the 30s
+  // intermission, so the slower full-page capture runs after these gates. ──
+  const revealGate = async (v: Viewer) => {
+    await v.game.locator(".private-reveal-skip").click({ timeout: 3_000 }).catch(() => {});
+    await v.page.waitForTimeout(500);
+    await v.page.screenshot({ path: testInfo.outputPath(`4b-reveal-${v.label}.png`), fullPage: false });
+    const reveal = await measureReveal(v.game);
+    if (v.width <= 700 || reveal) assertReveal(`4b-reveal@${v.label}`, v.width, reveal);
+    if (v.label === "390") {
+      await v.page.setViewportSize({ width: 390, height: 660 });
+      await v.page.waitForTimeout(400);
+      await v.page.screenshot({ path: testInfo.outputPath("4b-reveal-390short.png"), fullPage: false });
+      assertReveal("4b-reveal@390short", v.width, await measureReveal(v.game));
+      await v.page.setViewportSize({ width: 390, height: 844 });
+      await v.page.waitForTimeout(250);
+    }
+  };
   // R6 altitude law: from settlement the craft is LOWERED to the pad --
   // monotone non-increasing samples until they equal the pad anchor
   // (flightProgress 0 == ROCKET_REST_Y), then constant. Mid-descent
   // screenshot taken while the samples are still moving.
   const altitudes: number[] = [];
-  for (let i = 0; i < 18; i++) {
-    const sample = await readFlight();
-    altitudes.push(sample.p);
-    if (i === 4) await descentViewer.page.screenshot({ path: testInfo.outputPath("6-descent-mid-390.png"), fullPage: false });
-    await descentViewer.page.waitForTimeout(300);
-  }
+  const sampleDescent = async () => {
+    for (let i = 0; i < 18; i++) {
+      const sample = await readFlight();
+      altitudes.push(sample.p);
+      if (i === 4) await descentViewer.page.screenshot({ path: testInfo.outputPath("6-descent-mid-390.png"), fullPage: false });
+      await descentViewer.page.waitForTimeout(300);
+    }
+  };
+  const otherPhones = viewers.filter((v) => v.width <= 700 && v !== descentViewer);
+  await Promise.all([sampleDescent(), (async () => { for (const v of otherPhones) await revealGate(v); })()]);
   const descentStart = altitudes.findIndex((p, i) => i > 0 && p < altitudes[i - 1] - 1e-4);
   for (let i = Math.max(1, descentStart); i < altitudes.length; i++) {
     expect.soft(altitudes[i], `descent not monotone at sample ${i}: ${altitudes.join(", ")}`)
@@ -390,12 +501,12 @@ test("playtest game mobile composition holds at 320/360/390/430 and desktop stay
   expect.soft(altitudes[altitudes.length - 1], `craft not parked at pad anchor: ${altitudes.join(", ")}`).toBe(0);
   expect.soft(altitudes[altitudes.length - 2], "craft must be constant once landed").toBe(0);
   await descentViewer.page.screenshot({ path: testInfo.outputPath("6-descent-parked-390.png"), fullPage: false });
-  await viewers[0].page.waitForTimeout(500);
+  await revealGate(descentViewer);
+  for (const v of viewers) if (v.width > 700) await revealGate(v);
   await capture("4-settled");
 
-  // ── Phase 5: skip the reveal to the intermission/return state. ──
+  // ── Phase 5: continue past the reveal to the intermission/return state. ──
   for (const v of viewers) {
-    await v.game.locator(".private-reveal-skip").click({ timeout: 5_000 }).catch(() => {});
     await v.game.locator(".private-reveal-continue").click({ timeout: 5_000 }).catch(() => {});
   }
   // The δ-lagged presentation (displayLagMs, default 1000ms) renders the
