@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, audit the pre-season $PLANK record, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, repair mislabelled chain-event ledger rows, or dump the KOTH review queue (TEMPORARY diagnostic, see scripts/plank-koth-review-queue-dump.ts's own header).
+        description: Deploy, provision/verify the drand relayer, provision the Season 2 $PLANK KOTH watcher cron, audit the pre-season $PLANK record, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, repair mislabelled chain-event ledger rows, diagnose+run one incremental market-data refresh pass, or dump the KOTH review queue (TEMPORARY diagnostic, see scripts/plank-koth-review-queue-dump.ts's own header).
         required: true
         type: choice
         default: deploy
@@ -30,6 +30,8 @@ on:
           - set-dispatch-token
           - purge-market-data
           - repair-activity
+          - refresh-market-activity
+          - reset-vault-scan-head
           - diagnose-plank-koth-review-queue
           - reprocess-plank-koth-review-queue
           - reset-plank-koth-rpc-cursor
@@ -2238,6 +2240,249 @@ jobs:
         run: |
           echo "Repair pass complete. Only kind/venue/price_wei on already-stored" \
                "rows can change (repairChainEvents), and price_wei is filled, never erased."
+
+  # ---------------------------------------------------------------------------
+  # plank.love's Activity feed and 24h stats were showing nothing newer than
+  # several days old (2026-08-28) despite a clean, verified deploy of PR #273
+  # (confirmed via /api/health reporting the correct commit) and despite real
+  # on-chain transfers confirmed independently via Blockscout as recent as 35
+  # minutes before the check. docs/INMOTION_DEPLOYMENT.md §13 documents that
+  # production data ingestion is driven entirely by cPanel cron on the box
+  # itself (refresh-market-data every 2 minutes, mesh-tick every 5) — a green
+  # app deploy proves nothing about whether that cron is actually running,
+  # erroring, or stuck behind a lock file that never released.
+  #
+  # This is deliberately NOT purge-market-data: that operation passes
+  # --purge/--metadata/--rarity/--traits/--collection and exists to rebuild
+  # rarity/metadata after a cache-clearing incident, taking multiple slow
+  # passes by design. This runs the exact same flagless target set the
+  # incremental cron itself runs (sales catalog, vault activity, discovery,
+  # fills — see scripts/refresh-market-data.ts's own incremental target
+  # list), once, so it finishes in minutes and is safe to re-run any time.
+  #
+  # Shares the cron's own lock (flock -n, non-blocking) so this can never
+  # collide with a real in-flight cron pass — it just reports that one is
+  # already running and exits, the same self-limiting behavior the cron
+  # documentation describes for itself.
+  # ---------------------------------------------------------------------------
+  refresh-market-activity:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'refresh-market-activity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Diagnose cron state, then run one incremental refresh pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          script="$app_dir/current/scripts/refresh-market-data.mjs"
+          test -s "$env_file"
+          test -s "$script"
+
+          echo "=== crontab -l (read-only)"
+          crontab -l 2>&1 || echo "(no crontab or unreadable)"
+
+          echo
+          echo "=== market-refresh.lock / market-mesh.lock"
+          for lock in "$app_dir/shared/market-refresh.lock" "$app_dir/shared/market-refresh-full.lock" "$app_dir/shared/market-mesh.lock"; do
+            if [ -e "$lock" ]; then
+              echo "PRESENT: $lock (mtime $(date -r "$lock" -u '+%Y-%m-%dT%H:%M:%SZ'))"
+            else
+              echo "absent: $lock"
+            fi
+          done
+
+          echo
+          echo "=== running one incremental refresh pass now (same lock the cron uses, non-blocking)"
+          if ! /usr/bin/flock -n "$app_dir/shared/market-refresh.lock" \
+              "$node_bin" --env-file="$env_file" "$script"; then
+            echo "::warning::flock could not acquire market-refresh.lock — a real cron pass is already in flight; nothing more to do here."
+            exit 0
+          fi
+
+          # Same reasoning as purge-market-data's own restart: the app caches
+          # these snapshots in process memory, so a freshly-written row is
+          # invisible to a running Passenger worker until it restarts.
+          touch "$app_dir/tmp/restart.txt"
+          echo "refresh pass finished; Passenger restarted"
+          REMOTE
+
+      - name: Confirm the live site reflects it
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+              --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+              "$url/api/health" || true)"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 6
+          done
+          curl -sS --connect-timeout 5 --max-time 30 \
+            --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+            --header "Cache-Control: no-cache" \
+            "$url/api/market/multichain/collection?chainSlug=robinhood&collectionSlug=0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156" || true
+          echo
+
+  # ---------------------------------------------------------------------------
+  # The "Live Premium Plank Liquidity trades" ticker (VaultTradeHistory.tsx /
+  # /api/market/vault/activity) is a SEPARATE code path from
+  # refresh-market-data.mjs — it replays chain logs directly
+  # (lib/market/vault-activity.ts), on every request, not off a cron. It was
+  # found stuck showing nothing newer than 2026-08-24 while the vault
+  # contract's own transaction history (confirmed independently via
+  # Blockscout) has a real depositMany from 2026-08-27. Ruled out an ABI
+  # topic-hash mismatch (the exact bug class this file's own header warns
+  # about for the V2->V3 LiquidityAdded rename) — Deposited/Redeemed are
+  # byte-identical between vault-abi.json and vault-v3-abi.json.
+  #
+  # The remaining explanation is the incremental scan's own resume cursor
+  # (plank_kv_values row "plank:market:vault-scan-head-v1", written by
+  # fromEthRpc's steady-state path) parked behind a gap larger than one
+  # request's bounded eth_getLogs window ever closes, with no code path that
+  # detects or repairs a stuck cursor. Deleting the row is safe and
+  # non-destructive: it only ever advances (writeScanHead refuses to move it
+  # backward), so removing it just makes the very next request take the
+  # cold-start branch already built for a first-ever run — a bounded
+  # backward walk from the current chain head — instead of resuming from a
+  # stale point. No vault event data itself is touched.
+  # ---------------------------------------------------------------------------
+  reset-vault-scan-head:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'reset-vault-scan-head'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Delete the stuck scan-head cursor row
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          cd "$app_dir/current"
+          "$node_bin" --env-file="$env_file" -e '
+            const { Client } = require("pg");
+            (async () => {
+              const client = new Client({
+                host: process.env.PGHOST,
+                port: Number(process.env.PGPORT || 5432),
+                database: process.env.PGDATABASE,
+                user: process.env.PGUSER,
+                password: process.env.PGPASSWORD,
+              });
+              await client.connect();
+              const res = await client.query(
+                "DELETE FROM plank_kv_values WHERE key_name IN ($1, $2)",
+                ["plank:market:vault-scan-head-v1", "plank:market:vault-deposit-fallback-scan-head-v1"]
+              );
+              console.log("deleted rows:", res.rowCount);
+              await client.end();
+            })().catch((e) => { console.error(e); process.exit(1); });
+          '
+          REMOTE
+
+      - name: Trigger one fresh cold-start scan and report the result
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          curl -sS --connect-timeout 5 --max-time 90 \
+            --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+            --header "Cache-Control: no-cache" \
+            -w "\n[curl] http_code=%{http_code} time_total=%{time_total}\n" \
+            "$url/api/market/vault/activity?vault=0xacE28f72Fc3e15eA1671e689806694A9b0cE047D" || true
+          echo
+
+      - name: Tail the app's own error log for anything from this request
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          echo "=== passenger.log (last 60 lines)"
+          tail -n 60 "$app_dir/logs/passenger.log" 2>&1 || echo "(missing)"
+          REMOTE
 
   # ---------------------------------------------------------------------------
   # Keep dev from drifting behind master.
