@@ -6107,10 +6107,12 @@ async function startPrivatePlaytest() {
          red crashed-multiplier readout removed (its number already lives in
          the reveal card, scoreboard and history ribbon), and the rocket
          untouched at its pad rest pose at the stage bottom. */
-      #privateIntermissionCountdown{z-index:70;top:10px;bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:10px 14px}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
-      body[data-playtest="true"][data-private-phase="settled"] .center-readout{justify-content:flex-start;padding-top:96px}
+      /* Compact card + caption so the whole intermission text stack stays in
+         the TOP HALF of a 240px phone stage (rocket keeps the lower half). */
+      #privateIntermissionCountdown{z-index:70;top:8px;bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:6px 12px;gap:0 10px}#privateIntermissionCountdown strong{font-size:clamp(38px,10vw,56px)}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
+      body[data-playtest="true"][data-private-phase="settled"] .center-readout{justify-content:flex-start;padding-top:62px}
       body[data-playtest="true"][data-private-phase="settled"] .center-readout .mult{display:none}
-      body[data-playtest="true"][data-private-phase="settled"] .center-readout .substatus{max-width:calc(100vw - 32px);padding:6px 10px;border-radius:8px;background:rgba(4,8,11,.55)}
+      body[data-playtest="true"][data-private-phase="settled"] .center-readout .substatus{max-width:calc(100vw - 32px);padding:3px 8px;border-radius:8px;background:rgba(4,8,11,.55);font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       body[data-playtest="true"][data-private-phase="settled"] .mult-graph{opacity:.3}
       .private-result .result-mult{font-size:clamp(30px,11vw,46px);line-height:.98}.private-result-balance{font-size:12px}
       .private-powerball{min-height:0;margin-top:12px;display:flex;flex-direction:column}
