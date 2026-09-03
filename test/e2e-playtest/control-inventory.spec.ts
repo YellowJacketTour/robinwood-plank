@@ -343,7 +343,11 @@ test("every player control is present, reachable and functional on mobile + desk
           await manualLocker.page.screenshot({ path: testInfo.outputPath(`locked-${manualLocker.label}.png`), fullPage: false });
           const lockedGeom = await measureRows(manualLocker.game, flightRows.filter((r) => r.id === "primary" || r.id === "primary-sub" || r.id === "mult-readout"));
           if (!lockedGeom.primary?.present) failures.push(`locked@${manualLocker.label}:primary NOT PRESENT`);
-          if (!/Locked at \d+\.\d\d×/.test(lockedGeom["primary-sub"]?.text || "")) failures.push(`locked@${manualLocker.label}:primary-sub lacks "Locked at x.xx×" (${lockedGeom["primary-sub"]?.text})`);
+          // The round can settle between the phase check and this measurement
+          // (short flights): only report a missing "Locked at" while the
+          // round is still running after measuring.
+          const stillRunning = String(room(await snapshot(manualLocker.page, roomId)).phase) === "running";
+          if (stillRunning && !/Locked at \d+\.\d\d×/.test(lockedGeom["primary-sub"]?.text || "")) failures.push(`locked@${manualLocker.label}:primary-sub lacks "Locked at x.xx×" (${lockedGeom["primary-sub"]?.text})`);
         }
       } else {
         // Crash beat the tap (flights can be a couple of seconds): the UI must

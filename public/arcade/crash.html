@@ -5026,14 +5026,17 @@ function privateSyncFlightAction(liveBps, xStr) {
  *  (COMMIT / LOCK) sits inside the viewport's thumb zone. */
 function privateBringActionIntoView() {
   if (window.innerWidth > 700 || !primaryBtn) return;
-  // Measure the button's NATURAL position (it is sticky on phones): scroll so
-  // that position sits just above the sticky line, so the pinned button never
-  // covers the stake / auto-lock row that scrolls beneath it.
+  // The button is PINNED to the viewport on phones (position:fixed above the
+  // table bar). Measure its NATURAL slot in the deck flow and scroll so that
+  // slot sits just above the pinned button's top edge: everything the player
+  // must reach before acting (stake chips, cash-out target, AUTO-LOCK chip,
+  // REPEAT) then sits above the pinned action instead of beneath it.
   const previous = primaryBtn.style.position;
   primaryBtn.style.position = "static";
   const rect = primaryBtn.getBoundingClientRect();
   primaryBtn.style.position = previous;
-  const targetBottom = window.innerHeight - 72;
+  const pinnedTop = primaryBtn.getBoundingClientRect().top;
+  const targetBottom = Math.min(window.innerHeight - 72, pinnedTop - 8);
   if (rect.top >= 0 && rect.bottom <= targetBottom) return;
   try { window.scrollBy({ top: rect.bottom - targetBottom, behavior: privateMotionReduced() ? "auto" : "smooth" }); } catch (_) {}
 }
@@ -6091,7 +6094,11 @@ async function startPrivatePlaytest() {
       .private-code button,.private-host-actions button,.private-host-actions a{min-height:48px;touch-action:manipulation}
       .private-panel-title{font-size:20px}.private-host-actions{grid-template-columns:1fr 1fr}
       body[data-playtest="true"] .deck{padding:0 max(8px,env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
-      .stage{min-height:40dvh}.controls{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+      /* Phone stage: 30dvh (≥240px) so the whole deck — stake chips, cash-out
+         target, REPEAT, AUTO-LOCK — sits ABOVE the pinned primary action at
+         rest scroll (390×844: the action band is y≈716–772), instead of any
+         control resting beneath it. */
+      .stage{min-height:max(240px,30dvh)}.controls{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
       body[data-playtest="true"]:has(.private-result.show) #privateHud,body[data-playtest="true"]:has(.private-result.show) #privateJourney,body[data-playtest="true"]:has(.private-result.show) #privateTablePanel{visibility:hidden;pointer-events:none}
       .result-card.private-result,.result-card.private-result.show{position:fixed;z-index:95;inset:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));width:auto;max-height:none;margin:0;padding:12px;overflow:auto;overscroll-behavior:contain;border-radius:14px;transform:none}
       /* Deliberate intermission stage stack (settled phase, phones):
