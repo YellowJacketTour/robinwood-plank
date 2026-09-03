@@ -1991,7 +1991,25 @@ function frame() {
   // not just every ~1.2s poll, so both the number and the ascent it
   // drives climb continuously instead of stepping.
   let targetVelocityNorm = 0;
-  if (phaseState === "live" && launchAt) {
+  // The playtest presentation is sequenced by the ONE-WAY stage machine
+  // (privateCurrentStage), derived every frame from server phase + the lagged
+  // clock — never from which repaint/timer happened to fire last.
+  const privateStageNow = PLAYTEST_MODE && privateSnapshot ? privateCurrentStage(performance.now()) : null;
+  if (privateStageNow === "crash-hold" || privateStageNow === "descent" || privateStageNow === "parked") {
+    if (phaseState === "live") {
+      // ROOT CAUSE of the phantom relaunch: the lagged replay window expired
+      // mid-frame, but the scheduled crash repaint (setTimeout +20ms, worse
+      // under throttling) had not flipped phaseState yet — so the live branch
+      // below fell through to the on-chain QUADRATIC clock
+      // (multiplierAtBlocksBps of time-since-launchAt), a discontinuous jump
+      // of both readout and altitude for several frames, snapped back when
+      // the repaint finally entered "crashed". Flip the presentation HERE,
+      // frame-derived and idempotent, so no such window exists.
+      paintPrivateSnapshot(privateSnapshot);
+    }
+    privateApplySettledFlightTarget();
+  }
+  if (phaseState === "live" && launchAt && (privateStageNow === null || privateStageNow === "ignition" || privateStageNow === "flight")) {
     const estElapsedBlocks = Math.max(0, (performance.now() - launchAt) / LOCAL_BLOCK_MS);
     // Private multiplayer and the on-chain game deliberately have
     // different authoritative curves. Never run the private exponential
@@ -1999,8 +2017,7 @@ function frame() {
     // The lagged private presentation keeps extrapolating per-frame through
     // the settled-phase replay window (the display timeline runs δ behind
     // authoritative settlement).
-    const privateFlightDisplayed = PLAYTEST_MODE && privateSnapshot &&
-      (privateSnapshot.room.phase === "running" || privateLaggedReplayMsRemaining(performance.now()) > 0);
+    const privateFlightDisplayed = privateStageNow !== null;
     const estBps = privateFlightDisplayed
       ? privateLiveClock.sample(performance.now())
       : multiplierAtBlocksBps(estElapsedBlocks);
@@ -2080,6 +2097,8 @@ function frame() {
   // is a module script, so the bindings themselves are not reachable from
   // an injected test function). Read-only telemetry, no game input.
   window.__plankFlight = { p: flightProgress, t: targetFlightProgress };
+  // Stage machine telemetry for the e2e ordering/monotonicity assertions.
+  window.__plankStage = privateStageNow === null ? null : { round: privateStageRound, stage: privateStageName };
 
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
   // Launch geometry law (DEFECT: pre-launch dip): position(t<=0) == the pad
@@ -4686,6 +4705,87 @@ function privateLaggedReplayMsRemaining(perfMs) {
   if (privateLiveClock.deadlinePerfMs === null) return 0;
   return Math.max(0, privateLiveClock.deadlinePerfMs - perfMs);
 }
+
+// ── Round-cycle presentation state machine ──────────────────────────────────
+// One deterministic, ONE-WAY sequence per round, all derived from the server
+// phase + the single lagged display clock (never from animation state or
+// setTimeout luck):
+//   countdown → ignition (burn δ on the pad) → flight → crash-hold (beat for
+//   the crash to read) → descent (monotone to the pad) → parked
+// Within a round the stage index can only ADVANCE; the only way back to
+// ignition/flight is the real roundKey change of the NEXT round. This is the
+// structural guarantee behind the no-phantom-relaunch invariant: no repaint,
+// snapshot poll, or timer race can re-present flight once the crash rendered.
+const PRIVATE_STAGE_RANK = { countdown: 0, ignition: 1, flight: 2, "crash-hold": 3, descent: 4, parked: 5 };
+let privateStageRound = null;
+let privateStageName = "countdown";
+let privateCrashHoldAltitude = 0; // altitude frozen at the lagged crash render
+
+function privateDeriveStageName(perfMs) {
+  const snap = privateSnapshot;
+  if (!snap) return "countdown";
+  const phase = snap.room.phase;
+  if (phase === "lobby") return "countdown";
+  const replaying = phase === "settled" && privateLaggedReplayMsRemaining(perfMs) > 0;
+  if (phase === "running" || replaying) {
+    // The lagged clock owns liftoff: [T, T+δ] samples exactly 1.00x — the
+    // ignition burn — and only real display liftoff enters "flight".
+    return privateLiveClock.sample(perfMs) > 10_000 ? "flight" : "ignition";
+  }
+  if (phase !== "settled") return "countdown";
+  // Settled AND the δ-lagged crash has rendered: 1.1s hold beat measured from
+  // the LAGGED crash render (same law a mid-intermission joiner derives).
+  const settledAtMs = Date.parse(snap.room.settledAt || "");
+  const laggedCrashWallMs = Date.parse(snap.room.crashAt || "") + privateDisplayLagMs;
+  const crashRenderedAtMs = Number.isFinite(laggedCrashWallMs) ? Math.max(settledAtMs || -Infinity, laggedCrashWallMs) : settledAtMs;
+  const sinceCrashMs = Number.isFinite(crashRenderedAtMs) ? (Date.now() + privateServerOffsetMs) - crashRenderedAtMs : Infinity;
+  if (sinceCrashMs <= 1100) return "crash-hold";
+  return flightProgress <= 0.002 ? "parked" : "descent";
+}
+
+function privateCurrentStage(perfMs) {
+  const snap = privateSnapshot;
+  const roundKey = snap ? `${snap.room.id}:${snap.room.currentRound}` : null;
+  const derived = privateDeriveStageName(perfMs);
+  if (roundKey !== privateStageRound) {
+    // Real ignition of the NEW round is the only sanctioned reset.
+    privateStageRound = roundKey;
+    privateStageName = derived;
+    if (PRIVATE_STAGE_RANK[derived] >= PRIVATE_STAGE_RANK["crash-hold"]) {
+      // Joining/refreshing straight into the intermission: freeze wherever
+      // the craft currently is (a fresh client is already on the pad).
+      privateCrashHoldAltitude = flightProgress;
+      flightVel = 0;
+    }
+  } else if (PRIVATE_STAGE_RANK[derived] > PRIVATE_STAGE_RANK[privateStageName]) {
+    if (derived === "crash-hold" || (PRIVATE_STAGE_RANK[privateStageName] < PRIVATE_STAGE_RANK["crash-hold"] && PRIVATE_STAGE_RANK[derived] > PRIVATE_STAGE_RANK["crash-hold"])) {
+      // Entering the settled presentation: freeze the craft where the lagged
+      // crash rendered it. Never let the spring keep climbing toward a crash
+      // altitude the display had not yet reached (that upward creep after
+      // settle is exactly what the no-phantom-relaunch invariant forbids).
+      privateCrashHoldAltitude = flightProgress;
+      flightVel = 0;
+    }
+    privateStageName = derived;
+  }
+  return privateStageName;
+}
+
+// Settled-side flight target, applied idempotently from ANY caller (frame
+// loop, snapshot repaint, 250ms intermission ticker) — same result each time.
+function privateApplySettledFlightTarget(crashAltitude) {
+  const stage = privateCurrentStage(performance.now());
+  if (stage === "crash-hold") {
+    const hold = Math.min(
+      Number.isFinite(privateCrashHoldAltitude) ? privateCrashHoldAltitude : Infinity,
+      Number.isFinite(crashAltitude) ? crashAltitude : Infinity,
+    );
+    if (Number.isFinite(hold)) targetFlightProgress = Math.min(targetFlightProgress, hold);
+  } else if (stage === "descent" || stage === "parked") {
+    targetFlightProgress = 0;
+    if (privateMotionReduced() && flightProgress > 0) { flightProgress = 0; flightVel = 0; }
+  }
+}
 let privateMotionPreference = localStorage.getItem("plank-alpha:motion") || "system";
 let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || "balanced";
 
@@ -5246,17 +5346,10 @@ window.setInterval(() => {
     // must not preempt it; the scheduled lagged-crash repaint takes over.
     if (privateLaggedReplayMsRemaining(performance.now()) > 0) return;
     // The room version is static through the intermission, so no snapshot
-    // repaint arrives to flip the descent on -- derive it here from the
-    // same server settledAt clock (state-derived, not animation state),
-    // measured from the LAGGED crash render.
-    const settledAtMs = Math.max(
-      Date.parse(privateSnapshot.room.settledAt || "") || -Infinity,
-      Number.isFinite(Date.parse(privateSnapshot.room.crashAt || "")) ? Date.parse(privateSnapshot.room.crashAt) + privateDisplayLagMs : -Infinity,
-    );
-    if (Number.isFinite(settledAtMs) && (Date.now() + privateServerOffsetMs) - settledAtMs > 1100) {
-      targetFlightProgress = 0;
-      if (privateMotionReduced() && flightProgress > 0) { flightProgress = 0; flightVel = 0; }
-    }
+    // repaint arrives to flip the descent on -- the one-way stage machine
+    // (measured from the LAGGED crash render) derives it here, identically
+    // to the frame loop and any snapshot repaint.
+    privateApplySettledFlightTarget();
     const me = privateSnapshot.members.find((member) => member.id === privateSnapshot.me.id);
     const queued = privateSnapshot.nextRoundSeats?.find((seat) => seat.userId === privateSnapshot.me.id) ||
       (privatePendingCommitment?.roomId === privateSnapshot.room.id &&
@@ -5629,18 +5722,11 @@ function paintPrivateSnapshot(snapshot) {
     // mid-intermission computes a large sinceSettled and renders the craft
     // already parked -- the animation is presentation only.
     const crashAltitude = 1 - 1 / (1 + Math.max(0, x - 1) / 2.5);
-    const settledAtMs = Date.parse(snapshot.room.settledAt || "");
-    // The display timeline runs δ late, so the "moment of crash" the descent
-    // beat is measured from is the LAGGED crash render, not raw settledAt.
-    const laggedCrashWallMs = Date.parse(snapshot.room.crashAt || "") + privateDisplayLagMs;
-    const crashRenderedAtMs = Number.isFinite(laggedCrashWallMs) ? Math.max(settledAtMs || -Infinity, laggedCrashWallMs) : settledAtMs;
-    const sinceSettledMs = Number.isFinite(crashRenderedAtMs) ? (Date.now() + privateServerOffsetMs) - crashRenderedAtMs : Infinity;
-    if (sinceSettledMs > 1100) {
-      targetFlightProgress = 0;
-      if (privateMotionReduced()) { flightProgress = 0; flightVel = 0; }
-    } else {
-      targetFlightProgress = crashAltitude;
-    }
+    // The hold-beat / descent / parked sequencing lives in the one-way stage
+    // machine (privateDeriveStageName measures from the LAGGED crash render),
+    // so a repaint here is idempotent with the frame loop and the 250ms
+    // intermission ticker — every caller derives the identical target.
+    privateApplySettledFlightTarget(crashAltitude);
     reconstructPrivateMultGraph(snapshot, crashBps, receivedPerfMs);
     if (prior !== "crashed") {
       crashedAt = performance.now();
