@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
-    <title>PlankCrash — Visual Mechanics Map</title>
+    <title>PlankCrash — System &amp; Math</title>
     <style>
       :root {
         --gold: #e9b43f;
@@ -26,12 +26,14 @@
         background: #14100b;
         color: var(--cream);
         font-family: Nunito Sans, system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
         scroll-behavior: smooth;
       }
       body {
         margin: 0;
-        /* The decorative orb arrows and flight rocket overhang their grid
-           cells; clip at the page edge so no viewport ever scrolls sideways. */
+        /* The flight rocket overhangs its card; clip at the page edge so no
+           viewport ever scrolls sideways. */
         overflow-x: clip;
         background: radial-gradient(
             circle at 50% -10%,
@@ -43,56 +45,113 @@
       main {
         width: min(1180px, 100%);
         margin: auto;
-        padding: clamp(20px, 5vw, 68px);
-        /* Respect notches/home bars on phones (viewport-fit=cover). */
-        padding-left: max(clamp(20px, 5vw, 68px), env(safe-area-inset-left));
-        padding-right: max(clamp(20px, 5vw, 68px), env(safe-area-inset-right));
-        padding-bottom: max(clamp(20px, 5vw, 68px), env(safe-area-inset-bottom));
+        padding: clamp(18px, 4vw, 56px);
+        padding-left: max(clamp(18px, 4vw, 56px), env(safe-area-inset-left));
+        padding-right: max(clamp(18px, 4vw, 56px), env(safe-area-inset-right));
+        padding-bottom: max(clamp(18px, 4vw, 56px), env(safe-area-inset-bottom));
       }
       section {
         position: relative;
-        margin: 0 0 clamp(42px, 8vw, 90px);
+        margin: 0 0 clamp(34px, 6vw, 64px);
+        max-width: 100%;
       }
       h1,
-      h2 {
+      h2,
+      h3 {
         font-family: Impact, Arial Black, sans-serif;
         text-transform: uppercase;
         letter-spacing: 0.01em;
+        overflow-wrap: anywhere;
       }
       h1 {
-        font-size: clamp(55px, 11vw, 142px);
-        line-height: 0.78;
-        margin: 0.2em 0;
+        font-size: clamp(36px, 9vw, 96px);
+        line-height: 0.9;
+        margin: 0.15em 0 0.3em;
       }
       h1 span,
       h2 span {
         color: var(--gold);
       }
       h2 {
-        font-size: clamp(34px, 6vw, 72px);
-        line-height: 0.88;
-        margin: 0 0 24px;
+        font-size: clamp(22px, 6vw, 34px);
+        line-height: 1.05;
+        margin: 0 0 6px;
+      }
+      h3 {
+        font-size: clamp(17px, 4.5vw, 22px);
+        line-height: 1.1;
+        margin: 0 0 8px;
+        color: var(--gold2);
+      }
+      p {
+        margin: 0 0 12px;
+        max-width: 72ch;
+      }
+      ul {
+        margin: 0 0 12px;
+        padding-left: 1.2em;
+        max-width: 72ch;
+      }
+      li {
+        margin: 0 0 6px;
+      }
+      sup {
+        font-size: 12px;
+        line-height: 0;
       }
       .eyebrow {
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 900;
-        letter-spacing: 0.2em;
+        letter-spacing: 0.18em;
         color: var(--gold);
+        margin-bottom: 8px;
+      }
+      /* The lead line under a section title: the plain-language answer. */
+      .answer {
+        font-size: clamp(16px, 4.2vw, 19px);
+        font-weight: 700;
+        color: var(--cream);
+        margin: 0 0 14px;
+        max-width: 66ch;
+      }
+      /* Exact formula beneath a plain statement. */
+      .formula {
+        display: block;
+        margin: 6px 0 14px;
+        padding: 8px 12px;
+        border-left: 3px solid var(--gold);
+        background: #110a05b0;
+        border-radius: 0 8px 8px 0;
+        font: 700 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--gold2);
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      .formula small {
+        display: block;
+        font: 700 12px/1.4 Nunito Sans, system-ui, sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
       .hero {
-        min-height: 88svh;
-        display: grid;
-        align-content: center;
+        /* No viewport-height reservation: the hero is exactly as tall as its
+           content, so section 01 follows immediately on every phone. */
+        padding-top: 8px;
+      }
+      .hero p {
+        font-size: clamp(16px, 4.2vw, 19px);
+        max-width: 60ch;
       }
       .route {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: 8px;
-        margin-top: 40px;
+        margin-top: 22px;
       }
       .route div {
-        min-height: 80px;
-        padding: 14px 8px;
+        min-height: 72px;
+        padding: 10px 6px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
@@ -100,10 +159,22 @@
         place-items: center;
         text-align: center;
         font-weight: 900;
+        font-size: 12px;
+        letter-spacing: 0.06em;
       }
       .route b {
         color: var(--green);
-        font-size: 22px;
+        font-size: 20px;
+        line-height: 1;
+      }
+      .route small {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: 0;
+        line-height: 1.25;
+        margin-top: 4px;
       }
       .card {
         border: 1px solid var(--line);
@@ -111,9 +182,17 @@
         background: linear-gradient(145deg, #1b120aee, #07100df5);
         overflow: hidden;
         box-shadow: 0 24px 70px #0008;
+        max-width: 100%;
+      }
+      /* Two-column desktop composition: prose beside its figure. */
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: clamp(16px, 3vw, 32px);
+        align-items: start;
       }
       .flight {
-        height: min(68svh, 620px);
+        height: clamp(240px, 44vw, 420px);
         position: relative;
         background: radial-gradient(
             circle at 82% 18%,
@@ -135,7 +214,7 @@
       }
       .rocket {
         position: absolute;
-        font-size: clamp(42px, 7vw, 82px);
+        font-size: clamp(30px, 6vw, 64px);
         offset-path: path(
           "M 35 510 C 330 505 610 455 790 285 C 900 180 960 70 990 15"
         );
@@ -144,147 +223,134 @@
       }
       .equation {
         position: absolute;
-        right: 4%;
-        bottom: 4%;
-        padding: 12px 16px;
+        right: 10px;
+        bottom: 10px;
+        padding: 8px 12px;
         border: 1px solid var(--gold);
         border-radius: 8px;
         background: #110a05ee;
-        font: 900 clamp(18px, 3vw, 34px) ui-monospace;
+        font: 900 clamp(15px, 3vw, 26px) ui-monospace, monospace;
         color: var(--gold2);
       }
-      .weight-machine {
+      .caption {
+        padding: 12px 14px;
+        font-size: 15px;
+        color: var(--muted);
+        border-top: 1px solid var(--line);
+      }
+      /* Wrapping tiles: text never shrinks, tiles wrap instead. */
+      .tiles {
         display: grid;
-        grid-template-columns: 1fr auto 1fr auto 1.2fr;
-        gap: 16px;
-        align-items: center;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+        margin: 12px 0 16px;
       }
-      .dial,
-      .result {
-        min-height: 260px;
-        display: grid;
-        place-items: center;
-        text-align: center;
-        border: 2px solid var(--gold);
-        border-radius: 50%;
-        background: radial-gradient(circle, #302013, #110a05 70%);
+      .tile {
+        padding: 14px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        min-width: 0;
       }
-      .dial strong,
-      .result strong {
-        font: 900 clamp(28px, 5vw, 58px) Impact;
-      }
-      .result {
-        border-radius: 20px;
-        border-color: var(--blue);
-        color: var(--blue);
-      }
-      .operator {
-        font-size: 60px;
+      .tile strong {
+        display: block;
+        font: 900 clamp(24px, 6vw, 34px) / 1 Impact, Arial Black, sans-serif;
         color: var(--gold);
-        font-weight: 900;
+        margin-bottom: 4px;
+        overflow-wrap: anywhere;
       }
-      .flow-map {
-        padding: 24px;
+      .tile span {
+        display: block;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--cream);
+      }
+      .tile small {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.35;
+      }
+      .tile.burn strong {
+        color: var(--red);
+      }
+      .tile.board strong {
+        color: var(--green);
+      }
+      .tile.ops strong {
+        color: var(--gold2);
+      }
+      .tile.blue strong {
+        color: var(--blue);
       }
       .flow-map svg {
         width: 100%;
         height: auto;
         display: block;
       }
-      .allocation {
-        display: grid;
-        grid-template-columns: 4fr 4fr 2fr;
-        min-height: 220px;
-        border-radius: 16px;
-        overflow: hidden;
-        margin-top: 18px;
-      }
-      .allocation div {
-        display: grid;
-        place-items: center;
-        text-align: center;
-        color: #140b05;
-        font: 900 clamp(20px, 3vw, 42px) Impact;
-      }
-      .allocation .burn {
-        background: var(--red);
-      }
-      .allocation .board {
-        background: var(--green);
-      }
-      .allocation .founder {
-        background: var(--gold);
-      }
-      .allocation small {
-        display: block;
-        font: 900 11px system-ui;
-        letter-spacing: 0.14em;
-      }
-      .evolution {
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        gap: 9px;
-        align-items: end;
-        height: 390px;
-        padding: 50px 16px 0;
-        border-bottom: 2px solid var(--gold);
-      }
-      .epoch {
-        height: var(--h);
-        min-height: 45px;
-        border-radius: 10px 10px 0 0;
-        background: linear-gradient(var(--green), #123322);
-        position: relative;
-      }
-      .epoch b {
-        position: absolute;
-        inset: auto 0 8px;
-        text-align: center;
-        color: #07100d;
-        font-size: 11px;
-      }
-      .epoch i {
-        position: absolute;
-        top: -28px;
+      /* Worked example ledger table. */
+      .ledger {
         width: 100%;
-        text-align: center;
-        color: var(--green);
-        font-style: normal;
+        border-collapse: collapse;
+        font-size: 15px;
+        margin: 8px 0 14px;
+      }
+      .ledger th,
+      .ledger td {
+        padding: 8px 8px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      .ledger th {
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .ledger td.num {
+        text-align: right;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .ledger tr.total td {
+        color: var(--gold2);
         font-weight: 900;
       }
-      .cycle {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 40px;
-        align-items: center;
-        padding: 45px;
+      .table-wrap {
+        overflow-x: auto;
+        max-width: 100%;
       }
-      .orb {
-        aspect-ratio: 1;
-        border-radius: 50%;
-        border: 2px solid var(--c);
+      .steps {
         display: grid;
-        place-items: center;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        margin: 10px 0 14px;
+      }
+      .steps div {
+        padding: 10px 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
         text-align: center;
-        background: radial-gradient(circle, #302013, #07100d 70%);
-        box-shadow: 0 0 42px color-mix(in srgb, var(--c) 25%, transparent);
-        position: relative;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
       }
-      .orb:not(:last-child):after {
-        content: "➜";
-        position: absolute;
-        right: -48px;
-        color: var(--gold);
-        font-size: 35px;
-      }
-      .orb strong {
-        font: 900 clamp(22px, 4vw, 46px) Impact;
-        color: var(--c);
+      .steps b {
+        display: block;
+        font-size: 18px;
+        color: var(--green);
+        font-family: ui-monospace, monospace;
       }
       .lottery {
         display: grid;
-        grid-template-columns: 1.15fr 0.85fr;
-        gap: 28px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 20px;
         align-items: center;
       }
       .drum {
@@ -292,6 +358,9 @@
         position: relative;
         border: 8px solid #302013;
         border-radius: 46%;
+        max-width: 420px;
+        margin: auto;
+        width: 100%;
         background: radial-gradient(
           circle,
           #ffffff18,
@@ -327,13 +396,13 @@
       }
       .ball::after {
         content: attr(data-n);
-        width: 52%;
+        width: 56%;
         aspect-ratio: 1;
         border-radius: 50%;
         display: grid;
         place-items: center;
         background: #fff;
-        font: 900 clamp(9px, 2vw, 20px) ui-monospace;
+        font: 900 clamp(11px, 2.4vw, 18px) ui-monospace, monospace;
         box-shadow: inset 0 0 0 2px #07131a22;
       }
       .ball.win {
@@ -351,50 +420,63 @@
       }
       .odds strong {
         display: block;
-        font: 900 clamp(74px, 12vw, 150px) / 0.8 Impact;
+        font: 900 clamp(56px, 12vw, 120px) / 0.9 Impact, Arial Black, sans-serif;
         color: var(--gold);
+        margin-top: 14px;
       }
-      .odds .sequence {
+      .odds b {
+        display: block;
+        font-size: 13px;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      .sequence {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
         gap: 7px;
-        margin-top: 25px;
+        margin-top: 18px;
       }
       .sequence span {
-        padding: 12px 5px;
+        padding: 10px 6px;
         border: 1px solid var(--line);
         border-radius: 6px;
         background: var(--panel);
-        font-size: 10px;
+        font-size: 12px;
         font-weight: 900;
+        letter-spacing: 0.06em;
       }
-      .proofs {
+      .sequence small {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: 0;
+        margin-top: 3px;
+      }
+      .two-col {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
       }
       .seal {
-        min-height: 250px;
-        padding: 25px;
+        padding: 18px;
         border: 1px solid var(--line);
         border-radius: 16px;
         background: var(--panel);
-        display: grid;
-        place-items: center;
-        text-align: center;
       }
-      .seal strong {
-        display: block;
-        font: 900 25px Impact;
-        color: var(--gold2);
-      }
-      .seal b {
-        font-size: 70px;
+      .seal h3 {
         color: var(--green);
+      }
+      .seal.varies h3 {
+        color: var(--blue);
+      }
+      .seal ul {
+        max-width: none;
       }
       .cta {
         text-align: center;
-        padding: 70px 15px;
+        padding: 40px 12px 20px;
       }
       .cta a {
         display: inline-block;
@@ -405,12 +487,17 @@
         color: #261105;
         text-decoration: none;
         font-weight: 900;
+        font-size: 16px;
       }
       .fine {
-        margin: 28px auto 0;
-        max-width: 850px;
+        margin: 24px auto 0;
+        max-width: 72ch;
         color: var(--muted);
-        font-size: 11px;
+        font-size: 13px;
+        text-align: left;
+      }
+      .fine p {
+        max-width: none;
       }
       @keyframes trace {
         45%,
@@ -438,102 +525,30 @@
           transform: translate(16px, -20px) rotate(340deg);
         }
       }
-      @media (max-width: 760px) {
-        main {
-          padding: 24px 14px;
-        }
-        .hero {
-          min-height: 82svh;
-        }
-        .route {
-          grid-template-columns: repeat(3, 1fr);
-        }
-        .weight-machine {
-          grid-template-columns: 1fr auto 1fr;
-        }
-        .result {
-          grid-column: 1/-1;
-          min-height: 150px;
-        }
-        .allocation {
-          grid-template-columns: 1fr;
-          min-height: 360px;
-        }
+      @media (max-width: 860px) {
+        .split,
         .lottery {
           grid-template-columns: 1fr;
         }
-        .proofs {
-          grid-template-columns: 1fr;
-        }
-        .cycle {
-          padding: 25px 8px;
-          gap: 16px;
-        }
-        .orb:not(:last-child):after {
-          right: -24px;
-          font-size: 20px;
-        }
-        .evolution {
-          height: 300px;
-          gap: 4px;
-        }
-        .epoch i {
-          font-size: 8px;
-          transform: rotate(-55deg);
+        .route {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
-      @media(max-width:440px) {
-        h1 {
-          font-size: 52px;
-        }
-        /* The equation chip and rocket collide over the small flight card;
-           pin the chip inside the card and shrink the rocket emoji. */
-        .equation {
-          right: 8px;
-          bottom: 8px;
-          padding: 8px 10px;
-          font-size: 15px;
-        }
-        .rocket {
-          font-size: 34px;
+      @media (max-width: 440px) {
+        main {
+          padding: 16px 12px;
         }
         .route {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .flight {
-          height: 430px;
+          height: 240px;
         }
-        .weight-machine {
-          gap: 7px;
+        .tiles {
+          grid-template-columns: 1fr 1fr;
         }
-        .dial {
-          min-height: 150px;
-        }
-        .operator {
-          font-size: 28px;
-        }
-        .evolution {
-          grid-template-columns:repeat(8,1fr);
-          height: 250px;
-          padding-inline: 5px;
-        }
-        .epoch b {
-          font-size: 7px;
-        }
-        .cycle {
+        .tiles.wide {
           grid-template-columns: 1fr;
-        }
-        .orb {
-          width: 72%;
-          margin: auto;
-        }
-        .orb:not(:last-child):after {
-          content: "↓";
-          right: auto;
-          bottom: -35px;
-        }
-        .odds .sequence {
-          grid-template-columns: repeat(2, 1fr);
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -546,70 +561,354 @@
   <body>
     <main>
       <section class="hero">
-        <div class="eyebrow">PLANKCRASH × POWERBOARD · VISUAL FIELD MANUAL</div>
-        <h1>Risk becomes <span>weight.</span><br />Play builds the board.</h1>
-        <div class="route">
-          <div><b>01</b>COMMIT</div>
-          <div><b>02</b>LAUNCH</div>
-          <div><b>03</b>FLY</div>
-          <div><b>04</b>LOCK</div>
-          <div><b>05</b>SETTLE</div>
-          <div><b>06</b>DRAW</div>
+        <div class="eyebrow">PLANKCRASH × POWERBOARD · SYSTEM &amp; MATH</div>
+        <h1>What you put in.<br /><span>What you can get back.</span></h1>
+        <p>
+          PlankCrash is a shared-pot flight game with a lottery attached. This
+          page answers, in order: what a round costs you, what a round can pay
+          you, how the lottery works and what it costs, where the whole table's
+          money goes, and what is guaranteed versus what varies.
+        </p>
+        <div class="route" aria-label="The six steps of every round">
+          <div><b>01</b>COMMIT<small>put in a stake</small></div>
+          <div><b>02</b>LAUNCH<small>every 30 seconds</small></div>
+          <div><b>03</b>FLY<small>multiplier climbs</small></div>
+          <div><b>04</b>LOCK<small>before the crash</small></div>
+          <div><b>05</b>SETTLE<small>survivors share the pot</small></div>
+          <div><b>06</b>DRAW<small>lottery, when funded</small></div>
         </div>
       </section>
-      <section>
+
+      <section id="flight">
         <h2><span>01</span> · The flight curves upward</h2>
-        <div class="flight card">
-          <svg
-            role="img"
-            aria-label="Accelerating multiplier curve"
-            viewBox="0 0 1000 560"
-            preserveAspectRatio="none"
-          >
-            <defs>
-              <linearGradient id="curve" x1="0" y1="1" x2="1" y2="0">
-                <stop stop-color="#58bdf0" />
-                <stop offset="1" stop-color="#34d399" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
-              fill="none"
-              stroke="#ffffff18"
-              stroke-width="25"
-            />
-            <path
-              class="trace"
-              d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
-              fill="none"
-              stroke="url(#curve)"
-              stroke-width="8"
-            />
-          </svg>
-          <div class="rocket">🚀</div>
-          <div class="equation">x(t)=e<sup>0.22t</sup></div>
-        </div>
-      </section>
-      <section>
-        <h2><span>02</span> · Claim weight machine</h2>
-        <div class="weight-machine">
-          <div class="dial">
-            <div><strong>STAKE</strong><br />capital exposed</div>
+        <div class="split">
+          <div>
+            <p class="answer">
+              The multiplier starts at 1× and grows about 24% every second. The
+              crash can come at any moment. Half of all flights end below 2×.
+            </p>
+            <p>
+              You choose when to lock. Lock before the crash and you are a
+              survivor at that multiplier. Lock too late and you bust: your
+              stake is gone for that round. The crash point is fixed before
+              launch from a sealed random value, so nobody, including the
+              house, can move it once the flight starts.
+            </p>
+            <code class="formula">
+              <small>formula</small>
+              multiplier after t seconds: x(t) = e^(0.22·t)<br />
+              chance the flight reaches at least m: about 1 ÷ m
+            </code>
           </div>
-          <div class="operator">×</div>
-          <div class="dial">
-            <div><strong>ln(LOCK)</strong><br />hazard endured</div>
-          </div>
-          <div class="operator">=</div>
-          <div class="result">
-            <div>
-              <strong>CLAIM<br />WEIGHT</strong><br />position in a finite purse
+          <div class="card">
+            <div class="flight">
+              <svg
+                role="img"
+                aria-label="Accelerating multiplier curve"
+                viewBox="0 0 1000 560"
+                preserveAspectRatio="none"
+              >
+                <defs>
+                  <linearGradient id="curve" x1="0" y1="1" x2="1" y2="0">
+                    <stop stop-color="#58bdf0" />
+                    <stop offset="1" stop-color="#34d399" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
+                  fill="none"
+                  stroke="#ffffff18"
+                  stroke-width="25"
+                />
+                <path
+                  class="trace"
+                  d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
+                  fill="none"
+                  stroke="url(#curve)"
+                  stroke-width="8"
+                />
+              </svg>
+              <div class="rocket">🚀</div>
+              <div class="equation">x(t)=e<sup>0.22t</sup></div>
+            </div>
+            <div class="caption">
+              1× at launch · about 2× after 3 seconds · about 9× after 10
+              seconds. The curve never slows down; the crash ends it.
             </div>
           </div>
         </div>
       </section>
-      <section>
-        <h2><span>03</span> · Every credit has a destination</h2>
+
+      <section id="put-in">
+        <h2><span>02</span> · What am I putting in?</h2>
+        <p class="answer">
+          Your stake, and nothing else. The only cost is a 4.50% rake taken
+          from the table's stakes each round. There are no per-lock fees and
+          no hidden edge in the random draw.
+        </p>
+        <p>
+          The rake rate falls as the table's lifetime volume grows: 0.25% off
+          for every 25,000,000 credits wagered, down to a floor of 2.50%. That
+          means the player pot grows from 95.5% of stakes today toward 97.5%.
+          The table's current rate is shown in the game header.
+        </p>
+        <code class="formula">
+          <small>formula</small>
+          rake = max(2.50%, 4.50% − 0.25% × ⌊lifetime volume ÷ 25,000,000⌋)<br />
+          player pot = stakes × (1 − rake) = 95.5% of stakes today
+        </code>
+        <h3>Where every credit of rake goes</h3>
+        <div class="tiles">
+          <div class="tile burn">
+            <strong>40%</strong><span>Burned</span>
+            <small>Removed from supply for good. Nobody receives it.</small>
+          </div>
+          <div class="tile board">
+            <strong>40%</strong><span>Powerboard prize</span>
+            <small>The community lottery. This is the only thing that funds it.</small>
+          </div>
+          <div class="tile ops">
+            <strong>20%</strong><span>Operations</span>
+            <small>Running the table. Fixed share, disclosed here.</small>
+          </div>
+        </div>
+        <code class="formula">
+          <small>as a share of every stake</small>
+          rake 4.50% = burned 1.80% + Powerboard 1.80% + operations 0.90%
+        </code>
+        <p>
+          Minimum stake is 500 credits. Test credits in the playtest have no
+          cash value.
+        </p>
+      </section>
+
+      <section id="get-back">
+        <h2><span>03</span> · What can I get back on a flight?</h2>
+        <p class="answer">
+          Survivors share the player pot. There is no fixed payout: the
+          multiplier you lock at is your claim weight, not a promise of
+          stake × multiplier.
+        </p>
+        <p>Each survivor's payout has two parts:</p>
+        <ul>
+          <li>
+            <b>Survivor floor.</b> If you lock before the crash, you get 75%
+            of your stake back, guaranteed.
+          </li>
+          <li>
+            <b>Performance premium.</b> Whatever remains in the player pot
+            after all floors is split among survivors by weight. Your weight
+            is your stake × ln(your lock multiplier). Higher locks and bigger
+            stakes weigh more.
+          </li>
+          <li>
+            <b>House bonus (optional).</b> When the table's reserve holds funds,
+            a bonus can be added on top, capped at fair odds
+            (stake × (multiplier − 1)) and by a global reserve cap. It can be
+            zero; it is never taken from other players.
+          </li>
+        </ul>
+        <p>Busting returns 0.</p>
+        <code class="formula">
+          <small>formula</small>
+          pot = stakes × 95.5%<br />
+          weight_i = stake_i × ln(m_i)<br />
+          premium = pot − Σ floors = pot − 0.75 × Σ survivor stakes<br />
+          payout_i = 0.75 × stake_i + premium × weight_i ÷ Σ weights
+        </code>
+
+        <h3>Worked example: 10 players, 1,000 credits each, you lock at 2.0×</h3>
+        <p>
+          Stakes total 10,000. Rake 450. Player pot 9,550. Suppose four
+          players survive: two lock at 1.5×, you lock at 2.0×, one locks at
+          3.0×. Six bust.
+        </p>
+        <div class="table-wrap">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>Line</th>
+                <th>How it is computed</th>
+                <th style="text-align: right">Credits</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Player pot</td>
+                <td>10,000 × 0.955</td>
+                <td class="num">9,550</td>
+              </tr>
+              <tr>
+                <td>All survivor floors</td>
+                <td>4 × 750</td>
+                <td class="num">3,000</td>
+              </tr>
+              <tr>
+                <td>Premium to split</td>
+                <td>9,550 − 3,000</td>
+                <td class="num">6,550</td>
+              </tr>
+              <tr>
+                <td>Total weight</td>
+                <td>1,000 × (ln 1.5 + ln 1.5 + ln 2.0 + ln 3.0) = 1,000 × 2.603</td>
+                <td class="num">2,603</td>
+              </tr>
+              <tr>
+                <td>Your weight share</td>
+                <td>ln 2.0 ÷ 2.603 = 0.693 ÷ 2.603</td>
+                <td class="num">26.6%</td>
+              </tr>
+              <tr>
+                <td>Your floor</td>
+                <td>0.75 × 1,000</td>
+                <td class="num">750</td>
+              </tr>
+              <tr>
+                <td>Your premium</td>
+                <td>6,550 × 26.6%</td>
+                <td class="num">1,744</td>
+              </tr>
+              <tr class="total">
+                <td>You receive</td>
+                <td>750 + 1,744 = about 2.49× your stake</td>
+                <td class="num">2,494</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Same round, other outcomes for you</h3>
+        <div class="tiles">
+          <div class="tile">
+            <strong>0</strong><span>You bust</span>
+            <small>Lock after the crash: nothing back.</small>
+          </div>
+          <div class="tile blue">
+            <strong>955</strong><span>Everyone survives at 2.0×</span>
+            <small>Floors 7,500, premium 2,050 split ten ways: 0.955× each.</small>
+          </div>
+          <div class="tile board">
+            <strong>9,550</strong><span>You are the only survivor</span>
+            <small>Your floor plus the entire premium: 9.55× your stake.</small>
+          </div>
+        </div>
+        <p>
+          Across all players, the table returns exactly 95.5% of stakes to
+          survivors every round. That is a table-wide identity, not an
+          individual promise. Individual results vary enormously with
+          strategy: in simulation campaigns, locking early averaged about
+          1.04× of stakes back over a long run, while chasing high multipliers
+          averaged about 0.15×.<sup>1</sup>
+        </p>
+      </section>
+
+      <section id="lottery">
+        <h2><span>04</span> · How does the lottery work and what does it cost me?</h2>
+        <p class="answer">
+          It costs you nothing extra. The Powerboard prize is funded only by
+          the 40% community share of rake. Every stake you place is
+          automatically a ticket.
+        </p>
+        <div class="lottery">
+          <div>
+            <ul>
+              <li>
+                <b>Funding.</b> Every round adds player pot × 1.8% to the
+                prize (that is the 40% community share of the 4.50% rake).
+              </li>
+              <li>
+                <b>Your ticket weight</b> is your total stake in the current
+                prize epoch. Bigger stake, bigger share of the odds.
+              </li>
+              <li>
+                <b>The draw.</b> On a funded round, one of 16 balls is drawn
+                from a pre-committed reveal: the number comes from a sealed
+                random value published before the round, so the house cannot
+                choose it. Ball 1 is the hit.
+              </li>
+              <li>
+                <b>The winner.</b> On a hit, the sealed prize is paid to one
+                player chosen proportionally to ticket weight, from the same
+                committed randomness.
+              </li>
+            </ul>
+            <code class="formula">
+              <small>formula</small>
+              your odds this draw = (your weight ÷ everyone's weight) × 1/16<br />
+              prize funding per round = pot × 0.018
+            </code>
+          </div>
+          <div class="odds">
+            <div class="drum" aria-label="Sixteen equally eligible balls">
+              <div class="balls">
+                <i class="ball win" data-n="1" style="--x: 10%; --y: 15%; --d: -0.1s"></i
+                ><i class="ball" data-n="2" style="--x: 31%; --y: 8%; --d: -0.2s"></i
+                ><i class="ball" data-n="3" style="--x: 53%; --y: 12%; --d: -0.3s"></i
+                ><i class="ball" data-n="4" style="--x: 74%; --y: 20%; --d: -0.4s"></i
+                ><i class="ball" data-n="5" style="--x: 18%; --y: 36%; --d: -0.5s"></i
+                ><i class="ball" data-n="6" style="--x: 40%; --y: 31%; --d: -0.6s"></i
+                ><i class="ball" data-n="7" style="--x: 64%; --y: 39%; --d: -0.7s"></i
+                ><i class="ball" data-n="8" style="--x: 5%; --y: 59%; --d: -0.8s"></i
+                ><i class="ball" data-n="9" style="--x: 28%; --y: 55%; --d: -0.9s"></i
+                ><i class="ball" data-n="10" style="--x: 51%; --y: 58%; --d: -1s"></i
+                ><i class="ball" data-n="11" style="--x: 75%; --y: 55%; --d: -1.1s"></i
+                ><i class="ball" data-n="12" style="--x: 15%; --y: 76%; --d: -1.2s"></i
+                ><i class="ball" data-n="13" style="--x: 37%; --y: 74%; --d: -1.3s"></i
+                ><i class="ball" data-n="14" style="--x: 59%; --y: 78%; --d: -1.4s"></i
+                ><i class="ball" data-n="15" style="--x: 81%; --y: 75%; --d: -1.5s"></i
+                ><i class="ball" data-n="16" style="--x: 73%; --y: 3%; --d: -1.6s"></i>
+              </div>
+            </div>
+            <strong>1 / 16</strong>
+            <b>CHANCE OF A HIT ON ANY FUNDED DRAW</b>
+            <div class="sequence">
+              <span>COMMIT<small>hash published</small></span
+              ><span>PLAY<small>round runs</small></span
+              ><span>REVEAL<small>value opened</small></span
+              ><span>DERIVE<small>ball and winner</small></span>
+            </div>
+          </div>
+        </div>
+
+        <h3>When can a draw actually happen?</h3>
+        <p>
+          A win must never empty the board, so a draw is only allowed once
+          <b>two</b> amounts are fully sealed: the current prize, and the
+          reset reserve for the next prize. After a hit, the next base prize
+          ratchets up by 5% or 50,000 credits, whichever is larger, and can
+          never go down. Sealing takes a 10% operations fee on the funding
+          that constitutes each prize, so the credits needed are the target
+          ÷ 0.90.
+        </p>
+        <code class="formula">
+          <small>formula</small>
+          credits needed to seal a prize = target ÷ 0.90<br />
+          draw allowed when: prize sealed AND reset reserve ≥ (next base ÷ 0.90)<br />
+          next base = max(base × 1.05, base + 50,000)<br />
+          rounds to seal ≈ credits needed ÷ (pot × 0.018)
+        </code>
+        <h3>Example at a 10,000-credit pot per round</h3>
+        <div class="steps">
+          <div><b>180</b>credits added to the prize each round</div>
+          <div><b>≈ 309</b>rounds to seal a 50,000-credit prize (55,556 needed)</div>
+          <div><b>≈ 6,173</b>rounds to seal a 1,000,000-credit prize (1,111,112 needed)</div>
+          <div><b>30 s</b>between launches, so 120 rounds an hour at full tempo</div>
+        </div>
+        <p>
+          The reset reserve for the next prize is filled the same way after
+          the current prize seals, so the first real draw needs roughly twice
+          the rounds shown. The table's current prize target and funding
+          progress are shown in the game header. The playtest uses a smaller
+          test-credit prize target than mainnet.
+        </p>
+      </section>
+
+      <section id="whole-table">
+        <h2><span>05</span> · What does the whole table's money do?</h2>
+        <p class="answer">
+          Out of every 100 credits staked across all players: 95.5 go back to
+          survivors, 1.8 are burned, 1.8 fund the Powerboard prize, and 0.9
+          pay for operations.
+        </p>
         <div class="card flow-map">
           <svg
             role="img"
@@ -628,250 +927,99 @@
                 <path d="M0 0L9 3L0 6Z" fill="#e9b43f" />
               </marker>
             </defs>
-            <circle
-              cx="110"
-              cy="145"
-              r="85"
-              fill="#123322"
-              stroke="#34d399"
-              stroke-width="4"
-            />
-            <text
-              x="110"
-              y="130"
-              text-anchor="middle"
-              fill="#fff2cf"
-              font-size="48"
-              font-weight="900"
-            >
-              100%
-            </text>
-            <text
-              x="110"
-              y="165"
-              text-anchor="middle"
-              fill="#c9b58a"
-              font-size="18"
-            >
-              PLAYER STAKES
-            </text>
-            <path
-              d="M200 115H500"
-              stroke="#34d399"
-              stroke-width="18"
-              marker-end="url(#arrow)"
-            />
-            <path
-              d="M200 190H500"
-              stroke="#e9b43f"
-              stroke-width="10"
-              marker-end="url(#arrow)"
-            />
-            <rect
-              x="525"
-              y="45"
-              width="525"
-              height="110"
-              rx="18"
-              fill="#123322"
-              stroke="#34d399"
-            />
-            <text
-              x="785"
-              y="112"
-              text-anchor="middle"
-              fill="#fff2cf"
-              font-size="38"
-              font-weight="900"
-            >
-              95.5% → 97.5% PLAYER PURSE
-            </text>
-            <rect
-              x="525"
-              y="180"
-              width="525"
-              height="70"
-              rx="18"
-              fill="#302013"
-              stroke="#e9b43f"
-            />
-            <text
-              x="785"
-              y="224"
-              text-anchor="middle"
-              fill="#fff2cf"
-              font-size="28"
-              font-weight="900"
-            >
-              ROUTED RAKE
-            </text>
+            <circle cx="110" cy="145" r="85" fill="#123322" stroke="#34d399" stroke-width="4" />
+            <text x="110" y="130" text-anchor="middle" fill="#fff2cf" font-size="48" font-weight="900">100%</text>
+            <text x="110" y="165" text-anchor="middle" fill="#c9b58a" font-size="20">ALL STAKES</text>
+            <path d="M200 115H500" stroke="#34d399" stroke-width="18" marker-end="url(#arrow)" />
+            <path d="M200 190H500" stroke="#e9b43f" stroke-width="10" marker-end="url(#arrow)" />
+            <rect x="525" y="45" width="525" height="110" rx="18" fill="#123322" stroke="#34d399" />
+            <text x="785" y="100" text-anchor="middle" fill="#fff2cf" font-size="40" font-weight="900">95.5% TO SURVIVORS</text>
+            <text x="785" y="138" text-anchor="middle" fill="#c9b58a" font-size="22">rising to 97.5% as the rake falls</text>
+            <rect x="525" y="180" width="525" height="70" rx="18" fill="#302013" stroke="#e9b43f" />
+            <text x="785" y="224" text-anchor="middle" fill="#fff2cf" font-size="28" font-weight="900">4.5% RAKE: BURN · PRIZE · OPERATIONS</text>
           </svg>
-          <div
-            class="allocation"
-            aria-label="40 percent burn, 40 percent board, 20 percent founder"
-          >
-            <div class="burn">40 BURN<small>SUPPLY PRESSURE</small></div>
-            <div class="board">40 BOARD<small>ROLLING PRIZE</small></div>
-            <div class="founder">20 FOUNDER<small>OPERATIONS</small></div>
+        </div>
+        <div class="tiles wide" style="margin-top: 14px">
+          <div class="tile board">
+            <strong>95.5%</strong><span>Player purse</span>
+            <small>Returned to that round's survivors, every round, exactly.</small>
+          </div>
+          <div class="tile burn">
+            <strong>1.8%</strong><span>Burned</span>
+            <small>Permanently removed. Total supply only goes down from play.</small>
+          </div>
+          <div class="tile blue">
+            <strong>1.8%</strong><span>Powerboard prize</span>
+            <small>Accumulates until a prize and its reset reserve are sealed.</small>
+          </div>
+          <div class="tile ops">
+            <strong>0.9%</strong><span>Operations</span>
+            <small>The 20% share of rake.</small>
           </div>
         </div>
+        <h3>The protected vault and the prize base only go up</h3>
+        <ul>
+          <li>
+            <b>Protected vault.</b> A reserve that can only grow, funded only
+            from routed rake: specifically, half of any community share that is
+            not sent to the prize. On a new table it is 0, because this
+            table's current settings route the community share to the
+            Powerboard prize and no rake has yet been diverted to the vault.
+          </li>
+          <li>
+            <b>Prize base.</b> The guaranteed reset base for the lottery never
+            decreases; each hit ratchets it upward.
+          </li>
+        </ul>
+        <code class="formula">
+          <small>invariants checked every round</small>
+          vault(t+1) ≥ vault(t) · prize base(t+1) ≥ prize base(t) · Σ payouts ≤ funded capacity
+        </code>
       </section>
-      <section>
-        <h2><span>04</span> · Funded evolution</h2>
-        <div class="evolution">
-          <div class="epoch" style="--h: 48%"><i>95.50%</i><b>E0</b></div>
-          <div class="epoch" style="--h: 54%"><i>95.75%</i><b>E1</b></div>
-          <div class="epoch" style="--h: 60%"><i>96.00%</i><b>E2</b></div>
-          <div class="epoch" style="--h: 67%"><i>96.25%</i><b>E3</b></div>
-          <div class="epoch" style="--h: 74%"><i>96.50%</i><b>E4</b></div>
-          <div class="epoch" style="--h: 82%"><i>96.75%</i><b>E5</b></div>
-          <div class="epoch" style="--h: 91%"><i>97.00%</i><b>E6</b></div>
-          <div class="epoch" style="--h: 100%"><i>97.50%</i><b>E7</b></div>
-        </div>
-      </section>
-      <section>
-        <h2><span>05</span> · Two-tempo economy</h2>
-        <div class="cycle card">
-          <div class="orb" style="--c: #34d399">
-            <div><strong>FLIGHT</strong><br />frequent skill contest</div>
-          </div>
-          <div class="orb" style="--c: #e9b43f">
-            <div><strong>VAULT</strong><br />bounded risk budget</div>
-          </div>
-          <div class="orb" style="--c: #58bdf0">
-            <div><strong>POWERBOARD</strong><br />rare rolling reveal</div>
-          </div>
-        </div>
-      </section>
-      <section>
-        <h2><span>06</span> · One pool, sixteen equal results</h2>
-        <div class="lottery">
-          <div class="drum">
-            <div class="balls">
-              <i
-                class="ball win"
-                data-n="1"
-                style="--x: 10%; --y: 15%; --d: -0.1s"
-              ></i
-              ><i
-                class="ball"
-                data-n="2"
-                style="--x: 31%; --y: 8%; --d: -0.2s"
-              ></i
-              ><i
-                class="ball"
-                data-n="3"
-                style="--x: 53%; --y: 12%; --d: -0.3s"
-              ></i
-              ><i
-                class="ball"
-                data-n="4"
-                style="--x: 74%; --y: 20%; --d: -0.4s"
-              ></i
-              ><i
-                class="ball"
-                data-n="5"
-                style="--x: 18%; --y: 36%; --d: -0.5s"
-              ></i
-              ><i
-                class="ball"
-                data-n="6"
-                style="--x: 40%; --y: 31%; --d: -0.6s"
-              ></i
-              ><i
-                class="ball"
-                data-n="7"
-                style="--x: 64%; --y: 39%; --d: -0.7s"
-              ></i
-              ><i
-                class="ball"
-                data-n="8"
-                style="--x: 5%; --y: 59%; --d: -0.8s"
-              ></i
-              ><i
-                class="ball"
-                data-n="9"
-                style="--x: 28%; --y: 55%; --d: -0.9s"
-              ></i
-              ><i
-                class="ball"
-                data-n="10"
-                style="--x: 51%; --y: 58%; --d: -1s"
-              ></i
-              ><i
-                class="ball"
-                data-n="11"
-                style="--x: 75%; --y: 55%; --d: -1.1s"
-              ></i
-              ><i
-                class="ball"
-                data-n="12"
-                style="--x: 15%; --y: 76%; --d: -1.2s"
-              ></i
-              ><i
-                class="ball"
-                data-n="13"
-                style="--x: 37%; --y: 74%; --d: -1.3s"
-              ></i
-              ><i
-                class="ball"
-                data-n="14"
-                style="--x: 59%; --y: 78%; --d: -1.4s"
-              ></i
-              ><i
-                class="ball"
-                data-n="15"
-                style="--x: 81%; --y: 75%; --d: -1.5s"
-              ></i
-              ><i
-                class="ball"
-                data-n="16"
-                style="--x: 73%; --y: 3%; --d: -1.6s"
-              ></i>
-            </div>
-          </div>
-          <div class="odds">
-            <strong>1 / 16</strong><b>EACH ELIGIBLE NUMBER</b>
-            <div class="sequence">
-              <span>COMMIT</span><span>MIX</span><span>SELECT</span
-              ><span>REVEAL</span>
-            </div>
-          </div>
-        </div>
-      </section>
-      <section>
-        <h2><span>07</span> · Structural guarantees</h2>
-        <div class="proofs">
+
+      <section id="guarantees">
+        <h2><span>06</span> · What is guaranteed vs what varies</h2>
+        <div class="two-col">
           <div class="seal">
-            <div>
-              <b>≡</b><strong>PARTITION INVARIANT</strong>
-              <p>Splitting a position creates no extra aggregate claim.</p>
-            </div>
+            <h3>Guaranteed</h3>
+            <ul>
+              <li>Solvency every round: payouts never exceed what is funded.</li>
+              <li>75% of your stake back if you lock before the crash.</li>
+              <li>The lottery pays only when the prize and its reset reserve are fully sealed.</li>
+              <li>Crash point, drawn ball and winner all come from committed randomness published before the round.</li>
+              <li>Fixed 30-second cadence between launches.</li>
+              <li>Splitting a stake across wallets earns no extra claim.</li>
+            </ul>
           </div>
-          <div class="seal">
-            <div>
-              <b>∑</b><strong>FINITE PURSE</strong>
-              <p>Every payout remains inside funded capacity.</p>
-            </div>
-          </div>
-          <div class="seal">
-            <div>
-              <b>✓</b><strong>SAME RULES</strong>
-              <p>
-                Rank signals progress; it never purchases better settlement.
-              </p>
-            </div>
+          <div class="seal varies">
+            <h3>Varies</h3>
+            <ul>
+              <li>Your outcome: it depends on when you lock and what everyone else does.</li>
+              <li>How fast the prize grows: it scales with the table's pot size.</li>
+              <li>The crash point, every round.</li>
+              <li>The rake rate over time (only downward, with volume).</li>
+              <li>The house bonus, which may be zero.</li>
+            </ul>
           </div>
         </div>
       </section>
+
       <section class="cta">
         <div class="eyebrow">PUBLIC ALPHA · TEST CREDITS</div>
-        <h2>Fly for position.<br /><span>Build the board.</span></h2>
+        <h2>Ready to fly?</h2>
         <a href="/playtest/game">ENTER THE PLAYTEST</a>
         <div class="fine">
-          Test credits have no cash value. Multiplier is parimutuel claim
-          weight, not a fixed-odds payout promise. Aggregate player-purse
-          percentages do not promise an individual result.
+          <p>
+            Test credits have no cash value. The multiplier is a parimutuel
+            claim weight, not a fixed-odds payout promise. Table-wide
+            percentages describe where all stakes go; they do not promise any
+            individual result.
+          </p>
+          <p>
+            <sup>1</sup> Strategy averages come from 2,000,000-round simulation
+            campaigns of this settlement rule; they are long-run averages for
+            fixed strategies, not forecasts.
+          </p>
         </div>
       </section>
     </main>

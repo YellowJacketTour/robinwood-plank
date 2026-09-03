@@ -283,16 +283,63 @@ test("the live curve advances across a CONTINUOUS time horizon and the launch co
   assert.match(arcadeSource, /new THREE\.RingGeometry\(5\.45, 5\.72, 48\)/);
 });
 
-test("the marketing deck is a responsive visual system map rather than a prose brief", () => {
+test("the SYSTEM & MATH manual is a readable, plain-language, formula-accurate field manual", () => {
+  // Illustrations that anchor the visual identity survive.
   assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Accelerating multiplier curve"/);
   assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Flow diagram of credits"/);
-  assert.match(mechanicsDeckSource, /class="evolution"/);
   assert.equal((mechanicsDeckSource.match(/class="ball(?: win)?"/g) || []).length, 16);
-  assert.match(mechanicsDeckSource, /@media\(max-width:440px\)/);
-  assert.match(mechanicsDeckSource, /grid-template-columns:repeat\(8,1fr\)/);
-  assert.match(mechanicsDeckSource, />40 BURN</);
-  assert.match(mechanicsDeckSource, />40 BOARD</);
-  assert.match(mechanicsDeckSource, />20 FOUNDER</);
+  // Six-step strip.
+  for (const step of ["COMMIT", "LAUNCH", "FLY", "LOCK", "SETTLE", "DRAW"]) {
+    assert.match(mechanicsDeckSource, new RegExp(`<b>0[1-6]</b>${step}<small>`));
+  }
+  // The five player questions, in order.
+  const questions = [
+    "What am I putting in?",
+    "What can I get back on a flight?",
+    "How does the lottery work and what does it cost me?",
+    "What does the whole table's money do?",
+    "What is guaranteed vs what varies",
+  ];
+  let cursor = -1;
+  for (const q of questions) {
+    const at = mechanicsDeckSource.indexOf(q);
+    assert.ok(at > cursor, `question heading present and in order: ${q}`);
+    cursor = at;
+  }
+  // Key formulas from the real constants.
+  assert.match(mechanicsDeckSource, /95\.5%/);
+  assert.match(mechanicsDeckSource, /75%\s+of your stake back/);
+  assert.match(mechanicsDeckSource, /stake_i × ln\(m_i\)/);
+  assert.match(mechanicsDeckSource, /× 1\/16/);
+  assert.match(mechanicsDeckSource, /e\^\(0\.22·t\)/);
+  assert.match(mechanicsDeckSource, /4\.50%/);
+  assert.match(mechanicsDeckSource, /2\.50%/);
+  assert.match(mechanicsDeckSource, /pot × 0\.018/);
+  assert.match(mechanicsDeckSource, /max\(base × 1\.05, base \+ 50,000\)/);
+  assert.match(mechanicsDeckSource, />20%<\/strong><span>Operations</);
+});
+
+test("the SYSTEM & MATH manual reserves no viewport-height block and has no text under 11px", () => {
+  const css = mechanicsDeckSource.slice(
+    mechanicsDeckSource.indexOf("<style>"),
+    mechanicsDeckSource.indexOf("</style>")
+  );
+  // The dead zone came from `.hero{min-height:88svh}` — no viewport-height
+  // reservation may return anywhere in the page CSS.
+  assert.doesNotMatch(css, /min-height:\s*[\d.]+(svh|vh|dvh|lvh)/);
+  assert.doesNotMatch(css, /\.hero\s*\{[^}]*(svh|vh|dvh)/);
+  // Every explicit px font size (bare or inside font:/clamp()) is >= 11px.
+  const sizes: number[] = [];
+  for (const m of css.matchAll(/font(?:-size)?:\s*([^;]+);/g)) {
+    for (const px of m[1].matchAll(/(\d+(?:\.\d+)?)px/g)) sizes.push(Number(px[1]));
+  }
+  assert.ok(sizes.length > 10, "font sizes were parsed");
+  for (const size of sizes) assert.ok(size >= 11, `font size ${size}px is under the 11px floor`);
+});
+
+test("the SYSTEM & MATH manual never renders founder earnings or founder figures", () => {
+  assert.doesNotMatch(mechanicsDeckSource, /founder/i);
+  assert.doesNotMatch(mechanicsDeckSource, /FOUNDER TOTAL/);
 });
 
 test("returning invitees can choose login and rejoin the invited room in one action", () => {
