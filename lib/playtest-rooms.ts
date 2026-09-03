@@ -7,9 +7,10 @@ import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
-  bettingRoundId, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, newcomerSeatPlan, parsePolicy,
-  PLAYTEST_POWERBOARD_ODDS, powerboardRoundDraw, powerboardVoucherQuote,
-  parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
+  bettingRoundId, crashDurationMs, CURRENT_PLAYTEST_PRIZE_PROFILE, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState,
+  legacyPlaytestPrizeProfile, newcomerSeatPlan, parsePolicy,
+  PLAYTEST_POWERBOARD_ODDS, PLAYTEST_PRIZE_PROFILE_KEYS, PLAYTEST_PRIZE_PROFILES, powerboardRoundDraw, powerboardVoucherQuote,
+  parseSimulationState, playtestRulesHash, rebasePlaytestLotteryTarget, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 import { settlementDescriptor } from "@/lib/casino/settlement-rules";
 import { clampDisplayLagMs, DEFAULT_DISPLAY_LAG_MS, laggedLockGrantBps } from "@/lib/playtest-live-shared";
@@ -400,11 +401,12 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     let policy = parsePolicy(room.policy);
     // The public laboratory advances legacy tables at the round boundary,
     // never mid-flight. Historical rounds retain their committed descriptor.
-    const legacyPrizeProfile = policy.powerboardFundingBps === 2_500n
-      && policy.lotteryInitialBase === 100_000n
-      && policy.lotteryMinimumIncrease === 1_000n
-      && policy.lotteryBaseGrowthBps === 100n
-      && policy.lotteryMinimumBaseStep === 1_000n;
+    // A room whose stored prize tuple equals ANY superseded shipped default
+    // (v1 25%/100k, v2 100%/1M) is advanced to the current default; bespoke
+    // host-edited tuples are left alone.
+    const legacyPrize = legacyPlaytestPrizeProfile(policy);
+    const legacyPrizeProfile = legacyPrize !== null;
+    let policyMigration: Record<string, unknown> | null = null;
     const legacyEvolutionProfile = storedPolicy.rakeFloorBps === undefined
       || storedPolicy.rakeStepBps === undefined
       || storedPolicy.rakeVolumeStep === undefined;
@@ -425,6 +427,17 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       validatePolicy(policy);
       room.policy = serializeBigInts(policy);
       room.rules_hash = playtestRulesHash(policy);
+      if (legacyPrize) {
+        const from = PLAYTEST_PRIZE_PROFILES[legacyPrize];
+        const rebased = rebasePlaytestLotteryTarget(parseSimulationState(room.simulation_state), from.lotteryInitialBase, policy.lotteryInitialBase);
+        if (rebased) room.simulation_state = serializeSimulationState(rebased);
+        policyMigration = {
+          prizeProfile: { from: legacyPrize, to: CURRENT_PLAYTEST_PRIZE_PROFILE },
+          policy: serializeBigInts(Object.fromEntries(PLAYTEST_PRIZE_PROFILE_KEYS.map((key) => [key, { from: from[key], to: policy[key] }]))),
+          lotteryTargetRebased: rebased !== null,
+          ...(rebased ? { lotteryTarget: { from: from.lotteryInitialBase.toString(), to: policy.lotteryInitialBase.toString() } } : {}),
+        };
+      }
     }
     // An invitation means "join the next flight", not "silently spectate".
     // Seat only humans who arrived after the most recent settlement, and only
@@ -497,8 +510,8 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     room.commitment = commitment; room.reveal = reveal; room.crash_bps = crashBps.toString();
     room.started_at = started; room.crash_at = crashAt;
     await client.query(
-      `UPDATE playtest_rooms SET phase='running',version=$2,current_round=$3,commitment=$4,reveal=$5,crash_bps=$6,started_at=$7,crash_at=$8,settled_at=NULL,policy=$9,rules_hash=$10 WHERE id=$1`,
-      [roomId, room.version, room.current_round, commitment, reveal, crashBps.toString(), started, crashAt, JSON.stringify(room.policy), room.rules_hash],
+      `UPDATE playtest_rooms SET phase='running',version=$2,current_round=$3,commitment=$4,reveal=$5,crash_bps=$6,started_at=$7,crash_at=$8,settled_at=NULL,policy=$9,rules_hash=$10,simulation_state=$11 WHERE id=$1`,
+      [roomId, room.version, room.current_round, commitment, reveal, crashBps.toString(), started, crashAt, JSON.stringify(room.policy), room.rules_hash, JSON.stringify(room.simulation_state)],
     );
     // Never publish crashAt while the round is live. A deadline is merely the
     // unrevealed crash multiplier expressed in time, so exposing it defeats
@@ -508,6 +521,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       startedAt: started.toISOString(),
       settlement: settlementDescriptor(policy.allocationRule),
       evolution: serializeBigInts(evolutionQuote(policy, parseSimulationState(room.simulation_state).totals.freshWagers)),
+      ...(policyMigration ? { policyMigration } : {}),
     });
     if (welcomed.length) await event(client, room, "newcomers.seated", identity.id, null, {
       count: welcomed.length, stake: policy.minimumStake, targetBps: 20_000n, autoLockEnabled: false,

@@ -121,7 +121,60 @@ laboratory; this rejection is the standing decision of record. Any future revisi
 present new evidence of a concrete attack that consolation removes — retention-only
 arguments are insufficient by the owner's own bar.
 
-## 8. Evidence links
+## 8. Playtest test-credit profile (owner decision 2026-09-03)
+
+**Scope: the public laboratory's DEFAULT policy only** (`DEFAULT_PLAYTEST_POLICY`,
+`lib/playtest-room-core.ts`). Nothing in `contracts/` or `lib/casino/` changes; the rake
+(450 bps, floor 250, step 25 / 25M), the ratified 40/40/20 split, the 10% lottery founder
+fee, `lotteryMinimumIncrease` / `lotteryBaseGrowthBps` / `lotteryMinimumBaseStep`
+(50k / 5% / 50k) and the CCS-2L settlement rule are exactly as ratified above.
+
+| Parameter | Ratified-era playtest default (v2) | Playtest test-credit profile (v3) |
+|---|---|---|
+| `lotteryInitialBase` | 1,000,000 credits | **50,000 credits** |
+| `powerboardFundingBps` | 10,000 (100% of the community leg → prize) | **6,500 (65% → prize; 35% retained)** |
+
+**Reason — reachability.** At minimum stakes a two-seat round moves roughly 11–22 credits
+into the prize pipeline (pot 1,000 → rake 45 → community 18 → 65% ≈ 11; at the pre-change
+100% routing ≈ 18–22). The 1,000,000 base grossed up by the founder fee demanded
+`minimumLotteryGross(1,000,000, 10%) = 1,111,111` credits of funding before the epoch
+could even seal — tens of thousands of rounds — so no laboratory table ever reached a live
+draw without host injection. Retaining 35% of the community leg also makes the protected
+vault visibly compound (50/50 into `protectedPrincipal` and the emission buffer) instead
+of showing 0 for the life of a table.
+
+**Funding math (same kernel the engine's funded gate uses — `minimumLotteryGross`):**
+
+- Per 2 × 10,000-credit round: pot 20,000 × 4.50% = 900 rake → community 360 →
+  **234 to the prize** (`powerboardFundingAdded`), **126 retained** → 63 protected principal
+  + 63 emission buffer.
+- Prize seal gate: `minimumLotteryGross(50,000, 1,000 bps) = 55,555` gross → seals on
+  round ⌈55,555 / 234⌉ = **238** at that stake; sealed net prize exactly 50,000.
+- Reset-reserve gate (draw arms only when BOTH are covered): next base
+  `50,000 + max(5%, 50,000) = 100,000` → `minimumLotteryGross(100,000) = 111,111` gross;
+  arms on round ⌈(55,555 + 111,111) / 234⌉ = **713**.
+- After a hit: base ratchets to 100,000, the next prize (100,000) is re-seeded from the
+  sealed reserve, and the reserve refills toward `minimumLotteryGross(150,000) = 166,666`.
+
+**Migration of existing tables (round boundary only, never mid-flight).** `startPlaytestRound`
+already advanced tables whose stored prize tuple equalled the legacy v1 profile
+(25% / 100k). That check is now `legacyPlaytestPrizeProfile()`, which recognises BOTH
+superseded shipped defaults (v1 and the v2 tuple above) and advances them to the current
+default on the next launch. Bespoke host-edited tuples are never rewritten. When a v2 table
+is advanced and its lottery is still UNSEALED and undisplayed (`awaitingSeal`, `netPrize`
+0, no rollover, no armed draw, `cycleBase == nextPrizeTarget == 1,000,000`) the target is
+re-based to 50,000 by `rebasePlaytestLotteryTarget()`; accrued `pendingFunding`,
+`resetReserve` and principal are untouched (accounted assets conserved exactly). A sealed
+or ratcheted prize is a displayed promise and is never lowered. Every such migration is
+recorded on that round's `round.launched` event as `policyMigration` (`prizeProfile`
+from/to, per-key policy from/to, `lotteryTargetRebased`, and the target from/to). New
+tables start on the v3 profile directly.
+
+Pinned by `test/market/playtest-room-core.test.ts` (profile pin; funded gate arms at the
+new base with the founder gross-up; re-basing rules) and proven end-to-end against the real
+server + PostgreSQL by `test/e2e-playtest/lottery-funding-payout.spec.ts`.
+
+## 9. Evidence links
 
 - `docs/marketplank/RESEARCH-vision-economics-sota-config-2026-09-02.md` — the review
   behind these decisions (SOTA grounding, PROVEN vs JUDGMENT labeling).

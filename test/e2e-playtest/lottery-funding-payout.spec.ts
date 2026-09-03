@@ -11,10 +11,11 @@ import { BOOTSTRAP_SECRET } from "../../playwright.playtest.config";
  *  (a) FUNDING — every qualified settled round routes exactly
  *      community-leg × powerboardFundingBps into the Powerboard prize
  *      pipeline. With the current configuration (4.50% rake, ratified
- *      40/40/20 split, powerboardFundingBps = 100% of the community leg) a
- *      2 × 10,000-credit round contributes rake 900 → community 360 →
- *      powerboardFundingAdded 360, and lottery.pendingFunding strictly
- *      increases by at least that amount.
+ *      40/40/20 split, playtest powerboardFundingBps = 65% of the community
+ *      leg — RATIFICATION "Playtest test-credit profile") a 2 × 10,000-credit
+ *      round contributes rake 900 → community 360 → powerboardFundingAdded
+ *      234 (the retained 126 compounds the vault), and lottery.pendingFunding
+ *      strictly increases by at least that amount.
  *
  *  (b) NEGATIVE GATE — while the prize is < 100% funded there is NO draw at
  *      all, even when the host explicitly asks for a "hit": the settled
@@ -122,14 +123,14 @@ test("lottery funding accrues per qualified round; an unfunded prize never draws
   const before = lotteryState(await snapshot(host, roomId));
   const round1 = await runRound(host, guest, roomId, "none");
   expect(round1.payload.qualified).toBe(true);
-  expect(String(round1.payload.powerboardFundingAdded), "community leg share routed to the prize").toBe("360");
+  expect(String(round1.payload.powerboardFundingAdded), "65% of the community leg routed to the prize").toBe("234");
   const afterR1 = lotteryState(round1.snap);
   expect(BigInt(String(afterR1.pendingFunding)) - BigInt(String(before.pendingFunding)))
-    .toBeGreaterThanOrEqual(360n);
+    .toBeGreaterThanOrEqual(234n);
 
   const round2 = await runRound(host, guest, roomId, "hit"); // ← host DEMANDS a hit while unfunded
   // ── (b) NEGATIVE GATE: no draw of any kind below 100% funded. ──
-  expect(String(round2.payload.powerboardFundingAdded)).toBe("360");
+  expect(String(round2.payload.powerboardFundingAdded)).toBe("234");
   expect(round2.payload.lotteryEvent, "an unfunded prize can only be 'funding'").toBe("funding");
   const unfundedDraw = (round2.payload.powerboardDraw ?? {}) as Json;
   expect(unfundedDraw.drawActive, "no staged number while funding").toBe(false);
@@ -151,7 +152,7 @@ test("lottery funding accrues per qualified round; an unfunded prize never draws
   const armed = lotteryState(sealing.snap);
   expect(armed.readyForDraw, "draw arms only with prize + reset reserve sealed").toBe(true);
   const displayedPrize = BigInt(String(armed.netPrize));
-  expect(displayedPrize).toBeGreaterThanOrEqual(1_000_000n); // ≥ the cycle base
+  expect(displayedPrize).toBeGreaterThanOrEqual(50_000n); // ≥ the playtest cycle base
   const reserveBefore = BigInt(String(armed.resetReserve));
   expect(reserveBefore).toBeGreaterThan(displayedPrize); // covers the ratcheted next prize gross
   const cycleBaseBefore = BigInt(String(armed.cycleBase));
@@ -190,12 +191,12 @@ test("lottery funding accrues per qualified round; an unfunded prize never draws
   expect(BigInt(String(afterState.netPrize)), "next prize re-seeded from the reset reserve").toBeGreaterThanOrEqual(cycleBaseAfter);
   // The reset reserve was consumed to seed the new prize and immediately
   // refills (from the surplus pending funding) toward the NEXT ratcheted
-  // base: minimumLotteryGross(nextCycleBase(1,050,000)=1,102,500, 10% fee)
-  // = 1,224,999 gross.
-  expect(BigInt(String(afterState.resetReserve))).toBe(1_224_999n);
+  // base: minimumLotteryGross(nextCycleBase(100,000)=150,000, 10% fee)
+  // = 166,666 gross.
+  expect(BigInt(String(afterState.resetReserve))).toBe(166_666n);
   void reserveBefore;
 
-  console.log(`funding/round=360 threshold(prize gross)=1111112 displayedPrize=${displayedPrize} ` +
+  console.log(`funding/round=234 threshold(prize gross)=55555 displayedPrize=${displayedPrize} ` +
     `payout=${winner!.payout} ratchet=${cycleBaseBefore}->${cycleBaseAfter} nextPrize=${afterState.netPrize}`);
 
   await hostContext.close();

@@ -13,11 +13,19 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   // Explicit laboratory hypotheses. These are intentionally not described as
   // ratified mainnet parameters.
   protectedPrincipalBps: 5_000n,
-  powerboardFundingBps: 10_000n,
+  // Playtest test-credit profile (owner decision 2026-09-03, see
+  // docs/marketplank/RATIFICATION-ccs2l-2026-09-02.md "Playtest test-credit
+  // profile"): 65% of the community leg funds the Powerboard prize, the other
+  // 35% is retained (50/50 protected principal / emission buffer) so the vault
+  // visibly compounds. Mainnet/ratified economics are untouched by this value.
+  powerboardFundingBps: 6_500n,
   crashSeed: 10_000n,
   emissionBufferCap: 1_000_000n,
   lotteryFounderFeeBps: 1_000n,
-  lotteryInitialBase: 1_000_000n,
+  // 50,000-credit base: funded gate = minimumLotteryGross(50,000, 10% fee)
+  // = 55,555 gross; reachable in the laboratory at minimum stakes. The prior
+  // 1,000,000 base (1,111,111 gross) was unreachable at ~11-22 credits/round.
+  lotteryInitialBase: 50_000n,
   lotteryMinimumIncrease: 50_000n,
   lotteryBaseGrowthBps: 500n,
   lotteryMinimumBaseStep: 50_000n,
@@ -28,6 +36,41 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   // Test credits have no cash value; this is a conservative UX analogue.
   minimumStake: 500n,
 };
+
+/** Prize-profile tuples the public laboratory has shipped, oldest first. A
+ * stored room policy equal to one of these is advanced to the DEFAULT at the
+ * next round boundary (never mid-flight); see startPlaytestRound. */
+export const PLAYTEST_PRIZE_PROFILES = {
+  // 2026-08 legacy: 25% of the community leg, 100k base.
+  v1: { powerboardFundingBps: 2_500n, lotteryInitialBase: 100_000n, lotteryMinimumIncrease: 1_000n, lotteryBaseGrowthBps: 100n, lotteryMinimumBaseStep: 1_000n },
+  // 2026-09-02 ratification-era default: full community leg, 1M base.
+  v2: { powerboardFundingBps: 10_000n, lotteryInitialBase: 1_000_000n, lotteryMinimumIncrease: 50_000n, lotteryBaseGrowthBps: 500n, lotteryMinimumBaseStep: 50_000n },
+} as const;
+export const PLAYTEST_PRIZE_PROFILE_KEYS = ["powerboardFundingBps", "lotteryInitialBase", "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep"] as const;
+export const CURRENT_PLAYTEST_PRIZE_PROFILE = "v3";
+
+/** Which superseded prize profile a stored policy carries, or null when it
+ * already matches the current default (or is a bespoke host edit). */
+export function legacyPlaytestPrizeProfile(policy: SimulationPolicy): keyof typeof PLAYTEST_PRIZE_PROFILES | null {
+  for (const [name, profile] of Object.entries(PLAYTEST_PRIZE_PROFILES) as Array<[keyof typeof PLAYTEST_PRIZE_PROFILES, Record<string, bigint>]>) {
+    if (PLAYTEST_PRIZE_PROFILE_KEYS.every((key) => policy[key] === profile[key])) return name;
+  }
+  return null;
+}
+
+/** Round-boundary lottery re-basing that accompanies a prize-profile upgrade.
+ * Only an UNSEALED, undisplayed target is lowered: nothing has been promised
+ * (netPrize 0, no rollover, no armed draw) and the cycle base still sits at
+ * the superseded profile's initial base. Funding already accrued
+ * (pendingFunding, resetReserve, principal) is never touched, so accounted
+ * assets are conserved exactly. Returns null when nothing is eligible. */
+export function rebasePlaytestLotteryTarget(state: SimulationState, fromInitialBase: bigint, toInitialBase: bigint): SimulationState | null {
+  const lottery = state.lottery;
+  if (fromInitialBase === toInitialBase) return null;
+  if (!lottery.awaitingSeal || lottery.readyForDraw || lottery.netPrize !== 0n || lottery.rollover !== 0n) return null;
+  if (lottery.cycleBase !== fromInitialBase || lottery.nextPrizeTarget !== fromInitialBase) return null;
+  return { ...state, lottery: { ...lottery, cycleBase: toInitialBase, nextPrizeTarget: toInitialBase } };
+}
 
 /**
  * A settled table advances exactly once when the first participant commits.
