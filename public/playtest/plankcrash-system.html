@@ -812,8 +812,11 @@
           <div>
             <ul>
               <li>
-                <b>Funding.</b> Every round adds player pot × 1.8% to the
-                prize (that is the 40% community share of the 4.50% rake).
+                <b>Funding.</b> Every round, the 40% community share of the
+                4.50% rake (pot × 1.8%) is routed by the table's setting:
+                mainnet routes all of it to the prize; playtest tables route
+                65% to the prize (pot × 1.17%) and keep 35% compounding the
+                protected vault.
               </li>
               <li>
                 <b>Your ticket weight</b> is your total stake in the current
@@ -834,7 +837,8 @@
             <code class="formula">
               <small>formula</small>
               your odds this draw = (your weight ÷ everyone's weight) × 1/16<br />
-              prize funding per round = pot × 0.018
+              prize funding per round = pot × 0.045 × 0.40 × routed share<br />
+              &nbsp;&nbsp;mainnet (100% routed) = pot × 0.018 · playtest (65% routed) = pot × 0.0117
             </code>
           </div>
           <div class="odds">
@@ -884,13 +888,13 @@
           credits needed to seal a prize = target ÷ 0.90<br />
           draw allowed when: prize sealed AND reset reserve ≥ (next base ÷ 0.90)<br />
           next base = max(base × 1.05, base + 50,000)<br />
-          rounds to seal ≈ credits needed ÷ (pot × 0.018)
+          rounds to seal ≈ credits needed ÷ (pot × 0.018 × routed share)
         </code>
         <h3>Example at a 10,000-credit pot per round</h3>
         <div class="steps">
-          <div><b>180</b>credits added to the prize each round</div>
-          <div><b>≈ 309</b>rounds to seal a 50,000-credit prize (55,556 needed)</div>
-          <div><b>≈ 6,173</b>rounds to seal a 1,000,000-credit prize (1,111,112 needed)</div>
+          <div><b>117</b>credits added to the prize each round on a playtest table (180 on mainnet)</div>
+          <div><b>≈ 475</b>rounds to seal the playtest's 50,000-credit prize (55,555 needed; ≈ 309 at mainnet routing)</div>
+          <div><b>≈ 6,173</b>rounds to seal a 1,000,000-credit mainnet prize (1,111,111 needed)</div>
           <div><b>30 s</b>between launches, so 120 rounds an hour at full tempo</div>
         </div>
         <p>
@@ -961,10 +965,12 @@
         <ul>
           <li>
             <b>Protected vault.</b> A reserve that can only grow, funded only
-            from routed rake: specifically, half of any community share that is
-            not sent to the prize. On a new table it is 0, because this
-            table's current settings route the community share to the
-            Powerboard prize and no rake has yet been diverted to the vault.
+            from routed rake: half of whatever community share is not sent
+            to the prize. On playtest tables 35% of the community share is
+            kept back, so the vault receives pot × 0.315% every round (the
+            other half of that kept share seeds future flights). A brand-new
+            table starts at 0 and the vault grows from its first settled
+            round; it never decreases.
           </li>
           <li>
             <b>Prize base.</b> The guaranteed reset base for the lottery never
