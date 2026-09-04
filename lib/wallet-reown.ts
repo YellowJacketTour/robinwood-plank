@@ -20,10 +20,9 @@ const LOCAL_STORAGE_OVERRIDE_KEY = "plank-wallet-ui";
  * dynamic imports ever runs — the legacy WalletConnect QR path
  * (lib/wallet-connect.ts + ConnectWalletModal.tsx) is untouched.
  *
- * A localStorage override (mirroring the existing `plank-wc-project-id`
- * pattern in lib/wallet-connect.ts) lets this be flipped per-browser
- * without an env var change / dev server restart — useful for dogfooding
- * and for QA of this phase without redeploying.
+ * A localStorage override for the UI mode lets this be flipped per-browser
+ * without an env var change / dev server restart. It does not override the
+ * WalletConnect project ID, which always comes from the build configuration.
  */
 export function isReownWalletUIEnabled(): boolean {
   if (typeof window !== "undefined") {

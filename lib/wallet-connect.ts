@@ -79,16 +79,7 @@ export function isWalletConnectActive(): boolean {
 }
 
 export function getWalletConnectProjectId(): string {
-  if (typeof window !== "undefined") {
-    const fromLs = localStorage.getItem("plank-wc-project-id")?.trim();
-    if (fromLs) return fromLs;
-  }
   return (process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "").trim();
-}
-
-export function saveWalletConnectProjectId(id: string) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("plank-wc-project-id", id.trim());
 }
 
 export async function qrDataUrlForUri(uri: string): Promise<string> {
@@ -142,8 +133,6 @@ export async function connectWithWalletConnect(opts: {
   if (projectId.length < 20) {
     throw new Error("Paste a valid WalletConnect Project ID from cloud.reown.com");
   }
-  saveWalletConnectProjectId(projectId);
-
   // Cancel previous attempt first so a second "Show QR" does not freeze.
   await disconnectWalletConnect();
   const gen = ++connectGeneration;

@@ -13,7 +13,6 @@ import {
   disconnectWalletConnect,
   getWalletConnectProjectId,
   qrDataUrlForUri,
-  saveWalletConnectProjectId,
 } from "@/lib/wallet-connect";
 import {
   connectInjectedWallet,
@@ -38,7 +37,6 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   // onConnected — otherwise a WalletConnect-sourced connect would update
   // e.g. SwapWidget's local state but leave the nav/other surfaces stale.
   const { adoptAccount: walletAdoptAccount } = useWallet();
-  const [projectId, setProjectId] = useState("");
   const [uri, setUri] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,12 +54,15 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // Portal availability is an external browser condition established after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 
   useEffect(() => {
     if (!open) return;
-    setProjectId(getWalletConnectProjectId());
+    // Opening the externally controlled modal starts a fresh connection attempt.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUri(null);
     setQrDataUrl(null);
     setError(null);
@@ -74,6 +75,8 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
 
   useEffect(() => {
     if (!uri) {
+      // The derived QR asset must be cleared when the provider drops its URI.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQrDataUrl(null);
       return;
     }
@@ -154,11 +157,10 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
     setQrDataUrl(null);
     setPendingAddress(null);
     try {
-      const id = projectId.trim() || getWalletConnectProjectId();
+      const id = getWalletConnectProjectId();
       if (!id) {
-        throw new Error("Paste your WalletConnect Project ID (free at cloud.reown.com).");
+        throw new Error("WalletConnect is not configured for this build.");
       }
-      saveWalletConnectProjectId(id);
       const addr = await connectWithWalletConnect({
         projectId: id,
         onDisplayUri: (u) => {
@@ -187,7 +189,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
     } finally {
       setBusy(false);
     }
-  }, [projectId, checkChainAndFinish]);
+  }, [checkChainAndFinish]);
 
   const retryChain = useCallback(async () => {
     if (!pendingAddress) {
@@ -280,36 +282,6 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
                 <li>Approve the connection</li>
               </ol>
             </div>
-
-            {/* Config plumbing, not user UI: the project id ships with the
-                build (NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID). Ask only when
-                no id is configured anywhere — without one, WalletConnect
-                cannot pair at all. */}
-            {!getWalletConnectProjectId() && (
-              <>
-                <label className="mt-4 block text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
-                  WalletConnect Project ID
-                </label>
-                <input
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value.trim())}
-                  placeholder="from cloud.reown.com"
-                  className="mt-1 w-full rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
-                  autoComplete="off"
-                />
-                <p className="mt-1 text-[0.65rem] text-foreground/40">
-                  Free:{" "}
-                  <a
-                    href="https://cloud.reown.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-gold-300 underline"
-                  >
-                    cloud.reown.com
-                  </a>
-                </p>
-              </>
-            )}
 
             <button
               type="button"

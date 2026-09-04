@@ -226,7 +226,7 @@ the variable is unset, verified against `lib/constants.ts`,
 | `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Primary Marketplank vault address (V3 / Premium Plank Liquidity as of 2026-08-01) | `null` (vault sends disabled) | `lib/constants.ts:291` |
 | `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES` / `..._LEGACY_ADDRESS` | Legacy (redeem-only) vaults — currently V1 Driftwood and V2 WormWood | `null`/empty (no legacy vault) | `lib/constants.ts:324` |
 | `NEXT_PUBLIC_ROBINHOOD_RPC_URL` | Browser RPC for chain reads that don't go through `/api/rpc` (e.g. mint contract) | falls back to public Robinhood Chain RPC | `lib/mint-contract.ts:9` |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Reown/WalletConnect project ID for QR pairing | empty (WalletConnect QR path unusable until set, user can paste one client-side as a fallback) | `lib/wallet-connect.ts:65` |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Reown/WalletConnect project ID for QR pairing | empty (WalletConnect QR path unusable until configured at build time) | `lib/wallet-connect.ts` |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin used in metadata/OG tags | `https://plank.love`-shaped fallback in `lib/public-json.ts` | `lib/public-json.ts:51` |
 | `NEXT_PUBLIC_MINT_START_AT` | Optional mint countdown target | unset = no countdown | read directly (not via `lib/constants.ts`) |
 
