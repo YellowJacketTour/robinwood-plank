@@ -9,6 +9,11 @@
 }
 
 @media (max-width: 760px) {
+  [data-plankspace-subnav] .plankspace-mobile-brand {
+    display: inline;
+    font-size: 0.95rem;
+  }
+
   [data-plankspace-subnav] .plankspace-desktop-links,
   [data-plankspace-subnav] .plankspace-desktop-actions {
     display: none;

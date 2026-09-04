@@ -96,7 +96,7 @@ export default function PlankSpaceSubnav() {
             height={28}
             className="h-7 w-7 object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
           />
-          <span className="hidden font-display text-base leading-none text-gold-300 sm:inline">
+          <span className="plankspace-mobile-brand font-display text-base leading-none text-gold-300">
             PlankSpace
           </span>
         </Link>

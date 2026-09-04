@@ -19,10 +19,19 @@ test("mobile Board menu exposes every PlankSpace destination without changing sh
   ];
 
   assert.match(subnav, />\s*Board menu\s*</);
+  assert.match(subnav, /className="plankspace-mobile-brand[^"]*"[^>]*>\s*PlankSpace\s*</);
   assert.match(subnav, /aria-expanded=/);
   assert.match(subnav, /aria-controls="plankspace-mobile-menu"/);
   for (const href of expected) assert.match(subnav, new RegExp(`href[:=].*"${href}"`));
   assert.doesNotMatch(sharedNav, /plankspace-mobile-menu|Board menu/);
+});
+
+test("featured-video selector stays compact and horizontally scrollable on mobile", () => {
+  const css = read("integrations/plankspace-app/app/globals.css");
+
+  assert.match(css, /\.classic-profile \.profile-video-choices\{[^}]*display:flex[^}]*overflow-x:auto/s);
+  assert.match(css, /\.classic-profile \.profile-video-choices button\{[^}]*min-width:/s);
+  assert.match(css, /\.classic-profile \.profile-video-choices button\[aria-pressed=true\]/);
 });
 
 test("mobile profile has primary jump navigation and collapsible secondary details", () => {

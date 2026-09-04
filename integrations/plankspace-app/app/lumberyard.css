@@ -350,7 +350,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
   border: 1px solid var(--plankspace-card-line);
   border-radius: var(--plankspace-radius);
@@ -472,7 +472,7 @@
 }
 
 .plankspace-native .media-drawer-actions button {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 14px;
   border: 1px solid var(--color-gold-600);
   border-radius: var(--plankspace-radius);
@@ -481,6 +481,23 @@
   font: inherit;
   font-weight: 800;
   cursor: pointer;
+}
+
+.plankspace-native .composer > button:last-child {
+  min-height: 44px;
+  border: 1px solid var(--color-wood-700);
+  border-radius: var(--plankspace-radius);
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+  padding: 10px 16px;
+  font-weight: 800;
+  box-shadow: 0 2px 0 var(--color-wood-700);
+}
+
+.plankspace-native .composer > button:last-child:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  box-shadow: none;
 }
 
 .plankspace-native .media-drawer-actions button:disabled {
@@ -969,6 +986,11 @@
 }
 
 @media (max-width: 460px) {
+  .plankspace-native .composer > button:last-child {
+    align-self: stretch;
+    width: 100%;
+  }
+
   .plankspace-native .feed-hero { padding: 16px; }
   .plankspace-native .feed-hero h2 { font-size: 1.25rem; }
   .plankspace-native .feed-hero-row { flex-direction: column; align-items: stretch; }

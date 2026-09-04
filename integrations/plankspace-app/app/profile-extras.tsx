@@ -1,11 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { connectPlankLoveWallet, getPlankLoveWalletState, subscribePlankLoveWalletState } from "./plank-love-wallet";
 import { walletProof } from "./auth-client";
 import ContentActions from "./content-actions";
 import { MediaAttachment, MediaComposer } from "./post-media-ui";
 import type { PostMedia } from "./post-media";
+import { walletStateConfirmsDisconnect } from "./x-share-state";
 type Post = {
   id: number;
   author: string;
@@ -106,13 +107,14 @@ export function Feed() {
     [xUsername,setXUsername]=useState(""),
     [xRetryAfter,setXRetryAfter]=useState(0),
     [alsoPostToX,setAlsoPostToX]=useState(false);
+  const xStatusRequest = useRef(0);
   useEffect(() => {
     fetch("/api/posts")
       .then((r) => r.json())
       .then((d) => setItems(d.posts || []))
       .catch(() => setMessage("Feed unavailable"));
   }, []);
-  useEffect(()=>{const refresh=(address:string|null)=>{if(!address){setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false);return}fetch(`/api/x/status?wallet=${address}`).then(r=>r.json()).then(x=>{const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");setXRetryAfter(connected&&!x.postCooldown?.allowed?Number(x.postCooldown.retryAfterSeconds||0):0);if(!connected)setAlsoPostToX(false)}).catch(()=>{setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false)})};void getPlankLoveWalletState().then(state=>refresh(state.address));return subscribePlankLoveWalletState(state=>refresh(state.address))},[]);
+  useEffect(()=>{const refresh=(state:Awaited<ReturnType<typeof getPlankLoveWalletState>>)=>{const request=++xStatusRequest.current;if(walletStateConfirmsDisconnect(state)){setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false);return}if(!state.address)return;fetch(`/api/x/status?wallet=${state.address}`).then(async r=>{if(!r.ok)throw new Error("X status unavailable");return r.json()}).then(x=>{if(request!==xStatusRequest.current)return;const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");setXRetryAfter(connected&&!x.postCooldown?.allowed?Number(x.postCooldown.retryAfterSeconds||0):0);if(!connected)setAlsoPostToX(false)}).catch(()=>{/* Preserve the last confirmed X state during transient wallet/media refreshes. */})};void getPlankLoveWalletState().then(refresh);return subscribePlankLoveWalletState(refresh)},[]);
   const act = async (kind: "post" | "like", id?: number) => {
     setBusy(true);
     setMessage("");
