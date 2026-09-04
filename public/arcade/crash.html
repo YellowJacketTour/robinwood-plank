@@ -127,7 +127,11 @@
   .pb-pop-head { display: flex; justify-content: space-between; align-items: center;
     font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #c9adff;
     font-weight: 700; margin-bottom: 6px; }
-  .pb-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  /* 44px hit area: these four popover dismissals measured 11.8x17px, the
+     smallest interactive targets on the surface, at every viewport. */
+  .pb-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px;
+    display: inline-grid; place-items: center; min-width: 44px; min-height: 44px;
+    margin: -12px -12px -12px 0; }
   .pb-pop-close:hover { color: #fff; }
   .pb-pop-sub { font-size: 11px; color: #b3a3d9; line-height: 1.45; margin-bottom: 10px; }
   .pb-row { display: flex; justify-content: space-between; align-items: baseline;
@@ -191,7 +195,8 @@
   .rank-pop-head { display: flex; justify-content: space-between; align-items: center;
     font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #f0c98a;
     font-weight: 700; margin-bottom: 6px; }
-  .rank-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  .rank-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px;
+    display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
   .rank-pop-close:hover { color: #fff; }
   .rank-pop-sub { font-size: 11px; color: #d9b384; line-height: 1.45; margin-bottom: 10px; }
   .rank-bar-track { height: 8px; border-radius: 999px; background: rgba(224,168,84,0.14);
@@ -216,7 +221,8 @@
   .verify-pop-head { display: flex; justify-content: space-between; align-items: center;
     font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #5edcc8;
     font-weight: 700; margin-bottom: 6px; }
-  .verify-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  .verify-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px;
+    display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
   .verify-pop-close:hover { color: #fff; }
   .verify-pop-sub { font-size: 11px; color: #9fd9cd; line-height: 1.45; margin-bottom: 10px; }
   .vf-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
@@ -4838,6 +4844,7 @@ function privateApplySettledFlightTarget(crashAltitude) {
     if (privateMotionReduced() && flightProgress > 0) { flightProgress = 0; flightVel = 0; }
   }
 }
+let privateLastDeckShape = "";
 let privateMotionPreference = localStorage.getItem("plank-alpha:motion") || "system";
 let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || "balanced";
 
@@ -6102,7 +6109,13 @@ function paintPrivateSnapshot(snapshot) {
     }
     updatePrivateIntermissionAction(snapshot, queuedSeat, me);
   }
-  if (prior !== phaseState) privateBringActionIntoView();
+  // Re-anchor on a phase change AND whenever the deck's own height changes
+  // (committing a bet swaps the button label and the sub-line without
+  // changing phaseState, which used to leave the auto row resting under the
+  // sticky action with no scroll to clear it).
+  const deckShape = `${phaseState}:${Math.round(($("primaryBtn")?.getBoundingClientRect().top) || 0)}`;
+  if (prior !== phaseState || deckShape !== privateLastDeckShape) privateBringActionIntoView();
+  privateLastDeckShape = deckShape;
   renderPrivateRoster(snapshot);
   paintPrivateConclusion(snapshot, me, seat);
   updatePrivateJourney(snapshot, me, seat);
@@ -6340,13 +6353,13 @@ async function startPrivatePlaytest() {
          natural slot, back over the rows it is supposed to sit below. The
          clearance above the table bar comes from the deck's own bottom
          padding, and scroll-margin keeps the rows clear when scrolled to. */
-      body[data-playtest="true"] .deck .primary-btn{position:sticky;bottom:calc(60px + env(safe-area-inset-bottom));margin-bottom:calc(60px + env(safe-area-inset-bottom));width:auto;z-index:90;min-height:56px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+      body[data-playtest="true"] .deck .primary-btn{position:sticky;bottom:calc(60px + env(safe-area-inset-bottom));width:auto;z-index:90;min-height:56px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
       body[data-playtest="true"] .deck #stakeRow,body[data-playtest="true"] .deck #autoRow{scroll-margin-bottom:80px}
       /* Clearance for the PINNED primary action: it occupies the band from
          (72px + inset) to (72px + inset + 56px). The deck must reserve that
          band PLUS a gap, or the auto-lock / target / REPEAT row scrolls to
          rest underneath it and becomes untappable. */
-      body[data-playtest="true"] .deck{padding-bottom:calc(188px + env(safe-area-inset-bottom))}
+      body[data-playtest="true"] .deck{padding-bottom:calc(130px + env(safe-area-inset-bottom))}
       /* Every deck control is a real 44px touch target on phones. */
       body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
       #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
@@ -6371,6 +6384,18 @@ async function startPrivatePlaytest() {
       /* Compact card + caption so the whole intermission text stack stays in
          the TOP HALF of a 240px phone stage (rocket keeps the lower half). */
       #privateIntermissionCountdown{z-index:70;top:8px;bottom:auto;min-width:0;width:min(250px,calc(100vw - 32px));padding:6px 12px;gap:0 10px}#privateIntermissionCountdown strong{font-size:clamp(38px,10vw,56px)}body:has(.private-result.show) #privateIntermissionCountdown{display:none}
+      /* OPERATE: withdraw density under time pressure. During flight the bet
+         is already committed and cannot be changed, so the stake chips, the
+         credit quote and the whole auto row (target input, REPEAT, AUTO-LOCK)
+         are controls for a decision the player has already made. Hiding them
+         leaves the two things that matter — the climbing multiplier and the
+         LOCK button — and reclaims the scarcest vertical space on a phone.
+         The standing payout disclaimers collapse to one line for the same
+         seconds; they are restored the moment the round settles. */
+      body[data-playtest="true"][data-private-phase="running"] #stakeRow,
+      body[data-playtest="true"][data-private-phase="running"] #stakeValueQuote,
+      body[data-playtest="true"][data-private-phase="running"] #autoRow{display:none}
+      body[data-playtest="true"][data-private-phase="running"] #maxPayableDisclosure{display:none}
       body[data-playtest="true"][data-private-phase="settled"] .center-readout{justify-content:flex-start;padding-top:62px}
       body[data-playtest="true"][data-private-phase="settled"] .center-readout .mult{display:none}
       body[data-playtest="true"][data-private-phase="settled"] .center-readout .substatus{max-width:calc(100vw - 32px);padding:3px 8px;border-radius:8px;background:rgba(4,8,11,.55);font-size:11px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

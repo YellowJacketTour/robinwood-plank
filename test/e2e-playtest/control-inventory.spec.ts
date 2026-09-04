@@ -82,12 +82,12 @@ async function waitUntil(page: Page, roomId: string, pred: (s: Json) => boolean,
 type Row = { id: string; selector: string; phases: string[]; interactive: boolean; sheet?: boolean; thumb?: boolean; dim?: boolean; mobileOnly?: boolean };
 const ROWS: Row[] = [
   // Stake entry is state-disabled (dimmed) outside the betting window but must stay present.
-  { id: "stake-chips", selector: "#stakeRow .chip[data-amt]", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true, dim: true },
-  { id: "custom-stake", selector: "#privateCustomStake", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true, dim: true },
+  { id: "stake-chips", selector: "#stakeRow .chip[data-amt]", phases: ["lobby", "committed", "intermission"], interactive: true, dim: true },
+  { id: "custom-stake", selector: "#privateCustomStake", phases: ["lobby", "committed", "intermission"], interactive: true, dim: true },
   { id: "balance", selector: "#privateBalanceReadout", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: false },
-  { id: "auto-lock-chip", selector: "#privateAutoLockChip", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true },
-  { id: "target-input", selector: "#autoTargetInput", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true },
-  { id: "repeat", selector: "#autoToggle", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true },
+  { id: "auto-lock-chip", selector: "#privateAutoLockChip", phases: ["lobby", "committed", "intermission"], interactive: true },
+  { id: "target-input", selector: "#autoTargetInput", phases: ["lobby", "committed", "intermission"], interactive: true },
+  { id: "repeat", selector: "#autoToggle", phases: ["lobby", "committed", "intermission"], interactive: true },
   { id: "primary", selector: "#primaryBtn", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: true, thumb: true },
   { id: "primary-sub", selector: "#btnSub", phases: ["lobby", "committed", "flight", "locked", "intermission"], interactive: false },
   { id: "mult-readout", selector: "#multReadout", phases: ["flight", "locked"], interactive: false },
