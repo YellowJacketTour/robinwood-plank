@@ -1,0 +1,55 @@
+/* The subnav sits beside, not inside, .plankspace-native. Keep every rule
+   behind its route-only data boundary so profile CSS cannot affect it and
+   this stylesheet cannot affect the shared Plank.love navigation. */
+[data-plankspace-subnav] .plankspace-mobile-menu {
+  display: none;
+  position: relative;
+  margin-left: auto;
+  flex: none;
+}
+
+@media (max-width: 760px) {
+  [data-plankspace-subnav] .plankspace-desktop-links,
+  [data-plankspace-subnav] .plankspace-desktop-actions {
+    display: none;
+  }
+
+  [data-plankspace-subnav] .plankspace-mobile-menu {
+    display: block;
+  }
+
+  [data-plankspace-subnav] .plankspace-mobile-menu > button {
+    min-height: 44px;
+    border-color: var(--color-line-strong);
+    background: var(--color-wood-900);
+    color: var(--color-gold-300);
+  }
+
+  [data-plankspace-subnav] .plankspace-mobile-menu > nav {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 7px);
+    z-index: 70;
+    width: min(290px, calc(100vw - 24px));
+    max-height: calc(100dvh - 130px);
+    overflow: auto;
+    background: var(--color-wood-950);
+    border: 1px solid var(--color-line-strong);
+    box-shadow: 0 16px 34px #000b;
+    padding: 8px;
+  }
+
+  [data-plankspace-subnav] .plankspace-mobile-menu > nav a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 11px;
+    color: var(--color-cream);
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  [data-plankspace-subnav] .plankspace-mobile-menu > nav a[aria-current="page"] {
+    background: color-mix(in srgb, var(--color-gold-500) 15%, transparent);
+    color: var(--color-gold-300);
+  }
+}

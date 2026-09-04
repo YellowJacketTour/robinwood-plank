@@ -45,3 +45,15 @@ test("new mobile profile rules stay beneath the PlankSpace boundary", () => {
   assert.match(mobileBlock, /\[data-plankspace-subnav\]/);
   assert.match(mobileBlock, /\.classic-profile/);
 });
+
+test("mobile Board menu positioning is loaded outside the native content scope", () => {
+  const subnavCss = read("integrations/plankspace-app/app/plankspace-subnav.css");
+  const groupedLayout = read("app/(plankspace)/layout.tsx");
+  const landingLayout = read("app/plankspace/layout.tsx");
+
+  assert.match(groupedLayout, /plankspace-subnav\.css/);
+  assert.match(landingLayout, /plankspace-subnav\.css/);
+  assert.match(subnavCss, /\[data-plankspace-subnav\] \.plankspace-mobile-menu\s*\{[^}]*position:\s*relative/s);
+  assert.match(subnavCss, /\.plankspace-mobile-menu\s*>\s*nav\s*\{[^}]*position:\s*absolute/s);
+  assert.doesNotMatch(subnavCss, /(?:^|[},])\s*(?:body|html|header|nav|main|aside|section|button)\s*[{,]/m);
+});

@@ -1,4 +1,5 @@
 import "@/integrations/plankspace-app/app/globals.css";
+import "@/integrations/plankspace-app/app/plankspace-subnav.css";
 import "@/integrations/plankspace-app/app/widget-live.css";
 import "@/integrations/plankspace-app/app/lumberyard.css";
 import type { Metadata } from "next";
