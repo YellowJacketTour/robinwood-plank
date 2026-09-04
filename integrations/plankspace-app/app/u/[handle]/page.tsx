@@ -466,15 +466,8 @@ export default async function PublicProfile({
               <p>Last Sanded: Today</p>
             </div>
               </section>
-          <nav className="mobile-profile-jumps" aria-label="Profile sections">
-            <a href="#profile-feed">Feed</a>
-            <a href="#video">Videos</a>
-            <a href="#profile-friends">Top 8</a>
-            <a href="#profile-about">About</a>
-          </nav>
-          <details className="mobile-profile-details box contact">
-            <summary>Contact &amp; board actions</summary>
-            <div className="mobile-profile-detail-body">
+          <section className="box contact">
+            <div>
               <h2>Contacting {p.displayName}</h2>
               <BoardActions handle={p.handle} />
               <div className="contact-links">
@@ -482,17 +475,15 @@ export default async function PublicProfile({
                 <a href="#comments">💬 Knock on Wood</a>
               </div>
             </div>
-          </details>
-          <details className="mobile-profile-details box url">
-            <summary>Profile URL</summary>
-            <div className="mobile-profile-detail-body">
+          </section>
+          <section className="box url">
+            <div>
               <h2>PlankSpace URL:</h2>
               <p>plank.love/plankspace/{p.handle}</p>
             </div>
-          </details>
-          <details className="mobile-profile-details box interests">
-            <summary>About &amp; interests</summary>
-            <div className="mobile-profile-detail-body">
+          </section>
+          <section className="box interests">
+            <div>
               <h2>{p.displayName}&apos;s Interests</h2>
             <dl>
               {[
@@ -510,7 +501,7 @@ export default async function PublicProfile({
                 ))}
             </dl>
             </div>
-          </details>
+          </section>
           <a className="profile-edit-link" href="/profile-editor">
             Own this page? Open Profile Workshop
           </a>

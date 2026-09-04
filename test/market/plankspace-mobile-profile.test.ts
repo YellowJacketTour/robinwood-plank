@@ -26,23 +26,30 @@ test("mobile Board menu exposes every PlankSpace destination without changing sh
   assert.doesNotMatch(sharedNav, /plankspace-mobile-menu|Board menu/);
 });
 
-test("featured-video selector stays compact and horizontally scrollable on mobile", () => {
+test("profile video UI leaves navigation to the native YouTube player", () => {
   const css = read("integrations/plankspace-app/app/globals.css");
+  const player = read("integrations/plankspace-app/app/profile-video-player.tsx");
 
-  assert.match(css, /\.classic-profile \.profile-video-choices\{[^}]*display:flex[^}]*overflow-x:auto/s);
-  assert.match(css, /\.classic-profile \.profile-video-choices button\{[^}]*min-width:/s);
-  assert.match(css, /\.classic-profile \.profile-video-choices button\[aria-pressed=true\]/);
+  assert.doesNotMatch(css, /profile-video-choices/);
+  assert.doesNotMatch(player, /data-video-choice|<button/);
+  assert.match(player, /playlist/);
 });
 
-test("mobile profile has primary jump navigation and collapsible secondary details", () => {
+test("mobile profile remains one continuous page without added tabs or collapsible modules", () => {
   const profile = read("integrations/plankspace-app/app/u/[handle]/page.tsx");
 
   for (const target of ["profile-feed", "video", "profile-friends", "profile-about"]) {
-    assert.match(profile, new RegExp(`(?:id|href)=[{]?"#?${target}"`));
+    assert.match(profile, new RegExp(`id=[{]?"${target}"`));
   }
-  assert.match(profile, /className="mobile-profile-jumps"/);
-  assert.match(profile, /className="mobile-profile-details/);
-  assert.match(profile, /<summary>/);
+  assert.doesNotMatch(profile, /mobile-profile-jumps|mobile-profile-details|<summary>/);
+});
+
+test("mobile profile keeps visible background gutters and breathing room between modules", () => {
+  const css = read("integrations/plankspace-app/app/globals.css");
+  const mobileBlock = css.slice(css.indexOf("\/\* plankspace-mobile-profile \*\/"));
+
+  assert.match(mobileBlock, /\.classic-profile\s*>\s*main\s*\{[^}]*width:\s*calc\(100%\s*-\s*32px\)[^}]*gap:\s*16px/s);
+  assert.match(mobileBlock, /\.classic-profile\s+\.classic-left\s*,\s*\.classic-profile\s+\.public-modules\s*\{[^}]*gap:\s*16px/s);
 });
 
 test("new mobile profile rules stay beneath the PlankSpace boundary", () => {

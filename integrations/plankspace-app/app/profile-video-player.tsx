@@ -1,6 +1,3 @@
-"use client";
-
-import { useMemo, useState } from "react";
 import { parseYouTubeVideoIds } from "./profile-video-links";
 
 export default function ProfileVideoPlayer({
@@ -10,22 +7,22 @@ export default function ProfileVideoPlayer({
   links: string;
   title: string;
 }) {
-  const ids = useMemo(() => parseYouTubeVideoIds(links), [links]);
-  const [selectedId, setSelectedId] = useState(ids[0] || "");
-  const activeId = ids.includes(selectedId) ? selectedId : ids[0] || "";
+  const ids = parseYouTubeVideoIds(links);
+  const firstId = ids[0];
+  if (!firstId) return <p className="public-empty">No featured video yet.</p>;
 
-  if (!activeId) return <p className="public-empty">No featured video yet.</p>;
-
-  const selectedIndex = ids.indexOf(activeId);
-  const src = `https://www.youtube-nocookie.com/embed/${activeId}?playsinline=1&rel=0`;
+  const remaining = ids.slice(1);
+  const playlist = remaining.length
+    ? `&playlist=${encodeURIComponent(remaining.join(","))}`
+    : "";
+  const src = `https://www.youtube-nocookie.com/embed/${firstId}?playsinline=1&rel=0${playlist}`;
 
   return (
     <div className="profile-video-player">
       <div className="video-frame">
         <iframe
-          key={activeId}
           src={src}
-          title={`${title} — video ${selectedIndex + 1} of ${ids.length}`}
+          title={`${title} — ${ids.length} saved video${ids.length === 1 ? "" : "s"}`}
           loading="lazy"
           sandbox="allow-scripts allow-same-origin allow-presentation"
           referrerPolicy="strict-origin-when-cross-origin"
@@ -33,22 +30,6 @@ export default function ProfileVideoPlayer({
           allowFullScreen
         />
       </div>
-      {ids.length > 1 && (
-        <div className="profile-video-choices" aria-label="Choose featured video">
-          {ids.map((id, index) => (
-            <button
-              type="button"
-              key={id}
-              data-video-choice={id}
-              aria-pressed={id === activeId}
-              onClick={() => setSelectedId(id)}
-            >
-              <span>Video {index + 1} of {ids.length}</span>
-              <small>{id === activeId ? "Now playing" : "Play video"}</small>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
