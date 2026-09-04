@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AdminNavLink from "./admin-nav-link";
 import { savedProfileHandle } from "./auth-client";
 import { getPlankLoveWalletState, subscribePlankLoveWalletState } from "./plank-love-wallet";
@@ -42,6 +42,9 @@ export default function PlankSpaceSubnav() {
   const onEditor =
     active(pathname, "/profile-editor") || active(pathname, "/create-profile");
   const [profileHandle, setProfileHandle] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const resolve = (address: string | null) => {
       if (!address) { setProfileHandle(""); return; }
@@ -50,6 +53,30 @@ export default function PlankSpaceSubnav() {
     void getPlankLoveWalletState().then((state) => resolve(state.address));
     return subscribePlankLoveWalletState((state) => resolve(state.address));
   }, []);
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (returnFocus = false) => {
+      setMenuOpen(false);
+      if (returnFocus) menuTrigger.current?.focus();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(true);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menu.current?.contains(event.target as Node)) close();
+    };
+    const desktop = window.matchMedia("(min-width: 761px)");
+    const onDesktop = () => { if (desktop.matches) close(); };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    desktop.addEventListener("change", onDesktop);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onPointerDown);
+      desktop.removeEventListener("change", onDesktop);
+    };
+  }, [menuOpen]);
 
   return (
     <div
@@ -76,7 +103,7 @@ export default function PlankSpaceSubnav() {
 
         <nav
           aria-label="PlankSpace"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="plankspace-desktop-links flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {LINKS.map((link) => {
             const isActive = active(pathname, link.href);
@@ -93,7 +120,7 @@ export default function PlankSpaceSubnav() {
           })}
         </nav>
 
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="plankspace-desktop-actions ml-auto flex shrink-0 items-center gap-1">
           <AdminNavLink className={`${pill} ${idle}`} />
           <Link
             href="/profile-editor"
@@ -113,6 +140,29 @@ export default function PlankSpaceSubnav() {
           >
             My Profile
           </Link>
+        </div>
+        <div className="plankspace-mobile-menu" ref={menu}>
+          <button
+            ref={menuTrigger}
+            type="button"
+            className={pill}
+            aria-expanded={menuOpen}
+            aria-controls="plankspace-mobile-menu"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            Board menu
+          </button>
+          {menuOpen && (
+            <nav id="plankspace-mobile-menu" aria-label="PlankSpace Board menu">
+              {LINKS.map((link) => (
+                <Link key={link.href} href={link.href} aria-current={active(pathname, link.href) ? "page" : undefined}>
+                  {link.label}
+                </Link>
+              ))}
+              <Link href="/profile-editor">Edit Profile</Link>
+              <Link href={profileHandle ? `/u/${profileHandle}` : "/profile-editor"}>My Profile</Link>
+            </nav>
+          )}
         </div>
       </div>
     </div>

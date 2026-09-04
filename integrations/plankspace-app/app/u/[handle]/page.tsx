@@ -359,7 +359,7 @@ export default async function PublicProfile({
       </section>
     ),
     about: (
-      <section className="content about">
+      <section className="content about" id="profile-about">
         <h2>{p.displayName}&apos;s Blurbs</h2>
         <h3>About me:</h3>
         <p>{p.bio || "This board keeps things mysterious."}</p>
@@ -372,7 +372,7 @@ export default async function PublicProfile({
       </section>
     ),
     friends: (
-      <section className="content friendspace">
+      <section className="content friendspace" id="profile-friends">
         <div className="head">
           <h2>{p.displayName}&apos;s Friend Space</h2>
           <span>Top 8 boards</span>
@@ -416,7 +416,7 @@ export default async function PublicProfile({
     ),
     widgets: <ProfileWidgets handle={p.handle} />,
     feed: (
-      <section className="content">
+      <section className="content" id="profile-feed">
         <div className="head">
           <h2>Latest from the Lumberyard</h2>
           <span>Wallet-signed posts</span>
@@ -465,21 +465,35 @@ export default async function PublicProfile({
               <p>Collector / Builder / PlankSpace</p>
               <p>Last Sanded: Today</p>
             </div>
-          </section>
-          <section className="box contact">
-            <h2>Contacting {p.displayName}</h2>
-            <BoardActions handle={p.handle} />
-            <div className="contact-links">
-              <a href="#comments">✉ Send Board Mail</a>
-              <a href="#comments">💬 Knock on Wood</a>
+              </section>
+          <nav className="mobile-profile-jumps" aria-label="Profile sections">
+            <a href="#profile-feed">Feed</a>
+            <a href="#video">Videos</a>
+            <a href="#profile-friends">Top 8</a>
+            <a href="#profile-about">About</a>
+          </nav>
+          <details className="mobile-profile-details box contact">
+            <summary>Contact &amp; board actions</summary>
+            <div className="mobile-profile-detail-body">
+              <h2>Contacting {p.displayName}</h2>
+              <BoardActions handle={p.handle} />
+              <div className="contact-links">
+                <a href="#comments">✉ Send Board Mail</a>
+                <a href="#comments">💬 Knock on Wood</a>
+              </div>
             </div>
-          </section>
-          <section className="box url">
-            <h2>PlankSpace URL:</h2>
-            <p>plank.love/plankspace/{p.handle}</p>
-          </section>
-          <section className="box interests">
-            <h2>{p.displayName}&apos;s Interests</h2>
+          </details>
+          <details className="mobile-profile-details box url">
+            <summary>Profile URL</summary>
+            <div className="mobile-profile-detail-body">
+              <h2>PlankSpace URL:</h2>
+              <p>plank.love/plankspace/{p.handle}</p>
+            </div>
+          </details>
+          <details className="mobile-profile-details box interests">
+            <summary>About &amp; interests</summary>
+            <div className="mobile-profile-detail-body">
+              <h2>{p.displayName}&apos;s Interests</h2>
             <dl>
               {[
                 ["General", p.interests],
@@ -495,7 +509,8 @@ export default async function PublicProfile({
                   </div>
                 ))}
             </dl>
-          </section>
+            </div>
+          </details>
           <a className="profile-edit-link" href="/profile-editor">
             Own this page? Open Profile Workshop
           </a>
