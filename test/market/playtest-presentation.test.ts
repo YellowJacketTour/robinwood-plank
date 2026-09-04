@@ -595,9 +595,12 @@ test("the header speaks plain money: no ticket-weight jargon, and the economy pa
   assert.doesNotMatch(arcadeSource.slice(arcadeSource.indexOf("function privateEconomyHeader"), arcadeSource.indexOf("function privateEconomyHtml")), /\bWT\b/);
   assert.match(arcadeSource, /`LOTTERY \$\{lotteryLead\} · ODDS \$\{odds\}`/, "lottery chip = prize-or-funded% + your odds");
   assert.match(arcadeSource, /`\$\{privateCredits\(vault\.principal\)\} cr \(\$\{privateUsdShort\(vault\.principal\)\}\)`/, "vault chip = credits (USD)");
-  // Three-way money format, with the honest fallback when no quote exists.
-  assert.match(arcadeSource, /\$\{privateCredits\(credits\)\} cr · \$\{prefix\}\$\{privateCreditEth\(credits\)\} ETH · /);
-  assert.match(arcadeSource, /"USD unavailable"/);
+  // THE DISPLAY LAW (owner, 2026-09-04): "credits are least useful units".
+  // USD leads, ETH second, credits parenthetical — and when no live quote
+  // exists we say so rather than inventing a price, with exact ETH leading.
+  assert.match(arcadeSource, /credits are least useful units/);
+  assert.match(arcadeSource, /return `\$\{prefix\}\$\{privateCreditUsd\(magnitude\)\} · \$\{eth\} \(\$\{cr\}\)`/);
+  assert.match(arcadeSource, /USD quote unavailable/);
   assert.match(arcadeSource, /const PRIVATE_CREDITS_PER_ETH = 1_000_000n;/, "1 cr = 1e-6 ETH");
   // The panel's required fields, in plain language.
   for (const field of [

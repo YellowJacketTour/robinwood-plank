@@ -3757,6 +3757,17 @@ $("pbStat").addEventListener("click", () => {
     const presentation = privateLotteryPresentation(privateSnapshot);
     const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
     const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, privateSnapshot.policy.lotteryFounderFeeBps);
+    // The gate that ACTUALLY controls the next draw. Once a prize is sealed,
+    // nextPrizeTarget equals it, so "funding toward next seal" measured a gate
+    // that can never fire (sealFromFunding returns immediately) while the real
+    // gate — the reset reserve for the NEXT base — was never shown. That is
+    // why the prize looks frozen while every flight reports funding something.
+    const sealedNow = BigInt(lottery.netPrize || "0") > 0n;
+    const nextBase = privateNextCycleBase(lottery, privateSnapshot.policy);
+    const resetRequired = privateMinimumLotteryGross(nextBase, privateSnapshot.policy.lotteryFounderFeeBps);
+    const resetPct = resetRequired > 0n
+      ? Math.min(100, Number(BigInt(lottery.resetReserve || "0") * 10000n / resetRequired) / 100)
+      : 100;
     const myWeight = BigInt(board.myWeight || "0"), totalWeight = BigInt(board.totalWeight || "0");
     const hitOdds = BigInt(board.hitOddsOneIn || 16);
     const sharePpm = BigInt(board.quote?.conditionalSharePpm || (totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n));
@@ -3770,7 +3781,10 @@ $("pbStat").addEventListener("click", () => {
       '<div class="pb-row"><span class="pb-k">Your combined jackpot chance</span><span class="pb-v">' + (combinedDenominator ? 'about 1 in ' + privateCredits(combinedDenominator) : 'No qualified voucher yet') + '</span></div>' +
       '<div class="pb-row"><span class="pb-k">Probability-weighted prize value</span><span class="pb-v">' + privateCredits(expectedClaim) + ' cr</span></div>' +
       '<div class="pb-row"><span class="pb-k">Visible net prize</span><span class="pb-v">' + privateCredits(lottery.netPrize) + ' cr</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Funding toward next seal</span><span class="pb-v">' + privateCredits(available) + ' / ' + privateCredits(required) + ' cr</span></div>' +
+      (sealedNow
+        ? '<div class="pb-row"><span class="pb-k">Draw arms when the reset reserve is full</span><span class="pb-v hi">' + privateMoney3(lottery.resetReserve) + ' / ' + privateMoney3(resetRequired) + '</span></div>'
+          + '<div class="pb-row"><span class="pb-k">Progress to the next draw</span><span class="pb-v">' + resetPct.toFixed(1) + '% · the prize above is already funded and locked</span></div>'
+        : '<div class="pb-row"><span class="pb-k">Funding toward next seal</span><span class="pb-v">' + privateMoney3(available) + ' / ' + privateMoney3(required) + '</span></div>') +
       '<div class="pb-row"><span class="pb-k">Next net target</span><span class="pb-v">' + privateCredits(lottery.nextPrizeTarget) + ' cr</span></div>' +
       '<div class="pb-row"><span class="pb-k">Protected reset reserve</span><span class="pb-v">' + privateCredits(lottery.resetReserve) + ' cr</span></div>' +
       '<div class="pb-guarantee">Epoch ' + (board.epoch || lottery.epoch) + ' · each qualified credit contributes one linear selection-weight unit. The machine first draws 1 in ' + hitOdds + '; on a hit, the committed second draw selects one voucher proportionally. Splitting wallets does not change linear weight. ' + presentation.detail + ' A prize appears only when its full net target and protocol fee are already funded; no IOU is displayed as money.</div>';
@@ -5583,6 +5597,17 @@ function privateMinimumLotteryGross(targetNet, feeBps) {
   while (low < high) { const mid = (low + high) / 2n; if (mid - (mid * fee) / scale >= target) high = mid; else low = mid + 1n; }
   return low;
 }
+// Mirror of nextCycleBase() in lib/casino/simulation.ts — the base the reset
+// reserve must cover before a draw can arm. Kept byte-faithful to the kernel
+// so the client never displays a gate the engine does not enforce.
+function privateNextCycleBase(lottery, policy) {
+  const base = BigInt(lottery?.cycleBase || "0");
+  const initial = BigInt(policy?.lotteryInitialBase || "0");
+  const effective = base > initial ? base : initial;
+  const pct = (effective * BigInt(policy?.lotteryBaseGrowthBps || "0")) / 10_000n;
+  const minStep = BigInt(policy?.lotteryMinimumBaseStep || "0");
+  return effective + (pct > minStep ? pct : minStep);
+}
 
 // ── ECONOMY panel (2026-09-03): the Vault and the Powerboard lottery in plain
 // language, every money figure three ways (credits · ETH · USD). All numbers
@@ -5599,11 +5624,20 @@ function privateCreditEth(value, minFraction = 3) {
   return `${negative ? "-" : ""}${whole}${fraction.length ? "." + fraction : ""}`;
 }
 /** "X cr · Y ETH · $Z" (or "· USD unavailable" without a quote). */
+// THE DISPLAY LAW (owner, 2026-09-04): "credits are least useful units".
+// USD leads, ETH second, credits parenthetical — because a player reasons in
+// money, not in an internal unit. When no live quote exists we say so rather
+// than inventing a price, and ETH (which is exact, 1 cr = 1e-6 ETH) leads
+// instead.
 function privateMoney3(value, { sign = false } = {}) {
   let credits; try { credits = BigInt(value || "0"); } catch { credits = 0n; }
-  const prefix = sign && credits > 0n ? "+" : "";
-  const usd = privateEthUsd > 0 ? privateCreditUsd(credits < 0n ? -credits : credits) : "USD unavailable";
-  return `${prefix}${privateCredits(credits)} cr · ${prefix}${privateCreditEth(credits)} ETH · ${credits < 0n ? "-" : prefix}${usd}`;
+  const negative = credits < 0n;
+  const prefix = sign && credits > 0n ? "+" : (negative ? "-" : "");
+  const magnitude = negative ? -credits : credits;
+  const eth = `${prefix}${privateCreditEth(magnitude)} ETH`;
+  const cr = `${prefix}${privateCredits(magnitude)} cr`;
+  if (!(privateEthUsd > 0)) return `${eth} (${cr}) · USD quote unavailable`;
+  return `${prefix}${privateCreditUsd(magnitude)} · ${eth} (${cr})`;
 }
 function privateUsdShort(value) { return privateEthUsd > 0 ? privateCreditUsd(value) : "USD n/a"; }
 function privatePct(bps, digits = 2) { return `${(Number(BigInt(bps || "0")) / 100).toFixed(digits)}%`; }
@@ -5892,12 +5926,26 @@ function paintPrivateConclusion(snapshot, me, seat) {
   card.className = `result-card private-result show ${profitable ? "win" : "lose"}`;
   card.replaceChildren();
   const eyebrow = document.createElement("div"); eyebrow.className = "result-tier"; eyebrow.textContent = `ROUND ${snapshot.room.currentRound} COMPLETE · CRASHED AT ${crash}×`;
+  // THE REALIZED RETURN (owner display law, 2026-09-04). Under parimutuel
+  // settlement the lock multiplier is CLAIM WEIGHT, not a payout multiple:
+  // what a player actually receives is payout ÷ stake, and the two differ
+  // whenever the pot is shared differently than the locks imply. Showing only
+  // the lock multiplier is the closest this product comes to misleading
+  // someone, so the realized return leads everywhere a settlement is stated.
+  const realized = seat && BigInt(seat.stake || "0") > 0n
+    ? Number(BigInt(seat.payout || "0") * 10000n / BigInt(seat.stake)) / 10000
+    : null;
   const headline = document.createElement("div"); headline.className = "result-mult";
-  headline.textContent = !seat ? "ROUND SETTLED" : !survived ? "CAUGHT IN THE CRASH" : profitable ? `PROFIT · LOCKED ${locked}×` : `LOCKED ${locked}× · POOL DILUTED`;
+  // The headline names the REALIZED return; the lock multiplier is demoted to
+  // context, because it is claim weight and not what the player received.
+  headline.textContent = !seat ? "ROUND SETTLED"
+    : !survived ? "CAUGHT IN THE CRASH"
+    : profitable ? `+${((realized - 1) * 100).toFixed(0)}% · ${realized.toFixed(2)}× RETURNED`
+    : `${realized.toFixed(2)}× RETURNED · LOCKED ${locked}×`;
   const money = document.createElement("div"); money.className = "result-delta";
   money.textContent = !seat ? "You watched this round" : !survived
-    ? `${privateCredits(seat.stake)} credits lost · 0 returned`
-    : `${privateCredits(seat.payout)} credits paid · ${net >= 0n ? "+" : ""}${privateCredits(net)} net`;
+    ? `0.00× returned · ${privateMoney3(seat.stake)} staked and lost`
+    : `${realized.toFixed(2)}× returned · ${privateMoney3(seat.payout)} paid · ${privateMoney3(net, { sign: true })} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
   const settlementEvent = snapshot.currentSettlement || [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;

@@ -370,7 +370,11 @@ test("every player control is present, reachable and functional on mobile + desk
     for (const s of surfaces) {
       const text = await s.game.locator("#resultCard").innerText();
       if (!text.includes(`${crash}×`)) failures.push(`settled@${s.label}:result-card lacks crash multiplier ${crash}× ("${text.slice(0, 120)}")`);
-      if (!/credits (paid|lost)|watched/i.test(text)) failures.push(`settled@${s.label}:result-card lacks payout line`);
+      // The display law: the settlement states the REALIZED return (payout ÷
+      // stake) and money in USD/ETH — not "credits paid", which led with the
+      // least useful unit and never told the player what they actually got.
+      if (!/×\s*returned|watched/i.test(text)) failures.push(`settled@${s.label}:result-card lacks the realized-return line ("${text.slice(0, 120)}")`);
+      if (!/watched/i.test(text) && !/\$|ETH/.test(text)) failures.push(`settled@${s.label}:result-card states no USD/ETH value ("${text.slice(0, 120)}")`);
     }
     for (const s of surfaces) {
       await s.game.locator(".private-reveal-skip").click({ timeout: 5_000 }).catch(() => {});
