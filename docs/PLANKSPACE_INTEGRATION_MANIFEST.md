@@ -245,3 +245,13 @@ Results will be recorded before the first product-code port.
 ## Release Evidence
 
 Final exact-SHA validation, screenshots, migration effects, rollback implications, and tester URLs will be recorded here before the preview branch is pushed.
+
+### Migration audit
+
+- The nine stale-branch PlankSpace migrations were renumbered in dependency
+  order to `090` through `098`, after master's existing `089` migration.
+- The migration runner records full filenames and sorts lexically. New
+  PlankSpace prefixes therefore have no competing filenames.
+- Static additive/idempotency checks pass.
+- Production-shaped execution against PostgreSQL remains pending because
+  Docker Desktop was not running during this checkpoint.
