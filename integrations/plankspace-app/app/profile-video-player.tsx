@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { parseYouTubeVideoIds } from "./profile-video-links";
 
 export default function ProfileVideoPlayer({
@@ -13,10 +13,6 @@ export default function ProfileVideoPlayer({
   const ids = useMemo(() => parseYouTubeVideoIds(links), [links]);
   const [selectedId, setSelectedId] = useState(ids[0] || "");
   const activeId = ids.includes(selectedId) ? selectedId : ids[0] || "";
-
-  useEffect(() => {
-    setSelectedId(ids[0] || "");
-  }, [ids]);
 
   if (!activeId) return <p className="public-empty">No featured video yet.</p>;
 

@@ -42,7 +42,8 @@ export default function PlankSpaceSubnav() {
   const onEditor =
     active(pathname, "/profile-editor") || active(pathname, "/create-profile");
   const [profileHandle, setProfileHandle] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuState, setMenuState] = useState({ open: false, pathname });
+  const menuOpen = menuState.open && menuState.pathname === pathname;
   const menu = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -53,11 +54,10 @@ export default function PlankSpaceSubnav() {
     void getPlankLoveWalletState().then((state) => resolve(state.address));
     return subscribePlankLoveWalletState((state) => resolve(state.address));
   }, []);
-  useEffect(() => setMenuOpen(false), [pathname]);
   useEffect(() => {
     if (!menuOpen) return;
     const close = (returnFocus = false) => {
-      setMenuOpen(false);
+      setMenuState({ open: false, pathname });
       if (returnFocus) menuTrigger.current?.focus();
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -76,7 +76,7 @@ export default function PlankSpaceSubnav() {
       window.removeEventListener("pointerdown", onPointerDown);
       desktop.removeEventListener("change", onDesktop);
     };
-  }, [menuOpen]);
+  }, [menuOpen, pathname]);
 
   return (
     <div
@@ -148,19 +148,22 @@ export default function PlankSpaceSubnav() {
             className={pill}
             aria-expanded={menuOpen}
             aria-controls="plankspace-mobile-menu"
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={() => setMenuState((state) => ({
+              open: state.pathname === pathname ? !state.open : true,
+              pathname,
+            }))}
           >
             Board menu
           </button>
           {menuOpen && (
             <nav id="plankspace-mobile-menu" aria-label="PlankSpace Board menu">
               {LINKS.map((link) => (
-                <Link key={link.href} href={link.href} aria-current={active(pathname, link.href) ? "page" : undefined}>
+                <Link key={link.href} href={link.href} onClick={() => setMenuState({ open: false, pathname })} aria-current={active(pathname, link.href) ? "page" : undefined}>
                   {link.label}
                 </Link>
               ))}
-              <Link href="/profile-editor">Edit Profile</Link>
-              <Link href={profileHandle ? `/u/${profileHandle}` : "/profile-editor"}>My Profile</Link>
+              <Link href="/profile-editor" onClick={() => setMenuState({ open: false, pathname })}>Edit Profile</Link>
+              <Link href={profileHandle ? `/u/${profileHandle}` : "/profile-editor"} onClick={() => setMenuState({ open: false, pathname })}>My Profile</Link>
             </nav>
           )}
         </div>
