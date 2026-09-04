@@ -1,13 +1,58 @@
 "use client";
-import {useEffect,useMemo,useRef} from "react";
 
-const CONSENT_KEY="plankspace-terms-2026-08-22-v1";
-const idFrom=(raw:string)=>{try{const u=new URL(raw),host=u.hostname.replace(/^www\./,"");return host==="youtu.be"?u.pathname.slice(1).split("/")[0]:(host==="youtube.com"||host==="m.youtube.com"||host==="youtube-nocookie.com")?(u.searchParams.get("v")||u.pathname.split("/")[2]):""}catch{return ""}};
+import { useEffect, useMemo, useState } from "react";
+import { parseYouTubeVideoIds } from "./profile-video-links";
 
-export default function ProfileVideoPlayer({links,title}:{links:string;title:string}){
- const frame=useRef<HTMLIFrameElement>(null),ids=useMemo(()=>links.split(/[\s,]+/).map(idFrom).filter(id=>/^[\w-]{6,20}$/.test(id)).slice(0,8),[links]);
- const src=ids.length?`https://www.youtube-nocookie.com/embed/${ids[0]}?autoplay=1&mute=0&playsinline=1&rel=0&enablejsapi=1${ids.length>1?`&playlist=${ids.slice(1).join(",")}`:""}`:"";
- useEffect(()=>{if(!src)return;const play=()=>frame.current?.contentWindow?.postMessage(JSON.stringify({event:"command",func:"playVideo",args:[]}),"*");const accepted=()=>{play();setTimeout(play,250);setTimeout(play,1000)};window.addEventListener("plankspace:terms-accepted",accepted);if(localStorage.getItem(CONSENT_KEY)==="accepted"&&sessionStorage.getItem("plankspace-audio-unlocked")==="1")setTimeout(accepted,400);return()=>window.removeEventListener("plankspace:terms-accepted",accepted)},[src]);
- if(!src)return <p className="public-empty">No featured video yet.</p>;
- return <div className="video-frame"><iframe ref={frame} src={src} title={title} loading="eager" sandbox="allow-scripts allow-same-origin allow-presentation" referrerPolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen/></div>;
+export default function ProfileVideoPlayer({
+  links,
+  title,
+}: {
+  links: string;
+  title: string;
+}) {
+  const ids = useMemo(() => parseYouTubeVideoIds(links), [links]);
+  const [selectedId, setSelectedId] = useState(ids[0] || "");
+  const activeId = ids.includes(selectedId) ? selectedId : ids[0] || "";
+
+  useEffect(() => {
+    setSelectedId(ids[0] || "");
+  }, [ids]);
+
+  if (!activeId) return <p className="public-empty">No featured video yet.</p>;
+
+  const selectedIndex = ids.indexOf(activeId);
+  const src = `https://www.youtube-nocookie.com/embed/${activeId}?playsinline=1&rel=0`;
+
+  return (
+    <div className="profile-video-player">
+      <div className="video-frame">
+        <iframe
+          key={activeId}
+          src={src}
+          title={`${title} — video ${selectedIndex + 1} of ${ids.length}`}
+          loading="lazy"
+          sandbox="allow-scripts allow-same-origin allow-presentation"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allow="encrypted-media; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+      {ids.length > 1 && (
+        <div className="profile-video-choices" aria-label="Choose featured video">
+          {ids.map((id, index) => (
+            <button
+              type="button"
+              key={id}
+              data-video-choice={id}
+              aria-pressed={id === activeId}
+              onClick={() => setSelectedId(id)}
+            >
+              <span>Video {index + 1} of {ids.length}</span>
+              <small>{id === activeId ? "Now playing" : "Play video"}</small>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
