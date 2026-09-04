@@ -21,8 +21,22 @@ test("profile videos use one native YouTube playlist without extra selector butt
 
   assert.equal((markup.match(/<iframe/g) || []).length, 1);
   assert.match(markup, /youtube-nocookie\.com\/embed\/OklSZmIx9-o/);
-  assert.match(markup, /playlist=7TFS8r_SMlI%2Cqmlo0F2uOGU/);
+  assert.match(markup, /autoplay=1/);
+  assert.match(markup, /enablejsapi=1/);
+  assert.match(markup, /playlist=7TFS8r_SMlI,qmlo0F2uOGU/);
+  assert.match(markup, /allow="autoplay; encrypted-media; picture-in-picture"/);
   assert.doesNotMatch(markup, /data-video-choice|profile-video-choices|<button/);
+});
+
+test("accepting the terms sends the first-click play command to the visible player", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../../integrations/plankspace-app/app/profile-video-player.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /plankspace:terms-accepted/);
+  assert.match(source, /func:\s*"playVideo"/);
 });
 
 test("profile videos keep the existing empty state when no supported URL is saved", () => {

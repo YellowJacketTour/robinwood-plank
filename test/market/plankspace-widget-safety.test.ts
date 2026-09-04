@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { analyzeExternalWidget, sanitizeWidget } from "../../integrations/plankspace-app/app/widgets/widget-safety";
 import { buildExternalWidgetDocument } from "../../integrations/plankspace-app/app/widgets/external-widget-document";
+import { readFileSync } from "node:fs";
 
 const elfsight = `<!-- Elfsight Twitter Feed -->
 <script src="https://elfsightcdn.com/platform.js" async></script>
@@ -48,4 +49,12 @@ test("custom widget saves are blocked until every snippet validates", async () =
   const { widgetValidationErrors } = await import("../../integrations/plankspace-app/app/widgets/widget-safety");
   assert.deepEqual(widgetValidationErrors([{ type: "custom", config: { source: '<script src="http://bad.test/x.js"></script>' } }]), ["Widget 1: Widget scripts must use HTTPS."]);
   assert.deepEqual(widgetValidationErrors([{ type: "custom", config: { source: '<script src="https://good.test/x.js"></script>' } }]), []);
+});
+
+test("the site CSP permits the built-in chart widget providers inside profile frames", () => {
+  const config = readFileSync(new URL("../../next.config.ts", import.meta.url), "utf8");
+  const framePolicy = config.match(/"frame-src ([^"]+)"/)?.[1] || "";
+
+  assert.match(framePolicy, /https:\/\/dexscreener\.com/);
+  assert.match(framePolicy, /https:\/\/\*\.dextools\.io/);
 });

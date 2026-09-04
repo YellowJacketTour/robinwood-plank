@@ -37,7 +37,7 @@ const securityHeaders = [
       // players (postMessage-controlled, no provider SDK script — so
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
-      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com",
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://dexscreener.com https://*.dexscreener.com https://dextools.io https://*.dextools.io",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
