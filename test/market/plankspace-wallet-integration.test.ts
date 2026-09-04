@@ -34,7 +34,6 @@ test("native PlankSpace reads the master wallet state without requesting another
 
   assert.deepEqual(result, { state: connectedState });
 });
-
 test("native PlankSpace opens the master wallet modal when disconnected", async () => {
   let opened = 0;
   const result = await handleNativePlankSpaceWalletRequest(
@@ -85,4 +84,3 @@ test("native PlankSpace rejects signatures for another wallet or an unknown mess
     /unknown signature request/,
   );
 });
-

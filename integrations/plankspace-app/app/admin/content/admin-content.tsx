@@ -1,5 +1,5 @@
 "use client";
- 
+
 import {useState} from "react";
 import {connectPlankLoveWallet} from "../../plank-love-wallet";
 import {walletProof} from "../../auth-client";

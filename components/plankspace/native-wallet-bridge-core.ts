@@ -102,4 +102,3 @@ export async function handleNativePlankSpaceWalletRequest(
   }
   throw new Error("Unsupported wallet request.");
 }
-
