@@ -35,6 +35,7 @@ on:
           - reset-plank-koth-rpc-cursor
           - evaluate-plank-koth-tx
           - provision-plank-koth-gap-finder
+          - configure-plankspace-x
       repair_from_block:
         description: >-
           repair-activity only — first block to re-derive. Defaults to
@@ -2263,6 +2264,116 @@ jobs:
   # in-progress work unattended is not a thing a robot should do. The push is
   # the only elevated permission in this file, scoped to this job.
   # ---------------------------------------------------------------------------
+  configure-plankspace-x:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'configure-plankspace-x'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+      X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+      PLANKSPACE_X_TOKEN_ENCRYPTION_KEY: ${{ secrets.PLANKSPACE_X_TOKEN_ENCRYPTION_KEY }}
+      X_REDIRECT_URI: ${{ vars.X_REDIRECT_URI || 'https://plank.love/api/x/callback' }}
+    steps:
+      - name: Validate X OAuth and SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$X_CLIENT_ID"
+          test -n "$X_CLIENT_SECRET"
+          test "$X_REDIRECT_URI" = "https://plank.love/api/x/callback"
+          test -n "$PLANKSPACE_X_TOKEN_ENCRYPTION_KEY"
+          decoded_bytes="$(printf '%s' "$PLANKSPACE_X_TOKEN_ENCRYPTION_KEY" | base64 --decode | wc -c)"
+          test "$decoded_bytes" -eq 32
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Install server-only PlankSpace X OAuth configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          local_env="$RUNNER_TEMP/plankspace-x.env"
+          {
+            printf 'PLANKSPACE_X_PROVIDER=live\n'
+            printf 'X_CLIENT_ID=%s\n' "$X_CLIENT_ID"
+            printf 'X_CLIENT_SECRET=%s\n' "$X_CLIENT_SECRET"
+            printf 'X_REDIRECT_URI=%s\n' "$X_REDIRECT_URI"
+            printf 'PLANKSPACE_X_TOKEN_ENCRYPTION_KEY=%s\n' "$PLANKSPACE_X_TOKEN_ENCRYPTION_KEY"
+          } > "$local_env"
+          chmod 600 "$local_env"
+
+          port="${INMOTION_PORT:-2222}"
+          staged="$INMOTION_APP_DIR/shared/runtime-secrets/.plankspace-x-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" +            "${INMOTION_USER}@${INMOTION_HOST}" +            "mkdir -p '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
+          scp -i "$HOME/.ssh/inmotion" -P "$port" +            "$local_env" "${INMOTION_USER}@${INMOTION_HOST}:${staged}"
+          rm -f "$local_env"
+
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" +            "${INMOTION_USER}@${INMOTION_HOST}" +            bash -s -- "$INMOTION_APP_DIR" "$staged" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          staged="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+
+          env_file="$app_dir/shared/.env.production"
+          backup="$app_dir/shared/.env.production.bak.plankspace-x.$(date +%Y%m%d%H%M%S)"
+          next_env="$app_dir/shared/.env.production.next.plankspace-x"
+          cleanup() { rm -f "$staged" "$next_env"; }
+          trap cleanup EXIT
+          test -s "$env_file"
+          test -s "$staged"
+          chmod 600 "$staged"
+          cp -p "$env_file" "$backup"
+
+          grep -Ev '^(PLANKSPACE_X_PROVIDER|X_CLIENT_ID|X_CLIENT_SECRET|X_REDIRECT_URI|PLANKSPACE_X_TOKEN_ENCRYPTION_KEY)=' +            "$env_file" > "$next_env"
+          cat "$staged" >> "$next_env"
+          chmod 600 "$next_env"
+          mv -f "$next_env" "$env_file"
+          chmod 600 "$env_file"
+          touch "$app_dir/tmp/restart.txt"
+
+          healthy=false
+          for attempt in $(seq 1 15); do
+            if curl --fail --silent --show-error "https://plank.love/api/health" >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 4
+          done
+          if [ "$healthy" != "true" ]; then
+            cp -p "$backup" "$env_file"
+            chmod 600 "$env_file"
+            touch "$app_dir/tmp/restart.txt"
+            echo "X OAuth configuration failed health verification; previous environment restored." >&2
+            exit 1
+          fi
+          echo "PlankSpace X OAuth runtime configuration installed successfully."
+          REMOTE
+
   sync-dev:
     needs: deploy
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'

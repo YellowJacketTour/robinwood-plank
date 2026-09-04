@@ -14,21 +14,39 @@ X access, pricing, quotas, and available plans can change. Confirm the current
 terms in the X Developer Console before funding or opening a public rollout.
 
 1. Create a Project and App in the [X Developer Console](https://developer.x.com/en/portal/dashboard).
-2. Enable OAuth 2.0 for a Web App and add exact callback URLs:
+2. Enable OAuth 2.0 for **Web App, Automated App or Bot** and add exact callback URLs:
    - Local: `http://localhost:3000/api/x/callback`
-   - Hosted: `https://YOUR-DOMAIN/api/x/callback`
+   - Production: `https://plank.love/api/x/callback`
 3. Grant `tweet.read`, `tweet.write`, `users.read`, and `offline.access`.
-4. Set these server-only values (never expose them through `NEXT_PUBLIC_*`):
+4. Rotate any X credentials that have previously been pasted into chat,
+   screenshots, terminals, or other untrusted locations.
+5. Add these GitHub Actions secrets:
+
+   - `X_CLIENT_ID`
+   - `X_CLIENT_SECRET`
+   - `PLANKSPACE_X_TOKEN_ENCRYPTION_KEY`
+
+   Generate the encryption key once with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+   Do not reuse a database, wallet, session, or application secret.
+6. Optionally set repository variable `X_REDIRECT_URI`; it defaults to the
+   exact production callback above and rejects any other value.
+7. Run **InMotion Passenger CI/CD** manually with operation
+   `configure-plankspace-x`. The job writes only these server-side values to
+   the shared mode-600 production environment, restarts Passenger, verifies
+   `/api/health`, and restores the previous environment if verification fails.
+
+The resulting server-only configuration is:
 
    ```text
    PLANKSPACE_X_PROVIDER=live
    X_CLIENT_ID=...
    X_CLIENT_SECRET=...
-   X_REDIRECT_URI=http://localhost:3000/api/x/callback
+   X_REDIRECT_URI=https://plank.love/api/x/callback
    PLANKSPACE_X_TOKEN_ENCRYPTION_KEY=<32 random bytes, base64 encoded>
    ```
 
-5. Purchase a small credit balance, connect a test X account, import a small
+8. Purchase a small credit balance, connect a test X account, import a small
    batch, and confirm the usage ledger before opening the feature to testers.
 
 Recommended launch guardrails: import on button-click first, cache and deduplicate
