@@ -6407,6 +6407,12 @@ function stopPrivateUpdates() {
   privateUpdatesAbort?.abort();
   privateUpdatesAbort = null;
 }
+// Test hook (same read/drive-only pattern as __plankFlight / __plankStage):
+// lets the idle-reconnect spec kill the subscription exactly as a
+// backgrounded mobile browser does, so the visibilitychange restart has a
+// real negative control. Drives no game input and reveals no hidden state.
+window.__plankKillUpdates = () => stopPrivateUpdates();
+window.__plankUpdatesLive = () => Boolean(privateUpdatesAbort);
 
 function startPrivateUpdates() {
   stopPrivateUpdates();
@@ -6663,6 +6669,13 @@ async function startPrivatePlaytest() {
     if (!document.hidden) {
       clock.getDelta(); // discard the background gap before the next physics frame
       void refreshPrivatePlaytest();
+      // AND restart the subscription. A backgrounded tab has its in-flight
+      // long-poll aborted by the browser, and the loop returns permanently on
+      // an aborted controller — so a one-shot refresh repainted a snapshot
+      // that then never updated again ("the flight deck disconnects when you
+      // stop playing for a while"). startPrivateUpdates() is idempotent: it
+      // bumps the generation and aborts any live loop before opening a new one.
+      if (PLAYTEST_MODE && privateRoomId) startPrivateUpdates();
     }
   });
   window.addEventListener("online", () => { void refreshPrivatePlaytest(); startPrivateUpdates(); });
