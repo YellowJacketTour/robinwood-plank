@@ -2030,6 +2030,10 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
+let webglRecoveryTimer = null;
+// A session that renders for a while is healthy: forget earlier losses so a
+// single eviction hours apart never counts toward the degrade threshold.
+window.setTimeout(() => { try { sessionStorage.removeItem("plank-alpha:gl-recover"); } catch (_) {} }, 30000);
 canvas.addEventListener("webglcontextlost", (event) => {
   event.preventDefault();
   webglContextLost = true;
@@ -2037,10 +2041,35 @@ canvas.addEventListener("webglcontextlost", (event) => {
   boot.classList.remove("hide");
   boot.classList.add("context-recovery");
   boot.querySelector(".boot-mark").textContent = "RECONNECTING THE FLIGHT DECK · YOUR TABLE AND ROUND ARE SAFE ON THE SERVER";
+  // MUST fail open. Waiting for webglcontextrestored alone strands the player
+  // behind this curtain forever: phones reclaim GPU memory from a backgrounded
+  // tab, and iOS Safari in particular often discards the context permanently
+  // rather than restoring it -- the restore event simply never fires. Reload
+  // ourselves if it has not come back shortly. Room state is authoritative on
+  // the server, so a reload costs nothing but the animation.
+  window.clearTimeout(webglRecoveryTimer);
+  webglRecoveryTimer = window.setTimeout(() => {
+    if (!webglContextLost) return;
+    // Do not reload-loop on a device whose GPU keeps evicting us. After two
+    // attempts, lift the curtain and hide the dead 3D canvas instead. The
+    // readout, deck, table sheet and every control are plain DOM, so the
+    // table stays fully playable without the flight animation.
+    const attempts = Number(sessionStorage.getItem("plank-alpha:gl-recover") || "0");
+    if (attempts >= 2) {
+      document.body.classList.add("webgl-fallback");
+      canvas.style.display = "none";
+      const boot = document.getElementById("boot");
+      boot?.classList.add("hide");
+      return;
+    }
+    try { sessionStorage.setItem("plank-alpha:gl-recover", String(attempts + 1)); } catch (_) {}
+    window.location.reload();
+  }, 4000);
 });
 canvas.addEventListener("webglcontextrestored", () => {
   // Three owns interdependent targets and shader programs. A clean reload is
   // safer than a half-restored frame; authoritative room state rehydrates.
+  window.clearTimeout(webglRecoveryTimer);
   window.location.reload();
 });
 
