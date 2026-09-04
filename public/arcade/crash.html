@@ -763,7 +763,7 @@
          (72px + inset) to (72px + inset + 56px). The deck must reserve that
          band PLUS a gap, or the auto-lock / target / REPEAT row scrolls to
          rest underneath it and becomes untappable. */
-      body[data-playtest="true"] .deck{padding-bottom:calc(130px + env(safe-area-inset-bottom))}
+      body[data-playtest="true"] .deck{padding-bottom:calc(126px + env(safe-area-inset-bottom))}
       /* Every deck control is a real 44px touch target on phones. */
       body[data-playtest="true"] .deck .chip,body[data-playtest="true"] #autoTargetInput{min-height:44px}
       #privateCustomStake{min-height:44px;min-width:110px}#privateBalanceReadout{min-height:24px}
@@ -6283,8 +6283,20 @@ function paintPrivateSnapshot(snapshot) {
   // (committing a bet swaps the button label and the sub-line without
   // changing phaseState, which used to leave the auto row resting under the
   // sticky action with no scroll to clear it).
+  // Re-anchor on a phase change AND on a commitment change (committing a bet
+  // swaps the button label and sub-line without changing phaseState, which
+  // used to leave the auto row resting under the sticky action). It must NOT
+  // key off the button's measured position: during flight that moves on every
+  // repaint, so the deck re-scrolled continuously under the player — through
+  // the crash itself. Never scroll while the round is live.
+  // Keyed on the button's measured position, because that is what actually
+  // determines whether the rows above it are covered — a commitment changes
+  // the label and sub-line, which changes the deck's height, without changing
+  // phaseState. Guarded on phaseState !== "live": during flight the button
+  // moves every repaint, and re-scrolling then fought the player and
+  // disrupted the crash itself.
   const deckShape = `${phaseState}:${Math.round(($("primaryBtn")?.getBoundingClientRect().top) || 0)}`;
-  if (prior !== phaseState || deckShape !== privateLastDeckShape) privateBringActionIntoView();
+  if (phaseState !== "live" && (prior !== phaseState || deckShape !== privateLastDeckShape)) privateBringActionIntoView();
   privateLastDeckShape = deckShape;
   renderPrivateRoster(snapshot);
   paintPrivateConclusion(snapshot, me, seat);
