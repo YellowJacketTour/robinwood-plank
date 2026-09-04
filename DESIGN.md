@@ -34,6 +34,27 @@ colors:
                             # `body :where(.bg-gold-500,.bg-gold-400)` in app/globals.css
                             # repaints them to this with !important, so this is what
                             # actually renders. Both pass AA (9.50:1 / 9.73:1).
+  # ── Arcade cockpit sub-system ──────────────────────────────────────────
+  # Scoped to public/arcade/** and public/playtest/** ONLY. A player is inside
+  # an instrument during a live flight; wood-and-gold would fight that job.
+  # See "The arcade cockpit" section below. Nothing outside those directories
+  # may use these, and those surfaces may not use the marketing tokens.
+  hud-gold: "#ffc857"          # primary HUD accent: labels, active chips, countdown
+  hud-gold-soft: "#ffdca0"     # secondary gold — sub-labels, de-emphasised values
+  hud-gold-dim: "#f0c98a"      # quiet gold on a dense row
+  hud-green: "#3ddc84"         # live/positive: profit, connected, the flight trace
+  hud-green-bright: "#8dffc0"  # peak emphasis on a green value
+  hud-green-dim: "#8fb7a0"     # metadata beside a live value
+  hud-teal-dim: "#9fd9cd"      # the verify/trust lane
+  hud-violet: "#dcc8ff"        # the Powerboard lottery lane
+  hud-violet-mid: "#c9adff"
+  hud-violet-dim: "#b3a3d9"
+  hud-warn: "#ff8a5c"          # crash, bust, refusal
+  hud-cream: "#f5ecdc"         # primary readout text
+  hud-cream-muted: "#b7ab8f"   # secondary readout text
+  hud-slate-muted: "#aeb9b1"   # tertiary metadata
+  hud-ground: "#07100c"        # cockpit ground; panels are this at 0.86–0.94 alpha
+  hud-peak: "#ffffff"          # ONLY a value at peak emphasis, never body copy
 typography:
   display-xl:
     # Uncial Antiqua ships a SINGLE 400 cut and app/layout.tsx loads only that.
@@ -59,6 +80,49 @@ typography:
     fontWeight: 900
     lineHeight: 1.2
     letterSpacing: 0.12em
+  # ── Arcade cockpit ramp (public/arcade/**, public/playtest/** only) ──
+  # Denser than the marketing ramp because panels nest three deep inside a
+  # fixed viewport. Bungee is the cockpit display face (loaded in the arcade
+  # document, not app/layout.tsx). NOTHING BELOW 11px SHIPS.
+  hud-micro:
+    fontFamily: DM Mono
+    fontSize: 11px
+    fontWeight: 800
+    letterSpacing: 0.07em
+  hud-label:
+    fontFamily: DM Mono
+    fontSize: 12px
+    fontWeight: 700
+  hud-body:
+    fontFamily: DM Mono
+    fontSize: 13px
+    fontWeight: 600
+  hud-value:
+    fontFamily: DM Mono
+    fontSize: 15px
+    fontWeight: 900
+  hud-value-lg:
+    fontFamily: DM Mono
+    fontSize: 20px
+    fontWeight: 900
+  hud-heading:
+    fontFamily: DM Mono
+    fontSize: 16px
+    fontWeight: 900
+  hud-heading-lg:
+    fontFamily: Bungee
+    fontSize: 17px
+  hud-numeral:
+    fontFamily: Bungee
+    fontSize: 26px
+  hud-display:
+    fontFamily: Bungee
+    fontSize: 30px
+  hud-readout:
+    # The live multiplier scales with the viewport rather than sitting on the
+    # ramp; 52px is its desktop resting size.
+    fontFamily: Bungee
+    fontSize: 52px
 rounded:
   # Stock Tailwind v4. There is no `--radius` override in app/globals.css and
   # no tailwind config file, so these are what the utilities actually resolve
@@ -69,6 +133,16 @@ rounded:
   xl: 12px
   2xl: 16px
   pill: 9999px
+  # ── Arcade cockpit radii (public/arcade/**, public/playtest/** only) ──
+  hud-xs: 3px
+  hud-sm: 5px
+  hud-md: 7px
+  hud-md2: 10px
+  hud-lg: 9px
+  hud-xl: 11px
+  hud-2xl: 14px
+  hud-3xl: 18px
+  hud-4xl: 20px
 spacing:
   # Stock Tailwind v4 scale (0.25rem step). Listed because the spec expects a
   # spacing category, NOT because the codebase uses a curated subset — real
@@ -386,6 +460,53 @@ They are deliberately not here. This file is the design language: it should let
 you build anything in this system without knowing which page you are on. A
 catalogue of page contents crowds that out and goes stale the moment a feature
 moves.
+
+## The arcade cockpit — a scoped second visual world
+
+`public/arcade/crash.html` (served in the `/playtest/game` iframe) and
+`public/playtest/plankcrash-system.html` are **deliberately not** the wood-and-
+gold marketing world. They are a cockpit/HUD world: a player is inside an
+instrument during a live flight, reading a multiplier that is climbing while
+their money is at stake. Warm wood panels and storybook display type would
+actively hurt that job.
+
+This is the one sanctioned exception to "do not introduce a second palette".
+It is scoped by file: **nothing outside `public/arcade/**` and
+`public/playtest/**` may use these tokens, and these surfaces may not import
+the marketing tokens.** A third world requires the same treatment — documented
+here first, or it is drift.
+
+### Cockpit palette
+
+| Token | Value | Role |
+|---|---|---|
+| `hud-gold` | `#ffc857` | Primary HUD accent: labels, active chips, the countdown. The bridge to brand gold. |
+| `hud-gold-soft` | `#ffdca0` / `#f0c98a` | Secondary gold — sub-labels, de-emphasised values. |
+| `hud-green` | `#3ddc84` | Live/positive: profit, connected state, the flight trace. |
+| `hud-green-bright` | `#8dffc0` | Peak emphasis on a green value. |
+| `hud-green-dim` | `#8fb7a0` / `#9fd9cd` | Quiet green — metadata beside a live value. |
+| `hud-violet` | `#dcc8ff` / `#c9adff` / `#b3a3d9` | The Powerboard lottery lane, kept distinct from flight green. |
+| `hud-warn` | `#ff8a5c` | Crash, bust, and refusal states. |
+| `hud-cream` | `#f5ecdc` | Primary readout text on the cockpit ground. |
+| `hud-cream-muted` | `#b7ab8f` / `#aeb9b1` | Secondary readout text. |
+| `hud-ground` | `#07100c` | Cockpit ground; panel fills are this at 0.86–0.94 alpha. |
+| `hud-hairline` | `rgba(255,200,87,0.12–0.35)` | Gold hairlines at three weights: rest, emphasis, focus. |
+
+White (`#fff`) is permitted only for a value at peak emphasis — a live
+multiplier or a settled payout — never for body copy.
+
+### Cockpit type ramp
+
+Bungee (display) for the multiplier readout and section numerals; the mono
+family for every figure. The ramp is deliberately denser than the marketing
+ramp: `9.5 · 11 · 12 · 13 · 15 · 18 · 24 · 32 · 48+`. Nothing below **11px**
+ships, and the multiplier readout scales with the viewport rather than sitting
+on the ramp.
+
+### Cockpit radii
+
+`3 · 6 · 9 · 12 · 14 · 16 · 18px`. Denser than the marketing scale because
+panels nest three deep inside a fixed viewport.
 
 ## Known deviations — the punch list
 
