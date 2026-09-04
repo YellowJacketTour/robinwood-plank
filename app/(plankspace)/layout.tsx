@@ -6,6 +6,7 @@ import Nav from "@/components/Nav";
 import { PLANKSPACE_DISCOVERABLE } from "@/lib/constants";
 import TermsGate from "@/integrations/plankspace-app/app/terms-gate";
 import PlankSpaceSubnav from "@/integrations/plankspace-app/app/plankspace-subnav";
+import NativePlankSpaceWalletBridge from "@/components/plankspace/NativePlankSpaceWalletBridge";
 
 export const metadata: Metadata = {
   robots: {
@@ -23,6 +24,7 @@ export default function NativePlankSpaceLayout({
     <>
       <Nav />
       <PlankSpaceSubnav />
+      <NativePlankSpaceWalletBridge />
       <div className="plankspace-native">
         <TermsGate />
         {children}
