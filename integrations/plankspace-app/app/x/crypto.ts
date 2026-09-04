@@ -1,0 +1,5 @@
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+
+function decodeKey(value = process.env.PLANKSPACE_X_TOKEN_ENCRYPTION_KEY || ""):Buffer{const key=Buffer.from(value,"base64");if(key.length!==32)throw new Error("PLANKSPACE_X_TOKEN_ENCRYPTION_KEY must be a 32-byte base64 key");return key}
+export function encryptXCredential(plaintext:string,keyValue?:string):string{const iv=randomBytes(12),cipher=createCipheriv("aes-256-gcm",decodeKey(keyValue),iv),ciphertext=Buffer.concat([cipher.update(plaintext,"utf8"),cipher.final()]),tag=cipher.getAuthTag();return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${ciphertext.toString("base64url")}`}
+export function decryptXCredential(envelope:string,keyValue?:string):string{const [version,iv,tag,ciphertext]=envelope.split(".");if(version!=="v1"||!iv||!tag||!ciphertext)throw new Error("Invalid encrypted X credential");const decipher=createDecipheriv("aes-256-gcm",decodeKey(keyValue),Buffer.from(iv,"base64url"));decipher.setAuthTag(Buffer.from(tag,"base64url"));return Buffer.concat([decipher.update(Buffer.from(ciphertext,"base64url")),decipher.final()]).toString("utf8")}

@@ -1,0 +1,482 @@
+"use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useState } from "react";
+import { walletProof } from "../auth-client";
+import {
+  newWidget,
+  widgetLabels,
+  WIDGET_TYPES,
+  type ProfileWidget,
+  type WidgetType,
+} from "./widget-types";
+import { analyzeExternalWidget } from "./widget-safety";
+import ExternalWidgetFrame from "./external-widget-frame";
+
+const list = (value: unknown) => (Array.isArray(value) ? value : []);
+function CustomWidgetEditor({
+  widget,
+  onConfig,
+}: {
+  widget: ProfileWidget;
+  onConfig: (key: string, value: unknown) => void;
+}) {
+  const source = String(widget.config.source || widget.config.html || ""),
+    analysis = analyzeExternalWidget(source);
+  return (
+    <div className="custom-widget-workshop">
+      <div className="widget-editor-grid">
+        <label>
+          HTTPS embed code
+          <textarea
+            value={source}
+            onChange={(e) => onConfig("source", e.target.value)}
+            placeholder="Paste an HTTPS widget snippet, such as Elfsight"
+          />
+        </label>
+        <label>
+          CSS (inside this widget)
+          <textarea
+            value={String(widget.config.css || "")}
+            onChange={(e) => onConfig("css", e.target.value)}
+          />
+        </label>
+      </div>
+      {analysis.errors.length > 0 ? (
+        <ul className="widget-analysis-errors">
+          {analysis.errors.map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      ) : source ? (
+        <>
+          <p>
+            Preview is safe to load from:{" "}
+            {analysis.origins.join(", ") || "no external domain"}
+          </p>
+          <ExternalWidgetFrame
+            title={`${widget.title} preview`}
+            source={analysis.source}
+            origins={analysis.origins}
+            css={String(widget.config.css || "")}
+          />
+        </>
+      ) : (
+        <p>Paste a widget snippet to validate and preview it before saving.</p>
+      )}
+    </div>
+  );
+}
+export default function WidgetManager({
+  wallet,
+  handle,
+}: {
+  wallet: string;
+  handle: string;
+}) {
+  const [widgets, setWidgets] = useState<ProfileWidget[]>([]),
+    [addType, setAddType] = useState<WidgetType>("wallet"),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (handle && wallet)
+      void walletProof(wallet, "widgets:read", handle, { handle })
+        .then((proof) =>
+          fetch("/api/widgets", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...proof, handle }),
+          })
+        )
+        .then((r) => r.json())
+        .then((x) => setWidgets(x.widgets || []))
+        .catch(() => undefined);
+  }, [handle, wallet]);
+  const update = (index: number, patch: Partial<ProfileWidget>) =>
+    setWidgets((v) => v.map((w, i) => (i === index ? { ...w, ...patch } : w)));
+  const config = (index: number, key: string, value: unknown) =>
+    update(index, { config: { ...widgets[index].config, [key]: value } });
+  const style = (index: number, key: string, value: unknown) =>
+    update(index, { style: { ...widgets[index].style, [key]: value } });
+  const move = (index: number, delta: number) =>
+    setWidgets((v) => {
+      const n = [...v],
+        to = Math.max(0, Math.min(n.length - 1, index + delta));
+      [n[index], n[to]] = [n[to], n[index]];
+      return n;
+    });
+  const save = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const normalized = widgets.map((w, i) => ({ ...w, sortOrder: i })),
+        proof = await walletProof(wallet, "widgets:save", handle, {
+          handle,
+          widgets: normalized,
+        }),
+        response = await fetch("/api/widgets", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...proof, handle, widgets: normalized }),
+        }),
+        body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Widget save failed");
+      setWidgets(body.widgets || normalized);
+      setMessage("Widgets saved to your wallet-owned profile.");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Widget save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="widget-manager" id="profile-widget-manager">
+      <div className="widget-manager-head">
+        <div>
+          <h2>Build your module stack</h2>
+          <p>
+            Add only what you want public. Portfolio widgets start hidden and
+            never infer wallets.
+          </p>
+        </div>
+        <div className="widget-add-tools">
+          <label>
+            <span>Add a module</span>
+            <select
+              value={addType}
+              onChange={(e) => setAddType(e.target.value as WidgetType)}
+            >
+              {WIDGET_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {widgetLabels[type]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              setWidgets((v) => [
+                ...v,
+                newWidget(addType, `new-${crypto.randomUUID()}`),
+              ])
+            }
+          >
+            Add Widget
+          </button>
+        </div>
+      </div>
+      <div className="widget-manager-list">
+        {widgets.map((widget, index) => (
+          <details className="widget-editor" key={String(widget.id)} open>
+            <summary>
+              <b>{widget.title || widgetLabels[widget.type]}</b>
+              <span>{widget.visible ? "Visible" : "Hidden"}</span>
+            </summary>
+            <div className="widget-editor-tools">
+              <button
+                type="button"
+                onClick={() => move(index, -1)}
+                disabled={!index}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => move(index, 1)}
+                disabled={index === widgets.length - 1}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setWidgets((v) => v.filter((_, i) => i !== index))
+                }
+              >
+                Remove
+              </button>
+            </div>
+            <div className="widget-editor-grid">
+              <label>
+                Title
+                <input
+                  value={widget.title}
+                  onChange={(e) => update(index, { title: e.target.value })}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={widget.visible}
+                  onChange={(e) => update(index, { visible: e.target.checked })}
+                />{" "}
+                Visible
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={widget.desktopVisible}
+                  onChange={(e) =>
+                    update(index, { desktopVisible: e.target.checked })
+                  }
+                />{" "}
+                Desktop
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={widget.mobileVisible}
+                  onChange={(e) =>
+                    update(index, { mobileVisible: e.target.checked })
+                  }
+                />{" "}
+                Mobile
+              </label>
+            </div>
+            {widget.type === "wallet" && (
+              <label>
+                Public wallets (one per line: Chain | Label | Address)
+                <textarea
+                  value={list(widget.config.addresses)
+                    .map(
+                      (x: any) =>
+                        `${x.chain || ""} | ${x.label || ""} | ${
+                          x.address || ""
+                        }`
+                    )
+                    .join("\n")}
+                  onChange={(e) =>
+                    config(
+                      index,
+                      "addresses",
+                      e.target.value
+                        .split("\n")
+                        .filter(Boolean)
+                        .map((line) => {
+                          const [chain, label, address] = line
+                            .split("|")
+                            .map((x) => x.trim());
+                          return { chain, label, address };
+                        })
+                    )
+                  }
+                />
+              </label>
+            )}
+            {widget.type === "favorite-token" && (
+              <div className="widget-editor-grid">
+                {[
+                  ["name", "Token name"],
+                  ["symbol", "Symbol"],
+                  ["chain", "Chain"],
+                  ["contract", "Contract / mint"],
+                  ["logoUrl", "HTTPS logo"],
+                  ["message", "Your message"],
+                ].map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      value={String(widget.config[key] || "")}
+                      onChange={(e) => config(index, key, e.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {widget.type === "token-chart" && (
+              <div className="widget-editor-grid">
+                <label>
+                  Provider
+                  <select
+                    value={String(widget.config.provider || "dexscreener")}
+                    onChange={(e) => config(index, "provider", e.target.value)}
+                  >
+                    <option value="dexscreener">DexScreener</option>
+                    <option value="dextools">DEXTools</option>
+                  </select>
+                </label>
+                <label>
+                  Token/pair chart URL
+                  <input
+                    value={String(widget.config.url || "")}
+                    onChange={(e) => config(index, "url", e.target.value)}
+                    placeholder="https://dexscreener.com/chain/pair"
+                  />
+                </label>
+              </div>
+            )}
+            {widget.type === "portfolio" && (
+              <>
+                <label>
+                  Public detail
+                  <select
+                    value={String(widget.config.mode || "hidden")}
+                    onChange={(e) => config(index, "mode", e.target.value)}
+                  >
+                    <option value="hidden">Hidden (default)</option>
+                    <option value="assets">Assets only</option>
+                    <option value="allocation">Percentage allocation</option>
+                    <option value="full">Full balances/value</option>
+                  </select>
+                </label>
+                <label>
+                  Explicit assets (Symbol | Name | Amount | Allocation % |
+                  Value)
+                  <textarea
+                    value={list(widget.config.assets)
+                      .map(
+                        (x: any) =>
+                          `${x.symbol || ""} | ${x.name || ""} | ${
+                            x.amount || ""
+                          } | ${x.allocation || 0} | ${x.value || ""}`
+                      )
+                      .join("\n")}
+                    onChange={(e) =>
+                      config(
+                        index,
+                        "assets",
+                        e.target.value
+                          .split("\n")
+                          .filter(Boolean)
+                          .map((line) => {
+                            const [symbol, name, amount, allocation, value] =
+                              line.split("|").map((x) => x.trim());
+                            return {
+                              symbol,
+                              name,
+                              amount,
+                              allocation: Number(allocation),
+                              value,
+                            };
+                          })
+                      )
+                    }
+                  />
+                </label>
+              </>
+            )}
+            {widget.type === "tip-jar" && (
+              <div className="widget-editor-grid">
+                {[
+                  ["recipient", "Receiving EVM wallet"],
+                  ["chainLabel", "Network name"],
+                  ["chainId", "Chain ID"],
+                  ["tokenSymbol", "Native token symbol"],
+                ].map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      value={String(widget.config[key] || "")}
+                      onChange={(e) =>
+                        config(
+                          index,
+                          key,
+                          key === "chainId"
+                            ? Number(e.target.value)
+                            : e.target.value
+                        )
+                      }
+                    />
+                  </label>
+                ))}
+                <label>
+                  Preset amounts
+                  <input
+                    value={list(widget.config.presets).join(", ")}
+                    onChange={(e) =>
+                      config(
+                        index,
+                        "presets",
+                        e.target.value.split(",").map((x) => x.trim())
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={widget.config.showRecent !== false}
+                    onChange={(e) =>
+                      config(index, "showRecent", e.target.checked)
+                    }
+                  />{" "}
+                  Show Recent Chips
+                </label>
+              </div>
+            )}
+            {widget.type === "custom" && (
+              <CustomWidgetEditor
+                widget={widget}
+                onConfig={(key, value) => config(index, key, value)}
+              />
+            )}
+            <fieldset className="widget-style">
+              <legend>Style</legend>
+              <label>
+                Background
+                <input
+                  type="color"
+                  value={widget.style.background}
+                  onChange={(e) => style(index, "background", e.target.value)}
+                />
+              </label>
+              <label>
+                Opacity
+                <input
+                  type="range"
+                  min="0.15"
+                  max="1"
+                  step="0.05"
+                  value={widget.style.opacity}
+                  onChange={(e) =>
+                    style(index, "opacity", Number(e.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Border
+                <input
+                  type="color"
+                  value={widget.style.borderColor}
+                  onChange={(e) => style(index, "borderColor", e.target.value)}
+                />
+              </label>
+              <label>
+                Width
+                <input
+                  type="number"
+                  min="0"
+                  max="8"
+                  value={widget.style.borderWidth}
+                  onChange={(e) =>
+                    style(index, "borderWidth", Number(e.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Radius
+                <input
+                  type="number"
+                  min="0"
+                  max="32"
+                  value={widget.style.borderRadius}
+                  onChange={(e) =>
+                    style(index, "borderRadius", Number(e.target.value))
+                  }
+                />
+              </label>
+            </fieldset>
+          </details>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy || !wallet || !handle}
+      >
+        {busy ? "Saving widgets…" : "Save Widgets"}
+      </button>
+      {message && <p role="status">{message}</p>}
+    </section>
+  );
+}

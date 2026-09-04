@@ -1,0 +1,519 @@
+import type { Metadata } from "next";
+/* eslint-disable @next/next/no-img-element */
+import type React from "react";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { getDb } from "../../../db";
+import { profileRelations, profiles } from "../../../db/schema";
+import KnockForm from "./knock-form";
+import { BoardActions, Feed, MiniGame, PlankShelf } from "../../profile-extras";
+import {
+  customProfileCss,
+  hasVisibleCustomContent,
+} from "../../custom-profile-css-v2";
+import ProfileWidgets from "../../widgets/profile-widgets";
+import ProfileVideoPlayer from "../../profile-video-player";
+
+export const dynamic = "force-dynamic";
+const defaultLayout = [
+  "welcome",
+  "status",
+  "music",
+  "video",
+  "game",
+  "custom",
+  "collection",
+  "about",
+  "friends",
+  "widgets",
+  "feed",
+  "comments",
+];
+const fallback = {
+  id: 0,
+  wallet: "",
+  handle: "degenwaffle",
+  displayName: "DegenWaffle",
+  bio: "Builder, collector, and keeper of the lumberyard. PLANK has no arms, no legs, and no roadmap—just wood, uneven eyes, and an unshakable belief that PLANK IS FOR THE PEOPLE.",
+  hobbies:
+    "Wood grain, crypto, memes, building for the people, and keeping the lounge warm.",
+  interests:
+    "PLANK, Robinhood Chain, community, custom profile code, and the early-web spirit.",
+  music: "Punk, Woodstock, log drums, and anything with a solid beat.",
+  heroes:
+    "Ed, Edd n Eddy’s Plank. The Giving Tree. Every board that held the line.",
+  lookingToMeet:
+    "Boards, believers, meme makers, collectors, and anyone who refuses to get bored.",
+  avatarUrl: "/plank-robinwood.png",
+  mood: "feeling board",
+  moodText: "building the lumberyard.",
+  customHtml:
+    "<style>h2{color:#ffb04a;text-shadow:2px 2px #000}p{font-size:18px}</style><h2>WELCOME TO MY PLANKSPACE!!!</h2><p>PLANK IS FOR THE PEOPLE 🪵</p>",
+  customCss: "",
+  themeJson: JSON.stringify({
+    template: "lounge",
+    pageBackground: "#24130b",
+    panelBackground: "#f2dfbe",
+    textColor: "#2b160d",
+    linkColor: "#6e2b0e",
+    headingColor: "#fff0cf",
+    accentColor: "#e4862a",
+    fontFamily: "Verdana",
+  }),
+  layoutJson: JSON.stringify(defaultLayout),
+  featuredVideo: "https://www.youtube.com/watch?v=OklSZmIx9-o",
+  moderationStatus: "approved",
+  moderationNote: "",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+const classicFriends = [
+  "Splinter",
+  "Knotty",
+  "2x4",
+  "Cedar",
+  "Oakie",
+  "Driftwood",
+  "Boardy",
+  "Lil’ Chip",
+];
+const safe = (html: string) =>
+  html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<(iframe|object|embed|base|meta|link)[\s\S]*?>/gi, "")
+    .replace(/\son\w+\s*=\s*(["']).*?\1/gi, "")
+    .replace(/javascript:/gi, "")
+    .replace(/url\s*\(/gi, "blocked(");
+
+async function getProfile(handle: string) {
+  try {
+    const [p] = await getDb()
+      .select()
+      .from(profiles)
+      .where(eq(profiles.handle, handle))
+      .limit(1);
+    if (p?.moderationStatus === "approved") {
+      if (handle !== "degenwaffle") return p;
+      return {
+        ...fallback,
+        ...p,
+        bio: p.bio || fallback.bio,
+        hobbies: p.hobbies || fallback.hobbies,
+        interests: p.interests || fallback.interests,
+        music: p.music || fallback.music,
+        heroes: p.heroes || fallback.heroes,
+        lookingToMeet: p.lookingToMeet || fallback.lookingToMeet,
+        avatarUrl: p.avatarUrl || fallback.avatarUrl,
+        mood: p.mood || fallback.mood,
+        moodText: p.moodText || fallback.moodText,
+        customHtml: p.customHtml,
+        customCss: p.customCss,
+        themeJson:
+          p.themeJson && p.themeJson !== "{}"
+            ? p.themeJson
+            : fallback.themeJson,
+        layoutJson:
+          p.layoutJson && p.layoutJson !== "[]"
+            ? p.layoutJson
+            : fallback.layoutJson,
+        featuredVideo: p.featuredVideo || fallback.featuredVideo,
+      };
+    }
+  } catch {}
+  return handle === "degenwaffle" ? fallback : null;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ handle: string }>;
+}): Promise<Metadata> {
+  const { handle } = await params,
+    p = await getProfile(handle.toLowerCase());
+  if (!p) return { title: "Board not found · PlankSpace" };
+  const description = p.bio.slice(0, 150),
+    image = p.avatarUrl?.startsWith("/") ? p.avatarUrl : undefined;
+  return {
+    title: `${p.displayName} (@${p.handle}) · PlankSpace`,
+    description,
+    openGraph: {
+      title: `${p.displayName} on PlankSpace`,
+      description,
+      images: image ? [image] : [],
+    },
+    twitter: {
+      card: "summary",
+      title: `${p.displayName} on PlankSpace`,
+      description,
+      images: image ? [image] : [],
+    },
+  };
+}
+
+export default async function PublicProfile({
+  params,
+}: {
+  params: Promise<{ handle: string }>;
+}) {
+  const { handle: raw } = await params,
+    handle = raw.toLowerCase(),
+    p = await getProfile(handle);
+  if (!p)
+    return (
+      <div className="missing-profile">
+        <div className="directory-plank">
+          <i />
+          <i />
+        </div>
+        <h1>This board is not public.</h1>
+        <p>It may be awaiting approval or may have been removed.</p>
+        <a href="/browse">Browse the lumberyard</a>
+      </div>
+    );
+  let order: string[] = [],
+    hiddenModules: string[] = [];
+  try {
+    const saved = JSON.parse(p.layoutJson || "[]");
+    order = Array.isArray(saved)
+      ? saved
+      : Array.isArray(saved?.order)
+      ? saved.order
+      : [];
+    hiddenModules = Array.isArray(saved?.hidden) ? saved.hidden : [];
+  } catch {}
+  const all = defaultLayout,
+    ordered = [
+      ...order.filter((x) => all.includes(x)),
+      ...all.filter((x) => !order.includes(x)),
+    ].filter((id) => !hiddenModules.includes(id)),
+    avatar = p.avatarUrl
+      ? p.avatarUrl.startsWith("/")
+        ? p.avatarUrl
+        : `/api/avatar?handle=${p.handle}`
+      : "/plank-classic.jpeg";
+  let topHandles: string[] = [];
+  if (p.wallet) {
+    try {
+      topHandles = (
+        await getDb()
+          .select({ handle: profileRelations.targetHandle })
+          .from(profileRelations)
+          .where(
+            and(
+              eq(profileRelations.ownerWallet, p.wallet),
+              eq(profileRelations.kind, "top8")
+            )
+          )
+          .orderBy(asc(profileRelations.rank))
+          .limit(8)
+      ).map((x) => x.handle);
+    } catch {}
+  }
+  let topProfiles: {
+    handle: string;
+    displayName: string;
+    avatarUrl: string;
+  }[] = [];
+  if (topHandles.length) {
+    try {
+      const rows = await getDb()
+        .select({
+          handle: profiles.handle,
+          displayName: profiles.displayName,
+          avatarUrl: profiles.avatarUrl,
+        })
+        .from(profiles)
+        .where(
+          and(
+            inArray(profiles.handle, topHandles),
+            eq(profiles.moderationStatus, "approved")
+          )
+        )
+        .limit(8);
+      topProfiles = topHandles.flatMap((handle) => {
+        const profile = rows.find((row) => row.handle === handle);
+        return profile ? [profile] : [];
+      });
+    } catch {}
+  }
+  const themeDefaults = {
+    template: "lounge",
+    pageBackground: "#24130b",
+    panelBackground: "#f2dfbe",
+    textColor: "#2b160d",
+    linkColor: "#6e2b0e",
+    headingColor: "#fff0cf",
+    accentColor: "#e4862a",
+    fontFamily: "Verdana",
+    showTop8: true,
+  };
+  let theme = themeDefaults;
+  try {
+    theme = { ...themeDefaults, ...JSON.parse(p.themeJson || "{}") };
+  } catch {}
+  const skinStyle = {
+    "--profile-bg": theme.pageBackground,
+    "--profile-panel": theme.panelBackground,
+    "--profile-text": theme.textColor,
+    "--profile-link": theme.linkColor,
+    "--profile-heading": theme.headingColor,
+    "--profile-accent": theme.accentColor,
+    "--profile-font": theme.fontFamily,
+  } as React.CSSProperties;
+  const layoutCss = customProfileCss(p.customCss || "", p.customHtml || "");
+  const modules: Record<string, React.ReactNode> = {
+    welcome: (
+      <section className="lounge-intro">
+        <div className="lamp">✦</div>
+        <div>
+          <h2>The Plank Lounge</h2>
+          <p>Pull up a board. Share a thought. Stay awhile.</p>
+        </div>
+        <a className="enter-lounge" href="#music">
+          Enter With Music
+        </a>
+      </section>
+    ),
+    status: (
+      <section className="status">
+        <div>
+          <small>{p.displayName} is</small>
+          <h2>{p.moodText}</h2>
+          <span>
+            🪵 {p.mood} · <a href="/mood">update mood</a>
+          </span>
+        </div>
+        <a className="status-knock" href="#comments">
+          Knock
+        </a>
+      </section>
+    ),
+    music: (
+      <section className="player" id="music">
+        <div className="album">🪵</div>
+        <div className="track">
+          <small>PROFILE MUSIC</small>
+          <b>{p.music || "Profile Music"}</b>
+          <span>Add your favorite artists and soundtrack in the workshop</span>
+        </div>
+        <a className="play" href="#video" aria-label="Jump to featured videos">
+          ▶
+        </a>
+        <div className="bars active" aria-hidden="true">
+          {[1, 2, 3, 4, 5, 6, 7].map((x) => (
+            <i key={x} />
+          ))}
+        </div>
+      </section>
+    ),
+    video: (
+      <section className="content featured-video" id="video">
+        <div className="head">
+          <h2>{p.displayName}&apos;s Featured Videos</h2>
+          <span>Up to 8 · plays in order</span>
+        </div>
+        <ProfileVideoPlayer
+          links={p.featuredVideo || ""}
+          title={`${p.displayName} featured videos`}
+        />
+      </section>
+    ),
+    game: (
+      <section className="content plank-game">
+        <div className="head">
+          <h2>PLANK ATTACK!</h2>
+          <span>Profile Mini Game</span>
+        </div>
+        <MiniGame />
+      </section>
+    ),
+    custom: (
+      <section className="content code-space">
+        <div className="head">
+          <h2>{p.displayName}&apos;s Custom Space</h2>
+          <span>Sandboxed HTML + CSS</span>
+        </div>
+        {p.customHtml ? (
+          <iframe
+            className="public-custom"
+            sandbox=""
+            referrerPolicy="no-referrer"
+            title="Sandboxed custom profile content"
+            srcDoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{margin:0;background:#30170c;color:#f4dfbd;font:16px Arial;padding:18px}*{box-sizing:border-box}</style>${safe(
+              p.customHtml
+            )}`}
+          />
+        ) : (
+          <p className="public-empty">
+            This board hasn&apos;t customized their space yet.
+          </p>
+        )}
+      </section>
+    ),
+    collection: (
+      <section className="content collection">
+        <div className="head">
+          <h2>{p.displayName}&apos;s Plank Collection</h2>
+          <span>Live from Robinhood Chain</span>
+        </div>
+        <PlankShelf handle={p.handle} />
+      </section>
+    ),
+    about: (
+      <section className="content about">
+        <h2>{p.displayName}&apos;s Blurbs</h2>
+        <h3>About me:</h3>
+        <p>{p.bio || "This board keeps things mysterious."}</p>
+        {p.lookingToMeet && (
+          <>
+            <h3>Who I&apos;d like to meet:</h3>
+            <p>{p.lookingToMeet}</p>
+          </>
+        )}
+      </section>
+    ),
+    friends: (
+      <section className="content friendspace">
+        <div className="head">
+          <h2>{p.displayName}&apos;s Friend Space</h2>
+          <span>Top 8 boards</span>
+        </div>
+        <h3>{p.displayName}&apos;s Top 8</h3>
+        <div className="friends">
+          {topProfiles.length
+            ? topProfiles.map((friend, i) => (
+                <article key={friend.handle}>
+                  <a href={`/u/${friend.handle}`}>{friend.displayName}</a>
+                  <div className="avatar">
+                    <img
+                      src={
+                        friend.avatarUrl
+                          ? `/api/avatar?handle=${friend.handle}`
+                          : "/plank-classic.jpeg"
+                      }
+                      alt=""
+                    />
+                    <i />
+                    <i />
+                  </div>
+                  <small>#{i + 1}</small>
+                </article>
+              ))
+            : classicFriends.map((name, i) => (
+                <article key={name}>
+                  <a href="/browse">{name}</a>
+                  <div className="avatar">
+                    <i />
+                    <i />
+                  </div>
+                  <small>#{i + 1}</small>
+                </article>
+              ))}
+        </div>
+        <a className="viewall" href="/browse">
+          View the Whole Lumberyard →
+        </a>
+      </section>
+    ),
+    widgets: <ProfileWidgets handle={p.handle} />,
+    feed: (
+      <section className="content">
+        <div className="head">
+          <h2>Latest from the Lumberyard</h2>
+          <span>Wallet-signed posts</span>
+        </div>
+        <Feed />
+      </section>
+    ),
+    comments: (
+      <section className="content comments" id="comments">
+        <div className="head">
+          <h2>{p.displayName}&apos;s Comments</h2>
+          <span>Wallet-signed knocks</span>
+        </div>
+        <KnockForm handle={p.handle} displayName={p.displayName} />
+      </section>
+    ),
+  };
+  return (
+    <div
+      className={`public-profile classic-profile theme-${theme.template} ${
+        p.handle === "degenwaffle" ? "degen-profile" : ""
+      }`}
+      style={skinStyle}
+    >
+      {layoutCss && <style dangerouslySetInnerHTML={{ __html: layoutCss }} />}
+      <a className="skip-link" href="#profile-content">
+        Skip to profile content
+      </a>
+      <div className="classic-strap">
+        <b>A place for boards.</b>
+        <span>Wallet-owned profiles · custom HTML · Robinhood Chain</span>
+      </div>
+      <main>
+        <aside className="classic-left">
+          <section className="identity">
+            <div className="photo canonical-photo">
+              <img src={avatar} alt={`${p.displayName} profile picture`} />
+              <small>
+                {p.handle === "degenwaffle" ? "THE ORIGINAL" : "PLANKSPACE"}
+              </small>
+            </div>
+            <div>
+              <p className="online">● Online Now!</p>
+              <h1>{p.displayName} ★</h1>
+              <p>@{p.handle}</p>
+              <p>Collector / Builder / PlankSpace</p>
+              <p>Last Sanded: Today</p>
+            </div>
+          </section>
+          <section className="box contact">
+            <h2>Contacting {p.displayName}</h2>
+            <BoardActions handle={p.handle} />
+            <div className="contact-links">
+              <a href="#comments">✉ Send Board Mail</a>
+              <a href="#comments">💬 Knock on Wood</a>
+            </div>
+          </section>
+          <section className="box url">
+            <h2>PlankSpace URL:</h2>
+            <p>plank.love/plankspace/{p.handle}</p>
+          </section>
+          <section className="box interests">
+            <h2>{p.displayName}&apos;s Interests</h2>
+            <dl>
+              {[
+                ["General", p.interests],
+                ["Hobbies", p.hobbies],
+                ["Music", p.music],
+                ["Heroes", p.heroes],
+              ]
+                .filter(([, value]) => value)
+                .map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+            </dl>
+          </section>
+          <a className="profile-edit-link" href="/profile-editor">
+            Own this page? Open Profile Workshop
+          </a>
+        </aside>
+        <div id="profile-content" className="public-modules right">
+          {ordered
+            .filter(
+              (id) =>
+                (id !== "friends" || theme.showTop8) &&
+                (id !== "custom" || hasVisibleCustomContent(p.customHtml || ""))
+            )
+            .map((id) => (
+              <div key={id} className={`profile-module module-${id}`}>
+                {modules[id]}
+              </div>
+            ))}
+        </div>
+      </main>
+    </div>
+  );
+}

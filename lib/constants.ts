@@ -212,6 +212,17 @@ export const TOKEN = {
   chainId: CHAIN.id,
 } as const;
 
+/** Native PlankSpace route inside plank.love. */
+export const PLANKSPACE_URL = "/plankspace" as const;
+
+/**
+ * Build-time discovery switch for the preview rollout. Direct PlankSpace
+ * routes stay mounted when false, but public navigation and indexing do not
+ * advertise them. Missing or malformed values fail closed.
+ */
+export const PLANKSPACE_DISCOVERABLE =
+  process.env.NEXT_PUBLIC_PLANKSPACE_DISCOVERABLE?.trim().toLowerCase() === "true";
+
 /**
  * Primary navigation in reading order. `emphasis` changes presentation only;
  * every destination still comes from this single source of truth.
@@ -222,6 +233,9 @@ export const NAV_LINKS = [
   { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
+  ...(PLANKSPACE_DISCOVERABLE
+    ? ([{ href: PLANKSPACE_URL, label: "PlankSpace" }] as const)
+    : []),
   { href: "/learn", label: "Learn" },
   // Airdrop intentionally removed from the nav (2026-07) to make room for
   // the WoodAmp music chip — the #airdrop section and its checker still

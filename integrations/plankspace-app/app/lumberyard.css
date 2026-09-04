@@ -1,0 +1,1155 @@
+/* ============================================================
+   PlankSpace — Lumberyard surface (home feed, subnav, terms gate,
+   media composer).
+
+   PlankSpace is a sub-mode of the RobinWood Product System, not a
+   second design system. Every colour below is derived from the
+   DESIGN.md tokens in app/globals.css (--color-wood-*, --color-gold-*,
+   --color-cream, --color-line, --font-display, --font-body) so a theme
+   accent change retints PlankSpace along with the rest of the site.
+
+   The one thing PlankSpace adds is the *parchment card* — the warm
+   bulletin-board surface that gives the early-social-web feel. It is
+   a derived token (--plankspace-card), never a literal hex.
+
+   Loaded after globals.css and scoped to .plankspace-native so it
+   overrides the legacy minified rules for the selectors it owns.
+   ============================================================ */
+
+.plankspace-native {
+  /* Parchment card family — derived from cream + gold. */
+  --plankspace-card: color-mix(in oklch, var(--color-cream) 86%, var(--color-gold-300));
+  --plankspace-card-raised: color-mix(in oklch, var(--color-cream) 94%, white);
+  --plankspace-card-ink: var(--color-wood-950);
+  --plankspace-card-muted: color-mix(in oklch, var(--color-wood-700) 72%, var(--color-cream));
+  --plankspace-card-line: color-mix(in oklch, var(--color-gold-600) 55%, var(--color-wood-700));
+  --plankspace-card-shadow: 0 10px 28px -8px hsl(var(--base-h) var(--base-s) 4% / 55%);
+
+  /* Dark wood panels (aside, tabs, status). */
+  --plankspace-panel: var(--color-panel-soft);
+  --plankspace-panel-ink: var(--color-cream);
+  --plankspace-panel-muted: var(--color-cream-muted);
+
+  /* Activity kinds — gold family + the forest token, all from @theme. */
+  --plankspace-kind-post: var(--color-gold-600);
+  --plankspace-kind-knock: color-mix(in oklch, var(--color-gold-600) 60%, var(--color-wood-600));
+  --plankspace-kind-profile: var(--color-forest-600);
+
+  --plankspace-radius: 6px;
+  --plankspace-focus: 0 0 0 2px var(--color-wood-950), 0 0 0 4px var(--color-gold-400);
+
+  background:
+    radial-gradient(circle at 50% 0, var(--color-wood-600) 0, var(--color-wood-800) 38%, var(--color-wood-950) 100%);
+  background-attachment: fixed;
+  color: var(--color-cream);
+  font-family: var(--font-body), Arial, Helvetica, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  accent-color: var(--color-gold-500);
+  caret-color: var(--color-gold-500);
+}
+
+.plankspace-native ::selection {
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+}
+
+.plankspace-native :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--plankspace-focus);
+}
+
+/* ---------- Home feed shell ---------- */
+
+.plankspace-native .home-feed {
+  min-height: 60vh;
+  color: var(--plankspace-card-ink);
+  font-size: 1rem;
+}
+
+.plankspace-native .lumberyard-page-header {
+  max-width: 1120px;
+  margin: 24px auto 0;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-panel);
+  color: var(--plankspace-panel-ink);
+  box-shadow: var(--shadow-panel);
+}
+
+.plankspace-native .lumberyard-page-header small {
+  color: var(--color-gold-400);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.plankspace-native .lumberyard-page-header h1 {
+  margin: 4px 0;
+  color: var(--color-gold-300);
+  font: 400 clamp(1.55rem, 3vw, 2.2rem)/1.05 var(--font-display), Georgia, serif;
+}
+
+.plankspace-native .lumberyard-page-header p { margin: 0; color: var(--plankspace-panel-muted); }
+.plankspace-native .lumberyard-page-header > div:last-child { display: flex; gap: 8px; flex: none; }
+.plankspace-native .lumberyard-profile-action { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 9px 14px; border: 1px solid var(--color-gold-500); border-radius: var(--plankspace-radius); background: var(--color-gold-500); color: var(--color-wood-950); font-weight: 800; text-decoration: none; }
+.plankspace-native .lumberyard-profile-action:hover { background: var(--color-gold-400); text-decoration: none; }
+.plankspace-native .lumberyard-profile-action.is-secondary { background: transparent; color: var(--color-gold-300); }
+
+@media (max-width: 720px) {
+  .plankspace-native .lumberyard-page-header { margin: 12px 12px 0; align-items: stretch; flex-direction: column; }
+  .plankspace-native .lumberyard-page-header > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
+.plankspace-native .home-feed > main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 18px 88px;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+/* ---------- Aside: the Lumberyard sign ---------- */
+
+.plankspace-native .home-feed > main > aside {
+  position: sticky;
+  top: calc(58px + 52px + 18px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-panel);
+  color: var(--plankspace-panel-ink);
+  box-shadow: var(--shadow-panel);
+}
+
+@media (min-width: 1024px) {
+  .plankspace-native .home-feed > main > aside {
+    top: calc(68px + 52px + 18px);
+  }
+}
+
+.plankspace-native .home-feed .lumberyard-mascot {
+  display: block;
+  width: 132px;
+  height: auto;
+  margin: -6px 0 2px -4px;
+  filter: drop-shadow(0 8px 14px hsl(var(--base-h) var(--base-s) 4% / 60%));
+}
+
+.plankspace-native .home-feed > main > aside h1 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 2rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--color-gold-300);
+  text-wrap: balance;
+}
+
+.plankspace-native .home-feed > main > aside p {
+  margin: 0;
+  color: var(--plankspace-panel-muted);
+  line-height: 1.55;
+}
+
+.plankspace-native .lumberyard-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-line);
+}
+
+.plankspace-native .lumberyard-links a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 10px;
+  margin: 0 -10px;
+  border-radius: var(--plankspace-radius);
+  color: var(--color-gold-300);
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.plankspace-native .lumberyard-links a:hover {
+  background: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 12%);
+  color: var(--color-cream);
+  text-decoration: none;
+}
+
+.plankspace-native .lumberyard-links a small {
+  font-weight: 600;
+  color: var(--plankspace-panel-muted);
+}
+
+.plankspace-native .lumberyard-links a::after {
+  content: "→";
+  color: var(--color-gold-500);
+  opacity: 0.7;
+}
+
+/* ---------- Composer ---------- */
+
+.plankspace-native .home-feed > main > section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.plankspace-native .feed-hero {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  box-shadow: var(--plankspace-card-shadow);
+}
+
+.plankspace-native .feed-hero h2 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 1.5rem;
+  line-height: 1.1;
+  color: var(--color-wood-900);
+  text-wrap: balance;
+}
+
+.plankspace-native .feed-hero textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card-raised);
+  color: var(--plankspace-card-ink);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.plankspace-native .feed-hero textarea::placeholder {
+  color: var(--plankspace-card-muted);
+}
+
+.plankspace-native .feed-hero-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+
+.plankspace-native .feed-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plankspace-native .feed-hero-meta[data-near-limit="true"] {
+  color: var(--color-wood-700);
+}
+
+.plankspace-native .feed-hero .feed-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--color-gold-600);
+  border-radius: var(--plankspace-radius);
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 6px 16px -6px hsl(var(--accent-h) var(--accent-s) var(--accent-l-600) / 60%);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 160ms ease-out;
+}
+
+.plankspace-native .feed-hero .feed-submit:hover:not(:disabled) {
+  background: var(--color-gold-400);
+  transform: translateY(-1px);
+}
+
+.plankspace-native .feed-hero .feed-submit:disabled {
+  cursor: not-allowed;
+  background: color-mix(in oklch, var(--color-gold-500) 45%, var(--plankspace-card));
+  border-color: var(--plankspace-card-line);
+  color: color-mix(in oklch, var(--color-wood-950) 60%, var(--plankspace-card));
+  box-shadow: none;
+}
+
+.plankspace-native .feed-hero .feed-submit[data-intent="connect"] {
+  background: var(--color-wood-900);
+  border-color: var(--color-wood-700);
+  color: var(--color-gold-300);
+}
+
+.plankspace-native .feed-hero .feed-submit[data-intent="connect"]:hover {
+  background: var(--color-wood-800);
+}
+
+.plankspace-native .feed-hero-hint {
+  margin: 0;
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.plankspace-native .feed-hero-hint a,
+.plankspace-native .feed-status a,
+.plankspace-native .feed-state a {
+  color: var(--color-wood-900);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1.5px;
+}
+
+/* ---------- Media composer (previously unstyled) ---------- */
+
+.plankspace-native .media-composer-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.plankspace-native .media-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.plankspace-native .media-add-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card-raised);
+  color: var(--color-wood-900);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.plankspace-native .media-add-toggle span {
+  display: none;
+}
+
+.plankspace-native .media-toolbar > small {
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.plankspace-native .media-selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  background: var(--color-wood-900);
+  color: var(--color-gold-300);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.plankspace-native .media-selected button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.plankspace-native .media-composer {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card-raised);
+  min-width: 0;
+}
+
+.plankspace-native .media-composer legend {
+  padding: 0 6px;
+  font-weight: 800;
+  color: var(--color-wood-900);
+}
+
+.plankspace-native .media-gifts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plankspace-native .media-gifts button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: 999px;
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.plankspace-native .media-composer label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--color-wood-900);
+  font-size: 0.875rem;
+}
+
+.plankspace-native .media-composer input,
+.plankspace-native .media-composer select {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  font: inherit;
+  font-weight: 500;
+}
+
+.plankspace-native .media-composer > span {
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.plankspace-native .media-composer small[role="alert"] {
+  color: var(--color-wood-900);
+  font-weight: 700;
+}
+
+.plankspace-native .media-drawer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.plankspace-native .media-drawer-actions button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--color-gold-600);
+  border-radius: var(--plankspace-radius);
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.plankspace-native .media-drawer-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.plankspace-native .media-drawer-actions .media-clear {
+  background: transparent;
+  border-color: var(--plankspace-card-line);
+  color: var(--color-wood-900);
+}
+
+/* ---------- Wallet / status strip ---------- */
+
+.plankspace-native .feed-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-panel);
+  color: var(--plankspace-panel-ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-panel);
+  animation: lumberyard-rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.plankspace-native .feed-status[data-tone="error"] {
+  border-color: var(--color-gold-600);
+  background: color-mix(in oklch, var(--color-wood-900) 80%, var(--color-gold-600));
+}
+
+.plankspace-native .feed-status p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plankspace-native .feed-status a {
+  color: var(--color-gold-300);
+}
+
+.plankspace-native .feed-status .feed-status-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid var(--color-line-strong);
+  border-top-color: var(--color-gold-400);
+  animation: lumberyard-spin 900ms linear infinite;
+}
+
+.plankspace-native .feed-status button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: transparent;
+  color: var(--color-gold-300);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.plankspace-native .feed-status button:hover {
+  background: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 12%);
+}
+
+@keyframes lumberyard-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes lumberyard-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Tabs ---------- */
+
+.plankspace-native .feed-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-panel);
+}
+
+.plankspace-native .feed-tabs button {
+  flex: 1;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--plankspace-panel-muted);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.plankspace-native .feed-tabs button:hover {
+  color: var(--color-cream);
+}
+
+.plankspace-native .feed-tabs button[aria-selected="true"] {
+  background: var(--color-gold-500);
+  border-color: var(--color-gold-600);
+  color: var(--color-wood-950);
+}
+
+/* ---------- Feed states ---------- */
+
+.plankspace-native .feed-state {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 20px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  box-shadow: var(--plankspace-card-shadow);
+}
+
+.plankspace-native .feed-state img {
+  width: 72px;
+  height: auto;
+}
+
+.plankspace-native .feed-state h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 1.25rem;
+  color: var(--color-wood-900);
+}
+
+.plankspace-native .feed-state p {
+  margin: 0;
+  color: var(--plankspace-card-muted);
+  font-weight: 600;
+}
+
+.plankspace-native .feed-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.plankspace-native .feed-state-actions a,
+.plankspace-native .feed-state-actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--color-gold-600);
+  border-radius: var(--plankspace-radius);
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.plankspace-native .feed-state-actions a.is-secondary {
+  background: transparent;
+  border-color: var(--plankspace-card-line);
+  color: var(--color-wood-900);
+}
+
+.plankspace-native .feed-skeleton {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  box-shadow: var(--plankspace-card-shadow);
+}
+
+.plankspace-native .feed-skeleton i {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--plankspace-card-raised) 0%, color-mix(in oklch, var(--plankspace-card-raised) 60%, var(--plankspace-card-line)) 50%, var(--plankspace-card-raised) 100%);
+  background-size: 300% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.plankspace-native .feed-skeleton i:first-child { height: 58px; }
+.plankspace-native .feed-skeleton div { display: grid; gap: 8px; align-content: start; }
+.plankspace-native .feed-skeleton div i:nth-child(1) { height: 12px; width: 32%; }
+.plankspace-native .feed-skeleton div i:nth-child(2) { height: 16px; width: 62%; }
+.plankspace-native .feed-skeleton div i:nth-child(3) { height: 12px; width: 88%; }
+
+/* ---------- Feed items ---------- */
+
+.plankspace-native .activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plankspace-native .activity-feed article {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--plankspace-card-line);
+  border-left: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  box-shadow: var(--plankspace-card-shadow);
+}
+
+.plankspace-native .activity-avatar {
+  position: relative;
+  display: block;
+  width: 52px;
+  height: 58px;
+  overflow: hidden;
+  border: 2px solid var(--color-wood-700);
+  border-radius: 4px;
+  background: var(--color-wood-900);
+  box-shadow: 0 3px 8px -2px hsl(var(--base-h) var(--base-s) 4% / 50%);
+}
+
+.plankspace-native .activity-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.plankspace-native .activity-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.plankspace-native .activity-feed h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.plankspace-native .activity-feed h3 a {
+  color: var(--color-wood-900);
+  text-decoration: none;
+}
+
+.plankspace-native .activity-feed h3 a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.plankspace-native .activity-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.plankspace-native .activity-kind::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--plankspace-kind-post);
+}
+
+.plankspace-native .activity-knock .activity-kind::before { background: var(--plankspace-kind-knock); }
+.plankspace-native .activity-profile .activity-kind::before { background: var(--plankspace-kind-profile); }
+
+.plankspace-native .activity-kind a {
+  color: var(--color-wood-900);
+  text-decoration: none;
+}
+
+.plankspace-native .activity-feed p {
+  margin: 6px 0 0;
+  color: var(--plankspace-card-ink);
+  font-size: 1rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.plankspace-native .activity-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.plankspace-native .activity-feed time {
+  color: var(--plankspace-card-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plankspace-native .activity-feed .activity-likes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-wood-700);
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.plankspace-native .activity-feed .activity-likes svg {
+  width: 14px;
+  height: 14px;
+}
+
+.plankspace-native .post-media {
+  margin-top: 10px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--plankspace-card-line);
+}
+
+.plankspace-native .post-media img,
+.plankspace-native .post-media video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------- Terms gate ---------- */
+
+.plankspace-native .terms-gate {
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  box-sizing: border-box;
+  background: radial-gradient(circle at 50% 12%, hsl(var(--base-h) var(--base-s) 24% / 80%), hsl(var(--base-h) var(--base-s) 4% / 95%) 68%);
+  font-family: var(--font-body), Arial, Helvetica, sans-serif;
+}
+
+.plankspace-native .terms-gate * { box-sizing: border-box; }
+
+.plankspace-native .terms-gate-card {
+  width: min(620px, 100%);
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  padding: 26px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card);
+  color: var(--plankspace-card-ink);
+  box-shadow: 0 30px 80px -20px hsl(var(--base-h) var(--base-s) 2% / 90%);
+}
+
+.plankspace-native .terms-gate-card h1 {
+  margin: 0 0 12px;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 2rem;
+  line-height: 1.05;
+  color: var(--color-wood-900);
+  text-wrap: balance;
+}
+
+.plankspace-native .terms-gate-card p,
+.plankspace-native .terms-gate-card li {
+  font-size: 1rem;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+.plankspace-native .terms-gate-card ul { padding-left: 22px; margin: 10px 0; }
+
+.plankspace-native .terms-gate-card label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--plankspace-card-line);
+  border-radius: var(--plankspace-radius);
+  background: var(--plankspace-card-raised);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.plankspace-native .terms-gate-card input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px; }
+
+.plankspace-native .terms-gate-card button {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--color-gold-600);
+  border-radius: var(--plankspace-radius);
+  background: var(--color-gold-500);
+  color: var(--color-wood-950);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.plankspace-native .terms-gate-card button:disabled {
+  cursor: not-allowed;
+  background: color-mix(in oklch, var(--color-gold-500) 45%, var(--plankspace-card));
+  border-color: var(--plankspace-card-line);
+  color: color-mix(in oklch, var(--color-wood-950) 60%, var(--plankspace-card));
+}
+
+.plankspace-native .terms-gate-card a { color: var(--color-wood-900); font-weight: 700; }
+
+.plankspace-native .terms-gate-card .terms-leave {
+  display: block;
+  margin: 12px 0 0;
+  min-height: 40px;
+  line-height: 40px;
+  text-align: center;
+}
+
+.plankspace-native .terms-gate-card > small:last-child {
+  display: block;
+  margin-top: 10px;
+  color: var(--plankspace-card-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 880px) {
+  .plankspace-native .home-feed > main {
+    display: flex;
+    flex-direction: column;
+    padding-top: 18px;
+    gap: 16px;
+  }
+
+  .plankspace-native .home-feed > main > aside {
+    position: static;
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 16px;
+    padding: 16px;
+  }
+
+  .plankspace-native .home-feed .lumberyard-mascot {
+    grid-row: 1 / span 2;
+    width: 76px;
+    margin: 0;
+  }
+
+  .plankspace-native .home-feed > main > aside h1 { font-size: 1.5rem; }
+
+  .plankspace-native .lumberyard-links {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+  }
+
+  .plankspace-native .lumberyard-links a { margin: 0; padding: 0 6px; }
+}
+
+@media (max-width: 460px) {
+  .plankspace-native .feed-hero { padding: 16px; }
+  .plankspace-native .feed-hero h2 { font-size: 1.25rem; }
+  .plankspace-native .feed-hero-row { flex-direction: column; align-items: stretch; }
+  .plankspace-native .feed-hero .feed-submit { width: 100%; }
+  .plankspace-native .feed-state { grid-template-columns: 1fr; }
+  .plankspace-native .feed-state img { display: none; }
+  .plankspace-native .home-feed > main > aside p { display: none; }
+}
+
+/* ---------- Shared page chrome for every PlankSpace surface ----------
+   Pages carry no wordmark header or footer of their own; the subnav is the
+   rail. What remains is a title bar (.page-bar) and a back link. */
+
+.plankspace-native .page-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 26px 18px 6px;
+  background: none;
+  border: 0;
+}
+
+.plankspace-native .page-bar h1 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 2rem;
+  line-height: 1.05;
+  color: var(--color-gold-300);
+  text-wrap: balance;
+}
+
+.plankspace-native .page-bar a,
+.plankspace-native .back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--plankspace-radius);
+  color: var(--color-gold-300);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.plankspace-native .page-bar a:hover,
+.plankspace-native .back-link:hover {
+  background: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 12%);
+  text-decoration: none;
+}
+
+/* The brand character, everywhere a CSS-drawn "plank with eyes" used to be.
+   These device classes are used across profiles, the directory, games, and
+   the composer; the legacy rules still size and position them, this block
+   only swaps the drawing for the real art. */
+.plankspace-native .onboard-plank,
+.plankspace-native .directory-plank,
+.plankspace-native .composer-plank,
+.plankspace-native .feed-plank,
+.plankspace-native .tiny-plank,
+.plankspace-native .preview-plank,
+.plankspace-native .game-plank,
+.plankspace-native .nft-fallback {
+  background: url("/images/plank-logo.webp") center / contain no-repeat !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  filter: drop-shadow(0 6px 10px hsl(var(--base-h) var(--base-s) 4% / 55%));
+}
+
+.plankspace-native .onboard-plank > i,
+.plankspace-native .directory-plank > i,
+.plankspace-native .composer-plank > i,
+.plankspace-native .feed-plank > i,
+.plankspace-native .tiny-plank > i,
+.plankspace-native .preview-plank > i,
+.plankspace-native .game-plank > i,
+.plankspace-native .nft-fallback > i,
+.plankspace-native .onboard-plank::before,
+.plankspace-native .directory-plank::before,
+.plankspace-native .composer-plank::before,
+.plankspace-native .feed-plank::before,
+.plankspace-native .tiny-plank::before,
+.plankspace-native .preview-plank::before,
+.plankspace-native .game-plank::before,
+.plankspace-native .nft-fallback::before,
+.plankspace-native .onboard-plank::after,
+.plankspace-native .directory-plank::after,
+.plankspace-native .composer-plank::after,
+.plankspace-native .feed-plank::after,
+.plankspace-native .tiny-plank::after,
+.plankspace-native .preview-plank::after,
+.plankspace-native .game-plank::after,
+.plankspace-native .nft-fallback::after {
+  display: none !important;
+}
+
+/* The legacy stylesheet styles every bare <main> as a 1000px two-column
+   grid. Pages that own their layout opt out with [data-woodstock] (and any
+   future holding/marketing page can reuse the hook). */
+/* The scoped legacy `a { color }` rule outranks Tailwind's text-* utilities
+   inside PlankSpace; give the utilities the specificity they need here. */
+.plankspace-native main[data-woodstock] a.text-cream { color: var(--color-cream); }
+.plankspace-native main[data-woodstock] a.text-wood-950 { color: var(--color-wood-950); }
+.plankspace-native main[data-woodstock] a.text-gold-300 { color: var(--color-gold-300); }
+
+.plankspace-native main[data-woodstock] {
+  display: block;
+  max-width: none;
+  margin: 0;
+  grid-template-columns: none;
+  gap: 0;
+}
+
+/* Any legacy wordmark that survives a future merge stays invisible. */
+.plankspace-native a.brand { display: none; }
+
+/* Legacy page headings across the tree: one display face, one weight. */
+.plankspace-native h1 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.plankspace-native h2,
+.plankspace-native h3 {
+  text-wrap: balance;
+}
+
+/* Batched inspection fixes (2026-08-26): drawer inputs overflowed the card
+   on narrow screens; shortcut links stacked one-per-row on mobile. */
+.plankspace-native .media-composer-shell,
+.plankspace-native .media-composer,
+.plankspace-native .feed-hero {
+  min-width: 0;
+}
+
+.plankspace-native .media-composer input,
+.plankspace-native .media-composer select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.plankspace-native .media-composer input[type="file"] {
+  padding: 6px;
+  font-size: 0.875rem;
+}
+
+@media (max-width: 880px) {
+  .plankspace-native .lumberyard-links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 12px;
+  }
+
+  .plankspace-native .lumberyard-links a {
+    justify-content: flex-start;
+    min-height: 40px;
+  }
+
+  .plankspace-native .lumberyard-links a::after {
+    display: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .plankspace-native .lumberyard-links {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plankspace-native .feed-status,
+  .plankspace-native .feed-skeleton i,
+  .plankspace-native .feed-status .feed-status-spinner {
+    animation: none;
+  }
+}

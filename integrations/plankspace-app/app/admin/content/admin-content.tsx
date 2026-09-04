@@ -1,0 +1,14 @@
+"use client";
+ 
+import {useState} from "react";
+import {connectPlankLoveWallet} from "../../plank-love-wallet";
+import {walletProof} from "../../auth-client";
+type Report={id:number;targetType:string;targetId:string;reason:string;status:string;createdAt:string};
+type Item={id:number;author?:string;body:string;moderationStatus:string;profileHandle?:string};
+export default function AdminContent(){
+ const [reports,setReports]=useState<Report[]>([]),[posts,setPosts]=useState<Item[]>([]),[comments,setComments]=useState<Item[]>([]),[error,setError]=useState(""),[wallet,setWallet]=useState("");
+ const load=async(address=wallet)=>{try{const proof=await walletProof(address,"admin:content","admin",{}),r=await fetch(`/api/content?wallet=${address}`,{headers:{authorization:`Bearer ${proof.sessionToken}`}}),d=await r.json();if(!r.ok)throw new Error(d.error);setWallet(address);setReports(d.reports||[]);setPosts(d.posts||[]);setComments(d.comments||[])}catch(e){setError(e instanceof Error?e.message:"Moderation unavailable")}};
+ const connect=async()=>load(await connectPlankLoveWallet());
+ const act=async(kind:string,id:number,status:string)=>{const proof=await walletProof(wallet,"admin:content","admin",{}),resolution=kind==="report"?(prompt("Resolution note")||""):"",result=await fetch("/api/content",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({...proof,kind,id,status,resolution})}).then(r=>r.json());if(result.error)setError(result.error);else await load()};
+ return <div className="admin-shell"><header className="page-bar"><a className="back-link" href="/plankspace/admin">← Admin</a><h1>Content &amp; reports</h1></header><main><section className="admin-hero"><h2>Content moderation</h2><p>Review reports and remove or restore posts and knocks.</p>{!wallet&&<button onClick={connect}>Connect Admin Wallet & Verify</button>}{error&&<strong>{error}</strong>}</section>{wallet&&<><section className="admin-list"><h2>Open reports</h2>{reports.filter(x=>x.status==="open").map(x=><article key={x.id}><div><b>{x.targetType} #{x.targetId}</b><p>{x.reason}</p></div><div className="moderation-actions"><button onClick={()=>act("report",x.id,"resolved")}>Resolve</button><button onClick={()=>act("report",x.id,"dismissed")}>Dismiss</button></div></article>)}</section><section className="admin-list"><h2>Posts</h2>{posts.map(x=><article key={x.id}><div><b>{x.author}</b><p>{x.body}</p></div><button onClick={()=>act("post",x.id,x.moderationStatus==="approved"?"removed":"approved")}>{x.moderationStatus==="approved"?"Remove":"Restore"}</button></article>)}</section><section className="admin-list"><h2>Knocks</h2>{comments.map(x=><article key={x.id}><div><b>{x.author} → @{x.profileHandle}</b><p>{x.body}</p></div><button onClick={()=>act("comment",x.id,x.moderationStatus==="approved"?"removed":"approved")}>{x.moderationStatus==="approved"?"Remove":"Restore"}</button></article>)}</section></>}</main></div>;
+}

@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { CHAIN, CONTRACT_ADDRESS, SOCIAL_LINKS } from "@/lib/constants";
+import {
+  CHAIN,
+  CONTRACT_ADDRESS,
+  PLANKSPACE_DISCOVERABLE,
+  PLANKSPACE_URL,
+  SOCIAL_LINKS,
+} from "@/lib/constants";
 
 const SOCIALS = [
   {
@@ -32,6 +38,9 @@ const EXPLORE_LINKS = [
   { href: "/launch", label: "Launch" },
   { href: "/gallery", label: "Gallery" },
   { href: "/memes", label: "Memes" },
+  ...(PLANKSPACE_DISCOVERABLE
+    ? ([{ href: PLANKSPACE_URL, label: "PlankSpace" }] as const)
+    : []),
   { href: "/learn", label: "Learn" },
   { href: "/floorboards", label: "Under the floorboards" },
   { href: "/migrate", label: "Migrate" },

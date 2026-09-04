@@ -1,0 +1,8 @@
+import { asc, eq } from "drizzle-orm";
+import { getDb } from "../../db";
+import { posts, profiles, xAccounts, xPostMappings } from "../../db/schema";
+import { loadXAccount } from "./account";
+import { getXProvider } from "./provider";
+
+export async function syncXAccount(wallet:string){const db=getDb(),account=await loadXAccount(wallet);if(!account)return{imported:0,error:"not-connected"};const [row]=await db.select().from(xAccounts).where(eq(xAccounts.wallet,wallet)).limit(1),[profile]=await db.select({displayName:profiles.displayName}).from(profiles).where(eq(profiles.wallet,wallet)).limit(1),result=await getXProvider().listRecentPosts(account,row.syncCursor);let imported=0;for(const item of result.posts){try{const [post]=await db.insert(posts).values({author:profile?.displayName||account.username,authorWallet:wallet,body:item.text.slice(0,500),source:"x",externalPostId:item.id,xPostUrl:item.url}).returning();await db.insert(xPostMappings).values({wallet,plankspacePostId:post.id,xPostId:item.id,direction:"import",xPostUrl:item.url,idempotencyKey:`import:${item.id}`});imported++}catch{}}await db.update(xAccounts).set({syncCursor:result.cursor,updatedAt:new Date().toISOString()}).where(eq(xAccounts.wallet,wallet));return{imported,cursor:result.cursor}}
+export async function syncConnectedXAccounts({limit=25}:{limit?:number}={}){const rows=await getDb().select({wallet:xAccounts.wallet}).from(xAccounts).orderBy(asc(xAccounts.updatedAt)).limit(Math.max(1,Math.min(limit,100)));let imported=0,failed=0;for(const row of rows)try{imported+=(await syncXAccount(row.wallet)).imported}catch{failed++}return{accounts:rows.length,imported,failed}}

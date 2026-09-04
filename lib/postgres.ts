@@ -93,6 +93,15 @@ export function postgresPool(): Pool {
   return state.__plankPostgresPool;
 }
 
+/** Close and forget the shared pool for finite-lived CLI jobs and tests. */
+export async function closePostgres(): Promise<void> {
+  const state = postgresGlobal();
+  const pool = state.__plankPostgresPool;
+  if (!pool) return;
+  delete state.__plankPostgresPool;
+  await pool.end();
+}
+
 export async function postgresQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values: readonly unknown[] = []
