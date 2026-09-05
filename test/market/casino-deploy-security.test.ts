@@ -22,12 +22,37 @@ test("production casino deployment is chain-pinned and validates venue identity"
   assert.match(deploy, /Router WETH mismatch/);
 });
 
-test("production allocation defaults remain 40 burn / 40 Powerboard / 20 founder", async () => {
+test("production deploys exactly the canonical CCS-2L set and nothing retired", async () => {
   const deploy = await source("scripts/deploy-casino.ts");
+  for (const name of ["PlankV2TwapOracle", "PlankBurnEngine", "PlankLottery", "PlankRakeRouter", "PlankCrash", "PlankBank"]) {
+    assert.match(deploy, new RegExp(`getContractFactory\\("${name}"\\)`), `deploys ${name}`);
+  }
+  for (const retired of ["PlankCrashDrand", "PlankPowerboard", "PlankRakeDistributor", "PlankFuelBooster", "PlankProgression", "singlePayoutCapBps"]) {
+    assert.doesNotMatch(deploy, new RegExp(retired), `must not reference ${retired}`);
+  }
+});
 
-  assert.match(deploy, /envBig\("CASINO_BURN_BPS", 4000n\)/);
-  assert.match(deploy, /envBig\("CASINO_AIRDROP_BPS", 4000n\)/);
-  assert.match(deploy, /remainder \(20% of routed rake\)/);
+test("the 40/40/20 split of NET rake is router bytecode, not a deploy parameter", async () => {
+  const router = await source("contracts/PlankRakeRouter.sol");
+  assert.match(router, /uint256 public constant BURN_BPS = 4_000;/);
+  assert.match(router, /uint256 public constant COMMUNITY_BPS = 4_000;/);
+  assert.match(router, /founders = net - burnAmount - community;/);
+  const deploy = await source("scripts/deploy-casino.ts");
+  assert.doesNotMatch(deploy, /CASINO_BURN_BPS|CASINO_AIRDROP_BPS/);
+  assert.match(deploy, /envBig\("CASINO_COMMUNITY_LOTTERY_BPS", 6500n\)/);
+});
+
+test("ratified settlement and lottery parameters are the deploy defaults", async () => {
+  const deploy = await source("scripts/deploy-casino.ts");
+  assert.match(deploy, /envBig\("CASINO_CCS2L_FLOOR_BPS", 7500n\)/);
+  assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_CAP_BPS", 1000n\)/);
+  assert.match(deploy, /envBig\("CASINO_RAKE_BPS", 450n\)/);
+  assert.match(deploy, /envBig\("CASINO_RAKE_FLOOR_BPS", 250n\)/);
+  assert.match(deploy, /envBig\("CASINO_MUST_HIT_BY_ROUNDS", 1536n\)/);
+  assert.match(deploy, /envBig\("CASINO_CARVE_MIN_BPS", 1000n\)/);
+  assert.match(deploy, /envBig\("CASINO_CARVE_MAX_BPS", 3000n\)/);
+  assert.match(deploy, /envBig\("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n \* CREDIT\)/);
+  assert.match(deploy, /CASINO_MAX_MULTIPLIER_BPS is unset/);
 });
 
 test("production TWAP liquidity floor has no permissive generic default", async () => {
@@ -38,10 +63,13 @@ test("production TWAP liquidity floor has no permissive generic default", async 
   assert.doesNotMatch(deploy, /envBig\("CASINO_TWAP_MIN_RESERVE_WEI"/);
 });
 
-test("local and testnet fixtures mirror the ratified routed-rake ordering", async () => {
+test("local and testnet fixtures deploy the same canonical set with the ratified community subdivision", async () => {
   for (const path of ["scripts/local-casino-setup.ts", "scripts/testnet-casino-setup.ts"]) {
     const fixture = await source(path);
-    assert.match(fixture, /BURN_BPS = 4000n/);
-    assert.match(fixture, /AIRDROP_BPS = 4000n/);
+    assert.match(fixture, /COMMUNITY_LOTTERY_BPS = 6500n/);
+    for (const name of ["PlankLottery", "PlankRakeRouter", "PlankCrash", "PlankBank"]) {
+      assert.match(fixture, new RegExp(`getContractFactory\\("${name}"\\)`), `${path} deploys ${name}`);
+    }
+    assert.doesNotMatch(fixture, /PlankCrashDrand|PlankPowerboard|PlankRakeDistributor|PlankProgression|PlankFuelBooster/);
   }
 });
