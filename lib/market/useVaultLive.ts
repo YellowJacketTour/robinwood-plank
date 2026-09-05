@@ -48,6 +48,11 @@ export type VaultStats = {
   ethUsd: number | null;
   aprPct: number | null;
   aprBasisHours: number | null;
+  /** Same LP APR, over a real fixed 24h/7d cutoff — see computeLpAprWindows
+   *  in lib/market/vault-stats.ts. Either entry null means that window
+   *  didn't clear the same real-data bar the full-history figure does, not
+   *  a fetch failure. */
+  aprWindows: { "24h": { aprPct: number | null }; "7d": { aprPct: number | null } } | null;
   depositCount: number;
   redeemCount: number;
   vaultFeeRevenueWei: string;

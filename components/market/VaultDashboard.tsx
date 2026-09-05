@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { useVaultBook } from "@/lib/market/useVaultBook";
@@ -18,7 +19,7 @@ type Props = {
   active?: boolean;
 };
 
-function statCell(label: string, value: string, sub?: string) {
+function statCell(label: string, value: string, sub?: string, extra?: ReactNode) {
   return (
     <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
       <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">
@@ -26,8 +27,16 @@ function statCell(label: string, value: string, sub?: string) {
       </dt>
       <dd className="mt-1 text-xs font-bold text-foreground">{value}</dd>
       {sub && <p className="mt-0.5 text-[0.6rem] text-foreground/40">{sub}</p>}
+      {extra}
     </div>
   );
+}
+
+/** "—" for a window that hasn't cleared computeLpApr's own real-data bar
+ *  (see its docs in lib/market/vault-stats.ts) — never a fabricated 0%. */
+function fmtAprWindow(pct: number | null): string {
+  if (pct == null) return "—";
+  return `${pct >= 1000 ? pct.toFixed(0) : pct.toFixed(1)}%`;
 }
 
 /**
@@ -117,7 +126,22 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
               // Not "no swap history" — a pool can have traded and still be
               // too new or too thin to annualize. Permanent absence and
               // "too early to say" are different facts to an LP.
-              : "not enough trading history yet"
+              : "not enough trading history yet",
+          // Same LP APR, over a real fixed 24h/7d cutoff — see
+          // computeLpAprWindows in lib/market/vault-stats.ts. A quiet vault
+          // can legitimately show a real full-history figure above next to
+          // a dashed 24h/7d here — that's the honest answer for a window
+          // too thin to annualize, not a stale/broken read.
+          stats.aprWindows && (
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 border-t border-line/60 pt-1 text-[0.56rem] tabular-nums text-foreground/60">
+              <span>
+                24h <span className="text-foreground">{fmtAprWindow(stats.aprWindows["24h"].aprPct)}</span>
+              </span>
+              <span>
+                7d <span className="text-foreground">{fmtAprWindow(stats.aprWindows["7d"].aprPct)}</span>
+              </span>
+            </div>
+          )
         )}
       </div>
 
