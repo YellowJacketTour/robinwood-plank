@@ -10,7 +10,7 @@ const sha256 = (value: Buffer | string) => createHash("sha256").update(value).di
 const files = await Promise.all(tracked.map(async (file) => ({ file, sha256: sha256(await readFile(file)) })));
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const status = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
-const artifactPath = path.join(".hardhat-artifacts", "contracts", "PlankCrashDrand.sol", "PlankCrashDrand.json");
+const artifactPath = path.join(".hardhat-artifacts", "contracts", "PlankCrash.sol", "PlankCrash.json");
 let artifact = null;
 try {
   const compiled = JSON.parse(await readFile(artifactPath, "utf8"));
