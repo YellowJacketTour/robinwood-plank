@@ -100,6 +100,7 @@ type CollectionRow = {
   creator_handle: string | null;
   creator_address: string | null;
   creator_ens: string | null;
+  token_standard: string | null;
 };
 
 function rowToCollection(row: CollectionRow): TrackedCollection {
@@ -116,13 +117,14 @@ function rowToCollection(row: CollectionRow): TrackedCollection {
     creatorHandle: row.creator_handle,
     creatorAddress: row.creator_address,
     creatorEns: row.creator_ens,
+    tokenStandard: row.token_standard === "ERC721" || row.token_standard === "ERC1155" ? row.token_standard : null,
   };
 }
 
 /** Every collection registered for multichain sync. */
 export async function listTrackedCollections(): Promise<TrackedCollection[]> {
   const result = await postgresQuery<CollectionRow>(
-    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address
+    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, token_standard
      FROM plank_multichain_collections
      ORDER BY chain_slug, contract_address`
   );
@@ -199,7 +201,7 @@ export async function listCollectionsForSync(
  */
 export async function getTrackedCollection(chainSlug: string, contractAddress: string): Promise<TrackedCollection | null> {
   const result = await postgresQuery<CollectionRow>(
-    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, creator_ens
+    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, creator_ens, token_standard
      FROM plank_multichain_collections
      WHERE chain_slug = $1 AND contract_address = $2
      LIMIT 1`,
@@ -272,6 +274,16 @@ export async function upsertTrackedCollection(input: {
    * call behaves exactly as before (no dedup attempted).
    */
   nameHint?: string | null;
+  /**
+   * Real, on-chain-verified ERC-165 standard for this contract, when the
+   * calling discovery path checked it directly (e.g.
+   * robinhood-chain-scan.ts's readNftMetadata). Unlike `adapter`, this is a
+   * derived fact about the contract itself, not provenance -- always safe
+   * to overwrite with a freshly-confirmed value on every upsert, never
+   * first-writer-wins. Omit it (unknown/not checked by this caller) and an
+   * existing row's value, if any, is left untouched.
+   */
+  tokenStandard?: "ERC721" | "ERC1155" | null;
 }): Promise<number> {
   // Real bug found live 2026-08-23: unconditionally reassigning `adapter`
   // on every conflict let a second discovery source with the same
@@ -296,14 +308,15 @@ export async function upsertTrackedCollection(input: {
     nameHint: input.nameHint,
   });
   const result = await postgresQuery<{ id: number }>(
-    `INSERT INTO plank_multichain_collections (chain_slug, chain_id, contract_address, adapter, is_vault_backed)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO plank_multichain_collections (chain_slug, chain_id, contract_address, adapter, is_vault_backed, token_standard)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (chain_slug, contract_address)
      DO UPDATE SET
        adapter = plank_multichain_collections.adapter,
-       is_vault_backed = EXCLUDED.is_vault_backed
+       is_vault_backed = EXCLUDED.is_vault_backed,
+       token_standard = COALESCE(EXCLUDED.token_standard, plank_multichain_collections.token_standard)
      RETURNING id`,
-    [input.chainSlug, input.chainId, canonicalAddress, input.adapter, input.isVaultBacked ?? false]
+    [input.chainSlug, input.chainId, canonicalAddress, input.adapter, input.isVaultBacked ?? false, input.tokenStandard ?? null]
   );
   return result.rows[0].id;
 }

@@ -24,6 +24,14 @@ export type TrackedCollection = {
   creatorAddress: string | null;
   /** Real ENS name for creatorAddress, "whenever publicly known" (lib/market/multichain/ens.ts) -- never fabricated. */
   creatorEns: string | null;
+  /**
+   * Real, on-chain-verified ERC-165 standard ("ERC721" | "ERC1155"), when
+   * this row's discovery path checked it directly (robinhood-chain-scan.ts
+   * does; some foreign-chain adapters do not yet). Null means "never
+   * classified" -- callers must treat that the same conservative way as an
+   * explicit ERC1155 (not safe to assume ERC721), never guess.
+   */
+  tokenStandard: "ERC721" | "ERC1155" | null;
 };
 
 /** What a sync writes back for one collection. */
