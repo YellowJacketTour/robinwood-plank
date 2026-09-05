@@ -25,7 +25,7 @@
     "test:market": "tsx --test test/market/*.test.ts",
     "test:postgres": "tsx scripts/verify-postgres-storage.ts",
     "test:e2e": "playwright test",
-    "test": "npm run test:market && npm run test:contracts",
+    "test": "npm run test:contracts && npm run test:market",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
