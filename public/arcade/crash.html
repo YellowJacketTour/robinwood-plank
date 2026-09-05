@@ -279,6 +279,14 @@
   .payout-note { text-align: center; font-size: 11px; color: var(--ink-dim);
     letter-spacing: .01em; margin-bottom: 8px; cursor: help; opacity: .82; }
   .payout-note:hover { opacity: 1; color: var(--ink); }
+  /* The ONE fact players told us they couldn't find live: what you're
+     guaranteed if you lock before the crash. Deliberately louder than the
+     .payout-note detail lines below it -- those explain the mechanism, this
+     states the floor outright so it reads before anyone has to reason
+     through a pari-mutuel formula mid-round. */
+  .payout-floor { text-align: center; font-size: 13px; font-weight: 700;
+    color: var(--ink); letter-spacing: .01em; margin-bottom: 6px; }
+  .payout-floor b { color: #8dffc0; }
   .gear {
     width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
     background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
@@ -966,6 +974,7 @@
   </div>
 
   <div class="deck">
+    <div class="payout-floor" id="payoutFloorHeadline">Lock in time and you're guaranteed at least <b>75%</b> of your stake back — even if you're the only survivor pays more.</div>
     <div class="payout-note" title="Your payout isn't stake × multiplier — everyone who cashes out in time splits the pot by (their stake × their own multiplier). Cashing out earlier than others grows your share; more people cashing out late shrinks everyone's per-share.">
       ⓘ Payout = your share of the shared pot, split by stake × your cash-out multiplier — not a fixed stake × multiplier payout
     </div>
@@ -3062,6 +3071,14 @@ async function connectToChain(rpcUrl, address, pk, label) {
     LOTTERY_ADDR = lotteryAddr; ROUTER_ADDR = routerAddr; BEACON_ADDR = beaconAddr; BANK_ADDR = bankAddr;
     const capLine = document.getElementById("maxPayableDisclosure");
     if (capLine) capLine.textContent = `Targets from 1.01x to ${(Number(maxTarget) / 10_000).toLocaleString()}x. Payouts are parimutuel with a ${(Number(floor) / 100).toFixed(0)}% survivor floor; the target is committed with the bet and executes at settlement -- there is no cash-out.`;
+    // The headline floor fact, populated from the SAME real on-chain value
+    // as capLine above -- never a hardcoded "75%" that could drift from a
+    // future deploy's actual floorBps.
+    const floorHeadline = document.getElementById("payoutFloorHeadline");
+    if (floorHeadline) {
+      const floorPct = (Number(floor) / 100).toFixed(0);
+      floorHeadline.innerHTML = `Lock in time and you're guaranteed at least <b>${floorPct}%</b> of your stake back — surviving alone pays a lot more.`;
+    }
   } catch (_) { /* disclosure is best-effort; never blocks the bet UI */ }
   try {
     bank = new ethers.Contract(BANK_ADDR, ARCADE_ABI.PlankBank, signer);
@@ -4383,6 +4400,26 @@ let privatePendingCommitment = null;
 // server-side with every bet; amendable pre-launch only (re-commit), and
 // always re-synced from the authoritative snapshot's own seat.
 let privateAutoLockArmed = true;
+/**
+ * Real bug fixed 2026-09-05, reported live by testers as "auto-lock
+ * unselects itself right after I select it": privateSetAutoLock optimistically
+ * flips the chip, POSTs the change, then calls refreshPrivatePlaytest() to
+ * re-sync from server truth. If that follow-up snapshot (or an UNRELATED
+ * poll/SSE tick landing in the same window) reflects the room's version from
+ * BEFORE the write committed -- a genuine read-after-write race, not
+ * fabricated -- it silently overwrites the just-confirmed value back to
+ * stale, and the loop can repeat on every following poll tick.
+ *
+ * The commands endpoint's own successful response already returns the
+ * EXACT new room.version that write committed under (see placePlaytestBet /
+ * lockPlaytestBet in lib/playtest-rooms.ts, same DB transaction as the
+ * write). Recording that version here lets paintPrivateSnapshot refuse to
+ * let a snapshot OLDER than our own confirmed write ever touch the chip --
+ * precise, not a timer guess, and it self-clears the moment a snapshot at
+ * or after that version arrives (which is server truth by then, including
+ * for a change made from a second device).
+ */
+let privateAutoLockConfirmedAtVersion = null;
 let privateGraphRound = null;
 let privateFirstSnapshot = true;
 let privateSessionCommitted = 0n;
@@ -4573,7 +4610,7 @@ async function privateSetAutoLock(desired) {
   renderPrivateAutoLockChip();
   if (seat) {
     try {
-      await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
+      const commandResult = await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}/commands`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4583,12 +4620,22 @@ async function privateSetAutoLock(desired) {
           autoLockEnabled: desired,
         }),
       }));
+      // See privateAutoLockConfirmedAtVersion's own docs above: this is the
+      // exact room version our write committed under, straight from the
+      // same DB transaction -- not a guess. A snapshot older than this can
+      // never be allowed to flip the chip back.
+      const confirmedVersion = commandResult?.result?.version;
+      if (confirmedVersion != null) privateAutoLockConfirmedAtVersion = { version: BigInt(confirmedVersion), value: desired };
       if (privatePendingCommitment?.roomId === privateRoomId) privatePendingCommitment.autoLockEnabled = desired;
       toast(desired
         ? `Auto-lock re-armed at ${(Number(seat.requestedTargetBps) / 10_000).toFixed(2)}× for this commitment`
         : "Auto-lock disarmed for this commitment — manual lock only", "success");
       await refreshPrivatePlaytest();
     } catch (error) {
+      // The write never committed -- nothing to protect, and holding a
+      // stale guard here would incorrectly shield the reverted value below
+      // from the next real server snapshot.
+      privateAutoLockConfirmedAtVersion = null;
       privateAutoLockArmed = !desired;
       renderPrivateAutoLockChip();
       toast(`Auto-lock change rejected: ${error.message}`, "error");
@@ -5731,8 +5778,24 @@ function paintPrivateSnapshot(snapshot) {
   }
   // The AUTO-LOCK chip always shows the SERVER's committed state for the
   // player's live (or queued) seat -- never optimistic client state.
+  //
+  // EXCEPT: never let a snapshot OLDER than our own most recently confirmed
+  // write flip it back (see privateAutoLockConfirmedAtVersion's docs) --
+  // that is a read-after-write race, not a real server change, and was the
+  // exact cause of testers seeing the chip "unselect itself" right after
+  // toggling it. Once a snapshot AT OR AFTER that confirmed version
+  // arrives, it is server truth again (including a change from a second
+  // device) and the guard clears itself.
   const armedSource = authoritativeSeat || authoritativeQueuedSeat;
-  if (armedSource && typeof armedSource.autoLockEnabled === "boolean") privateAutoLockArmed = armedSource.autoLockEnabled;
+  const snapshotVersion = snapshot.room.version != null ? BigInt(snapshot.room.version) : null;
+  const staleAgainstOwnWrite = privateAutoLockConfirmedAtVersion && snapshotVersion !== null
+    && snapshotVersion < privateAutoLockConfirmedAtVersion.version;
+  if (staleAgainstOwnWrite) {
+    privateAutoLockArmed = privateAutoLockConfirmedAtVersion.value;
+  } else {
+    privateAutoLockConfirmedAtVersion = null;
+    if (armedSource && typeof armedSource.autoLockEnabled === "boolean") privateAutoLockArmed = armedSource.autoLockEnabled;
+  }
   renderPrivateAutoLockChip();
   let liveBps = snapshot.room.phase === "running" || laggedReplayRemainingMs > 0 ? privateLiveClock.sample(receivedPerfMs) : 10000;
   schedulePrivateCrashTick(snapshot);
