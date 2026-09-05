@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import type { SimulationPolicy, SimulationState } from "@/lib/casino/simulation";
+import { PROB_ONE, type SimulationPolicy, type SimulationState } from "@/lib/casino/simulation";
 import { msToReachMultiplierBps, multiplierBpsAtMs } from "@/lib/playtest-live-shared";
 
-export const PLAYTEST_RULES_SCHEMA = "plank.live-lab.v1";
+export const PLAYTEST_RULES_SCHEMA = "plank.live-lab.v2";
 
 export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   rakeBps: 450n,
@@ -15,21 +15,22 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   protectedPrincipalBps: 5_000n,
   // Playtest test-credit profile (owner decision 2026-09-03, see
   // docs/marketplank/RATIFICATION-ccs2l-2026-09-02.md "Playtest test-credit
-  // profile"): 65% of the community leg funds the Powerboard prize, the other
+  // profile"): 65% of the community leg funds the lottery prize, the other
   // 35% is retained (50/50 protected principal / emission buffer) so the vault
   // visibly compounds. Mainnet/ratified economics are untouched by this value.
   powerboardFundingBps: 6_500n,
   crashSeed: 10_000n,
   emissionBufferCap: 1_000_000n,
   lotteryFounderFeeBps: 1_000n,
-  // 50,000-credit base: funded gate = minimumLotteryGross(50,000, 10% fee)
-  // = 55,555 gross; reachable in the laboratory at minimum stakes. The prior
-  // 1,000,000 base (1,111,111 gross) was unreachable at ~11-22 credits/round.
-  lotteryInitialBase: 50_000n,
-  lotteryMinimumIncrease: 50_000n,
-  lotteryBaseGrowthBps: 500n,
-  lotteryMinimumBaseStep: 50_000n,
-  consolation: 0n,
+  // The lottery law (2026-09-05, RESEARCH-game-theory-lottery-seed-resolution):
+  // the SAME parameters the contracts deploy with. Flat ceiling 1 in 16;
+  // kappa = 2 (the pool keeps at least half of every contribution in
+  // expectation); progressive carve x(P) = 10% + 20% * P / (P + 250,000 cr).
+  lotteryOddsOneIn: 16n,
+  lotteryKappaBps: 20_000n,
+  carveMinBps: 1_000n,
+  carveMaxBps: 3_000n,
+  carveHalfSaturation: 250_000n,
   allocationRule: "ccs-2l",
   minimumPlayers: 2,
   // 500 credits = 0.0005 ETH, about $1.22 at the current public reference.
@@ -37,39 +38,21 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   minimumStake: 500n,
 };
 
-/** Prize-profile tuples the public laboratory has shipped, oldest first. A
- * stored room policy equal to one of these is advanced to the DEFAULT at the
- * next round boundary (never mid-flight); see startPlaytestRound. */
-export const PLAYTEST_PRIZE_PROFILES = {
-  // 2026-08 legacy: 25% of the community leg, 100k base.
-  v1: { powerboardFundingBps: 2_500n, lotteryInitialBase: 100_000n, lotteryMinimumIncrease: 1_000n, lotteryBaseGrowthBps: 100n, lotteryMinimumBaseStep: 1_000n },
-  // 2026-09-02 ratification-era default: full community leg, 1M base.
-  v2: { powerboardFundingBps: 10_000n, lotteryInitialBase: 1_000_000n, lotteryMinimumIncrease: 50_000n, lotteryBaseGrowthBps: 500n, lotteryMinimumBaseStep: 50_000n },
-} as const;
-export const PLAYTEST_PRIZE_PROFILE_KEYS = ["powerboardFundingBps", "lotteryInitialBase", "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep"] as const;
-export const CURRENT_PLAYTEST_PRIZE_PROFILE = "v3";
+export const CURRENT_PLAYTEST_PRIZE_PROFILE = "v4-actuarial";
+/** The lottery-law keys a stored policy must carry to be current. */
+export const PLAYTEST_PRIZE_PROFILE_KEYS = ["powerboardFundingBps", "lotteryOddsOneIn", "lotteryKappaBps", "carveMinBps", "carveMaxBps", "carveHalfSaturation"] as const;
+/** Superseded stored-policy keys (the cycle-base / reset-reserve / must-hit model). */
+export const LEGACY_LOTTERY_POLICY_KEYS = ["lotteryInitialBase", "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep", "consolation"] as const;
 
-/** Which superseded prize profile a stored policy carries, or null when it
- * already matches the current default (or is a bespoke host edit). */
-export function legacyPlaytestPrizeProfile(policy: SimulationPolicy): keyof typeof PLAYTEST_PRIZE_PROFILES | null {
-  for (const [name, profile] of Object.entries(PLAYTEST_PRIZE_PROFILES) as Array<[keyof typeof PLAYTEST_PRIZE_PROFILES, Record<string, bigint>]>) {
-    if (PLAYTEST_PRIZE_PROFILE_KEYS.every((key) => policy[key] === profile[key])) return name;
-  }
-  return null;
-}
-
-/** Round-boundary lottery re-basing that accompanies a prize-profile upgrade.
- * Only an UNSEALED, undisplayed target is lowered: nothing has been promised
- * (netPrize 0, no rollover, no armed draw) and the cycle base still sits at
- * the superseded profile's initial base. Funding already accrued
- * (pendingFunding, resetReserve, principal) is never touched, so accounted
- * assets are conserved exactly. Returns null when nothing is eligible. */
-export function rebasePlaytestLotteryTarget(state: SimulationState, fromInitialBase: bigint, toInitialBase: bigint): SimulationState | null {
-  const lottery = state.lottery;
-  if (fromInitialBase === toInitialBase) return null;
-  if (!lottery.awaitingSeal || lottery.readyForDraw || lottery.netPrize !== 0n || lottery.rollover !== 0n) return null;
-  if (lottery.cycleBase !== fromInitialBase || lottery.nextPrizeTarget !== fromInitialBase) return null;
-  return { ...state, lottery: { ...lottery, cycleBase: toInitialBase, nextPrizeTarget: toInitialBase } };
+/** A stored policy written by the pre-actuarial engine (any of the v1/v2/v3
+ * cycle-base profiles) is advanced to the current default at the next round
+ * boundary (never mid-flight); see startPlaytestRound. Returns the legacy
+ * profile name, or null when the policy already carries the current law. */
+export function legacyPlaytestPrizeProfile(raw: unknown): "pre-actuarial" | null {
+  const stored = (raw ?? {}) as Record<string, unknown>;
+  const missingCurrent = PLAYTEST_PRIZE_PROFILE_KEYS.some((key) => stored[key] === undefined);
+  const carriesLegacy = LEGACY_LOTTERY_POLICY_KEYS.some((key) => stored[key] !== undefined);
+  return missingCurrent || carriesLegacy ? "pre-actuarial" : null;
 }
 
 /**
@@ -112,34 +95,75 @@ export function playtestRulesHash(policy: SimulationPolicy): string {
 const POLICY_BIGINT_KEYS = new Set([
   "rakeBps", "rakeFloorBps", "rakeStepBps", "rakeVolumeStep",
   "keeperRewardBps", "protectedPrincipalBps", "crashSeed",
-  "emissionBufferCap", "lotteryFounderFeeBps", "lotteryInitialBase",
-  "lotteryMinimumIncrease", "lotteryBaseGrowthBps", "lotteryMinimumBaseStep",
-  "consolation", "minimumStake", "powerboardFundingBps",
+  "emissionBufferCap", "lotteryFounderFeeBps",
+  "lotteryOddsOneIn", "lotteryKappaBps", "carveMinBps", "carveMaxBps", "carveHalfSaturation",
+  "minimumStake", "powerboardFundingBps",
 ]);
 
+/** Revive a stored policy. Unknown (legacy) keys are dropped; missing current
+ * keys take the laboratory default, so a pre-actuarial room parses into a
+ * valid current policy (its rules hash then changes at the round boundary). */
 export function parsePolicy(raw: unknown): SimulationPolicy {
   const value = raw as Record<string, unknown>;
-  const revived: Record<string, unknown> = { ...value };
-  for (const key of POLICY_BIGINT_KEYS) {
-    const fallback = key in DEFAULT_PLAYTEST_POLICY
-      ? DEFAULT_PLAYTEST_POLICY[key as keyof SimulationPolicy]
-      : undefined;
-    revived[key] = BigInt(String(value[key] ?? fallback));
+  const revived: Record<string, unknown> = {};
+  for (const key of Object.keys(DEFAULT_PLAYTEST_POLICY)) {
+    revived[key] = value[key] ?? DEFAULT_PLAYTEST_POLICY[key as keyof SimulationPolicy];
   }
+  for (const key of POLICY_BIGINT_KEYS) revived[key] = BigInt(String(revived[key]));
+  revived.minimumPlayers = Number(revived.minimumPlayers);
   return revived as unknown as SimulationPolicy;
 }
 
 const STATE_BIGINT_KEYS = new Set([
-  "iteration", "protectedPrincipal", "emissionBuffer", "cycle", "epoch",
-  "cycleBase", "netPrize", "pendingFunding", "resetReserve", "rollover",
-  "nextPrizeTarget", "highWaterPrize", "freshWagers", "grossRake",
+  "iteration", "protectedPrincipal", "emissionBuffer",
+  "pool", "committedPrize", "draws", "hits", "highWaterPrize", "lastThresholdE18", "lastContribution",
+  "freshWagers", "grossRake",
   "keeperRewards", "burned", "communityFunded", "powerboardFunded", "crashFounderRake",
-  "lotteryGrossConstituted", "lotteryFounderFees", "lotteryFounderFeesOnRollover",
-  "playerCrashPayouts", "lotteryWinnerPayouts", "consolationPayouts",
+  "lotteryGrossConstituted", "lotteryFounderFees", "lotterySeeded",
+  "playerCrashPayouts", "lotteryWinnerPayouts",
   "vaultRemainders", "externalLotteryFunding", "flightSeeded",
+  // legacy lottery shape (migrated below)
+  "cycle", "epoch", "cycleBase", "netPrize", "pendingFunding", "resetReserve", "rollover", "nextPrizeTarget",
+  "lotteryFounderFeesOnRollover", "consolationPayouts",
 ]);
 
+/** Founder fee the pre-actuarial engine had NOT yet charged on money still
+ * sitting in its gross buckets (pendingFunding, resetReserve). */
+const LEGACY_FOUNDER_FEE_BPS = 1_000n;
+
+/**
+ * Migrate a pre-actuarial lottery snapshot (cycleBase / netPrize / rollover /
+ * pendingFunding / resetReserve) to the pool model, conserving accounted
+ * assets exactly: everything already net (netPrize, rollover) joins the pool
+ * as is; the gross buckets are charged the founder fee they would have paid
+ * at their seal and join net. The whole pool is immediately drawable.
+ */
+export function migrateLegacyLotteryState(state: Record<string, unknown>): void {
+  const lottery = state.lottery as Record<string, unknown> | undefined;
+  if (!lottery || lottery.pool !== undefined || lottery.netPrize === undefined) return;
+  const big = (key: string) => BigInt(String(lottery[key] ?? "0"));
+  const gross = big("pendingFunding") + big("resetReserve");
+  const fee = (gross * LEGACY_FOUNDER_FEE_BPS) / 10_000n;
+  const pool = big("netPrize") + big("rollover") + gross - fee;
+  const totals = (state.totals ??= {}) as Record<string, unknown>;
+  totals.lotteryFounderFees = (BigInt(String(totals.lotteryFounderFees ?? "0")) + fee).toString();
+  totals.lotteryGrossConstituted = (BigInt(String(totals.lotteryGrossConstituted ?? "0")) + gross).toString();
+  totals.lotterySeeded ??= "0";
+  const highWater = big("highWaterPrize");
+  state.lottery = {
+    pool: pool.toString(),
+    committedPrize: pool.toString(),
+    draws: "0",
+    hits: String(lottery.cycle ?? "0"),
+    highWaterPrize: (highWater > pool ? highWater : pool).toString(),
+    lastThresholdE18: "0",
+    lastContribution: "0",
+  };
+}
+
 export function parseSimulationState(raw: unknown): SimulationState {
+  const plain = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  migrateLegacyLotteryState(plain);
   const revive = (value: unknown, key = ""): unknown => {
     if (STATE_BIGINT_KEYS.has(key)) return BigInt(String(value));
     if (Array.isArray(value)) return value.map((child) => revive(child));
@@ -149,43 +173,43 @@ export function parseSimulationState(raw: unknown): SimulationState {
     }
     return value;
   };
-  const state = revive(raw) as SimulationState;
-  // Snapshots produced before per-round Powerboard provenance was introduced
+  const state = revive(plain) as SimulationState;
+  // Snapshots produced before per-round lottery provenance was introduced
   // remain replayable; absence means no historically attributed contribution.
   state.totals.powerboardFunded ??= 0n;
   state.totals.flightSeeded ??= 0n;
+  state.totals.lotterySeeded ??= 0n;
+  state.lottery.draws ??= 0n;
+  state.lottery.hits ??= 0n;
+  state.lottery.lastThresholdE18 ??= 0n;
+  state.lottery.lastContribution ??= 0n;
   return state;
 }
 
 const EDITABLE_SIMULATION_AMOUNTS = new Set([
   "protectedPrincipal", "emissionBuffer",
-  "lottery.cycleBase", "lottery.netPrize", "lottery.highWaterPrize",
-  "lottery.pendingFunding", "lottery.resetReserve", "lottery.rollover", "lottery.nextPrizeTarget",
+  "lottery.pool", "lottery.committedPrize", "lottery.highWaterPrize",
   "totals.burned", "totals.communityFunded", "totals.crashFounderRake", "totals.lotteryFounderFees",
 ]);
-const EDITABLE_SIMULATION_FLAGS = new Set(["lottery.awaitingSeal", "lottery.readyForDraw"]);
 
 export function injectSimulationState(current: SimulationState, patch: unknown): SimulationState {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new RangeError("Simulation changes must be an object.");
   const state = parseSimulationState(serializeBigInts(current)) as unknown as Record<string, unknown>;
   for (const [path, value] of Object.entries(patch as Record<string, unknown>)) {
-    if (!EDITABLE_SIMULATION_AMOUNTS.has(path) && !EDITABLE_SIMULATION_FLAGS.has(path)) throw new RangeError(`${path} cannot be injected.`);
+    if (!EDITABLE_SIMULATION_AMOUNTS.has(path)) throw new RangeError(`${path} cannot be injected.`);
     const [parent, child] = path.split(".");
     const target = child ? state[parent] as Record<string, unknown> : state;
     if (!target || typeof target !== "object") throw new RangeError(`${path} is unavailable.`);
-    if (EDITABLE_SIMULATION_FLAGS.has(path)) {
-      if (typeof value !== "boolean") throw new RangeError(`${path} must be true or false.`);
-      target[child] = value;
-    } else {
-      if (typeof value !== "string" || !/^\d{1,30}$/.test(value)) throw new RangeError(`${path} must be a non-negative integer string.`);
-      target[child || parent] = BigInt(value);
-    }
+    if (typeof value !== "string" || !/^\d{1,30}$/.test(value)) throw new RangeError(`${path} must be a non-negative integer string.`);
+    target[child || parent] = BigInt(value);
   }
   const lottery = state.lottery as Record<string, unknown>;
-  if (lottery.awaitingSeal && lottery.readyForDraw) throw new RangeError("A lottery cannot await sealing and be ready for a draw simultaneously.");
-  if (lottery.readyForDraw && BigInt(String(lottery.netPrize)) <= 0n) throw new RangeError("A draw-ready lottery needs a positive prize.");
-  if (BigInt(String(lottery.highWaterPrize)) < BigInt(String(lottery.netPrize))) lottery.highWaterPrize = lottery.netPrize;
-  if (BigInt(String(lottery.cycleBase)) <= 0n || BigInt(String(lottery.nextPrizeTarget)) <= 0n) throw new RangeError("Lottery bases and targets must stay positive.");
+  // Injecting a pool alone makes it the next prize (mirrors a funded, settled board).
+  if ((patch as Record<string, unknown>)["lottery.pool"] !== undefined && (patch as Record<string, unknown>)["lottery.committedPrize"] === undefined) {
+    lottery.committedPrize = lottery.pool;
+  }
+  if (BigInt(String(lottery.committedPrize)) > BigInt(String(lottery.pool))) throw new RangeError("The committed prize cannot exceed the pool.");
+  if (BigInt(String(lottery.highWaterPrize)) < BigInt(String(lottery.pool))) lottery.highWaterPrize = lottery.pool;
   return state as unknown as SimulationState;
 }
 
@@ -208,28 +232,29 @@ export function simulationCrashBps(revealHex: string): bigint {
   return bucket === 0n ? 10_000n : 100_000_000n / (10_000n - bucket);
 }
 
-export const PLAYTEST_POWERBOARD_ODDS = 16;
+/** The lottery machine shows this many balls; ball 1 is the winning zone. */
+export const PLAYTEST_POWERBOARD_BALLS = 16;
 
-/** Exact integer presentation quote for a linear-weight two-stage voucher.
- * This never enters settlement; it makes the already-ratified probability
- * visible without floating-point drift or a wallet-based Sybil bonus. */
-export function powerboardVoucherQuote(myWeight: bigint, totalWeight: bigint, netPrize: bigint, hitOddsOneIn = PLAYTEST_POWERBOARD_ODDS) {
-  if (myWeight < 0n || totalWeight < 0n || netPrize < 0n || myWeight > totalWeight) throw new RangeError("invalid voucher quote amounts");
-  if (!Number.isSafeInteger(hitOddsOneIn) || hitOddsOneIn < 1) throw new RangeError("invalid hit odds");
-  const odds = BigInt(hitOddsOneIn);
-  return {
-    conditionalSharePpm: totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n,
-    combinedOddsOneInCeil: myWeight > 0n ? (totalWeight * odds + myWeight - 1n) / myWeight : 0n,
-    probabilityWeightedPrize: totalWeight > 0n ? netPrize * myWeight / (totalWeight * odds) : 0n,
-  };
-}
-
-/** Public, deterministic numbered draw derived from the already-committed reveal. */
+/**
+ * Public, deterministic uniform draw derived from the already-committed
+ * reveal: `sampleE18` in [0, PROB_ONE) is what the engine compares against
+ * the round's actuarial threshold (hit iff sample < threshold). `drawnNumber`
+ * is the presentation ball (1..16) the sample lands in; ball 1 is the
+ * winning zone at the flat ceiling, and inside it the exact threshold decides.
+ */
 export function powerboardRoundDraw(revealHex: string) {
   if (!/^[0-9a-f]{64}$/.test(revealHex)) throw new RangeError("invalid reveal");
-  const digest = createHash("sha256").update(`${revealHex}:powerboard:number`).digest();
-  const drawnNumber = digest.readUInt32BE(0) % PLAYTEST_POWERBOARD_ODDS + 1;
-  return { drawnNumber, winningNumber: 1, oddsOneIn: PLAYTEST_POWERBOARD_ODDS, rawHit: drawnNumber === 1 };
+  let digest = createHash("sha256").update(`${revealHex}:powerboard:number`).digest("hex");
+  const space = 1n << 256n;
+  const limit = space - (space % PROB_ONE);
+  let sample = BigInt(`0x${digest}`);
+  while (sample >= limit) {
+    digest = createHash("sha256").update(digest, "hex").digest("hex");
+    sample = BigInt(`0x${digest}`);
+  }
+  const sampleE18 = sample % PROB_ONE;
+  const drawnNumber = Number((sampleE18 * BigInt(PLAYTEST_POWERBOARD_BALLS)) / PROB_ONE) + 1;
+  return { sampleE18, drawnNumber, balls: PLAYTEST_POWERBOARD_BALLS, winningNumber: 1 };
 }
 
 /** Flight duration until the committed crash multiplier, via the ONE shared

@@ -3,38 +3,31 @@ import { BOOTSTRAP_SECRET } from "../../playwright.playtest.config";
 
 /**
  * REQUIREMENT: "ensure the lottery does get funded and ensure if there is a
- * lottery funded it can and does pay out on a 1."
+ * lottery funded it can and does pay out."
  *
  * Proven through the REAL server path (Next.js routes -> lib/playtest-rooms.ts
- * transactions -> real PostgreSQL; nothing mocked):
+ * transactions -> real PostgreSQL; nothing mocked), under the 2026-09-05 law
+ * (docs/marketplank/RESEARCH-game-theory-lottery-seed-resolution-2026-09-05.md):
  *
- *  (a) FUNDING — every qualified settled round routes exactly
- *      community-leg × powerboardFundingBps into the Powerboard prize
- *      pipeline. With the current configuration (4.50% rake, ratified
- *      40/40/20 split, playtest powerboardFundingBps = 65% of the community
- *      leg — RATIFICATION "Playtest test-credit profile") a 2 × 10,000-credit
- *      round contributes rake 900 → community 360 → powerboardFundingAdded
- *      234 (the retained 126 compounds the vault), and lottery.pendingFunding
- *      strictly increases by at least that amount.
+ *  (a) FUNDING -- every qualified settled round routes exactly
+ *      community-leg x powerboardFundingBps into the prize pool, net of the
+ *      10% inflow fee, at once. A 2 x 10,000-credit round: rake 900 ->
+ *      community 360 -> powerboardFundingAdded 234 -> pool +211.
  *
- *  (b) NEGATIVE GATE — while the prize is < 100% funded there is NO draw at
- *      all, even when the host explicitly asks for a "hit": the settled
- *      event reports lotteryEvent "funding", drawActive false, no staged
- *      number and no winner (the e10225e behavior, preserved).
+ *  (b) THE GENESIS ROUND HAS NO DRAW -- nothing was on the board before it
+ *      (prize snapshot): lotteryEvent "funding", drawActive false, no winner,
+ *      even when the host explicitly asks for a "hit".
  *
- *  (c) FUNDED PAYOUT — a funded prize is REACHABLE with current config via
- *      the host console's laboratory funding injection (the real
- *      admin.simulation path; the funded-gate itself is untouched — sealing
- *      still requires full minimumLotteryGross coverage AND a sealed reset
- *      reserve before readyForDraw ever arms). Once funded, a draw round
- *      pays the displayed prize to a voucher holder, the ledger shows the
- *      jackpot payment, the cycle base ratchets by max(5%, 50k), and the
- *      reset reserve refills the next prize.
+ *  (c) EVERY LATER ROUND IS A DRAW among that round's seats, priced by the
+ *      round's own contribution: the settled event carries the exact
+ *      threshold, the committed sample and the prize it drew for; a natural
+ *      hit is exactly sample < threshold and the permissionless keeper
+ *      derives that same outcome.
  *
- *  (d) PAYS ON A 1 — the settled event's committed draw satisfies
- *      forcedForSimulation === (drawnNumber !== 1): whenever the committed
- *      reveal-derived ball IS 1, the payout is the natural outcome (and the
- *      permissionless keeper derives exactly that outcome from the reveal).
+ *  (d) A HIT PAYS EXACTLY W -- the winner (a seat of THAT round) is credited
+ *      the carve's winner take of the prize that was on the board, and the
+ *      next board opens at exactly S plus the hit round's own contribution.
+ *      Nothing is forced; a host-forced laboratory hit is flagged.
  */
 
 type Json = Record<string, unknown>;
@@ -93,7 +86,7 @@ async function runRound(host: Page, guest: Page, roomId: string, lotteryOutcome:
   return { snap, payload };
 }
 
-test("lottery funding accrues per qualified round; an unfunded prize never draws; a funded prize pays out", async ({ browser }) => {
+test("lottery funding accrues per qualified round; the genesis round never draws; a funded prize pays exactly W to a seat of the drawing round", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -119,85 +112,79 @@ test("lottery funding accrues per qualified round; an unfunded prize never draws
   });
   expect(joined.status, JSON.stringify(joined.json)).toBe(201);
 
-  // ── (a) FUNDING: two qualified rounds, exact per-round contribution. ──
+  // -- (a)+(b) GENESIS: funded, no draw, even though the host demands a hit. --
   const before = lotteryState(await snapshot(host, roomId));
-  const round1 = await runRound(host, guest, roomId, "none");
+  expect(String(before.pool)).toBe("0");
+  const round1 = await runRound(host, guest, roomId, "hit");
   expect(round1.payload.qualified).toBe(true);
   expect(String(round1.payload.powerboardFundingAdded), "65% of the community leg routed to the prize").toBe("234");
+  expect(round1.payload.lotteryEvent, "nothing was on the board before the genesis round").toBe("funding");
+  const genesisDraw = (round1.payload.powerboardDraw ?? {}) as Json;
+  expect(genesisDraw.drawActive).toBe(false);
+  expect(genesisDraw.payableHit).toBe(false);
+  expect(round1.payload.lotteryWinner).toBeNull();
   const afterR1 = lotteryState(round1.snap);
-  expect(BigInt(String(afterR1.pendingFunding)) - BigInt(String(before.pendingFunding)))
-    .toBeGreaterThanOrEqual(234n);
+  expect(String(afterR1.pool), "234 gross - 10% fee = 211 banked at once").toBe("211");
+  expect(String(afterR1.committedPrize), "the board is set at settlement").toBe("211");
 
-  const round2 = await runRound(host, guest, roomId, "hit"); // ← host DEMANDS a hit while unfunded
-  // ── (b) NEGATIVE GATE: no draw of any kind below 100% funded. ──
-  expect(String(round2.payload.powerboardFundingAdded)).toBe("234");
-  expect(round2.payload.lotteryEvent, "an unfunded prize can only be 'funding'").toBe("funding");
-  const unfundedDraw = (round2.payload.powerboardDraw ?? {}) as Json;
-  expect(unfundedDraw.drawActive, "no staged number while funding").toBe(false);
-  expect(unfundedDraw.payableHit).toBe(false);
-  expect(round2.payload.lotteryWinner, "nobody is paid below 100% funded").toBeNull();
-  const afterR2 = lotteryState(round2.snap);
-  expect(BigInt(String(afterR2.pendingFunding))).toBeGreaterThan(BigInt(String(afterR1.pendingFunding)));
-  expect(String(afterR2.cycleBase)).toBe(String(before.cycleBase)); // no ratchet without a paid jackpot
+  // -- (c) EVERY later round is a priced draw (natural), keeper-derived. --
+  const round2 = await runRound(host, guest, roomId, "none");
+  expect(["hit", "miss"]).toContain(String(round2.payload.lotteryEvent));
+  const draw2 = (round2.payload.powerboardDraw ?? {}) as Json;
+  expect(draw2.drawActive).toBe(true);
+  expect(String(round2.payload.lotteryPrize), "drew for the prize that was on the board").toBe("211");
+  const PROB_ONE = 10n ** 18n;
+  expect(BigInt(String(draw2.thresholdE18)), "a 211-credit prize is in the flat regime: 1 in 16").toBe(PROB_ONE / 16n);
+  const naturalHit = BigInt(String(draw2.sampleE18)) < BigInt(String(draw2.thresholdE18));
+  expect(draw2.naturalHit).toBe(naturalHit);
+  expect(round2.payload.lotteryEvent).toBe(naturalHit ? "hit" : "miss");
+  expect(draw2.forcedForSimulation, "a natural draw is never flagged as forced").toBe(false);
 
-  // ── (c) reach FULL funding via the host console's laboratory injection —
-  // the REAL admin.simulation server path; the sealing/reset-reserve gate
-  // below still does all of its own arithmetic. ──
-  await command(host, roomId, { action: "adminSimulation", simulation: { "lottery.pendingFunding": "5000000" } });
+  // -- put a real prize on the board through the host console laboratory
+  // injection (the REAL admin.simulation path) and settle a draw round. --
+  await command(host, roomId, { action: "adminSimulation", simulation: { "lottery.pool": "90000" } });
+  const boardBefore = lotteryState(await snapshot(host, roomId));
+  expect(String(boardBefore.committedPrize)).toBe("90000");
+  const balancesBefore = new Map((((await snapshot(host, roomId)).members ?? []) as Json[]).map((m) => [String(m.id), BigInt(String(m.balance))]));
 
-  // A sealing round: the engine itself must seal the epoch (full
-  // minimumLotteryGross coverage), fund the reset reserve, and arm the draw.
-  const sealing = await runRound(host, guest, roomId, "none");
-  expect(sealing.payload.lotteryEvent).toBe("sealed");
-  const armed = lotteryState(sealing.snap);
-  expect(armed.readyForDraw, "draw arms only with prize + reset reserve sealed").toBe(true);
-  const displayedPrize = BigInt(String(armed.netPrize));
-  expect(displayedPrize).toBeGreaterThanOrEqual(50_000n); // ≥ the playtest cycle base
-  const reserveBefore = BigInt(String(armed.resetReserve));
-  expect(reserveBefore).toBeGreaterThan(displayedPrize); // covers the ratcheted next prize gross
-  const cycleBaseBefore = BigInt(String(armed.cycleBase));
-  const balancesBefore = new Map(((sealing.snap.members ?? []) as Json[]).map((m) => [String(m.id), BigInt(String(m.balance))]));
-
-  // ── (c)+(d) the funded draw round: pays the DISPLAYED prize. ──
+  // -- (d) forced laboratory hit: pays exactly W(90,000) to a seat of THIS round. --
   const jackpot = await runRound(host, guest, roomId, "hit");
   expect(jackpot.payload.lotteryEvent).toBe("hit");
   const draw = (jackpot.payload.powerboardDraw ?? {}) as Json;
   expect(draw.drawActive).toBe(true);
   expect(draw.payableHit).toBe(true);
-  expect(draw.winningNumber, "ball 1 is the jackpot ball").toBe(1);
-  // The payout-on-1 law: the outcome is natural exactly when the committed
-  // reveal-derived ball is 1 — so a funded prize DOES pay on a 1, and the
-  // permissionless keeper (tickPlaytestRound) derives that same outcome.
-  expect(draw.forcedForSimulation).toBe(Number(draw.drawnNumber) !== 1);
-
+  // 90,000 credits against a 234-credit contribution: the actuarial branch binds (below 1 in 16).
+  const threshold = BigInt(String(draw.thresholdE18));
+  expect(threshold).toBeLessThan(PROB_ONE / 16n);
+  expect(threshold).toBe((234n * PROB_ONE * 10_000n) / (20_000n * 76_236n));
+  const natural = BigInt(String(draw.sampleE18)) < threshold;
+  expect(draw.naturalHit).toBe(natural);
+  expect(draw.forcedForSimulation, "forced exactly when the sample would not have hit").toBe(!natural);
+  // S(90,000) = 13,764 -> W = 76,236: displayed == redeemable.
+  expect(String(jackpot.payload.lotteryWinnerPaid)).toBe("76236");
+  expect(String(jackpot.payload.lotterySeeded)).toBe("13764");
   const winner = (jackpot.payload.lotteryWinner ?? null) as Json | null;
-  expect(winner, "a funded hit names a paid winner").toBeTruthy();
-  expect(BigInt(String(winner!.payout)), "winner is paid the displayed prize").toBe(displayedPrize);
+  expect(winner, "a hit names a paid winner").toBeTruthy();
+  expect(BigInt(String(winner!.payout))).toBe(76_236n);
+  expect(String(winner!.round)).toBe(String((jackpot.snap.room as Json).currentRound));
+  const roundSeatIds = ((jackpot.snap.seats ?? []) as Json[]).map((seat) => String(seat.userId));
+  expect(roundSeatIds, "round-only eligibility: the winner sat in the drawing round").toContain(String(winner!.userId));
 
-  // Ledger: JACKPOT paid to the winner's balance through the real member row.
-  const afterState = lotteryState(jackpot.snap);
+  // Ledger: the jackpot lands on the winner balance through the real member row.
   const balancesAfter = new Map(((jackpot.snap.members ?? []) as Json[]).map((m) => [String(m.id), BigInt(String(m.balance))]));
   const winnerId = String(winner!.userId);
-  const winnerSeatNet = ((jackpot.snap.seats ?? []) as Json[]).find((seat) => String(seat.userId) === winnerId);
-  const crashDelta = BigInt(String(winnerSeatNet?.payout ?? "0")) - 10_000n; // seat stake was escrowed at bet time
-  expect(balancesAfter.get(winnerId)! - balancesBefore.get(winnerId)!)
-    .toBe(displayedPrize + crashDelta);
+  const winnerSeat = ((jackpot.snap.seats ?? []) as Json[]).find((seat) => String(seat.userId) === winnerId);
+  const crashDelta = BigInt(String(winnerSeat?.payout ?? "0")) - 10_000n; // seat stake was escrowed at bet time
+  expect(balancesAfter.get(winnerId)! - balancesBefore.get(winnerId)!).toBe(76_236n + crashDelta);
 
-  // Cycle base ratchets by max(5%, 50k) and the reset reserve refills the
-  // NEXT prize (netPrize is immediately re-seeded from the sealed reserve).
-  const cycleBaseAfter = BigInt(String(afterState.cycleBase));
-  const minStep = cycleBaseBefore * 500n / 10_000n > 50_000n ? cycleBaseBefore * 500n / 10_000n : 50_000n;
-  expect(cycleBaseAfter).toBe(cycleBaseBefore + minStep);
-  expect(BigInt(String(afterState.netPrize)), "next prize re-seeded from the reset reserve").toBeGreaterThanOrEqual(cycleBaseAfter);
-  // The reset reserve was consumed to seed the new prize and immediately
-  // refills (from the surplus pending funding) toward the NEXT ratcheted
-  // base: minimumLotteryGross(nextCycleBase(100,000)=150,000, 10% fee)
-  // = 166,666 gross.
-  expect(BigInt(String(afterState.resetReserve))).toBe(166_666n);
-  void reserveBefore;
+  // The next board: exactly S plus the hit round's own net contribution (211).
+  const afterState = lotteryState(jackpot.snap);
+  expect(String(afterState.pool)).toBe(String(13_764n + 211n));
+  expect(String(afterState.committedPrize)).toBe(String(13_764n + 211n));
+  expect(String(jackpot.payload.lotteryPrizeAfter)).toBe(String(13_764n + 211n));
+  expect(BigInt(String(afterState.hits))).toBeGreaterThanOrEqual(1n);
 
-  console.log(`funding/round=234 threshold(prize gross)=55555 displayedPrize=${displayedPrize} ` +
-    `payout=${winner!.payout} ratchet=${cycleBaseBefore}->${cycleBaseAfter} nextPrize=${afterState.netPrize}`);
+  console.log(`funding/round=234 (net 211) prize=90000 W=76236 S=13764 threshold=${threshold} natural=${natural} winner=${winner!.displayName}`);
 
   await hostContext.close();
   await guestContext.close();

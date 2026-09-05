@@ -1,12 +1,12 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { minimumLotteryGross } from "../../lib/casino/economics";
-import { accountedAssets, initialSimulationState, simulateIteration } from "../../lib/casino/simulation";
+import { accountedAssets, carvePrize, initialSimulationState, PROB_ONE, simulateIteration } from "../../lib/casino/simulation";
 import {
   bettingRoundId,
-  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, legacyPlaytestPrizeProfile, multiplierAt,
-  newcomerSeatPlan, parsePolicy, parseSimulationState, PLAYTEST_PRIZE_PROFILES, playtestRulesHash, rebasePlaytestLotteryTarget, serializeBigInts,
-  simulationCrashBps, powerboardRoundDraw, powerboardVoucherQuote,
+  canonicalJson, crashDurationMs, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState, legacyPlaytestPrizeProfile,
+  migrateLegacyLotteryState, multiplierAt, newcomerSeatPlan, parsePolicy, parseSimulationState, PLAYTEST_POWERBOARD_BALLS, playtestRulesHash,
+  serializeBigInts, simulationCrashBps, powerboardRoundDraw,
 } from "../../lib/playtest-room-core";
 
 test("a genuine newcomer receives exactly one affordable welcome-flight seat", () => {
@@ -32,26 +32,15 @@ test("a multiplayer lobby advances once and keeps every commitment in one round"
   assert.throws(() => bettingRoundId("running", 17n), /closed/);
 });
 
-test("every committed reveal produces one bounded deterministic Powerboard number", () => {
+test("every committed reveal produces one bounded deterministic uniform sample and presentation ball", () => {
   const reveal = "ab".repeat(32);
   const first = powerboardRoundDraw(reveal);
   assert.deepEqual(first, powerboardRoundDraw(reveal));
-  assert.ok(first.drawnNumber >= 1 && first.drawnNumber <= first.oddsOneIn);
-  assert.equal(first.rawHit, first.drawnNumber === first.winningNumber);
-});
-
-test("Powerboard voucher quote exposes exact two-stage odds and is Sybil invariant", () => {
-  const whole = powerboardVoucherQuote(25_000n, 100_000n, 1_600_000n, 16);
-  assert.deepEqual(whole, {
-    conditionalSharePpm: 250_000n,
-    combinedOddsOneInCeil: 64n,
-    probabilityWeightedPrize: 25_000n,
-  });
-  const splitA = powerboardVoucherQuote(10_000n, 100_000n, 1_600_000n, 16);
-  const splitB = powerboardVoucherQuote(15_000n, 100_000n, 1_600_000n, 16);
-  assert.equal(splitA.conditionalSharePpm + splitB.conditionalSharePpm, whole.conditionalSharePpm);
-  assert.equal(splitA.probabilityWeightedPrize + splitB.probabilityWeightedPrize, whole.probabilityWeightedPrize);
-  assert.throws(() => powerboardVoucherQuote(100_001n, 100_000n, 1n), /invalid/);
+  assert.ok(first.sampleE18 >= 0n && first.sampleE18 < PROB_ONE);
+  assert.ok(first.drawnNumber >= 1 && first.drawnNumber <= PLAYTEST_POWERBOARD_BALLS);
+  assert.equal(first.drawnNumber, Number((first.sampleE18 * BigInt(PLAYTEST_POWERBOARD_BALLS)) / PROB_ONE) + 1, "the ball is the sample's sixteenth");
+  assert.equal(first.winningNumber, 1);
+  assert.throws(() => powerboardRoundDraw("nope"), /invalid reveal/);
 });
 
 test("room rules hash is canonical and stable across key order", () => {
@@ -61,24 +50,23 @@ test("room rules hash is canonical and stable across key order", () => {
   assert.match(playtestRulesHash(DEFAULT_PLAYTEST_POLICY), /^[0-9a-f]{64}$/);
 });
 
-test("admin scenario injection changes only allowlisted laboratory state", () => {
+test("admin scenario injection changes only allowlisted laboratory state; an injected pool is the next prize", () => {
   const initial = initialSimulationState(DEFAULT_PLAYTEST_POLICY);
   const injected = injectSimulationState(initial, {
     protectedPrincipal: "5000000",
-    "lottery.netPrize": "900000",
+    "lottery.pool": "900000",
     "lottery.highWaterPrize": "1",
-    "lottery.awaitingSeal": false,
-    "lottery.readyForDraw": true,
     "totals.burned": "42000",
   });
   assert.equal(injected.protectedPrincipal, 5_000_000n);
-  assert.equal(injected.lottery.netPrize, 900_000n);
+  assert.equal(injected.lottery.pool, 900_000n);
+  assert.equal(injected.lottery.committedPrize, 900_000n, "a funded board is immediately drawable");
   assert.equal(injected.lottery.highWaterPrize, 900_000n);
-  assert.equal(injected.lottery.readyForDraw, true);
   assert.equal(injected.totals.burned, 42_000n);
   assert.equal(initial.protectedPrincipal, 0n, "the authoritative prior snapshot is not mutated");
   assert.throws(() => injectSimulationState(initial, { iteration: "999" }), /cannot be injected/);
-  assert.throws(() => injectSimulationState(initial, { "lottery.awaitingSeal": false, "lottery.readyForDraw": true }), /positive prize/);
+  assert.throws(() => injectSimulationState(initial, { "lottery.awaitingSeal": false }), /cannot be injected/);
+  assert.throws(() => injectSimulationState(initial, { "lottery.pool": "10", "lottery.committedPrize": "11" }), /cannot exceed the pool/);
 });
 
 test("policy and simulation state survive JSON without losing integer precision", () => {
@@ -97,83 +85,98 @@ test("public policy starts at a conservative one-dollar-reference floor", () => 
   assert.equal(DEFAULT_PLAYTEST_POLICY.rakeVolumeStep, 25_000_000n);
 });
 
-// ── Playtest test-credit prize profile (owner decision 2026-09-03) ──
-// RATIFICATION-ccs2l-2026-09-02.md "Playtest test-credit profile". Only the
-// laboratory default changes; rake, the 40/40/20 split, the founder fee and
-// the ratchet steps are the ratified values and stay pinned here.
-test("playtest test-credit prize profile is pinned; ratified economics untouched", () => {
-  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryInitialBase, 50_000n);
+// ── The lottery law (2026-09-05): the laboratory deploys the SAME parameters
+// as contracts/PlankLottery.sol (RESEARCH-game-theory-lottery-seed-resolution).
+test("playtest lottery law is pinned to the contract parameters; no forced hit exists in the policy", () => {
   assert.equal(DEFAULT_PLAYTEST_POLICY.powerboardFundingBps, 6_500n);
-  assert.equal(DEFAULT_PLAYTEST_POLICY.rakeBps, 450n);
   assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryFounderFeeBps, 1_000n);
-  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryMinimumIncrease, 50_000n);
-  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryBaseGrowthBps, 500n);
-  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryMinimumBaseStep, 50_000n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryOddsOneIn, 16n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.lotteryKappaBps, 20_000n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.carveMinBps, 1_000n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.carveMaxBps, 3_000n);
+  assert.equal(DEFAULT_PLAYTEST_POLICY.carveHalfSaturation, 250_000n);
   assert.equal(DEFAULT_PLAYTEST_POLICY.protectedPrincipalBps, 5_000n);
-  assert.equal(legacyPlaytestPrizeProfile(DEFAULT_PLAYTEST_POLICY), null, "the live default is not a legacy tuple");
-  assert.equal(legacyPlaytestPrizeProfile({ ...DEFAULT_PLAYTEST_POLICY, ...PLAYTEST_PRIZE_PROFILES.v2 }), "v2");
-  assert.equal(legacyPlaytestPrizeProfile({ ...DEFAULT_PLAYTEST_POLICY, ...PLAYTEST_PRIZE_PROFILES.v1 }), "v1");
-  assert.equal(legacyPlaytestPrizeProfile({ ...DEFAULT_PLAYTEST_POLICY, lotteryInitialBase: 250_000n }), null, "bespoke host edits are never rewritten");
+  for (const key of Object.keys(DEFAULT_PLAYTEST_POLICY)) assert.doesNotMatch(key, /mustHit|consolation|InitialBase|BaseGrowth|MinimumIncrease/i);
+  assert.equal(legacyPlaytestPrizeProfile(serializeBigInts(DEFAULT_PLAYTEST_POLICY)), null, "the live default is current");
+  assert.equal(legacyPlaytestPrizeProfile({ ...serializeBigInts(DEFAULT_PLAYTEST_POLICY) as object, lotteryInitialBase: "50000" }), "pre-actuarial", "a stored legacy key marks the room for migration");
+  const missing = serializeBigInts(DEFAULT_PLAYTEST_POLICY) as Record<string, unknown>;
+  delete missing.lotteryKappaBps;
+  assert.equal(legacyPlaytestPrizeProfile(missing), "pre-actuarial", "a stored policy without the current law is migrated");
+  // Legacy keys are dropped and current keys defaulted when parsing.
+  const parsed = parsePolicy({ ...missing, lotteryInitialBase: "50000", consolation: "0" });
+  assert.deepEqual(parsed, DEFAULT_PLAYTEST_POLICY);
 });
 
-test("funded gate arms at the 50k base grossed up by the founder fee; 35% of the community leg compounds the vault", () => {
+test("genesis funding: 65% of the community leg reaches the prize net of the founder fee; the first draw prices the round by its own contribution", () => {
   const policy = DEFAULT_PLAYTEST_POLICY;
   const players = [{ id: "a", stake: 10_000n, targetBps: 15_000n }, { id: "b", stake: 10_000n, targetBps: 15_000n }];
-  const round = (state: ReturnType<typeof initialSimulationState>) => simulateIteration(state, policy, { players, crashBps: 20_000n, lotteryOutcome: "none" });
-  const first = round(initialSimulationState(policy));
-  // 20,000 pot × 4.50% = 900 rake → community 360 → 65% = 234 to the prize;
-  // the retained 126 splits 50/50 protected principal / emission buffer.
+  const round = (state: ReturnType<typeof initialSimulationState>, sample: bigint) => simulateIteration(state, policy, { players, crashBps: 20_000n, lotteryOutcome: "none", lotteryDrawE18: sample });
+  const first = round(initialSimulationState(policy), 0n);
+  // 20,000 pot × 4.50% = 900 rake → community 360 → 65% = 234 to the prize
+  // (fee 23 → 211 banked); the retained 126 splits 50/50 principal / buffer.
   assert.equal(first.state.totals.communityFunded, 360n);
-  assert.equal(first.state.lottery.pendingFunding, 234n);
   assert.equal(first.state.totals.powerboardFunded, 234n);
+  assert.equal(first.state.lottery.pool, 211n);
+  assert.equal(first.state.lottery.committedPrize, 211n);
   assert.equal(first.state.protectedPrincipal, 63n);
   assert.equal(first.state.emissionBuffer, 63n);
-  const requiredGross = minimumLotteryGross(policy.lotteryInitialBase, policy.lotteryFounderFeeBps);
-  assert.equal(requiredGross, 55_555n, "50,000 net ÷ (1 − 10% founder fee), integer-exact");
-  const resetGross = minimumLotteryGross(policy.lotteryInitialBase + policy.lotteryMinimumBaseStep, policy.lotteryFounderFeeBps);
-  assert.equal(resetGross, 111_111n, "reset reserve covers the ratcheted 100,000 base grossed up");
-  let state = first.state; let rounds = 1n;
-  while (state.lottery.awaitingSeal) { state = round(state).state; rounds += 1n; if (rounds > 5_000n) throw new Error("never sealed"); }
-  assert.equal(rounds, (requiredGross + 233n) / 234n, "seals on the first round whose cumulative funding reaches the gross gate");
-  assert.equal(state.lottery.netPrize, 50_000n, "the sealed prize is exactly the base after the founder fee");
-  assert.equal(state.lottery.readyForDraw, false, "no draw until the reset reserve is also sealed");
-  while (!state.lottery.readyForDraw) { state = round(state).state; rounds += 1n; if (rounds > 5_000n) throw new Error("never armed"); }
-  assert.equal(rounds, (requiredGross + resetGross + 233n) / 234n, "arms once prize gross + reset gross are both covered");
-  assert.equal(state.lottery.resetReserve, resetGross);
-  const hit = simulateIteration(state, policy, { players, crashBps: 20_000n, lotteryOutcome: "hit" });
-  assert.equal(hit.lotteryEvent, "hit");
-  assert.equal(hit.state.totals.lotteryWinnerPayouts, 50_000n);
-  assert.equal(hit.state.lottery.cycleBase, 100_000n, "ratchet by max(5%, 50k)");
-  assert.equal(hit.state.lottery.netPrize, 100_000n, "next prize re-seeded from the sealed reserve");
+  assert.equal(first.lotteryEvent, "funding", "nothing was on the board before the genesis round");
+  // Second round: a 211-credit prize is in the flat regime (W tiny) -> 1 in 16; sample 0 hits.
+  const second = round(first.state, 0n);
+  assert.equal(second.lotteryEvent, "hit");
+  assert.equal(second.lotteryDraw?.thresholdE18, PROB_ONE / 16n);
+  const { winnerPaid, seeded } = carvePrize(211n, policy);
+  assert.equal(second.lotteryDraw?.winnerPaid, winnerPaid);
+  assert.equal(second.state.lottery.pool, seeded + 211n, "next board = carve seed + this round's own net contribution");
+  assert.equal(second.state.totals.lotteryWinnerPayouts, winnerPaid);
+  // A miss (sample at the top of the range) leaves the pool growing.
+  const third = round(second.state, PROB_ONE - 1n);
+  assert.equal(third.lotteryEvent, "miss");
+  assert.equal(third.state.lottery.pool, second.state.lottery.pool + 211n);
 });
 
-test("legacy default rooms re-base only an unsealed, undisplayed target at the round boundary", () => {
-  const v2 = { ...DEFAULT_PLAYTEST_POLICY, ...PLAYTEST_PRIZE_PROFILES.v2 };
-  const funding = initialSimulationState(v2);
-  funding.lottery.pendingFunding = 4_321n; funding.protectedPrincipal = 999n;
-  const rebased = rebasePlaytestLotteryTarget(funding, 1_000_000n, DEFAULT_PLAYTEST_POLICY.lotteryInitialBase);
-  assert.ok(rebased);
-  assert.equal(rebased.lottery.cycleBase, 50_000n);
-  assert.equal(rebased.lottery.nextPrizeTarget, 50_000n);
-  assert.equal(rebased.lottery.pendingFunding, 4_321n, "accrued funding is never touched");
-  assert.equal(accountedAssets(rebased), accountedAssets(funding), "accounted assets conserved exactly");
-  assert.equal(funding.lottery.cycleBase, 1_000_000n, "the stored prior is not mutated");
-  const sealed = initialSimulationState(v2);
-  sealed.lottery.awaitingSeal = false; sealed.lottery.netPrize = 900_000n;
-  assert.equal(rebasePlaytestLotteryTarget(sealed, 1_000_000n, 50_000n), null, "a displayed prize is a promise; never lowered");
-  const rolled = initialSimulationState(v2);
-  rolled.lottery.rollover = 1n;
-  assert.equal(rebasePlaytestLotteryTarget(rolled, 1_000_000n, 50_000n), null);
-  const ratcheted = initialSimulationState(v2);
-  ratcheted.lottery.cycleBase = 1_050_000n; ratcheted.lottery.nextPrizeTarget = 1_050_000n;
-  assert.equal(rebasePlaytestLotteryTarget(ratcheted, 1_000_000n, 50_000n), null, "a table that already paid a jackpot keeps its ratchet");
-  assert.equal(rebasePlaytestLotteryTarget(initialSimulationState(DEFAULT_PLAYTEST_POLICY), 50_000n, 50_000n), null);
+test("pre-actuarial snapshots migrate to the pool model conserving accounted assets exactly, and stay replayable", () => {
+  const legacy = {
+    iteration: "40", protectedPrincipal: "999", emissionBuffer: "500",
+    lottery: {
+      cycle: "1", epoch: "3", cycleBase: "100000", netPrize: "50000", pendingFunding: "4321", resetReserve: "20000",
+      rollover: "700", nextPrizeTarget: "50000", awaitingSeal: false, readyForDraw: false, highWaterPrize: "50000",
+    },
+    totals: {
+      freshWagers: "1", grossRake: "1", keeperRewards: "0", burned: "0", communityFunded: "0", powerboardFunded: "0", crashFounderRake: "0",
+      lotteryGrossConstituted: "1000", lotteryFounderFees: "100", lotteryFounderFeesOnRollover: "5", playerCrashPayouts: "0",
+      lotteryWinnerPayouts: "0", consolationPayouts: "0", vaultRemainders: "0", externalLotteryFunding: "0", flightSeeded: "0",
+    },
+  };
+  const legacyAccounted = 999n + 500n + 50_000n + 4_321n + 20_000n + 700n;
+  const migrated = parseSimulationState(legacy);
+  // gross buckets 24,321 pay the 10% fee they had not yet paid (2,432); everything already net joins as is.
+  assert.equal(migrated.lottery.pool, 50_000n + 700n + 24_321n - 2_432n);
+  assert.equal(migrated.lottery.committedPrize, migrated.lottery.pool, "the whole board is immediately drawable");
+  assert.equal(migrated.lottery.hits, 1n, "cycle count carries over as hits");
+  assert.equal(migrated.lottery.draws, 0n);
+  assert.equal(migrated.lottery.highWaterPrize, migrated.lottery.pool);
+  assert.equal(migrated.totals.lotteryFounderFees, 100n + 2_432n);
+  assert.equal(migrated.totals.lotteryGrossConstituted, 1_000n + 24_321n);
+  assert.equal(accountedAssets(migrated) + 2_432n, legacyAccounted, "conserved: the only difference is the fee now booked");
+  assert.deepEqual(parseSimulationState(serializeBigInts(migrated)), migrated, "idempotent: a migrated snapshot parses unchanged");
+  const plain = JSON.parse(JSON.stringify(legacy));
+  migrateLegacyLotteryState(plain);
+  migrateLegacyLotteryState(plain);
+  assert.equal(plain.lottery.pool, migrated.lottery.pool.toString());
+  // The migrated state settles under the current law.
+  const players = [{ id: "a", stake: 10_000n, targetBps: 15_000n }, { id: "b", stake: 10_000n, targetBps: 15_000n }];
+  const next = simulateIteration(migrated, DEFAULT_PLAYTEST_POLICY, { players, crashBps: 20_000n, lotteryOutcome: "none", lotteryDrawE18: PROB_ONE - 1n });
+  assert.equal(next.lotteryEvent, "miss");
+  assert.equal(next.lotteryDraw?.prize, migrated.lottery.pool);
 });
 
-test("pre-Powerboard-provenance snapshots remain replayable", () => {
+test("pre-provenance snapshots remain replayable", () => {
   const legacy = serializeBigInts(initialSimulationState(DEFAULT_PLAYTEST_POLICY)) as Record<string, unknown>;
   delete (legacy.totals as Record<string, unknown>).powerboardFunded;
+  delete (legacy.totals as Record<string, unknown>).lotterySeeded;
   assert.equal(parseSimulationState(legacy).totals.powerboardFunded, 0n);
+  assert.equal(parseSimulationState(legacy).totals.lotterySeeded, 0n);
 });
 
 test("laboratory crash fixture is deterministic, bounded, and committed separately", () => {
@@ -201,12 +204,14 @@ test("authoritative display curve is monotonic and reaches crash on its deadline
   assert.ok(multiplierAt(start, start + enormousDuration) >= enormous);
 });
 
-// AUDIT 2026-09-02 (Workstream F): authoritative fixture pinning the ball
-// derivation. If the sha256("<reveal>:powerboard:number") mapping ever
-// changes, replayed/settled rounds would silently present a DIFFERENT ball
-// than the one committed — this literal fixture makes that impossible to
-// miss. reveal = "ab" x 32 must always draw ball 11 of 16 (a miss).
-test("the committed-reveal → displayed-ball mapping is pinned by fixture", () => {
+// Authoritative fixture pinning the draw derivation. If the
+// sha256("<reveal>:powerboard:number") mapping ever changes, replayed/settled
+// rounds would silently present a DIFFERENT sample than the one committed --
+// this literal fixture makes that impossible to miss.
+test("the committed-reveal -> displayed sample mapping is pinned by fixture", () => {
   const draw = powerboardRoundDraw("ab".repeat(32));
-  assert.deepEqual(draw, { drawnNumber: 11, winningNumber: 1, oddsOneIn: 16, rawHit: false });
+  const expected = BigInt(`0x${createHash("sha256").update(`${"ab".repeat(32)}:powerboard:number`).digest("hex")}`) % PROB_ONE;
+  assert.equal(draw.sampleE18, expected);
+  assert.equal(draw.drawnNumber, Number((expected * 16n) / PROB_ONE) + 1);
+  assert.equal(draw.balls, 16);
 });

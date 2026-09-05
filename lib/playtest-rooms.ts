@@ -2,18 +2,18 @@ import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { evolutionQuote, initialSimulationState, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
+import { evolutionQuote, initialSimulationState, PROB_ONE, serializeSimulationState, simulateIteration, validatePolicy, type LotteryOutcome, type SimulationPolicy } from "@/lib/casino/simulation";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import type { PlaytestIdentity } from "@/lib/playtest-auth";
 import { BOT_PROFILE_NAMES, botProfile, botRoundCommitment, validateBotProfile, weightedTicketWinner, type BotProfileName, type PlaytestBotProfile } from "@/lib/playtest-bots";
 import {
   bettingRoundId, crashDurationMs, CURRENT_PLAYTEST_PRIZE_PROFILE, DEFAULT_PLAYTEST_POLICY, effectiveSettlementTarget, injectSimulationState,
-  legacyPlaytestPrizeProfile, newcomerSeatPlan, parsePolicy,
-  PLAYTEST_POWERBOARD_ODDS, PLAYTEST_PRIZE_PROFILE_KEYS, PLAYTEST_PRIZE_PROFILES, powerboardRoundDraw, powerboardVoucherQuote,
-  parseSimulationState, playtestRulesHash, rebasePlaytestLotteryTarget, serializeBigInts, simulationCrashBps,
+  LEGACY_LOTTERY_POLICY_KEYS, legacyPlaytestPrizeProfile, newcomerSeatPlan, parsePolicy,
+  PLAYTEST_POWERBOARD_BALLS, PLAYTEST_PRIZE_PROFILE_KEYS, powerboardRoundDraw,
+  parseSimulationState, playtestRulesHash, serializeBigInts, simulationCrashBps,
 } from "@/lib/playtest-room-core";
 import { settlementDescriptor } from "@/lib/casino/settlement-rules";
-import { activationPace, lotteryActivationQuote, lotteryShareOfPotPpm, seedShareBps, vaultGrowthBps, vaultShareOfPotPpm } from "@/lib/casino/economy-report";
+import { contributionPace, lotteryPrizeQuote, lotteryShareOfPotPpm, playerRoundOdds, seedShareBps, vaultGrowthBps, vaultShareOfPotPpm } from "@/lib/casino/economy-report";
 import { clampDisplayLagMs, DEFAULT_DISPLAY_LAG_MS, laggedLockGrantBps } from "@/lib/playtest-live-shared";
 
 /** Server-published presentation lag δ for every room (see the choice
@@ -191,11 +191,16 @@ export function buildEconomyReport(
   const vaultAdded = hasProvenance ? big(payload.vaultAdded) : null;
   const seed = hasProvenance ? big(payload.seed) : null;
   const reservesBeforeSeed = hasProvenance ? big(payload.reservesBeforeSeed) : null;
-  const activation = lotteryActivationQuote(simulation, policy);
+  // The odds are quoted at THIS table's typical contribution (average routed
+  // lottery leg of the last 10 settled rounds), so "1 in N" is the chance a
+  // round like the ones actually being played has -- never a flat fiction.
   const recentFunding = recent.map((row) => big(row.public_payload.powerboardFundingAdded));
-  const pace = activationPace(activation.remaining, recentFunding, BigInt(PLAYTEST_INTERMISSION_MS / 1000));
+  const sampled = recentFunding.slice(0, 10);
+  const quotedContribution = sampled.length ? sampled.reduce((sum, value) => sum + value, 0n) / BigInt(sampled.length) : 0n;
+  const prize = lotteryPrizeQuote(simulation, policy, quotedContribution);
+  const pace = contributionPace(recentFunding, prize.thresholdE18, BigInt(PLAYTEST_INTERMISSION_MS / 1000));
   return {
-    schema: "plank.live-lab.economy.v1",
+    schema: "plank.live-lab.economy.v2",
     creditsPerEth: "1000000",
     lastSettledRound: last?.round_id ?? null,
     vault: {
@@ -216,15 +221,20 @@ export function buildEconomyReport(
       lifetimeSeeded: simulation.totals.flightSeeded ?? 0n,
     },
     lottery: {
-      ...activation,
+      ...prize,
       addedThisRound: last ? big(payload.powerboardFundingAdded) : null,
       shareOfPotPpm: lotteryShareOfPotPpm(policy, effectiveRakeBps),
-      averageFundingPerRound: pace.averageFundingPerRound,
+      averageContributionPerRound: pace.averageContributionPerRound,
       roundsSampled: pace.roundsSampled,
-      roundsToActivation: pace.roundsToActivation,
-      secondsToActivation: pace.secondsToActivation,
+      expectedRoundsToHit: pace.expectedRoundsToHit,
+      expectedSecondsToHit: pace.expectedSecondsToHit,
       cadenceSeconds: PLAYTEST_INTERMISSION_MS / 1000,
-      hitOddsOneIn: PLAYTEST_POWERBOARD_ODDS,
+      inflowFeeBps: policy.lotteryFounderFeeBps,
+      lastDraw: last ? {
+        thresholdE18: big(payload.lotteryThresholdE18),
+        contribution: big(payload.powerboardFundingAdded),
+        event: String(payload.lotteryEvent ?? "none"),
+      } : null,
     },
   };
 }
@@ -284,17 +294,14 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
         WHERE room_id=$1 AND event_type='round.settled' ORDER BY sequence DESC LIMIT 10`, [roomId],
     );
     const economy = buildEconomyReport(simulation, snapshotPolicy, evolution.effectiveRakeBps, recentSettlements.rows);
-    const eligibilityEpoch = simulation.lottery.awaitingSeal ? simulation.lottery.epoch + 1n : simulation.lottery.epoch;
-    const powerboard = await client.query<{ total_weight: string; my_weight: string; participant_count: string }>(
-      `SELECT COALESCE(SUM(weight),0)::text AS total_weight,
-              COALESCE(SUM(weight) FILTER (WHERE user_id=$3),0)::text AS my_weight,
-              COUNT(*)::text AS participant_count
-         FROM playtest_powerboard_tickets WHERE room_id=$1 AND epoch=$2`,
-      [roomId, eligibilityEpoch.toString(), identity.id],
-    );
-    const totalPowerboardWeight = BigInt(powerboard.rows[0]?.total_weight ?? "0");
-    const myPowerboardWeight = BigInt(powerboard.rows[0]?.my_weight ?? "0");
-    const voucherQuote = powerboardVoucherQuote(myPowerboardWeight, totalPowerboardWeight, simulation.lottery.netPrize);
+    // ROUND-ONLY ELIGIBILITY: the ticket holders of the next draw are the
+    // seats of the round that will settle next (the queued round on a settled
+    // table, the open/flying round otherwise), weighted by stake.
+    const eligibleSeats = room.phase === "settled" ? (nextRoundSeats?.rows ?? []) : seats.rows;
+    const eligibleRound = room.phase === "settled" ? BigInt(room.current_round) + 1n : BigInt(room.current_round);
+    const roundStake = eligibleSeats.reduce((sum, row) => sum + BigInt(row.stake), 0n);
+    const myRoundStake = eligibleSeats.filter((row) => row.user_id === identity.id).reduce((sum, row) => sum + BigInt(row.stake), 0n);
+    const myOdds = playerRoundOdds(economy.lottery.thresholdE18, myRoundStake, roundStake, economy.lottery.winnerTake);
     const revealVisible = room.phase === "settled" ? room.reveal : null;
     const crashVisible = room.phase === "settled" ? room.crash_bps : null;
     return {
@@ -321,13 +328,13 @@ export async function playtestRoomSnapshot(identity: PlaytestIdentity, roomId: s
       evolution: serializeBigInts(evolution),
       economy: serializeBigInts(economy),
       powerboard: {
-        epoch: eligibilityEpoch.toString(),
-        totalWeight: totalPowerboardWeight.toString(),
-        myWeight: myPowerboardWeight.toString(),
-        participantCount: Number(powerboard.rows[0]?.participant_count ?? "0"),
-        hitOddsOneIn: PLAYTEST_POWERBOARD_ODDS,
-        allocationRule: "linear-stake-weight-v1",
-        quote: serializeBigInts(voucherQuote),
+        eligibleRound: eligibleRound.toString(),
+        roundStake: roundStake.toString(),
+        myStake: myRoundStake.toString(),
+        participantCount: eligibleSeats.length,
+        balls: PLAYTEST_POWERBOARD_BALLS,
+        allocationRule: "round-only-stake-weight-v2",
+        quote: serializeBigInts(myOdds),
       },
       members: members.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, balance: row.test_credit_balance, isBot: row.is_bot, botProfile: row.bot_profile })),
       seats: seats.rows.map((row) => ({
@@ -468,7 +475,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     // A room whose stored prize tuple equals ANY superseded shipped default
     // (v1 25%/100k, v2 100%/1M) is advanced to the current default; bespoke
     // host-edited tuples are left alone.
-    const legacyPrize = legacyPlaytestPrizeProfile(policy);
+    const legacyPrize = legacyPlaytestPrizeProfile(storedPolicy);
     const legacyPrizeProfile = legacyPrize !== null;
     let policyMigration: Record<string, unknown> | null = null;
     const legacyEvolutionProfile = storedPolicy.rakeFloorBps === undefined
@@ -479,27 +486,24 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       policy = {
         ...policy,
         allocationRule: "ccs-2l",
-        ...(legacyPrizeProfile ? {
-          powerboardFundingBps: DEFAULT_PLAYTEST_POLICY.powerboardFundingBps,
-          lotteryInitialBase: DEFAULT_PLAYTEST_POLICY.lotteryInitialBase,
-          lotteryMinimumIncrease: DEFAULT_PLAYTEST_POLICY.lotteryMinimumIncrease,
-          lotteryBaseGrowthBps: DEFAULT_PLAYTEST_POLICY.lotteryBaseGrowthBps,
-          lotteryMinimumBaseStep: DEFAULT_PLAYTEST_POLICY.lotteryMinimumBaseStep,
-        } : {}),
+        ...(legacyPrizeProfile ? Object.fromEntries(PLAYTEST_PRIZE_PROFILE_KEYS.map((key) => [key, DEFAULT_PLAYTEST_POLICY[key]])) : {}),
         ...(legacyMinimumStake ? { minimumStake: DEFAULT_PLAYTEST_POLICY.minimumStake } : {}),
       };
       validatePolicy(policy);
       room.policy = serializeBigInts(policy);
       room.rules_hash = playtestRulesHash(policy);
       if (legacyPrize) {
-        const from = PLAYTEST_PRIZE_PROFILES[legacyPrize];
-        const rebased = rebasePlaytestLotteryTarget(parseSimulationState(room.simulation_state), from.lotteryInitialBase, policy.lotteryInitialBase);
-        if (rebased) room.simulation_state = serializeSimulationState(rebased);
+        // The pre-actuarial lottery state (cycle base / reset reserve /
+        // rollover) is migrated to the pool model by parseSimulationState,
+        // conserving accounted assets exactly; every credit it held is on the
+        // board and immediately drawable under the actuarial rule.
+        const migrated = parseSimulationState(room.simulation_state);
+        room.simulation_state = serializeSimulationState(migrated);
         policyMigration = {
           prizeProfile: { from: legacyPrize, to: CURRENT_PLAYTEST_PRIZE_PROFILE },
-          policy: serializeBigInts(Object.fromEntries(PLAYTEST_PRIZE_PROFILE_KEYS.map((key) => [key, { from: from[key], to: policy[key] }]))),
-          lotteryTargetRebased: rebased !== null,
-          ...(rebased ? { lotteryTarget: { from: from.lotteryInitialBase.toString(), to: policy.lotteryInitialBase.toString() } } : {}),
+          policy: serializeBigInts(Object.fromEntries(PLAYTEST_PRIZE_PROFILE_KEYS.map((key) => [key, { from: storedPolicy[key] ?? null, to: policy[key] }]))),
+          retiredKeys: LEGACY_LOTTERY_POLICY_KEYS.filter((key) => storedPolicy[key] !== undefined),
+          lotteryPool: migrated.lottery.pool.toString(),
         };
       }
     }
@@ -658,41 +662,28 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     );
     const policy = parsePolicy(room.policy);
     const prior = parseSimulationState(room.simulation_state);
+    // The draw sample is derived from the already-committed reveal; the
+    // engine prices it against THIS round's own contribution (actuarial rule).
     const powerboardDraw = powerboardRoundDraw(room.reveal!);
-    // Wagers made while funding the next prize belong to that next isolated
-    // epoch, not to the already-consumed epoch number in the awaiting state.
-    const eligibilityEpoch = prior.lottery.awaitingSeal ? prior.lottery.epoch + 1n : prior.lottery.epoch;
     const result = simulateIteration(prior, policy, {
       players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: effectiveSettlementTarget(BigInt(room.crash_bps!), BigInt(seat.requested_target_bps), seat.accepted_target_bps === null ? null : BigInt(seat.accepted_target_bps), seat.auto_lock_enabled) })),
-      crashBps: BigInt(room.crash_bps), lotteryOutcome,
+      crashBps: BigInt(room.crash_bps), lotteryOutcome, lotteryDrawE18: powerboardDraw.sampleE18,
     });
     const powerboardFundingAdded = result.state.totals.powerboardFunded - prior.totals.powerboardFunded;
-    // The simulator is the accounting authority. Deriving the payout from the
-    // cumulative counter also covers a prize sealed and won in this iteration;
-    // prior.lottery.netPrize is zero while an epoch is awaiting its next seal.
+    // The simulator is the accounting authority: the winner receives exactly
+    // the carve's W for the prize that was on the board before this round.
     const lotteryPayout = result.state.totals.lotteryWinnerPayouts - prior.totals.lotteryWinnerPayouts;
-    if (result.qualified) {
-      for (const seat of seats.rows) {
-        await client.query(
-          `INSERT INTO playtest_powerboard_tickets (room_id,epoch,user_id,weight) VALUES ($1,$2,$3,$4)
-           ON CONFLICT (room_id,epoch,user_id) DO UPDATE SET weight=playtest_powerboard_tickets.weight+EXCLUDED.weight`,
-          [roomId, eligibilityEpoch.toString(), seat.user_id, seat.stake],
-        );
-      }
-    }
-    const epochTickets = await client.query<{ user_id: string; display_name: string; weight: string }>(
-      `SELECT t.user_id,u.display_name,t.weight::text FROM playtest_powerboard_tickets t
-         JOIN playtest_users u ON u.id=t.user_id WHERE t.room_id=$1 AND t.epoch=$2 ORDER BY t.user_id`,
-      [roomId, eligibilityEpoch.toString()],
-    );
-    const epochTotalWeight = epochTickets.rows.reduce((sum, ticket) => sum + BigInt(ticket.weight), 0n);
-    let lotteryWinner: { userId: string; displayName: string; payout: string; epoch: string } | null = null;
+    // ROUND-ONLY ELIGIBILITY: the stake-weighted ticket among THIS round's seats.
+    const roundTickets = seats.rows.map((row) => ({ id: row.user_id, weight: BigInt(row.stake) }));
+    const roundTotalWeight = roundTickets.reduce((sum, ticket) => sum + ticket.weight, 0n);
+    let lotteryWinner: { userId: string; displayName: string; payout: string; round: string } | null = null;
     if (result.lotteryEvent === "hit") {
-      const winner = weightedTicketWinner(epochTickets.rows.map((row) => ({ id: row.user_id, displayName: row.display_name, weight: BigInt(row.weight) })), `${room.reveal}:powerboard:ticket:${eligibilityEpoch}`);
-      if (!winner) throw new PlaytestRoomError(409, "NO_LOTTERY_TICKETS", "The current Powerboard epoch has no eligible tickets.");
+      const winner = weightedTicketWinner(roundTickets, `${room.reveal}:powerboard:ticket:${room.current_round}`);
+      if (!winner) throw new PlaytestRoomError(409, "NO_LOTTERY_TICKETS", "This round has no eligible seats.");
       if (lotteryPayout <= 0n) throw new PlaytestRoomError(409, "NO_LOTTERY_PAYOUT", "The lottery hit did not produce a payable prize.");
+      const name = await client.query<{ display_name: string }>(`SELECT display_name FROM playtest_users WHERE id=$1`, [winner.id]);
       await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance+$3 WHERE room_id=$1 AND user_id=$2`, [roomId, winner.id, lotteryPayout.toString()]);
-      lotteryWinner = { userId: winner.id, displayName: winner.displayName, payout: lotteryPayout.toString(), epoch: eligibilityEpoch.toString() };
+      lotteryWinner = { userId: winner.id, displayName: name.rows[0]?.display_name ?? "player", payout: lotteryPayout.toString(), round: room.current_round };
     }
     for (const allocation of result.settlement?.allocations ?? []) {
       const originalSeat = seats.rows.find((seat) => seat.user_id === allocation.id);
@@ -731,20 +722,33 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
       vaultAfter: result.state.protectedPrincipal.toString(),
       vaultAdded: (result.state.protectedPrincipal - prior.protectedPrincipal).toString(),
       emissionBufferAfter: result.state.emissionBuffer.toString(),
-      lotteryRemainingAfter: lotteryActivationQuote(result.state, policy).remaining.toString(),
+      // The draw record (mirror of PlankLottery's Draw event): prize on the
+      // board, the round's contribution, the threshold it was priced at, the
+      // committed sample, W and S. Displayed == redeemable.
+      lotteryPrize: (result.lotteryDraw?.prize ?? 0n).toString(),
+      lotteryThresholdE18: (result.lotteryDraw?.thresholdE18 ?? 0n).toString(),
+      lotteryWinnerPaid: (result.lotteryDraw?.winnerPaid ?? 0n).toString(),
+      lotterySeeded: (result.lotteryDraw?.seeded ?? 0n).toString(),
+      lotteryPrizeAfter: result.state.lottery.committedPrize.toString(),
       powerboardPool: {
-        epoch: eligibilityEpoch.toString(), totalWeight: epochTotalWeight.toString(),
-        weights: epochTickets.rows.map((ticket) => ({ userId: ticket.user_id, weight: ticket.weight })),
+        round: room.current_round, totalWeight: roundTotalWeight.toString(),
+        weights: roundTickets.map((ticket) => ({ userId: ticket.id, weight: ticket.weight.toString() })),
       },
       powerboardDraw: {
-        ...powerboardDraw,
+        sampleE18: powerboardDraw.sampleE18.toString(),
+        drawnNumber: powerboardDraw.drawnNumber,
+        balls: powerboardDraw.balls,
+        winningNumber: powerboardDraw.winningNumber,
+        thresholdE18: (result.lotteryDraw?.thresholdE18 ?? 0n).toString(),
+        probOne: PROB_ONE.toString(),
         // A uniform sample exists every round, but it is a payable draw only
-        // when the simulator actually had a fully funded sealed prize. This
-        // prevents a funding-round sample of ball 1 from masquerading as an
-        // unpaid jackpot hit in every connected client's presentation.
+        // when a prize was on the board before this round settled. This
+        // prevents a funding-round sample from masquerading as an unpaid
+        // jackpot hit in every connected client's presentation.
         drawActive: result.lotteryEvent === "hit" || result.lotteryEvent === "miss",
         payableHit: result.lotteryEvent === "hit",
-        forcedForSimulation: ownerOnly && lotteryOutcome !== (powerboardDraw.rawHit ? "hit" : "miss"),
+        naturalHit: result.lotteryDraw?.natural ?? null,
+        forcedForSimulation: Boolean(result.lotteryDraw?.forced),
       },
     });
     return { duplicate: false, version: room.version };
@@ -763,16 +767,17 @@ export async function tickPlaytestRound(identity: PlaytestIdentity, roomId: stri
   if (row?.phase === "settled") return startPlaytestRound(identity, roomId, commandId, true);
   const reveal = row?.reveal;
   if (!reveal || row?.phase !== "running") throw new PlaytestRoomError(409, "NOT_RUNNING", "No committed round can be ticked.");
-  const draw = powerboardRoundDraw(reveal);
-  const outcome: LotteryOutcome = draw.rawHit ? "hit" : "miss";
+  // "none" = natural: the engine compares the committed sample with the
+  // round's actuarial threshold; no caller can choose the branch.
+  const outcome: LotteryOutcome = "none";
   return settlePlaytestRound(identity, roomId, commandId, outcome, false);
 }
 
 const EDITABLE_POLICY_KEYS = new Set<keyof SimulationPolicy>([
   "keeperRewardBps", "protectedPrincipalBps", "crashSeed", "emissionBufferCap",
   "powerboardFundingBps",
-  "lotteryFounderFeeBps", "lotteryInitialBase", "lotteryMinimumIncrease",
-  "lotteryBaseGrowthBps", "lotteryMinimumBaseStep", "consolation",
+  "lotteryFounderFeeBps", "lotteryOddsOneIn", "lotteryKappaBps",
+  "carveMinBps", "carveMaxBps", "carveHalfSaturation",
   "minimumPlayers", "minimumStake",
 ]);
 

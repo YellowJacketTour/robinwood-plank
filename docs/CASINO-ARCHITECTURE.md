@@ -513,6 +513,13 @@ next time), so a bad sink can never brick settlement, and only balance *above* t
 cap is ever moved — the never-zero floor is untouched. Config: `reserveCap` (0 =
 uncapped, no spill) and `jackpotSink` (0 = cascade off). Emits `VaultOverflow`.
 
+> **SUPERSEDED 2026-09-05.** The paragraph below describes the retired `PlankPowerboard`
+> (epoch tickets, consolation drain, `mustHitByEpochs`). The live lottery is
+> `contracts/PlankLottery.sol`: round-only eligibility, the progressive carve, and the
+> ACTUARIAL hit rule `p = min(1/oddsOneIn, c/(κ·W(P)))` with **no forced hit** (owner
+> ruling). See `docs/marketplank/RESEARCH-game-theory-lottery-seed-resolution-2026-09-05.md`.
+> The laboratory engine (`lib/casino/simulation.ts`) mirrors the same law.
+
 **"Must be won" — the guaranteed jackpot.** Left alone, the full jackpot only pays
 when the Plank Ball hits (`1/ballRange` per epoch — geometric, so the wait has an
 unbounded tail even though it self-caps at ~`1/consolationBps` × per-epoch funding

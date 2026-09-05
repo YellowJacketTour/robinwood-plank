@@ -3754,42 +3754,23 @@ $("pbStat").addEventListener("click", () => {
   if (PLAYTEST_MODE) { togglePrivateEconomy("lottery"); return; }
   $("pbPopover").classList.toggle("show");
   if (PLAYTEST_MODE && privateSnapshot) {
-    const lottery = privateSnapshot.simulation.lottery;
-    const board = privateSnapshot.powerboard || {};
+    const m = privateEconomyModel(privateSnapshot);
+    const lottery = privateSnapshot.simulation.lottery || {};
     const presentation = privateLotteryPresentation(privateSnapshot);
-    const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
-    const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, privateSnapshot.policy.lotteryFounderFeeBps);
-    // The gate that ACTUALLY controls the next draw. Once a prize is sealed,
-    // nextPrizeTarget equals it, so "funding toward next seal" measured a gate
-    // that can never fire (sealFromFunding returns immediately) while the real
-    // gate — the reset reserve for the NEXT base — was never shown. That is
-    // why the prize looks frozen while every flight reports funding something.
-    const sealedNow = BigInt(lottery.netPrize || "0") > 0n;
-    const nextBase = privateNextCycleBase(lottery, privateSnapshot.policy);
-    const resetRequired = privateMinimumLotteryGross(nextBase, privateSnapshot.policy.lotteryFounderFeeBps);
-    const resetPct = resetRequired > 0n
-      ? Math.min(100, Number(BigInt(lottery.resetReserve || "0") * 10000n / resetRequired) / 100)
-      : 100;
-    const myWeight = BigInt(board.myWeight || "0"), totalWeight = BigInt(board.totalWeight || "0");
-    const hitOdds = BigInt(board.hitOddsOneIn || 16);
-    const sharePpm = BigInt(board.quote?.conditionalSharePpm || (totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n));
-    const combinedDenominator = BigInt(board.quote?.combinedOddsOneInCeil || (myWeight > 0n ? (totalWeight * hitOdds + myWeight - 1n) / myWeight : 0n));
-    const expectedClaim = BigInt(board.quote?.probabilityWeightedPrize || (totalWeight > 0n ? BigInt(lottery.netPrize || "0") * myWeight / (totalWeight * hitOdds) : 0n));
+    const prize = privateBig(lottery.committedPrize);
+    const { winnerTake, nextSeed } = privateCarve(prize, privateSnapshot.policy);
+    const econ = m?.lottery || {};
     $("pbPopBody").innerHTML =
-      '<div class="pb-row"><span class="pb-k">State</span><span class="pb-v hi">' + (BigInt(lottery.netPrize || "0") > 0n ? 'SEALED' : 'FUNDING') + '</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Your epoch voucher weight</span><span class="pb-v hi">' + privateCredits(myWeight) + '</span></div>' +
-      '<div class="pb-row"><span class="pb-k">All epoch voucher weight</span><span class="pb-v">' + privateCredits(totalWeight) + '</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Your share if the draw hits</span><span class="pb-v hi">' + (Number(sharePpm) / 10_000).toFixed(2) + '%</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Your combined jackpot chance</span><span class="pb-v">' + (combinedDenominator ? 'about 1 in ' + privateCredits(combinedDenominator) : 'No qualified voucher yet') + '</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Probability-weighted prize value</span><span class="pb-v">' + privateCredits(expectedClaim) + ' cr</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Visible net prize</span><span class="pb-v">' + privateCredits(lottery.netPrize) + ' cr</span></div>' +
-      (sealedNow
-        ? '<div class="pb-row"><span class="pb-k">Draw arms when the reset reserve is full</span><span class="pb-v hi">' + privateMoney3(lottery.resetReserve) + ' / ' + privateMoney3(resetRequired) + '</span></div>'
-          + '<div class="pb-row"><span class="pb-k">Progress to the next draw</span><span class="pb-v">' + resetPct.toFixed(1) + '% · the prize above is already funded and locked</span></div>'
-        : '<div class="pb-row"><span class="pb-k">Funding toward next seal</span><span class="pb-v">' + privateMoney3(available) + ' / ' + privateMoney3(required) + '</span></div>') +
-      '<div class="pb-row"><span class="pb-k">Next net target</span><span class="pb-v">' + privateCredits(lottery.nextPrizeTarget) + ' cr</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Protected reset reserve</span><span class="pb-v">' + privateCredits(lottery.resetReserve) + ' cr</span></div>' +
-      '<div class="pb-guarantee">Epoch ' + (board.epoch || lottery.epoch) + ' · each qualified credit contributes one linear selection-weight unit. The machine first draws 1 in ' + hitOdds + '; on a hit, the committed second draw selects one voucher proportionally. Splitting wallets does not change linear weight. ' + presentation.detail + ' A prize appears only when its full net target and protocol fee are already funded; no IOU is displayed as money.</div>';
+      '<div class="pb-row"><span class="pb-k">State</span><span class="pb-v hi">' + (prize > 0n ? 'LIVE · DRAWN EVERY ROUND' : 'FUNDING') + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">If you win you receive</span><span class="pb-v hi">' + privateMoney3(winnerTake) + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Seeds the next prize</span><span class="pb-v">' + privateMoney3(nextSeed) + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Banked right now</span><span class="pb-v">' + privateMoney3(lottery.pool) + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Your stake in the next flight</span><span class="pb-v hi">' + (m ? privateCredits(m.myStake) + ' of ' + privateCredits(m.roundStake) + ' cr' : '—') + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Your chance next flight</span><span class="pb-v hi">' + (m && m.myOdds !== null ? 'about 1 in ' + privateCredits(m.myOdds) : 'commit a seat to hold a ticket') + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Probability-weighted value of your ticket</span><span class="pb-v">' + (m ? privateCredits(m.myExpected) : '0') + ' cr</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Chance for a whole round like this table\'s</span><span class="pb-v">' + (m && m.roundOdds !== null ? '1 in ' + privateCredits(m.roundOdds) : 'no draw yet') + '</span></div>' +
+      '<div class="pb-row"><span class="pb-k">Expected time to a hit</span><span class="pb-v">' + (econ.expectedRoundsToHit == null ? 'no funding yet' : '≈ ' + privateCredits(econ.expectedRoundsToHit) + ' rounds') + '</span></div>' +
+      '<div class="pb-guarantee">Round-only eligibility: only the seats of the round that draws hold tickets, weighted by stake. Each round\'s chance is the smaller of 1 in ' + privateCredits(econ.flatOddsOneIn || 16) + ' and what that round paid in ÷ (' + (Number(privateBig(econ.kappaBps || 20_000)) / 10_000).toFixed(1) + ' × the prize), so a bigger prize is rarer in exact proportion and can never be farmed. ' + presentation.detail + ' Nothing is forced; displayed equals redeemable.</div>';
   } else refreshPowerboardUI();
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
@@ -5593,23 +5574,32 @@ if (PLAYTEST_MODE) {
   window.addEventListener("pagehide", stopPrivateEthPrice, { once:true });
 }
 
-function privateMinimumLotteryGross(targetNet, feeBps) {
-  const target = BigInt(targetNet || "0"), fee = BigInt(feeBps || "0"), scale = 10_000n;
-  let low = target, high = (target * scale + (scale - fee) - 1n) / (scale - fee) + 1n;
-  while (low < high) { const mid = (low + high) / 2n; if (mid - (mid * fee) / scale >= target) high = mid; else low = mid + 1n; }
-  return low;
+// ── THE LOTTERY LAW, mirrored byte-faithfully from lib/casino/simulation.ts
+// (itself a mirror of contracts/PlankLottery.sol): the progressive carve and
+// the actuarial hit rule. The client only formats what the server derives;
+// these mirrors exist so a quote can be recomputed for "a round like this
+// one" without a round trip. PROB_ONE == certainty.
+const PRIVATE_PROB_ONE = 10n ** 18n;
+function privateBig(value) { try { return BigInt(value || "0"); } catch { return 0n; } }
+function privateCarve(prize, policy) {
+  const P = privateBig(prize); if (P <= 0n) return { winnerTake: 0n, nextSeed: 0n };
+  const xMin = privateBig(policy?.carveMinBps), xMax = privateBig(policy?.carveMaxBps), c = privateBig(policy?.carveHalfSaturation);
+  const denom = P + c;
+  const seeded = (P * (xMin * denom + (xMax - xMin) * P)) / (10_000n * denom);
+  return { winnerTake: P - seeded, nextSeed: seeded };
 }
-// Mirror of nextCycleBase() in lib/casino/simulation.ts — the base the reset
-// reserve must cover before a draw can arm. Kept byte-faithful to the kernel
-// so the client never displays a gate the engine does not enforce.
-function privateNextCycleBase(lottery, policy) {
-  const base = BigInt(lottery?.cycleBase || "0");
-  const initial = BigInt(policy?.lotteryInitialBase || "0");
-  const effective = base > initial ? base : initial;
-  const pct = (effective * BigInt(policy?.lotteryBaseGrowthBps || "0")) / 10_000n;
-  const minStep = BigInt(policy?.lotteryMinimumBaseStep || "0");
-  return effective + (pct > minStep ? pct : minStep);
+function privateHitThreshold(contribution, prize, policy) {
+  const odds = privateBig(policy?.lotteryOddsOneIn) || 16n, kappa = privateBig(policy?.lotteryKappaBps) || 20_000n;
+  const flat = PRIVATE_PROB_ONE / odds;
+  const { winnerTake } = privateCarve(prize, policy);
+  if (winnerTake === 0n) return flat;
+  const actuarial = (privateBig(contribution) * PRIVATE_PROB_ONE * 10_000n) / (kappa * winnerTake);
+  return actuarial < flat ? actuarial : flat;
 }
+function privateOddsOneIn(thresholdE18) { const t = privateBig(thresholdE18); return t > 0n ? (PRIVATE_PROB_ONE + t - 1n) / t : null; }
+function privateOddsText(thresholdE18) { const n = privateOddsOneIn(thresholdE18); return n === null ? "no draw" : `1 in ${privateCredits(n)}`; }
+/** A probability on the PROB_ONE scale as a readable percentage. */
+function privateProbPct(thresholdE18) { return `${(Number(privateBig(thresholdE18) / 10_000_000_000n) / 100_000_000 * 100).toFixed(4)}%`; }
 
 // ── ECONOMY panel (2026-09-03): the Vault and the Powerboard lottery in plain
 // language, every money figure three ways (credits · ETH · USD). All numbers
@@ -5652,19 +5642,24 @@ function privateEconomyRow(k, v, hi) { return `<div class="pb-row"><span class="
 function privateEconomyModel(snapshot) {
   const economy = snapshot?.economy; if (!economy) return null;
   const board = snapshot.powerboard || {};
-  const myWeight = BigInt(board.myWeight || "0"), totalWeight = BigInt(board.totalWeight || "0");
-  const hitOdds = BigInt(economy.lottery.hitOddsOneIn || board.hitOddsOneIn || 16);
-  const combinedOdds = BigInt(board.quote?.combinedOddsOneInCeil || (myWeight > 0n ? (totalWeight * hitOdds + myWeight - 1n) / myWeight : 0n));
-  return { economy, vault: economy.vault, lottery: economy.lottery, myWeight, totalWeight, hitOdds, combinedOdds };
+  const myStake = privateBig(board.myStake), roundStake = privateBig(board.roundStake);
+  const threshold = privateBig(economy.lottery.thresholdE18);
+  // Round-only eligibility: my chance this round = the round's chance x my stake share.
+  const mineE18 = roundStake > 0n ? (threshold * myStake) / roundStake : 0n;
+  const winnerTake = privateBig(economy.lottery.winnerTake);
+  return {
+    economy, vault: economy.vault, lottery: economy.lottery, myStake, roundStake, threshold, mineE18, winnerTake,
+    myOdds: privateOddsOneIn(mineE18), roundOdds: privateOddsOneIn(threshold),
+    myExpected: (mineE18 * winnerTake) / PRIVATE_PROB_ONE,
+  };
 }
 function privateEconomyHeader(snapshot) {
   const m = privateEconomyModel(snapshot);
   if (!m) return { vault: privateCredits(snapshot.simulation.protectedPrincipal), lottery: privateLotteryPresentation(snapshot).label };
   const { lottery, vault } = m;
-  const prize = BigInt(lottery.prizeNow || "0");
   const phone = window.matchMedia("(max-width:700px)").matches;
-  const lotteryLead = lottery.status === "active" ? `PRIZE ${privateCredits(prize)} cr` : `${privatePct(lottery.fundedBps, phone ? 0 : 1)} FUNDED`;
-  const odds = m.combinedOdds > 0n ? `1 IN ${privateCredits(m.combinedOdds)}` : (phone ? "NO TICKETS" : "NO TICKETS YET");
+  const lotteryLead = lottery.status === "active" ? `PRIZE ${privateCredits(m.winnerTake)} cr` : "PRIZE FUNDING";
+  const odds = m.myOdds !== null ? `1 IN ${privateCredits(m.myOdds)}` : m.roundOdds !== null ? `ROUND 1 IN ${privateCredits(m.roundOdds)}` : (phone ? "NO SEAT" : "NO SEAT THIS ROUND");
   // Phones: keep both chips to one short line each (a wrapped topbar pushes
   // the whole deck down under the pinned action); USD lives in the panel.
   if (phone) return { vault: `${privateCredits(vault.principal)} cr`, lottery: `${lotteryLead} · ${odds}` };
@@ -5687,13 +5682,21 @@ function privateEconomyHtml(snapshot) {
   const seedLine = seed === null ? "no settled round yet"
     : seed === 0n ? `0 — the seed buffer is still filling (buffer now ${privateMoney3(vault.emissionBuffer)})`
     : `${privateMoney3(seed)} from the emission buffer = ${privatePct(vault.seedShareBps ?? "0")} of the vault-side reserves (${privateCredits(vault.reservesBeforeSeed)} cr before the draw)`;
-  const remaining = BigInt(lottery.remaining || "0");
-  const pace = lottery.roundsToActivation == null ? "no lottery funding recorded yet"
-    : remaining === 0n ? "fully funded"
-    : `≈ ${privateCredits(lottery.roundsToActivation)} rounds ≈ ${privateHours(lottery.secondsToActivation)} (avg ${privateCredits(lottery.averageFundingPerRound)} cr/round over the last ${lottery.roundsSampled}, ${lottery.cadenceSeconds || PRIVATE_ECONOMY_CADENCE_FALLBACK}s cadence)`;
-  const oddsLine = m.combinedOdds > 0n ? `1 in ${privateCredits(m.combinedOdds)}` : "no tickets yet — every qualified bet earns tickets";
-  const derivation = `your tickets ${privateCredits(m.myWeight)} ÷ everyone's ${privateCredits(m.totalWeight)} × 1/${m.hitOdds}`;
   const active = lottery.status === "active";
+  const prize = privateBig(lottery.prize), winnerTake = privateBig(lottery.winnerTake), nextSeed = privateBig(lottery.nextSeed), pool = privateBig(lottery.pool);
+  const quoted = privateBig(lottery.quotedContribution);
+  const roundOdds = m.roundOdds === null ? "no draw until a prize is on the board" : `1 in ${privateCredits(m.roundOdds)} for a round that adds ${privateCredits(quoted)} cr (this table's recent average)`;
+  const regime = lottery.regime === "actuarial"
+    ? `the prize is big enough that each round's chance is priced by what it pays in: chance = contribution ÷ (${(Number(privateBig(lottery.kappaBps)) / 10_000).toFixed(1)} × prize). A bigger prize is rarer in exact proportion, like every real progressive jackpot — and it can never be farmed.`
+    : `the prize is still small, so every round draws at the flat ceiling of 1 in ${privateCredits(lottery.flatOddsOneIn)}.`;
+  const pace = lottery.expectedRoundsToHit == null ? "no lottery funding recorded yet"
+    : `≈ ${privateCredits(lottery.expectedRoundsToHit)} rounds ≈ ${privateHours(lottery.expectedSecondsToHit)} on average (${lottery.cadenceSeconds || PRIVATE_ECONOMY_CADENCE_FALLBACK}s cadence); it is a draw, not a schedule`;
+  const mine = m.roundStake === 0n ? "no seat committed for the next flight — commit to hold a ticket"
+    : m.myStake === 0n ? `no seat of yours in the next flight (${privateCredits(m.roundStake)} cr committed by others)`
+    : `1 in ${privateCredits(m.myOdds)} — your ${privateCredits(m.myStake)} cr is ${(Number(m.myStake * 1_000_000n / m.roundStake) / 10_000).toFixed(2)}% of the ${privateCredits(m.roundStake)} cr committed, so your share of the round's ${privateOddsText(m.threshold)} chance`;
+  const growthLine = privateBig(lottery.expectedGrowthPerRound) > 0n
+    ? `+${privateCredits(lottery.expectedGrowthPerRound)} cr per round like that, after the expected payout — the prize grows without a ceiling`
+    : "the prize grows with every funded round";
   return `
     <div class="private-econ-section" data-econ="vault">
       <div class="private-econ-title">⬢ THE VAULT <small>protected principal · never decreases</small></div>
@@ -5707,19 +5710,20 @@ function privateEconomyHtml(snapshot) {
       ${privateEconomyRow("Lifetime seeded into flights", privateMoney3(vault.lifetimeSeeded))}
     </div>
     <div class="private-econ-section" data-econ="lottery">
-      <div class="private-econ-title">🎟 THE POWERBOARD LOTTERY <small>${active ? "ACTIVE — a numbered draw happens after each round" : "FUNDING — no draw yet"}</small></div>
-      ${privateEconomyRow("Prize right now", privateMoney3(lottery.prizeNow), true)}
-      ${privateEconomyRow("Needed to turn active", remaining === 0n ? "0 — active" : `${privateMoney3(remaining)} remaining`)}
-      ${privateEconomyRow("Funded", `${privatePct(lottery.fundedBps, 1)} of ${privateCredits(lottery.requiredTotal)} cr (${privateCredits(lottery.requiredGross)} prize gross + ${privateCredits(lottery.requiredReserve)} reset reserve)`)}
-      ${privateEconomyRow("Prize when active", `${privateMoney3(lottery.target)}, then the base ratchets to ${privateCredits(lottery.nextBase)} cr`)}
-      ${privateEconomyRow("This round added", lottery.addedThisRound == null ? "no settled round yet" : privateMoney3(lottery.addedThisRound, { sign: true }))}
-      ${privateEconomyRow("At this table's pace", pace)}
-      ${privateEconomyRow("Your odds this draw", oddsLine, true)}
-      ${privateEconomyRow("How", derivation)}
-      ${privateEconomyRow("If you win you receive", privateMoney3(lottery.target))}
+      <div class="private-econ-title">🎟 THE PROGRESSIVE LOTTERY <small>${active ? "LIVE — every settled round is a draw among that round's seats" : "FUNDING — the first funded round puts a prize on the board"}</small></div>
+      ${privateEconomyRow("If you win you receive", active ? privateMoney3(winnerTake) : "the first prize is being funded", true)}
+      ${privateEconomyRow("Prize on the board", `${privateMoney3(prize)} = ${privateCredits(winnerTake)} cr to the winner + ${privateCredits(nextSeed)} cr that seeds the next prize (${privatePct(lottery.carveBps, 1)} carve)`)}
+      ${privateEconomyRow("Banked right now", `${privateMoney3(pool)}${pool > prize ? ` — ${privateCredits(pool - prize)} cr funded since the last settlement joins the next board` : ""}`)}
+      ${privateEconomyRow("This round added", lottery.addedThisRound == null ? "no settled round yet" : `${privateMoney3(lottery.addedThisRound, { sign: true })} before the ${privatePct(lottery.inflowFeeBps, 0)} protocol fee`)}
+      ${privateEconomyRow("Chance per round", roundOdds)}
+      ${privateEconomyRow("Why", regime)}
+      ${privateEconomyRow("Your odds next flight", mine, true)}
+      ${privateEconomyRow("Expected time to a hit", pace)}
+      ${privateEconomyRow("Growth", growthLine)}
+      ${privateEconomyRow("Record", `high-water prize ${privateCredits(lottery.highWaterPrize)} cr · ${privateCredits(lottery.draws)} draws · ${privateCredits(lottery.hits)} hits`)}
       ${privateEconomyRow("Lottery share of each pot", `pot × ${privatePpmPct(lottery.shareOfPotPpm)} (${privatePct(policy.powerboardFundingBps, 0)} of the community rake share)`)}
     </div>
-    <div class="pb-guarantee">1 credit = 0.000001 ETH (1,000,000 cr = 1 ETH). ${usdNote} Test credits have no cash value.</div>`;
+    <div class="pb-guarantee">1 credit = 0.000001 ETH (1,000,000 cr = 1 ETH). ${usdNote} Only seats in the round that draws are eligible; nothing is forced and no draw is ever scheduled. Test credits have no cash value.</div>`;
 }
 function paintPrivateEconomy() {
   if (!PLAYTEST_MODE || !privateSnapshot) return;
@@ -5750,13 +5754,11 @@ function togglePrivateEconomy(section) {
 }
 
 function privateLotteryPresentation(snapshot) {
-  const lottery = snapshot.simulation.lottery, prize = BigInt(lottery.netPrize || "0");
-  if (prize > 0n) return { label:`PRIZE ${privateCredits(prize)}`, detail:`Sealed prize ${privateCredits(prize)} credits (${privateCreditUsd(prize)})` };
-  const available = BigInt(lottery.rollover || "0") + BigInt(lottery.pendingFunding || "0");
-  const required = privateMinimumLotteryGross(lottery.nextPrizeTarget, snapshot.policy.lotteryFounderFeeBps);
-  const pct = required > 0n ? Number(available * 10_000n / required) / 100 : 100;
-  const visiblePct = available < required ? Math.min(99.9, pct) : 100;
-  return { label:`NEXT PRIZE ${privateCredits(lottery.nextPrizeTarget)} · ${visiblePct.toFixed(1)}%`, detail:`Unsealed next-prize target ${privateCredits(lottery.nextPrizeTarget)} credits; ${privateCredits(available)} of ${privateCredits(required)} gross credits funded. Reset reserve ${privateCredits(lottery.resetReserve)}.` };
+  const lottery = snapshot.simulation.lottery || {}, prize = privateBig(lottery.committedPrize);
+  const { winnerTake, nextSeed } = privateCarve(prize, snapshot.policy);
+  if (prize > 0n) return { label:`PRIZE ${privateCredits(winnerTake)}`, detail:`Prize on the board ${privateCredits(prize)} credits (${privateCreditUsd(prize)}): ${privateCredits(winnerTake)} to the winner, ${privateCredits(nextSeed)} seeds the next prize.` };
+  const pool = privateBig(lottery.pool);
+  return { label:`PRIZE FUNDING · ${privateCredits(pool)}`, detail:`${privateCredits(pool)} credits banked; the first funded settlement puts the prize on the board.` };
 }
 
 function renderPrivateRoster(snapshot) {
@@ -5957,20 +5959,23 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const powerball = document.createElement("section"); powerball.className = `private-powerball ${winner ? "hit" : drawActive ? "miss" : "funding"}`;
   if (draw) {
     const outcome = winner ? `JACKPOT · ${winner.displayName} WINS ${privateCredits(winner.payout)}`
-      : lotteryEvent === "miss" ? "NO MATCH · PRIZE ROLLS FORWARD"
-      : lotteryEvent === "sealed" ? "NO PAYOUT · NEXT PRIZE NOW SEALED"
+      : lotteryEvent === "miss" ? "NO HIT · THE PRIZE KEEPS GROWING"
       : "FUNDING MIX · NO ACTIVE PRIZE DRAW";
     const fundingAdded = BigInt(settlementEvent?.payload?.powerboardFundingAdded || "0");
     const settledPool = settlementEvent?.payload?.powerboardPool;
-    const mySettledVoucher = settledPool?.weights?.find((voucher) => voucher.userId === snapshot.me.id);
-    const myWeight = BigInt(mySettledVoucher?.weight || snapshot.powerboard?.myWeight || "0"), totalWeight = BigInt(settledPool?.totalWeight || snapshot.powerboard?.totalWeight || "0");
+    const mySettledTicket = settledPool?.weights?.find((ticket) => ticket.userId === snapshot.me.id);
+    const myWeight = BigInt(mySettledTicket?.weight || "0"), totalWeight = BigInt(settledPool?.totalWeight || "0");
     const mySharePpm = totalWeight > 0n ? myWeight * 1_000_000n / totalWeight : 0n;
-    const drawPopulation = Math.max(1, Number(draw.oddsOneIn));
+    const drawPopulation = Math.max(1, Number(draw.balls || 16));
     const perBallChance = (100 / drawPopulation).toFixed(2);
+    const threshold = privateBig(draw.thresholdE18), sample = privateBig(draw.sampleE18);
+    const prizeDrawn = privateBig(settlementEvent?.payload?.lotteryPrize);
+    const nextPrize = privateBig(settlementEvent?.payload?.lotteryPrizeAfter ?? snapshot.simulation.lottery?.committedPrize);
+    const nextTake = privateCarve(nextPrize, snapshot.policy).winnerTake;
     const drawLedger = drawActive
-      ? `Drawn ball ${draw.drawnNumber} · winning ball ${draw.winningNumber} · gate 1 in ${draw.oddsOneIn}`
+      ? `Ball ${draw.drawnNumber} of ${drawPopulation} · committed draw ${privateProbPct(sample)} vs this round's winning zone ${privateProbPct(threshold)} (${privateOddsText(threshold)})`
       : "MIXING ONLY · no result ball is selected while the prize is funding";
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p>${drawActive ? `<div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div>` : ""}<div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR EPOCH VOUCHER"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} weight · ${(Number(mySharePpm) / 10_000).toFixed(2)}% if hit`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE BASE" : "NEXT STATE"}</small>${winner ? `${privateCredits(snapshot.simulation.lottery.netPrize)} CR` : lotteryEvent === "miss" ? "ROLLOVER" : lotteryEvent === "sealed" ? "SEALED" : "FUNDING"}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE LOTTERY · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p>${drawActive ? `<div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div>` : ""}<div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR TICKET THIS ROUND"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} cr · ${(Number(mySharePpm) / 10_000).toFixed(2)}% of the round`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE" : drawActive ? "PRIZE DRAWN FOR" : "NEXT PRIZE"}</small>${winner ? `${privateCredits(nextTake)} CR` : drawActive ? `${privateCredits(privateCarve(prizeDrawn, snapshot.policy).winnerTake)} CR` : `${privateCredits(nextTake)} CR`}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
     powerball.dataset.drawActive = drawActive ? "true" : "false";
     const drawCanvas = powerball.querySelector(".private-powerball-canvas");
     drawCanvas.removeAttribute("aria-hidden");
@@ -5979,15 +5984,15 @@ function paintPrivateConclusion(snapshot, me, seat) {
       ? `Lottery air chamber containing ${drawPopulation} equally eligible numbered balls; ball ${draw.drawnNumber} is selected`
       : `Lottery air chamber mixing ${drawPopulation} equally eligible numbered balls; no result ball is selected while the prize is funding`);
     powerball.querySelector(".private-powerball-rule").textContent = drawActive
-      ? `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal.`
-      : "The chamber is mixing while the next prize is funded. All eligible balls remain inside the chamber; no result is selected until the full prize and reset reserve are sealed.";
+      ? `One physical sphere represents every equally eligible result: balls 1 through ${drawPopulation}, ${perBallChance}% each. The animation faithfully reveals the already-committed uniform result; ball ${draw.drawnNumber} exits this exact pool through the selection tube and lands on the pedestal. Ball 1 is the winning zone at the 1-in-${drawPopulation} ceiling; inside it, this round's exact threshold (${privateProbPct(threshold)}, priced by what the round paid in) decides.`
+      : "The chamber is mixing while the first prize is funded. All eligible balls remain inside the chamber; no result is selected until a prize is on the board.";
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
   } else {
-    const prize = BigInt(snapshot.simulation.lottery.netPrize || "0");
-    const target = BigInt(snapshot.simulation.lottery.nextPrizeTarget || "0");
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><div class="private-lottery-fallback" aria-hidden="true"><i></i><i></i><i></i><b>?</b></div><div class="private-powerball-copy"><small>THE POWERBOARD · ROUND ${snapshot.room.currentRound}</small><h3>DRAW RECORD RECOVERING</h3><p class="private-powerball-rule">The flight is settled, but this client did not receive its committed numbered draw record. No result is being invented.</p><div class="private-powerball-outcome"><strong>REFRESHING AUTHORITATIVE RESULT</strong><span>${prize > 0n ? `Sealed prize ${privateCredits(prize)} credits` : `Next prize target ${privateCredits(target)} credits · still funding`}</span></div></div>`;
+    const prize = privateBig(snapshot.simulation.lottery?.committedPrize);
+    const { winnerTake } = privateCarve(prize, snapshot.policy);
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><div class="private-lottery-fallback" aria-hidden="true"><i></i><i></i><i></i><b>?</b></div><div class="private-powerball-copy"><small>THE LOTTERY · ROUND ${snapshot.room.currentRound}</small><h3>DRAW RECORD RECOVERING</h3><p class="private-powerball-rule">The flight is settled, but this client did not receive its committed numbered draw record. No result is being invented.</p><div class="private-powerball-outcome"><strong>REFRESHING AUTHORITATIVE RESULT</strong><span>${prize > 0n ? `Prize on the board ${privateCredits(winnerTake)} credits to the winner` : `Prize funding · ${privateCredits(snapshot.simulation.lottery?.pool)} credits banked`}</span></div></div>`;
     powerball.setAttribute("role", "status");
   }
   const world = document.createElement("div"); world.className = "private-result-world";
@@ -5998,15 +6003,13 @@ function paintPrivateConclusion(snapshot, me, seat) {
   // show; the honest state is funded/required gross (the same fee gross-up
   // kernel the engine's funded gate uses), never "PRIZE 0".
   const worldLottery = snapshot.simulation.lottery || {};
-  const sealedPrize = BigInt(worldLottery.netPrize || "0"), worldReserve = BigInt(worldLottery.resetReserve || "0");
-  const fundedGross = BigInt(worldLottery.rollover || "0") + BigInt(worldLottery.pendingFunding || "0");
-  const requiredGross = privateMinimumLotteryGross(worldLottery.nextPrizeTarget, snapshot.policy?.lotteryFounderFeeBps);
-  const fundedPct = requiredGross > 0n ? (fundedGross >= requiredGross ? 100 : Math.min(99.9, Number(fundedGross * 10_000n / requiredGross) / 100)) : 0;
+  const boardPrize = privateBig(worldLottery.committedPrize), boardPool = privateBig(worldLottery.pool);
+  const boardCarve = privateCarve(boardPrize, snapshot.policy);
   const vaultUsd = privateEthUsd > 0 ? ` <small>${privateCreditUsd(snapshot.simulation.protectedPrincipal)}</small>` : "";
   const worldTiles = [`<span data-econ="vault" role="button" tabindex="0" title="Open the economy panel"><small>PROTECTED VAULT</small>${privateCredits(snapshot.simulation.protectedPrincipal)} cr${vaultUsd}</span>`];
-  if (sealedPrize > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>${winner ? "NEXT PRIZE BASE" : "LOTTERY PRIZE"}</small>${privateCredits(sealedPrize)} cr</span>`);
-  else worldTiles.push(`<span class="private-result-funding" data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>PRIZE FUNDING</small>${privateCredits(fundedGross)} / ${privateCredits(requiredGross)} · ${fundedPct.toFixed(1)}%</span>`);
-  if (worldReserve > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>RESET RESERVE</small>${privateCredits(worldReserve)} cr</span>`);
+  if (boardPrize > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>${winner ? "NEXT PRIZE" : "LOTTERY PRIZE"}</small>${privateCredits(boardCarve.winnerTake)} cr</span>`);
+  else worldTiles.push(`<span class="private-result-funding" data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>PRIZE FUNDING</small>${privateCredits(boardPool)} cr banked</span>`);
+  if (boardCarve.nextSeed > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>SEEDS NEXT PRIZE</small>${privateCredits(boardCarve.nextSeed)} cr</span>`);
   worldTiles.push(`<span data-econ="vault" role="button" tabindex="0" title="Open the economy panel"><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)} cr</span>`);
   world.innerHTML = worldTiles.join("");
   for (const tile of world.querySelectorAll("[data-econ]")) tile.addEventListener("click", () => openPrivateEconomy(tile.dataset.econ));
@@ -6043,7 +6046,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   }
   const dilutionNote = survived && !profitable ? `You beat the crash, but too much stake also survived to cover every stake after the ${(settledRakeBps / 100).toFixed(2)}% routed rake; the bounded pool cannot manufacture the difference. ` : "";
   const claimNote = "The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.";
-  const winnerNote = winner ? ` Powerboard epoch ${winner.epoch} hit: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : "";
+  const winnerNote = winner ? ` Lottery hit in round ${winner.round}: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : "";
   const noteText = `${seat ? `${settlementDetail}${dilutionNote}${claimNote}` : "Commit below to take a seat in the next round."}${winnerNote}`;
   if (note.tagName === "DETAILS") {
     // Phone sheet: collapsed by default, left-aligned, every disclosed number
@@ -6076,7 +6079,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
     privateDockObserver = new ResizeObserver(reserve); privateDockObserver.observe(next); reserve();
   } else card.style.removeProperty("--private-dock-h");
   if (draw) {
-    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, drawActive ? draw.drawnNumber : null, draw.oddsOneIn); }
+    try { mountPrivateLotteryMachine(powerball.querySelector(".private-powerball-canvas"), card, drawActive ? draw.drawnNumber : null, draw.balls || 16); }
     catch (error) {
       console.error("[playtest] lottery machine WebGL fallback", error);
       powerball.classList.add("webgl-fallback");
@@ -6132,7 +6135,7 @@ function updatePrivateJourney(snapshot, me, seat) {
       launch: snapshot.room.isOwner ? "Your friends can see who is ready. Launch when the table feels assembled." : "You are ready. The host controls the shared launch.",
       fly: !seat ? "You are spectating this flight. Watch how lock decisions shape the shared settlement." : seat.acceptedTargetBps ? `You secured ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×. Watch the rest of the table finish the story.` : "The multiplier is rising. Lock whenever you want: your lock is granted at the multiplier you were shown.",
       settle: "The crash is known. Review your result, the group outcome, and what this round changed.",
-      powerboard: "The flight is accounted. Reveal this round's committed Powerboard number and funded win-or-rollover outcome.",
+      powerboard: "The flight is accounted. Reveal this round's committed lottery draw against its own actuarial threshold.",
       return: `The story is accounted for. Choose your stake when you are ready to open round ${Number(snapshot.room.currentRound) + 1}.`,
     };
     cue.textContent = cues[stage];
@@ -6217,12 +6220,12 @@ function paintPrivateSnapshot(snapshot) {
   $("vaultSeed").textContent = "";
   $("vaultStat").title = "The protected Vault: kept back from every round's rake and never decreases. Click for the full economy panel.";
   $("vaultStat").setAttribute("role", "button"); $("vaultStat").tabIndex = 0;
-  const voucherWeight = BigInt(snapshot.powerboard?.myWeight || "0");
-  const voucherOdds = BigInt(snapshot.powerboard?.quote?.combinedOddsOneInCeil || "0");
+  const ticketStake = BigInt(snapshot.powerboard?.myStake || "0");
+  const ticketOdds = snapshot.powerboard?.quote?.oddsOneIn == null ? null : BigInt(snapshot.powerboard.quote.oddsOneIn);
   $("pbTickets").textContent = economyHeader.lottery;
-  $("pbStat").title = voucherWeight > 0n
-    ? `Your tickets this epoch: ${privateCredits(voucherWeight)} of ${privateCredits(snapshot.powerboard.totalWeight)}; combined jackpot chance about 1 in ${privateCredits(voucherOdds)}. Click for the full economy panel.`
-    : "Every qualified bet earns lottery tickets. Click for the full economy panel.";
+  $("pbStat").title = ticketStake > 0n
+    ? `Your ticket in the next flight: ${privateCredits(ticketStake)} of ${privateCredits(snapshot.powerboard.roundStake)} cr committed; your chance about 1 in ${ticketOdds === null ? "—" : privateCredits(ticketOdds)}. Click for the full economy panel.`
+    : "Only seats in the round that draws hold tickets, weighted by stake. Click for the full economy panel.";
   $("pbJackpot").textContent = "";
   paintPrivateEconomy();
   const effectiveRakeBps = Number(snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
@@ -6666,10 +6669,10 @@ async function startPrivatePlaytest() {
       <label class="private-setting"><span>Minimum players</span><input data-policy="minimumPlayers" inputmode="numeric"></label><label class="private-setting"><span>Minimum stake</span><input data-policy="minimumStake" inputmode="numeric"></label><label class="private-setting"><span>Vault share of routed rake (bps)</span><input data-policy="protectedPrincipalBps" inputmode="numeric"></label><label class="private-setting"><span>Powerboard share of community rake (bps)</span><input data-policy="powerboardFundingBps" inputmode="numeric"></label><label class="private-setting"><span>Keeper reward (bps)</span><input data-policy="keeperRewardBps" inputmode="numeric"></label><label class="private-setting"><span>Crash seed per round</span><input data-policy="crashSeed" inputmode="numeric"></label><label class="private-setting"><span>Emission buffer cap</span><input data-policy="emissionBufferCap" inputmode="numeric"></label>
     </div><div class="private-menu-actions"><button id="privateApplyRules" class="primary">APPLY TABLE RULES</button></div></section>
     <section class="private-admin-section"><h3>LOTTERY ENGINE RULES</h3><div class="private-admin-grid">
-      <label class="private-setting"><span>Founder fee (bps)</span><input data-policy="lotteryFounderFeeBps" inputmode="numeric"></label><label class="private-setting"><span>Initial base prize</span><input data-policy="lotteryInitialBase" inputmode="numeric"></label><label class="private-setting"><span>Minimum prize increase</span><input data-policy="lotteryMinimumIncrease" inputmode="numeric"></label><label class="private-setting"><span>Base growth (bps)</span><input data-policy="lotteryBaseGrowthBps" inputmode="numeric"></label><label class="private-setting"><span>Minimum reset-base step</span><input data-policy="lotteryMinimumBaseStep" inputmode="numeric"></label><label class="private-setting"><span>Consolation payout</span><input data-policy="consolation" inputmode="numeric"></label>
+      <label class="private-setting"><span>Founder fee (bps)</span><input data-policy="lotteryFounderFeeBps" inputmode="numeric"></label><label class="private-setting"><span>Flat odds ceiling (1 in N)</span><input data-policy="lotteryOddsOneIn" inputmode="numeric"></label><label class="private-setting"><span>Actuarial loading kappa (bps, &gt; 10000)</span><input data-policy="lotteryKappaBps" inputmode="numeric"></label><label class="private-setting"><span>Carve min (bps)</span><input data-policy="carveMinBps" inputmode="numeric"></label><label class="private-setting"><span>Carve max (bps)</span><input data-policy="carveMaxBps" inputmode="numeric"></label><label class="private-setting"><span>Carve half-saturation (credits)</span><input data-policy="carveHalfSaturation" inputmode="numeric"></label>
     </div><div class="private-menu-actions"><button id="privateApplyLotteryRules" class="primary">APPLY LOTTERY RULES</button></div></section>
     <section class="private-admin-section"><h3>INJECT A TEST WORLD STATE</h3><p class="private-menu-lede">These are explicit laboratory starting conditions, not earned economic flows.</p><div class="private-admin-grid">
-      <label class="private-setting"><span>Protected Vault principal</span><input data-state="protectedPrincipal" inputmode="numeric"></label><label class="private-setting"><span>Emission buffer</span><input data-state="emissionBuffer" inputmode="numeric"></label><label class="private-setting"><span>Current lottery prize</span><input data-state="lottery.netPrize" inputmode="numeric"></label><label class="private-setting"><span>Lottery high water</span><input data-state="lottery.highWaterPrize" inputmode="numeric"></label><label class="private-setting"><span>Pending lottery funding</span><input data-state="lottery.pendingFunding" inputmode="numeric"></label><label class="private-setting"><span>Reset reserve</span><input data-state="lottery.resetReserve" inputmode="numeric"></label><label class="private-setting"><span>Lottery rollover</span><input data-state="lottery.rollover" inputmode="numeric"></label><label class="private-setting"><span>Next prize target</span><input data-state="lottery.nextPrizeTarget" inputmode="numeric"></label><label class="private-setting"><span>Cycle base</span><input data-state="lottery.cycleBase" inputmode="numeric"></label><label class="private-setting"><span>Cumulative PLANK burned</span><input data-state="totals.burned" inputmode="numeric"></label><label class="private-setting"><span>Cumulative community funding</span><input data-state="totals.communityFunded" inputmode="numeric"></label><label class="private-setting"><span>Cumulative founder rake</span><input data-state="totals.crashFounderRake" inputmode="numeric"></label><label class="private-setting private-setting-check"><span>Awaiting seal</span><input data-state="lottery.awaitingSeal" type="checkbox"></label><label class="private-setting private-setting-check"><span>Ready for draw</span><input data-state="lottery.readyForDraw" type="checkbox"></label>
+      <label class="private-setting"><span>Protected Vault principal</span><input data-state="protectedPrincipal" inputmode="numeric"></label><label class="private-setting"><span>Emission buffer</span><input data-state="emissionBuffer" inputmode="numeric"></label><label class="private-setting"><span>Lottery pool (banked, net)</span><input data-state="lottery.pool" inputmode="numeric"></label><label class="private-setting"><span>Prize on the board (≤ pool)</span><input data-state="lottery.committedPrize" inputmode="numeric"></label><label class="private-setting"><span>Lottery high water</span><input data-state="lottery.highWaterPrize" inputmode="numeric"></label><label class="private-setting"><span>Cumulative PLANK burned</span><input data-state="totals.burned" inputmode="numeric"></label><label class="private-setting"><span>Cumulative community funding</span><input data-state="totals.communityFunded" inputmode="numeric"></label><label class="private-setting"><span>Cumulative founder rake</span><input data-state="totals.crashFounderRake" inputmode="numeric"></label>
     </div><div class="private-menu-actions"><button id="privateApplyState" class="primary">INJECT LAB STATE</button></div></section>
     <section class="private-admin-section"><h3>SYNTHETIC PARTICIPANTS</h3><p class="private-menu-lede">Bots commit before the crash secret is revealed, wager only from their own bankrolls, and settle through the same parimutuel kernel as friends. Add one, a tuned cohort, or a population stress test.</p><div class="private-admin-grid">
       <label class="private-setting"><span>Preset</span><select id="privateBotPreset"><option value="mixed">Mixed population</option><option value="cautious">Cautious</option><option value="balanced" selected>Balanced</option><option value="bold">Bold</option><option value="whale">Whale</option><option value="house-money">House-money</option><option value="break-even">Break-even</option><option value="wildcard">Wildcard</option></select></label><label class="private-setting"><span>How many (1–100)</span><input id="privateBotCount" value="1" inputmode="numeric"></label><label class="private-setting"><span>Starting bankroll each</span><input id="privateBotBankroll" value="1000000" inputmode="numeric"></label>
@@ -6679,7 +6682,7 @@ async function startPrivatePlaytest() {
     <div class="private-menu-actions"><button id="privateUpdateBots" class="primary">APPLY TO SELECTED</button><button id="privateRemoveBots">REMOVE SELECTED</button></div></section>
     <section class="private-admin-section"><h3>PLAYER CREDITS</h3><div class="private-admin-grid"><label class="private-setting"><span>Player</span><select id="privateCreditUser"></select></label><label class="private-setting"><span>New balance</span><input id="privateCreditBalance" inputmode="numeric"></label></div><div class="private-menu-actions"><button id="privateApplyCredit" class="primary">SET PLAYER BALANCE</button></div></section>
     <section class="private-admin-section"><h3>CO-HOST ACCESS</h3><p class="private-menu-lede">Create a separate six-digit host login. Co-hosts can create their own tables, invite people, tune simulations, and administer test credits. PINs are derived server-side and never stored as plain text.</p><div class="private-admin-grid"><label class="private-setting"><span>Co-host username</span><input id="privateCohostName" maxlength="40" autocomplete="off"></label><label class="private-setting"><span>Six-digit PIN</span><input id="privateCohostPin" inputmode="numeric" maxlength="6" autocomplete="new-password"></label></div><div class="private-menu-actions"><button id="privateCreateCohost">CREATE CO-HOST LOGIN</button></div></section>
-    <section class="private-admin-section"><h3>FORCE LOTTERY OUTCOME AFTER CRASH</h3><p class="private-menu-lede">Once the authoritative flight deadline passes, settle this round with no draw, a rollover miss, or a winner-takes-all hit.</p><div class="private-menu-actions"><button data-outcome="none">NO DRAW</button><button data-outcome="miss">MISS · ROLLOVER</button><button data-outcome="hit">HIT · WINNER TAKES ALL</button></div></section>
+    <section class="private-admin-section"><h3>SETTLE AFTER CRASH (LABORATORY)</h3><p class="private-menu-lede">Once the authoritative flight deadline passes, settle this round naturally (the committed sample against this round's actuarial threshold) or force a laboratory miss/hit; forced outcomes are flagged in every client.</p><div class="private-menu-actions"><button data-outcome="none">NATURAL DRAW</button><button data-outcome="miss">FORCE MISS</button><button data-outcome="hit">FORCE HIT · WINNER TAKES W</button></div></section>
     <div class="private-menu-actions"><button id="privateSimulationClose">RETURN TO TABLE</button></div></div>`; document.body.appendChild(simulationDialog);
   const adminStatus = simulationDialog.querySelector("#privateAdminStatus");
   const simulationValue = (path) => path.split(".").reduce((value, key) => value?.[key], privateSnapshot?.simulation);
@@ -6703,7 +6706,7 @@ async function startPrivatePlaytest() {
   };
   simulation.onclick = () => { fillSimulationConsole(); simulationDialog.showModal(); };
   simulationDialog.querySelector("#privateApplyRules").onclick = () => applyAdminPatch("adminPolicy", "policy", '[data-policy="minimumPlayers"],[data-policy="minimumStake"],[data-policy="protectedPrincipalBps"],[data-policy="powerboardFundingBps"],[data-policy="keeperRewardBps"],[data-policy="crashSeed"],[data-policy="emissionBufferCap"]');
-  simulationDialog.querySelector("#privateApplyLotteryRules").onclick = () => applyAdminPatch("adminPolicy", "policy", '[data-policy^="lottery"],[data-policy="consolation"]');
+  simulationDialog.querySelector("#privateApplyLotteryRules").onclick = () => applyAdminPatch("adminPolicy", "policy", '[data-policy^="lottery"],[data-policy^="carve"]');
   simulationDialog.querySelector("#privateApplyState").onclick = () => applyAdminPatch("adminSimulation", "state", "[data-state]");
   const selectedBots = () => [...simulationDialog.querySelectorAll("[data-bot-id]:checked")].map((input) => input.dataset.botId);
   const botDigits = (id, fallback) => simulationDialog.querySelector(id).value.replace(/\D/g, "") || fallback;

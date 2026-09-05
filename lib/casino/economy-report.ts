@@ -1,11 +1,11 @@
-import { BPS, minimumLotteryGross } from "./economics";
-import { nextCycleBase, type SimulationPolicy, type SimulationState } from "./simulation";
+import { BPS } from "./economics";
+import { carveBps, carvePrize, hitThresholdE18, PROB_ONE, type SimulationPolicy, type SimulationState } from "./simulation";
 
 /**
  * Player-facing economy derivations shared by the room snapshot (server), the
  * arcade panel (client, via the snapshot) and the unit tests. Every figure is
- * derived from the SAME kernel functions the engine settles with
- * (minimumLotteryGross, nextCycleBase); nothing here is a second opinion.
+ * derived from the SAME kernel functions the engine settles with (carvePrize,
+ * hitThresholdE18); nothing here is a second opinion.
  *
  * Laboratory denomination: 1 test credit = 1e-6 ETH (1,000,000 credits =
  * 1 ETH). USD is a display-only quote supplied by the client; it never
@@ -30,69 +30,83 @@ export function creditsToUsd(credits: bigint, ethUsd: number | null | undefined)
   return Number(credits) / Number(CREDITS_PER_ETH) * ethUsd;
 }
 
-export interface LotteryActivationQuote {
-  awaitingSeal: boolean;
-  readyForDraw: boolean;
+export interface LotteryPrizeQuote {
   status: "active" | "funding";
-  /** Net prize paid on a hit once active: the sealed prize, or the next target. */
-  target: bigint;
-  /** Gross (fee-inclusive) funding the target needs — the engine's seal gate. */
-  requiredGross: bigint;
-  /** Base the cycle ratchets to after a paid hit. */
-  nextBase: bigint;
-  /** Gross the reset reserve must hold before readyForDraw arms. */
-  requiredReserve: bigint;
-  /** rollover + pendingFunding (gross toward the next seal). */
-  fundedGross: bigint;
-  resetReserve: bigint;
-  /** What the prize is worth right now: netPrize when sealed, else funded gross. */
-  prizeNow: bigint;
-  prizeShort: bigint;
-  reserveShort: bigint;
-  /** Credits still needed before a draw can happen (0 ⇔ readyForDraw after settlement). */
-  remaining: bigint;
-  requiredTotal: bigint;
-  fundedTotal: bigint;
-  fundedBps: bigint;
+  /** Net money banked on the board right now (includes funding since the last settlement). */
+  pool: bigint;
+  /** The prize the NEXT draw pays (the pool as of the last qualified settlement). */
+  prize: bigint;
+  /** Displayed == redeemable: the winner receives exactly this on a hit ... */
+  winnerTake: bigint;
+  /** ... and the next board opens with exactly this. */
+  nextSeed: bigint;
+  carveBps: bigint;
+  /** The contribution the threshold below is quoted at (a typical round's routed lottery leg). */
+  quotedContribution: bigint;
+  /** Hit threshold on the PROB_ONE scale at that contribution. */
+  thresholdE18: bigint;
+  /** ceil(PROB_ONE / threshold): "1 in N" for a round of that size; null when the threshold is 0. */
+  oddsOneIn: bigint | null;
+  /** The flat ceiling the rule never beats. */
+  flatOddsOneIn: bigint;
+  /** Which branch of min() binds: "flat" (small prize) or "actuarial" (prize priced by contribution). */
+  regime: "flat" | "actuarial";
+  kappaBps: bigint;
+  /** Expected net growth of the pool per round of that size: c(1 - fee) - E[payout]. */
+  expectedGrowthPerRound: bigint;
+  highWaterPrize: bigint;
+  draws: bigint;
+  hits: bigint;
 }
 
-/** Remaining-to-activation, mirroring sealFromFunding + fundResetReserve:
- * the prize bucket seals when rollover + pending ≥ requiredGross; the surplus
- * pending then flows into the reset reserve, which must reach
- * minimumLotteryGross(nextCycleBase) before a draw is exposed. Reserve
- * surplus never flows back to the prize, so the two shortfalls are summed
- * per bucket instead of netted. */
-export function lotteryActivationQuote(state: SimulationState, policy: SimulationPolicy): LotteryActivationQuote {
+/**
+ * The prize as players should read it under the actuarial rule: what the
+ * next draw pays, what the winner takes, what re-seeds the board, and the
+ * odds a round of a given size has. `quotedContribution` should be the
+ * average routed lottery leg of recent rounds (see contributionPace) so the
+ * odds shown are the odds THIS table actually plays at.
+ */
+export function lotteryPrizeQuote(state: SimulationState, policy: SimulationPolicy, quotedContribution: bigint): LotteryPrizeQuote {
+  if (quotedContribution < 0n) throw new RangeError("negative contribution");
   const lottery = state.lottery;
-  const target = lottery.awaitingSeal ? lottery.nextPrizeTarget : lottery.netPrize;
-  const requiredGross = lottery.awaitingSeal ? minimumLotteryGross(target, policy.lotteryFounderFeeBps) : 0n;
-  const nextBase = nextCycleBase(lottery.cycleBase, policy);
-  const requiredReserve = minimumLotteryGross(nextBase, policy.lotteryFounderFeeBps);
-  const fundedGross = lottery.rollover + lottery.pendingFunding;
-  const prizeShort = requiredGross > fundedGross ? requiredGross - fundedGross : 0n;
-  const surplus = fundedGross > requiredGross ? fundedGross - requiredGross : 0n;
-  const reserveCovered = lottery.resetReserve + surplus;
-  const reserveShort = requiredReserve > reserveCovered ? requiredReserve - reserveCovered : 0n;
-  const remaining = prizeShort + reserveShort;
-  const requiredTotal = requiredGross + requiredReserve;
-  const fundedTotal = requiredTotal - remaining;
+  const prize = lottery.committedPrize;
+  const { winnerPaid, seeded } = carvePrize(prize, policy);
+  const thresholdE18 = prize > 0n ? hitThresholdE18(quotedContribution, prize, policy) : 0n;
+  const flat = PROB_ONE / policy.lotteryOddsOneIn;
+  const oddsOneIn = thresholdE18 > 0n ? (PROB_ONE + thresholdE18 - 1n) / thresholdE18 : null;
+  const expectedPayout = (thresholdE18 * winnerPaid) / PROB_ONE;
+  const netInflow = quotedContribution - (quotedContribution * policy.lotteryFounderFeeBps) / BPS;
   return {
-    awaitingSeal: lottery.awaitingSeal,
-    readyForDraw: lottery.readyForDraw,
-    status: lottery.readyForDraw ? "active" : "funding",
-    target,
-    requiredGross,
-    nextBase,
-    requiredReserve,
-    fundedGross,
-    resetReserve: lottery.resetReserve,
-    prizeNow: lottery.awaitingSeal ? fundedGross : lottery.netPrize,
-    prizeShort,
-    reserveShort,
-    remaining,
-    requiredTotal,
-    fundedTotal,
-    fundedBps: requiredTotal > 0n ? (fundedTotal * BPS) / requiredTotal : BPS,
+    status: prize > 0n ? "active" : "funding",
+    pool: lottery.pool,
+    prize,
+    winnerTake: winnerPaid,
+    nextSeed: seeded,
+    carveBps: carveBps(prize, policy),
+    quotedContribution,
+    thresholdE18,
+    oddsOneIn,
+    flatOddsOneIn: policy.lotteryOddsOneIn,
+    regime: prize > 0n && thresholdE18 < flat ? "actuarial" : "flat",
+    kappaBps: policy.lotteryKappaBps,
+    expectedGrowthPerRound: netInflow - expectedPayout,
+    highWaterPrize: lottery.highWaterPrize,
+    draws: lottery.draws,
+    hits: lottery.hits,
+  };
+}
+
+/** A player's own chance this round: the round's hit chance times their
+ * stake share of the round (round-only eligibility, stake-weighted ticket).
+ * All exact integers; "1 in N" is a ceiling. */
+export function playerRoundOdds(thresholdE18: bigint, myStake: bigint, roundStake: bigint, winnerTake: bigint) {
+  if (myStake < 0n || roundStake < 0n || myStake > roundStake || thresholdE18 < 0n) throw new RangeError("invalid round odds inputs");
+  const sharePpm = roundStake > 0n ? (myStake * 1_000_000n) / roundStake : 0n;
+  const mineE18 = roundStake > 0n ? (thresholdE18 * myStake) / roundStake : 0n;
+  return {
+    sharePpm,
+    oddsOneIn: mineE18 > 0n ? (PROB_ONE + mineE18 - 1n) / mineE18 : null,
+    probabilityWeightedPrize: (mineE18 * winnerTake) / PROB_ONE,
   };
 }
 
@@ -107,7 +121,7 @@ export function vaultShareOfPotPpm(policy: SimulationPolicy, effectiveRakeBps: b
   return (netRakeBps * communityBps * retainedBps * policy.protectedPrincipalBps * 1_000_000n) / (BPS * BPS * BPS * BPS);
 }
 
-/** Powerboard funding share of each round's pot, ppm (default: 4.5% × 40% × 65% = 1.17%). */
+/** Lottery funding share of each round's pot, ppm (default: 4.5% × 40% × 65% = 1.17%). */
 export function lotteryShareOfPotPpm(policy: SimulationPolicy, effectiveRakeBps: bigint): bigint {
   const netRakeBps = effectiveRakeBps * (BPS - policy.keeperRewardBps) / BPS;
   return (netRakeBps * 4_000n * policy.powerboardFundingBps * 1_000_000n) / (BPS * BPS * BPS);
@@ -127,20 +141,22 @@ export function seedShareBps(seed: bigint, reservesBeforeSeed: bigint): bigint {
   return (seed * BPS) / reservesBeforeSeed;
 }
 
-export interface ActivationPace {
-  averageFundingPerRound: bigint;
+export interface ContributionPace {
+  /** Average routed lottery leg over the newest 10 settled rounds. */
+  averageContributionPerRound: bigint;
   roundsSampled: number;
-  /** Ceil(remaining ÷ average); null when nothing has been funded yet. */
-  roundsToActivation: bigint | null;
-  secondsToActivation: bigint | null;
+  /** Expected rounds to the next hit at that pace: ceil(PROB_ONE / threshold); null with no sample or a zero threshold. */
+  expectedRoundsToHit: bigint | null;
+  expectedSecondsToHit: bigint | null;
 }
 
-export function activationPace(remaining: bigint, recentFunding: readonly bigint[], cadenceSeconds: bigint): ActivationPace {
-  const sampled = recentFunding.slice(0, 10);
+export function contributionPace(recentContributions: readonly bigint[], thresholdE18: bigint, cadenceSeconds: bigint): ContributionPace {
+  const sampled = recentContributions.slice(0, 10);
   const total = sampled.reduce((sum, value) => sum + value, 0n);
   const average = sampled.length ? total / BigInt(sampled.length) : 0n;
-  if (remaining <= 0n) return { averageFundingPerRound: average, roundsSampled: sampled.length, roundsToActivation: 0n, secondsToActivation: 0n };
-  if (average <= 0n) return { averageFundingPerRound: average, roundsSampled: sampled.length, roundsToActivation: null, secondsToActivation: null };
-  const rounds = (remaining + average - 1n) / average;
-  return { averageFundingPerRound: average, roundsSampled: sampled.length, roundsToActivation: rounds, secondsToActivation: rounds * cadenceSeconds };
+  if (!sampled.length || thresholdE18 <= 0n) {
+    return { averageContributionPerRound: average, roundsSampled: sampled.length, expectedRoundsToHit: null, expectedSecondsToHit: null };
+  }
+  const rounds = (PROB_ONE + thresholdE18 - 1n) / thresholdE18;
+  return { averageContributionPerRound: average, roundsSampled: sampled.length, expectedRoundsToHit: rounds, expectedSecondsToHit: rounds * cadenceSeconds };
 }

@@ -1,19 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BPS, minimumLotteryGross } from "../../lib/casino/economics.ts";
+import { BPS } from "../../lib/casino/economics.ts";
 import {
-  activationPace,
+  contributionPace,
   creditsToEth,
   creditsToUsd,
-  lotteryActivationQuote,
+  lotteryPrizeQuote,
   lotteryShareOfPotPpm,
+  playerRoundOdds,
   seedShareBps,
   vaultGrowthBps,
   vaultShareOfPotPpm,
 } from "../../lib/casino/economy-report.ts";
 import {
+  carvePrize,
+  hitThresholdE18,
   initialSimulationState,
-  nextCycleBase,
+  PROB_ONE,
   seededSimulationRandom,
   simulateIteration,
   type SimulationState,
@@ -72,77 +75,84 @@ test("the flight seed is exposed per round and accumulates in totals.flightSeede
   assert.equal(parseSimulationState(legacy).totals.flightSeeded, 0n, "pre-provenance snapshots default to 0");
 });
 
-function assertQuoteMatchesKernel(state: SimulationState, label: string) {
-  const quote = lotteryActivationQuote(state, policy);
-  assert.equal(quote.readyForDraw, state.lottery.readyForDraw);
-  assert.equal(
-    quote.remaining === 0n && !quote.awaitingSeal,
-    state.lottery.readyForDraw,
-    `${label}: remaining-to-activation must be 0 exactly when the kernel's readyForDraw gate is open (remaining=${quote.remaining} awaiting=${quote.awaitingSeal})`,
-  );
-  assert.equal(quote.requiredReserve, minimumLotteryGross(nextCycleBase(state.lottery.cycleBase, policy), policy.lotteryFounderFeeBps));
-  if (state.lottery.awaitingSeal) {
-    assert.equal(quote.requiredGross, minimumLotteryGross(state.lottery.nextPrizeTarget, policy.lotteryFounderFeeBps));
-    assert.equal(quote.prizeNow, state.lottery.rollover + state.lottery.pendingFunding);
+function assertQuoteMatchesKernel(state: SimulationState, contribution: bigint, label: string) {
+  const quote = lotteryPrizeQuote(state, policy, contribution);
+  assert.equal(quote.prize, state.lottery.committedPrize, `${label}: prize == committedPrize`);
+  assert.equal(quote.pool, state.lottery.pool);
+  const carve = carvePrize(state.lottery.committedPrize, policy);
+  assert.equal(quote.winnerTake, carve.winnerPaid, `${label}: displayed == redeemable`);
+  assert.equal(quote.nextSeed, carve.seeded);
+  assert.equal(quote.winnerTake + quote.nextSeed, quote.prize);
+  if (state.lottery.committedPrize > 0n) {
+    assert.equal(quote.thresholdE18, hitThresholdE18(contribution, state.lottery.committedPrize, policy), `${label}: threshold from the kernel`);
+    assert.ok(quote.thresholdE18 <= PROB_ONE / policy.lotteryOddsOneIn);
+    assert.equal(quote.status, "active");
+    assert.ok(quote.oddsOneIn !== null && quote.oddsOneIn >= policy.lotteryOddsOneIn, "never better than the flat ceiling");
   } else {
-    assert.equal(quote.prizeNow, state.lottery.netPrize);
-    assert.equal(quote.target, state.lottery.netPrize);
+    assert.equal(quote.status, "funding");
+    assert.equal(quote.thresholdE18, 0n);
+    assert.equal(quote.oddsOneIn, null);
   }
-  assert.ok(quote.fundedBps >= 0n && quote.fundedBps <= BPS);
-  assert.equal(quote.fundedTotal + quote.remaining, quote.requiredTotal);
 }
 
-test("remaining-to-activation equals the kernel's readyForDraw gate exactly (funding, seal, reserve, miss, hit)", () => {
+test("the prize quote mirrors the kernel exactly across a random walk with natural draws (funding, miss, hit)", () => {
   const initial = initialSimulationState(policy);
-  const genesisQuote = lotteryActivationQuote(initial, policy);
-  assert.equal(genesisQuote.requiredGross, 55_555n, "minimumLotteryGross(50,000, 10%)");
-  assert.equal(genesisQuote.requiredReserve, minimumLotteryGross(100_000n, 1_000n));
-  assert.equal(genesisQuote.remaining, 55_555n + 111_111n);
-  assert.equal(genesisQuote.status, "funding");
-  assertQuoteMatchesKernel(initial, "genesis");
+  const genesis = lotteryPrizeQuote(initial, policy, 234n);
+  assert.equal(genesis.status, "funding");
+  assert.equal(genesis.prize, 0n);
+  assert.equal(genesis.flatOddsOneIn, 16n);
+  assert.equal(genesis.kappaBps, 20_000n);
+  assertQuoteMatchesKernel(initial, 234n, "genesis");
 
   let state = initial;
   const random = seededSimulationRandom(7n);
-  const outcomes = ["none", "miss", "hit"] as const;
-  let sawReady = false, sawHit = false, sawMiss = false;
-  for (let i = 0; i < 400; i += 1) {
+  let sawHit = false, sawMiss = false, sawActuarial = false;
+  for (let i = 0; i < 600; i += 1) {
     const external = i % 7 === 3 ? 20_000n + (random() % 60_000n) : 0n;
-    const outcome = outcomes[Number(random() % 3n)];
-    const before = lotteryActivationQuote(state, policy);
     const result = simulateIteration(state, policy, {
-      players: twoPlayers, crashBps: 15_000n + (random() % 30_000n), lotteryOutcome: outcome, externalLotteryFunding: external,
+      players: twoPlayers, crashBps: 15_000n + (random() % 30_000n), lotteryOutcome: "none",
+      lotteryDrawE18: (random() * random()) % PROB_ONE, externalLotteryFunding: external,
     });
     state = result.state;
-    assertQuoteMatchesKernel(state, `iteration ${i} (${result.lotteryEvent})`);
+    assertQuoteMatchesKernel(state, 234n, `iteration ${i} (${result.lotteryEvent})`);
     if (result.lotteryEvent === "hit") sawHit = true;
     if (result.lotteryEvent === "miss") sawMiss = true;
-    if (state.lottery.readyForDraw) sawReady = true;
-    // Funding only ever shrinks the remaining figure unless a draw resolved.
-    if (result.lotteryEvent === "funding" || result.lotteryEvent === "sealed") {
-      assert.ok(lotteryActivationQuote(state, policy).remaining <= before.remaining, `iteration ${i}: remaining grew without a draw`);
-    }
+    if (lotteryPrizeQuote(state, policy, 234n).regime === "actuarial") sawActuarial = true;
   }
-  assert.ok(sawReady && sawHit && sawMiss, `walk must exercise ready/hit/miss (ready=${sawReady} hit=${sawHit} miss=${sawMiss})`);
+  assert.ok(sawHit && sawMiss && sawActuarial, `walk must exercise hit/miss/actuarial (hit=${sawHit} miss=${sawMiss} actuarial=${sawActuarial})`);
 });
 
-test("reserve surplus never counts toward the prize bucket", () => {
+test("a 2 x 10,000 table against a 90,000-credit prize is priced in the actuarial regime, exactly as the contract prices it", () => {
   const state = initialSimulationState(policy);
-  state.lottery.resetReserve = 500_000n; // far above the 111,111 reserve requirement
-  state.lottery.pendingFunding = 40_000n; // short of the 55,555 prize gross
-  const quote = lotteryActivationQuote(state, policy);
-  assert.equal(quote.reserveShort, 0n);
-  assert.equal(quote.prizeShort, 15_555n);
-  assert.equal(quote.remaining, 15_555n, "prize shortfall is not netted against the reserve surplus");
+  state.lottery.pool = 90_000n; state.lottery.committedPrize = 90_000n;
+  const quote = lotteryPrizeQuote(state, policy, 234n);
+  // S(90,000) = floor(90,000 x 0.15294) = 13,764 -> W = 76,236 (integer credits); c = 234; kappa = 2 -> p = 234 / 152,472
+  assert.equal(quote.winnerTake, 76_236n);
+  assert.equal(quote.nextSeed, 13_764n);
+  assert.equal(quote.thresholdE18, (234n * PROB_ONE * BPS) / (20_000n * 76_236n));
+  assert.equal(quote.regime, "actuarial");
+  assert.equal(quote.oddsOneIn, 652n, "ceil(152,472 / 234)");
+  // Expected pool growth per such round: 234 net of the 10% fee minus E[payout] = 211 - 116 = 95 credits.
+  assert.equal(quote.expectedGrowthPerRound, 234n - 23n - (quote.thresholdE18 * quote.winnerTake) / PROB_ONE);
+  assert.equal(quote.expectedGrowthPerRound, 95n);
+  assert.ok(quote.expectedGrowthPerRound > 0n, "strict submartingale");
+  // A player's own odds: half the round's stake -> half the round's chance.
+  const mine = playerRoundOdds(quote.thresholdE18, 10_000n, 20_000n, quote.winnerTake);
+  assert.equal(mine.sharePpm, 500_000n);
+  assert.equal(mine.oddsOneIn, 1_304n);
+  assert.equal(mine.probabilityWeightedPrize, ((quote.thresholdE18 * 10_000n) / 20_000n * quote.winnerTake) / PROB_ONE);
+  assert.deepEqual(playerRoundOdds(quote.thresholdE18, 0n, 20_000n, quote.winnerTake), { sharePpm: 0n, oddsOneIn: null, probabilityWeightedPrize: 0n });
+  assert.throws(() => playerRoundOdds(quote.thresholdE18, 30_000n, 20_000n, 1n), /invalid/);
 });
 
-test("activation pace: ceil(remaining / average of the last 10 rounds) at the table cadence", () => {
-  const pace = activationPace(166_666n, [234n, 234n, 234n], 30n);
-  assert.equal(pace.averageFundingPerRound, 234n);
+test("contribution pace: average of the newest 10 rounds and the expected rounds to a hit at the quoted threshold", () => {
+  const pace = contributionPace([234n, 234n, 234n], PROB_ONE / 652n, 30n);
+  assert.equal(pace.averageContributionPerRound, 234n);
   assert.equal(pace.roundsSampled, 3);
-  assert.equal(pace.roundsToActivation, 713n); // ceil(166666 / 234)
-  assert.equal(pace.secondsToActivation, 713n * 30n);
+  assert.equal(pace.expectedRoundsToHit, 653n);
+  assert.equal(pace.expectedSecondsToHit, 653n * 30n);
   const eleven = Array.from({ length: 11 }, (_, i) => (i === 10 ? 1_000_000n : 100n));
-  assert.equal(activationPace(1_000n, eleven, 30n).averageFundingPerRound, 100n, "only the newest 10 are sampled");
-  assert.equal(activationPace(1_000n, [], 30n).roundsToActivation, null);
-  assert.equal(activationPace(0n, [], 30n).roundsToActivation, 0n);
+  assert.equal(contributionPace(eleven, PROB_ONE / 16n, 30n).averageContributionPerRound, 100n, "only the newest 10 are sampled");
+  assert.equal(contributionPace([], PROB_ONE / 16n, 30n).expectedRoundsToHit, null);
+  assert.equal(contributionPace([234n], 0n, 30n).expectedRoundsToHit, null);
 });

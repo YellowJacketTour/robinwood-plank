@@ -133,18 +133,24 @@ test("Powerboard uses an air-mix lottery machine and selection tube instead of f
   );
   assert.match(
     arcadeSource,
-    /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, drawActive \? draw\.drawnNumber : null, draw\.oddsOneIn\)/
+    /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, drawActive \? draw\.drawnNumber : null, draw\.balls \|\| 16\)/
   );
   assert.match(arcadeSource, /\$\{perBallChance\}% each/);
   assert.doesNotMatch(arcadeSource, /THE ORANGE KNOWS THE NUMBER/);
 });
 
-test("an unsealed next prize cannot be rounded up and presented as funded", () => {
-  assert.match(
-    arcadeSource,
-    /available < required \? Math\.min\(99\.9, pct\) : 100/
-  );
-  assert.match(arcadeSource, /NEXT PRIZE/);
+test("displayed == redeemable: the prize chip and tiles show the winner's exact take from the carve, never the pool", () => {
+  // The client mirrors the kernel's carve and hit rule byte-faithfully...
+  assert.match(arcadeSource, /function privateCarve\(prize, policy\)/);
+  assert.match(arcadeSource, /function privateHitThreshold\(contribution, prize, policy\)/);
+  assert.match(arcadeSource, /const seeded = \(P \* \(xMin \* denom \+ \(xMax - xMin\) \* P\)\) \/ \(10_000n \* denom\);/);
+  // ...and every player-facing prize figure is the winner's take.
+  assert.match(arcadeSource, /label:`PRIZE \$\{privateCredits\(winnerTake\)\}`/);
+  assert.match(arcadeSource, /<small>\$\{winner \? "NEXT PRIZE" : "LOTTERY PRIZE"\}<\/small>\$\{privateCredits\(boardCarve\.winnerTake\)\} cr/);
+  assert.match(arcadeSource, /If you win you receive/);
+  // No sealing / reset-reserve / ratchet copy survives on any surface.
+  assert.doesNotMatch(arcadeSource, /resetReserve|nextPrizeTarget|cycleBase|awaitingSeal|readyForDraw|NOW SEALED/);
+  assert.match(arcadeSource, /Nothing is forced/);
 });
 
 test("settled intermission exposes a real countdown and the main action commits in one click", () => {
@@ -384,7 +390,8 @@ test("the displayed Powerboard ball is derived server-side from the committed re
 test("a host-forced lab outcome that diverges from the reveal-derived ball is computed AND rendered as forced", () => {
   // Server publishes the divergence flag whenever the paid outcome disagrees
   // with the reveal-derived rawHit…
-  assert.match(roomsSource, /forcedForSimulation: ownerOnly && lotteryOutcome !== \(powerboardDraw\.rawHit \? "hit" : "miss"\)/);
+  assert.match(roomsSource, /forcedForSimulation: Boolean\(result\.lotteryDraw\?\.forced\)/);
+  assert.match(roomsSource, /naturalHit: result\.lotteryDraw\?\.natural \?\? null/);
   assert.match(roomsSource, /payableHit: result\.lotteryEvent === "hit"/);
   // …and the client renders the explicit banner off that flag, so a displayed
   // ball can never silently masquerade as (or hide) a natural jackpot.
@@ -605,8 +612,8 @@ test("the header speaks plain money: no ticket-weight jargon, and the economy pa
   // The panel's required fields, in plain language.
   for (const field of [
     "Vault holds", "Added this round", "Where it comes from", "Contributed to games", "Lifetime added to vault", "Lifetime seeded into flights",
-    "Prize right now", "Needed to turn active", "Prize when active", "This round added", "At this table's pace", "Your odds this draw", "If you win you receive",
-    "ACTIVE — a numbered draw happens after each round", "FUNDING — no draw yet", "the seed buffer is still filling", "genesis round — vault starts at 0",
+    "If you win you receive", "Prize on the board", "Banked right now", "This round added", "Chance per round", "Your odds next flight", "Expected time to a hit",
+    "LIVE — every settled round is a draw among that round's seats", "FUNDING — the first funded round puts a prize on the board", "the seed buffer is still filling", "genesis round — vault starts at 0",
   ]) assert.ok(arcadeSource.includes(field), `economy panel field missing: ${field}`);
   // Every entry point: desktop chips, the mobile HUD button, the phone table
   // sheet section, and the reveal card's tiles.
