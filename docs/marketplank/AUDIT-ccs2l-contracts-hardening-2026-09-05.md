@@ -294,14 +294,22 @@ crash/lottery/router/bank/math; the oracle's `unchecked` is the V2 accumulator w
 
 ## PART C — PROOF
 
-**Compile:** `npx hardhat compile --force` clean (30 files, solc 0.8.24, paris, viaIR).
+**Compile:** `npx hardhat compile --force` clean (32 files incl. the two new test mocks, solc 0.8.24, paris, viaIR).
+
+**C.1 — Environment incident, disclosed.** To measure baseline bytecode sizes I compiled `0391515` in a
+`git worktree` with an NTFS junction to this tree's `node_modules`; `git worktree remove --force` followed
+the junction and emptied `C:	mpobinwood-sync-fix2
+ode_modules`. It was restored with
+`npm ci --no-audit --no-fund` from the **unchanged** `package-lock.json` (`git diff` on `package.json` /
+`package-lock.json` is empty; no package was added, removed or upgraded). Every number in this section was
+re-measured on the restored install; the final suites below are from that run.
 
 **Suites.**
 
 | Suite | Before (`0391515`) | After (`dad6e45` + test fix) |
 |---|---|---|
-| `npm run test:contracts` | 175 passing, 1 failing (S-12: `ethers.Wallet.createRandom()` bad-point flake — harness, not contract; brief said 176) | **188 passing, 0 failing** (176 + 12 adversarial) |
-| `npm run test:market` | 1128 pass / 4 fail (pre-existing PlankSpace drizzle-orm) | **1128 pass / 4 fail** (unchanged; nothing installed) |
+| `npm run test:contracts` | 175 passing, 1 failing (S-12: `ethers.Wallet.createRandom()` bad-point flake — harness, not contract; brief said 176) | **188 passing, 0 failing** (176 + 12 adversarial), 28 s |
+| `npm run test:market` | 1128 pass / 4 fail (pre-existing PlankSpace drizzle-orm) | 1128 pass / 4 fail on the original `node_modules`; **1148 pass / 0 fail (1181 tests)** after the exact `npm ci` restore described in §C.1 — the four "pre-existing" failures were an artefact of a drifted local install, not of the code |
 | Three-way differential (300 rounds, 135 all-bust) | wei-identical | **wei-identical** (settlement math untouched: `PlankCcs2LMath.sol` has no diff) |
 
 **Deployed size (EIP-170 limit 24,576).**
@@ -321,8 +329,8 @@ crash/lottery/router/bank/math; the oracle's `unchecked` is the V2 accumulator w
 | 10 | 1,047,942 | 828,412 | −21 % |
 | 50 | 3,691,677 | 2,580,542 | −30 % |
 | 100 | 6,982,097 | 4,783,077 | −31.5 % |
-| 128 (S-12 mixed) | 2,398,497 | 2,177,353 | −9 % |
-| 256 all-survive (ceiling) | n/a | 11,730,465 (45,822/seat) | 70 % of EIP-7825 cap |
+| 128 (S-12 mixed; survivor count varies with the deployment address) | 2,398,497 | 1,776,243 – 2,177,353 | −9 … −26 % |
+| 256 all-survive (ceiling) | n/a | 11,693,265 – 11,730,465 (~45.7k/seat) | 70 % of EIP-7825 cap |
 | 512 all-survive (old ceiling) | OOG (> 30M block) | disallowed | — |
 
 Other measured: `settleRound` with a real draw ≈ 510k (A-2b estimate); 56 starved gas limits from 12.5 % to
@@ -374,7 +382,8 @@ Other measured: `settleRound` with a real draw ≈ 510k (A-2b estimate); 56 star
   constructor guards, test helper.
 - `dad6e45` feat(contracts): seat ceiling 256 sized to EIP-7825, `paidOf` view, dead SSTORE removed,
   adversarial suite A-1..A-10 + two test-only mocks.
-- (this report + A-2 outcome-agnostic assertion) — see `git log`.
+- `3cd5f28` docs(audit): this report + A-2 outcome-agnostic assertion.
+- (final) docs(audit): §C numbers re-measured after the `npm ci` restore; incident note C.1.
 
 Never staged: `docs/marketplank/sim-settlement-ccs2l/partition-results.json`,
 `docs/marketplank/GROK-ONESHOT-vault-deposit-backfill-2026-08-28.md`, `docs/marketplank/sim-plankcrash/*.json`
