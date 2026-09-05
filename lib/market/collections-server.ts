@@ -77,7 +77,20 @@ export async function getCollectionAsync(slug: string): Promise<MarketCollection
     slug: found.contractAddress,
     name: found.name ?? found.contractAddress,
     contractAddress: found.contractAddress,
-    tokenStandard: "ERC721",
+    // Real bug fixed 2026-09-05: this used to hardcode "ERC721" for every
+    // auto-discovered collection, regardless of what robinhood-chain-scan.ts
+    // actually verified on-chain (it registers real ERC-1155 contracts too).
+    // That made order-validation.ts's "no 1155 support yet" guard never
+    // fire for a real ERC-1155 collection, so its listing flow instead
+    // reached ownsToken()'s ERC-721-only ownerOf() call, which reverts
+    // against ERC-1155 and fail-closes to "You don't own that token." for a
+    // genuine holder. found.tokenStandard is now the real, on-chain-checked
+    // value (or null if this row predates that check) -- default an unknown
+    // value to "ERC1155" here, NOT "ERC721": the existing guards only ever
+    // allow the literal string "ERC721" through, so an unknown standard
+    // correctly falls back to the same honest "not supported yet" rejection
+    // instead of silently being trusted as ERC721 again.
+    tokenStandard: found.tokenStandard === "ERC721" ? "ERC721" : "ERC1155",
     image: found.imageUrl ?? "/images/plank-logo.webp",
     trustBadges: [],
     feeBps: MARKET_DEFAULT_FEE_BPS,
