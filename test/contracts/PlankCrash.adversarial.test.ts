@@ -88,7 +88,12 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
     const rr = await crash.rounds(id);
     expect(paid).to.equal(rr.totalPlayerPaid + rr.totalBonus);
     expect(await ethers.provider.getBalance(await crash.getAddress())).to.equal(await crash.accountedBalance());
-    await crash.connect(alice).withdraw();
+    // The pull ledger works as usual for whoever was paid (the crash value
+    // depends on the deployment address, so the outcome is not fixed here).
+    for (const who of [alice, bob]) {
+      if ((await crash.owed(who.address)) > 0n) await crash.connect(who).withdraw();
+    }
+    expect(await crash.totalOwed()).to.equal(0n);
   });
 
   it("A-2b: insufficient-gas griefing cannot skip a HEALTHY draw -- every settle that succeeds carries the lottery's Draw", async () => {
