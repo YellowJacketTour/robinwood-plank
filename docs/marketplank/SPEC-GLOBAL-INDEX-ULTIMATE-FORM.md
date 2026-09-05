@@ -211,6 +211,37 @@ basket). Neither combines NFT-vault-shares and a governance token in one
 redeemable on-chain basket the way this design does — genuine whitespace,
 confirmed by research rather than assumed.
 
+**STATUS (round 6, `0186100`): the intent/solver-auction recommendation
+above does NOT apply to `GlobalIndexVault.sol`'s actual single-asset
+mint/redeem imbalance-fee leg, and no commit/settle plumbing was built for
+it — verified, not assumed.** Direct code read found the front-running
+shape this section describes has no arrow present in the contract: there is
+no vault-initiated trade at all (only two `safeTransfer` call sites in the
+whole contract, both `to msg.sender` inside a share-burning redemption, no
+external venue/router/forwardable-calldata entrypoint); the "internal swap"
+prices off the checkpointed oracle band (Part 2 of this doc), not a
+reserve ratio an attacker could move first; and commit/fill are already the
+same atomic transaction, bounded by the caller's own
+`minSharesOut`/`minAmountOut` — there is no window between "committed" and
+"filled" for a solver auction to close, because none exists to begin with.
+Building a settlement leg anyway would have added a second, later,
+separately-callable step between a user and their assets — a regression
+against the unmovable-assets rule, not an improvement. Proven adversarially
+in `test/contracts/IndexVaultIntentSurface.test.ts` (13 tests): no
+calldata-forwarding entrypoint exists; both sandwich orientations are
+strictly loss-making with loss monotonically growing with attack size (no
+break-even point); NAV-per-share is non-decreasing across any sandwich
+attempt (per-*leg* backing is correctly allowed to shift — a single-asset
+deposit deliberately lifts its own leg and dilutes the others, that's the
+mechanism working, not a bug — the right stayer-protection invariant is
+NAV-per-share, not per-leg balance); and the exit door stays open under
+every ordering, including with the oracle fully stale, since
+`redeemProRata` consults no price at all and so cannot be jammed by
+anything that would have made the oracle side worse. The v4-hooks and
+ERC-7702 recommendations above remain genuinely open, unbuilt design space
+— only the intent-settlement piece was resolved this round, and it
+resolved to "already safe, don't build it," not "built."
+
 ---
 
 ## 5. New attack vectors found this round, and what closes each
@@ -328,3 +359,466 @@ requirement true by construction:
 This remains spec-only. Building any of it still requires the same
 external-audit bar V3 received, and still requires the admin's explicit
 go-ahead to begin — neither of which this document changes.
+
+---
+
+## Part G: universal stranded-value sweep (spec-only, round 4 candidate)
+
+**The problem, concretely.** StonkBrokers-style collections give every NFT
+its own ERC-6551 token-bound account (TBA) that keeps *receiving* value
+after mint — trading-fee-funded RWA airdrops, in StonkBrokers' case (70% of
+Anvil AMM fees swapped into stock tokens like TSLA/AMZN/NVDA and pushed into
+activated wallets). Any NFT sitting in a MarketplankVault, or in
+GlobalIndexVault's basket, keeps its TBA — and right now nothing in either
+contract sweeps, tracks, or distributes what lands there. That's real,
+growing, invisible value. The same gap exists for two other custody shapes:
+LP positions and generic ERC-721/721A holdings.
+
+**Three distinct asset shapes, three distinct sweep primitives — deliberately
+not one generic function:**
+
+1. **ERC-20 stranded in a TBA** (stock tokens, reward tokens): permissionless
+   `sweepTBAERC20(heldTokenId, tbaAddress, assetContract)` — plain
+   `IERC20.transfer` out of the TBA into the vault's accounted reserves,
+   credited the same push-only way `IndexDividendDistributor.receiveDividends()`
+   already handles ETH. `assetContract` must be on a per-asset allowlist —
+   never "sweep whatever token balance appears," since that's exactly the
+   fake-token attack surface `PlankGauge`'s "impostor LP token" test already
+   had to guard against for a different reason.
+
+2. **ERC-721/721A stranded in a TBA, or accrued directly on a held NFT**
+   (e.g. a sub-NFT airdropped to the TBA): `sweepTBAERC721(heldTokenId,
+   tbaAddress, assetContract, assetTokenId)` via `safeTransferFrom`. Needs
+   the same per-`assetContract` allowlist as (1) — accepting arbitrary
+   inbound 721s is worse than arbitrary ERC-20s, since it's also a vector for
+   griefing via a maliciously-reverting `onERC721Received` implementation on
+   whatever downstream contract eventually holds it, and for diluting basket
+   accounting with junk collections nobody priced.
+
+3. **LP positions.** Two different shapes needing two different code paths:
+   - Fungible LP tokens (v2-style, most 9mm pools) are already covered by
+     primitive (1) once the pair address is allowlisted — no new code.
+   - Concentrated-liquidity positions (v3/v4-style) are ERC-721s that also
+     accrue *uncollected fees inside the position itself* — sweeping the NFT
+     alone misses value sitting in the position manager. Needs
+     `sweepLPPosition(heldTokenId, tbaAddress, positionManager, positionId)`
+     that calls `collect()` against the position manager (allowlisted, since
+     an unaudited/fake position manager could misreport or reenter) before
+     crediting the collected amounts, then optionally sweeps the position
+     NFT itself via primitive (2).
+
+**The consistent safety pattern across all three** (matches every custody
+primitive already shipped in this codebase): permissionless (anyone can
+trigger a sweep — there is no reason to gate *who* calls it), push-only
+(value only ever moves into accounted reserves, never out to a caller-chosen
+address), allowlisted per exact `(mechanism, assetContract)` pair — never a
+blanket "accept anything this TBA holds" — and credited through the existing
+accounted-reserve/dividend-accumulator machinery, not a new balance-tracking
+system.
+
+**A sharper risk than the value-capture gap: TBA `execute()` scope.**
+ERC-6551's `execute()` lets whoever the standard resolves as the TBA's
+"owner" run arbitrary calls through it. If a MarketplankVault or
+GlobalIndexVault ever holds the NFT that owns a TBA, the *vault contract
+address* resolves as that owner — meaning the vault (or anything that can
+trick the vault into forwarding a call) has a live path to drive arbitrary
+calldata through the TBA, not just read its balances. The sweep primitives
+above must be READ-then-TRANSFER only — call `IERC20.transfer`/
+`safeTransferFrom` directly, never anything that routes through
+`execute()`, and the vault must never expose a general-purpose "forward this
+calldata to a TBA I own" function to anyone, including its own admin. This
+is a materially bigger risk than the missing-airdrop-value gap it was meant
+to fix, and it's the reason Part G stays spec-only pending its own dedicated
+adversarial pass before any build authorization.
+
+Not authorized to build. Queued as a round-4 candidate once round 3's real
+work (Parts A-F, committed at `92c9979` on `feat/global-index-vault`) has
+had time to be reviewed, and only with its own explicit go-ahead — same bar
+as every other Index Vault build this session.
+
+---
+
+## Security best-practices sweep (2026 research pass)
+
+Real, current findings checked against what's actually built, not a generic
+checklist:
+
+- **Admin-key social engineering is 2026's dominant real loss vector, not
+  contract logic.** Drift Protocol's $285M April 2026 loss and several other
+  headline 2026 incidents trace to a compromised/social-engineered
+  *privileged key*, not a bug in the audited logic — the attacker used a
+  legitimate admin key to whitelist a fake collateral token, self-priced it,
+  and drained the pool. GlobalIndexVault's timelock (`MIN_TIMELOCK_DELAY`
+  floor, `MAX_TIMELOCK_DELAY` = 30 days ceiling) buys *reaction time* against
+  this, but a single compromised admin key can still queue a malicious
+  parameter change and wait it out unnoticed. The real mitigation the Garden
+  economics engine already applies and this codebase hasn't yet — **scoped-
+  capability admin**, splitting one blanket admin role into independently-
+  keyed roles (constituent-admission, treasury-policy, emergency-pause,
+  parameter-tuning) so one compromised key can't do everything — remains a
+  documented, real, unclosed gap. Worth a dedicated round before any mainnet
+  conversation, not a mainnet-day fix.
+- **Whitelisting bad collateral is the second-most-common real 2026 root
+  cause** (the Drift incident again, plus the Blend/YieldBlox February 2026
+  oracle-inflation incident: a manipulated single-source price let an
+  attacker post a wildly overvalued token as collateral). This is exactly
+  what `IEligibilitySource` already guards against — no admin function makes
+  a constituent eligible by fiat, eligibility is read from self-sourced
+  on-chain state and fails closed against reverting/gas-bomb sources (proven
+  in `IndexVaultEligibility.test.ts`). This design was already ahead of the
+  2026 incident pattern before the pattern was researched — worth noting
+  explicitly since it validates the earlier decision not to add an
+  admin-settable eligibility override for convenience.
+- **Single-source oracle feeds remain the standard root cause where oracles
+  are used at all** — reinforces (doesn't newly discover) the standing
+  decision to keep GlobalIndexVault's NAV band-based/checkpointed rather
+  than trusting any single external price feed, and to keep PLANK itself
+  never a direct pricing input.
+- **ERC-6551 itself has no publicly documented exploit history yet** (it's
+  a young standard) — the real risk found this pass isn't a known incident,
+  it's the `execute()` scope-creep risk documented in Part G above, surfaced
+  by reasoning from the standard's own mechanics rather than a public
+  post-mortem. Flagging it now, before any sweep primitive is built, is the
+  cheaper time to catch it.
+
+Sources: [DeFi Hacks 2026 guide](https://airdropalert.com/blogs/defi-hacks-2026-guide/), [Drift Protocol Hack 2026](https://smartcontractshacking.com/hacks/drift-protocol-hack-2026), [Oracle Manipulation Attacks 2026](https://smartcontractshacking.com/attacks/oracle-manipulation-attacks), [ERC-6551 EIP](https://eips.ethereum.org/EIPS/eip-6551)
+
+---
+
+## Verified build state — bullet points with real numbers (round 3, `92c9979`)
+
+Every number below is read directly from the committed contracts or from a
+command I ran and confirmed myself this session — not narrated from memory.
+
+**Test suite:** 317 passing, 0 failing (`npm run test:contracts`, confirmed
+independently after copying the continuation agent's work into the real
+worktree). 212 pre-existing + 105 new across five new test files
+(`BackstopSizingCalculator.test.ts` 28, `IndexVaultEligibility.test.ts` 23,
+`DistributorWethAndReentrancy.test.ts` 21, `SelfDealAndDirectionSymmetry.test.ts`
+16, `IndexVaultPersistenceCalibration.test.ts` 17).
+
+**GlobalIndexVault.sol real bounds:**
+- Max 32 constituents (`MAX_CONSTITUENTS`).
+- Timelock: 30-day ceiling (`MAX_TIMELOCK_DELAY`), floor set at deploy time
+  per `MIN_TIMELOCK_DELAY`.
+- Concentration cap: hard-bounded between 10% and 50% (`MIN/MAX_CONCENTRATION_CAP_BPS`
+  = 1,000/5,000 bps) even before the new dynamic HHI formula narrows it
+  further; the dynamic cap can only tighten this range, never loosen it
+  (`min(dynamic, flat)`).
+- Target HHI: default 2,000 bps (0.20), bounded between 200 bps (0.02, very
+  diversified) and 10,000 bps (1.00, unconstrained) via `MIN/MAX_TARGET_HHI_BPS`.
+- Single-asset imbalance fee ceiling: 10% (`CEIL_IMBALANCE_FEE_BPS`).
+- NAV band widening ceiling: 20% (`CEIL_BAND_BPS`); per-observation price-cap
+  ceiling: 20% (`CEIL_PRICE_CAP_BPS`).
+- Ramp-in/out duration: up to 365 days (`MAX_RAMP_DURATION`).
+- Platform allocation (operator's cut of NEW MINTS ONLY, never existing
+  holders): default 200 bps (2.0%), hard-capped at 500 bps (5.0%) via
+  `CEIL_PLATFORM_ALLOCATION_BPS` — currently **inert**, no treasury wired yet
+  (`platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet`
+  is a real comment in the deployed constructor logic, not a claim).
+
+**PlankGauge.sol real bounds:**
+- LP-yield boost: capped at 5.0x (`MAX_MULTIPLIER_BPS` = 5×BPS), floor at
+  1.0x (`MIN_MULTIPLIER_BPS`) — never a penalty, only ever a boost or no-op.
+- Epoch duration: up to 90 days (`MAX_EPOCH_DURATION`).
+- Concentration-penalty exponent: bounded, tuned via `MAX_EXPONENT_HALVES`
+  = 8 halving-steps.
+- Boost ceiling: hard-capped at 5.0x (`CEIL_BOOST_BPS`) regardless of what a
+  timelocked parameter change requests.
+
+**MarketplankVaultV3.sol real bounds** (the live, audited, mainnet
+contract — quoted here for contrast with the still-spec-only Index Vault):
+- Mint fee ceiling: 0.05 ETH (`MAX_MINT_FEE_WEI`).
+- Redeem fee ceiling: 0.05 ETH (`MAX_REDEEM_FEE_WEI`).
+- Target-redeem premium ceiling: 0.1 ETH (`MAX_TARGET_PREMIUM_WEI`).
+- Swap fee ceiling: 100 bps / 1% (`MAX_SWAP_FEE_BPS`).
+- Batch operation ceiling: 50 NFTs per call (`MAX_BATCH`).
+
+**BackstopSizingCalculator.sol:**
+- `MAX_SAMPLES` = 512, genuinely affordable at that ceiling as of this
+  round's fix — measured gas at n=256 was ~14.8M under the old insertion
+  sort (uncallable on a 30M-gas block at n≈300); the merge-sort replacement
+  is O(n log n) on any input ordering, closing that gap.
+- Confirmed stateless by full ABI/storage enumeration in
+  `BackstopSizingCalculator.test.ts`: every function is view/pure, no
+  receive/fallback/payable constructor, all storage slots read zero after
+  driving the entire ABI.
+
+Nothing above is deployed anywhere real. All of it lives on
+`feat/global-index-vault` in the isolated worktree, compiles clean, and is
+independently test-verified — the deployment/audit gate is unchanged.
+
+---
+
+## Round 4: scoped-capability admin roles (`1288775`)
+
+The single blanket `admin` on GlobalIndexVault.sol and PlankGauge.sol —
+flagged as a real, open gap in the security-research pass above — is
+replaced with a mapping-based role registry (`ScopedRoles.sol`, not a proxy,
+not delegatecall): GlobalIndexVault gets four independently-held,
+independently-timelocked roles (constituent-admission, risk-parameter,
+platform-allocation, admin-role-management); PlankGauge gets three
+(gauge-registry, gauge-tuning, admin-role-management). Every reassignment
+goes through the existing timelock — rotating a key costs exactly as much
+public delay as any other parameter change. 331 tests passing (317 + 14),
+independently re-verified.
+
+One real cross-role hole was found and closed during this round: the
+timelock's `queuedParams` mapping is shared key-space across both contracts,
+so without an explicit whitelist the risk-parameter role could construct a
+key that landed in admission-role territory. `roleForParamKey()` now rejects
+unrecognized keys at *queue* time.
+
+**A hard constraint, stated by the admin and now binding on every future
+round, including Part G:** no security mechanism — pause, freeze, role
+lock, anything — may ever be capable of trapping user assets in an
+unmovable state, even temporarily, even under total role compromise. This
+round's own `ScopedRoles.sol` deliberately has NO pause/freeze/halt/lock
+surface anywhere — none existed before this round and none was added,
+specifically because of this rule. Proven, not asserted: the named test
+`THE EXIT DOOR: no role, no pause, no queued change, and no collusion can
+ever block a redemption` drives a fully hostile queued slate from every
+role key simultaneously and confirms pro-rata redemption still succeeds,
+both mid-timelock and after the hostile changes land. Any future round that
+proposes an emergency-pause, circuit-breaker, or similar mechanism must
+prove this same invariant before it can be considered done — gating new
+deposits/admission/parameter changes is fine, gating withdrawal/redemption
+in any way, for any duration, by any role, is not.
+
+---
+
+## Round 5: universal stranded-value sweep, built (`8523349`)
+
+Part G above is no longer spec-only — built as a standalone
+`TBAValueSweeper.sol`, deliberately NOT a change to `GlobalIndexVault.sol`
+(zero vault authority; its only view into the vault is a read-only
+`isTokenHeld`). 364 tests passing (331 + 33), independently re-verified.
+
+**The `execute()` question, answered honestly rather than routed around:**
+ERC-6551 gives no way to move a TBA's ERC-20 balance except through the
+TBA's own `execute()` — the TBA *is* the token holder, there is no direct
+"call transfer against the TBA" primitive to fall back to. What got built
+is the narrowest form of the constraint from this doc: exactly one
+`execute()` call site per primitive, with calldata built entirely
+in-contract from (allowlisted asset, immutable destination, measured
+balance) — `value=0`, `CALL` only, never delegatecall — and a test
+asserting no external function on the sweeper takes a `bytes` parameter at
+all. A caller chooses only *which allowlisted asset* to sweep, never what
+happens to it. The sweeper must still be granted executor permission on
+each TBA it sweeps (real ERC-6551 accounts only execute for their owner or
+an owner-permitted caller) — that setup step was deliberately left open
+rather than closed with any general-purpose forwarder, since a forwarder is
+exactly the drain this whole design exists to refuse.
+
+**Both unmovable-assets proofs pass by name:** `UNMOVABLE-ASSETS (a)` drives
+real vault redemptions under a hostile allowlist, mid-sweep, and immediately
+after a sweep of the same NFT — vault always ends empty, every NFT with its
+owner. `UNMOVABLE-ASSETS (b)` is the harder one: a full role takeover to an
+attacker, followed by de-allowlisting the swept asset, still leaves
+already-swept value untouched in the immutable sink — no role, including a
+fully compromised one, has a claw-back path.
+
+New role: `ROLE_SWEEP_ALLOWLIST` (via the existing `ScopedRoles.sol`
+pattern), scoped narrowly to adding/removing allowlist entries — it fits
+none of the four existing GlobalIndexVault roles on merits (documented in
+the contract header) and reusing one would have quietly widened that role's
+blast radius, the exact thing scoped roles exist to prevent.
+
+---
+
+## Part K: no funded backstop — the elegant answer is not building one
+
+The admin's own framing, restated precisely: find a design that **never
+needs** a backstop, or that generates protection **naturally**, without
+skimming off max profit share. Researched against real precedent
+(GMX/GLP's shared-pool model, Synthetix's debt-pool socialization, and the
+Garden economics engine's own resolution of an equivalent question — see
+below) rather than defaulting to "build a bigger insurance fund."
+
+**The core Index Vault already doesn't need one, by construction, and this
+was true before this question was asked — it just hadn't been named.**
+Every backstop-fund precedent researched (Drift, Mango, Euler, InsurAce,
+BendDAO — §6.1 of `SPEC-PLANK-CHECKS-AND-INDEX.md`) exists to cover a gap
+between what a protocol *promised* and what it can *actually deliver* —
+bad debt, undercollateralized loans, a redemption that outran real
+reserves. **Pro-rata in-kind redemption (Part 1 of this doc) never makes
+that promise in the first place** — burning `s` shares out of `S` pays out
+exactly `(s/S)` of whatever the vault actually, currently holds. There is
+no gap for a backstop to fill, because there is no promised value beyond
+real backing, ever, by mathematical construction, not by monitoring. This
+is the same reason NFTX v3 and Set Protocol don't run backstop funds for
+their core redemption paths either — the mechanism itself has no
+insolvency mode.
+
+**The one place a genuine backstop concept would ever apply — lending
+(§6.2, still spec-only, never built, no timeline) — has its own elegant
+non-fund answer, GMX/GLP-shaped rather than fund-shaped:** if lending is
+ever built, bad debt should be **organically absorbed by the same pool of
+participants who took the yield for bearing that exact risk** — the way
+GLP stakers collectively collateralize GMX's trader positions, or the way
+Synthetix's debt pool is socialized directly across SNX stakers, rather
+than routed through a separately-funded, separately-triggered insurance
+contract. This generates protection **naturally** because the yield those
+participants already earn (for supplying credit, exactly the actors who
+should bear that credit's risk) *is* the risk premium — nothing is carved
+out of top-line profit share to pre-fund a separate reserve; the same
+capital that earns from lending is the capital that's first-loss on it,
+priced in from day one, not skimmed after the fact.
+
+**Garden's own equivalent resolution, checked for precedent**: Garden's
+audit history (`docs/AUDIT-garden-economics-2026-07-17.md`) never
+independently funds a backstop reserve either — every fix for a real
+custody bug (the ephemeral-respend double-credit CRITICAL, the terminal-
+exit freeze CRITICAL) was a fix to the mechanism's own invariants, not a
+reserve built to paper over an unfixed one. The float/dead-share design gap
+found in that audit was explicitly left as "requires owner economic
+sign-off, not an autonomous rewrite" rather than being patched with a fund
+— same discipline this section applies here.
+
+**What stays exactly as-is:** `BackstopSizingCalculator.sol` remains a
+correct, useful, stateless CVaR *sizing* utility for the one narrow case
+where it would ever matter (a future, explicitly-authorized lending
+feature, sized honestly against real tail risk) — kept because it costs
+nothing to keep (zero custody, zero storage) and would be the right tool
+*if* lending is ever built and *if* it ever needed sizing help beyond the
+GLP-style organic-absorption default above. It is not, and was never,
+itself a promise that a funded reserve exists or is planned.
+
+No build authorized by this section — it is a closed design decision
+(build no funded reserve) and a documented precedent for the one future
+feature (lending) where the question could recur.
+
+---
+
+## Part H: fee-revenue split — operator income vs. ecosystem revenue-share
+
+Answers the previously-open question: how does "just our income" (real
+marketplace-fee revenue Marketplank the operator is owed) get correctly
+separated from "ecosystem revenue-share" (value that flows to PLANK
+burners, LP boosters, and index-share holders), across collections that
+charge a marketplace fee and collections that don't.
+
+**The split is determined at the point of fee collection, never
+after-the-fact, and never by inference.** Every Marketplank collection's
+listing config already carries an explicit, collection-specific fee rate
+(zero for fee-free collections, non-zero — e.g. 0.5% — for others per
+existing listing logic). There is no "default" fee assumed for a collection
+that charges none; a zero-fee collection contributes exactly zero to either
+side of the split, permanently, not a rounding-to-zero of some nonzero
+default.
+
+**Two real, already-collected revenue streams, kept in genuinely separate
+accounting, never commingled:**
+1. **Operator income** — Marketplank's own marketplace-fee cut (V3's
+   `mintFeeWei`/`redeemFeeWei`/swap-fee-bps, already live on mainnet,
+   already paid only to `treasury` per the existing `withdrawFees` path).
+   This is Marketplank's own revenue, full stop — no ecosystem mechanism
+   has any claim on it, and no ecosystem mechanism should ever be built
+   with an implicit assumption that it does.
+2. **Ecosystem revenue-share** — anything that funds `IndexDividendDistributor`,
+   `PlankGauge` boost pools, or a future backstop reserve. This must be
+   sourced ONLY from real, already-realized protocol-level revenue that
+   was explicitly designed to be shared (e.g. a portion of AMM swap-fee
+   growth in `MarketplankVaultV3`'s `k`-growth mechanism, or a future
+   explicit ecosystem-fee leg on top of, not carved out of, operator
+   income) — never from operator income being redirected after the fact,
+   and never minted/promised. This mirrors the Garden economics engine's
+   FLWRS attribution law precedent: fee must be confirmed, hard-asset-
+   denominated, capped at realized contribution, no double-count.
+
+**Precedent checked, not adopted as-is:** 9mm.pro/claim is a real, live,
+Merkle-proof-based claimable revenue-share mechanism on Robinhood Chain —
+see Part I below for why Marketplank keeps its own accumulator pattern
+instead rather than copying it directly.
+
+**Zero-fee collections, explicitly:** a zero-fee collection's holders still
+benefit from the ecosystem side (index inclusion, gauge eligibility, sweep
+of any stranded TBA value per Part G) — those are usage/eligibility-gated,
+not fee-gated. What a zero-fee collection never generates is operator
+income or an ecosystem revenue-share contribution of its own — it can only
+ever be a net beneficiary of value other, fee-paying collections generate,
+which is fine and by design, not a bug to fix.
+
+This section is a specification of an accounting/design rule, not new
+contract code — no build authorized by writing this.
+
+---
+
+## Part I: Merkle-distributor — documented alternative, not adopted
+
+9mm's own live `claim.9mm.pro` is confirmed (via research) to be a real,
+snapshot-based, monthly, multi-chain, non-custodial Merkle-proof claim
+distributor for ETH revenue-share. Real, working precedent — noted here so
+it's not re-discovered later, and explicitly NOT what
+`IndexDividendDistributor.sol` uses.
+
+**Why Marketplank keeps the accumulator pattern (MasterChef/Synthetix-style
+`accEthPerShareWad`) instead:** a Merkle distributor's core advantage is
+serving claims across multiple chains from one off-chain-computed root —
+Marketplank is single-chain (Robinhood Chain only) today, so that advantage
+doesn't apply yet. The accumulator pattern's advantage that does apply now:
+continuous, permissionless, real-time accrual with no snapshot cadence and
+no off-chain computation step trusted to be correct — every claim is
+computed live, on-chain, from live balances, which is a strictly smaller
+trust surface for a single-chain deployment.
+
+**When this should be revisited:** if/when Marketplank ever expands
+ecosystem revenue-share across more than one chain, the Merkle-distributor
+pattern becomes the better fit and this decision should be re-opened —
+flagged explicitly so a future session doesn't have to re-research 9mm's
+mechanism from scratch.
+
+---
+
+## Part J: forbidden-claims list — marketing and UI copy
+
+Ported from the-exchange's Garden economics engine, which already
+maintains this list as a real, audited-project discipline — directly
+applicable here, not reinvented:
+
+- **Never** say "riskless," "guaranteed," "safe," or "impossible to
+  exploit" about any Index Vault mechanism, on any surface (marketing copy,
+  UI strings, admin-facing docs meant for external eyes) — matches this
+  session's own standing rule of never making absolute claims even when
+  explicitly requested.
+- **Never** say "audited" before a real, completed external audit has
+  actually happened — not "audit in progress," not "audit scheduled," only
+  after completion, and only for the specific contract version that was
+  actually audited (a re-audit is required after any material change, per
+  the same standard `MarketplankVaultV3.sol` was held to).
+- **Never** quote an APY or APR figure for any ecosystem revenue-share
+  mechanism. Real yield here is realized fee flow, not a rate — a rate
+  implies a promise about the future that this design deliberately never
+  makes (see the Terraform-collapse precedent already cited in the legal
+  research doc). If a number is shown at all, show realized historical
+  distribution amounts, explicitly labeled as historical and non-
+  predictive, never an annualized/projected rate.
+- **Never** describe PLANK burning, LP-boost, or gauge weighting as
+  "earning interest," "staking rewards" in the securities-law sense
+  discussed in `RESEARCH-legal-structural-precedent.md`, or any phrase
+  that implies a fixed, contractual return — these are all real, variable,
+  usage-driven, non-guaranteed mechanisms and must be described as such.
+- **Never** claim the sqrt-dampened gauge weight or the concentration
+  penalty is "sybil-resistant" — this session's own corrected finding: it
+  is explicitly NOT (splitting a burn across wallets yields MORE weight,
+  not less). Any future copy describing PlankGauge must not repeat the
+  original, disproven claim.
+
+Documentation only — no build authorized by writing this.
+
+---
+
+## Standing audit requirement — restated, not new
+
+Before any Index Vault code (or Part G, once built) goes anywhere near a
+real network: the same external-audit bar `MarketplankVaultV3.sol` already
+received on mainnet applies here, **plus** bullish's own independent review
+of every round in this document, **plus** the admin's stated plan —
+multiple angles, multiple frontier models, not one review pass. This
+includes explicitly re-checking the two sections above (Part G's
+`execute()`-scope risk and the admin-key-compromise/scoped-capability gap)
+by name, since they were found by reasoning about the mechanics rather than
+from a public incident report on this exact codebase, and a second set of
+eyes is exactly how a reasoning-based finding gets pressure-tested. This
+gate has not moved and does not move without the admin's own explicit
+separate sign-off.
