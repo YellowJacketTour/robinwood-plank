@@ -5,32 +5,33 @@
    "seed": 11,
    "steps": 60,
    "counts": {
-    "bet": 11,
-    "sinkToggle": 13,
+    "bet": 8,
+    "sinkToggle": 17,
     "lock": 7,
+    "cashOut": 2,
+    "fund": 10,
     "reveal": 3,
-    "settle": 2,
-    "claimRake": 2,
-    "fund": 9,
-    "voidStale": 2,
-    "sweep": 2,
-    "carryForward": 6,
-    "cashOut": 3
+    "settle": 3,
+    "register": 3,
+    "claimRake": 3,
+    "claim": 1,
+    "carryForward": 2,
+    "sweep": 1
    }
   },
   {
    "seed": 23,
    "steps": 60,
    "counts": {
-    "fund": 8,
-    "bet": 12,
-    "sinkToggle": 12,
-    "lock": 7,
+    "fund": 12,
+    "bet": 8,
+    "sinkToggle": 13,
+    "lock": 11,
+    "cashOut": 2,
     "reveal": 3,
-    "settle": 3,
-    "register": 6,
-    "claim": 3,
-    "voidStale": 1,
+    "settle": 2,
+    "register": 3,
+    "claim": 1,
     "carryForward": 3,
     "claimRake": 2
    }
@@ -39,16 +40,17 @@
    "seed": 47,
    "steps": 60,
    "counts": {
-    "bet": 8,
-    "fund": 19,
+    "bet": 7,
+    "fund": 15,
     "sinkToggle": 13,
-    "lock": 6,
+    "lock": 9,
+    "cashOut": 4,
     "reveal": 2,
     "settle": 2,
-    "register": 4,
-    "claim": 3,
+    "register": 3,
+    "claim": 2,
     "claimRake": 2,
-    "cashOut": 1
+    "carryForward": 1
    }
   },
   {
@@ -56,34 +58,34 @@
    "steps": 60,
    "counts": {
     "lock": 14,
-    "fund": 18,
-    "sinkToggle": 12,
-    "bet": 7,
+    "fund": 21,
+    "sinkToggle": 10,
+    "bet": 5,
     "reveal": 2,
-    "settle": 1,
-    "carryForward": 2,
-    "sweep": 1,
-    "voidStale": 1,
+    "settle": 2,
+    "register": 1,
     "claimRake": 1,
-    "cashOut": 1
+    "carryForward": 1,
+    "cashOut": 2,
+    "sweep": 1
    }
   },
   {
    "seed": 131,
    "steps": 60,
    "counts": {
-    "fund": 17,
-    "lock": 6,
-    "sinkToggle": 6,
+    "fund": 15,
+    "lock": 10,
+    "sinkToggle": 8,
     "bet": 9,
-    "cashOut": 3,
     "reveal": 3,
-    "settle": 2,
-    "register": 3,
+    "settle": 3,
+    "register": 4,
     "claimRake": 2,
-    "voidStale": 2,
-    "claim": 2,
-    "carryForward": 5
+    "sweep": 2,
+    "carryForward": 2,
+    "cashOut": 1,
+    "claim": 1
    }
   }
  ],

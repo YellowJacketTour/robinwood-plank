@@ -9,11 +9,13 @@ Reference inputs: `AUDIT-ccs2l-contracts-hardening-2026-09-05.md` (F-1, F-2), `D
 
 F-1 and F-2 are the same defect. In both, the protocol pays a **fixed** amount (the 10,000-credit house seed; the prize `W(P)`) against a **variable** contribution that the attacker chooses to be minimal (a 5,000-credit min-pool round paying 225 rake). Any mechanism that pays a fixed reward against a player-chosen contribution is farmable once the reward exceeds the contribution, and no parameter tuning escapes it (Theorem 1, Theorem 3). The elegant fix is one principle applied twice, the **actuarial identity**: *a round can never expect to take out of a shared pool more than it put in.* Concretely: (i) the house bonus a round may draw is capped by a fraction of that round's own rake, `H_round = min(seed, reserveCap, κ_h · rake_round)`; (ii) the lottery hit probability is `p = min(1/oddsOneIn, c_round / (κ · W(P)))` where `c_round` is the round's routed lottery contribution; (iii) `mustHitBy` is measured in cumulative contribution, not round count. Under (i)–(iii) the attacker's EV is `(κ_h − 1)·rake < 0` and `(c/κ) − rake < 0` for **every** pool size, split, target choice, seed size and prize size (verified: max EV −166 and −196 credits per round respectively). Honest players are unaffected in the parimutuel layer, and the prize grows *forever* at rate `c(1 − 1/κ)` per round, which is exactly the owner directive. The cost is fundamental and stated in §6: draw frequency becomes proportional to prize size, as in every real progressive jackpot.
 
+**Architecture note.** The site hosts exactly one PlankCrash, one PlankLottery and one vault. There are no tables: `PlankCrash.currentRoundId` is a single global sequence on a fixed clock. "Manufacturing a round" therefore means *being the only participant in a round that runs anyway*, i.e. betting with two sybil wallets during quiet hours when no honest player joins. The attacker cannot create rounds, only occupy empty ones, and every round contributes to the one site-wide prize. All results below are unchanged by this; "round" replaces "table" throughout.
+
 ## 1. Model
 
 Notation (credits): pool `Q = Σ s_i`; rake `r·Q` with `r ∈ [0.025, 0.045]`; distributable `D = (1−r)Q`; floor `f = 0.75`; weights `w_i = s_i ln m_i` over survivors; `W = Σ w_i`; survival law `P(crash ≥ m) = 1/m` (discrete `floor(1e8/m)/1e4`). Player layer returns all of `D` to survivors when any survive (floors plus premium). House layer: `H = min(seed, reserveAtLock·houseCapBps)`, `b_i = min(H·w_i/W, s_i(m_i − 1))`, `houseReturned = H − Σ b_i`. Lottery: contribution per round `c = 0.40 · 0.65 · r · Q = 0.26·r·Q`; hit `1/N`, `N = 16`; winner takes `W(P) = P(1 − x(P))`, carve `x(P) = 0.10 + 0.20·P/(P + 250,000)`; `mustHitByRounds` forces a hit after 96 (deploy 1,536) rounds.
 
-**Lemma 1 (sybil zero-sum).** If every seat in a round belongs to one principal, the player layer nets that principal exactly `−r·Q` regardless of targets, splits and the crash point, because `D` is returned in full whenever any seat survives and the attacker can always hold one seat at `1.01×` (survives with probability 0.990). The only channels through which a solo table can profit are the house layer and the lottery. This reduces both findings to one-dimensional problems.
+**Lemma 1 (sybil zero-sum).** If every seat in a round belongs to one principal, the player layer nets that principal exactly `−r·Q` regardless of targets, splits and the crash point, because `D` is returned in full whenever any seat survives and the attacker can always hold one seat at `1.01×` (survives with probability 0.990). The only channels through which a quiet round (attacker is the only participant) can profit are the house layer and the lottery. This reduces both findings to one-dimensional problems.
 
 ## 2. F-2, the seed farm
 
@@ -33,7 +35,7 @@ With `H = 10,000, s_B = 3,000, r·Q = 225`: (1) gives `+2,083`; the discrete law
 
     H_round = min(seed, reserveAtLock·houseCapBps/BPS, κ_h · rake_round),   κ_h ∈ (0, 1).
 
-**Theorem 2 (sybil-proofness).** For any partition of a round into seats owned by one principal, `Σ b_i ≤ H_round ≤ κ_h·rake_round`, and by Lemma 1 `EV ≤ (κ_h − 1)·rake_round < 0`. The bound holds for every `Q`, `ω`, targets, `seed`, `P` and rake tier; it does not depend on the survival law. Mixed tables: the honest seats' bonus is unchanged in form (`H·w_i/W`, fair-capped); the attacker cannot increase `H_round` without paying rake proportionally, so the attacker's extraction is still bounded by `κ_h·rake_round` of their own money. Verified numerically over `Q ∈ {5k, 20k, 100k, 1M}`, `seed ∈ {10k, 100k, 1M}`, `ω ∈ [0.05, 0.6]`, `m_B ∈ [1.01, 10,000]`, `m_A ∈ {1.01, 1.5, 2.0}`: **max attacker EV = −166.1 credits/round** (at the min pool, i.e. `(0.5 − 1)·225` less rounding).
+**Theorem 2 (sybil-proofness).** For any partition of a round into seats owned by one principal, `Σ b_i ≤ H_round ≤ κ_h·rake_round`, and by Lemma 1 `EV ≤ (κ_h − 1)·rake_round < 0`. The bound holds for every `Q`, `ω`, targets, `seed`, `P` and rake tier; it does not depend on the survival law. Mixed rounds (honest players present): the honest seats' bonus is unchanged in form (`H·w_i/W`, fair-capped); the attacker cannot increase `H_round` without paying rake proportionally, so the attacker's extraction is still bounded by `κ_h·rake_round` of their own money. Verified numerically over `Q ∈ {5k, 20k, 100k, 1M}`, `seed ∈ {10k, 100k, 1M}`, `ω ∈ [0.05, 0.6]`, `m_B ∈ [1.01, 10,000]`, `m_A ∈ {1.01, 1.5, 2.0}`: **max attacker EV = −166.1 credits/round** (at the min pool, i.e. `(0.5 − 1)·225` less rounding).
 
 Interpretation for players: the house bonus is the house *matching a slice of the rake back to survivors who took real risk*. With `κ_h = 0.5` it is exactly "the house returns up to half the rake as a risk bonus". The `seed`/`emissionBuffer` machinery remains the *bankroll* that funds it; the vault floor `protectedPrincipal` remains untouched. Partition invariance of the player layer is unaffected because the change is confined to `_houseLayer`.
 
@@ -51,7 +53,7 @@ Break-even `W(P) = 3,600 ⇒ P = 4,015` (audit: ~4,000). At `P = 90,000`, `W = 7
 
     p_round = min( 1/N ,  c_round / (κ · W(P)) ),   κ > 1,   c_round = lotteryShare · rake_round.
 
-Expected outflow per round `p·W ≤ c/κ < c`, so **the pool never expects to pay out more than `1/κ` of what the round paid in**, and the prize grows in expectation by `c(1 − 1/κ)` per round *unconditionally* (`P` is a strict submartingale). Small prizes keep the `1/N` cadence (branch 1 binds while `W < κ·N·c`, i.e. below ≈ 7,500 credits for a 20 k table at `κ = 2`).
+Expected outflow per round `p·W ≤ c/κ < c`, so **the pool never expects to pay out more than `1/κ` of what the round paid in**, and the prize grows in expectation by `c(1 − 1/κ)` per round *unconditionally* (`P` is a strict submartingale). Small prizes keep the `1/N` cadence (branch 1 binds while `W < κ·N·c`, i.e. below ≈ 7,500 credits for a 20 k-credit round at `κ = 2`).
 
 **Theorem 4 (sybil-proofness).** For a manufactured round `EV = p·W − r·Q ≤ c/κ − r·Q = r·Q(0.26/κ − 1) < 0` for all `κ > 0.26`; with `κ = 2`, EV `= −0.87·rake` for every `Q` and `P`. Verified over `Q ∈ {5k, 20k, 100k}`, `P ∈ [1k, 10M]`: **max EV = −195.8 credits/round**. Splitting one bankroll across many small rounds does not help: `p` is linear in `c_round` below the cap, so `k` rounds of contribution `c/k` have the same total hit mass as one round of `c` (additivity), while paying the same total rake.
 
@@ -61,7 +63,7 @@ Expected outflow per round `p·W ≤ c/κ < c`, so **the pool never expects to p
 
 Under the design doc's flat odds, `P` had a unique attracting equilibrium `P*` because outflow `W(P)/N` grew with `P`. Under the actuarial rule outflow is capped at `c/κ`, so there is **no equilibrium**: `E[P_{t+1} − P_t] = c(1 − 1/κ) > 0` always. This is "grow forever" realised literally, and the carve `x(P)` still applies on every hit so each next cycle starts from `S = x(P)·P`, which also grows without bound. `x(P)` remains in the admissible family; nothing in `DESIGN-vault-lottery-progressive-carve` changes except the equilibrium section, which becomes a drift section.
 
-Growth rate at ratified parameters, 20 k tables, `κ = 2`: `+117` credits per round net of expected payouts; 1 M credits (1 ETH) of prize in ≈ 8,500 rounds ≈ 4 days of continuous play at 40 s per round. Honest cadence (`E[rounds to hit]`) at `P = 10k / 50k / 150k / 500k / 1M`: `76 / 370 / 1,058 / 3,276 / 6,325`.
+Growth rate at ratified parameters, 20 k-credit rounds, `κ = 2`: `+117` credits per round net of expected payouts; 1 M credits (1 ETH) of prize in ≈ 8,500 rounds ≈ 4 days of continuous play at 40 s per round. Honest cadence (`E[rounds to hit]`) at `P = 10k / 50k / 150k / 500k / 1M`: `76 / 370 / 1,058 / 3,276 / 6,325`.
 
 ## 5. Mechanisms considered and rejected
 
@@ -71,7 +73,7 @@ Growth rate at ratified parameters, 20 k tables, `κ = 2`: `+117` credits per ro
 | Pool-proportional seed `σQ` | Sybil-proof only for `σ ≤ 2.6 %`; couples seed to the rake tier; not a real bonus. |
 | Cap prize at `P_max` | Contradicts "grow forever"; `P_max` would have to be ≤ 4,000 credits at current rake, i.e. no lottery. |
 | Ticket weight by wallet age / history | Cross-round eligibility, which the owner rejected; sybil wallets age for free. |
-| Minimum qualifying pool `Q_min(P)` scaling with `W` | Same cadence as the actuarial rule but excludes small honest tables from draws entirely; strictly dominated. |
+| Minimum qualifying pool `Q_min(P)` scaling with `W` | Same cadence as the actuarial rule but excludes small honest rounds from draws entirely; strictly dominated. |
 | Contribution-banked draws (fires when Σc ≥ threshold, winner from that round) | Same expected cadence as actuarial `p`; deterministic in money, so a whale can time the crossing round. Kept only as the `mustHitBy` backstop. |
 | Per-wallet cooldown / KYC | Off-chain, sybil-trivial, against the permissionless thesis. |
 
