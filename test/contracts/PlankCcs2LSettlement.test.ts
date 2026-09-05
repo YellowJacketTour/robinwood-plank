@@ -5,7 +5,7 @@ import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
 import { ethers } from "./helpers/hardhat.js";
 
 type SolSeat = { stake: bigint; targetBps: bigint };
-type SolParams = { floorBps: bigint; houseCapBps: bigint };
+type SolParams = { floorBps: bigint; houseCapBps: bigint; houseRakeCapBps: bigint };
 
 interface SolResult {
   mode: bigint;
@@ -23,11 +23,11 @@ interface SolResult {
 interface CcsHarness {
   settle(
     playerD: bigint, seedH: bigint, crashBps: bigint,
-    seats: SolSeat[], reserveAtLock: bigint, params: SolParams,
+    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, params: SolParams,
   ): Promise<SolResult>;
   settleGas(
     playerD: bigint, seedH: bigint, crashBps: bigint,
-    seats: SolSeat[], reserveAtLock: bigint, params: SolParams,
+    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, params: SolParams,
   ): Promise<{ wait(): Promise<{ gasUsed: bigint }> }>;
   lnScaled(xBps: bigint): Promise<bigint>;
   paramsHash(params: SolParams): Promise<string>;
@@ -53,7 +53,8 @@ interface CcsEngine {
     crashBps: bigint,
     seats: Array<{ id: string; stake: bigint; targetBps: bigint }>,
     reserveAtLock: bigint,
-    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint },
+    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint; houseRakeCapBps: bigint },
+    rakeWei?: bigint,
   ) => EngineSettlement;
   lnScaled: (xBps: bigint) => bigint;
   makeRng: (seed: bigint) => () => bigint;
@@ -78,7 +79,7 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
   const MODES = ["no-survivor", "floor-degenerate", "normal"] as const;
   let engine: CcsEngine;
   let ccs: CcsHarness;
-  const params = { floorBps: 7_500n, houseCapBps: 1_000n };
+  const params = { floorBps: 7_500n, houseCapBps: 1_000n, houseRakeCapBps: 5_000n };
   const gasRows: Array<{ n: number; mode: string; gas: bigint }> = [];
   const E = (x: number) => BigInt(Math.round(x * 1e6)) * 10n ** 12n;
   const RESERVE = E(500);
@@ -107,6 +108,9 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
     crashBps: bigint,
     seats: Array<{ stake: bigint; targetBps: bigint }>,
     reserveAtLock: bigint = RESERVE,
+    // Default: the rake a 4.5%-rake round would leave against this D, so the
+    // v2 rake cap is exercised (binding or not) in every differential case.
+    rakeWei: bigint = (playerD * 450n) / 9_550n,
   ) {
     const js = engine.settleCcs2L(
       playerD,
@@ -114,9 +118,10 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
       crashBps,
       seats.map((s, i) => ({ id: `s${i}`, ...s })),
       reserveAtLock,
-      { floorBps: params.floorBps, playerWeight: "ln", houseCapBps: params.houseCapBps },
+      { floorBps: params.floorBps, playerWeight: "ln", houseCapBps: params.houseCapBps, houseRakeCapBps: params.houseRakeCapBps },
+      rakeWei,
     );
-    const sol = await ccs.settle(playerD, seedH, crashBps, seats, reserveAtLock, params);
+    const sol = await ccs.settle(playerD, seedH, crashBps, seats, reserveAtLock, rakeWei, params);
     expect(MODES[Number(sol.mode)], `${label}: mode`).to.equal(
       js.allBust ? "no-survivor" : js.meta.mode === "floor-degenerate" ? "floor-degenerate" : "normal",
     );
@@ -155,13 +160,13 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
   });
 
   it("paramsHash matches the registry convention byte-for-byte", async () => {
-    // keccak256(abi.encode(keccak256("ccs-2l"), 1, floorBps, houseCapBps)) —
+    // keccak256(abi.encode(keccak256("ccs-2l"), 2, floorBps, houseCapBps, houseRakeCapBps)) —
     // the same bytes lib/casino/settlement-rules.ts ccs2lParamsHash() emits
     // (pinned there against this literal expression in its own test).
     const expected = keccak256(
       AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "uint256", "uint256", "uint256"],
-        [keccak256(toUtf8Bytes("ccs-2l")), 1n, params.floorBps, params.houseCapBps],
+        ["bytes32", "uint256", "uint256", "uint256", "uint256"],
+        [keccak256(toUtf8Bytes("ccs-2l")), 2n, params.floorBps, params.houseCapBps, params.houseRakeCapBps],
       ),
     );
     expect(await ccs.paramsHash(params)).to.equal(expected);
@@ -224,7 +229,8 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
         { id: "s1", stake: E(4), targetBps: 80_000n },
       ],
       RESERVE,
-      { floorBps: 7_500n, playerWeight: "ln", houseCapBps: 1_000n },
+      { floorBps: 7_500n, playerWeight: "ln", houseCapBps: 1_000n, houseRakeCapBps: 5_000n },
+      (E(1) * 450n) / 9_550n,
     );
     expect(js.meta.mode).to.equal("floor-degenerate");
     await differential("floor-degenerate", E(1), 0n, 100_000n, [
@@ -263,7 +269,7 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
       const crash = 400_000n;
       const playerD = (E(1) * BigInt(n) * 9_700n) / 10_000n;
       const seedH = E(0.5);
-      const tx = await ccs.settleGas(playerD, seedH, crash, seats, RESERVE, params);
+      const tx = await ccs.settleGas(playerD, seedH, crash, seats, RESERVE, RESERVE / 100n, params);
       const receipt = await tx.wait();
       gasRows.push({ n, mode: "normal", gas: receipt.gasUsed });
     }

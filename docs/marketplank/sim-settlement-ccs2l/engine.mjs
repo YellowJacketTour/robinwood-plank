@@ -32,8 +32,14 @@
  * and POSITIVELY HOMOGENEOUS in stake, so splitting one economic position
  * across wallets can never increase the aggregate house bonus beyond
  * deterministic rounding dust:
- *   H_avail = min(H, reserveAtLock*houseCapBps/BPS)   (GLOBAL reserve-at-lock
- *                                                      cap on the whole purse)
+ *   H_avail = min(H, reserveAtLock*houseCapBps/BPS,   (GLOBAL reserve-at-lock
+ *                 rakeWei*houseRakeCapBps/BPS)         cap on the whole purse +
+ *                                                      v2 ACTUARIAL rake cap:
+ *                                                      never more than a
+ *                                                      fraction of this round's
+ *                                                      own rake, see RESEARCH-
+ *                                                      game-theory-lottery-seed-
+ *                                                      resolution-2026-09-05)
  *   w_i     = s_i * lnScaled(m_i)           (house weight — linear in stake,
  *                                            identity-independent)
  *   bRaw_i  = H_avail * w_i / W
@@ -69,6 +75,7 @@ export const DEFAULT_CCS2L = Object.freeze({
   floorBps: 7_500n, // f: min survivor recovery fraction of stake (player layer)
   playerWeight: "ln", // "ln" (variant A, CANONICAL) | "odds" (variant B dial)
   houseCapBps: 1_000n, // GLOBAL aggregate house-purse cap, of reserveAtLock
+  houseRakeCapBps: 5_000n, // v2 GLOBAL house-purse cap, of the round's own rake
 });
 
 // ---------------------------------------------------------------------------
@@ -127,11 +134,16 @@ export function playerG(targetBps, playerWeight) {
  * @param crashBps            realized crash multiplier.
  * @param seats               [{id, stake, targetBps}] (targetBps = accepted lock).
  * @param reserveAtLock       reserve snapshot for the GLOBAL house-purse cap.
- * @param params              {floorBps, playerWeight, houseCapBps}.
+ * @param params              {floorBps, playerWeight, houseCapBps, houseRakeCapBps}.
+ * @param rakeWei             the rake this round leaves behind: base of the v2
+ *                            actuarial house cap. The chain ALWAYS applies it;
+ *                            omitted (undefined) = v1 house layer, kept only so
+ *                            the historical campaigns/scenarios still replay.
  */
-export function settleCcs2L(playerDistributable, seedH, crashBps, seats, reserveAtLock, params = DEFAULT_CCS2L) {
+export function settleCcs2L(playerDistributable, seedH, crashBps, seats, reserveAtLock, params = DEFAULT_CCS2L, rakeWei = undefined) {
   assertInputs(playerDistributable, seedH, crashBps, seats);
   if (reserveAtLock < 0n) throw new RangeError("negative reserve");
+  if (rakeWei !== undefined && (rakeWei < 0n || rakeWei > MAX_POT)) throw new RangeError("rake out of range");
   const n = seats.length;
   const survived = seats.map((s) => s.targetBps <= crashBps);
   const survivorStake = seats.reduce((a, s, i) => a + (survived[i] ? s.stake : 0n), 0n);
@@ -189,7 +201,12 @@ export function settleCcs2L(playerDistributable, seedH, crashBps, seats, reserve
     // ── LAYER 2: house purse — partition-invariant (v1.1) ────────────────
     // Global reserve-at-lock cap on the WHOLE purse (identity-independent):
     const reserveCap = (reserveAtLock * params.houseCapBps) / BPS;
-    const hAvail = seedH < reserveCap ? seedH : reserveCap;
+    let hAvail = seedH < reserveCap ? seedH : reserveCap;
+    // v2 actuarial identity: never more than a fraction of THIS round's rake.
+    if (rakeWei !== undefined) {
+      const rakeCap = (rakeWei * (params.houseRakeCapBps ?? 0n)) / BPS;
+      if (rakeCap < hAvail) hAvail = rakeCap;
+    }
     // House weight: s*lnScaled(m) — linear in stake at fixed m, so additive
     // under any wallet split of the same economic position.
     const hws = seats.map((s, i) => (survived[i] ? s.stake * lnScaled(s.targetBps) : 0n));

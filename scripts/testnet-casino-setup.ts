@@ -86,8 +86,9 @@ async function main() {
     source: predictedCrash,
     founderSink: treasury.address,
     founderFeeBps: 1000n,
-    oddsOneIn: STRICT ? 256n : 8n,
-    mustHitByRounds: STRICT ? 1536n : 48n,
+    oddsOneIn: STRICT ? 16n : 8n, // flat ceiling; the actuarial rule prices each round by its contribution
+    contributionBps: 2600n, // router: 40% community x 65% lottery
+    kappaBps: 20_000n, // kappa = 2
     carveMinBps: 1000n,
     carveMaxBps: 3000n,
     carveHalfSaturationWei: 250_000n * CREDIT,
@@ -124,6 +125,7 @@ async function main() {
     protectedPrincipalBps: 5000n,
     floorBps: 7500n,
     houseCapBps: 1000n,
+    houseRakeCapBps: 5000n,
     seedBootstrapBudgetWei: ethers.parseEther("0.005"),
     refundTimeoutSeconds: 30n * 86400n,
   }, FEES);

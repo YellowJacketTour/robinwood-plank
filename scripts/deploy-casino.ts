@@ -143,6 +143,9 @@ async function main() {
   // CCS-2L v1 variant A (ratified): survivor floor 75%, GLOBAL house cap 10% of reserveAtLock.
   const FLOOR_BPS = envBig("CASINO_CCS2L_FLOOR_BPS", 7500n);
   const HOUSE_CAP_BPS = envBig("CASINO_CCS2L_HOUSE_CAP_BPS", 1000n);
+  // v2 actuarial identity (RESEARCH-game-theory-lottery-seed-resolution-2026-09-05):
+  // the house risks at most this share of a round's OWN rake on that round.
+  const HOUSE_RAKE_CAP_BPS = envBig("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 5000n);
   // The Vault (solvency floor): fixed seed 10,000 credits, buffer cap 1,000,000 credits,
   // 50% of the retained community leg becomes protected principal (the floor).
   const CRASH_SEED_WEI = envBig("CASINO_CRASH_SEED_WEI", 10_000n * CREDIT);
@@ -171,12 +174,17 @@ async function main() {
   const MAX_STAKE_BPS = envBig("CASINO_MAX_STAKE_BPS", 6000n);
   const MAX_SEATS = envBig("CASINO_MAX_SEATS", 128n);
 
-  // Lottery (DESIGN s6.1/s6.5): 10% founder fee on fresh inflow only; E[R] = 256 (D1);
-  // mustHitByRounds = 6 x E[R] = 1,536 funded qualified rounds (D4);
+  // Lottery (DESIGN s6.1/s6.5 + actuarial hit rule, RESEARCH-game-theory-
+  // lottery-seed-resolution-2026-09-05): 10% founder fee on fresh inflow only;
+  // p_hit = min(1/oddsOneIn, c/(kappa * W)) with c the round's routed
+  // contribution (40% community x communityLotteryBps of the rake) and
+  // kappa = 2 (the pool keeps >= half of every contribution in expectation);
+  // NO forced hit -- a progressive lottery pays when the ball falls;
   // progressive carve x(P) = 0.10 + 0.20 * P / (P + 250,000 credits) (D2).
   const LOTTERY_FOUNDER_FEE_BPS = envBig("CASINO_LOTTERY_FOUNDER_FEE_BPS", 1000n);
-  const LOTTERY_ODDS_ONE_IN = envBig("CASINO_LOTTERY_ODDS_ONE_IN", 256n);
-  const MUST_HIT_BY_ROUNDS = envBig("CASINO_MUST_HIT_BY_ROUNDS", 1536n);
+  const LOTTERY_ODDS_ONE_IN = envBig("CASINO_LOTTERY_ODDS_ONE_IN", 16n);
+  const LOTTERY_CONTRIBUTION_BPS = (4000n * COMMUNITY_LOTTERY_BPS) / 10_000n; // router bytecode: community 40%
+  const LOTTERY_KAPPA_BPS = envBig("CASINO_LOTTERY_KAPPA_BPS", 20_000n);
   const CARVE_MIN_BPS = envBig("CASINO_CARVE_MIN_BPS", 1000n);
   const CARVE_MAX_BPS = envBig("CASINO_CARVE_MAX_BPS", 3000n);
   const CARVE_HALF_SATURATION_WEI = envBig("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n * CREDIT);
@@ -227,7 +235,8 @@ async function main() {
     founderSink: TREASURY,
     founderFeeBps: LOTTERY_FOUNDER_FEE_BPS,
     oddsOneIn: LOTTERY_ODDS_ONE_IN,
-    mustHitByRounds: MUST_HIT_BY_ROUNDS,
+    contributionBps: LOTTERY_CONTRIBUTION_BPS,
+    kappaBps: LOTTERY_KAPPA_BPS,
     carveMinBps: CARVE_MIN_BPS,
     carveMaxBps: CARVE_MAX_BPS,
     carveHalfSaturationWei: CARVE_HALF_SATURATION_WEI,
@@ -271,6 +280,7 @@ async function main() {
     protectedPrincipalBps: PROTECTED_PRINCIPAL_BPS,
     floorBps: FLOOR_BPS,
     houseCapBps: HOUSE_CAP_BPS,
+    houseRakeCapBps: HOUSE_RAKE_CAP_BPS,
     seedBootstrapBudgetWei: SEED_BOOTSTRAP_BUDGET_WEI,
     refundTimeoutSeconds: REFUND_TIMEOUT_SECONDS,
   }); // nonce+2

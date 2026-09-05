@@ -20,8 +20,11 @@
  * (< survivorCount wei) goes to the largest-weight survivor so the sum is
  * EXACT. No house cap ever touches this layer.
  *
- * HOUSE LAYER (v1.1, PARTITION-INVARIANT) — the available house purse
- * H_avail = min(H, reserveAtLock*houseCapBps/BPS) (a GLOBAL cap, never
+ * HOUSE LAYER (v2, PARTITION-INVARIANT + ACTUARIAL) — the available house purse
+ * H_avail = min(H, reserveAtLock*houseCapBps/BPS, rakeWei*houseRakeCapBps/BPS)
+ * (GLOBAL caps; the rake cap is the actuarial identity of
+ * docs/marketplank/RESEARCH-game-theory-lottery-seed-resolution-2026-09-05.md:
+ * a round never draws more house money than a fraction of its own rake, never
  * per-address) is split by the house weight w_i = s_i*lnScaled(m_i) — linear
  * in stake and identity-independent — and capped per seat only at the
  * fair-odds cap s_i*(m_i-BPS)/BPS (linear in stake, additive under wallet
@@ -57,12 +60,15 @@ export interface Ccs2LParams {
   playerWeight: Ccs2LPlayerWeight;
   /** GLOBAL aggregate house-purse cap as bps of reserveAtLock (never per-address). */
   houseCapBps: bigint;
+  /** GLOBAL aggregate house-purse cap as bps of the round's OWN rake (v2 actuarial identity). */
+  houseRakeCapBps: bigint;
 }
 
 export const DEFAULT_CCS2L_PARAMS: Ccs2LParams = {
   floorBps: 7_500n,
   playerWeight: "ln",
   houseCapBps: 1_000n,
+  houseRakeCapBps: 5_000n,
 };
 
 export interface Ccs2LAllocation {
@@ -160,9 +166,16 @@ export function settleCcs2L(
   seats: readonly Seat[],
   reserveAtLock: bigint,
   params: Ccs2LParams = DEFAULT_CCS2L_PARAMS,
+  /**
+   * The rake this round leaves behind (net of keeper bounty): the base of the
+   * v2 actuarial house cap. The on-chain law ALWAYS applies it; omit it only
+   * to replay v1-era records or historical campaigns (no rake cap).
+   */
+  rakeWei?: bigint,
 ): Ccs2LSettlement {
   assertInputs(playerDistributable, seedH, crashBps, seats);
   if (reserveAtLock < 0n) throw new RangeError("negative reserve");
+  if (rakeWei !== undefined && (rakeWei < 0n || rakeWei > CCS2L_MAX_POT)) throw new RangeError("rake out of range");
   const n = seats.length;
   const survived = seats.map((s) => s.targetBps <= crashBps);
   const survivorStake = seats.reduce((a, s, i) => a + (survived[i] ? s.stake : 0n), 0n);
@@ -214,7 +227,12 @@ export function settleCcs2L(
 
     // House layer v1.1 — partition-invariant: global reserve cap + linear caps.
     const reserveCap = (reserveAtLock * params.houseCapBps) / BPS;
-    const hAvail = seedH < reserveCap ? seedH : reserveCap;
+    let hAvail = seedH < reserveCap ? seedH : reserveCap;
+    // v2 actuarial identity: never more than a fraction of THIS round's rake.
+    if (rakeWei !== undefined) {
+      const rakeCap = (rakeWei * params.houseRakeCapBps) / BPS;
+      if (rakeCap < hAvail) hAvail = rakeCap;
+    }
     const hws = seats.map((s, i) => (survived[i] ? s.stake * lnScaled(s.targetBps) : 0n));
     const HW = hws.reduce((a, b) => a + b, 0n);
     let bSum = 0n;

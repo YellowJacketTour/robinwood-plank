@@ -1,5 +1,14 @@
 # DESIGN — The authentic vault role, the progressive carve x(P), and round-only eligibility
 
+> **SUPERSEDED IN PART — 2026-09-05.** Two parts of this design were replaced by
+> `RESEARCH-game-theory-lottery-seed-resolution-2026-09-05.md` after the F-1/F-2 audit findings:
+> (1) the flat per-round hit probability `1/E[R]` is replaced by the actuarial rule
+> `p = min(1/oddsOneIn, c_round/(κ·W(P)))`, so the "equilibrium prize `P*`" analysis (Part 4) becomes a
+> **drift** analysis: `P` grows in expectation by `c(1 − 1/κ)` every round with no equilibrium and no cap;
+> (2) every must-hit-by mechanism (Part 5, D4) is **removed by owner ruling** — the site runs a pure
+> progressive lottery. The carve `x(P)`, round-only eligibility, prize snapshot, founder-fee-on-inflow and
+> the vault floor are unchanged and remain canonical.
+
 **Date:** 2026-09-04 · **Status:** design + research, analysis only. No code, config or
 economics changed by this document.
 **Builds on:** `docs/marketplank/RESEARCH-vault-and-lottery-design-2026-09-04.md` (the prior

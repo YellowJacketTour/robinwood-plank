@@ -6,7 +6,7 @@ import {IDrandBeacon} from "./IDrandBeacon.sol";
 import {PlankCcs2LMath} from "./lib/PlankCcs2LMath.sol";
 
 interface IPlankLottery {
-    function recordRound(uint256 roundId, bytes32 resultSeed, address winner) external;
+    function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) external;
     function fund() external payable;
 }
 
@@ -159,6 +159,7 @@ contract PlankCrash is ReentrancyGuard {
         uint256 protectedPrincipalBps;
         uint256 floorBps; // CCS-2L f (ratified 7_500)
         uint256 houseCapBps; // CCS-2L GLOBAL house cap (ratified 1_000)
+        uint256 houseRakeCapBps; // CCS-2L v2 actuarial house cap, of the round's rake (ratified 5_000)
         uint256 seedBootstrapBudgetWei;
         uint256 refundTimeoutSeconds;
     }
@@ -186,6 +187,7 @@ contract PlankCrash is ReentrancyGuard {
     uint256 public immutable protectedPrincipalBps;
     uint256 public immutable floorBps;
     uint256 public immutable houseCapBps;
+    uint256 public immutable houseRakeCapBps;
     uint256 public immutable seedBootstrapBudgetWei;
     uint256 public immutable refundTimeoutSeconds;
     bytes32 public immutable settlementRuleId;
@@ -301,6 +303,9 @@ contract PlankCrash is ReentrancyGuard {
         // The survivor floor must be payable from the rake-net pot; otherwise the
         // math's floor-degenerate branch (defensive) would be the normal case.
         if (cfg.floorBps > BPS - cfg.rakeBps || cfg.houseCapBps > BPS) revert BadConfig();
+        // Actuarial identity: the house may never risk MORE than the round's
+        // rake on that round (>= BPS would re-open the seed farm, F-2).
+        if (cfg.houseRakeCapBps >= BPS) revert BadConfig();
         if (cfg.refundTimeoutSeconds == 0) revert BadConfig();
 
         genesisTimestamp = block.timestamp;
@@ -322,6 +327,7 @@ contract PlankCrash is ReentrancyGuard {
         protectedPrincipalBps = cfg.protectedPrincipalBps;
         floorBps = cfg.floorBps;
         houseCapBps = cfg.houseCapBps;
+        houseRakeCapBps = cfg.houseRakeCapBps;
         seedBootstrapBudgetWei = cfg.seedBootstrapBudgetWei;
         seedBudget = cfg.seedBootstrapBudgetWei;
         refundTimeoutSeconds = cfg.refundTimeoutSeconds;
@@ -335,7 +341,7 @@ contract PlankCrash is ReentrancyGuard {
     // ── Round lifecycle ─────────────────────────────────────────────────
 
     function _params() private view returns (PlankCcs2LMath.Params memory) {
-        return PlankCcs2LMath.Params({floorBps: floorBps, houseCapBps: houseCapBps});
+        return PlankCcs2LMath.Params({floorBps: floorBps, houseCapBps: houseCapBps, houseRakeCapBps: houseRakeCapBps});
     }
 
     function _nextSlot() private view returns (uint256) {
@@ -492,6 +498,10 @@ contract PlankCrash is ReentrancyGuard {
         uint256 playerDistributable = (playerPool * (BPS - rake)) / BPS;
         r.playerDistributable = playerDistributable;
         uint256 grossRake = playerPool - playerDistributable;
+        // Keeper bounty (bps of realised rake); the remainder is the rake the
+        // round leaves behind, the base of BOTH actuarial caps (house, lottery).
+        uint256 keeperReward = (grossRake * keeperRewardBps) / BPS;
+        uint256 netRake = grossRake - keeperReward;
 
         Seat[] storage seats = _seats[id];
         uint256 n = seats.length;
@@ -500,7 +510,7 @@ contract PlankCrash is ReentrancyGuard {
             mseats[i] = PlankCcs2LMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
         }
         PlankCcs2LMath.Result memory res =
-            PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, _params());
+            PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, _params());
 
         uint256 paidSum = 0;
         for (uint256 i = 0; i < n; i++) {
@@ -527,13 +537,12 @@ contract PlankCrash is ReentrancyGuard {
             _creditBuffer(res.bustedToReserve, true);
         }
 
-        // Rake: keeper bounty (bps of realised rake), remainder escrowed for the router.
-        uint256 keeperReward = (grossRake * keeperRewardBps) / BPS;
+        // Rake: keeper bounty paid now, remainder escrowed for the router.
         if (keeperReward > 0) {
             owed[msg.sender] += keeperReward;
             totalOwed += keeperReward;
         }
-        pendingRake += grossRake - keeperReward;
+        pendingRake += netRake;
         qualifiedVolume += playerPool;
         r.phase = Phase.SETTLED;
 
@@ -548,7 +557,7 @@ contract PlankCrash is ReentrancyGuard {
         // healthy draw: the work after this call (_startRound) costs far more
         // than the 1/64 EIP-150 retains, so a starved call reverts the whole
         // transaction (proven in PlankCrash.adversarial.test.ts).
-        try IPlankLottery(lottery).recordRound(id, seedHash, winner) {}
+        try IPlankLottery(lottery).recordRound(id, seedHash, winner, netRake) {}
         catch (bytes memory reason) {
             emit LotteryRecordFailed(id, winner, reason);
         }
@@ -786,7 +795,9 @@ contract PlankCrash is ReentrancyGuard {
         }
         uint256 rake = r.phase == Phase.SETTLED ? r.effectiveRakeBps : effectiveRakeBps();
         uint256 playerDistributable = (r.playerPool * (BPS - rake)) / BPS;
-        return PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, _params());
+        uint256 grossRake = r.playerPool - playerDistributable;
+        uint256 netRake = grossRake - (grossRake * keeperRewardBps) / BPS;
+        return PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, _params());
     }
 
     /// @notice Every wei this contract is responsible for (S-8). Equals

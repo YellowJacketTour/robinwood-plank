@@ -349,6 +349,7 @@ export function simulateIteration(
         input.players,
         state.emissionBuffer,
         DEFAULT_CCS2L_PARAMS,
+        economics.rake,
       );
       settlement = ccs;
       reserveReturn = ccs.houseReturned + ccs.bustedToReserve;

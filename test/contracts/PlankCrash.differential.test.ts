@@ -10,7 +10,8 @@ interface CcsEngine {
   settleCcs2L: (
     playerD: bigint, seedH: bigint, crashBps: bigint,
     seats: Array<{ id: string; stake: bigint; targetBps: bigint }>, reserveAtLock: bigint,
-    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint },
+    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint; houseRakeCapBps: bigint },
+    rakeWei?: bigint,
   ) => { allBust: boolean; houseReturned: bigint; bustedToReserve: bigint; totalPlayerPaid: bigint; totalBonus: bigint; allocations: Array<{ playerPayout: bigint; houseBonus: bigint }>; meta: { mode: string } };
   makeRng: (seed: bigint) => () => bigint;
   rngBelow: (rng: () => bigint, bound: bigint) => bigint;
@@ -55,8 +56,9 @@ describe("PlankCrash -- three-way wei-exact differential (settleRound vs settleC
     expect(round.seed, `${label}: seed committed before bets`).to.equal(before.seed);
 
     const libSeats = seats.map((s, i) => ({ id: `s${i}`, stake: s.stake, targetBps: s.targetBps }));
-    const lib = settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, DEFAULT_CCS2L_PARAMS);
-    const eng = engine.settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, { floorBps: 7500n, playerWeight: "ln", houseCapBps: 1000n });
+    const netRake = playerPool - D; // keeper bounty is 0 in the fixture
+    const lib = settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, DEFAULT_CCS2L_PARAMS, netRake);
+    const eng = engine.settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, { floorBps: 7500n, playerWeight: "ln", houseCapBps: 1000n, houseRakeCapBps: 5000n }, netRake);
 
     for (let i = 0; i < seats.length; i++) {
       const onChain: bigint = await env.crash.paidOf(id, seats[i].player);

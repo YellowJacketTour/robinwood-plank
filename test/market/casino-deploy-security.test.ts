@@ -48,7 +48,14 @@ test("ratified settlement and lottery parameters are the deploy defaults", async
   assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_CAP_BPS", 1000n\)/);
   assert.match(deploy, /envBig\("CASINO_RAKE_BPS", 450n\)/);
   assert.match(deploy, /envBig\("CASINO_RAKE_FLOOR_BPS", 250n\)/);
-  assert.match(deploy, /envBig\("CASINO_MUST_HIT_BY_ROUNDS", 1536n\)/);
+  // v2 actuarial identity (RESEARCH-game-theory-lottery-seed-resolution-2026-09-05):
+  // house risks <= half the round's rake; the pool keeps >= half of every
+  // contribution (kappa = 2); the flat ceiling is 1/16; NO forced hit exists.
+  assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 5000n\)/);
+  assert.match(deploy, /envBig\("CASINO_LOTTERY_ODDS_ONE_IN", 16n\)/);
+  assert.match(deploy, /envBig\("CASINO_LOTTERY_KAPPA_BPS", 20_000n\)/);
+  assert.match(deploy, /LOTTERY_CONTRIBUTION_BPS = \(4000n \* COMMUNITY_LOTTERY_BPS\) \/ 10_000n/);
+  assert.doesNotMatch(deploy, /MUST_HIT_BY|mustHitBy/);
   assert.match(deploy, /envBig\("CASINO_CARVE_MIN_BPS", 1000n\)/);
   assert.match(deploy, /envBig\("CASINO_CARVE_MAX_BPS", 3000n\)/);
   assert.match(deploy, /envBig\("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n \* CREDIT\)/);

@@ -34,7 +34,8 @@ pragma solidity 0.8.24;
 /// constraint is identity-independent and positively homogeneous in stake, so
 /// splitting one economic position across wallets cannot raise the aggregate
 /// house bonus beyond deterministic rounding dust:
-///   H_avail = min(H, reserveAtLock * houseCapBps / BPS)   (GLOBAL cap)
+///   H_avail = min(H, reserveAtLock * houseCapBps / BPS,
+///                 rakeWei * houseRakeCapBps / BPS)          (GLOBAL cap)
 ///   w_i     = s_i * lnScaled(m_i)                          (linear in stake)
 ///   b_i     = min(H_avail * w_i / W, s_i * (m_i - BPS) / BPS)  (fair-odds cap,
 ///             linear in stake => a lawful local cap; implies the aggregate
@@ -42,6 +43,13 @@ pragma solidity 0.8.24;
 ///   H_returned = H - sum(b_i) -> PROTECTED RESERVE (never players/treasury).
 ///   REMOVED (v1.0 -> v1.1): the per-WALLET reserveAtLock * bps cap — constant
 ///   per address, therefore split-relaxable (N wallets got N caps).
+///   ADDED (v1.1 -> v2, ACTUARIAL IDENTITY): the round's house draw is capped
+///   by a fraction of the round's OWN rake (rakeWei * houseRakeCapBps / BPS).
+///   A fixed seed against a player-chosen pool is farmable whenever
+///   seed > pool * r*w/(w-r) (~4.9% at r=4.5%, w=60%; RESEARCH-game-theory-
+///   lottery-seed-resolution-2026-09-05 Thm 1). With the rake cap every
+///   solo-principal round nets <= (houseRakeCapBps/BPS - 1) * rake < 0 for
+///   every pool, split, target, seed and reserve (Thm 2).
 ///
 /// NO SURVIVOR: bustedToReserve = D_players + H (ratified busted-round routing).
 /// There is NO treasury cap residue anywhere, structurally.
@@ -56,7 +64,7 @@ library PlankCcs2LMath {
 
     /// @dev Rule identity for commitment-time persistence (see paramsHash).
     bytes32 internal constant RULE_ID = keccak256("ccs-2l");
-    uint256 internal constant RULE_VERSION = 1;
+    uint256 internal constant RULE_VERSION = 2;
 
     error InvalidSeat();
     error InvalidCrash();
@@ -70,6 +78,7 @@ library PlankCcs2LMath {
     struct Params {
         uint256 floorBps; // f, provisionally 7_500
         uint256 houseCapBps; // GLOBAL house-purse cap, of reserveAtLock
+        uint256 houseRakeCapBps; // GLOBAL house-purse cap, of the round's own rake (v2)
     }
 
     struct Result {
@@ -89,9 +98,9 @@ library PlankCcs2LMath {
     ///         round commitment; never re-derive settlement semantics from the
     ///         then-current configuration. Matches lib/casino/settlement-rules.ts
     ///         ccs2lParamsHash() byte-for-byte:
-    ///         keccak256(abi.encode(RULE_ID, RULE_VERSION, floorBps, houseCapBps)).
+    ///         keccak256(abi.encode(RULE_ID, RULE_VERSION, floorBps, houseCapBps, houseRakeCapBps)).
     function paramsHash(Params memory params) internal pure returns (bytes32) {
-        return keccak256(abi.encode(RULE_ID, RULE_VERSION, params.floorBps, params.houseCapBps));
+        return keccak256(abi.encode(RULE_ID, RULE_VERSION, params.floorBps, params.houseCapBps, params.houseRakeCapBps));
     }
 
     /// @notice Fixed-point natural log: lnScaled(xBps) ~= ln(x/1e4)*1e6, floor.
@@ -152,16 +161,18 @@ library PlankCcs2LMath {
     /// @param playerDistributable D_players = playerPool - rake (player money).
     /// @param seedH the round's rolled/committed seed (house money).
     /// @param reserveAtLock reserve snapshot for the GLOBAL house-purse cap.
+    /// @param rakeWei the rake this round leaves behind (actuarial house cap, v2).
     function settle(
         uint256 playerDistributable,
         uint256 seedH,
         uint256 crashBps,
         Seat[] memory seats,
         uint256 reserveAtLock,
+        uint256 rakeWei,
         Params memory params
     ) internal pure returns (Result memory r) {
         if (crashBps < BPS) revert InvalidCrash();
-        if (playerDistributable > MAX_POT || seedH > MAX_POT) revert InvalidPot();
+        if (playerDistributable > MAX_POT || seedH > MAX_POT || rakeWei > MAX_POT) revert InvalidPot();
         uint256 n = seats.length;
         r.playerPayouts = new uint256[](n);
         r.bonuses = new uint256[](n);
@@ -176,7 +187,7 @@ library PlankCcs2LMath {
         }
 
         _playerLayer(r, p, playerDistributable);
-        _houseLayer(r, p, seats, seedH, reserveAtLock, params.houseCapBps);
+        _houseLayer(r, p, seats, seedH, reserveAtLock, rakeWei, params);
     }
 
     /// ── LAYER 1: player purse, distributed in full ──────────────────
@@ -214,10 +225,15 @@ library PlankCcs2LMath {
         Seat[] memory seats,
         uint256 seedH,
         uint256 reserveAtLock,
-        uint256 houseCapBps_
+        uint256 rakeWei,
+        Params memory params
     ) private pure {
-        uint256 reserveCap = (reserveAtLock * houseCapBps_) / BPS;
+        uint256 reserveCap = (reserveAtLock * params.houseCapBps) / BPS;
         uint256 hAvail = seedH < reserveCap ? seedH : reserveCap;
+        // v2 actuarial identity: the house never risks more than a fraction of
+        // what THIS round paid it. Sybil-proof by construction (Thm 2).
+        uint256 rakeCap = (rakeWei * params.houseRakeCapBps) / BPS;
+        if (rakeCap < hAvail) hAvail = rakeCap;
         if (hAvail > 0 && p.W > 0) {
             uint256 bSum = 0;
             uint256 n = seats.length;

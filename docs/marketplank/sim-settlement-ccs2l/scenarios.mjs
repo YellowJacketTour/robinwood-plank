@@ -197,6 +197,12 @@ console.log("\n== manufactured-round farming (why forward-seeding is NON-PREFERR
   // The demonstration required: variant C creates an addressable cross-round
   // transfer (carry > 0 visible pre-bet); variant A's equivalent is 0.
   ok("C-farming-surface-exists", carryC > 0n && win.allocations[0].houseBonus > 0n);
+  // v2 (2026-09-05, RESEARCH-game-theory-lottery-seed-resolution): with the
+  // round's own rake passed, the house draw is capped at houseRakeCapBps of
+  // it -- the same harvest leg can never take more than half its own rake.
+  const winV2 = settleCcs2L(econ2.playerDistributable, carryC, 20_000n, [{ id: "h", stake: S, targetBps: 20_000n }], RESERVE, DEFAULT_CCS2L, econ2.rake);
+  ok("v2-rake-cap-closes-farming", winV2.allocations[0].houseBonus <= (econ2.rake * DEFAULT_CCS2L.houseRakeCapBps) / BPS && winV2.allocations[0].houseBonus < win.allocations[0].houseBonus,
+    `v2 bonus=${winV2.allocations[0].houseBonus} vs v1 ${win.allocations[0].houseBonus}, rake=${econ2.rake}`);
   console.log(`  variant A: addressable carry = 0 (busted pots enter the protected reserve; per-round seed <= reserve/200 and fair-odds capped).`);
 }
 

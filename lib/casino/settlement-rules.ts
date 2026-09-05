@@ -8,8 +8,8 @@
  *
  * The registry maps (rule, version) to a FROZEN settle implementation and a
  * deterministic parameter hash:
- *  - "ccs-2l" v1: paramsHash = keccak256(abi.encode(keccak256("ccs-2l"), 1,
- *    floorBps, houseCapBps)) — byte-identical to
+ *  - "ccs-2l" v2: paramsHash = keccak256(abi.encode(keccak256("ccs-2l"), 2,
+ *    floorBps, houseCapBps, houseRakeCapBps)) — byte-identical to
  *    contracts/lib/PlankCcs2LMath.sol paramsHash(), so an on-chain commitment
  *    field can carry the very same bytes32.
  *  - legacy parimutuel rules ("pfss", "stake-only", "stake-multiplier") v1:
@@ -64,8 +64,10 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Byte-identical to contracts/lib/PlankCcs2LMath.sol paramsHash(). */
-export function ccs2lParamsHash(params: Ccs2LParams, version = 1): string {
-  if (version !== 1) throw new RangeError(`unknown ccs-2l version: ${version}`);
+export const CCS2L_RULE_VERSION = 2;
+
+export function ccs2lParamsHash(params: Ccs2LParams, version = CCS2L_RULE_VERSION): string {
+  if (version !== CCS2L_RULE_VERSION) throw new RangeError(`unknown ccs-2l version: ${version}`);
   if (params.playerWeight !== "ln") {
     // Variant A ("ln") is the canonical registered rule. Variant B remains a
     // ratifiable dial but has no registered version yet; committing it would
@@ -74,8 +76,8 @@ export function ccs2lParamsHash(params: Ccs2LParams, version = 1): string {
   }
   return keccak256(
     AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "uint256", "uint256", "uint256"],
-      [CCS2L_RULE_ID, version, params.floorBps, params.houseCapBps],
+      ["bytes32", "uint256", "uint256", "uint256", "uint256"],
+      [CCS2L_RULE_ID, version, params.floorBps, params.houseCapBps, params.houseRakeCapBps],
     ),
   );
 }
@@ -95,12 +97,13 @@ export function settlementDescriptor(
   if (rule === "ccs-2l") {
     return {
       rule,
-      version: 1,
+      version: CCS2L_RULE_VERSION,
       paramsHash: ccs2lParamsHash(ccs2lParams),
       params: {
         floorBps: ccs2lParams.floorBps.toString(),
         playerWeight: ccs2lParams.playerWeight,
         houseCapBps: ccs2lParams.houseCapBps.toString(),
+        houseRakeCapBps: ccs2lParams.houseRakeCapBps.toString(),
       },
     };
   }
@@ -124,6 +127,8 @@ export interface CommittedCcs2LRound {
     crashBps: bigint;
     seats: readonly Seat[];
     reserveAtLock: bigint;
+    /** v2: the rake the round left behind (base of the actuarial house cap). */
+    rakeWei?: bigint;
   };
 }
 
@@ -139,6 +144,7 @@ function reviveCcs2lParams(params: Record<string, string>): Ccs2LParams {
     floorBps: BigInt(params.floorBps),
     playerWeight: params.playerWeight,
     houseCapBps: BigInt(params.houseCapBps),
+    houseRakeCapBps: BigInt(params.houseRakeCapBps ?? "0"),
   };
 }
 
@@ -150,7 +156,8 @@ function reviveCcs2lParams(params: Record<string, string>): Ccs2LParams {
  */
 export function replayCommittedRound(record: CommittedRound): Settlement | Ccs2LSettlement {
   const { descriptor } = record;
-  if (descriptor.version !== 1) {
+  const registered = descriptor.rule === "ccs-2l" ? CCS2L_RULE_VERSION : 1;
+  if (descriptor.version !== registered) {
     throw new SettlementRuleMismatch(`unregistered ${descriptor.rule} version ${descriptor.version}`);
   }
   if (descriptor.rule === "ccs-2l") {
@@ -167,6 +174,7 @@ export function replayCommittedRound(record: CommittedRound): Settlement | Ccs2L
       inputs.seats,
       inputs.reserveAtLock,
       params,
+      inputs.rakeWei,
     );
   }
   const expected = parimutuelParamsHash(descriptor.rule, descriptor.version);

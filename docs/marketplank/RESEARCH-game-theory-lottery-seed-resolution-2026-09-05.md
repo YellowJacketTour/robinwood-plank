@@ -1,13 +1,13 @@
 # Game-theory resolution of F-1 (lottery drain) and F-2 (seed farm)
 
 Date: 2026-09-05 · Scope: `contracts/PlankCrash.sol`, `contracts/PlankLottery.sol`, `contracts/lib/PlankCcs2LMath.sol`
-Status: RESEARCH COMPLETE, verified numerically (`scripts/research/gametheory-f1-f2.mjs`, foreground, reproduces every audit figure). Contracts NOT yet changed; owner decision requested at §7.
+Status: RESEARCH COMPLETE and **IMPLEMENTED** (§10). Verified numerically (`scripts/research/gametheory-f1-f2.mjs`, reproduces every audit figure) and on-chain (A-9b, A-10 inverted; L-7..L-9). Owner rulings 2026-09-05: one global game, no tables; **no forced hit** (a progressive lottery pays when the ball falls).
 
 Reference inputs: `AUDIT-ccs2l-contracts-hardening-2026-09-05.md` (F-1, F-2), `DESIGN-vault-lottery-progressive-carve-2026-09-04.md`, `RATIFICATION-ccs2l-2026-09-02.md`, tests A-9b and A-10 in `test/contracts/PlankCrash.adversarial.test.ts`.
 
 ## 0. Result in one paragraph
 
-F-1 and F-2 are the same defect. In both, the protocol pays a **fixed** amount (the 10,000-credit house seed; the prize `W(P)`) against a **variable** contribution that the attacker chooses to be minimal (a 5,000-credit min-pool round paying 225 rake). Any mechanism that pays a fixed reward against a player-chosen contribution is farmable once the reward exceeds the contribution, and no parameter tuning escapes it (Theorem 1, Theorem 3). The elegant fix is one principle applied twice, the **actuarial identity**: *a round can never expect to take out of a shared pool more than it put in.* Concretely: (i) the house bonus a round may draw is capped by a fraction of that round's own rake, `H_round = min(seed, reserveCap, κ_h · rake_round)`; (ii) the lottery hit probability is `p = min(1/oddsOneIn, c_round / (κ · W(P)))` where `c_round` is the round's routed lottery contribution; (iii) `mustHitBy` is measured in cumulative contribution, not round count. Under (i)–(iii) the attacker's EV is `(κ_h − 1)·rake < 0` and `(c/κ) − rake < 0` for **every** pool size, split, target choice, seed size and prize size (verified: max EV −166 and −196 credits per round respectively). Honest players are unaffected in the parimutuel layer, and the prize grows *forever* at rate `c(1 − 1/κ)` per round, which is exactly the owner directive. The cost is fundamental and stated in §6: draw frequency becomes proportional to prize size, as in every real progressive jackpot.
+F-1 and F-2 are the same defect. In both, the protocol pays a **fixed** amount (the 10,000-credit house seed; the prize `W(P)`) against a **variable** contribution that the attacker chooses to be minimal (a 5,000-credit min-pool round paying 225 rake). Any mechanism that pays a fixed reward against a player-chosen contribution is farmable once the reward exceeds the contribution, and no parameter tuning escapes it (Theorem 1, Theorem 3). The elegant fix is one principle applied twice, the **actuarial identity**: *a round can never expect to take out of a shared pool more than it put in.* Concretely: (i) the house bonus a round may draw is capped by a fraction of that round's own rake, `H_round = min(seed, reserveCap, κ_h · rake_round)`; (ii) the lottery hit probability is `p = min(1/oddsOneIn, c_round / (κ · W(P)))` where `c_round` is the round's routed lottery contribution; (iii) the forced hit (`mustHitByRounds`) is **removed** — it was the cheapest F-1 vector and a progressive lottery does not need it. Under (i)–(ii) the attacker's EV is `(κ_h − 1)·rake < 0` and `(c/κ) − rake < 0` for **every** pool size, split, target choice, seed size and prize size (verified: max EV −166 and −196 credits per round respectively). Honest players are unaffected in the parimutuel layer, and the prize grows *forever* at rate `c(1 − 1/κ)` per round, which is exactly the owner directive. The cost is fundamental and stated in §6: draw frequency becomes proportional to prize size, as in every real progressive jackpot.
 
 **Architecture note.** The site hosts exactly one PlankCrash, one PlankLottery and one vault. There are no tables: `PlankCrash.currentRoundId` is a single global sequence on a fixed clock. "Manufacturing a round" therefore means *being the only participant in a round that runs anyway*, i.e. betting with two sybil wallets during quiet hours when no honest player joins. The attacker cannot create rounds, only occupy empty ones, and every round contributes to the one site-wide prize. All results below are unchanged by this; "round" replaces "table" throughout.
 
@@ -57,7 +57,7 @@ Expected outflow per round `p·W ≤ c/κ < c`, so **the pool never expects to p
 
 **Theorem 4 (sybil-proofness).** For a manufactured round `EV = p·W − r·Q ≤ c/κ − r·Q = r·Q(0.26/κ − 1) < 0` for all `κ > 0.26`; with `κ = 2`, EV `= −0.87·rake` for every `Q` and `P`. Verified over `Q ∈ {5k, 20k, 100k}`, `P ∈ [1k, 10M]`: **max EV = −195.8 credits/round**. Splitting one bankroll across many small rounds does not help: `p` is linear in `c_round` below the cap, so `k` rounds of contribution `c/k` have the same total hit mass as one round of `c` (additivity), while paying the same total rake.
 
-**mustHitBy.** Replace the round counter with a contribution accumulator: force a hit when `Σ c_round since last hit ≥ M · W(P)`. With `M = 6`, forcing at `P = 90,000` costs 1.76 M credits of rake to win 76 k (EV −1.68 M); under the current rule it costs 21,600. The honest guarantee is preserved in the form players care about ("the prize must pay out before the pool has taken in six prizes' worth"), and the expected time to the forced hit is `κ·M` times the natural expectation, so it is a true backstop, not the normal path.
+**mustHitBy: removed (owner ruling).** The round-counted forced hit cost 21,600 credits to trigger at `P = 90,000` and was the cheapest F-1 vector. A contribution-counted backstop (force when `Σ c ≥ M·W`) was analysed and would be safe (forcing cost 1.76 M credits to win 76 k), but the owner ruled that the site runs a pure progressive lottery: the prize pays when the ball falls, and the actuarial rule already guarantees a finite, traffic-proportional expected time to every hit. Nothing forces a draw; nothing can be forced.
 
 ## 4. Equilibrium and growth
 
@@ -81,14 +81,12 @@ Growth rate at ratified parameters, 20 k-credit rounds, `κ = 2`: `+117` credits
 
 Round-only eligibility + unbounded prize + fixed per-round odds cannot coexist (Thm 3). Any sybil-proof rule must make the round's hit mass proportional to what the round paid in, which makes the expected time between hits grow linearly with the prize. This is how Powerball, EuroMillions and every casino progressive behave, and it is legible to players: a bigger jackpot is rarer. The earlier wish for bounded cadence "without arbitrarily making each lottery harder" is met in the only non-arbitrary way: harder exactly in proportion to what it pays, never more. If a frequent-win feel is wanted in addition, the correct instrument is a second, small, capped pool with flat odds (a "daily ball"), funded from a separate rake slice, whose cap sits below the F-1 break-even (`W_cap/N < min rake`, i.e. ≤ 3,600 credits at current parameters). This is optional and not required for the fix.
 
-## 7. Owner decision required
+## 7. Owner decisions (taken 2026-09-05)
 
-1. Adopt actuarial house cap `κ_h` (recommended 0.5: the house returns up to half the round's rake as risk bonus). Requires `_houseLayer` to receive `rakeWei` and a `houseCapRakeBps` parameter.
-2. Adopt actuarial hit rule `κ` (recommended 2: the pool keeps at least half of every contribution in expectation). Requires `recordRound` to receive the round's contribution `c` and compute `p` as a 1e18-scaled threshold compared against `keccak(BALL_DOMAIN, resultSeed)`.
-3. Adopt `mustHitBy` in contribution units, `M` (recommended 6), replacing `mustHitByRounds`.
-4. Optional: separate flat-odds "daily ball" pool, capped ≤ 3,600 credits.
-
-Nothing here claims the contracts are impossible to exploit. It claims that under the stated model every solo-principal strategy has strictly negative EV, and names the assumptions (Lemma 1; honest-mixed tables bounded by own rake).
+1. **Adopted.** Actuarial house cap `κ_h = 0.5` (`houseRakeCapBps = 5000`): the house returns up to half the round's rake as risk bonus.
+2. **Adopted.** Actuarial hit rule `κ = 2` (`kappaBps = 20000`, `contributionBps = 2600`, flat ceiling `oddsOneIn = 16`): the pool keeps at least half of every contribution in expectation.
+3. **Rejected in favour of removal.** No forced hit of any kind; `mustHitByRounds` deleted from the contract, the fixtures and the deploy scripts.
+4. Optional "daily ball" pool: not built; noted for a future decision.
 
 ## 8. Reproduction
 
@@ -102,3 +100,18 @@ Output reproduces: `+2,044` (A-9b), best response `ω = 0.6, m_B ≈ 4.37×`, th
 - Actuarial premium principles: Bühlmann, *Mathematical Methods in Risk Theory*, 1970 (expected-value principle with loading `κ`).
 - Sybil-proofness of allocation rules: Conitzer, Immorlica, Letchford, Munagala, Wagman, "False-name-proofness in social networks", WINE 2010; Alon, Fischer, Procaccia, Tennenholtz, "Sum of us: strategyproof selection from the selectors", TARK 2011 (additivity in contribution as the standard sufficient condition, used in Thm 4).
 - Submartingale drift: Williams, *Probability with Martingales*, 1991, ch. 10.
+
+## 10. Implementation (2026-09-05, same day)
+
+| Piece | Change |
+|---|---|
+| `contracts/lib/PlankCcs2LMath.sol` | RULE_VERSION 1 → 2. `Params.houseRakeCapBps`; `settle(..., reserveAtLock, rakeWei, params)`; `_houseLayer` takes `hAvail = min(seed, reserveCap, rakeWei·houseRakeCapBps/BPS)`. `paramsHash` now commits 5 fields. |
+| `contracts/PlankCrash.sol` | `Config.houseRakeCapBps` (immutable, `< BPS` enforced); keeper bounty computed before settlement so **net rake** is the base of both caps; `recordRound(id, seed, winner, netRake)`; `_preview` mirrors. |
+| `contracts/PlankLottery.sol` | `Config`: `contributionBps`, `kappaBps` (`> BPS` enforced) replace `mustHitByRounds`. `hitThreshold(rakeWei, prize) = min(PROB_ONE/oddsOneIn, c·PROB_ONE·BPS/(kappaBps·W))`, `PROB_ONE = 1e18`; hit iff `keccak(BALL_DOMAIN, seed) % PROB_ONE < threshold`. `Draw` event carries `threshold` and `hit`; no `forced`, no counters, no `roundsUntilForcedHit`. |
+| `lib/casino/economics-ccs2l.ts`, `settlement-rules.ts`, `simulation.ts`, `docs/.../engine.mjs` | Mirrors: `houseRakeCapBps` param, optional `rakeWei` (explicit in every chain-parity path; omitted only to replay v1 records/campaigns), registry version 2, `CommittedCcs2LRound.inputs.rakeWei`. |
+| Fixtures / deploy | `houseRakeCapBps 5000`, `contributionBps 2600` (= router 40 % × 65 %), `kappaBps 20000`, `oddsOneIn 16` on deploy (was 256 with a 1,536-round force). `CASINO_MUST_HIT_BY_ROUNDS` removed. |
+| Tests | A-9b and A-10 **inverted** (negative controls now assert EV < 0 across pool/seed/split/target and across prize 1e12..1e24 wei); A-5/A-9 carry the rake cap; A-7 rejects `houseRakeCapBps ≥ BPS`, `kappaBps ≤ BPS`, `contributionBps ∉ (0, BPS]`; L-5 (forced hit) deleted; L-7 (rule mirror + identity + monotonicity), L-8 (Powerball law, no forced surface in ABI/event), L-9 (net-of-keeper rake) added; params-hash pins re-pinned to v2. |
+
+Results: hardhat 190/190; market 1148/0 (33 skipped, unchanged); CCS-2L simulations 619,221 checks / 0 failures, scenarios 0 failures (new `v2-rake-cap-closes-farming`), partition 39,680 cases worst gain 0 wei.
+
+Observed under the fixture (A-10, L-8): a 5,000-credit quiet round against a 90,000-credit prize draws at about 1 in 2,600 and its expected payout is below its 225-credit rake; a 3.5 ETH round against a 90 ETH prize draws at 1 in 3,079 versus the 1-in-16 ceiling.

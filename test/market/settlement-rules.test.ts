@@ -27,13 +27,14 @@ test("ccs-2l paramsHash is pinned to the Solidity convention byte-for-byte", () 
   assert.equal(CCS2L_RULE_ID, "0xcee375f888dd3a2ee6094d52174fc8c6ee0ca62cd11be35250e739528a4f3091");
   assert.equal(
     ccs2lParamsHash(DEFAULT_CCS2L_PARAMS),
-    "0xbfa05cce17a89480a879c4aea43ba1538764931a333c64e0a7c66852097f4f9f",
+    "0xcc313ac55684becbf5b9de38b91b80118850561cfcd5259d91fb60b154964d4b",
   );
 });
 
-test("ccs-2l v1 registers variant A only; unknown versions rejected", () => {
+test("ccs-2l v2 registers variant A only; other versions rejected (v1 lacks the actuarial rake cap)", () => {
   assert.throws(() => ccs2lParamsHash({ ...DEFAULT_CCS2L_PARAMS, playerWeight: "odds" }), RangeError);
-  assert.throws(() => ccs2lParamsHash(DEFAULT_CCS2L_PARAMS, 2), RangeError);
+  assert.throws(() => ccs2lParamsHash(DEFAULT_CCS2L_PARAMS, 1), RangeError);
+  assert.throws(() => ccs2lParamsHash(DEFAULT_CCS2L_PARAMS, 3), RangeError);
   assert.throws(() => parimutuelParamsHash("pfss", 2), RangeError);
 });
 
@@ -72,7 +73,7 @@ test("committed ccs-2l rounds replay under the recorded parameters", () => {
 
 test("tampered or drifted records are refused, never defaulted", () => {
   const record: CommittedCcs2LRound = {
-    descriptor: { ...settlementDescriptor("ccs-2l"), params: { floorBps: "5000", playerWeight: "ln", houseCapBps: "1000" } },
+    descriptor: { ...settlementDescriptor("ccs-2l"), params: { floorBps: "5000", playerWeight: "ln", houseCapBps: "1000", houseRakeCapBps: "5000" } },
     inputs: { playerDistributable: 9_550n, seedH: 500n, crashBps: 20_000n, seats: SEATS, reserveAtLock: 100_000n },
   };
   assert.throws(() => replayCommittedRound(record), SettlementRuleMismatch);

@@ -24,12 +24,14 @@ export type CrashConfig = {
   keeperRewardBps: bigint; minParticipants: bigint; minPoolWei: bigint; minStakeWei: bigint;
   maxStakePerWalletBps: bigint; maxTargetBps: bigint; maxSeats: bigint; crashSeedWei: bigint;
   emissionBufferCapWei: bigint; protectedPrincipalBps: bigint; floorBps: bigint; houseCapBps: bigint;
-  seedBootstrapBudgetWei: bigint; refundTimeoutSeconds: bigint;
+  houseRakeCapBps: bigint; seedBootstrapBudgetWei: bigint; refundTimeoutSeconds: bigint;
 };
 export type LotteryConfig = {
-  source: string; founderSink: string; founderFeeBps: bigint; oddsOneIn: bigint; mustHitByRounds: bigint;
+  source: string; founderSink: string; founderFeeBps: bigint; oddsOneIn: bigint; contributionBps: bigint; kappaBps: bigint;
   carveMinBps: bigint; carveMaxBps: bigint; carveHalfSaturationWei: bigint;
 };
+/** Probability fixed point of PlankLottery (PROB_ONE == certainty). */
+export const PROB_ONE = 10n ** 18n;
 
 export const DEFAULT_CRASH: Omit<CrashConfig, "beacon" | "router" | "lottery" | "bank"> = {
   bettingDurationSeconds: 120n,
@@ -50,13 +52,15 @@ export const DEFAULT_CRASH: Omit<CrashConfig, "beacon" | "router" | "lottery" | 
   protectedPrincipalBps: 5000n,
   floorBps: 7500n,
   houseCapBps: 1000n,
+  houseRakeCapBps: 5000n, // v2 actuarial: house risks at most half the round's rake
   seedBootstrapBudgetWei: 200_000n * CREDIT,
   refundTimeoutSeconds: 86400n,
 };
 export const DEFAULT_LOTTERY: Omit<LotteryConfig, "source" | "founderSink"> = {
   founderFeeBps: 1000n,
   oddsOneIn: 16n,
-  mustHitByRounds: 96n,
+  contributionBps: 2600n, // router: 40% community x 65% lottery
+  kappaBps: 20_000n, // kappa = 2: the pool keeps >= half of every contribution in expectation
   carveMinBps: 1000n,
   carveMaxBps: 3000n,
   carveHalfSaturationWei: 250_000n * CREDIT,
@@ -134,8 +138,30 @@ export function crashFromSeed(seed: string): bigint {
   return r === 0n ? BPS : (BPS * BPS) / (BPS - r);
 }
 
-export function ballHits(seed: string, oddsOneIn: bigint): boolean {
-  return BigInt(keccak256(abi.encode(["bytes32", "bytes32"], [BALL_DOMAIN, seed]))) % oddsOneIn === 0n;
+/** Mirror of PlankLottery's hit test: hash % PROB_ONE < threshold. */
+export function ballHits(seed: string, thresholdE18: bigint): boolean {
+  return BigInt(keccak256(abi.encode(["bytes32", "bytes32"], [BALL_DOMAIN, seed]))) % PROB_ONE < thresholdE18;
+}
+
+/** Mirror of PlankLottery.hitThreshold(rakeWei, prize). */
+export function hitThresholdOf(
+  rakeWei: bigint, prize: bigint,
+  cfg: { oddsOneIn: bigint; contributionBps: bigint; kappaBps: bigint; carveMinBps: bigint; carveMaxBps: bigint; carveHalfSaturationWei: bigint } = DEFAULT_LOTTERY,
+): bigint {
+  const flat = PROB_ONE / cfg.oddsOneIn;
+  if (prize === 0n) return flat;
+  const denom = prize + cfg.carveHalfSaturationWei;
+  const seeded = (prize * (cfg.carveMinBps * denom + (cfg.carveMaxBps - cfg.carveMinBps) * prize)) / (BPS * denom);
+  const W = prize - seeded;
+  if (W === 0n) return flat;
+  const c = (rakeWei * cfg.contributionBps) / BPS;
+  const actuarial = (c * PROB_ONE * BPS) / (cfg.kappaBps * W);
+  return actuarial < flat ? actuarial : flat;
+}
+
+/** The rake a round with `playerPool` leaves behind under the fixture (keeper bounty 0). */
+export function netRakeOf(playerPool: bigint, rakeBps: bigint = DEFAULT_CRASH.rakeBps): bigint {
+  return playerPool - (playerPool * (BPS - rakeBps)) / BPS;
 }
 
 export function ticketOf(seed: string, playerPool: bigint): bigint {

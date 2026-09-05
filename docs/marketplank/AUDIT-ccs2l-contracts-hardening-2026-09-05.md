@@ -14,8 +14,10 @@ that set, fixes what it can without touching ratified economics, and proves the 
 > **Standing honesty line.** "Impossible to exploit" is not claimed here and must not be claimed anywhere.
 > What follows is: proven invariants (with the test that proves each), findings with concrete attack
 > narratives, fixes with negative controls, and an explicit residual-assumption list. **No real value
-> should move on these contracts before an independent audit.** Two HIGH economic findings (F-1, F-2)
-> are OPEN because fixing them requires changing ratified economics — they are owner decisions.
+> should move on these contracts before an independent audit.** The two HIGH economic findings (F-1, F-2)
+> were OPEN at the time of writing; **both are CLOSED later the same day** by the actuarial identity
+> (`RESEARCH-game-theory-lottery-seed-resolution-2026-09-05.md`, §10): house bonus ≤ ½ of the round's own
+> rake, lottery hit probability priced by the round's own contribution, forced hit removed. A-9b/A-10 inverted.
 
 Static analysis: **none available** — `package.json` devDeps carry hardhat 3.12 + toolbox only; no
 slither / solhint / mythril / foundry in `node_modules/.bin`. Nothing was installed. Everything below is
@@ -44,8 +46,8 @@ wei analytically and on-chain (§A.5); router/burn (§A.6); every non-view funct
 
 | ID | Sev | Status | Title | Where |
 |---|---|---|---|---|
-| **F-1** | **HIGH** (economic) | **OPEN — owner decision** | The Powerboard is drained by manufactured minimum-pool rounds: the per-round hit probability is independent of the round's size | `PlankLottery.recordRound` (ball at L162); `PlankCrash._lock` quorum |
-| **F-2** | **HIGH** (economic) | **OPEN — owner decision** | A two-target solo table (1.01x pool-keeper + seed-farmer) is strictly +EV against the fixed per-round Vault seed | `PlankCrash._drawSeed`; `PlankCcs2LMath._houseLayer` |
+| **F-1** | **HIGH** (economic) | **CLOSED (same day)** — actuarial hit rule, forced hit removed; A-10 inverted | The Powerboard is drained by manufactured minimum-pool rounds: the per-round hit probability is independent of the round's size | `PlankLottery.recordRound` (ball at L162); `PlankCrash._lock` quorum |
+| **F-2** | **HIGH** (economic) | **CLOSED (same day)** — house draw ≤ `houseRakeCapBps` of the round's rake; A-9b inverted | A two-target solo table (1.01x pool-keeper + seed-farmer) is strictly +EV against the fixed per-round Vault seed | `PlankCrash._drawSeed`; `PlankCcs2LMath._houseLayer` |
 | F-3 | MEDIUM | FIXED `58ecf97` | Open `placeBetFor` lets anyone squat a player's one seat per round (seat-squatting / forced-hit capture) | `PlankCrash.placeBetFor` |
 | F-4 | MEDIUM (liveness) | FIXED `58ecf97` | An unsettleable LIVE round locks every stake forever (the refund is gated on randomness *absence*; a reverting `lottery.recordRound`, a gas ceiling, or any settle-path failure is permanent) | `PlankCrash.settleRound` / `refundRound` |
 | F-5 | MEDIUM (liveness) | FIXED `dad6e45` | `MAX_SEATS_CEILING = 512` cannot be settled in one transaction (512 all-survive > 30M; EIP-7825 caps a tx at 16.78M) | `PlankCrash` constants |
@@ -63,7 +65,7 @@ wei analytically and on-chain (§A.5); router/burn (§A.6); every non-view funct
 | F-17 | INFO | proven | Reentrancy: none. CEI at every site; `nonReentrant` on every ETH-moving or state-transitioning entry; the only outsider callback is `withdraw()`→`msg.sender` after the debit, and every accounting view is consistent inside it (A-8) | all |
 | F-18 | INFO | proven by analysis | `PlankLottery.recordRound` is revert-free: `pool ≥ committedPrize` is an invariant (pool only shrinks inside `recordRound` by `prize = committedPrize ≤ pool`), `winner ≠ 0` (a seat player), `oddsOneIn ≥ 2` | `PlankLottery.recordRound` |
 
-### F-1 · HIGH · Manufactured rounds drain the Powerboard (OPEN — owner decision)
+### F-1 · HIGH · Manufactured rounds drain the Powerboard (CLOSED — actuarial hit rule; see research §3, §10)
 
 **Invariant broken:** PRODUCT.md *"a community lottery whose prize can only grow"*; design §5's "fixed
 point set by volume".
@@ -93,7 +95,7 @@ odds; (b) qualification threshold for a *draw* that scales with the committed pr
 return to volume-weighted tickets across a window. Each keeps W/S/carve untouched. Note the same law lives in
 the lib kernel; the contract is faithful to it.
 
-### F-2 · HIGH · Two-target solo table farms the fixed per-round seed (OPEN — owner decision)
+### F-2 · HIGH · Two-target solo table farms the fixed per-round seed (CLOSED — actuarial house cap; see research §2, §10)
 
 **Invariant broken:** the Vault as *"funded only by rake it has itself taken in"* (design 1.4/V2) — the
 income bound holds, but a manufactured table converts bootstrap + retained income into attacker profit
@@ -298,7 +300,8 @@ crash/lottery/router/bank/math; the oracle's `unchecked` is the V2 accumulator w
 
 **C.1 — Environment incident, disclosed.** To measure baseline bytecode sizes I compiled `0391515` in a
 `git worktree` with an NTFS junction to this tree's `node_modules`; `git worktree remove --force` followed
-the junction and emptied `C:	mpobinwood-sync-fix2
+the junction and emptied `C:	mp
+obinwood-sync-fix2
 ode_modules`. It was restored with
 `npm ci --no-audit --no-fund` from the **unchanged** `package-lock.json` (`git diff` on `package.json` /
 `package-lock.json` is empty; no package was added, removed or upgraded). Every number in this section was
@@ -357,7 +360,7 @@ Other measured: `settleRound` with a real draw ≈ 510k (A-2b estimate); 56 star
 
 ### Deferred / not proven here
 
-- F-1, F-2 (owner decisions; A-9b and A-10 *document* them and will fail when the law changes — invert them then).
+- F-1, F-2: closed the same day (research §10); A-9b and A-10 are now negative controls. The closure itself is not independently audited.
 - BLS wire compatibility beyond the single fixture (prior B-18) — unchanged.
 - TWAP manipulation cost on the real pair (depends on real depth) — unchanged.
 - Behaviour under a real Osaka chain (only hardhat's EDR cap was exercised).

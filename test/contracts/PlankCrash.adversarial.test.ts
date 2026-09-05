@@ -2,8 +2,8 @@ import { expect } from "chai";
 import { toBeHex } from "ethers";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
 import {
-  BPS, CREDIT, DEFAULT_CRASH, DRAND_GENESIS, DRAND_PERIOD, assertConserved, bet, betFor, closeBetting, deployCasino,
-  findRandomness, freshAddress, increaseToAtLeast, settleCurrent, type CasinoEnv,
+  BPS, CREDIT, DEFAULT_CRASH, DEFAULT_LOTTERY, DRAND_GENESIS, DRAND_PERIOD, PROB_ONE, assertConserved, ballHits, bet, betFor,
+  closeBetting, deployCasino, findRandomness, freshAddress, hitThresholdOf, increaseToAtLeast, netRakeOf, settleCurrent, type CasinoEnv,
 } from "./helpers/casino.js";
 
 /**
@@ -182,7 +182,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
   // ── A-5 sybil partition at MAX_SEATS-1 ─────────────────────────────────
   it("A-5: MAX_SEATS-1 sybils at the same and at adjacent targets never beat one whole seat by more than k wei (player layer) and never at all (house layer)", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps };
+    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
     const honest = [{ stake: E("3"), targetBps: 18_000n }, { stake: E("2"), targetBps: 35_000n }];
     const whole = E("7.123456789012345678");
     const k = MAX_SEATS - honest.length; // 126 sybils
@@ -203,8 +203,9 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
         const D = (pool * (BPS - DEFAULT_CRASH.rakeBps)) / BPS;
         const seed = E("0.5");
         const reserve = E("40");
-        const one = await ccs.settle(D, seed, crash, [...honest, { stake: whole, targetBps: adjacent ? m + 1n : m }], reserve, params);
-        const split = await ccs.settle(D, seed, crash, [...honest, ...parts], reserve, params);
+        const rakeWei = pool - D;
+        const one = await ccs.settle(D, seed, crash, [...honest, { stake: whole, targetBps: adjacent ? m + 1n : m }], reserve, rakeWei, params);
+        const split = await ccs.settle(D, seed, crash, [...honest, ...parts], reserve, rakeWei, params);
         const aggPlayer = (r: any, from: number) => r.playerPayouts.slice(from).reduce((a: bigint, b: bigint) => a + b, 0n);
         const aggBonus = (r: any, from: number) => r.bonuses.slice(from).reduce((a: bigint, b: bigint) => a + b, 0n);
         const gainPlayer = aggPlayer(split, 2) - aggPlayer(one, 2);
@@ -215,6 +216,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
         if (split.mode !== 0n) {
           expect(split.totalPlayerPaid).to.equal(D);
           expect(split.totalBonus + split.houseReturned).to.equal(seed);
+          expect(split.totalBonus <= (rakeWei * params.houseRakeCapBps) / BPS, "v2 rake cap").to.equal(true);
         }
       }
     }
@@ -244,13 +246,16 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
     const env = await deployCasino();
     const Lottery = await ethers.getContractFactory("PlankLottery");
     const base = { source: env.crashAddr, founderSink: env.treasury.address, ...env.lotteryConfig };
-    for (const bad of [{ oddsOneIn: 1n }, { oddsOneIn: 0n }, { carveMinBps: 0n }, { carveMinBps: 3000n, carveMaxBps: 3000n }, { carveMinBps: 3001n, carveMaxBps: 3000n }, { carveMaxBps: 10_000n }, { carveHalfSaturationWei: 0n }]) {
+    for (const bad of [{ oddsOneIn: 1n }, { oddsOneIn: 0n }, { contributionBps: 0n }, { contributionBps: 10_001n }, { kappaBps: 10_000n }, { kappaBps: 9_999n }, { carveMinBps: 0n }, { carveMinBps: 3000n, carveMaxBps: 3000n }, { carveMinBps: 3001n, carveMaxBps: 3000n }, { carveMaxBps: 10_000n }, { carveHalfSaturationWei: 0n }]) {
       await expect(Lottery.deploy({ ...base, ...bad }), JSON.stringify(bad, (_k, v) => typeof v === "bigint" ? v.toString() : v)).to.be.revertedWithCustomError(Lottery, "BadConfig");
     }
-    await Lottery.deploy({ ...base, oddsOneIn: 2n, carveMinBps: 1n }); // the boundary is admissible
+    await Lottery.deploy({ ...base, oddsOneIn: 2n, carveMinBps: 1n, contributionBps: 10_000n, kappaBps: 10_001n }); // the boundary is admissible
     const Crash = await ethers.getContractFactory("PlankCrash");
     const cfg = env.crashConfig;
     await expect(Crash.deploy({ ...cfg, minParticipants: cfg.maxSeats + 1n })).to.be.revertedWithCustomError(Crash, "BadConfig");
+    // v2: the house may never risk the whole rake (or more) on a round.
+    await expect(Crash.deploy({ ...cfg, houseRakeCapBps: 10_000n })).to.be.revertedWithCustomError(Crash, "BadConfig");
+    await Crash.deploy({ ...cfg, houseRakeCapBps: 9_999n });
     await expect(Crash.deploy({ ...cfg, minStakeWei: (1n << 96n) })).to.be.revertedWithCustomError(Crash, "BadConfig");
     await expect(Crash.deploy({ ...cfg, router: env.dave.address })).to.be.revertedWithCustomError(Crash, "ZeroAddress");
     await expect(Crash.deploy({ ...cfg, lottery: env.dave.address })).to.be.revertedWithCustomError(Crash, "ZeroAddress");
@@ -285,7 +290,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
   // ── A-9 seed extraction by a manufactured table ────────────────────────
   it("A-9: a same-target solo table is strictly negative-EV against the seed for every target and pool (fair-odds cap + rake), on-chain law", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps };
+    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
     const rake = DEFAULT_CRASH.rakeBps;
     let checked = 0;
     for (const pool of [DEFAULT_CRASH.minPoolWei, DEFAULT_CRASH.minPoolWei * 10n, E("5")]) {
@@ -293,7 +298,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
         for (const m of [10_100n, 10_500n, 11_000n, 15_000n, 20_000n, 29_999n, 30_000n, 30_001n, 40_000n, 100_000n, 1_000_000n, 100_000_000n]) {
           const D = (pool * (BPS - rake)) / BPS;
           const seats = [{ stake: (pool * 6n) / 10n, targetBps: m }, { stake: pool - (pool * 6n) / 10n, targetBps: m }];
-          const res = await ccs.settle(D, seed, m, seats, seed * 100n, params); // cap never binds: worst case for the house
+          const res = await ccs.settle(D, seed, m, seats, seed * 100n, pool - D, params); // reserve cap never binds: worst case for the house
           // Exact discrete law: P(crash >= m) = floor(1e8 / m) / 1e4.
           const pSurv = 100_000_000n / m; // x 1e-4
           const evScaled = pSurv * (res.totalPlayerPaid + res.totalBonus) - 10_000n * pool;
@@ -305,47 +310,82 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
     console.log(`      same-target solo-table EV < 0 in ${checked}/${checked} cells`);
   });
 
-  it("A-9b (OPEN -- F-2, owner decision): a TWO-target solo table (1.01x pool-keeper + seed-farmer) is positive-EV against a fixed per-round seed; this assertion documents the exposure and must be inverted when the seed law changes", async () => {
+  it("A-9b (F-2 CLOSED): a TWO-target quiet round (1.01x pool-keeper + seed-farmer) is strictly negative-EV against the seed for every pool, seed, split and target -- the v2 rake cap makes the house draw <= half the round's own rake", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps };
+    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
     const rake = DEFAULT_CRASH.rakeBps;
-    const pool = DEFAULT_CRASH.minPoolWei; // 5,000 credits, the cheapest qualifying table
-    const seed = DEFAULT_CRASH.crashSeedWei; // 10,000 credits, independent of the pool
-    const sB = (pool * 6n) / 10n; // whale cap: largest stake <= 60%
-    const sA = pool - sB;
-    const mA = 10_100n;
-    const mB = 10_000n + (seed * 10_000n) / sB; // fair-odds cap == seed
-    const D = (pool * (BPS - rake)) / BPS;
-    const both = await ccs.settle(D, seed, mB, [{ stake: sA, targetBps: mA }, { stake: sB, targetBps: mB }], seed * 100n, params);
-    const onlyA = await ccs.settle(D, seed, mA, [{ stake: sA, targetBps: mA }, { stake: sB, targetBps: mB }], seed * 100n, params);
-    const pB = 100_000_000n / mB; // x1e-4: both survive
-    const pA = 100_000_000n / mA - pB; // A alone survives
-    const ev = pB * (both.totalPlayerPaid + both.totalBonus) + pA * (onlyA.totalPlayerPaid + onlyA.totalBonus) - 10_000n * pool;
-    console.log(`      two-target solo table: EV = +${ev / 10_000n / CREDIT} credits/round on a ${pool / CREDIT}-credit table vs seed ${seed / CREDIT} (rake paid ${(pool - D) / CREDIT})`);
-    expect(ev > 0n).to.equal(true); // documents F-2; see the audit for the owner's options
+    let checked = 0;
+    let worst = -(1n << 200n);
+    for (const pool of [DEFAULT_CRASH.minPoolWei, DEFAULT_CRASH.minPoolWei * 4n, E("1")]) {
+      for (const seed of [DEFAULT_CRASH.crashSeedWei, DEFAULT_CRASH.crashSeedWei * 10n, pool * 100n]) {
+        for (const share of [1n, 3n, 6n]) { // B holds 10% / 30% / 60% (whale cap)
+          const sB = (pool * share) / 10n;
+          const sA = pool - sB;
+          const D = (pool * (BPS - rake)) / BPS;
+          const rakeWei = pool - D;
+          for (const mA of [10_100n, 15_000n]) {
+            // The research best response m_B* = 1 + H/s_B, plus a sweep around it.
+            for (const mB of [10_100n, 10_800n, 12_000n, 20_000n, 10_000n + (seed * 10_000n) / sB, 10_000n + ((rakeWei / 2n) * 10_000n) / sB, 100_000n, 10_000_000n]) {
+              if (mB <= mA || mB > DEFAULT_CRASH.maxTargetBps) continue;
+              const seats = [{ stake: sA, targetBps: mA }, { stake: sB, targetBps: mB }];
+              const both = await ccs.settle(D, seed, mB, seats, seed * 100n, rakeWei, params);
+              const onlyA = await ccs.settle(D, seed, mA, seats, seed * 100n, rakeWei, params);
+              const pB = 100_000_000n / mB; // x1e-4: both survive
+              const pA = 100_000_000n / mA - pB; // A alone survives
+              const ev = pB * (both.totalPlayerPaid + both.totalBonus) + pA * (onlyA.totalPlayerPaid + onlyA.totalBonus) - 10_000n * pool;
+              expect(ev < 0n, `EV >= 0 at pool=${pool} seed=${seed} sB=${sB} mA=${mA} mB=${mB}`).to.equal(true);
+              // Actuarial identity, exact: the house never risks more than houseRakeCapBps of the rake.
+              expect(both.totalBonus <= (rakeWei * params.houseRakeCapBps) / BPS).to.equal(true);
+              if (ev > worst) worst = ev;
+              checked += 1;
+            }
+          }
+        }
+      }
+    }
+    console.log(`      two-target quiet-round EV < 0 in ${checked}/${checked} cells; worst EV = ${worst / 10_000n / CREDIT} credits/round`);
   });
 
-  // ── A-10 lottery: manufactured rounds (documents F-1) ──────────────────
-  it("A-10 (OPEN -- F-1, owner decision): a minimum-pool round has the same hit probability as any round, so a P above ~16x the cost of the cheapest round is +EV to farm", async () => {
+  // ── A-10 lottery: manufactured rounds (F-1 CLOSED) ─────────────────────
+  it("A-10 (F-1 CLOSED): a minimum-pool quiet round's hit chance is priced by its own contribution, so farming the prize is negative-EV at EVERY prize size; the pool keeps >= 1 - 1/kappa of every contribution in expectation", async () => {
     const env = await fresh();
+    const minPool = DEFAULT_CRASH.minPoolWei;
+    const netRake = netRakeOf(minPool);
+    const c = (netRake * DEFAULT_LOTTERY.contributionBps) / BPS;
+    // (a) The law, on-chain, across ten orders of magnitude of prize.
+    for (let e = 12; e <= 24; e++) {
+      const P = 10n ** BigInt(e);
+      const [, W] = await env.lottery.carve(P);
+      const t: bigint = await env.lottery.hitThreshold(netRake, P);
+      expect(t).to.equal(hitThresholdOf(netRake, P));
+      expect(t <= PROB_ONE / DEFAULT_LOTTERY.oddsOneIn, "never better than the flat ceiling").to.equal(true);
+      // E[payout] = t/PROB_ONE * W <= c / kappa  (actuarial identity)
+      expect(t * W <= (c * PROB_ONE * BPS) / DEFAULT_LOTTERY.kappaBps + W, "E[payout] <= c/kappa (+1 wei rounding)").to.equal(true);
+      // Attacker EV = E[payout] - rake < 0 for every P (research Thm 4).
+      expect(t * W < netRake * PROB_ONE, `EV >= 0 at P=1e${e}`).to.equal(true);
+    }
+    // (b) A real manufactured round against a 90,000-credit prize: the draw
+    //     happens, is priced at c/(kappa W), and a hit still pays exactly W.
     await env.lottery.fund({ value: E("0.1") }); // P = 0.09 ETH net
     await bet(env, env.alice, "1", 15_000n);
     await bet(env, env.bob, "1", 20_000n);
     await settleCurrent(env, toBeHex(11n, 32)); // seals committedPrize
     const [P, W] = await env.lottery.quote();
     expect(P).to.equal(E("0.09"));
-    // Two sybils at the minimum qualifying pool: exactly one ticket, odds 1/16.
+    const threshold: bigint = await env.lottery.hitThreshold(netRake, P);
+    expect(threshold).to.equal((c * PROB_ONE * BPS) / (DEFAULT_LOTTERY.kappaBps * W));
+    expect(threshold < PROB_ONE / DEFAULT_LOTTERY.oddsOneIn).to.equal(true);
     const id: bigint = await env.crash.currentRoundId();
     const r0 = await env.crash.rounds(id);
-    const minPool = DEFAULT_CRASH.minPoolWei;
     await env.crash.connect(env.carol).placeBet(10_100n, { value: (minPool * 6n) / 10n });
     await env.crash.connect(env.dave).placeBet(10_100n, { value: minPool - (minPool * 6n) / 10n });
-    const rnd = await findRandomness(env, id, BigInt(r0.targetDrandRound), (_c, seed) => {
-      return BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "bytes32"], [ethers.keccak256(Buffer.from("PLANK_BALL_V1")), seed]))) % 16n === 0n;
-    });
-    await settleCurrent(env, rnd);
-    const won = (await env.lottery.owed(env.carol.address)) + (await env.lottery.owed(env.dave.address));
-    expect(won).to.equal(W); // the whole committed W for a 0.005 ETH table paying 0.000225 ETH of rake
-    console.log(`      F-1: a ${minPool / CREDIT}-credit table (rake ${(minPool * DEFAULT_CRASH.rakeBps) / BPS / CREDIT} credits) took W = ${W / CREDIT} credits at 1/${env.lotteryConfig.oddsOneIn}`);
+    const miss = await findRandomness(env, id, BigInt(r0.targetDrandRound), (_c, seed) => !ballHits(seed, threshold));
+    const { receipt } = await settleCurrent(env, miss);
+    const draw = receipt.logs.map((l: any) => { try { return env.lottery.interface.parseLog(l); } catch { return null; } }).find((e: any) => e?.name === "Draw");
+    expect(draw.args.threshold).to.equal(threshold);
+    expect(draw.args.hit).to.equal(false);
+    expect(await env.lottery.pool()).to.equal(E("0.09"));
+    console.log(`      F-1 closed: a ${minPool / CREDIT}-credit quiet round (rake ${netRake / CREDIT} credits, contribution ${c / CREDIT} credits) draws at 1/${PROB_ONE / threshold} for W = ${W / CREDIT} credits: E[payout] = ${(threshold * W) / PROB_ONE / CREDIT} credits < rake`);
+    await assertConserved(env, expect);
   });
 });
