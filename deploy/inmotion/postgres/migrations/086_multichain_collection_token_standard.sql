@@ -1,0 +1,31 @@
+-- Real bug found live 2026-09-05: robinhood-chain-scan.ts's discovery loop
+-- registers BOTH ERC-721 and ERC-1155 candidates into
+-- plank_multichain_collections (readNftMetadata correctly detects and
+-- returns each contract's real standard via ERC-165 supportsInterface), but
+-- the standard was never persisted -- TrackedCollection had no column for
+-- it. getCollectionAsync (collections-server.ts) then hardcoded every
+-- auto-discovered collection's tokenStandard to "ERC721" regardless of what
+-- it actually was. That made order-validation.ts's real, intentional
+-- "reject 1155, no audited quantity model yet" guard (tokenStandard !==
+-- "ERC721") never fire for these rows -- execution instead reached
+-- ownsToken()'s ERC-721-only ownerOf() call against a real ERC-1155
+-- contract, which reverts/returns empty, which ownsToken's fail-closed
+-- catch turns into a plain `false` -- so a genuine ERC-1155 holder got
+-- rejected with the misleading "You don't own that token." (NOT_OWNER)
+-- instead of the honest, already-existing 1155-not-supported-yet message.
+--
+-- This column is the fix: persist the real, on-chain-verified standard at
+-- discovery time so getCollectionAsync can report it honestly instead of
+-- guessing "ERC721" for everything.
+--
+-- No backfill to a guessed value here on purpose: evm-log-scan.ts's own
+-- foreign-chain discovery path (writeChainCoverage's standardGroup
+-- "erc721+erc1155") ALSO registers real ERC-1155 collections today, via
+-- Alchemy's fetchSnapshot rather than a direct interface probe, so there is
+-- no single honest default for every pre-existing row -- NULL ("never
+-- classified") is the truthful starting state, not a guess. Read call
+-- sites (getCollectionAsync) must treat NULL the same conservative way
+-- order-validation.ts already treats anything that isn't literally
+-- "ERC721": not tradable as ERC721 until a real value is known.
+ALTER TABLE plank_multichain_collections
+  ADD COLUMN IF NOT EXISTS token_standard TEXT;

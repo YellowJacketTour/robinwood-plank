@@ -242,6 +242,7 @@ async function runRobinhoodChainDiscoveryScanInternal(
       chainId: ROBINHOOD_CHAIN_ID,
       contractAddress,
       adapter: "robinhood-native",
+      tokenStandard: meta.standard === "erc721" ? "ERC721" : "ERC1155",
     });
     await updateCollectionDisplay(CHAIN_SLUG, contractAddress, {
       name: sample.name ?? meta.name ?? null,
