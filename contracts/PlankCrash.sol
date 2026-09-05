@@ -77,7 +77,14 @@ interface IPlankBankCredit {
  */
 contract PlankCrash is ReentrancyGuard {
     uint256 private constant BPS = 10_000;
-    uint256 public constant MAX_SEATS_CEILING = 512;
+    // A round that cannot be settled inside ONE transaction would strand every
+    // stake in it, so the ceiling is sized to the smallest per-transaction gas
+    // cap the EVM has standardised: EIP-7825 (Osaka) caps a transaction at
+    // 2^24 = 16,777,216 gas. All-survive settlement measures ~47k per seat
+    // (one cold SSTORE to the pull ledger, lnScaled, the event) after the
+    // per-seat paidOf SSTORE was replaced by a view; 256 seats ~= 12.3M, ~27%
+    // headroom under that cap (512 measured past 30M before this change).
+    uint256 public constant MAX_SEATS_CEILING = 256;
     uint256 public constant MAX_TARGET_CEILING = 100_000_000; // 10,000x, the crash law's own maximum
     uint256 public constant MAX_STAKE_WEI = type(uint96).max; // < PlankCcs2LMath.MAX_STAKE
     uint256 public constant MAX_KEEPER_BPS = 500;
@@ -201,8 +208,6 @@ contract PlankCrash is ReentrancyGuard {
     mapping(uint256 => Seat[]) private _seats;
     mapping(uint256 => mapping(address => uint256)) public stakeOf;
     mapping(uint256 => mapping(address => uint256)) public targetOf;
-    mapping(uint256 => mapping(address => uint256)) private _seatIndexPlusOne;
-    mapping(uint256 => mapping(address => uint256)) public paidOf; // settled payout+bonus per seat
     mapping(uint256 => mapping(address => bool)) public refunded;
     mapping(uint64 => uint256) public drandRoundToRoundId;
     mapping(address => uint256) public owed;
@@ -423,7 +428,6 @@ contract PlankCrash is ReentrancyGuard {
         Seat[] storage seats = _seats[id];
         if (seats.length >= maxSeats) revert RoundFull();
         seats.push(Seat({player: player, stake: uint96(stake), targetBps: uint32(targetBps)}));
-        _seatIndexPlusOne[id][player] = seats.length;
         stakeOf[id][player] = stake;
         targetOf[id][player] = targetBps;
         r.playerPool += stake;
@@ -505,7 +509,6 @@ contract PlankCrash is ReentrancyGuard {
             bool survived = seats[i].targetBps <= crashBps;
             if (p > 0) {
                 owed[player] += p;
-                paidOf[id][player] = p;
                 paidSum += p;
             }
             emit SeatSettled(id, player, survived, res.playerPayouts[i], res.bonuses[i]);
@@ -745,6 +748,24 @@ contract PlankCrash is ReentrancyGuard {
         if (seed > seedBudget) seed = seedBudget;
     }
 
+    /// @notice What a settled seat was credited (player payout + house bonus).
+    ///         Recomputed from the round's committed data -- the SAME library
+    ///         call that settled it -- instead of a per-seat cold SSTORE, which
+    ///         was ~1/3 of settle gas. 0 for a seat that busted, for a player
+    ///         without a seat, or for a round not (yet) settled.
+    function paidOf(uint256 roundId, address player) external view returns (uint256) {
+        Round storage r = rounds[roundId];
+        if (r.phase != Phase.SETTLED) return 0;
+        Seat[] storage seats = _seats[roundId];
+        uint256 n = seats.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (seats[i].player != player) continue;
+            PlankCcs2LMath.Result memory res = _preview(roundId, r.crashBps);
+            return res.playerPayouts[i] + res.bonuses[i];
+        }
+        return 0;
+    }
+
     /// @notice Exact settlement preview for a hypothetical crash -- the SAME
     ///         library call settleRound makes (displayed == redeemable).
     function previewSettlement(uint256 roundId, uint256 crashBps)
@@ -752,6 +773,10 @@ contract PlankCrash is ReentrancyGuard {
         view
         returns (PlankCcs2LMath.Result memory)
     {
+        return _preview(roundId, crashBps);
+    }
+
+    function _preview(uint256 roundId, uint256 crashBps) private view returns (PlankCcs2LMath.Result memory) {
         Round storage r = rounds[roundId];
         Seat[] storage seats = _seats[roundId];
         uint256 n = seats.length;
