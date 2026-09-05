@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalJson, normalizeAddresses, receiptGas } from "../../scripts/lib/testnet-canary-evidence.js";
 
+// The CCS-2L set: fuelBooster/progression/powerboard retired with the
+// pre-CCS graph; lottery and rakeRouter are what the deploy script creates.
 const addresses = {
   crash: "0x0000000000000000000000000000000000000001",
   bank: "0x0000000000000000000000000000000000000002",
-  fuelBooster: "0x0000000000000000000000000000000000000003",
-  progression: "0x0000000000000000000000000000000000000004",
-  powerboard: "0x0000000000000000000000000000000000000005",
+  lottery: "0x0000000000000000000000000000000000000003",
+  rakeRouter: "0x0000000000000000000000000000000000000004",
   beacon: "0x0000000000000000000000000000000000000006",
 };
 

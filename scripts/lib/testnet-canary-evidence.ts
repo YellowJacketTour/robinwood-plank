@@ -3,12 +3,14 @@ import { getAddress, isAddress } from "ethers";
 
 export const TESTNET_CHAIN_ID = 46630;
 
+// The CCS-2L contract set. fuelBooster/progression/powerboard were retired
+// with the pre-CCS graph (PlankFuelBooster, PlankProgression, PlankPowerboard);
+// the canary now proves the deployed set the deploy script actually creates.
 export type CanaryAddresses = {
   crash: string;
   bank: string;
-  fuelBooster: string;
-  progression: string;
-  powerboard: string;
+  lottery: string;
+  rakeRouter: string;
   beacon: string;
 };
 
@@ -24,7 +26,7 @@ export function sha256Hex(value: string | Uint8Array): string {
 }
 
 export function normalizeAddresses(input: Record<string, unknown>): CanaryAddresses {
-  const required = ["crash", "bank", "fuelBooster", "progression", "powerboard", "beacon"] as const;
+  const required = ["crash", "bank", "lottery", "rakeRouter", "beacon"] as const;
   const normalized = {} as CanaryAddresses;
   for (const key of required) {
     const value = input[key];
