@@ -474,6 +474,17 @@
       .seal ul {
         max-width: none;
       }
+      .audit-note {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--green);
+        border-radius: 10px;
+        background: var(--panel);
+        font-size: 13px;
+        line-height: 1.6;
+        opacity: .9;
+      }
       .cta {
         text-align: center;
         padding: 40px 12px 20px;
@@ -1009,6 +1020,17 @@
             </ul>
           </div>
         </div>
+        <p class="audit-note">
+          <b>2026-09-05:</b> an internal review found two loopholes that let a
+          player running two coordinated wallets manufacture cheap rounds to
+          farm the lottery odds, or a two-wallet "solo table" siphon from the
+          house's own per-round seed. Neither could touch a single honest
+          player's payout or anyone else's stake — both required deliberately
+          running multiple accounts against the house. Both were closed the
+          same day: the lottery's hit odds are now tied to what a round
+          actually pays into rake, and the house bonus is capped to a share
+          of that same round's rake.
+        </p>
       </section>
 
       <section class="cta">
