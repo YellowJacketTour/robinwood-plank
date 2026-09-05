@@ -108,9 +108,15 @@ contract PlankLottery is ReentrancyGuard {
     constructor(Config memory cfg) {
         if (cfg.source == address(0) || cfg.founderSink == address(0)) revert ZeroAddress();
         if (cfg.founderFeeBps >= BPS) revert BadConfig();
-        if (cfg.oddsOneIn == 0) revert BadConfig();
-        // x_max < 1 is what makes W(P) increasing for ALL P (design 2.3(d)).
-        if (cfg.carveMaxBps >= BPS || cfg.carveMinBps > cfg.carveMaxBps) revert BadConfig();
+        // oddsOneIn == 1 would make every funded round a hit: the ball must
+        // be a genuine draw (mustHitByRounds == 1 is the explicit "always
+        // hit" configuration if a rig ever needs one).
+        if (cfg.oddsOneIn < 2) revert BadConfig();
+        // x_max < 1 is what makes W(P) increasing for ALL P (design 2.3(d));
+        // x_min > 0 is what makes the structural reset S(P) > 0 for every P
+        // that carries a wei; x_min < x_max is what makes the carve
+        // progressive (design directive 2) rather than constant.
+        if (cfg.carveMaxBps >= BPS || cfg.carveMinBps == 0 || cfg.carveMinBps >= cfg.carveMaxBps) revert BadConfig();
         if (cfg.carveHalfSaturationWei == 0) revert BadConfig();
         source = cfg.source;
         founderSink = cfg.founderSink;

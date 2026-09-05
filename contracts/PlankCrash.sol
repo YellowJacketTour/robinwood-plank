@@ -86,7 +86,15 @@ contract PlankCrash is ReentrancyGuard {
     uint256 public constant TARGET_ROUND_SAFETY_PERIODS = 20;
     bytes32 public constant RESULT_DOMAIN = keccak256("PLANKCRASH_RESULT_V2");
     bytes32 public constant TICKET_DOMAIN = keccak256("PLANK_TICKET_V1");
-    uint256 public constant OVERFLOW_GAS_STIPEND = 100_000;
+    // PlankLottery.fund() on a never-touched lottery writes four zero->nonzero
+    // slots (~91k gas); 100k left no margin, so the stipend is 2x that.
+    uint256 public constant OVERFLOW_GAS_STIPEND = 200_000;
+    // A LIVE round whose randomness IS on the beacon but which nobody has
+    // settled for ABANDONED_ROUND_MULTIPLIER x refundTimeoutSeconds after its
+    // emission time is treated as unsettleable (bricked lottery, gas ceiling,
+    // dead beacon read) and becomes refundable. Settlement stays permissionless
+    // and first-come the whole time, so this never reads the outcome.
+    uint256 public constant ABANDONED_ROUND_MULTIPLIER = 30;
 
     enum Phase {
         BETTING,
@@ -125,6 +133,7 @@ contract PlankCrash is ReentrancyGuard {
         address beacon;
         address router; // PlankRakeRouter (net rake)
         address lottery; // PlankLottery (draws + overflow)
+        address bank; // PlankBank: the ONLY caller of placeBetFor / creditFor sink
         uint256 bettingDurationSeconds;
         uint256 roundIntervalSeconds; // 0 = reopen immediately
         uint256 rakeBps;
@@ -150,6 +159,7 @@ contract PlankCrash is ReentrancyGuard {
     IDrandBeacon public immutable beacon;
     address public immutable router;
     address public immutable lottery;
+    address public immutable bank;
     uint256 public immutable genesisTimestamp;
     uint256 public immutable bettingDurationSeconds;
     uint256 public immutable roundIntervalSeconds;
@@ -231,6 +241,7 @@ contract PlankCrash is ReentrancyGuard {
     event OverflowQueued(uint256 amount, uint256 pendingTotal);
     event OverflowDelivered(uint256 amount, bool ok);
     event RakeFlushed(uint256 amount, bool ok);
+    event LotteryRecordFailed(uint256 indexed roundId, address indexed winner, bytes reason);
 
     error ZeroAddress();
     error BadConfig();
@@ -245,6 +256,7 @@ contract PlankCrash is ReentrancyGuard {
     error RandomnessNotYetAvailable();
     error RandomnessAvailable();
     error NotRouter();
+    error NotBank();
     error NothingToFund();
     error NothingToWithdraw();
     error AlreadyRefunded();
@@ -252,11 +264,17 @@ contract PlankCrash is ReentrancyGuard {
     error RuleMismatch();
 
     constructor(Config memory cfg) {
-        if (cfg.beacon == address(0) || cfg.router == address(0) || cfg.lottery == address(0)) revert ZeroAddress();
-        if (cfg.beacon.code.length == 0) revert ZeroAddress();
+        if (cfg.beacon == address(0) || cfg.router == address(0) || cfg.lottery == address(0) || cfg.bank == address(0)) {
+            revert ZeroAddress();
+        }
+        // The beacon, router and lottery are deployed BEFORE the crash and are
+        // called from settlement: an address without code would brick the game.
+        // The bank is deployed after (it takes this address), so only non-zero.
+        if (cfg.beacon.code.length == 0 || cfg.router.code.length == 0 || cfg.lottery.code.length == 0) revert ZeroAddress();
         beacon = IDrandBeacon(cfg.beacon);
         router = cfg.router;
         lottery = cfg.lottery;
+        bank = cfg.bank;
         uint256 period = beacon.period();
         // Two consecutive rounds must never share a target drand round.
         if (cfg.roundIntervalSeconds != 0 && cfg.roundIntervalSeconds <= (TARGET_ROUND_SAFETY_PERIODS + 1) * period) {
@@ -270,6 +288,9 @@ contract PlankCrash is ReentrancyGuard {
         if (cfg.minParticipants == 0 || cfg.maxStakePerWalletBps == 0 || cfg.maxStakePerWalletBps > BPS) revert BadConfig();
         if (cfg.maxTargetBps < PlankCcs2LMath.MIN_TARGET_BPS || cfg.maxTargetBps > MAX_TARGET_CEILING) revert BadConfig();
         if (cfg.maxSeats == 0 || cfg.maxSeats > MAX_SEATS_CEILING) revert BadConfig();
+        // A table that can never reach quorum, or a minimum stake no seat can
+        // pay, would void every round forever (no setter can repair it).
+        if (cfg.minParticipants > cfg.maxSeats || cfg.minStakeWei > MAX_STAKE_WEI) revert BadConfig();
         if (cfg.crashSeedWei > PlankCcs2LMath.MAX_POT) revert BadConfig();
         if (cfg.protectedPrincipalBps > BPS) revert BadConfig();
         // The survivor floor must be payable from the rake-net pot; otherwise the
@@ -377,8 +398,15 @@ contract PlankCrash is ReentrancyGuard {
         _placeBet(msg.sender, targetBps, msg.sender);
     }
 
-    /// @notice Commit a seat FOR `player`, funded by the caller (PlankBank).
+    /// @notice Commit a seat FOR `player`, funded by the fixed PlankBank only.
+    ///         A seat is one-per-player-per-round, so an OPEN third-party
+    ///         funder would let anyone squat a player's seat for the round at
+    ///         a bad target for the price of minStakeWei (seat-squatting /
+    ///         forced-hit capture); the bank is the single funder that can
+    ///         act for a player, and it only does so on the player's own
+    ///         root- or session-key signature.
     function placeBetFor(address player, uint256 targetBps) external payable nonReentrant {
+        if (msg.sender != bank) revert NotBank();
         if (player == address(0)) revert ZeroAddress();
         _placeBet(player, targetBps, msg.sender);
     }
@@ -510,7 +538,17 @@ contract PlankCrash is ReentrancyGuard {
         address winner = _ticketWinner(seats, n, seedHash, playerPool);
         r.lotteryWinner = winner;
         emit LotteryTicket(id, winner, uint256(keccak256(abi.encode(TICKET_DOMAIN, seedHash))) % playerPool, playerPool);
-        IPlankLottery(lottery).recordRound(id, seedHash, winner);
+        // The draw must never be able to lock player money: PlankLottery.
+        // recordRound is revert-free by analysis, but if it ever reverts the
+        // round still settles and the failure is logged. Insufficient-gas
+        // griefing (make the callee OOG, keep the caller alive) cannot skip a
+        // healthy draw: the work after this call (_startRound) costs far more
+        // than the 1/64 EIP-150 retains, so a starved call reverts the whole
+        // transaction (proven in PlankCrash.adversarial.test.ts).
+        try IPlankLottery(lottery).recordRound(id, seedHash, winner) {}
+        catch (bytes memory reason) {
+            emit LotteryRecordFailed(id, winner, reason);
+        }
 
         emit RoundSettled(
             id,
@@ -546,12 +584,18 @@ contract PlankCrash is ReentrancyGuard {
     ///         emission time, refund every stake exactly and return the seed.
     ///         Reverts the moment the randomness exists on the beacon, so a
     ///         settle always wins the race; the condition never reads the crash.
+    ///         ABANDONED ROUND: if the randomness exists but nobody has settled
+    ///         for ABANDONED_ROUND_MULTIPLIER x the timeout (settlement is
+    ///         permissionless and rewarded, so only an UNSETTLEABLE round gets
+    ///         here), the refund is allowed anyway so no configuration or
+    ///         dependency failure can lock stakes forever.
     function refundRound() external nonReentrant {
         uint256 id = currentRoundId;
         Round storage r = rounds[id];
         if (r.phase != Phase.LIVE) revert BadPhase();
         if (block.timestamp < uint256(r.revealNotBefore) + refundTimeoutSeconds) revert TooEarly();
-        if (beacon.randomnessOrZero(r.targetDrandRound) != bytes32(0)) revert RandomnessAvailable();
+        bool abandoned = block.timestamp >= uint256(r.revealNotBefore) + refundTimeoutSeconds * ABANDONED_ROUND_MULTIPLIER;
+        if (!abandoned && beacon.randomnessOrZero(r.targetDrandRound) != bytes32(0)) revert RandomnessAvailable();
         r.phase = Phase.REFUNDED;
         unclaimedRefunds += r.playerPool;
         uint256 seed = r.seed;
@@ -584,12 +628,14 @@ contract PlankCrash is ReentrancyGuard {
         emit Withdrawn(msg.sender, msg.sender, amount);
     }
 
-    /// @notice Recycle winnings into a PlankBank play balance (bank.creditFor).
-    function withdrawToBank(address bank) external nonReentrant {
-        if (bank == address(0)) revert ZeroAddress();
+    /// @notice Recycle winnings into the fixed PlankBank play balance
+    ///         (bank.creditFor). `bank_` must be the construction-time bank:
+    ///         the crash makes no ETH call to a caller-chosen address.
+    function withdrawToBank(address bank_) external nonReentrant {
+        if (bank_ != bank) revert NotBank();
         uint256 amount = _debit();
-        IPlankBankCredit(bank).creditFor{value: amount}(msg.sender);
-        emit Withdrawn(msg.sender, bank, amount);
+        IPlankBankCredit(bank_).creditFor{value: amount}(msg.sender);
+        emit Withdrawn(msg.sender, bank_, amount);
     }
 
     function _debit() private returns (uint256 amount) {

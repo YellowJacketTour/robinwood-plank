@@ -78,6 +78,7 @@ async function main() {
 
   const nonce = await deployer.getNonce();
   const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
+  const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lottery = await (
     await ethers.getContractFactory("PlankLottery")
@@ -104,6 +105,7 @@ async function main() {
     beacon: await beacon.getAddress(),
     router: await rakeRouter.getAddress(),
     lottery: await lottery.getAddress(),
+    bank: predictedBank,
     bettingDurationSeconds: BETTING_SECONDS,
     roundIntervalSeconds: 0,
     rakeBps: 450n,
@@ -133,6 +135,9 @@ async function main() {
 
   const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr], FEES);
   await bank.waitForDeployment();
+  if ((await bank.getAddress()).toLowerCase() !== predictedBank.toLowerCase()) {
+    throw new Error(`Bank address prediction failed: predicted ${predictedBank}, got ${await bank.getAddress()}.`);
+  }
   await (await plank.mint(deployer.address, ethers.parseEther("5000"), FEES)).wait();
 
   const fs = await import("node:fs");

@@ -2,8 +2,8 @@ import { expect } from "chai";
 import { AbiCoder, keccak256, toBeHex, toUtf8Bytes } from "ethers";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
 import {
-  BPS, CREDIT, DEFAULT_CRASH, assertConserved, bet, closeBetting, crashFromSeed, deployCasino, findRandomness,
-  increaseToAtLeast, resultSeedOf, seatsOf, settleCurrent, type CasinoEnv,
+  BPS, CREDIT, DEFAULT_CRASH, assertConserved, bet, betFor, closeBetting, crashFromSeed, deployCasino, findRandomness,
+  freshAddress, increaseToAtLeast, resultSeedOf, seatsOf, settleCurrent, type CasinoEnv,
 } from "./helpers/casino.js";
 import { evolutionQuote, type SimulationPolicy } from "../../lib/casino/simulation.js";
 import { ratifiedRakeSplit } from "../../lib/casino/economics.js";
@@ -210,8 +210,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     for (let t = 0; t < 12; t++) {
       const n = 2 + Number(rng() % 10n);
       for (let i = 0; i < n; i++) {
-        const w = ethers.Wallet.createRandom().address;
-        await env.crash.placeBetFor(w, 10_100n + rng() % 5_000_000n, { value: 500n * CREDIT + rng() % E("3") });
+        await betFor(env, freshAddress(), 10_100n + rng() % 5_000_000n, 500n * CREDIT + rng() % E("3"));
       }
       const { round } = await settleCurrent(env, toBeHex(rng(), 32));
       expect(round.phase).to.equal(2n);
@@ -220,9 +219,9 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     // A full round at MAX_SEATS.
     const max = Number(DEFAULT_CRASH.maxSeats);
     for (let i = 0; i < max; i++) {
-      await env.crash.placeBetFor(ethers.Wallet.createRandom().address, 10_100n + BigInt(i) * 997n, { value: E("0.01") + BigInt(i) * 10n ** 14n });
+      await betFor(env, freshAddress(), 10_100n + BigInt(i) * 997n, E("0.01") + BigInt(i) * 10n ** 14n);
     }
-    await expect(env.crash.placeBetFor(ethers.Wallet.createRandom().address, 15_000n, { value: E("0.01") })).to.be.revertedWithCustomError(env.crash, "RoundFull");
+    await expect(betFor(env, freshAddress(), 15_000n, E("0.01"))).to.be.revertedWithCustomError(env.crash, "RoundFull");
     const { receipt, round } = await settleCurrent(env, toBeHex(31337n, 32));
     console.log(`      settleRound gas at MAX_SEATS=${max}: ${receipt.gasUsed}`);
     expect(round.phase).to.equal(2n);
@@ -237,7 +236,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
       const id: bigint = await env.crash.currentRoundId();
       const r0 = await env.crash.rounds(id);
       for (let i = 0; i < n; i++) {
-        await env.crash.placeBetFor(ethers.Wallet.createRandom().address, 10_100n + BigInt(i) * 137n, { value: E("1") + BigInt(i) * 10n ** 15n });
+        await betFor(env, freshAddress(), 10_100n + BigInt(i) * 137n, E("1") + BigInt(i) * 10n ** 15n);
       }
       // All survive (crash >= every target), the most expensive branch.
       const rnd = await findRandomness(env, id, BigInt(r0.targetDrandRound), (c) => c >= 40_000n);

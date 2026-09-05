@@ -18,7 +18,7 @@ export const BALL_DOMAIN = keccak256(Buffer.from("PLANK_BALL_V1"));
 const abi = AbiCoder.defaultAbiCoder();
 
 export type CrashConfig = {
-  beacon: string; router: string; lottery: string;
+  beacon: string; router: string; lottery: string; bank: string;
   bettingDurationSeconds: bigint; roundIntervalSeconds: bigint;
   rakeBps: bigint; rakeFloorBps: bigint; rakeStepBps: bigint; rakeVolumeStepWei: bigint;
   keeperRewardBps: bigint; minParticipants: bigint; minPoolWei: bigint; minStakeWei: bigint;
@@ -31,7 +31,7 @@ export type LotteryConfig = {
   carveMinBps: bigint; carveMaxBps: bigint; carveHalfSaturationWei: bigint;
 };
 
-export const DEFAULT_CRASH: Omit<CrashConfig, "beacon" | "router" | "lottery"> = {
+export const DEFAULT_CRASH: Omit<CrashConfig, "beacon" | "router" | "lottery" | "bank"> = {
   bettingDurationSeconds: 120n,
   roundIntervalSeconds: 0n,
   rakeBps: 450n,
@@ -93,6 +93,7 @@ export async function deployCasino(opts: {
 
   const nonce = await deployer.getNonce();
   const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
+  const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lotteryConfig: LotteryConfig = { source: predictedCrash, founderSink: treasury.address, ...DEFAULT_LOTTERY, ...(opts.lottery ?? {}) };
   const lottery: any = await (await ethers.getContractFactory("PlankLottery")).deploy(lotteryConfig);
@@ -103,6 +104,7 @@ export async function deployCasino(opts: {
     beacon: await beacon.getAddress(),
     router: await rakeRouter.getAddress(),
     lottery: await lottery.getAddress(),
+    bank: predictedBank,
     ...DEFAULT_CRASH,
     ...(opts.crash ?? {}),
   };
@@ -110,6 +112,7 @@ export async function deployCasino(opts: {
   const crashAddr = await crash.getAddress();
   if (crashAddr.toLowerCase() !== predictedCrash.toLowerCase()) throw new Error("crash address prediction failed");
   const bank: any = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
+  if ((await bank.getAddress()).toLowerCase() !== predictedBank.toLowerCase()) throw new Error("bank address prediction failed");
 
   return {
     beacon, plank, weth, pair, oracle, v2Router, burnEngine, lottery, rakeRouter, crash, bank,
@@ -171,6 +174,27 @@ export async function findRandomness(
 
 export async function bet(env: CasinoEnv, signer: any, eth: string, targetBps: bigint) {
   return env.crash.connect(signer).placeBet(targetBps, { value: ethers.parseEther(eth) });
+}
+
+/**
+ * Commit a seat FOR `player` the only way the contract allows: as the fixed
+ * PlankBank (placeBetFor is bank-only after the 2026-09-05 hardening). The
+ * bank is impersonated so fuzz tests can seat many distinct players without
+ * funding wallets; on the real bank this is exactly what bet()/betVia() do.
+ */
+export async function betFor(env: CasinoEnv, player: string, targetBps: bigint, valueWei: bigint) {
+  const bankAddr = await env.bank.getAddress();
+  await networkHelpers.impersonateAccount(bankAddr);
+  await networkHelpers.setBalance(bankAddr, ethers.parseEther("1000000"));
+  const bankSigner = await ethers.getSigner(bankAddr);
+  return env.crash.connect(bankSigner).placeBetFor(player, targetBps, { value: valueWei });
+}
+
+/** A deterministic, valid, never-colliding player address (no key derivation). */
+let _addrCounter = 0x1000n;
+export function freshAddress(): string {
+  _addrCounter += 1n;
+  return ethers.getAddress("0x" + _addrCounter.toString(16).padStart(40, "0"));
 }
 
 export async function increaseToAtLeast(t: bigint) {

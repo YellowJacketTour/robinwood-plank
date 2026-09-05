@@ -214,9 +214,11 @@ async function main() {
   await burnEngine.waitForDeployment();
 
   // ── 3. Resolve the immutable 3-way cycle by predicting the crash addr.
-  //     lottery[nonce] -> rakeRouter[nonce+1] -> crash[nonce+2]; consecutive.
+  //     lottery[nonce] -> rakeRouter[nonce+1] -> crash[nonce+2] -> bank[nonce+3]; consecutive.
+  //     The crash pins the bank (placeBetFor / withdrawToBank are bank-only).
   const nonce = await deployer.getNonce();
   const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
+  const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lottery = await (
     await ethers.getContractFactory("PlankLottery")
@@ -250,6 +252,7 @@ async function main() {
     beacon: BEACON,
     router: await rakeRouter.getAddress(),
     lottery: await lottery.getAddress(),
+    bank: predictedBank,
     bettingDurationSeconds: BETTING_SECONDS,
     roundIntervalSeconds: ROUND_INTERVAL_SECONDS,
     rakeBps: RAKE_BPS,
@@ -279,8 +282,11 @@ async function main() {
   }
 
   // ── 4. PlankBank -- the deposit/instant-play/withdraw buffer. ──────
-  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
+  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]); // nonce+3
   await bank.waitForDeployment();
+  if ((await bank.getAddress()).toLowerCase() !== predictedBank.toLowerCase()) {
+    throw new Error(`Bank address prediction failed (predicted ${predictedBank}, got ${await bank.getAddress()}). The crash is pinned to the predicted bank; redeploy the whole set.`);
+  }
 
   console.log("\n===================== DEPLOYED =====================");
   console.log("PlankV2TwapOracle :", await oracle.getAddress());

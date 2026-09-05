@@ -21,8 +21,10 @@ interface IPlankGame {
  * recycles them here with game.withdrawToBank(bank) (creditFor). To leave,
  * the player WITHDRAWS whatever is left (one signature).
  *
- * The bank holds NO privilege over the game beyond what any funder has: it
- * bets on a player's behalf and nothing else. It
+ * The bank is the ONE address the game lets bet on a player's behalf
+ * (PlankCrash.placeBetFor is bank-only, pinned at the crash's construction,
+ * so nobody can squat a player's one seat per round), and it does so only on
+ * the player's own root- or session-key signature. It
  * has NO admin, NO upgrade path, and the set of games it will talk to is
  * fixed at construction. A session key is strictly LESS powerful than the
  * player -- it can only bet up to its cap, only until its expiry, only on

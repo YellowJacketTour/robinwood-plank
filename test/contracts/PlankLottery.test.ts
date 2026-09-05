@@ -174,7 +174,7 @@ describe("PlankLottery -- round-only draw, progressive carve, C.8 lottery invari
   });
 
   it("L-6 (ratified form): the reset is structural -- after every hit the next board opens at S(P) > 0 and is immediately drawable", async () => {
-    const env = await deployCasino({ lottery: { oddsOneIn: 1n } }); // every funded round hits
+    const env = await deployCasino({ lottery: { oddsOneIn: 1n << 60n, mustHitByRounds: 1n } }); // every funded round hits (forced)
     await env.lottery.fund({ value: E("3") });
     await playRound(env, null); // snapshot
     let expected: bigint = await env.lottery.committedPrize();

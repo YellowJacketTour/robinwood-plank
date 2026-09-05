@@ -3,7 +3,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { toBeHex } from "ethers";
 import { ethers } from "./helpers/hardhat.js";
-import { BPS, CREDIT, assertConserved, deployCasino, seatsOf, settleCurrent, type CasinoEnv } from "./helpers/casino.js";
+import { BPS, CREDIT, assertConserved, betFor, deployCasino, freshAddress, seatsOf, settleCurrent, type CasinoEnv } from "./helpers/casino.js";
 import { DEFAULT_CCS2L_PARAMS, settleCcs2L } from "../../lib/casino/economics-ccs2l.js";
 
 interface CcsEngine {
@@ -44,7 +44,7 @@ describe("PlankCrash -- three-way wei-exact differential (settleRound vs settleC
     for (let i = 0; i < n; i++) {
       const stake = 500n * CREDIT + engine.rngBelow(rng, E("4"));
       const target = 10_100n + engine.rngBelow(rng, t % 3 === 0 ? 600_000n : 40_000n); // mix low locks (mostly survive) and deep tails
-      await env.crash.placeBetFor(ethers.Wallet.createRandom().address, target, { value: stake });
+      await betFor(env, freshAddress(), target, stake);
     }
     const seats = await seatsOf(env, id);
     const playerPool = seats.reduce((a, s) => a + s.stake, 0n);

@@ -74,9 +74,10 @@ async function main() {
   await burnEngine.waitForDeployment();
 
   // ── 3-way immutable cycle resolved by CREATE-address prediction ─────
-  //    lottery[nonce] -> rakeRouter[nonce+1] -> crash[nonce+2], consecutive.
+  //    lottery[nonce] -> rakeRouter[nonce+1] -> crash[nonce+2] -> bank[nonce+3], consecutive.
   const nonce = await deployer.getNonce();
   const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
+  const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lottery = await (
     await ethers.getContractFactory("PlankLottery")
@@ -103,6 +104,7 @@ async function main() {
     beacon: await beacon.getAddress(),
     router: await rakeRouter.getAddress(),
     lottery: await lottery.getAddress(),
+    bank: predictedBank,
     bettingDurationSeconds: BETTING_SECONDS,
     roundIntervalSeconds: 0,
     rakeBps: RAKE_BPS,
@@ -132,6 +134,9 @@ async function main() {
 
   const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
   await bank.waitForDeployment();
+  if ((await bank.getAddress()).toLowerCase() !== predictedBank.toLowerCase()) {
+    throw new Error(`Bank address prediction failed: predicted ${predictedBank}, got ${await bank.getAddress()}.`);
+  }
 
   // Prime the Vault so the first rounds seed (bounded by the bootstrap budget).
   await (await crash.fundVault({ value: ethers.parseEther("0.2") })).wait();

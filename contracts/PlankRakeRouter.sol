@@ -80,6 +80,11 @@ contract PlankRakeRouter is ReentrancyGuard {
                 || founderSink_ == address(0)
         ) revert ZeroAddress();
         if (communityLotteryBps_ > BPS) revert BadConfig();
+        // The burn sink and the lottery are deployed BEFORE the router and are
+        // called by claimBurn / claimLottery: an address without code would
+        // strand those legs forever. source_ / vault_ are the (predicted, not
+        // yet deployed) crash, so only non-zero can be required for them.
+        if (burnSink_.code.length == 0 || lottery_.code.length == 0) revert BadConfig();
         source = source_;
         burnSink = burnSink_;
         lottery = lottery_;
