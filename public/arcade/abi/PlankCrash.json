@@ -1,0 +1,2087 @@
+[
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "beacon",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "router",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "lottery",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "bank",
+      "type": "address"
+     },
+     {
+      "internalType": "uint256",
+      "name": "bettingDurationSeconds",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "roundIntervalSeconds",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "rakeBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "rakeFloorBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "rakeStepBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "rakeVolumeStepWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "keeperRewardBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "minParticipants",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "minPoolWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "minStakeWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "maxStakePerWalletBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "maxTargetBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "maxSeats",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "crashSeedWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "emissionBufferCapWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "protectedPrincipalBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "floorBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "houseCapBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "houseRakeCapBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "seedBootstrapBudgetWei",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "refundTimeoutSeconds",
+      "type": "uint256"
+     }
+    ],
+    "internalType": "struct PlankCrash.Config",
+    "name": "cfg",
+    "type": "tuple"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "constructor"
+ },
+ {
+  "inputs": [],
+  "name": "AlreadyBet",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "AlreadyRefunded",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "BadConfig",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "BadPhase",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "BadStake",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "BadTarget",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidCrash",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidPot",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidSeat",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NoBet",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotBank",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotRouter",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NothingToFund",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NothingToWithdraw",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RandomnessAvailable",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RandomnessNotYetAvailable",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RoundFull",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RuleMismatch",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "TooEarly",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "TooLate",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "TransferFailed",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "ZeroAddress",
+  "type": "error"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "stake",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "fundedBy",
+    "type": "address"
+   }
+  ],
+  "name": "BetPlaced",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "toPrincipal",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "toBuffer",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "reserveAfter",
+    "type": "uint256"
+   }
+  ],
+  "name": "CommunityReturn",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "winner",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes",
+    "name": "reason",
+    "type": "bytes"
+   }
+  ],
+  "name": "LotteryRecordFailed",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "winner",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "ticket",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "playerPool",
+    "type": "uint256"
+   }
+  ],
+  "name": "LotteryTicket",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "ok",
+    "type": "bool"
+   }
+  ],
+  "name": "OverflowDelivered",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "pendingTotal",
+    "type": "uint256"
+   }
+  ],
+  "name": "OverflowQueued",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "ok",
+    "type": "bool"
+   }
+  ],
+  "name": "RakeFlushed",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "RefundClaimed",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "playerPool",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "seatCount",
+    "type": "uint256"
+   }
+  ],
+  "name": "RoundLocked",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "playerPool",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "seedReturned",
+    "type": "uint256"
+   }
+  ],
+  "name": "RoundRefunded",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "crashBps",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "effectiveRakeBps",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "grossRake",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "keeperReward",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "totalPlayerPaid",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "totalBonus",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "houseReturned",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "bustedToReserve",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint8",
+    "name": "mode",
+    "type": "uint8"
+   }
+  ],
+  "name": "RoundSettled",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "bettingEndsAt",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "targetDrandRound",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "revealNotBefore",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "seed",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "reserveAtLock",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "paramsHash",
+    "type": "bytes32"
+   }
+  ],
+  "name": "RoundStarted",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "playerPool",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "string",
+    "name": "reason",
+    "type": "string"
+   }
+  ],
+  "name": "RoundVoided",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "survived",
+    "type": "bool"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "playerPayout",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "houseBonus",
+    "type": "uint256"
+   }
+  ],
+  "name": "SeatSettled",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "from",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "reserveAfter",
+    "type": "uint256"
+   }
+  ],
+  "name": "VaultFunded",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "to",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Withdrawn",
+  "type": "event"
+ },
+ {
+  "inputs": [],
+  "name": "ABANDONED_ROUND_MULTIPLIER",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_KEEPER_BPS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_SEATS_CEILING",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_STAKE_WEI",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_TARGET_CEILING",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "OVERFLOW_GAS_STIPEND",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "RESULT_DOMAIN",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "TARGET_ROUND_SAFETY_PERIODS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "TICKET_DOMAIN",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "seedHash",
+    "type": "bytes32"
+   }
+  ],
+  "name": "_deriveCrash",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "multiplierBps",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "pure",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "accountedBalance",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "total",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "bank",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "beacon",
+  "outputs": [
+   {
+    "internalType": "contract IDrandBeacon",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "bettingDurationSeconds",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "buffer",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   }
+  ],
+  "name": "claimRefund",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "crashSeedWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "currentRound",
+  "outputs": [
+   {
+    "components": [
+     {
+      "internalType": "enum PlankCrash.Phase",
+      "name": "phase",
+      "type": "uint8"
+     },
+     {
+      "internalType": "uint64",
+      "name": "targetDrandRound",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "bettingEndsAt",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "revealNotBefore",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "paramsHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint256",
+      "name": "seed",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "playerPool",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "reserveAtLock",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "largestStake",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "crashBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "effectiveRakeBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "playerDistributable",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "totalPlayerPaid",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "totalBonus",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "houseReturned",
+      "type": "uint256"
+     },
+     {
+      "internalType": "address",
+      "name": "lotteryWinner",
+      "type": "address"
+     }
+    ],
+    "internalType": "struct PlankCrash.Round",
+    "name": "",
+    "type": "tuple"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "currentRoundId",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "deliverOverflow",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "ok",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "drandRoundToRoundId",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "effectiveRakeBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "volume",
+    "type": "uint256"
+   }
+  ],
+  "name": "effectiveRakeBpsAt",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "emissionBufferCapWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "floorBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "flushRake",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "ok",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "fundCommunityReturn",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "fundVault",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "genesisTimestamp",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "houseCapBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "houseRakeCapBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "keeperRewardBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "lockRound",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "lottery",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "maxSeats",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "maxStakePerWalletBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "maxTargetBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "minParticipants",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "minPoolWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "minStakeWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "nextSeed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "seed",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "owed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   }
+  ],
+  "name": "paidOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pendingOverflow",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pendingRake",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "placeBet",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "placeBetFor",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "crashBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "previewSettlement",
+  "outputs": [
+   {
+    "components": [
+     {
+      "internalType": "uint8",
+      "name": "mode",
+      "type": "uint8"
+     },
+     {
+      "internalType": "uint256",
+      "name": "lambda",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "totalPlayerPaid",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "totalBonus",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "houseReturned",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "bustedToReserve",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "playerDust",
+      "type": "uint256"
+     },
+     {
+      "internalType": "int256",
+      "name": "dustIndex",
+      "type": "int256"
+     },
+     {
+      "internalType": "uint256[]",
+      "name": "playerPayouts",
+      "type": "uint256[]"
+     },
+     {
+      "internalType": "uint256[]",
+      "name": "bonuses",
+      "type": "uint256[]"
+     }
+    ],
+    "internalType": "struct PlankCcs2LMath.Result",
+    "name": "",
+    "type": "tuple"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "protectedPrincipal",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "protectedPrincipalBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "qualifiedVolume",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "rakeBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "rakeFloorBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "rakeStepBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "rakeVolumeStepWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "refundRound",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "refundTimeoutSeconds",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "refunded",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "reserve",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint64",
+    "name": "targetDrandRound",
+    "type": "uint64"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "drandRandomness",
+    "type": "bytes32"
+   }
+  ],
+  "name": "resultSeed",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "roundIntervalSeconds",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "name": "rounds",
+  "outputs": [
+   {
+    "internalType": "enum PlankCrash.Phase",
+    "name": "phase",
+    "type": "uint8"
+   },
+   {
+    "internalType": "uint64",
+    "name": "targetDrandRound",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "bettingEndsAt",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "revealNotBefore",
+    "type": "uint64"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "paramsHash",
+    "type": "bytes32"
+   },
+   {
+    "internalType": "uint256",
+    "name": "seed",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "playerPool",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "reserveAtLock",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "largestStake",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "crashBps",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "effectiveRakeBps",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "playerDistributable",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "totalPlayerPaid",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "totalBonus",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "houseReturned",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "lotteryWinner",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "router",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   }
+  ],
+  "name": "seatCount",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   }
+  ],
+  "name": "seatsOf",
+  "outputs": [
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "player",
+      "type": "address"
+     },
+     {
+      "internalType": "uint96",
+      "name": "stake",
+      "type": "uint96"
+     },
+     {
+      "internalType": "uint32",
+      "name": "targetBps",
+      "type": "uint32"
+     }
+    ],
+    "internalType": "struct PlankCrash.Seat[]",
+    "name": "",
+    "type": "tuple[]"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "seedBootstrapBudgetWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "seedBudget",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "settleRound",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "settlementParamsHash",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "settlementRuleId",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "settlementRuleVersion",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "stakeOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "targetOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "totalOwed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "totalSeedReturned",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "totalSeeded",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "unclaimedRefunds",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "unclassifiedSurplus",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "withdraw",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "bank_",
+    "type": "address"
+   }
+  ],
+  "name": "withdrawToBank",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ }
+]

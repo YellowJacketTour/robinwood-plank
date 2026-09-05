@@ -1,0 +1,423 @@
+[
+ {
+  "inputs": [
+   {
+    "internalType": "address[]",
+    "name": "games",
+    "type": "address[]"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "constructor"
+ },
+ {
+  "inputs": [],
+  "name": "BadExpiry",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "CapExceeded",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InsufficientBalance",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "KeyInUse",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NoGames",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotAGame",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotKeyOwner",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NothingToWithdraw",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "SessionExpired",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "SessionInvalid",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "ZeroAddress",
+  "type": "error"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "game",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "by",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "BetPlaced",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "game",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Credited",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "newBalance",
+    "type": "uint256"
+   }
+  ],
+  "name": "Deposited",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "key",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "spendCap",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "expiry",
+    "type": "uint64"
+   }
+  ],
+  "name": "SessionGranted",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "key",
+    "type": "address"
+   }
+  ],
+  "name": "SessionRevoked",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "newBalance",
+    "type": "uint256"
+   }
+  ],
+  "name": "Withdrawn",
+  "type": "event"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "balanceOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "game",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "bet",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "game",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "betVia",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   }
+  ],
+  "name": "creditFor",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "deposit",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "key",
+    "type": "address"
+   },
+   {
+    "internalType": "uint128",
+    "name": "spendCap",
+    "type": "uint128"
+   },
+   {
+    "internalType": "uint64",
+    "name": "expiry",
+    "type": "uint64"
+   }
+  ],
+  "name": "grantSession",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "isGame",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "key",
+    "type": "address"
+   }
+  ],
+  "name": "revokeSession",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "sessions",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "internalType": "uint128",
+    "name": "spendCap",
+    "type": "uint128"
+   },
+   {
+    "internalType": "uint128",
+    "name": "spent",
+    "type": "uint128"
+   },
+   {
+    "internalType": "uint64",
+    "name": "expiry",
+    "type": "uint64"
+   },
+   {
+    "internalType": "bool",
+    "name": "revoked",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "withdraw",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "withdrawAll",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ }
+]

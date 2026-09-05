@@ -174,7 +174,7 @@ test("accepted bets and locks cannot lose their authoritative repaint behind an 
     /if \(privateRefreshQueued\) queueMicrotask\(\(\) => \{ void refreshPrivatePlaytest\(\); \}\)/
   );
   assert.match(arcadeSource, /Round commitment accepted/);
-  assert.match(arcadeSource, /Lock accepted at/);
+  assert.match(arcadeSource, /Lock granted at/);
 });
 
 test("a playtest commitment always carries its displayed pre-launch lock target", () => {
@@ -195,7 +195,7 @@ test("a playtest commitment always carries its displayed pre-launch lock target"
   assert.match(arcadeSource, /const autoExecuted = Boolean\(seat && !seat\.acceptedTargetBps && seat\.autoLockEnabled/);
   assert.match(arcadeSource, /REPEAT&nbsp;/);
   assert.match(arcadeSource, /auto-lock .*armed/);
-  assert.match(arcadeSource, /function betVia\(address game, uint256 amount, uint256 autoCashOutBps\)/);
+  assert.match(arcadeSource, /new ethers\.Contract\(BANK_ADDR, ARCADE_ABI\.PlankBank, signer\)/);
   assert.match(arcadeSource, /crash\.placeBet\(committedTargetBps,/);
   assert.match(arcadeSource, /sessionBank\.betVia\(crash\.target, ethers\.parseEther\(betAmount\), committedTargetBps\)/);
 });
@@ -203,8 +203,8 @@ test("a playtest commitment always carries its displayed pre-launch lock target"
 test("pre-lock execution is authoritative and manual lock reports the included value", () => {
   assert.match(arcadeSource, /browser must NOT race a second manual transaction/);
   assert.doesNotMatch(arcadeSource, /Number\(liveBps\) >= autoTarget \* 10000/);
-  assert.match(arcadeSource, /entry\?\.name === "CashedOut"/);
-  assert.match(arcadeSource, /Lock accepted at/);
+  assert.match(arcadeSource, /crash\.filters\.SeatSettled\(rid, signer\.address\)/);
+  assert.match(arcadeSource, /Lock granted at/);
 });
 
 test("multiplier art filters non-finite and regressing samples", () => {

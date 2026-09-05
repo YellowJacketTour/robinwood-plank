@@ -917,7 +917,7 @@
 
   <!-- Universal crash-game convention (Aviator, JetX, Spaceman, Rocketman
        all have this): a compact, always-visible strip of recent crash
-       points, color-coded by tier. Built from the same real RoundCrashed
+       points, color-coded by tier. Built from the same real RoundSettled
        events the Stats panel scans -- not a separate fabricated feed. -->
   <div class="history-ribbon" id="historyRibbon"></div>
 
@@ -930,7 +930,7 @@
       <!-- The other universal convention: a rising multiplier line graph,
            color-shifting cool-to-warm as it climbs, like every real crash
            game's stock-ticker-style curve. Plots this round's own real
-           liveMultiplierBps samples, not synthetic/decorative motion. -->
+           the settled crash point, not synthetic/decorative motion. -->
       <canvas id="multGraph" class="mult-graph"></canvas>
     </div>
     <!-- The real conclusion moment -- replaces a one-line "WON at Xx"
@@ -948,7 +948,7 @@
     <!-- Post-crash SCOREBOARD: the whole roster for the round -- who exited
          in time (with the exact multiplier they locked), who was caught in
          the crash, and the totals. Built from the round's own emitted
-         events (BetPlaced / CashedOut / RoundCrashed / ResultRegistered /
+         events (BetPlaced / RoundSettled / SeatSettled /
          Claimed), not fabricated. -->
     <div class="scoreboard" id="scoreboard"></div>
 
@@ -956,7 +956,7 @@
          horse-racing tote board gives bettors, made concrete for a payout
          model where your return depends on what everyone else does, not
          just your own timing. Shows every current participant (real
-         BetPlaced/CashedOut events for THIS round, not fabricated) and,
+         seatsOf()/SeatSettled for THIS round, not fabricated) and,
          for anyone still flying, a live "if you cashed out this instant"
          estimate -- computed the same way for every flying player, since
          the multiplier is round-wide, not per-player. Only ever shown
@@ -1004,7 +1004,7 @@
       <button id="statsClose">Close</button>
     </div>
   </div>
-  <div class="stats-hint">Built entirely from this contract's own emitted events (<code>BetPlaced</code>, <code>CashedOut</code>, <code>RoundCrashed</code>, <code>ResultRegistered</code>, <code>Claimed</code>) via a real <code>queryFilter</code> scan -- not a mock or a fabricated leaderboard. At local/testnet scale this client-side scan is genuinely fine; a real mainnet deployment would want a proper indexer behind this same UI, not this same scan re-run on every load.</div>
+  <div class="stats-hint">Built entirely from this contract's own emitted events (<code>BetPlaced</code>, <code>RoundSettled</code>, <code>SeatSettled</code>) via a real <code>queryFilter</code> scan -- not a mock or a fabricated leaderboard. At local/testnet scale this client-side scan is genuinely fine; a real mainnet deployment would want a proper indexer behind this same UI, not this same scan re-run on every load.</div>
   <div class="stats-body" id="statsBody">
     <div class="stats-empty">Connect, then click Refresh to scan real on-chain history.</div>
   </div>
@@ -1082,7 +1082,7 @@ function setChainAction(stage, details = {}) {
 
 // ── Deploy-address auto-sync ─────────────────────────────────────────────
 // Real bug this closes: every hardcoded address below (BANK_ADDR,
-// FUEL_BOOSTER_ADDR, PLANK_ADDR, POWERBOARD_ADDR, SIMULATE_ADDR) used to be
+// LOTTERY_ADDR, ROUTER_ADDR, BEACON_ADDR, SIMULATE_ADDR) used to be
 // a fixed JS constant, and a fresh local redeploy can hand out DIFFERENT
 // contract addresses even from an identical deploy sequence (CREATE address
 // depends on the deployer's nonce, which isn't perfectly pinned across every
@@ -1106,10 +1106,8 @@ async function loadDeployAddresses() {
     if (!res.ok) return;
     const m = await res.json();
     if (m.bank) BANK_ADDR = m.bank;
-    if (m.fuelBooster) FUEL_BOOSTER_ADDR = m.fuelBooster;
-    if (m.plank) PLANK_ADDR = m.plank;
-    if (m.powerboard) POWERBOARD_ADDR = m.powerboard;
-    if (m.progression) PROGRESSION_ADDR = m.progression;
+    if (m.lottery) LOTTERY_ADDR = m.lottery;
+    if (m.rakeRouter) ROUTER_ADDR = m.rakeRouter;
     if (m.beacon) BEACON_ADDR = m.beacon;
     if (m.crash) SIMULATE_ADDR = m.crash;
     // Local Simulate assumes the well-known Hardhat mnemonic's accounts
@@ -2594,100 +2592,41 @@ let pollTimer2 = null;
 // ── PlankBank instant-play (deposit once, play with a browser session key,
 //    withdraw what's left). These are the ONLY new functions beyond the V2
 //    ABI the page already fetches, so they live in their own minimal ABIs.
+// ── THE CURRENT ON-CHAIN SET (contracts/): PlankCrash (CCS-2L v2, committed
+// seats, no cash-out), PlankLottery (round-only progressive lottery, actuarial
+// hit rule), PlankBank (instant-play buffer), PlankRakeRouter, IDrandBeacon.
+// Every ABI below is loaded from abi/*.json, exported from the compiled
+// artifacts by scripts/export-arcade-abi.mjs and pinned by
+// test/market/arcade-abi.test.ts, so this page can never bind to a retired
+// contract again. Addresses default to the local deploy and are overridden by
+// deploy-addresses.local.json / .testnet.json (loadDeployAddresses).
 let BANK_ADDR = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
-const BANK_ABI = [
-  "function deposit() payable",
-  "function withdraw(uint256 amount)",
-  "function withdrawAll()",
-  "function grantSession(address key, uint128 spendCap, uint64 expiry)",
-  "function revokeSession(address key)",
-  "function betVia(address game, uint256 amount, uint256 autoCashOutBps)",
-  "function cashOutVia(address game, uint256 roundId)",
-  "function balanceOf(address) view returns (uint256)",
-  "function sessions(address key) view returns (address player, uint128 spendCap, uint128 spent, uint64 expiry, bool revoked)",
-];
-const CRASH_EXT_ABI = [
-  "function setPayoutRedirect(address sink)",
-  "function reserve() view returns (uint256)",
-  "function nextSeed() view returns (uint256)",
-  "function bettingDurationSeconds() view returns (uint256)",
-  "function seedNumerator() view returns (uint256)",
-  "function seedDenominator() view returns (uint256)",
-  "function rakeBps() view returns (uint256)",
-];
-let bettingDurationCache = 8;
-let rakeBpsCache = 450; // 4.5% -- overwritten with the real immutable value on connect
-
-// ── DrandBeacon: the actual verifiable-randomness source every round's
-// crash point and every Powerboard draw derives from. Read-only here (the
-// Verify popover below); named beaconContract, not `beacon`, since that
-// identifier is already the THREE.js launch-pad mesh above.
 let BEACON_ADDR = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const BEACON_ABI = [
-  "function randomnessOrZero(uint64 round) view returns (bytes32)",
-  "function isRoundAvailable(uint64 round) view returns (bool)",
-  "function chainHash() view returns (bytes32)",
-];
+let LOTTERY_ADDR = "";
+let ROUTER_ADDR = "";
+const ARCADE_ABI = {}; // name -> abi (PlankCrash, PlankLottery, PlankBank, PlankRakeRouter, IDrandBeacon)
+let bettingDurationCache = 30;
+let rakeBpsCache = 450; // overwritten with the real immutable value on connect
+let minStakeWeiCache = 0n;
+let maxTargetBpsCache = 100_000_000n;
+let floorBpsCache = 7500;
+let refundTimeoutCache = 86400;
 let beaconContract = null;
-
-// ── Fuel the next launch: burn $PLANK (any time -- burnFuel() has no phase
-//    check) to boost the shared Vault. Never touches the burner's own odds.
-let FUEL_BOOSTER_ADDR = "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e";
-let PLANK_ADDR = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"; // local mock; the real $PLANK on mainnet
-const FUEL_BOOSTER_ABI = [
-  "function burnFuel(uint256 plankAmount)",
-  "function roundFuelStats() view returns (uint256 roundId, uint256 plankBurnedThisRound, uint256 ethBoostedThisRound, uint256 boostCapWei)",
-  "function totalPlankBurned() view returns (uint256)",
-  "function totalEthBoosted() view returns (uint256)",
-  "function boostPool() view returns (uint256)",
-];
-const PLANK_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-];
+let lotteryContract = null;
+let routerContract = null;
+// Retired with the pre-CCS graph (fuel booster / powerboard /
+// progression): kept as null so no stale reference can bind.
 let fuelBooster = null;
 let plankToken = null;
-
-// ── Powerboard: every crash bet already earns a wager-weighted lottery
-// ticket toward a daily, rolling jackpot -- previously invisible in this
-// UI even though it's fully live on-chain. Read-only surface (claiming is
-// keeper-driven), so this only needs view functions.
-let POWERBOARD_ADDR = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
-const POWERBOARD_ABI = [
-  "function currentEpoch() view returns (uint256)",
-  "function jackpot() view returns (uint256)",
-  "function ticketsOf(uint256 epoch, address player) view returns (uint256)",
-  "function epochs(uint256) view returns (uint256 totalTickets, uint64 targetDrandRound, bool drawRequested, bool drawn, bool jackpotHit, uint256 drawnBall, address winner, uint256 prize)",
-  "function previewPrizes() view returns (uint256 ifJackpotHit, uint256 ifMiss)",
-  "function jackpotOddsOneIn() view returns (uint256)",
-  "function guaranteedHitByEpoch() view returns (uint256)",
-  "function epochDuration() view returns (uint256)",
-  "function genesisTimestamp() view returns (uint256)",
-  "function participantCount(uint256 epoch) view returns (uint256)",
-];
 let powerboard = null;
-
-// ── Progression: every wallet has a rank (Sapling -> Stick -> Board ->
-// Plank -> Big Beam -> Wooden Whale) earned by playing, that raises the
-// per-bet cap and lowers the entry premium. Read-only view surface here --
-// recordBet/recordFuelBurn/recordPowerboardClaim are called by the wired
-// contracts themselves, never directly from the UI.
-let PROGRESSION_ADDR = "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1";
-const PROGRESSION_ABI = [
-  "function rankOf(address player) view returns (uint8)",
-  "function capFor(address player) view returns (uint256)",
-  "function wageredNeededForNextRank(address player) view returns (uint256)",
-  "function statsOf(address) view returns (uint32 roundsPlayed, uint128 cumulativeWagered, uint32 fuelBurns, uint32 powerboardClaims, uint40 firstBetAt)",
-];
-const RANK_NAMES = ["Sapling", "Stick", "Board", "Plank", "Big Beam", "Wooden Whale"];
 let progression = null;
-let lastKnownRank = null; // used to detect a rank-up moment across polls
+let lastKnownRank = null;
+const RANK_NAMES = [];
 
 let bank = null; // bound to the root signer (deposit/withdraw/grant)
-let crashExt = null; // root signer, for setPayoutRedirect
+let crashExt = null; // alias of `crash` (kept for the instant-play helpers)
 let sessionSigner = null; // ephemeral browser keypair
-let sessionBank = null; // bank bound to the session key (betVia/cashOutVia)
+let sessionBank = null; // bank bound to the session key (betVia)
 let bankMode = false; // when true, play routes through the buffer, no popup
 let betAmount = "0.01";
 let currentRoundIdCache = null;
@@ -2833,17 +2772,17 @@ function drawMultGraph() {
   multGraphCtx.fill();
 }
 
-// Real RoundCrashed events, same source the Stats panel scans -- last ~10
+// Real RoundSettled events, same source the Stats panel scans -- last ~10
 // rounds, color-coded by tier the way Aviator/JetX round-history chips are.
 async function loadHistoryRibbon() {
   if (!crash) return;
   const ribbon = $("historyRibbon");
   try {
-    const events = await crash.queryFilter(crash.filters.RoundCrashed());
+    const events = await crash.queryFilter(crash.filters.RoundSettled());
     const recent = events.slice(-10).reverse();
     ribbon.innerHTML = recent
       .map((e) => {
-        const bps = e.args.crashMultiplierBps;
+        const bps = e.args.crashBps;
         if (bps === 0n) return `<span class="history-chip tier-void">VOID</span>`;
         const x = Number(bps) / 10000;
         const tier = x >= 5 ? "tier-high" : x >= 2 ? "tier-mid" : "tier-low";
@@ -2857,7 +2796,7 @@ async function loadHistoryRibbon() {
 }
 let attemptedLockThisRound = false;
 // The legacy reveal/settle split needs two
-// separate one-shot flags where V1 needed one: revealEntropy() makes the
+// separate one-shot flags where V1 needed one: the old reveal step makes the
 // true crash point public WITHOUT ending the round, and settleRound()
 // only becomes callable later, once real elapsed blocks actually reach
 // it -- these happen at genuinely different times, sometimes many
@@ -2867,7 +2806,7 @@ let attemptedEntropyRevealThisRound = false;
 let attemptedSettleThisRound = false;
 let attemptedRegisterThisRound = false;
 let attemptedClaimThisRound = false;
-// The legacy crash's maxElapsedBlocks immutable, fetched once at connect
+// The legacy crash's max-elapsed-blocks immutable, fetched once at connect
 // time and cached -- lets the keeper compute client-side exactly when
 // settleRound() will stop reverting, instead of polling it blindly.
 let maxElapsedBlocksCache = null;
@@ -2900,13 +2839,14 @@ function toast(msg, type) {
 }
 
 async function loadAbi() {
-  // V2: reveal/settle split, presetCashOut, estimatedPayout, keeper
-  // reward. NOTE: this page is bound to the RETIRED PlankCrashDrand ABI
-  // (plankcrashv2-abi.json); the canonical on-chain game is now
-  // contracts/PlankCrash.sol (CCS-2L, committed seats, no cash-out) and this
-  // page must be re-pointed before any on-chain deploy of the new stack.
-  const res = await fetch("plankcrashv2-abi.json");
-  abi = await res.json();
+  // The compiled ABIs of the CURRENT contracts (abi/*.json). If any is
+  // missing the connect fails loudly instead of binding to something else.
+  for (const name of ["PlankCrash", "PlankLottery", "PlankBank", "PlankRakeRouter", "IDrandBeacon"]) {
+    const res = await fetch(`abi/${name}.json`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`abi/${name}.json is missing -- run: node scripts/export-arcade-abi.mjs`);
+    ARCADE_ABI[name] = await res.json();
+  }
+  abi = ARCADE_ABI.PlankCrash;
 }
 
 document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
@@ -3103,54 +3043,34 @@ async function connectToChain(rpcUrl, address, pk, label) {
   signer = new ethers.Wallet(pk, provider);
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);
-  maxElapsedBlocksCache = await crash.maxElapsedBlocks();
-  // FOUR-CEILING pre-bet disclosure: the MAX PAYABLE multiplier (settlement ceiling) is
-  // mult(maxElapsedBlocks). A player's auto target cannot exceed it (the contract reverts
-  // BadAutoTarget), and any crash above it settles at this cap. Disclose it before the bet.
+  crashExt = crash;
+  // Immutable rules, read once (CCS-2L: no settlement ceiling below the max
+  // target; a seat commits its target at bet time and is paid by the
+  // parimutuel player layer with a floor, plus a fair-odds-capped house bonus).
   try {
-    const maxPayableBps = multiplierAtBlocksBps(Number(maxElapsedBlocksCache));
-    const maxPayableX = (maxPayableBps / 10000).toFixed(0);
-    const noteEl = document.querySelector(".payout-note");
-    if (noteEl) {
-      noteEl.setAttribute("data-maxpayable", maxPayableX);
-      const capLine = document.getElementById("maxPayableDisclosure");
-      if (capLine) capLine.textContent = `Max payable multiplier: ${maxPayableX}x — a crash above this settles at the cap.`;
-    }
-  } catch (_) { /* disclosure is best-effort; never blocks the bet UI */ }
-  // Bind the instant-play helpers to the same signer/chain.
-  try {
-    bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
-    crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
-    // Independent reads, fetched concurrently rather than as two sequential
-    // awaits -- connect-time latency has been a recurring real issue this
-    // session (see the e2e suite's own documented connect-timeout
-    // flakiness), so a second RPC round-trip added here without batching
-    // it against the first would be a real, avoidable regression, not a
-    // hypothetical one.
-    const [bettingDurationResult, rakeBpsResult] = await Promise.allSettled([
-      crashExt.bettingDurationSeconds(),
-      crashExt.rakeBps(),
+    const [duration, rake, minStake, maxTarget, floor, refundTimeout, lotteryAddr, routerAddr, beaconAddr, bankAddr] = await Promise.all([
+      crash.bettingDurationSeconds(), crash.rakeBps(), crash.minStakeWei(), crash.maxTargetBps(), crash.floorBps(), crash.refundTimeoutSeconds(),
+      crash.lottery(), crash.router(), crash.beacon(), crash.bank(),
     ]);
-    if (bettingDurationResult.status === "fulfilled") bettingDurationCache = Number(bettingDurationResult.value);
-    if (rakeBpsResult.status === "fulfilled") rakeBpsCache = Number(rakeBpsResult.value);
-    try {
-      fuelBooster = new ethers.Contract(FUEL_BOOSTER_ADDR, FUEL_BOOSTER_ABI, signer);
-      plankToken = new ethers.Contract(PLANK_ADDR, PLANK_ABI, signer);
-    } catch (_) { /* fuel booster optional; game still works without it */ }
-    try {
-      powerboard = new ethers.Contract(POWERBOARD_ADDR, POWERBOARD_ABI, signer);
-    } catch (_) { /* powerboard optional; game still works without it */ }
-    try {
-      progression = new ethers.Contract(PROGRESSION_ADDR, PROGRESSION_ABI, signer);
-    } catch (_) { /* progression optional; game still works without it */ }
-    try {
-      beaconContract = new ethers.Contract(BEACON_ADDR, BEACON_ABI, provider);
-    } catch (_) { /* verify popover optional; game still works without it */ }
+    bettingDurationCache = Number(duration);
+    rakeBpsCache = Number(rake);
+    minStakeWeiCache = minStake;
+    maxTargetBpsCache = maxTarget;
+    floorBpsCache = Number(floor);
+    refundTimeoutCache = Number(refundTimeout);
+    // The crash contract is the source of truth for its own graph.
+    LOTTERY_ADDR = lotteryAddr; ROUTER_ADDR = routerAddr; BEACON_ADDR = beaconAddr; BANK_ADDR = bankAddr;
+    const capLine = document.getElementById("maxPayableDisclosure");
+    if (capLine) capLine.textContent = `Targets from 1.01x to ${(Number(maxTarget) / 10_000).toLocaleString()}x. Payouts are parimutuel with a ${(Number(floor) / 100).toFixed(0)}% survivor floor; the target is committed with the bet and executes at settlement -- there is no cash-out.`;
+  } catch (_) { /* disclosure is best-effort; never blocks the bet UI */ }
+  try {
+    bank = new ethers.Contract(BANK_ADDR, ARCADE_ABI.PlankBank, signer);
+    lotteryContract = new ethers.Contract(LOTTERY_ADDR, ARCADE_ABI.PlankLottery, provider);
+    routerContract = new ethers.Contract(ROUTER_ADDR, ARCADE_ABI.PlankRakeRouter, provider);
+    beaconContract = new ethers.Contract(BEACON_ADDR, ARCADE_ABI.IDrandBeacon, provider);
     if (typeof refreshBankUI === "function") refreshBankUI();
     if (typeof refreshVault === "function") refreshVault();
-    if (typeof refreshFuelUI === "function") refreshFuelUI();
     if (typeof refreshPowerboardUI === "function") refreshPowerboardUI();
-    if (typeof refreshProgressionUI === "function") refreshProgressionUI();
     if (typeof tryRestoreSession === "function") tryRestoreSession();
   } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
@@ -3295,7 +3215,7 @@ const LOCAL_BLOCK_MS = 100;
 // division exactly -- this has to be bit-for-bit the same curve the
 // contract pays out on, not just visually close, since it also drives
 // what price the ascent animation implies. The multiplier readout and
-// ascent used to only update once per ~1.2s poll of liveMultiplierBps --
+// ascent used to only update once per ~1.2s poll of the on-chain multiplier --
 // correct in value, but it made both the number and the astronaut's climb
 // visibly step/stutter instead of climbing smoothly, since three.js
 // renders at 60fps and the polled value only changed a few times a
@@ -3353,82 +3273,52 @@ let scoreboardTimer = null;
 const _shortAddr = (a) => a.slice(0, 6) + "…" + a.slice(-4);
 
 async function renderScoreboard(roundId, round) {
-  // Only for a real crash (a voided round has no crash multiplier / roster).
-  if (!(round.crashMultiplierBps > 0n)) return;
-
-  const [bets, cashes, registers, claims] = await Promise.all([
-    crash.queryFilter(crash.filters.BetPlaced(roundId)),
-    crash.queryFilter(crash.filters.CashedOut(roundId)),
-    crash.queryFilter(crash.filters.ResultRegistered(roundId)),
-    crash.queryFilter(crash.filters.Claimed(roundId)),
+  // Only for a settled round (a voided/refunded round has no crash point).
+  if (!(round.crashBps > 0n)) return;
+  const [seats, settled] = await Promise.all([
+    crash.seatsOf(roundId),
+    crash.queryFilter(crash.filters.SeatSettled(roundId)),
   ]);
-
-  const lockBlock = Number(round.lockBlock);
-  const crashElapsed = Number(round.crashElapsedBlocks);
   const me = signer ? signer.address.toLowerCase() : null;
-
-  const stakeBy = new Map();
-  for (const e of bets) stakeBy.set(e.args.player.toLowerCase(), e.args.amount);
-  const cashBy = new Map();
-  for (const e of cashes) cashBy.set(e.args.player.toLowerCase(), { atBlock: Number(e.args.atBlock), preset: e.args.preset });
-  const payoutBy = new Map();
-  for (const e of claims) payoutBy.set(e.args.player.toLowerCase(), e.args.payout);
-  const registeredWon = new Map();
-  for (const e of registers) registeredWon.set(e.args.player.toLowerCase(), e.args.won);
-
+  const paidBy = new Map();
+  for (const e of settled) paidBy.set(e.args.player.toLowerCase(), { player: e.args.playerPayout, bonus: e.args.houseBonus, survived: e.args.survived });
   const winners = [], busted = [];
   let poolWagered = 0n, lostTotal = 0n;
-  for (const [addr, stake] of stakeBy) {
+  for (const seat of seats) {
+    const addr = seat.player.toLowerCase();
+    const stake = BigInt(seat.stake), targetBps = BigInt(seat.targetBps);
     poolWagered += stake;
-    const c = cashBy.get(addr);
-    // Authoritative once the keeper registers; otherwise derive from the
-    // real crash point exactly as the contract will.
-    const won = registeredWon.has(addr)
-      ? registeredWon.get(addr)
-      : (!!c && (c.atBlock - lockBlock) <= crashElapsed);
-    if (won && c) {
-      const exitBps = multiplierAtBlocksBps(c.atBlock - lockBlock);
-      winners.push({ addr, stake, exitBps, exitX: exitBps / 10000, preset: c.preset, payout: payoutBy.get(addr) ?? null });
-    } else {
-      busted.push({ addr, stake, cashedLate: !!c });
-      lostTotal += stake;
-    }
+    const r = paidBy.get(addr);
+    const survived = r ? r.survived : targetBps <= round.crashBps;
+    if (survived) winners.push({ addr, stake, targetBps, exitX: Number(targetBps) / 10000, payout: r ? r.player + r.bonus : null, bonus: r ? r.bonus : 0n });
+    else { busted.push({ addr, stake, targetBps }); lostTotal += stake; }
   }
-  winners.sort((a, b) => b.exitBps - a.exitBps);
+  winners.sort((a, b) => Number(b.targetBps - a.targetBps));
   busted.sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0));
-
-  // Prize pool to survivors = pool minus rake (use the real settled figure
-  // once available). Estimate each winner's pari-mutuel share by weight
-  // (stake x locked multiplier) until their real Claimed payout lands.
-  const distributable = round.distributable > 0n ? round.distributable : (poolWagered * 955n) / 1000n;
-  let totalWeight = 0n;
-  for (const w of winners) { w.weight = (w.stake * BigInt(w.exitBps)) / 10000n; totalWeight += w.weight; }
-
+  const distributable = round.playerDistributable > 0n ? round.playerDistributable : (poolWagered * BigInt(10000 - rakeBpsCache)) / 10000n;
   const fmt = (wei) => (+ethers.formatEther(wei)).toFixed(4);
   const rowsHtml = (arr, kind) => arr.length ? arr.map((r) => {
     const meTag = r.addr === me ? '<span class="sb-tag">YOU</span>' : '';
     if (kind === "win") {
-      const pay = r.payout != null ? "+" + fmt(r.payout) : (totalWeight > 0n ? "~" + fmt((distributable * r.weight) / totalWeight) : "—");
-      const presetTag = r.preset ? '<span class="sb-tag">auto</span>' : '';
-      return `<div class="sb-row win${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}${presetTag}</span><span class="sb-x">${r.exitX.toFixed(2)}x</span><span class="sb-amt">${pay} ETH</span></div>`;
+      const pay = r.payout != null ? "+" + fmt(r.payout) : "settling";
+      const bonusTag = r.bonus > 0n ? '<span class="sb-tag">+house bonus</span>' : '';
+      return `<div class="sb-row win${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}${bonusTag}</span><span class="sb-x">${r.exitX.toFixed(2)}x</span><span class="sb-amt">${pay} ETH</span></div>`;
     }
-    const why = r.cashedLate ? '<span class="sb-tag">too late</span>' : '<span class="sb-tag">rode it</span>';
-    return `<div class="sb-row bust${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}${why}</span><span class="sb-x">—</span><span class="sb-amt">-${fmt(r.stake)} ETH</span></div>`;
-  }).join("") : '<div class="sb-empty">' + (kind === "win" ? "No survivors — the whole pot rolls into the next round." : "Everyone cashed out in time.") + "</div>";
-
+    return `<div class="sb-row bust${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}<span class="sb-tag">target ${(Number(r.targetBps) / 10000).toFixed(2)}x</span></span><span class="sb-x">—</span><span class="sb-amt">-${fmt(r.stake)} ETH</span></div>`;
+  }).join("") : '<div class="sb-empty">' + (kind === "win" ? "No survivors — the pot and the seed return to the protected reserve." : "Every seat survived its target.") + "</div>";
   const el = $("scoreboard");
   el.innerHTML =
     `<div class="sb-head">
        <div class="sb-round">Round #${roundId.toString()}<br/>Scoreboard</div>
-       <div class="sb-crash"><small>Crashed at</small>${bpsToXStr(round.crashMultiplierBps)}x</div>
+       <div class="sb-crash"><small>Crashed at</small>${bpsToXStr(round.crashBps)}x</div>
      </div>
-     <div class="sb-sect win">Exited in time <span class="sb-count">${winners.length}</span></div>
+     <div class="sb-sect win">Survived their target <span class="sb-count">${winners.length}</span></div>
      <div class="sb-rows">${rowsHtml(winners, "win")}</div>
      <div class="sb-sect bust">Caught in the crash <span class="sb-count">${busted.length}</span></div>
      <div class="sb-rows">${rowsHtml(busted, "bust")}</div>
      <div class="sb-foot">
        <div class="sb-stat"><div class="sb-k">Pool</div><div class="sb-v">${fmt(poolWagered)}</div></div>
-       <div class="sb-stat"><div class="sb-k">To survivors</div><div class="sb-v" style="color:var(--win)">${winners.length ? fmt(distributable) : "0.0000"}</div></div>
+       <div class="sb-stat"><div class="sb-k">To survivors</div><div class="sb-v" style="color:var(--win)">${winners.length ? fmt(distributable + (round.totalBonus || 0n)) : "0.0000"}</div></div>
        <div class="sb-stat"><div class="sb-k">Lost</div><div class="sb-v" style="color:var(--lose)">${fmt(lostTotal)}</div></div>
      </div>`;
   el.classList.add("show");
@@ -3451,71 +3341,22 @@ async function renderLiveBoard(roundId, round) {
   if (liveBoardBusy) return;
   liveBoardBusy = true;
   try {
-    const [bets, cashes] = await Promise.all([
-      crash.queryFilter(crash.filters.BetPlaced(roundId)),
-      crash.queryFilter(crash.filters.CashedOut(roundId)),
-    ]);
-    if (bets.length === 0) { hideLiveBoard(); return; }
-
-    const lockBlock = Number(round.lockBlock);
-    const blockNow = await provider.getBlockNumber();
-    const elapsed = Math.max(0, blockNow - lockBlock);
-    const liveBps = BigInt(multiplierAtBlocksBps(elapsed));
+    const seats = await crash.seatsOf(roundId);
+    if (seats.length === 0) { hideLiveBoard(); return; }
     const me = signer ? signer.address.toLowerCase() : null;
-
-    const cashBy = new Map();
-    for (const e of cashes) cashBy.set(e.args.player.toLowerCase(), Number(e.args.atBlock));
-
-    // distributableNow: what the pot would be if settled at this exact
-    // pool size (grows as late bets... wait, betting's closed by LIVE --
-    // this is just the pool.pool as of the last poll, rake already known).
-    const distributableNow = (round.pool * BigInt(10000 - rakeBpsCache)) / 10000n;
-    // Everyone who's ALREADY cashed out has a locked weight (counted in
-    // round.provisionalWinningWeight by the contract itself). Anyone still
-    // flying would add stake * the SAME live multiplier if they cashed out
-    // this instant -- the multiplier is round-wide, not per-player, so
-    // this hypothetical is exactly computable for every flier at once.
-    const rows = [];
-    let hypotheticalTotalWeight = round.provisionalWinningWeight;
-    const flyingRows = [];
-    for (const e of bets) {
-      const addr = e.args.player.toLowerCase();
-      const stake = e.args.amount;
-      const cashedAtBlock = cashBy.get(addr);
-      if (cashedAtBlock !== undefined) {
-        const exitBps = BigInt(multiplierAtBlocksBps(cashedAtBlock - lockBlock));
-        const weight = (stake * exitBps) / 10000n;
-        const est = round.provisionalWinningWeight > 0n ? (distributableNow * weight) / round.provisionalWinningWeight : 0n;
-        rows.push({ addr, stake, status: "cashed", exitBps, est });
-      } else {
-        const hypotheticalWeight = (stake * liveBps) / 10000n;
-        flyingRows.push({ addr, stake, hypotheticalWeight });
-      }
-    }
-    for (const f of flyingRows) hypotheticalTotalWeight += f.hypotheticalWeight;
-    for (const f of flyingRows) {
-      const est = hypotheticalTotalWeight > 0n ? (distributableNow * f.hypotheticalWeight) / hypotheticalTotalWeight : 0n;
-      rows.push({ addr: f.addr, stake: f.stake, status: "flying", est });
-    }
-    // Flying first (the ones still making a decision are the ones this
-    // panel is for), then cashed, each group by stake size descending.
-    rows.sort((a, b) => {
-      if (a.status !== b.status) return a.status === "flying" ? -1 : 1;
-      return b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0;
-    });
-
+    // CCS-2L: every seat's target is committed. While the round is sealed
+    // (LIVE, awaiting the drand round) nothing can change; show each seat's
+    // committed target and the survivor floor it is guaranteed if it survives.
+    const rows = [...seats].map((seat) => ({ addr: seat.player.toLowerCase(), stake: BigInt(seat.stake), targetBps: BigInt(seat.targetBps) }))
+      .sort((a, b) => Number(a.targetBps - b.targetBps));
     const fmt = (wei) => (+ethers.formatEther(wei)).toFixed(4);
-    const rowsHtml = rows.length ? rows.map((r) => {
+    const rowsHtml = rows.map((r) => {
       const meTag = r.addr === me ? '<span class="lb-tag">YOU</span>' : "";
-      const statusHtml = r.status === "flying" ? "FLYING" : `<span style="color:var(--win)">${(Number(r.exitBps) / 10000).toFixed(2)}x</span>`;
-      return `<div class="lb-row ${r.status}${r.addr === me ? " me" : ""}"><span class="lb-who">${_shortAddr(r.addr)}${meTag}</span><span class="lb-status">${statusHtml}</span><span class="lb-est">~${fmt(r.est)} ETH</span></div>`;
-    }).join("") : '<div class="lb-empty">No bets yet this round.</div>';
-
-    const flyingCount = flyingRows.length;
-    const cashedCount = rows.length - flyingCount;
+      return `<div class="lb-row flying${r.addr === me ? " me" : ""}"><span class="lb-who">${_shortAddr(r.addr)}${meTag}</span><span class="lb-status"><span style="color:var(--win)">${(Number(r.targetBps) / 10000).toFixed(2)}x</span> target</span><span class="lb-est">floor ${fmt((r.stake * BigInt(floorBpsCache)) / 10000n)} ETH</span></div>`;
+    }).join("");
     $("liveBoard").innerHTML =
-      `<div class="lb-head">🔴 Live · Round #${roundId.toString()} in flight</div>
-       <div class="lb-pot">Pool right now <b>${fmt(round.pool)} ETH</b> · ${flyingCount} flying · ${cashedCount} locked in</div>
+      `<div class="lb-head">🔴 Sealed · Round #${roundId.toString()} awaiting drand #${round.targetDrandRound}</div>
+       <div class="lb-pot">Pool <b>${fmt(round.playerPool)} ETH</b> · seed ${fmt(round.seed)} ETH · ${rows.length} committed seat${rows.length === 1 ? "" : "s"}</div>
        <div class="lb-rows">${rowsHtml}</div>`;
     $("liveBoard").classList.add("show");
   } catch (_) {
@@ -3571,9 +3412,9 @@ function showScoreboardForRound(roundId, round) {
 // and pulses green whenever it grows -- the "always compounding" signal.
 let lastVaultWei = null;
 async function refreshVault() {
-  if (!crashExt) return;
+  if (!crash) return;
   try {
-    const [reserve, seed] = await Promise.all([crashExt.reserve(), crashExt.nextSeed()]);
+    const [reserve, seed] = await Promise.all([crash.reserve(), crash.nextSeed()]);
     const amtEl = $("vaultAmt");
     const seedEl = $("vaultSeed");
     if (amtEl) amtEl.textContent = (+ethers.formatEther(reserve)).toFixed(4) + " ETH";
@@ -3586,107 +3427,15 @@ async function refreshVault() {
   } catch (_) { /* transient */ }
 }
 
-// Fuel the Next Launch: burn $PLANK (ANY time -- burnFuel() has no phase
+// Fuel the Next Launch (retired pre-CCS panel; see the no-ops below)
 // check) to boost the shared Vault by its fair TWAP value. Shows this
 // round's burn activity and what % bigger the next pot is because of it,
 // and lets the connected player burn straight from the panel.
-let fuelBusy = false;
-let fuelUiEverRendered = false;
+// Retired with the pre-CCS fuel booster: the CCS-2L set seeds flights
+// from the Vault's emission buffer. Kept as no-ops so nothing binds to it.
+async function refreshFuelUI() { return; }
+async function burnFuelAction(amountStr) { void amountStr; toast("Fuel burning was retired with the pre-CCS graph; flights are seeded from the Vault buffer.", "error"); }
 
-async function refreshFuelUI() {
-  const body = $("fuelBody");
-  if (!body) return;
-  if (!fuelBooster || !crashExt || !signer) {
-    body.innerHTML = '<div class="fl-sub">Connect (or Simulate) to fuel the next launch. Burning is allowed at ANY time -- it never affects your own odds, only the shared pot everyone plays for next.</div>';
-    return;
-  }
-  try {
-    const [[, plankBurned, ethBoosted, cap], reserve, num, den, myBal] = await Promise.all([
-      fuelBooster.roundFuelStats(),
-      crashExt.reserve(),
-      crashExt.seedNumerator(),
-      crashExt.seedDenominator(),
-      plankToken ? plankToken.balanceOf(signer.address) : Promise.resolve(0n),
-    ]);
-    // % bigger the NEXT seed is, purely from this round's fuel burns: the
-    // seed formula is floor(reserve * num/den); compare against what the
-    // seed would be WITHOUT the ETH this round's burns contributed.
-    const baselineReserve = reserve > ethBoosted ? reserve - ethBoosted : 0n;
-    const actualSeed = (reserve * num) / den;
-    const baselineSeed = (baselineReserve * num) / den;
-    let pctText = "—";
-    if (baselineSeed > 0n) {
-      const pct = Number(((actualSeed - baselineSeed) * 10000n) / baselineSeed) / 100;
-      pctText = "+" + pct.toFixed(1) + "%";
-    } else if (actualSeed > 0n) {
-      pctText = "new!";
-    }
-    const capPct = cap > 0n ? Math.min(100, Number((ethBoosted * 100n) / cap)) : 0;
-
-    body.innerHTML =
-      '<div class="fl-sub">Burn $PLANK anytime to grow the pot everyone plays for next — a bigger seed for every future round, for the whole table. (It never changes your own stake, cash-out, or crash odds — this is purely a gift to the pot.)</div>' +
-      '<div class="fl-stats">' +
-        '<div class="fl-stat"><div class="fl-k">Burned</div><div class="fl-v">' + (+ethers.formatEther(plankBurned)).toLocaleString(undefined, {maximumFractionDigits:0}) + '</div></div>' +
-        '<div class="fl-stat"><div class="fl-k">Boosted</div><div class="fl-v">' + (+ethers.formatEther(ethBoosted)).toFixed(4) + ' Ξ</div></div>' +
-        '<div class="fl-stat"><div class="fl-k">Next pot</div><div class="fl-v pct">' + pctText + '</div></div>' +
-      '</div>' +
-      '<div class="fl-bar"><div class="fl-bar-fill" style="--fill:' + (capPct / 100).toFixed(4) + '"></div></div>' +
-      '<div class="fl-row"><input id="flAmt" type="number" min="1" step="10" value="100" />' +
-      '<button id="flBurn">Burn</button></div>' +
-      '<div class="fl-bal">Your balance: ' + (+ethers.formatEther(myBal)).toLocaleString(undefined, {maximumFractionDigits:2}) + ' $PLANK</div>';
-    document.getElementById("flBurn").onclick = () => burnFuelAction(document.getElementById("flAmt").value);
-    fuelUiEverRendered = true;
-  } catch (_) {
-    // A single failed poll (RPC hiccup/rate-limit, especially on a public
-    // remote RPC) shouldn't blank out an already-successful render -- that
-    // reads as the widget "coming in and out" every few seconds, which
-    // looks like a real bug even though the underlying contract call is
-    // fine. Only show the fallback message if we've never rendered real
-    // data yet, so a genuine "not available on this deployment" case still
-    // says so.
-    if (!fuelUiEverRendered) {
-      body.innerHTML = '<div class="fl-sub">Fuel booster not available on this deployment.</div>';
-    }
-  }
-}
-
-async function burnFuelAction(amountStr) {
-  if (fuelBusy) return;
-  if (!fuelBooster || !plankToken || !signer) { toast("Connect first"); return; }
-  const amt = parseFloat(amountStr);
-  if (!(amt > 0)) { toast("Enter an amount of $PLANK to burn"); return; }
-  const wei = ethers.parseEther(String(amt));
-  // Check first instead of letting the burn revert on it -- this account
-  // (most commonly Deployer, via Simulate mode) may genuinely hold none;
-  // that's expected, not a bug, but "execution reverted" doesn't tell a
-  // player that's what happened or what to do about it.
-  const currentBal = await plankToken.balanceOf(signer.address).catch(() => 0n);
-  if (currentBal < wei) {
-    toast(`You only have ${ethers.formatEther(currentBal)} $PLANK -- burn a smaller amount, or switch to an account that holds some.`, "error");
-    return;
-  }
-  fuelBusy = true;
-  const btn = document.getElementById("flBurn");
-  if (btn) { btn.disabled = true; btn.textContent = "Burning…"; }
-  try {
-    const allowance = await plankToken.allowance(signer.address, FUEL_BOOSTER_ADDR);
-    if (allowance < wei) {
-      await (await plankToken.approve(FUEL_BOOSTER_ADDR, wei)).wait();
-    }
-    await (await fuelBooster.burnFuel(wei)).wait();
-    toast("🔥 Burned " + amt + " $PLANK — fueling the next launch's pot");
-  } catch (err) {
-    toast("Burn failed: " + (err.shortMessage || err.message));
-  } finally {
-    fuelBusy = false;
-    refreshFuelUI();
-  }
-}
-
-// Powerboard: makes the otherwise-invisible lottery mechanic visible. Every
-// crash bet already earns a real, wager-weighted ticket toward this daily
-// rolling jackpot (keeper-driven claimTickets, no player action needed) --
-// this panel is purely a READOUT of that already-live system.
 let lastPbJackpotWei = null;
 
 function fmtDuration(sec) {
@@ -3698,54 +3447,46 @@ function fmtDuration(sec) {
 }
 
 async function refreshPowerboardUI() {
-  if (!powerboard) return;
+  if (!lotteryContract || !crash) return;
   try {
-    const epoch = await powerboard.currentEpoch();
-    const [jackpotWei, myTickets, ep, oddsOneIn, guaranteedBy, epochDuration, genesisTs, participants] = await Promise.all([
-      powerboard.jackpot(),
-      signer ? powerboard.ticketsOf(epoch, signer.address) : Promise.resolve(0n),
-      powerboard.epochs(epoch),
-      powerboard.jackpotOddsOneIn(),
-      powerboard.guaranteedHitByEpoch(),
-      powerboard.epochDuration(),
-      powerboard.genesisTimestamp(),
-      powerboard.participantCount(epoch),
+    const [quote, pool, hits, draws, oddsOneIn, kappaBps, contributionBps, owedToMe, roundId] = await Promise.all([
+      lotteryContract.quote(), lotteryContract.pool(), lotteryContract.hits(), lotteryContract.draws(),
+      lotteryContract.oddsOneIn(), lotteryContract.kappaBps(), lotteryContract.contributionBps(),
+      signer ? lotteryContract.owed(signer.address) : Promise.resolve(0n), crash.currentRoundId(),
     ]);
-    const totalTickets = ep.totalTickets;
-
-    // Header chip: your tickets + the jackpot headline.
+    const [prize, winnerPaid, seeded] = [quote.prize, quote.winnerPaid, quote.seeded];
+    // This round's rake so far prices this round's own chance (actuarial rule).
+    const round = await crash.currentRound();
+    const rakeSoFar = (round.playerPool * BigInt(rakeBpsCache)) / 10000n;
+    const threshold = prize > 0n ? await lotteryContract.hitThreshold(rakeSoFar, prize) : 0n;
+    const PROB_ONE = 10n ** 18n;
+    const roundOdds = threshold > 0n ? (PROB_ONE + threshold - 1n) / threshold : null;
+    const myStake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
+    const mine = round.playerPool > 0n ? (threshold * myStake) / round.playerPool : 0n;
+    const myOdds = mine > 0n ? (PROB_ONE + mine - 1n) / mine : null;
     const ticketsEl = $("pbTickets");
     const jackpotEl = $("pbJackpot");
-    if (ticketsEl) ticketsEl.textContent = (+ethers.formatEther(myTickets)).toLocaleString(undefined, {maximumFractionDigits: 2});
-    if (jackpotEl) jackpotEl.textContent = "· jackpot " + (+ethers.formatEther(jackpotWei)).toFixed(3) + " Ξ";
-    if (lastPbJackpotWei !== null && jackpotWei > lastPbJackpotWei) {
+    if (ticketsEl) ticketsEl.textContent = prize > 0n ? "PRIZE " + (+ethers.formatEther(winnerPaid)).toFixed(4) + " Ξ" : "PRIZE FUNDING";
+    if (jackpotEl) jackpotEl.textContent = myOdds !== null ? "· your odds 1 in " + myOdds.toLocaleString() : roundOdds !== null ? "· round 1 in " + roundOdds.toLocaleString() : "";
+    if (lastPbJackpotWei !== null && prize > lastPbJackpotWei) {
       const chip = $("pbStat");
       if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
     }
-    lastPbJackpotWei = jackpotWei;
-
-    // Popover detail body (only worth computing while it's actually open).
+    lastPbJackpotWei = prize;
     const pop = $("pbPopover");
     if (pop && pop.classList.contains("show")) {
-      const oddsText = totalTickets > 0n
-        ? "1 in " + (Number(totalTickets) / Math.max(1, Number(myTickets))).toLocaleString(undefined, {maximumFractionDigits: 1})
-        : "—";
-      const now = Math.floor(Date.now() / 1000);
-      const epochEndsAt = Number(genesisTs) + (Number(epoch) + 1) * Number(epochDuration);
-      const secsToDraw = epochEndsAt - now;
-      const guaranteeText = guaranteedBy > 0n
-        ? "Full jackpot guaranteed to pay out by epoch " + guaranteedBy.toString() + " even if the ball never hits."
-        : null;
-
+      const pct = (t) => `${(Number(t / 10_000_000_000n) / 1e8 * 100).toFixed(4)}%`;
       $("pbPopBody").innerHTML =
-        '<div class="pb-row"><span class="pb-k">Your tickets today</span><span class="pb-v hi">' + (+ethers.formatEther(myTickets)).toFixed(4) + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Total tickets today</span><span class="pb-v">' + (+ethers.formatEther(totalTickets)).toFixed(4) + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Players today</span><span class="pb-v">' + participants.toString() + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Your odds today</span><span class="pb-v hi">' + oddsText + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Jackpot</span><span class="pb-v">' + (+ethers.formatEther(jackpotWei)).toFixed(4) + ' Ξ</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Ball odds (jackpot hit)</span><span class="pb-v">1 in ' + oddsOneIn.toString() + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Next draw</span><span class="pb-v">' + fmtDuration(secsToDraw) + '</span></div>' +
-        (guaranteeText ? '<div class="pb-guarantee">🔒 ' + guaranteeText + '</div>' : '');
+        '<div class="pb-row"><span class="pb-k">If you win you receive</span><span class="pb-v hi">' + (+ethers.formatEther(winnerPaid)).toFixed(4) + ' Ξ</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Prize on the board</span><span class="pb-v">' + (+ethers.formatEther(prize)).toFixed(4) + ' Ξ = winner + ' + (+ethers.formatEther(seeded)).toFixed(4) + ' Ξ next seed</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Banked right now</span><span class="pb-v">' + (+ethers.formatEther(pool)).toFixed(4) + ' Ξ</span></div>' +
+        '<div class="pb-row"><span class="pb-k">This round\'s chance</span><span class="pb-v">' + (roundOdds !== null ? '1 in ' + roundOdds.toLocaleString() + ' (' + pct(threshold) + ')' : 'no prize on the board yet') + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Your chance this round</span><span class="pb-v hi">' + (myOdds !== null ? 'about 1 in ' + myOdds.toLocaleString() : 'no seat in this round') + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Record</span><span class="pb-v">' + draws.toString() + ' draws · ' + hits.toString() + ' hits</span></div>' +
+        (owedToMe > 0n ? '<div class="pb-row"><span class="pb-k">Owed to you</span><span class="pb-v hi">' + (+ethers.formatEther(owedToMe)).toFixed(4) + ' Ξ · <button id="pbWithdraw">withdraw</button></span></div>' : '') +
+        '<div class="pb-guarantee">Round-only eligibility: only seats of the round that draws hold tickets, weighted by stake. Each round\'s chance is min(1 in ' + oddsOneIn.toString() + ', its contribution (' + (Number(contributionBps) / 100).toFixed(0) + '% of its rake) ÷ (' + (Number(kappaBps) / 10_000).toFixed(1) + ' × the winner take)), so a bigger prize is rarer in exact proportion and can never be farmed. Nothing is forced; displayed equals redeemable (PlankLottery.quote()).</div>';
+      const wd = document.getElementById("pbWithdraw");
+      if (wd) wd.onclick = async () => { try { await (await lotteryContract.connect(signer).withdraw()).wait(); toast("Lottery winnings withdrawn", "success"); } catch (err) { toast("Withdraw failed: " + (err.shortMessage || err.message), "error"); } };
     }
   } catch (_) { /* transient */ }
 }
@@ -3775,107 +3516,13 @@ $("pbStat").addEventListener("click", () => {
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
 
+// Retired with the pre-CCS rank ladder: no ranks, no per-rank
+// caps; the whale cap is a plain share of the pool. The rank chip is hidden.
 async function refreshProgressionUI() {
-  if (!progression || !signer) return;
-  try {
-    const [rank, cap, wageredNeeded, stats] = await Promise.all([
-      progression.rankOf(signer.address),
-      progression.capFor(signer.address),
-      progression.wageredNeededForNextRank(signer.address),
-      progression.statsOf(signer.address),
-    ]);
-    const rankNum = Number(rank);
-    const rankName = RANK_NAMES[rankNum] || "—";
-
-    const nameEl = $("rankName");
-    if (nameEl) nameEl.textContent = rankName;
-
-    // Rank-up detection: only fires once we've actually observed a prior
-    // rank for this session (not on the very first poll after connect,
-    // which would otherwise "celebrate" a rank the player already had).
-    if (lastKnownRank !== null && rankNum > lastKnownRank) {
-      const chip = $("rankStat");
-      if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
-      // Rank is disclosed as account state, never celebrated as a reason to
-      // increase stake. Responsible-game standards specifically prohibit
-      // product messaging that urges customers to raise what they wager.
-      toast("Account rank updated to " + rankName + ". Review your limits before playing.", "success");
-    }
-    lastKnownRank = rankNum;
-
-    const pop = $("rankPopover");
-    if (pop && pop.classList.contains("show")) {
-      const isMaxRank = rankNum >= RANK_NAMES.length - 1;
-      const capStr = (+ethers.formatEther(cap)).toFixed(3);
-      const wageredStr = (+ethers.formatEther(stats.cumulativeWagered)).toFixed(4);
-      const nextStr = isMaxRank ? null : (+ethers.formatEther(wageredNeeded)).toFixed(4);
-      const barPct = isMaxRank ? 100 : Math.max(2, Math.min(100,
-        100 * Number(stats.cumulativeWagered) / Math.max(1, Number(stats.cumulativeWagered) + Number(wageredNeeded))));
-
-      $("rankPopBody").innerHTML =
-        '<div class="pb-row"><span class="pb-k">Rank</span><span class="pb-v hi">' + rankName + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Max bet</span><span class="pb-v">' + capStr + ' Ξ</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Rounds played</span><span class="pb-v">' + stats.roundsPlayed.toString() + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Total wagered</span><span class="pb-v">' + wageredStr + ' Ξ</span></div>' +
-        (isMaxRank
-          ? '<div class="pb-guarantee">🏆 Max rank reached -- no cap, no entry fee.</div>'
-          : '<div class="rank-bar-track"><div class="rank-bar-fill" style="--fill:' + (barPct / 100).toFixed(4) + '"></div></div>' +
-            '<div class="rank-bar-label">' + nextStr + ' Ξ more wagered to rank up</div>');
-    }
-  } catch (_) { /* transient */ }
+  const chip = $("rankStat"); if (chip) chip.style.display = "none";
+  const pop = $("rankPopover"); if (pop) pop.classList.remove("show");
 }
 
-$("rankStat").addEventListener("click", () => {
-  $("rankPopover").classList.toggle("show");
-  if (PLAYTEST_MODE) {
-    const evolution = privateSnapshot?.evolution || {};
-    const rake = Number(evolution.effectiveRakeBps ?? privateSnapshot?.policy?.rakeBps ?? 450);
-    const floor = Number(privateSnapshot?.policy?.rakeFloorBps ?? 250);
-    const step = Number(privateSnapshot?.policy?.rakeStepBps ?? 25);
-    const milestone = BigInt(privateSnapshot?.policy?.rakeVolumeStep ?? "25000000");
-    const volume = BigInt(evolution.qualifiedVolume ?? "0");
-    const withinTier = milestone > 0n ? volume % milestone : 0n;
-    const progress = evolution.nextMilestoneVolume == null ? 100 : Number((withinTier * 10_000n) / milestone) / 100;
-    document.querySelector(".rank-pop-sub").textContent = "TABLE EVOLUTION · Economic volume lowers protocol rake permanently. Rank never changes price, odds, settlement weight, or the $1-reference floor.";
-    $("rankPopBody").innerHTML =
-      `<div class="pb-row"><span class="pb-k">Player RTP</span><span class="pb-v hi">${(100-rake/100).toFixed(2)}%</span></div>` +
-      `<div class="pb-row"><span class="pb-k">Permanent floor</span><span class="pb-v">${(100-floor/100).toFixed(2)}% RTP</span></div>` +
-      `<div class="pb-row"><span class="pb-k">Next unlock</span><span class="pb-v">+${(step/100).toFixed(2)}% RTP</span></div>` +
-      `<div class="rank-bar-track"><div class="rank-bar-fill" style="--fill:${(progress / 100).toFixed(4)}"></div></div>` +
-      `<div class="rank-bar-label">${evolution.nextMilestoneVolume == null ? "MAXIMUM PLAYER-PURSE TIER UNLOCKED" : `${privateCredits(evolution.volumeRemaining)} qualified credits to next tier`}</div>` +
-      '<div class="pb-row"><span class="pb-k">Crash weight</span><span class="pb-v">stake × ln(lock)</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Wallet splitting</span><span class="pb-v">0 aggregate gain</span></div>' +
-      '<div class="pb-guarantee">Only qualified staked notional advances the meter. More wallets do not. Ranks remain reputation-only and cannot unlock larger economic rights.</div>';
-    return;
-    document.querySelector(".rank-pop-sub").textContent = "Ranks belong to identity and reputation, not gambling price, odds, or permission to risk more. The alpha applies the same table rules to every economic participant.";
-    $("rankPopBody").innerHTML =
-      '<div class="pb-row"><span class="pb-k">Stake weight</span><span class="pb-v hi">LINEAR</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Lock-risk weight</span><span class="pb-v">stake × (lock − 1.00×)</span></div>' +
-      '<div class="pb-row"><span class="pb-k">Wallet splitting</span><span class="pb-v">No aggregate weight gain</span></div>' +
-      '<div class="pb-guarantee">Per-wallet ranks cannot prove one human and are not called Sybil-resistant. Mainnet requires protocol-wide concentration limits, identity-aware responsible limits where legally required, and monitoring—not wager-to-unlock incentives.</div>';
-  } else refreshProgressionUI();
-});
-$("rankPopClose").addEventListener("click", () => $("rankPopover").classList.remove("show"));
-
-// ── Verify popover: shows the CURRENT round's real drand round number and
-// its randomness, once revealed, straight from the beacon this contract
-// actually reads -- not a claim, a live on-chain read anyone else could
-// run themselves. drand's public API lets anyone independently fetch the
-// signature for a given round number and confirm it matches what the
-// contract used, with zero trust in this game's operator required either
-// way -- that's the whole point of a threshold-BLS public beacon over a
-// centralized "provably fair" seed scheme.
-// Real bug caught before shipping: this was first written with a
-// fabricated chain hash, which would have sent every "verify" click to
-// either a 404 or (worse) a real but WRONG drand chain, undermining the
-// entire point of this feature. Fixed properly: chainHash is a public
-// immutable on the REAL DrandBeacon contract (read live below, so this is
-// always correct for whatever chain the deployed beacon actually verifies
-// against -- never a value baked into this file). The mock beacon used
-// for local dev has no such field, so this constant is only ever the
-// fallback for that case, and even then it's the exact value
-// DrandBeacon.sol's own header documents for evmnet, with the same
-// "verify, don't trust this comment" caveat that file itself carries.
 const DRAND_CHAIN_HASH_FALLBACK = "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3";
 async function refreshVerifyPopover() {
   const body = $("verifyPopBody");
@@ -3932,48 +3579,40 @@ async function refreshVerifyPopover() {
     }
     return;
   }
-  if (sub) sub.textContent = "The crash point is derived from the League of Entropy public drand beacon, which no single party can control or predict.";
+  if (sub) sub.textContent = "The crash point is derived from the League of Entropy public drand beacon, which no single party can control or predict: PlankCrash commits the target drand round BEFORE any stake is visible, and settles from that round's randomness only.";
   if (!crash) return;
   try {
     const roundId = await crash.currentRoundId();
     const round = await crash.rounds(roundId);
     const drandRound = round.targetDrandRound.toString();
-    let chainHash = DRAND_CHAIN_HASH_FALLBACK;
-    if (beaconContract) {
-      try { chainHash = (await beaconContract.chainHash()).replace(/^0x/, ""); } catch (_) { /* mock beacon has no chainHash() -- keep fallback */ }
-    }
+    const chainHash = DRAND_CHAIN_HASH_FALLBACK;
     let randomnessHtml = '<span class="vf-v pending">not yet available</span>';
     let derivedHtml = "";
-    if (round.entropyRevealed && beaconContract) {
+    if (beaconContract) {
       try {
         const randomness = await beaconContract.randomnessOrZero(round.targetDrandRound);
-        randomnessHtml = `<span class="vf-v">${randomness.slice(0, 10)}…${randomness.slice(-8)}</span>`;
-        // FOUR CEILINGS, disclosed truthfully:
-        //  - TRUE derived crash = what the RNG produced (uncapped display value);
-        //  - SETTLEMENT crash = min(true, maxElapsedBlocks) = what the contract actually PAID.
-        // When the true value exceeds the settlement ceiling, we show BOTH and say so — the
-        // display number is never presented as a payout it wasn't.
-        const trueBlocks = Number(round.trueCrashElapsedBlocks);
-        const capped = round.trueCrashElapsedBlocks > maxElapsedBlocksCache;
-        const effective = capped ? maxElapsedBlocksCache : round.trueCrashElapsedBlocks;
-        const trueBps = multiplierAtBlocksBps(trueBlocks);
-        const settledBps = multiplierAtBlocksBps(Number(effective));
-        derivedHtml =
-          `<div class="vf-row"><span class="vf-k">Derived elapsed blocks</span><span class="vf-v">${round.trueCrashElapsedBlocks}</span></div>` +
-          `<div class="vf-row"><span class="vf-k">True derived crash</span><span class="vf-v">${(trueBps / 10000).toFixed(2)}x</span></div>` +
-          (capped
-            ? `<div class="vf-row"><span class="vf-k">Settled at (cap)</span><span class="vf-v">${(settledBps / 10000).toFixed(2)}x</span></div>` +
-              `<div class="vf-row"><span class="vf-k" style="color:var(--ink-dim)">Note</span><span class="vf-v" style="color:var(--ink-dim)">crash reached ${(trueBps / 10000).toFixed(2)}x — payouts settle at the ${(settledBps / 10000).toFixed(2)}x cap</span></div>`
-            : `<div class="vf-row"><span class="vf-k">Settlement crash</span><span class="vf-v">${(settledBps / 10000).toFixed(2)}x</span></div>`);
+        if (randomness && randomness !== ethers.ZeroHash) {
+          randomnessHtml = `<span class="vf-v">${randomness.slice(0, 10)}…${randomness.slice(-8)}</span>`;
+          // Recompute the settlement inputs exactly as the contract does.
+          const seedHash = await crash.resultSeed(roundId, round.targetDrandRound, randomness);
+          const derived = await crash._deriveCrash(seedHash);
+          derivedHtml =
+            `<div class="vf-row"><span class="vf-k">Result seed</span><span class="vf-v">${seedHash.slice(0, 10)}…${seedHash.slice(-8)}</span></div>` +
+            `<div class="vf-row"><span class="vf-k">Derived crash</span><span class="vf-v">${(Number(derived) / 10000).toFixed(2)}x</span></div>` +
+            (round.crashBps > 0n ? `<div class="vf-row"><span class="vf-k">Settled crash</span><span class="vf-v">${(Number(round.crashBps) / 10000).toFixed(2)}x ${round.crashBps === derived ? "· matches" : "· DOES NOT MATCH"}</span></div>` : "");
+        }
       } catch (_) { /* beacon read failed -- leave as pending */ }
     }
     body.innerHTML =
       `<div class="vf-row"><span class="vf-k">Round</span><span class="vf-v">#${roundId.toString()}</span></div>` +
+      `<div class="vf-row"><span class="vf-k">Phase</span><span class="vf-v">${["BETTING", "LIVE", "SETTLED", "VOIDED", "REFUNDED"][Number(round.phase)] ?? round.phase}</span></div>` +
       `<div class="vf-row"><span class="vf-k">drand round #</span><span class="vf-v">${drandRound}</span></div>` +
+      `<div class="vf-row"><span class="vf-k">Reveal not before</span><span class="vf-v">${new Date(Number(round.revealNotBefore) * 1000).toLocaleTimeString()}</span></div>` +
+      `<div class="vf-row"><span class="vf-k">Rule</span><span class="vf-v">ccs-2l v${(await crash.settlementRuleVersion()).toString()} · params ${round.paramsHash.slice(0, 10)}…</span></div>` +
       `<div class="vf-row"><span class="vf-k">Randomness</span>${randomnessHtml}</div>` +
       derivedHtml +
       `<a class="vf-link" href="https://api.drand.sh/${chainHash}/public/${drandRound}" target="_blank" rel="noopener">Check drand round ${drandRound} independently ↗</a>` +
-      `<div class="vf-note">Local dev uses a mock beacon (setRandomness is a test-only injection point -- see DrandBeaconMock.sol) since there's no local drand network to relay from. On a real deployment this same round number resolves against the actual League of Entropy beacon at the link above, and the contract only ever reads what's already public there -- it can't inject anything itself.</div>`;
+      `<div class="vf-note">Local dev uses DrandBeaconMock (setRandomness is a test-only injection point). On a real deployment this same round number resolves against the League of Entropy beacon at the link above; the contract only reads what is already public there.</div>`;
   } catch (_) {
     body.innerHTML = '<div class="vf-row"><span class="vf-k">Unavailable</span><span class="vf-v pending">connect first</span></div>';
   }
@@ -3984,26 +3623,50 @@ $("verifyBtn").addEventListener("click", () => {
 });
 $("verifyPopClose").addEventListener("click", () => $("verifyPopover").classList.remove("show"));
 
-// Event-driven: watch for the newest RoundCrashed and show its scoreboard,
+// Event-driven: watch for the newest RoundSettled and show its scoreboard,
 // no matter what the current round is now. Runs on the same poll cadence.
 let lastScoreboardRound = -1n;
 async function pollScoreboard() {
-  if (!crash) return;
+  if (!crash || lastScoreboardRound === -1n) return;
   try {
-    const evs = await crash.queryFilter(crash.filters.RoundCrashed());
+    const evs = await crash.queryFilter(crash.filters.RoundSettled());
     if (!evs.length) return;
     const last = evs[evs.length - 1];
     const rid = last.args.roundId;
     if (rid > lastScoreboardRound) {
       lastScoreboardRound = rid;
       const rd = await crash.rounds(rid);
-      if (rd.crashMultiplierBps > 0n) showScoreboardForRound(rid, rd);
-      // Event-driven Stats auto-refresh: the gamification research finding
-      // from earlier ("treat every player action as an event that updates
-      // visible state, not a static view requiring manual refresh") --
-      // re-scan automatically on every real round-crash event, but ONLY
-      // while the panel is actually open, so this never burns a
-      // queryFilter scan on a closed panel nobody's looking at.
+      if (rd.crashBps > 0n) {
+        showScoreboardForRound(rid, rd);
+        crashedAt = performance.now();
+        shakeAmount = prefersReducedMotion ? 0 : 1.4;
+        spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
+        sfx.crash(); haptic([50, 30, 80]);
+        const flashEl = $("crashFlash");
+        if (flashEl) { flashEl.classList.remove("flash"); void flashEl.offsetWidth; flashEl.classList.add("flash"); }
+        const xStr = bpsToXStr(rd.crashBps);
+        setMultReadout(xStr, "crashed");
+        targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
+        recordMultGraphSample(Number(xStr));
+        drawMultGraph();
+        // The player's own conclusion: real payout from the SeatSettled event.
+        if (signer) {
+          const [stake, targetBps, mine] = await Promise.all([crash.stakeOf(rid, signer.address), crash.targetOf(rid, signer.address), crash.queryFilter(crash.filters.SeatSettled(rid, signer.address))]);
+          if (stake > 0n) {
+            const paid = mine[0] ? mine[0].args.playerPayout + mine[0].args.houseBonus : await crash.paidOf(rid, signer.address);
+            const survived = mine[0] ? mine[0].args.survived : targetBps <= rd.crashBps;
+            const net = paid - stake;
+            const targetX = Number(targetBps) / 10000;
+            if (!survived) showResultCard("lose", Number(xStr), `-${ethers.formatEther(stake)} ETH`, `CRASHED BELOW YOUR ${targetX.toFixed(2)}x TARGET`);
+            else {
+              const profitable = net > 0n;
+              const delta = `${net >= 0n ? "+" : "-"}${ethers.formatEther(net >= 0n ? net : -net)} ETH net`;
+              showResultCard(profitable ? "win" : "lose", targetX, delta, profitable ? "PROFIT · TARGET SURVIVED" : "SURVIVED · RETURN BELOW STAKE");
+              if (profitable) celebrate(targetX);
+            }
+          }
+        }
+      }
       if ($("statsPanel").classList.contains("show")) runStatsScan();
     }
   } catch (_) { /* transient */ }
@@ -4084,7 +3747,7 @@ async function doPlaceBet(viaButton) {
 // tells a player what to do next, instead of a raw ABI error name (or
 // "unknown custom error" entirely, which is what an out-of-date ABI
 // produces -- decoding depends on the contract's error list matching what's
-// actually deployed, see plankcrashv2-abi.json's own generation comment).
+// actually deployed, see abi/PlankCrash.json, exported from the compiled artifact).
 // BadPhase/TooEarly is the single most likely one anyone will ever hit:
 // clicking LAUNCH in the last instant before a round locks.
 //
@@ -4106,19 +3769,20 @@ function friendlyRevertReason(err) {
   if (name === "BadPhase" || name === "TooEarly" || name === "TooLate") {
     return "Betting just closed for this round -- try the next one.";
   }
-  if (name === "StakeExceedsCap") {
-    if (progression && signer) {
-      return "That bet is above your current rank's max bet" +
-        (lastKnownRank !== null ? " (" + RANK_NAMES[lastKnownRank] + ")" : "") +
-        " -- keep playing to rank up and unlock bigger bets.";
-    }
-    return "That bet would be too large a share of this round's pool -- try a smaller amount.";
+  if (name === "BadStake") {
+    return `That stake is outside the round's limits (minimum ${ethers.formatEther(minStakeWeiCache)} ETH, and no single wallet may hold more than the whale-cap share of the pool).`;
+  }
+  if (name === "BadTarget") {
+    return `Targets must be between 1.01x and ${(Number(maxTargetBpsCache) / 10_000).toLocaleString()}x.`;
   }
   if (name === "AlreadyBet") {
-    return "You've already got a bet in this round.";
+    return "You've already got a seat in this round.";
   }
-  if (name === "AlreadyCashedOut") {
-    return "Your pre-locked or earlier manual multiplier is already secured.";
+  if (name === "RoundFull") {
+    return "This round's seats are full -- try the next one.";
+  }
+  if (name === "RandomnessNotYetAvailable") {
+    return "The drand round for this flight has not been published yet.";
   }
   return (err && (err.shortMessage || err.message)) || "unknown error";
 }
@@ -4130,47 +3794,11 @@ async function doCashOut(viaButton) {
   sfx.click(); haptic(15);
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "CASHING OUT…"; }
   if (PLAYTEST_MODE) return privatePlaytestCommand("lock");
-  try {
-    setChainAction(ACTION_STAGES.INTENT, { action: "lock" });
-    const roundId = await crash.currentRoundId();
-    const liveBps = await crash.liveMultiplierBps(roundId);
-    setChainAction(ACTION_STAGES.SIGNING);
-    const tx = bankMode && sessionBank
-      ? await sessionBank.cashOutVia(crash.target, roundId)
-      : await crash.cashOut(roundId);
-    setChainAction(ACTION_STAGES.SUBMITTED, { hash: tx.hash });
-    const receipt = await tx.wait();
-    setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });
-    setChainAction(ACTION_STAGES.ACCEPTED);
-    sfx.cashOut(); haptic([20, 30, 20]);
-    // The click-time quote is only intent. Report the block actually accepted
-    // by the contract, which is the only multiplier settlement will use.
-    let acceptedBps = liveBps;
-    try {
-      const acceptedLog = receipt.logs.map((log) => { try { return crash.interface.parseLog(log); } catch (_) { return null; } })
-        .find((entry) => entry?.name === "CashedOut");
-      const round = await crash.rounds(roundId);
-      if (acceptedLog && BigInt(acceptedLog.args.cashOutBlock) >= BigInt(round.lockBlock)) {
-        acceptedBps = BigInt(multiplierAtBlocksBps(Number(BigInt(acceptedLog.args.cashOutBlock) - BigInt(round.lockBlock))));
-      }
-    } catch (_) { /* retain the clearly provisional click quote as fallback */ }
-    toast("Lock accepted at " + bpsToXStr(acceptedBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""), "success");
-    if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
-    return true;
-  } catch (err) {
-    try { setChainAction(ACTION_STAGES.REJECTED, { message: friendlyRevertReason(err) }); } catch (_) { /* preserve original error */ }
-    // A real, meaningful outcome under V2's reveal/settle split, not a
-    // generic failure: the round's true crash point was already revealed
-    // and real elapsed blocks caught up to it between the decision and the
-    // transaction landing -- the ticker shows this the instant refresh runs.
-    sfx.error();
-    if ((err.shortMessage || err.message || "").includes("PastCrashPoint")) {
-      toast("Too late -- the round already crashed before this landed.", "error");
-    } else {
-      toast("Cash out failed: " + (err.shortMessage || err.message), "error");
-    }
-    return false;
-  }
+  // PlankCrash (CCS-2L) has no cash-out: the target was committed with the
+  // bet and executes at settlement whether or not this tab is open.
+  toast(`Your ${autoTarget.toFixed(2)}x target was committed with your bet and executes at settlement.`);
+  if (viaButton) { primaryBtn.disabled = false; primaryBtn.classList.remove("pending"); }
+  return false;
 }
 
 // Keyboard access for every div/span styled as a clickable control
@@ -4286,55 +3914,35 @@ function updatePrimaryButton(state, opts = {}) {
 
 // ── keeper: auto lock / auto reveal / auto register / auto claim ────────
 async function keeperTick(round, roundId, blockNum, chainNow) {
+  void blockNum;
   try {
-    // Gate on the CHAIN's own clock (the contract's real check), not the
-    // browser's Date.now() -- on a locally time-warped dev node those two
-    // clocks can drift arbitrarily far apart, and trusting the client's
-    // clock would make the keeper wait forever even though lockRound()
-    // would already succeed on-chain.
+    // Gate on the CHAIN's own clock (the contract's real check).
     if (Number(round.phase) === 0 && Number(round.bettingEndsAt) <= chainNow && !attemptedLockThisRound) {
       attemptedLockThisRound = true;
       await (await crash.lockRound()).wait().catch(() => {});
     }
-    // V2's reveal/settle split: revealEntropy() makes the true crash
-    // point public without ending the round; settleRound() only becomes
-    // valid once real elapsed blocks actually reach it (capped by
-    // maxElapsedBlocks). These are genuinely two different moments in
-    // real time, sometimes far apart -- computed client-side so this
-    // keeper only ever sends a transaction once it's actually valid,
-    // instead of spamming settleRound() every poll until it stops
-    // reverting.
-    if (Number(round.phase) === 1) {
-      if (!round.entropyRevealed && blockNum > Number(round.entropyBlock) && !attemptedEntropyRevealThisRound) {
-        attemptedEntropyRevealThisRound = true;
-        await (await crash.revealEntropy(roundId)).wait().catch(() => {});
-      } else if (round.entropyRevealed && !attemptedSettleThisRound && maxElapsedBlocksCache !== null) {
-        const effective =
-          round.trueCrashElapsedBlocks < maxElapsedBlocksCache ? round.trueCrashElapsedBlocks : maxElapsedBlocksCache;
-        if (BigInt(blockNum) - round.lockBlock >= effective) {
-          attemptedSettleThisRound = true;
-          await (await crash.settleRound(roundId)).wait().catch(() => {});
-        }
+    if (Number(round.phase) === 1 && beaconContract) {
+      const available = await beaconContract.isRoundAvailable(round.targetDrandRound);
+      if (available && !attemptedSettleThisRound) {
+        attemptedSettleThisRound = true;
+        await (await crash.settleRound()).wait().catch(() => {});
+      } else if (!available && chainNow >= Number(round.bettingEndsAt) + refundTimeoutCache && !attemptedRegisterThisRound) {
+        // Outcome-independent liveness escape: the beacon never delivered.
+        attemptedRegisterThisRound = true;
+        await (await crash.refundRound()).wait().catch(() => {});
       }
     }
-    if (Number(round.phase) === 2 && signer) {
-      const stake = await crash.stakeOf(roundId, signer.address);
-      if (stake > 0n) {
-        const isRegistered = await crash.registered(roundId, signer.address);
-        if (!isRegistered && !attemptedRegisterThisRound && blockNum <= Number(round.registrationDeadlineBlock)) {
-          attemptedRegisterThisRound = true;
-          await (await crash.registerResult(roundId, signer.address)).wait().catch(() => {});
-        }
-        const isClaimed = await crash.claimed(roundId, signer.address);
-        if (!isClaimed && !attemptedClaimThisRound && blockNum > Number(round.registrationDeadlineBlock)) {
-          attemptedClaimThisRound = true;
-          try {
-            await (await crash.claim(roundId, signer.address)).wait();
-            await (await crash.withdrawPayments(signer.address)).wait();
-          } catch {
-            /* not a winner -- expected outcome, not an error */
-          }
-        }
+    // Pull ledger: anything owed to this wallet (payouts, keeper bounties,
+    // refunds) is withdrawn -- to the bank buffer in instant-play mode.
+    if (signer && !attemptedClaimThisRound) {
+      const owedNow = await crash.owed(signer.address);
+      if (owedNow > 0n) {
+        attemptedClaimThisRound = true;
+        try {
+          if (bankMode) await (await crash.withdrawToBank(BANK_ADDR)).wait();
+          else await (await crash.withdraw()).wait();
+          if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
+        } catch { /* races with another tab -- retried next round */ }
       }
     }
   } catch {
@@ -4345,19 +3953,6 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
 async function refresh() {
   if (!crash) return;
   try {
-    // Fetched concurrently, not as four sequential awaits. Real bug this
-    // fixes: under real load (e.g. the keeper mining a new block every
-    // couple seconds), several blocks could land BETWEEN the roundId/round
-    // read and the blockNum/chainNow read below. If that happened right at
-    // a round's first poll, chainNow could already be past round.bettingEndsAt
-    // even though the round had just opened -- and since bettingEndsAtEstimateMs
-    // is anchored only ONCE per round (by design, see below), that single
-    // bad snapshot froze the countdown at "IGNITION..." for the round's
-    // entire duration even though the chain's own betting window was fine.
-    // Promise.all issues all four in the same tick, which ethers v6 batches
-    // into one JSON-RPC request -- reflecting one consistent block, not
-    // whichever block happened to be latest by the time each awaited call
-    // finally resolved.
     const [roundId, round, blockNum] = await Promise.all([
       crash.currentRoundId(),
       crash.currentRound(),
@@ -4368,40 +3963,27 @@ async function refresh() {
     if (currentRoundIdCache !== roundId.toString()) {
       currentRoundIdCache = roundId.toString();
       attemptedLockThisRound = false;
-      attemptedEntropyRevealThisRound = false;
       attemptedSettleThisRound = false;
       attemptedRegisterThisRound = false;
       attemptedClaimThisRound = false;
       warpTriggeredForRound = false;
-      hideOutcome();
+      launchAt = null;
       multGraphSamples = [];
       clearMultGraph();
       loadHistoryRibbon();
-      // Anchor real wall-clock time to the chain's betting deadline ONCE per
-      // round (round.bettingEndsAt is fixed for the round's whole betting
-      // phase), not every poll. Real bug this fixes: recomputing it every
-      // poll from `bettingEndsAt - chainNow` (both whole-second on-chain
-      // integers) reintroduces up to ~1s of quantization jitter on EVERY
-      // poll -- invisible on the old integer "LAUNCHING IN 3s" countdown,
-      // but a visible backward tick on the continuous 0->1.00x fueling
-      // gauge frame() drives from this anchor every frame.
+      // Anchor real wall-clock time to the chain's betting deadline ONCE per round.
       const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
       bettingEndsAtEstimateMs = performance.now() + secsLeft * 1000;
     }
 
     $("roundLabel").textContent = "ROUND " + roundId.toString();
-    $("poolStat").textContent = Number(ethers.formatEther(round.pool)).toFixed(3) + " ETH";
-    $("playersStat").textContent = (await crash.participantCount(roundId)).toString();
+    $("poolStat").textContent = Number(ethers.formatEther(round.playerPool)).toFixed(3) + " ETH";
+    $("playersStat").textContent = (await crash.seatCount(roundId)).toString();
 
     const phase = Number(round.phase);
     const prevPhaseState = phaseState;
     phaseState = phase === 0 ? "betting" : phase === 1 ? "live" : "crashed";
     if (phaseState === "live" && prevPhaseState !== "live") {
-      launchAt = performance.now();
-      // Ignition burst + rumble right as the clamp arms release -- reuses
-      // the crash burst's isotropic emitter (real rocket ignition really
-      // does billow outward in every direction off the deck, unlike the
-      // tight downward cruise-thrust cone used the rest of the flight).
       spawnParticles(0xffb37a, prefersReducedMotion ? 12 : 50, 2.4);
       shakeAmount = prefersReducedMotion ? 0 : 0.5;
       sfx.ignition(); haptic(40);
@@ -4409,144 +3991,29 @@ async function refresh() {
 
     const stake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
     const hasStake = stake > 0n;
-    const cashOutBlock = signer ? await crash.cashOutBlockOf(roundId, signer.address) : 0n;
-    const hasCashedOut = cashOutBlock > 0n;
+    const myTarget = hasStake ? await crash.targetOf(roundId, signer.address) : 0n;
 
     if (phase === 0) {
       flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
       setMultReadout("0.00", "fueling");
-      // bettingEndsAtEstimateMs is anchored ONCE per round (see the
-      // "new round detected" block above) -- frame() ticks the fueling
-      // gauge and countdown from it every frame with no per-poll jitter.
-      updatePrimaryButton(hasStake ? "waiting" : "betting-open");
-      autoPlayTick(0, roundId, hasStake, hasCashedOut, 0n);
+      updatePrimaryButton(hasStake ? "waiting" : "betting-open", hasStake ? { sub: `Seat committed: ${ethers.formatEther(stake)} ETH at ${(Number(myTarget) / 10000).toFixed(2)}x` } : {});
+      autoPlayTick(0, roundId, hasStake, false, 0n);
     } else if (phase === 1) {
-      // The number and the astronaut's ascent are now driven every frame
-      // by the smooth extrapolation in frame() (see multiplierAtBlocksBps
-      // above), not by this poll directly -- this stayed correct in
-      // VALUE, but only updating a few times a second made both the
-      // readout and the climb visibly step instead of climbing smoothly.
-      // This poll is still the authoritative source of truth, though: use
-      // it to correct launchAt (and therefore the extrapolation) back in
-      // line with the real chain, the same server-reconciliation idea any
-      // client-side-predicted real-time game uses, so estimation error
-      // can never silently accumulate round after round.
-      const liveBps = await crash.liveMultiplierBps(roundId);
-      // Invert 10000 + 40e + e^2/5 = bps for e (elapsed blocks), positive
-      // root of the quadratic (multiply through by 5 first: e^2 + 200e +
-      // (50000-5bps) = 0), then re-derive the launchAt that would produce
-      // that many elapsed blocks under the local dev block cadence --
-      // correcting drift instead of letting it compound. Must be re-solved
-      // any time multiplierAtBlocksBps's constants change (see that
-      // function's own comment) -- this is the exact inverse of it.
-      const impliedElapsed = Math.max(0, (-200 + Math.sqrt(20 * Number(liveBps) - 160000)) / 2);
-      const impliedLaunchAt = performance.now() - impliedElapsed * LOCAL_BLOCK_MS;
-      // Only ever correct FORWARD (smaller launchAt = larger elapsed
-      // estimate). The real multiplier is mathematically non-decreasing
-      // while LIVE -- a straight snap-to-implied here was a real, visible
-      // bug: whenever a block landed a little slower than the assumed 1/s
-      // (ordinary timing jitter, not an error), the correction would push
-      // launchAt LATER, momentarily shrinking the estimated elapsed time
-      // and making the displayed multiplier visibly tick backward for a
-      // frame. Clamping to min() makes reconciliation one-directional, so
-      // it can still catch the estimate up when the chain runs ahead, but
-      // can never make the display un-climb.
-      launchAt = Math.min(launchAt, impliedLaunchAt);
-      recordMultGraphSample(Number(bpsToXStr(liveBps)));
-      drawMultGraph();
-      $("substatus").textContent = "IN FLIGHT";
-      if (!hasStake) updatePrimaryButton("watching");
-      else if (hasCashedOut) {
-        // Real, on-chain, honestly-labeled -- see estimatedPayout()'s own
-        // comment on the legacy crash contract for why this is a
-        // PROVISIONAL figure while still live (it can only ever shrink,
-        // never grow, as more players also cash out), not a promise.
-        // This is the actual point of building that view: show it, don't
-        // let "Cashed out, waiting…" imply a number nobody can see yet.
-        const est = await crash.estimatedPayout(roundId, signer.address);
-        const estStr = Number(ethers.formatEther(est)).toFixed(4);
-        updatePrimaryButton("cashed", { sub: `Cashed out — ~${estStr} ETH (shared pot — can shrink as others cash out too)` });
-      } else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
-      autoPlayTick(1, roundId, hasStake, hasCashedOut, liveBps);
+      // CCS-2L: the round is SEALED. Every target is committed; the crash
+      // point is derived from the target drand round the moment it is
+      // public. There is no live multiplier to extrapolate and no cash-out.
+      const waitSecs = Math.max(0, Number(round.revealNotBefore) - chainNow);
+      setMultReadout(hasStake ? bpsToXStr(myTarget) : "1.00", "live");
+      $("substatus").textContent = waitSecs > 0 ? `SEALED · DRAND #${round.targetDrandRound} IN ${waitSecs}s` : `SEALED · AWAITING DRAND #${round.targetDrandRound}`;
+      if (!hasStake) updatePrimaryButton("watching", { sub: "Seats are sealed until the beacon publishes" });
+      else updatePrimaryButton("cashed", { sub: `Target ${(Number(myTarget) / 10000).toFixed(2)}x committed · ${ethers.formatEther(stake)} ETH staked` });
+      autoPlayTick(1, roundId, hasStake, true, 0n);
     } else {
-      if (crashedAt === null) {
-        crashedAt = performance.now();
-        shakeAmount = prefersReducedMotion ? 0 : 1.4;
-        spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
-        sfx.crash(); haptic([50, 30, 80]);
-        // "It's over" visual cue, distinct from the win celebration --
-        // pure class toggle, auto-removed so it can re-fire next round.
-        const flashEl = $("crashFlash");
-        if (flashEl) {
-          flashEl.classList.remove("flash");
-          void flashEl.offsetWidth; // restart the animation if triggered twice
-          flashEl.classList.add("flash");
-        }
-      }
-      const xStr = bpsToXStr(round.crashMultiplierBps);
-      // Snap the target to the real, final crash multiplier -- not
-      // whatever the last LIVE poll happened to sample -- so the
-      // astronaut's resting height always matches the actual on-chain
-      // outcome exactly, even though polling is coarser than 60fps.
-      if (round.crashMultiplierBps > 0n) targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
-      setMultReadout(round.crashMultiplierBps > 0n ? xStr : "0.00", "crashed");
-      $("substatus").textContent = round.crashMultiplierBps > 0n ? "CRASHED" : "VOIDED";
-
-      if (!hasStake) {
-        updatePrimaryButton("watching", { sub: "Next round starts automatically" });
-      } else if (!hasCashedOut) {
-        if (outcomeShownForRound !== currentRoundIdCache) {
-          outcomeShownForRound = currentRoundIdCache;
-          showResultCard("lose", Number(xStr), `-${ethers.formatEther(stake)} ETH`, "DIDN'T CASH OUT IN TIME");
-        }
-        updatePrimaryButton("settling", { sub: "Next round starts automatically" });
-      } else {
-        const isClaimed = await crash.claimed(roundId, signer.address);
-        // Your actual locked-in multiplier is a pure function of your own
-        // cashOutBlock relative to lockBlock -- the same formula the
-        // contract itself pays out on, mirrored client-side. Real bug
-        // fixed here: this used to display round.crashMultiplierBps (the
-        // round's EVENTUAL crash point, only known at reveal) as if it
-        // were the player's own result -- wrong whenever you cashed out
-        // before the crash, which is the entire point of cashing out
-        // early.
-        const cashOutMultX = Number(bpsToXStr(multiplierAtBlocksBps(Number(cashOutBlock - round.lockBlock))));
-        if (isClaimed && outcomeShownForRound !== currentRoundIdCache) {
-          outcomeShownForRound = currentRoundIdCache;
-          // Real payout, not stake*multiplier (this is a pari-mutuel split
-          // among winners, not a fixed-odds payout, so that estimate could
-          // be meaningfully off) -- one cheap one-shot event query right
-          // at the settle moment, not per poll.
-          const claims = await crash.queryFilter(crash.filters.Claimed(roundId, signer.address));
-          const payout = claims[0]?.args.payout ?? 0n;
-          const net = payout - stake;
-          const profitable = net > 0n;
-          const delta = `${net >= 0n ? "+" : "-"}${ethers.formatEther(net >= 0n ? net : -net)} ETH net`;
-          showResultCard(profitable ? "win" : "lose", cashOutMultX, delta, profitable ? "PROFIT · CASHED OUT" : "CASHED OUT · RETURN BELOW STAKE");
-          // Never apply win-associated audio, haptics, particles, or glow to
-          // an equal-or-losing return. Payout is not profit in a parimutuel.
-          if (profitable) celebrate(cashOutMultX);
-        } else if (
-          !isClaimed &&
-          attemptedClaimThisRound &&
-          blockNum > Number(round.registrationDeadlineBlock) &&
-          outcomeShownForRound !== currentRoundIdCache
-        ) {
-          // Real gap this closes: cashing out does NOT guarantee a win in
-          // this contract -- the crash point is only derived from
-          // blockhash entropy at reveal, so it's entirely possible for
-          // the (retroactively-determined) crash to have "happened"
-          // before your own cash-out block. claim() correctly reverts as
-          // NotWinner for that outcome (keeperTick already treats that as
-          // expected, not an error), but nothing ever told the PLAYER --
-          // they'd sit on "Settling your payout automatically…" forever
-          // with no conclusion at all. attemptedClaimThisRound being true
-          // means claim() was already tried and lost this exact case.
-          outcomeShownForRound = currentRoundIdCache;
-          showResultCard("lose", cashOutMultX, `-${ethers.formatEther(stake)} ETH`, "CRASHED BEFORE YOUR CASH-OUT");
-        }
-        updatePrimaryButton("settling", { sub: isClaimed ? "Payout claimed — next round starts automatically" : "Settling your payout automatically…" });
-      }
+      // SETTLED/VOIDED/REFUNDED is transient here: settleRound opens the next
+      // round in the same transaction, so conclusions are driven by the
+      // RoundSettled event (pollScoreboard) rather than by this phase.
+      $("substatus").textContent = phase === 2 ? "SETTLED" : phase === 3 ? "VOIDED" : "REFUNDED";
+      updatePrimaryButton("settling", { sub: "Next round starts automatically" });
     }
 
     await keeperTick(round, roundId, blockNum, chainNow);
@@ -4558,6 +4025,12 @@ async function refresh() {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   if (pollTimer2) clearInterval(pollTimer2);
+  // Conclusions are event-driven: settlements that already happened before
+  // this connect are history (ribbon/stats), never replayed as a live crash.
+  lastScoreboardRound = -1n;
+  crash.queryFilter(crash.filters.RoundSettled())
+    .then((evs) => { lastScoreboardRound = evs.length ? evs[evs.length - 1].args.roundId : 0n; })
+    .catch(() => { lastScoreboardRound = 0n; });
   refresh();
   // Was 1200ms. The multiplier/countdown are now driven smoothly every
   // frame regardless of this cadence, but PHASE TRANSITIONS (crash
@@ -4579,7 +4052,7 @@ function startPolling() {
   // this at the same cadence as local (cheap now that CORS/rate-limit
   // issues are actually fixed) avoids that.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); refreshProgressionUI(); pollLiveBoard(); }, 600);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshPowerboardUI(); pollLiveBoard(); }, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
@@ -4612,47 +4085,33 @@ async function runStatsScan() {
   }
   body.innerHTML = '<div class="stats-empty">Scanning real on-chain events…</div>';
   try {
-    const [bets, cashOuts, crashes, registrations, claims] = await Promise.all([
+    const [bets, settledRounds, seatsSettled] = await Promise.all([
       crash.queryFilter(crash.filters.BetPlaced()),
-      crash.queryFilter(crash.filters.CashedOut()),
-      crash.queryFilter(crash.filters.RoundCrashed()),
-      crash.queryFilter(crash.filters.ResultRegistered()),
-      crash.queryFilter(crash.filters.Claimed()),
+      crash.queryFilter(crash.filters.RoundSettled()),
+      crash.queryFilter(crash.filters.SeatSettled()),
     ]);
 
     const crashByRound = new Map();
-    for (const e of crashes) {
-      crashByRound.set(e.args.roundId.toString(), {
-        multiplierBps: e.args.crashMultiplierBps,
-        elapsedBlocks: e.args.crashElapsedBlocks,
-      });
-    }
+    for (const e of settledRounds) crashByRound.set(e.args.roundId.toString(), { multiplierBps: e.args.crashBps });
 
     const players = new Map(); // address -> aggregate stats
     function player(addr) {
       if (!players.has(addr)) {
-        players.set(addr, {
-          address: addr, roundsPlayed: new Set(), totalWagered: 0n,
-          wins: 0, losses: 0, totalWon: 0n, biggestWin: 0n, cashOuts: 0,
-        });
+        players.set(addr, { address: addr, roundsPlayed: new Set(), totalWagered: 0n, wins: 0, losses: 0, totalWon: 0n, biggestWin: 0n, cashOuts: 0 });
       }
       return players.get(addr);
     }
-
     for (const e of bets) {
       const p = player(e.args.player);
       p.roundsPlayed.add(e.args.roundId.toString());
-      p.totalWagered += e.args.amount;
+      p.totalWagered += e.args.stake;
     }
-    for (const e of cashOuts) player(e.args.player).cashOuts += 1;
-    for (const e of registrations) {
+    for (const e of seatsSettled) {
       const p = player(e.args.player);
-      if (e.args.won) p.wins += 1; else p.losses += 1;
-    }
-    for (const e of claims) {
-      const p = player(e.args.player);
-      p.totalWon += e.args.payout;
-      if (e.args.payout > p.biggestWin) p.biggestWin = e.args.payout;
+      const paid = e.args.playerPayout + e.args.houseBonus;
+      if (e.args.survived) p.wins += 1; else p.losses += 1;
+      p.totalWon += paid;
+      if (paid > p.biggestWin) p.biggestWin = paid;
     }
 
     lastPlayerRows = [...players.values()].map((p) => ({
@@ -4672,18 +4131,11 @@ async function runStatsScan() {
     lastRoundRows = roundIds
       .map((rid) => {
         const roundBets = bets.filter((e) => e.args.roundId.toString() === rid);
-        const pool = roundBets.reduce((sum, e) => sum + e.args.amount, 0n);
+        const pool = roundBets.reduce((sum, e) => sum + e.args.stake, 0n);
         const bettors = new Set(roundBets.map((e) => e.args.player)).size;
-        const winners = registrations.filter((e) => e.args.roundId.toString() === rid && e.args.won).length;
+        const winners = seatsSettled.filter((e) => e.args.roundId.toString() === rid && e.args.survived).length;
         const c = crashByRound.get(rid);
-        return {
-          roundId: Number(rid),
-          pool,
-          bettors,
-          winners,
-          crashX: c ? Number(c.multiplierBps) / 10000 : null,
-          blockNum: roundBets[0]?.blockNumber ?? 0,
-        };
+        return { roundId: Number(rid), pool, bettors, winners, crashX: c ? Number(c.multiplierBps) / 10000 : null, blockNum: roundBets[0]?.blockNumber ?? 0 };
       })
       .sort((a, b) => b.roundId - a.roundId);
 
@@ -4876,7 +4328,6 @@ async function enterInstantPlay(depositEth) {
     const cap = value * 100n;
     const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
     await (await bank.grantSession(sk.address, cap, expiry)).wait();
-    await (await crashExt.setPayoutRedirect(BANK_ADDR)).wait();
     sessionSigner = sk;
     sessionBank = bank.connect(sk);
     bankMode = true;
@@ -6834,38 +6285,6 @@ else refreshBankUI();
   <div id="bankBody"></div>
 </div>
 
-<!-- ── Fuel the Next Launch (PlankFuelBooster) ──────────────────────────
-     Burn real $PLANK at ANY time -- burnFuel() has no phase check -- to
-     boost the shared Vault by its fair TWAP value. Never touches the
-     burner's own stake, cash-out, or crash odds; only the pool everyone
-     plays for next. Amber to match the "fueling" readout. ─────────────── -->
-<style>
-  #fuelPanel{position:fixed;right:16px;bottom:16px;z-index:60;width:280px;
-    font-family:inherit;background:rgba(18,14,4,.92);border:1px solid rgba(255,200,87,.35);
-    border-radius:14px;padding:14px 15px;backdrop-filter:blur(8px);
-    box-shadow:0 8px 30px rgba(0,0,0,.5);color:#f5ecdc}
-  #fuelPanel h4{margin:0 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
-    color:#ffc857;display:flex;align-items:center;gap:6px}
-  #fuelPanel .fl-sub{font-size:11px;color:#b7ab8f;line-height:1.4;margin-bottom:8px}
-  #fuelPanel .fl-stats{display:flex;justify-content:space-between;gap:8px;margin:8px 0;
-    padding:8px 10px;background:rgba(255,200,87,.06);border-radius:9px;border:1px solid rgba(255,200,87,.15)}
-  #fuelPanel .fl-stat{text-align:center;flex:1}
-  #fuelPanel .fl-stat .fl-k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#b7ab8f}
-  #fuelPanel .fl-stat .fl-v{font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:#fff;margin-top:2px}
-  #fuelPanel .fl-stat .fl-v.pct{color:#ffc857}
-  #fuelPanel .fl-bar{height:5px;border-radius:3px;background:rgba(255,200,87,.12);overflow:hidden;margin-top:4px}
-  #fuelPanel .fl-bar-fill{height:100%;width:100%;transform-origin:left center;transform:scaleX(var(--fill,0));background:linear-gradient(90deg,#ffc857,#ff8a5c);transition:transform .4s cubic-bezier(.22,1,.36,1)}
-  #fuelPanel .fl-row{display:flex;gap:7px;align-items:center;margin-top:8px}
-  #fuelPanel input{flex:1;min-width:0;background:#140f04;border:1px solid rgba(255,200,87,.3);
-    color:#f5ecdc;border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
-  #fuelPanel button{background:#ffc857;color:#241a02;border:0;border-radius:8px;
-    padding:7px 11px;font:inherit;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap}
-  #fuelPanel button:disabled{opacity:.5;cursor:default}
-  #fuelPanel .fl-bal{font-size:11px;color:#b7ab8f;margin-top:6px}
-</style>
-<div id="fuelPanel">
-  <h4>🔥 Fuel the Next Launch</h4>
-  <div id="fuelBody"></div>
-</div>
+<!-- The pre-CCS fuel-booster panel and its styles were retired with that contract. -->
 </body>
 </html>
