@@ -358,6 +358,19 @@ test("the SYSTEM & MATH manual never renders founder earnings or founder figures
   assert.doesNotMatch(mechanicsDeckSource, /FOUNDER TOTAL/);
 });
 
+test("the manual honestly discloses the 2026-09-05 F-1/F-2 hardening, plainly and without hiding it could touch a solo player", () => {
+  // Placed right under "Guaranteed vs varies" -- the exact promise these
+  // two closed findings protect (solvency; no extra claim from splitting a
+  // stake across wallets). Must state plainly this was a MULTI-WALLET
+  // collusion loophole, not something a single honest player was exposed
+  // to, and must not bury the date or pretend nothing happened.
+  assert.match(mechanicsDeckSource, /class="audit-note"/);
+  assert.match(mechanicsDeckSource, /2026-09-05/);
+  assert.match(mechanicsDeckSource, /two coordinated wallets/);
+  assert.match(mechanicsDeckSource, /Neither could touch a single honest\s*\n?\s*player's payout/);
+  assert.match(mechanicsDeckSource, /closed the\s*\n?\s*same day/);
+});
+
 test("returning invitees can choose login and rejoin the invited room in one action", () => {
   assert.match(gateSource, /\(publicRegistration \|\| invite\)/);
   assert.match(gateSource, />Returning player</);
@@ -457,6 +470,36 @@ test("the round summary discloses the full CCS-2L settlement decomposition", () 
   assert.match(arcadeSource, /returned · /);
   // Busted seats get honest copy, never an invented number.
   assert.match(arcadeSource, /nothing is returned to busted seats/);
+});
+
+// ── FIX 2026-09-05: the ONE fact players couldn't find live ──
+// Multiple live testers reported the pari-mutuel payout as "guaranteed
+// diluted value" — the mechanism was already honestly disclosed
+// (.payout-note / maxPayableDisclosure), but only as a small, dimmed,
+// tooltip-style line explaining the FORMULA, never the one concrete,
+// reassuring number: the guaranteed floor. This headline states it
+// outright, loudly, at the exact bet-sizing decision point.
+
+test("the guaranteed survivor floor is stated as a loud, plain-language headline, not just a dimmed formula note", () => {
+  assert.match(arcadeSource, /class="payout-floor" id="payoutFloorHeadline"/);
+  // Must be visually distinct from the dimmed/hover-only .payout-note style
+  // used for the mechanism-explanation lines -- this is the one fact meant
+  // to read at a glance, not on hover.
+  assert.match(arcadeSource, /\.payout-floor \{[^}]*font-weight:\s*700/);
+  assert.doesNotMatch(arcadeSource, /class="payout-floor payout-note"/);
+});
+
+test("the floor headline is populated from the real on-chain floorBps, never a hardcoded percentage", () => {
+  // Same `floor` binding as capLine's existing disclosure — both must read
+  // crash.floorBps(), so the headline can never drift from a future
+  // deploy's real floor value.
+  assert.match(arcadeSource, /crash\.floorBps\(\)/);
+  const start = arcadeSource.indexOf('document.getElementById("payoutFloorHeadline")');
+  assert.ok(start >= 0, "could not locate the floor headline population code");
+  const end = arcadeSource.indexOf("\n", arcadeSource.indexOf("floorHeadline.innerHTML", start));
+  const block = arcadeSource.slice(start, end);
+  assert.match(block, /Number\(floor\)/, "the headline must read the same `floor` value fetched from the contract, not a literal percentage");
+  assert.doesNotMatch(block, /guaranteed at least <b>75%/, "the percentage must be interpolated from the real floor value, never hardcoded to today's default");
 });
 
 test("settlement rule and parameter hash are persisted at commitment and echoed at settlement", () => {
