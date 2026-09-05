@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { vaultShortName } from "@/lib/market/vault-registry";
 import { SkeletonBlock, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
@@ -49,6 +49,9 @@ type VaultStats = {
   redeemCount?: number;
   aprPct?: number | null;
   aprBasisHours?: number | null;
+  /** Same LP APR, over a real fixed 24h/7d cutoff — see computeLpAprWindows
+   *  in lib/market/vault-stats.ts. */
+  aprWindows?: { "24h": { aprPct: number | null }; "7d": { aprPct: number | null } } | null;
   vaultFeeRevenueWei?: string;
   poolOpen?: boolean;
 };
@@ -75,18 +78,28 @@ function Tile({
   label,
   value,
   source,
+  extra,
 }: {
   label: string;
   value: string;
   source: string;
+  extra?: ReactNode;
 }) {
   return (
     <div className="rounded-md border border-line bg-panel-strong p-3">
       <p className={LABEL}>{label}</p>
       <p className="mt-1 text-lg font-bold tabular-nums text-gold-300">{value}</p>
+      {extra}
       <p className="mt-1 font-mono text-[0.6rem] text-cream-muted/70">{source}</p>
     </div>
   );
+}
+
+/** "—" for a window that hasn't cleared computeLpApr's own real-data bar
+ *  (see its docs in lib/market/vault-stats.ts) — never a fabricated 0%. */
+function fmtAprWindow(pct: number | null): string {
+  if (pct == null) return "—";
+  return `${pct >= 1000 ? pct.toFixed(0) : pct.toFixed(1)}%`;
 }
 
 // Read-only — ignores the shell's `address` prop.
@@ -250,6 +263,18 @@ export default function AnalyticsSection() {
               }
               value={typeof vault?.aprPct === "number" ? `${vault.aprPct.toFixed(1)}%` : "—"}
               source="/api/market/vault/stats"
+              extra={
+                vault?.aprWindows && (
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 border-t border-line/60 pt-1 text-[0.6rem] tabular-nums text-cream-muted">
+                    <span>
+                      24h <span className="text-cream">{fmtAprWindow(vault.aprWindows["24h"].aprPct)}</span>
+                    </span>
+                    <span>
+                      7d <span className="text-cream">{fmtAprWindow(vault.aprWindows["7d"].aprPct)}</span>
+                    </span>
+                  </div>
+                )
+              }
             />
             <Tile
               // Real mint/redeem fee revenue — but it pays the treasury, not

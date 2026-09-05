@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs/promises";
-import { computeLpApr } from "../../lib/market/vault-stats";
+import { computeLpApr, computeLpAprWindows } from "../../lib/market/vault-stats";
 import type { VaultTradeEvent } from "../../lib/market/vault-activity";
 
 /**
@@ -63,6 +63,33 @@ import type { VaultTradeEvent } from "../../lib/market/vault-activity";
 
 const statsUrl = new URL("../../lib/market/vault-stats.ts", import.meta.url);
 
+/**
+ * Finds the end of the plain (non-exported) `function` declaration starting
+ * at `start`, for tests that string-scan one function's body in isolation.
+ * Bounded on whichever comes first: the function's own closing
+ * brace-then-blank-line, or the next plain `function ` declaration (a
+ * fallback for callers that predate computeLpAprWindows, which is an
+ * `export function` a bare "\nfunction " marker wouldn't stop at). Without
+ * this, a naive "\nfunction "-only boundary silently spills into
+ * computeLpAprWindows' own body/doc-comment when computeLpApr is the LAST
+ * plain function in the file. CRLF-tolerant since this repo's checked-out
+ * line endings aren't guaranteed to be \n.
+ */
+function findFunctionEnd(source: string, start: number): number {
+  const fnBoundary = /\r?\nfunction /g;
+  fnBoundary.lastIndex = start + 1;
+  const fnMatch = fnBoundary.exec(source);
+  const nextPlainFn = fnMatch ? fnMatch.index : -1;
+
+  const closeBoundary = /\r?\n\}\r?\n/g;
+  closeBoundary.lastIndex = start + 1;
+  const closeMatch = closeBoundary.exec(source);
+  const closeBrace = closeMatch ? closeMatch.index + closeMatch[0].length : -1;
+
+  if (closeBrace > start && (nextPlainFn < 0 || closeBrace < nextPlainFn)) return closeBrace;
+  return nextPlainFn;
+}
+
 test("no heldTokenCount-based APR fabrication exists anywhere in vault-stats.ts", async () => {
   const source = await fs.readFile(statsUrl, "utf8");
   assert.ok(
@@ -75,7 +102,13 @@ test("LP APR is computed from Bought/Sold swap volume, not deposit/redeem fees",
   const source = await fs.readFile(statsUrl, "utf8");
   const start = source.indexOf("function computeLpApr(");
   assert.ok(start >= 0, "could not locate computeLpApr");
-  const end = source.indexOf("\nfunction ", start + 1);
+  // computeLpApr is the last plain (non-exported) `function` before
+  // computeLpAprWindows (an `export function`, so a bare "function " marker
+  // alone wouldn't stop there, and would otherwise spill into that sibling
+  // helper's own body/leading doc-comment) — bound on this function's own
+  // closing brace-then-blank-line instead. CRLF-tolerant: this repo's
+  // checked-out line endings aren't guaranteed to be \n.
+  const end = findFunctionEnd(source, start);
   const body = source.slice(start, end > start ? end : undefined);
 
   assert.match(
@@ -97,7 +130,13 @@ test("LP APR is computed from Bought/Sold swap volume, not deposit/redeem fees",
 test("LP APR's TVL denominator is the full two-sided pool value, exactly 2x the ETH reserve", async () => {
   const source = await fs.readFile(statsUrl, "utf8");
   const start = source.indexOf("function computeLpApr(");
-  const end = source.indexOf("\nfunction ", start + 1);
+  // computeLpApr is the last plain (non-exported) `function` before
+  // computeLpAprWindows (an `export function`, so a bare "function " marker
+  // alone wouldn't stop there, and would otherwise spill into that sibling
+  // helper's own body/leading doc-comment) — bound on this function's own
+  // closing brace-then-blank-line instead. CRLF-tolerant: this repo's
+  // checked-out line endings aren't guaranteed to be \n.
+  const end = findFunctionEnd(source, start);
   const body = source.slice(start, end > start ? end : undefined);
 
   assert.match(
@@ -129,7 +168,13 @@ test("legacy (share-fee) vaults never get LP APR computed — they have no swap 
 test("LP APR returns null, not a fabricated window, when there is no measurable swap volume", async () => {
   const source = await fs.readFile(statsUrl, "utf8");
   const start = source.indexOf("function computeLpApr(");
-  const end = source.indexOf("\nfunction ", start + 1);
+  // computeLpApr is the last plain (non-exported) `function` before
+  // computeLpAprWindows (an `export function`, so a bare "function " marker
+  // alone wouldn't stop there, and would otherwise spill into that sibling
+  // helper's own body/leading doc-comment) — bound on this function's own
+  // closing brace-then-blank-line instead. CRLF-tolerant: this repo's
+  // checked-out line endings aren't guaranteed to be \n.
+  const end = findFunctionEnd(source, start);
   const body = source.slice(start, end > start ? end : undefined);
 
   assert.match(
@@ -156,7 +201,13 @@ test("LP APR returns null, not a fabricated window, when there is no measurable 
 test("REGRESSION (round 4): MIN_SWAPS_FOR_APR is a real gate, not a floor swapCount gets clamped up to", async () => {
   const source = await fs.readFile(statsUrl, "utf8");
   const start = source.indexOf("function computeLpApr(");
-  const end = source.indexOf("\nfunction ", start + 1);
+  // computeLpApr is the last plain (non-exported) `function` before
+  // computeLpAprWindows (an `export function`, so a bare "function " marker
+  // alone wouldn't stop there, and would otherwise spill into that sibling
+  // helper's own body/leading doc-comment) — bound on this function's own
+  // closing brace-then-blank-line instead. CRLF-tolerant: this repo's
+  // checked-out line endings aren't guaranteed to be \n.
+  const end = findFunctionEnd(source, start);
   const body = source.slice(start, end > start ? end : undefined);
 
   assert.match(
@@ -260,6 +311,60 @@ test("a real window at/above MIN_HOURS_FOR_APR with at least MIN_SWAPS_FOR_APR e
   const result = computeLpApr(events, ETH_RESERVE, SWAP_FEE_BPS, VAULT);
   assert.notEqual(result.aprPct, null, "a genuine 24h window with 5 swaps must produce a rate");
   assert.equal(result.aprBasisHours, 24, "the reported basis must be the true measured span, not a clamped one");
+});
+
+/**
+ * computeLpAprWindows: the 24h/7d figures shown alongside the full-history
+ * one on the dashboard (owner request, 2026-09-05 — "keep full but also
+ * include 24 hour and 7 day"). Same gates as computeLpApr throughout —
+ * these tests exist to prove the windowing itself (which events fall
+ * inside a cutoff) is correct, not to re-litigate annualizeApr's math.
+ */
+test("computeLpAprWindows: a real 24h window with enough swaps reports a genuine 24h figure, independent of full history", () => {
+  // 30 days of steady trading (comfortably clears the full-history gates on
+  // its own), PLUS exactly 5 more swaps packed into the most recent 24h —
+  // the 24h figure must be computed from ONLY those 5 recent swaps, not
+  // diluted by (or blind to) the other 25 days of volume.
+  const oldEvents = evenlySpacedSwaps(20, 30 * 24);
+  const recentEvents = evenlySpacedSwaps(5, 24).map((e) => ({
+    ...e,
+    // Shift so these 5 land in the most recent 24h relative to "now" below.
+    timestamp: new Date(Date.parse(e.timestamp!) + 29 * 24 * 3600 * 1000).toISOString(),
+  }));
+  const events = [...oldEvents, ...recentEvents];
+  const nowSec = Date.parse(recentEvents[recentEvents.length - 1].timestamp!) / 1000;
+
+  const { full, windows } = computeLpAprWindows(events, ETH_RESERVE, SWAP_FEE_BPS, VAULT, nowSec);
+  assert.notEqual(full.aprPct, null, "full-history figure must be real given 25 real swaps over 30 real days");
+  assert.notEqual(windows["24h"].aprPct, null, "24h figure must be real given exactly 5 real swaps inside the last 24h");
+  assert.ok(windows["24h"].aprBasisHours! <= 24, "the 24h figure's own measured span must not exceed the 24h cutoff");
+});
+
+test("computeLpAprWindows: a quiet vault's 24h/7d figures correctly return null next to a real full-history figure", () => {
+  // 25 real swaps over 30 real days clears the full-history gates, but
+  // nothing at all happened in the last 24h or 7d — those windows must be
+  // null, not a stale/carried-over copy of the full-history number, and
+  // not a fabricated one either.
+  const events = evenlySpacedSwaps(25, 30 * 24);
+  const nowSec = Date.parse(events[events.length - 1].timestamp!) / 1000 + 40 * 24 * 3600; // 40 real days after the last swap
+
+  const { full, windows } = computeLpAprWindows(events, ETH_RESERVE, SWAP_FEE_BPS, VAULT, nowSec);
+  assert.notEqual(full.aprPct, null, "full-history figure must still be real — this vault genuinely traded");
+  assert.equal(windows["24h"].aprPct, null, "no swaps at all in the last 24h must report null, not a stale copy");
+  assert.equal(windows["7d"].aprPct, null, "no swaps at all in the last 7d must report null, not a stale copy");
+});
+
+test("computeLpAprWindows: an event with no parseable timestamp is dropped from a windowed figure, not guessed into it", () => {
+  const events = evenlySpacedSwaps(5, 24);
+  events[2] = { ...events[2], timestamp: null };
+  const nowSec = Date.parse(events[events.length - 1].timestamp!) / 1000;
+
+  const { windows } = computeLpAprWindows(events, ETH_RESERVE, SWAP_FEE_BPS, VAULT, nowSec);
+  // Only 4 of the 5 events carry a usable timestamp once one is stripped —
+  // MIN_SWAPS_FOR_APR (5) is no longer cleared inside the window, so this
+  // must come back null, not silently include the undated event to keep
+  // the count up.
+  assert.equal(windows["24h"].aprPct, null, "an undated event must not be counted into a windowed figure either way");
 });
 
 test("getVaultStats seeds both treasury revenue and LP APR as null/zero before the activity replay runs", async () => {

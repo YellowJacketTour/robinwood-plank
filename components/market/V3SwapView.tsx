@@ -8,7 +8,7 @@
  * trade card so the whole page stays consistent. Legacy vaults never appear here.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowLeftRight, ExternalLink } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
@@ -45,12 +45,17 @@ import V3PriceChart from "@/components/market/V3PriceChart";
 import { swrJson } from "@/lib/market/swr-fetch";
 
 /** The LP-APR fields off /api/market/vault/stats — see the aprPct docstring
- *  in lib/market/vault-stats.ts. Only the two APR fields are needed here;
+ *  in lib/market/vault-stats.ts. Only the APR fields are needed here;
  *  everything else on this page already comes from the live getV3Snapshot
- *  read above, which has no history and so can't compute this itself. */
+ *  read above, which has no history and so can't compute this itself.
+ *  aprWindows is the same figure over a real, fixed 24h/7d cutoff — see
+ *  computeLpAprWindows — alongside the full-history one; either entry is
+ *  null exactly when that window doesn't clear the same real-data bar
+ *  (min swap count, min measured span) the full-history figure does. */
 type VaultAprStats = {
   aprPct: number | null;
   aprBasisHours: number | null;
+  aprWindows: { "24h": { aprPct: number | null }; "7d": { aprPct: number | null } } | null;
 };
 
 type TabKey = "vault" | "odds" | "price" | "activity" | "liquidity";
@@ -326,7 +331,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         : "/api/market/vault/stats";
       swrJson<VaultAprStats | null>(url, { ttlMs: 20_000 })
         .then((s) => {
-          if (!cancelled) setAprStats(s ? { aprPct: s.aprPct, aprBasisHours: s.aprBasisHours } : null);
+          if (!cancelled) setAprStats(s ? { aprPct: s.aprPct, aprBasisHours: s.aprBasisHours, aprWindows: s.aprWindows } : null);
         })
         .catch(() => {
           /* keep last good value on a transient failure */
@@ -502,7 +507,27 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           }
           value={aprStats?.aprPct != null ? `${aprStats.aprPct >= 1000 ? aprStats.aprPct.toFixed(0) : aprStats.aprPct.toFixed(1)}%` : "—"}
           sub={aprStats?.aprPct != null ? "swap fees" : "not enough trading history yet"}
-        />
+        >
+          {/* Same swap-fee APR, over a real fixed 24h/7d cutoff (see
+              computeLpAprWindows) — shown alongside the full-history figure
+              above so recent activity is visibly reflected without losing
+              the honest full-history number. Either reads "—" when THAT
+              window doesn't clear the same real-data bar the full-history
+              figure does (too few swaps, too thin a measured span) — a
+              quiet vault can legitimately show a real full-history APR next
+              to a dashed 24h/7d, and that's the honest answer for a window
+              with too little recent activity to annualize, not a bug. */}
+          {aprStats?.aprWindows && (
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 border-t border-line/60 pt-1 text-[0.56rem] tabular-nums text-cream-muted">
+              <span>
+                24h <span className="text-cream">{fmtAprWindow(aprStats.aprWindows["24h"].aprPct)}</span>
+              </span>
+              <span>
+                7d <span className="text-cream">{fmtAprWindow(aprStats.aprWindows["7d"].aprPct)}</span>
+              </span>
+            </div>
+          )}
+        </BigStat>
       </div>
 
       {/* hero: trade widget + vault info dock left, the tabbed panel fills right */}
@@ -696,14 +721,32 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
 }
 
 /** A prominent vault stat for the NFTX-style stat row (big value, small label). */
-function BigStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function BigStat({
+  label,
+  value,
+  sub,
+  children,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  children?: ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-line bg-panel-strong px-3 py-2.5">
       <div className="text-[0.56rem] font-black uppercase tracking-wide text-cream-muted">{label}</div>
       <div className="font-mono text-xl font-black tabular-nums text-cream">{value}</div>
       {sub && <div className="text-[0.56rem] text-cream/45">{sub}</div>}
+      {children}
     </div>
   );
+}
+
+/** "—" for a window that hasn't cleared computeLpApr's own real-data bar
+ *  (see its docs) — never a fabricated 0% for "no data yet". */
+function fmtAprWindow(pct: number | null): string {
+  if (pct == null) return "—";
+  return `${pct >= 1000 ? pct.toFixed(0) : pct.toFixed(1)}%`;
 }
 
 /** A label/value row for the Vault info panel; value links out when href given. */

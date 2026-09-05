@@ -319,6 +319,21 @@ export type VaultStats = {
    */
   aprPct: number | null;
   aprBasisHours: number | null;
+  /**
+   * The same LP yield as aprPct/aprBasisHours above, additionally computed
+   * over a real, fixed-cutoff 24h and 7d lookback (see computeLpAprWindows)
+   * so the dashboard can show a figure that visibly reacts to recent swap
+   * activity, alongside the full-history one, rather than only the
+   * ever-widening full-history window (which real trades still move, just
+   * by a shrinking share of an ever-growing base — see that function's
+   * docs). Either entry is null exactly when computeLpApr would return
+   * null for that same cutoff: not enough real swap volume, too few
+   * distinct swaps, or too thin a measured span inside the window. A quiet
+   * vault legitimately shows a real full-history APR next to a null 24h/7d
+   * figure — that is the honest answer for a window with too little
+   * recent activity to annualize, not a fallback bug.
+   */
+  aprWindows: { "24h": LpAprWindow; "7d": LpAprWindow } | null;
   depositCount: number;
   redeemCount: number;
   /**
@@ -393,6 +408,7 @@ export async function getVaultStats(
   // this null/zero shape.
   const noTreasury = { depositCount: 0, redeemCount: 0, feeRevenueWei: BigInt(0) };
   const noLpApr = { aprPct: null as number | null, aprBasisHours: null as number | null };
+  const noLpAprWindows: { "24h": LpAprWindow; "7d": LpAprWindow } | null = null;
 
   // Best-effort enrichment — never let history scans fail the whole stats payload.
   // Deposit/redeem (treasury revenue) and Bought/Sold (LP APR) are two
@@ -401,6 +417,7 @@ export async function getVaultStats(
   let heldTokenIds: string[] = [];
   let treasuryPart = noTreasury;
   let lpAprPart = noLpApr;
+  let lpAprWindows: { "24h": LpAprWindow; "7d": LpAprWindow } | null = noLpAprWindows;
   let marketplaceFeeRevenueEstWei = BigInt(0);
   try {
     // Full per-vault lineage from the durable KV store, NOT a bounded 80-event
@@ -434,11 +451,19 @@ export async function getVaultStats(
       feeSchedule.model === "eth"
         ? computeLpApr(events, ethReserveWei, feeSchedule.swapFeeBps, vault)
         : noLpApr;
+    // Same gate as lpAprPart above — legacy (share-fee) vaults have no
+    // swapFeeBps on-contract at all, so there is no LP-fee APR to compute
+    // for any window, not merely an unmeasured one.
+    lpAprWindows =
+      feeSchedule.model === "eth"
+        ? computeLpAprWindows(events, ethReserveWei, feeSchedule.swapFeeBps, vault).windows
+        : noLpAprWindows;
     marketplaceFeeRevenueEstWei = mkt;
   } catch {
     heldTokenIds = [];
     treasuryPart = noTreasury;
     lpAprPart = noLpApr;
+    lpAprWindows = noLpAprWindows;
     marketplaceFeeRevenueEstWei = BigInt(0);
   }
 
@@ -463,6 +488,7 @@ export async function getVaultStats(
     ethUsd,
     aprPct,
     aprBasisHours,
+    aprWindows: lpAprWindows,
     depositCount,
     redeemCount,
     vaultFeeRevenueWei: feeRevenueWei.toString(),
@@ -605,7 +631,23 @@ export function computeLpApr(
   events: VaultTradeEvent[],
   ethReserveWei: bigint,
   swapFeeBps: number,
-  vaultAddress?: string | null
+  vaultAddress?: string | null,
+  /**
+   * Optional lower bound (unix seconds) restricting which Bought/Sold
+   * events count — the same replayed event set powers the 24h/7d/full-
+   * history APR figures side by side (see LP_APR_WINDOWS), so the caller
+   * asks the same question three times with three different cutoffs
+   * rather than three different code paths. Omit for the full-history
+   * figure (every real event this vault ever emitted, no cutoff).
+   *
+   * Every gate below (min hours, min swaps, revenue > 0) still applies
+   * unchanged inside the cutoff — a 24h window on a quiet vault is
+   * expected to come back null far more often than the full-history one,
+   * and that is the correct, honest answer, not a bug: see this file's
+   * "display what it's supposed to be if valid... if not then we can skip
+   * it" doc above computeLpApr.
+   */
+  sinceTs?: number
 ): { aprPct: number | null; aprBasisHours: number | null } {
   const none = { aprPct: null as number | null, aprBasisHours: null as number | null };
   if (ethReserveWei <= BigInt(0) || swapFeeBps <= 0) return none;
@@ -627,9 +669,20 @@ export function computeLpApr(
       continue;
     }
     if (wei <= BigInt(0)) continue;
+    const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
+    if (sinceTs != null) {
+      // A windowed figure (24h/7d) needs every event to carry a real,
+      // parseable timestamp to know whether it belongs in the window at
+      // all — an undated event can't be honestly included OR excluded, so
+      // it's dropped rather than guessed into either bucket. The
+      // full-history figure (sinceTs omitted) keeps its original, looser
+      // behavior: an undated event still counts toward volume/swapCount
+      // (it happened, even if this replay can't date it), it just can't
+      // widen earliest/latestTs.
+      if (!Number.isFinite(ts) || ts < sinceTs) continue;
+    }
     volumeWei += wei;
     swapCount += 1;
-    const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
     if (Number.isFinite(ts)) {
       earliest = Math.min(earliest, ts);
       latestTs = Math.max(latestTs, ts);
@@ -661,4 +714,41 @@ export function computeLpApr(
   // as no data at all, rather than as a partial number worth rendering.
   if (aprPct == null) return none;
   return { aprPct, aprBasisHours: hoursObserved };
+}
+
+/** Real unix-seconds cutoffs for the 24h/7d windowed APR figures — the
+ *  full-history figure needs no cutoff (undefined `since`). */
+const LP_APR_WINDOWS = [
+  { key: "24h" as const, hours: 24 },
+  { key: "7d" as const, hours: 24 * 7 },
+];
+
+export type LpAprWindow = { aprPct: number | null; aprBasisHours: number | null };
+
+/**
+ * The 24h/7d/full-history LP APR figures side by side, from one replayed
+ * event set — see computeLpApr's `sinceTs` docs for why a windowed figure
+ * routinely comes back null on a quiet vault (too few swaps, or too thin a
+ * measured span inside the window) even when the full-history figure is
+ * real: that is the honest answer for that window, not a fallback bug.
+ */
+export function computeLpAprWindows(
+  events: VaultTradeEvent[],
+  ethReserveWei: bigint,
+  swapFeeBps: number,
+  vaultAddress?: string | null,
+  nowSec: number = Date.now() / 1000
+): { full: LpAprWindow; windows: Record<"24h" | "7d", LpAprWindow> } {
+  const full = computeLpApr(events, ethReserveWei, swapFeeBps, vaultAddress);
+  const windows = {} as Record<"24h" | "7d", LpAprWindow>;
+  for (const w of LP_APR_WINDOWS) {
+    windows[w.key] = computeLpApr(
+      events,
+      ethReserveWei,
+      swapFeeBps,
+      vaultAddress,
+      nowSec - w.hours * 3600
+    );
+  }
+  return { full, windows };
 }
