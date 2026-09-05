@@ -26,28 +26,22 @@ const EXPLORER_API = (process.env.ROBINHOOD_TESTNET_EXPLORER_API ?? "https://exp
 // the exact read/write surface exercised below; the runtime code hashes are
 // independently recorded before any call is made.
 const CRASH_ABI = [
-  "function IS_TEST_BUILD() view returns (bool)",
-  "function seedingEnabled() view returns (bool)",
   "function beacon() view returns (address)",
-  "function jackpotSink() view returns (address)",
-  "function progression() view returns (address)",
+  "function router() view returns (address)",
+  "function lottery() view returns (address)",
+  "function settlementRuleId() view returns (bytes32)",
+  "function settlementParamsHash() view returns (bytes32)",
   "function currentRoundId() view returns (uint256)",
-  "function participantCount(uint256) view returns (uint256)",
-  "function minPoolSize() view returns (uint256)",
-  "function rounds(uint256) view returns (uint8 phase,bool entropyRevealed,bool swept,uint64 targetDrandRound,uint256 bettingEndsAt,uint256 lockBlock,uint256 trueCrashElapsedBlocks,uint256 crashElapsedBlocks,uint256 crashMultiplierBps,uint256 pool,uint256 distributable,uint256 totalWinningWeight,uint256 provisionalWinningWeight,uint256 registrationDeadlineBlock,uint256 rolledOverFromPrevious,uint256 revealNotBefore,uint256 reserveAtLock,address lockedBy,address revealedBy)",
+  "function seatCount(uint256) view returns (uint256)",
+  "function minPoolWei() view returns (uint256)",
+  "function rounds(uint256) view returns (uint8 phase,uint64 targetDrandRound,uint64 bettingEndsAt,uint64 revealNotBefore,bytes32 paramsHash,uint256 seed,uint256 playerPool,uint256 reserveAtLock,uint256 largestStake,uint256 crashBps,uint256 effectiveRakeBps,uint256 playerDistributable,uint256 totalPlayerPaid,uint256 totalBonus,uint256 houseReturned,address lotteryWinner)",
   "function placeBet(uint256) payable",
   "function lockRound()",
-  "function revealEntropy(uint256)",
-  "function settleRound(uint256)",
+  "function settleRound()",
 ];
 const BANK_ABI = ["function isGame(address) view returns (bool)"];
-const FUEL_ABI = ["function crash() view returns (address)", "function progression() view returns (address)"];
-const POWERBOARD_ABI = ["function beacon() view returns (address)", "function progression() view returns (address)"];
-const PROGRESSION_ABI = [
-  "function crash() view returns (address)",
-  "function fuelBooster() view returns (address)",
-  "function powerboard() view returns (address)",
-];
+const LOTTERY_ABI = ["function source() view returns (address)"];
+const ROUTER_ABI = ["function source() view returns (address)", "function lottery() view returns (address)", "function vault() view returns (address)"];
 const BEACON_ABI = [
   "function isRoundAvailable(uint64) view returns (bool)",
   "function randomnessOrZero(uint64) view returns (bytes32)",
@@ -122,24 +116,20 @@ async function main() {
 
   const crash = await ethers.getContractAt(CRASH_ABI, addresses.crash, signer);
   const bank = await ethers.getContractAt(BANK_ABI, addresses.bank, signer);
-  const fuel = await ethers.getContractAt(FUEL_ABI, addresses.fuelBooster, signer);
-  const powerboard = await ethers.getContractAt(POWERBOARD_ABI, addresses.powerboard, signer);
-  const progression = await ethers.getContractAt(PROGRESSION_ABI, addresses.progression, signer);
+  const lottery = await ethers.getContractAt(LOTTERY_ABI, addresses.lottery, signer);
+  const rakeRouter = await ethers.getContractAt(ROUTER_ABI, addresses.rakeRouter, signer);
   const beacon = await ethers.getContractAt(BEACON_ABI, addresses.beacon, signer);
 
+  const ccs2lRuleId = ethers.keccak256(ethers.toUtf8Bytes("ccs-2l"));
   const assertions = {
-    isTestBuild: await crash.IS_TEST_BUILD(),
-    seedingDisabled: !(await crash.seedingEnabled()),
     crashBeacon: (await crash.beacon()).toLowerCase() === addresses.beacon.toLowerCase(),
-    crashPowerboard: (await crash.jackpotSink()).toLowerCase() === addresses.powerboard.toLowerCase(),
-    crashProgression: (await crash.progression()).toLowerCase() === addresses.progression.toLowerCase(),
-    fuelCrash: (await fuel.crash()).toLowerCase() === addresses.crash.toLowerCase(),
-    fuelProgression: (await fuel.progression()).toLowerCase() === addresses.progression.toLowerCase(),
-    powerboardBeacon: (await powerboard.beacon()).toLowerCase() === addresses.beacon.toLowerCase(),
-    powerboardProgression: (await powerboard.progression()).toLowerCase() === addresses.progression.toLowerCase(),
-    progressionCrash: (await progression.crash()).toLowerCase() === addresses.crash.toLowerCase(),
-    progressionFuel: (await progression.fuelBooster()).toLowerCase() === addresses.fuelBooster.toLowerCase(),
-    progressionPowerboard: (await progression.powerboard()).toLowerCase() === addresses.powerboard.toLowerCase(),
+    crashRouter: (await crash.router()).toLowerCase() === addresses.rakeRouter.toLowerCase(),
+    crashLottery: (await crash.lottery()).toLowerCase() === addresses.lottery.toLowerCase(),
+    crashSettlesCcs2L: (await crash.settlementRuleId()) === ccs2lRuleId,
+    lotterySource: (await lottery.source()).toLowerCase() === addresses.crash.toLowerCase(),
+    routerSource: (await rakeRouter.source()).toLowerCase() === addresses.crash.toLowerCase(),
+    routerLottery: (await rakeRouter.lottery()).toLowerCase() === addresses.lottery.toLowerCase(),
+    routerVault: (await rakeRouter.vault()).toLowerCase() === addresses.crash.toLowerCase(),
     bankAllowsCrash: await bank.isGame(addresses.crash),
   };
   if (Object.values(assertions).some((value) => value !== true)) throw new Error("One or more deployment wiring assertions failed");
@@ -164,25 +154,21 @@ async function main() {
   if (process.env.CANARY_EXERCISE_FRESH_ROUND === "1") {
     const roundId = await crash.currentRoundId();
     const round = await crash.rounds(roundId);
-    if (round.phase !== 0n || round.pool !== 0n || (await crash.participantCount(roundId)) !== 0n) {
+    if (round.phase !== 0n || round.playerPool !== 0n || (await crash.seatCount(roundId)) !== 0n) {
       throw new Error("Full lifecycle canary requires a fresh, unused betting round");
     }
-    const bet = await crash.placeBet(10_100n, { value: await crash.minPoolSize() });
+    const bet = await crash.placeBet(10_100n, { value: await crash.minPoolWei() });
     transactions.push(await receiptEvidence("crash:placeBet", bet.hash));
     await waitUntil(round.bettingEndsAt);
     const lock = await crash.lockRound();
     transactions.push(await receiptEvidence("crash:lockRound", lock.hash));
     const locked = await crash.rounds(roundId);
-    // r == 0 produces the documented immediate 1.00x crash in this openly
-    // manipulable mock. It bounds canary duration; it is not fairness evidence.
-    let zeroModulo = 1n;
-    while (BigInt(ethers.keccak256(ethers.toBeHex(zeroModulo, 32))) % 10_000n !== 0n) zeroModulo += 1n;
-    const deterministicCrash = ethers.keccak256(ethers.toBeHex(zeroModulo, 32));
-    const randomTx = await beacon.setRandomness(locked.targetDrandRound, deterministicCrash);
+    await waitUntil(locked.revealNotBefore);
+    // Arbitrary injected randomness in this openly manipulable mock: the
+    // settlement is a pure function of it. Execution evidence, not fairness evidence.
+    const randomTx = await beacon.setRandomness(locked.targetDrandRound, ethers.keccak256(ethers.toBeHex(1n, 32)));
     transactions.push(await receiptEvidence("beacon:setRandomness:round", randomTx.hash));
-    const reveal = await crash.revealEntropy(roundId);
-    transactions.push(await receiptEvidence("crash:revealEntropy", reveal.hash));
-    const settle = await crash.settleRound(roundId);
+    const settle = await crash.settleRound();
     transactions.push(await receiptEvidence("crash:settleRound", settle.hash));
   }
 

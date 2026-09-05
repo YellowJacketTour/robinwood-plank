@@ -173,22 +173,6 @@
     </div>
   </section>
 
-  <section>
-    <h2>🪵 Progression</h2>
-    <div class="hint">
-      Rank status for a chosen account (Sapling → Stick → Board → Plank → Big Beam → Wooden Whale).
-      Wooden Whale also needs 7 days of tenure since first bet -- use "Fast-forward tenure" below to
-      skip that wait without grinding real rounds (devnet-only evm_increaseTime, never possible on a real chain).
-    </div>
-    <div class="row">
-      <label>Account</label>
-      <select id="rankAcct"><option>alice</option><option>bob</option><option>carol</option><option>deployer</option></select>
-      <button onclick="checkRank()">Check rank</button>
-    </div>
-    <div class="row">
-      <button class="warn-btn" onclick="fastForwardTenure()">Fast-forward 7 days</button>
-    </div>
-  </section>
 
   <section>
     <h2>⏱ Manual tick</h2>
@@ -265,15 +249,8 @@ const PLANK_ABI = [
   "function mint(address to, uint256 amount) external",
   "function balanceOf(address) view returns (uint256)",
 ];
-const PROGRESSION_ABI = [
-  "function rankOf(address player) view returns (uint8)",
-  "function capFor(address player) view returns (uint256)",
-  "function wageredNeededForNextRank(address player) view returns (uint256)",
-  "function statsOf(address) view returns (uint32 roundsPlayed, uint128 cumulativeWagered, uint32 fuelBurns, uint32 powerboardClaims, uint40 firstBetAt)",
-];
-const RANK_NAMES = ["Sapling", "Stick", "Board", "Plank", "Big Beam", "Wooden Whale"];
 
-let manifest, crash, powerboard, beacon, plank, progression;
+let manifest, crash, powerboard, beacon, plank;
 
 function log(msg, cls) {
   const el = document.getElementById("log");
@@ -316,7 +293,6 @@ async function init() {
   powerboard = new ethers.Contract(manifest.powerboard, POWERBOARD_ABI, op);
   beacon = new ethers.Contract(manifest.beacon, BEACON_ABI, op);
   plank = new ethers.Contract(manifest.plank, PLANK_ABI, op);
-  if (manifest.progression) progression = new ethers.Contract(manifest.progression, PROGRESSION_ABI, op);
   try {
     const saved = localStorage.getItem("plankcrash_bot_bet_eth");
     if (saved) document.getElementById("botAmt").value = saved;
@@ -342,12 +318,7 @@ async function refreshStatus() {
     for (const [name, w] of Object.entries(ACCOUNTS)) {
       const bal = await provider.getBalance(w.address);
       const pbal = await plank.balanceOf(w.address);
-      let rankStr = "";
-      if (progression) {
-        const rank = await progression.rankOf(w.address);
-        rankStr = `  [${RANK_NAMES[Number(rank)]}]`;
-      }
-      lines.push(`${name.padEnd(9)} ${w.address}  ${Number(ethers.formatEther(bal)).toFixed(2).padStart(10)} ETH  ${Number(ethers.formatEther(pbal)).toFixed(0).padStart(8)} $PLANK${rankStr}`);
+      lines.push(`${name.padEnd(9)} ${w.address}  ${Number(ethers.formatEther(bal)).toFixed(2).padStart(10)} ETH  ${Number(ethers.formatEther(pbal)).toFixed(0).padStart(8)} $PLANK`);
     }
     document.getElementById("status").textContent = lines.join("\n");
   } catch (e) {
@@ -476,36 +447,6 @@ async function claimTickets() {
     await tx.wait();
     log(`claimed tickets for ${acct} in crash round ${roundId}`, "ok");
   } catch (e) { log("claim-tickets failed: " + friendlyRevertReason(e, powerboard), "err"); }
-}
-
-async function checkRank() {
-  if (!progression) { log("no PlankProgression in this deploy manifest", "err"); return; }
-  const acct = document.getElementById("rankAcct").value;
-  try {
-    const addr = ACCOUNTS[acct].address;
-    const [rank, cap, wageredNeeded, stats] = await Promise.all([
-      progression.rankOf(addr),
-      progression.capFor(addr),
-      progression.wageredNeededForNextRank(addr),
-      progression.statsOf(addr),
-    ]);
-    const rankName = RANK_NAMES[Number(rank)];
-    log(
-      `${acct}: ${rankName}  cap ${ethers.formatEther(cap)} ETH  ` +
-      `rounds ${stats.roundsPlayed}  wagered ${ethers.formatEther(stats.cumulativeWagered)} ETH  ` +
-      (Number(rank) < RANK_NAMES.length - 1 ? `needs ${ethers.formatEther(wageredNeeded)} ETH more to rank up` : "max rank"),
-      "ok"
-    );
-  } catch (e) { log("check-rank failed: " + friendlyRevertReason(e, progression), "err"); }
-}
-
-async function fastForwardTenure() {
-  try {
-    await provider.send("evm_increaseTime", [7 * 24 * 60 * 60]);
-    await provider.send("evm_mine", []);
-    log("advanced chain time by 7 days (Wooden Whale tenure requirement)", "ok");
-    refreshStatus();
-  } catch (e) { log("fast-forward failed: " + (e.shortMessage || e.message), "err"); }
 }
 
 async function tick() {

@@ -2856,7 +2856,7 @@ async function loadHistoryRibbon() {
   }
 }
 let attemptedLockThisRound = false;
-// V2's reveal/settle split (see PlankCrashV2.sol's header) needs two
+// The legacy reveal/settle split needs two
 // separate one-shot flags where V1 needed one: revealEntropy() makes the
 // true crash point public WITHOUT ending the round, and settleRound()
 // only becomes callable later, once real elapsed blocks actually reach
@@ -2867,7 +2867,7 @@ let attemptedEntropyRevealThisRound = false;
 let attemptedSettleThisRound = false;
 let attemptedRegisterThisRound = false;
 let attemptedClaimThisRound = false;
-// PlankCrashV2's maxElapsedBlocks immutable, fetched once at connect
+// The legacy crash's maxElapsedBlocks immutable, fetched once at connect
 // time and cached -- lets the keeper compute client-side exactly when
 // settleRound() will stop reverting, instead of polling it blindly.
 let maxElapsedBlocksCache = null;
@@ -2901,8 +2901,10 @@ function toast(msg, type) {
 
 async function loadAbi() {
   // V2: reveal/settle split, presetCashOut, estimatedPayout, keeper
-  // reward -- see contracts/PlankCrashV2.sol's own header for the full
-  // design. This is the live contract the frontend actually talks to now.
+  // reward. NOTE: this page is bound to the RETIRED PlankCrashDrand ABI
+  // (plankcrashv2-abi.json); the canonical on-chain game is now
+  // contracts/PlankCrash.sol (CCS-2L, committed seats, no cash-out) and this
+  // page must be re-pointed before any on-chain deploy of the new stack.
   const res = await fetch("plankcrashv2-abi.json");
   abi = await res.json();
 }
@@ -3174,7 +3176,7 @@ $("connectBtn").addEventListener("click", async () => {
 });
 
 // ── Simulate mode: zero wallet-connect friction, zero rule-relaxation.
-// This still deploys to and settles against the real PlankCrashV2.sol on
+// This still deploys to and settles against the legacy crash contract on
 // the real local chain -- every check (whale cap, pari-mutuel payout
 // math, reveal/settle-split crash point, two-phase register+claim) is the
 // actual contract enforcing itself, not a client-side approximation.
@@ -3280,11 +3282,11 @@ function bpsToXStr(bps) {
 // evm_setIntervalMining argument exactly -- this is what lets elapsed
 // real time stand in for elapsed blocks below. Set to Robinhood Chain's
 // real measured block time (~100ms, confirmed via research -- see
-// PlankCrashV2.sol's _multiplierAt comment), not an arbitrary "feels
+// the legacy contract's _multiplierAt comment), not an arbitrary "feels
 // right" local value, so local playtesting reflects real mainnet pacing.
 const LOCAL_BLOCK_MS = 100;
 
-// Real mirror of PlankCrashV2.sol's _multiplierAt(elapsedBlocks), not an
+// Real mirror of the legacy crash's _multiplierAt(elapsedBlocks), not an
 // approximation: 10000 + 40*e + floor(e^2/5), bps -- re-derived for
 // Robinhood Chain's real ~100ms blocks (V1/V2's earlier constant,
 // 400*e + 20*e^2, was tuned against local dev's simulated ~500ms-1s
@@ -4475,7 +4477,7 @@ async function refresh() {
       if (!hasStake) updatePrimaryButton("watching");
       else if (hasCashedOut) {
         // Real, on-chain, honestly-labeled -- see estimatedPayout()'s own
-        // comment on contracts/PlankCrashV2.sol for why this is a
+        // comment on the legacy crash contract for why this is a
         // PROVISIONAL figure while still live (it can only ever shrink,
         // never grow, as more players also cash out), not a promise.
         // This is the actual point of building that view: show it, don't

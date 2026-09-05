@@ -17,8 +17,8 @@ const config = defineConfig({
         version: "0.8.24",
         settings: {
           optimizer: { enabled: true, runs: 200 },
-          // Required by PlankCrashV2.sol -- its Config-struct constructor
-          // and large Round struct (view-returned by currentRound()) hit
+          // Required by the crash contracts -- Config-struct constructors
+          // and the large Round struct (view-returned by currentRound()) hit
           // a real "stack too deep" error under the legacy codegen;
           // viaIR is the standard, compiler-recommended fix. Applies to
           // every file except the override below, so the full test suite

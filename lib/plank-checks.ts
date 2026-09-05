@@ -429,11 +429,11 @@ export async function getPointTotalForWallet(wallet: string): Promise<number> {
 // A visible tier label over a wallet's real Plank Checks point total --
 // flagged by the owner as wanting "a points and ranking system purely
 // social rank earned thru economic energy like we do with gamble games."
-// Named/spirited after PlankProgression.sol's own rank ladder (the
-// gambling module's on-chain Sapling->Wooden Whale tiers), but this is a
-// DIFFERENT, UI-only derivation -- PlankProgression's ranks unlock real
-// contract-level privileges (bet cap, fee discount) from on-chain wagering
-// stats; this is a vanity display over Plank Checks' off-chain point
+// Named/spirited after the retired on-chain PlankProgression rank ladder
+// (Sapling->Wooden Whale; deleted 2026-09-04 because per-wallet privileges
+// are incompatible with the partition-invariant CCS-2L rule), but this is a
+// UI-only derivation with no contract-level effect: a vanity display over
+// Plank Checks' off-chain point
 // ledger, same "vanity only, for now" posture the whole module already
 // has (SPEC-PLANK-CHECKS-AND-INDEX.md §1.1). No privilege is gated by this
 // -- see that spec's §1.7 for what a REAL future graduation into

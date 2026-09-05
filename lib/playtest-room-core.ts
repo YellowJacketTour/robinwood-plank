@@ -255,7 +255,8 @@ export function effectiveSettlementTarget(
 ): bigint {
   // A pre-committed auto target is a ceiling, never a suggestion that a
   // later manual request may raise. Manual play can improve safety only by
-  // locking earlier. This mirrors PlankCrashDrand.effectiveCashOutBlock().
+  // locking earlier. (The on-chain PlankCrash has no manual lock at all: a
+  // seat commits its target at bet time.)
   if (autoLockEnabled) {
     if (acceptedTargetBps !== null && acceptedTargetBps < requestedTargetBps) return acceptedTargetBps;
     return requestedTargetBps;

@@ -159,14 +159,6 @@
     </div>
   </section>
 
-  <section>
-    <h2>🪵 Progression</h2>
-    <div class="row">
-      <label>Player</label>
-      <input id="rankAddr" type="text" placeholder="0x... (defaults to the admin key)" />
-      <button onclick="checkRank()">Check rank</button>
-    </div>
-  </section>
 
   <section>
     <h2>⏱ Manual tick</h2>
@@ -256,15 +248,8 @@ const PLANK_ABI = [
   "function mint(address to, uint256 amount) external",
   "function balanceOf(address) view returns (uint256)",
 ];
-const PROGRESSION_ABI = [
-  "function rankOf(address player) view returns (uint8)",
-  "function capFor(address player) view returns (uint256)",
-  "function wageredNeededForNextRank(address player) view returns (uint256)",
-  "function statsOf(address) view returns (uint32 roundsPlayed, uint128 cumulativeWagered, uint32 fuelBurns, uint32 powerboardClaims, uint40 firstBetAt)",
-];
-const RANK_NAMES = ["Sapling", "Stick", "Board", "Plank", "Big Beam", "Wooden Whale"];
 
-let manifest, crash, powerboard, beacon, plank, progression;
+let manifest, crash, powerboard, beacon, plank;
 
 // Three funded throwaway wallets, independent of the admin key, so
 // multiple simultaneous bettors can be placed in one round the same way
@@ -364,7 +349,6 @@ async function init() {
   powerboard = new ethers.Contract(manifest.powerboard, POWERBOARD_ABI, admin);
   beacon = new ethers.Contract(manifest.beacon, BEACON_ABI, admin);
   plank = new ethers.Contract(manifest.plank, PLANK_ABI, admin);
-  if (manifest.progression) progression = new ethers.Contract(manifest.progression, PROGRESSION_ABI, admin);
   await refreshStatus();
   if (!window.__statusPolling) {
     window.__statusPolling = true;
@@ -505,24 +489,6 @@ async function claimTickets() {
     await tx.wait();
     log(`claimed tickets for ${player} in crash round ${roundId}`, "ok");
   } catch (e) { log("claim-tickets failed: " + friendlyRevertReason(e, powerboard), "err"); }
-}
-
-async function checkRank() {
-  if (!progression) { log("no PlankProgression in this deploy manifest", "err"); return; }
-  const addr = document.getElementById("rankAddr").value.trim() || admin.address;
-  try {
-    const [rank, cap, wageredNeeded, stats] = await Promise.all([
-      progression.rankOf(addr), progression.capFor(addr),
-      progression.wageredNeededForNextRank(addr), progression.statsOf(addr),
-    ]);
-    const rankName = RANK_NAMES[Number(rank)];
-    log(
-      `${addr}: ${rankName}  cap ${ethers.formatEther(cap)} ETH  rounds ${stats.roundsPlayed}  ` +
-      `wagered ${ethers.formatEther(stats.cumulativeWagered)} ETH  ` +
-      (Number(rank) < RANK_NAMES.length - 1 ? `needs ${ethers.formatEther(wageredNeeded)} ETH more to rank up` : "max rank"),
-      "ok"
-    );
-  } catch (e) { log("check-rank failed: " + friendlyRevertReason(e, progression), "err"); }
 }
 
 async function tick() {

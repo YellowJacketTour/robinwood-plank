@@ -1,219 +1,107 @@
 import { expect } from "chai";
 import { ethers, networkHelpers } from "./helpers/hardhat.js";
-import { hardeningFor } from "./helpers/crashHardening.js";
+import { assertConserved, bet, deployCasino, findRandomness, increaseToAtLeast, settleCurrent } from "./helpers/casino.js";
 import { tick, type KeeperConfig } from "../../scripts/casino-keeper.js";
 
 /**
- * PlankBank -- the "deposit once, play instantly, withdraw what's left"
- * buffer. These tests prove the whole instant-UX loop against the REAL
- * crash game, plus every access-control boundary that keeps a session key
- * strictly weaker than the player's root key.
+ * PlankBank -- "deposit once, play instantly with a session key, withdraw"
+ * against the REAL PlankCrash, plus every access-control boundary that keeps
+ * a session key strictly weaker than the root key. Also drives the keeper's
+ * tick() so the permissionless loop is proven end to end.
  */
-describe("PlankBank — deposit, play instantly with a session key, withdraw", () => {
-  const DRAND_PERIOD = 3n;
-  const DRAND_GENESIS = 1727521075n;
+describe("PlankBank -- session-key play against PlankCrash + keeper loop", () => {
+  const E = (x: string) => ethers.parseEther(x);
 
-  async function deploy(bettingSeconds = 5) {
-    const [deployer, alice, bob, keeper, sessionKey, attacker] = await ethers.getSigners();
-
-    const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
-
-    const nonce = await deployer.getNonce();
-    const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
-
-    const powerboard: any = await (
-      await ethers.getContractFactory("PlankPowerboard")
-    ).deploy({
-      beacon: await beacon.getAddress(),
-      allowedSources: [predictedCrash],
-      genesisTimestamp: DRAND_GENESIS,
-      epochDuration: 3600n,
-      drawerRewardBps: 200n,
-      ballRange: 26n,
-      jackpotBall: 8n,
-      consolationBps: 500n,
-      mustHitByEpochs: 0n,
-    });
-    // A throwaway treasury sink so rake distribution can't revert the flow.
-    const distributor: any = await (
-      await ethers.getContractFactory("PlankRakeDistributor")
-    ).deploy(deployer.address, await powerboard.getAddress(), deployer.address, 2000n, 4000n);
-
-    const crash: any = await (
-      await ethers.getContractFactory("PlankCrashDrand")
-    ).deploy({
-      bettingDurationSeconds: bettingSeconds,
-      roundIntervalSeconds: 0,
-      maxAwaitBlocks: 500,
-      maxElapsedBlocks: 40,
-      registrationWindowBlocks: 5,
-      rakeBps: 450n,
-      minParticipants: 2n,
-      minPoolSize: ethers.parseEther("0.01"),
-      maxStakePerWalletBps: 6000n,
-      keeperRewardBps: 1n, // hardening (c): must be > 0
-      seedNumerator: 1n,
-      seedDenominator: 2n,
-      reserveShareBps: 0n,
-      reserveFloorWei: 0n,
-      reserveCap: 0n,
-      jackpotSink: ethers.ZeroAddress,
-      treasury: await distributor.getAddress(),
-      beacon: await beacon.getAddress(),
-      ...hardeningFor(40), // Phase 3 hardening fields (test defaults)
-    });
-    expect((await crash.getAddress()).toLowerCase()).to.equal(predictedCrash.toLowerCase());
-
-    const bank: any = await (await ethers.getContractFactory("PlankBank")).deploy([await crash.getAddress()]);
-
+  async function deploy() {
+    const env = await deployCasino();
+    await env.crash.fundVault({ value: E("1") });
+    const [sessionKey, attacker] = env.signers.slice(10, 12);
     const cfg: KeeperConfig = {
-      crash: await crash.getAddress(),
-      powerboard: await powerboard.getAddress(),
-      beacon: await beacon.getAddress(),
-      distributor: await distributor.getAddress(),
+      crash: env.crashAddr,
+      lottery: await env.lottery.getAddress(),
+      beacon: await env.beacon.getAddress(),
+      router: await env.rakeRouter.getAddress(),
+      burnEngine: await env.burnEngine.getAddress(),
+      oracle: await env.oracle.getAddress(),
       mockBeacon: true,
     };
-    return { crash, bank, cfg, deployer, alice, bob, keeper, sessionKey, attacker };
+    return { env, sessionKey, attacker, cfg };
   }
 
-  async function runKeeper(cfg: KeeperConfig, signer: any, ticks: number) {
-    for (let i = 0; i < ticks; i++) {
-      await tick(ethers.provider as any, signer, cfg);
-      await networkHelpers.time.increase(3);
-      await networkHelpers.mine(8);
-    }
-  }
-
-  it("deposits and withdraws under the player's root key only", async () => {
-    const { bank, alice } = await deploy();
-    await bank.connect(alice).deposit({ value: ethers.parseEther("2") });
-    expect(await bank.balanceOf(alice.address)).to.equal(ethers.parseEther("2"));
-
-    await expect(bank.connect(alice).withdraw(ethers.parseEther("3"))).to.be.revertedWithCustomError(
-      bank,
-      "InsufficientBalance"
-    );
-    await bank.connect(alice).withdraw(ethers.parseEther("0.5"));
-    expect(await bank.balanceOf(alice.address)).to.equal(ethers.parseEther("1.5"));
+  it("deposit -> grantSession -> betVia commits a seat FOR the player; winnings recycle via withdrawToBank", async () => {
+    const { env, sessionKey } = await deploy();
+    const { bank, crash, alice, bob } = env;
+    await bank.connect(alice).deposit({ value: E("3") });
+    const expiry = BigInt(await networkHelpers.time.latest()) + 3600n;
+    await bank.connect(alice).grantSession(sessionKey.address, E("2"), expiry);
+    const id: bigint = await crash.currentRoundId();
+    const r0 = await crash.rounds(id);
+    await bank.connect(sessionKey).betVia(env.crashAddr, E("1"), 15_000n);
+    expect(await crash.stakeOf(id, alice.address)).to.equal(E("1"));
+    expect(await crash.targetOf(id, alice.address)).to.equal(15_000n);
+    expect(await bank.balanceOf(alice.address)).to.equal(E("2"));
+    await bet(env, bob, "1", 20_000n);
+    await settleCurrent(env, await findRandomness(env, id, BigInt(r0.targetDrandRound), (c) => c >= 20_000n));
+    const won: bigint = await crash.owed(alice.address);
+    expect(won).to.be.greaterThan(0n);
+    await crash.connect(alice).withdrawToBank(await bank.getAddress());
+    expect(await bank.balanceOf(alice.address)).to.equal(E("2") + won);
+    expect(await crash.owed(alice.address)).to.equal(0n);
     await bank.connect(alice).withdrawAll();
     expect(await bank.balanceOf(alice.address)).to.equal(0n);
+    await assertConserved(env, expect);
   });
 
-  it("a session key can bet but NEVER withdraw, and is bounded by cap + expiry", async () => {
-    const { bank, crash, alice, sessionKey } = await deploy();
-    await bank.connect(alice).deposit({ value: ethers.parseEther("2") });
-
-    // A session key holds no balance of its own -> cannot withdraw anything.
-    await expect(bank.connect(sessionKey).withdrawAll()).to.be.revertedWithCustomError(bank, "NothingToWithdraw");
-
-    // Not yet granted -> betVia is rejected.
-    await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n)
-    ).to.be.revertedWithCustomError(bank, "SessionInvalid");
-
-    const expiry = (await networkHelpers.time.latest()) + 3600;
-    await bank.connect(alice).grantSession(sessionKey.address, ethers.parseEther("0.3"), expiry);
-
-    // Within cap: two 0.1 bets are fine (across rounds), a third 0.2 breaks the 0.3 cap.
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
-    expect(await crash.stakeOf(await crash.currentRoundId(), alice.address)).to.equal(ethers.parseEther("0.1"));
-    // Same round, same player can't double-bet -> move to a fresh round by voiding.
-    await networkHelpers.time.increase(6);
-    await crash.lockRound(); // voids (only 1 participant), opens a new round
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
-    // Cap now at 0.2 spent; a 0.2 more exceeds 0.3.
-    await networkHelpers.time.increase(6);
-    await crash.lockRound();
-    await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.2"), 0n)
-    ).to.be.revertedWithCustomError(bank, "CapExceeded");
-
-    // Revoked -> dead immediately.
+  it("a session key is strictly weaker than the root key: cap, expiry, revoke, game allow-list, no withdraw", async () => {
+    const { env, sessionKey, attacker } = await deploy();
+    const { bank, alice } = env;
+    await bank.connect(alice).deposit({ value: E("5") });
+    const expiry = BigInt(await networkHelpers.time.latest()) + 100n;
+    await bank.connect(alice).grantSession(sessionKey.address, E("1.5"), expiry);
+    await expect(bank.connect(sessionKey).betVia(env.crashAddr, E("2"), 15_000n)).to.be.revertedWithCustomError(bank, "CapExceeded");
+    await expect(bank.connect(sessionKey).betVia(attacker.address, E("1"), 15_000n)).to.be.revertedWithCustomError(bank, "NotAGame");
+    await expect(bank.connect(attacker).betVia(env.crashAddr, E("1"), 15_000n)).to.be.revertedWithCustomError(bank, "SessionInvalid");
+    await expect(bank.connect(attacker).grantSession(sessionKey.address, E("1"), expiry)).to.be.revertedWithCustomError(bank, "KeyInUse");
+    // No withdraw surface for a session key, at all.
+    const names = bank.interface.fragments.filter((f: any) => f.type === "function").map((f: any) => f.name as string);
+    expect(names.some((n) => /withdrawVia|cashOut/i.test(n))).to.equal(false);
     await bank.connect(alice).revokeSession(sessionKey.address);
-    await expect(
-      bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.05"), 0n)
-    ).to.be.revertedWithCustomError(bank, "SessionInvalid");
+    await expect(bank.connect(sessionKey).betVia(env.crashAddr, E("1"), 15_000n)).to.be.revertedWithCustomError(bank, "SessionInvalid");
+    await bank.connect(alice).grantSession(sessionKey.address, E("1.5"), expiry);
+    await increaseToAtLeast(expiry + 1n);
+    await expect(bank.connect(sessionKey).betVia(env.crashAddr, E("1"), 15_000n)).to.be.revertedWithCustomError(bank, "SessionExpired");
+    await expect(bank.connect(attacker).creditFor(alice.address, { value: 1n })).to.be.revertedWithCustomError(bank, "NotAGame");
+    await expect(bank.connect(alice).withdraw(E("6"))).to.be.revertedWithCustomError(bank, "InsufficientBalance");
   });
 
-  it("nobody but a whitelisted game can mint balance via creditFor", async () => {
-    const { bank, attacker, alice } = await deploy();
-    await expect(
-      bank.connect(attacker).creditFor(alice.address, { value: ethers.parseEther("1") })
-    ).to.be.revertedWithCustomError(bank, "NotAGame");
-  });
-
-  it("only the funder can cash a bank-funded bet out on-behalf", async () => {
-    const { bank, crash, alice, sessionKey, attacker } = await deploy();
-    await bank.connect(alice).deposit({ value: ethers.parseEther("1") });
-    const expiry = (await networkHelpers.time.latest()) + 3600;
-    await bank.connect(alice).grantSession(sessionKey.address, ethers.parseEther("1"), expiry);
-    await bank.connect(sessionKey).betVia(await crash.getAddress(), ethers.parseEther("0.1"), 0n);
-
-    // A stranger calling cashOutFor directly on the crash is not the funder.
-    const roundId = await crash.currentRoundId();
-    await networkHelpers.time.increase(6);
-    // (still BETTING phase check will fire first, but the funder gate is the
-    // real protection; assert it directly on a locked round below is covered
-    // by the end-to-end test.)
-    await expect(crash.connect(attacker).cashOutFor(roundId, alice.address)).to.be.revertedWithCustomError(
-      crash,
-      "NotFunder"
-    );
-  });
-
-  it("END TO END: deposit -> instant session-key play -> win recycles into the balance -> withdraw what's left", async () => {
-    const { crash, bank, cfg, alice, bob, keeper, sessionKey } = await deploy(120);
-    const bankAddr = await bank.getAddress();
-    const crashAddr = await crash.getAddress();
-
-    // Alice signs THREE times total to get set up, then never again:
-    //   1) deposit her play buffer
-    //   2) authorize a local session key
-    //   3) opt her winnings into recycling back to the bank
-    await bank.connect(alice).deposit({ value: ethers.parseEther("1") });
-    const expiry = (await networkHelpers.time.latest()) + 3600;
-    await bank.connect(alice).grantSession(sessionKey.address, ethers.parseEther("1"), expiry);
-    await crash.connect(alice).setPayoutRedirect(bankAddr);
-
-    // Instant play: the session key bets FOR alice from her buffer, no popup.
-    const stake = ethers.parseEther("0.2");
-    await bank.connect(sessionKey).betVia(crashAddr, stake, 0n);
-    expect(await bank.balanceOf(alice.address)).to.equal(ethers.parseEther("0.8")); // debited
-    expect(await crash.stakeOf(await crash.currentRoundId(), alice.address)).to.equal(stake);
-
-    // Bob plays too (a second participant so the round is valid).
-    const roundId = await crash.currentRoundId();
-    await crash.connect(bob).placeBet(0n, { value: ethers.parseEther("0.2") });
-
-    // Close betting and lock the round (LIVE) -- pause here so alice's
-    // session key can lock in a win before the keeper reveals + settles.
-    await networkHelpers.time.increase(121);
-    await crash.lockRound();
-    expect(Number((await crash.rounds(roundId)).phase)).to.equal(1); // LIVE
-
-    // Alice's session key locks in her win instantly at a low multiplier --
-    // still no wallet popup.
-    await bank.connect(sessionKey).cashOutVia(crashAddr, roundId);
-
-    // Keeper carries it to settled + registered + claimed.
-    await runKeeper(cfg, keeper, 14);
-    expect(Number((await crash.rounds(roundId)).phase)).to.equal(2); // CRASHED
-    expect(await crash.claimed(roundId, alice.address)).to.equal(true);
-
-    // Her winnings were PUSHED back into her bank balance (recycled), not
-    // stranded in escrow -- so she can keep playing with no re-deposit.
-    const finalBal = await bank.balanceOf(alice.address);
-    expect(finalBal).to.be.gt(ethers.parseEther("0.8")); // 0.8 left + winnings
-
-    // And she withdraws whatever is left with one root-key signature.
-    const before = await ethers.provider.getBalance(alice.address);
-    const tx = await bank.connect(alice).withdrawAll();
-    const rc = await tx.wait();
-    const after = await ethers.provider.getBalance(alice.address);
-    expect(after - before + rc!.gasUsed * rc!.gasPrice).to.equal(finalBal);
-    expect(await bank.balanceOf(alice.address)).to.equal(0n);
-
-    // Conservation: the bank never holds unaccounted ETH after everyone exits.
-    expect(await ethers.provider.getBalance(bankAddr)).to.equal(0n);
+  it("the keeper's tick() drives lock -> relay -> settle -> flush -> router claims -> burn with a gas-only signer", async () => {
+    const { env, cfg } = await deploy();
+    const { crash, alice, bob, keeper } = env;
+    await bet(env, alice, "2", 15_000n);
+    await bet(env, bob, "2", 20_000n);
+    const id: bigint = await crash.currentRoundId();
+    const r0 = await crash.rounds(id);
+    const steps = new Set<string>();
+    const run = async () => { for (const a of await tick(ethers.provider, keeper, cfg)) steps.add(a.step); };
+    await run(); // nothing actionable yet (betting open)
+    expect(steps.has("lockRound")).to.equal(false);
+    await increaseToAtLeast(BigInt(r0.bettingEndsAt));
+    await run(); // lock
+    expect((await crash.rounds(id)).phase).to.equal(1n);
+    await increaseToAtLeast(BigInt(r0.revealNotBefore));
+    await run(); // mock relay + settle (+ flush on the same tick)
+    expect((await crash.rounds(id)).phase).to.equal(2n);
+    await networkHelpers.time.increase(61);
+    await run(); // router legs + oracle prime + burn
+    await run();
+    for (const s of ["lockRound", "mockBeacon.setRandomness", "settleRound", "flushRake", "router.claimBurn", "router.claimLottery", "router.claimVault", "router.claimFounders", "oracle.update", "executeBurn"]) {
+      expect(steps.has(s), `keeper step ${s}`).to.equal(true);
+    }
+    expect(await env.burnEngine.totalPlankBurned()).to.be.greaterThan(0n);
+    expect(await env.lottery.totalFunded()).to.be.greaterThan(0n);
+    expect(await crash.protectedPrincipal()).to.be.greaterThan(0n);
+    // Zero privilege: the keeper earned nothing (keeperRewardBps 0) and can redirect nothing.
+    expect(await crash.owed(keeper.address)).to.equal(0n);
+    await assertConserved(env, expect);
   });
 });

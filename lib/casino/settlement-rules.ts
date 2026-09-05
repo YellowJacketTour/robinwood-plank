@@ -17,14 +17,11 @@
  *    params})) — they predate the on-chain hash convention and have no
  *    tunable parameters beyond the rule id itself.
  *
- * ON-CHAIN FIELD (specified, not deployable here — the live PlankCrashDrand
- * is frozen on this branch): a future contract revision adds to the round
- * commitment struct
- *     bytes32 settlementRuleId;      // keccak256(rule string), e.g. RULE_ID
- *     bytes32 settlementParamsHash;  // PlankCcs2LMath.paramsHash(params)
- * written in the same transaction that commits the round randomness, and the
- * settlement path requires the executing rule/params to hash to those exact
- * values. Off-chain (the playtest laboratory), the same descriptor is
+ * ON-CHAIN FIELD: contracts/PlankCrash.sol carries `settlementRuleId` /
+ * `settlementParamsHash` as immutables and stamps `paramsHash` into every
+ * round commitment (the same transaction that commits the round's drand
+ * target); settleRound reverts RuleMismatch unless the executing params hash
+ * to the committed value. Off-chain (the playtest laboratory), the same descriptor is
  * persisted in the "round.launched" event payload (lib/playtest-rooms.ts).
  */
 

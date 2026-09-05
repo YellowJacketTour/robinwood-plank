@@ -9,8 +9,9 @@
  * DESIGN-PLANKCRASH-CCS2L-INTEGRATION-2026-08-31.md. Variant C (forward-seed
  * recycling) is REJECTED and archived as evidence only; it is not a rule.
  *
- * Mechanism (mirrors PlankCrashDrand._splitPayout's playerPot/seed separation
- * with continuous hazard pricing on the player layer):
+ * Mechanism (the player-pot/seed separation, settled on-chain by
+ * contracts/PlankCrash.sol via contracts/lib/PlankCcs2LMath.sol, with
+ * continuous hazard pricing on the player layer):
  *
  * PLAYER LAYER — D_players = playerPool - rake. When any survivor exists it is
  * distributed 100% to survivors: p_i = f*s_i/BPS + premium*w_i/W with
