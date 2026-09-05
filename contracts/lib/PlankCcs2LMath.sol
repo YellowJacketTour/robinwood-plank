@@ -119,6 +119,35 @@ library PlankCcs2LMath {
         return (log2Scaled * LN2_SCALED) >> 40;
     }
 
+    /// @dev Per-seat pre-pass: survival, floors, hazard weights and their sums.
+    struct Prep {
+        uint256[] floors;
+        uint256[] ws;
+        bool[] survived;
+        uint256 sumFloors;
+        uint256 W;
+        bool anySurvivor;
+    }
+
+    function _prepare(Seat[] memory seats, uint256 crashBps, uint256 floorBps_) private pure returns (Prep memory p) {
+        uint256 n = seats.length;
+        p.floors = new uint256[](n);
+        p.ws = new uint256[](n);
+        p.survived = new bool[](n);
+        for (uint256 i = 0; i < n; i++) {
+            uint256 s = seats[i].stake;
+            uint256 m = seats[i].targetBps;
+            if (s == 0 || s > MAX_STAKE || m < MIN_TARGET_BPS || m > MAX_TARGET) revert InvalidSeat();
+            if (m > crashBps) continue;
+            p.survived[i] = true;
+            p.anySurvivor = true;
+            p.floors[i] = (floorBps_ * s) / BPS;
+            p.ws[i] = s * lnScaled(m); // <= 1e30 * 2.1e7 — no overflow
+            p.sumFloors += p.floors[i];
+            p.W += p.ws[i];
+        }
+    }
+
     /// @notice Settle one round under CCS-2L (variant A). Memory-only; no state.
     /// @param playerDistributable D_players = playerPool - rake (player money).
     /// @param seedH the round's rolled/committed seed (house money).
@@ -127,7 +156,7 @@ library PlankCcs2LMath {
         uint256 playerDistributable,
         uint256 seedH,
         uint256 crashBps,
-        Seat[] calldata seats,
+        Seat[] memory seats,
         uint256 reserveAtLock,
         Params memory params
     ) internal pure returns (Result memory r) {
@@ -138,65 +167,63 @@ library PlankCcs2LMath {
         r.bonuses = new uint256[](n);
         r.dustIndex = -1;
 
-        uint256[] memory floors = new uint256[](n);
-        uint256[] memory ws = new uint256[](n);
-        bool[] memory survived = new bool[](n);
-        uint256 sumFloors = 0;
-        uint256 W = 0;
-        bool anySurvivor = false;
+        Prep memory p = _prepare(seats, crashBps, params.floorBps);
 
-        for (uint256 i = 0; i < n; i++) {
-            uint256 s = seats[i].stake;
-            uint256 m = seats[i].targetBps;
-            if (s == 0 || s > MAX_STAKE || m < MIN_TARGET_BPS || m > MAX_TARGET) revert InvalidSeat();
-            if (m > crashBps) continue;
-            survived[i] = true;
-            anySurvivor = true;
-            floors[i] = (params.floorBps * s) / BPS;
-            ws[i] = s * lnScaled(m); // <= 1e30 * 2.1e7 — no overflow
-            sumFloors += floors[i];
-            W += ws[i];
-        }
-
-        if (!anySurvivor) {
+        if (!p.anySurvivor) {
             r.mode = 0;
             r.bustedToReserve = playerDistributable + seedH;
             return r;
         }
 
-        // ── LAYER 1: player purse, distributed in full ──────────────────
+        _playerLayer(r, p, playerDistributable);
+        _houseLayer(r, p, seats, seedH, reserveAtLock, params.houseCapBps);
+    }
+
+    /// ── LAYER 1: player purse, distributed in full ──────────────────
+    function _playerLayer(Result memory r, Prep memory p, uint256 playerDistributable) private pure {
+        uint256 n = p.floors.length;
         uint256 paidSum = 0;
-        if (sumFloors > playerDistributable) {
+        if (p.sumFloors > playerDistributable) {
             r.mode = 1; // floor-degenerate (defensive; f > 1-rake only)
             for (uint256 i = 0; i < n; i++) {
-                if (!survived[i]) continue;
-                r.playerPayouts[i] = (playerDistributable * floors[i]) / sumFloors;
+                if (!p.survived[i]) continue;
+                r.playerPayouts[i] = (playerDistributable * p.floors[i]) / p.sumFloors;
                 paidSum += r.playerPayouts[i];
             }
-            _awardDust(r, floors, survived, n, playerDistributable - paidSum);
+            _awardDust(r, p.floors, p.survived, n, playerDistributable - paidSum);
         } else {
             r.mode = 2;
-            uint256 premium = playerDistributable - sumFloors;
+            uint256 premium = playerDistributable - p.sumFloors;
             // W > 0: every survivor has m >= 1.01x => lnScaled > 0.
-            r.lambda = (premium * LAMBDA_DENOM) / W; // premium <= 1e33 — no overflow
+            r.lambda = (premium * LAMBDA_DENOM) / p.W; // premium <= 1e33 — no overflow
             for (uint256 i = 0; i < n; i++) {
-                if (!survived[i]) continue;
+                if (!p.survived[i]) continue;
                 // premium * ws[i] <= 1e33 * 2.1e37 = 2.1e70 < 2^256
-                r.playerPayouts[i] = floors[i] + (premium * ws[i]) / W;
+                r.playerPayouts[i] = p.floors[i] + (premium * p.ws[i]) / p.W;
                 paidSum += r.playerPayouts[i];
             }
-            _awardDust(r, ws, survived, n, playerDistributable - paidSum);
+            _awardDust(r, p.ws, p.survived, n, playerDistributable - paidSum);
         }
         r.totalPlayerPaid = playerDistributable; // exact by dust award
+    }
 
-        // ── LAYER 2: house purse — partition-invariant (v1.1) ───────────
-        uint256 reserveCap = (reserveAtLock * params.houseCapBps) / BPS;
+    /// ── LAYER 2: house purse — partition-invariant (v1.1) ───────────
+    function _houseLayer(
+        Result memory r,
+        Prep memory p,
+        Seat[] memory seats,
+        uint256 seedH,
+        uint256 reserveAtLock,
+        uint256 houseCapBps_
+    ) private pure {
+        uint256 reserveCap = (reserveAtLock * houseCapBps_) / BPS;
         uint256 hAvail = seedH < reserveCap ? seedH : reserveCap;
-        if (hAvail > 0 && W > 0) {
+        if (hAvail > 0 && p.W > 0) {
             uint256 bSum = 0;
+            uint256 n = seats.length;
             for (uint256 i = 0; i < n; i++) {
-                if (!survived[i]) continue;
-                uint256 b = (hAvail * ws[i]) / W; // hAvail <= 1e33, w <= 2.1e37 — ok
+                if (!p.survived[i]) continue;
+                uint256 b = (hAvail * p.ws[i]) / p.W; // hAvail <= 1e33, w <= 2.1e37 — ok
                 uint256 fairCap = (seats[i].stake * (seats[i].targetBps - BPS)) / BPS;
                 if (b > fairCap) b = fairCap;
                 r.bonuses[i] = b;

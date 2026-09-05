@@ -3,10 +3,9 @@ pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-/// Minimal surface the bank needs on a casino game (PlankCrashDrand).
+/// Minimal surface the bank needs on a casino game (PlankCrash).
 interface IPlankGame {
-    function placeBetFor(address player, uint256 autoCashOutBps) external payable;
-    function cashOutFor(uint256 roundId, address player) external;
+    function placeBetFor(address player, uint256 targetBps) external payable;
 }
 
 /**
@@ -15,14 +14,15 @@ interface IPlankGame {
  * A player DEPOSITS ETH once (one signature), then plays as many rounds as
  * they like with NO per-bet wallet popup: they authorize a local "session
  * key" (a throwaway keypair the frontend holds) with a spend cap and an
- * expiry, and that key drives placeBetFor / cashOutFor on the game FROM the
- * player's pre-funded bank balance. Losses simply leave the balance smaller;
- * winnings recycle straight back into the balance IF the player opted into
- * the game's payout redirect (game.setPayoutRedirect(bank)). To leave, the
- * player WITHDRAWS whatever is left (one signature).
+ * expiry, and that key drives placeBetFor on the game FROM the player's
+ * pre-funded bank balance. Every seat commits (stake, targetBps) at bet time
+ * -- there is no cash-out call of any kind under CCS-2L. Losses simply leave
+ * the balance smaller; winnings land in the game's pull ledger and the player
+ * recycles them here with game.withdrawToBank(bank) (creditFor). To leave,
+ * the player WITHDRAWS whatever is left (one signature).
  *
  * The bank holds NO privilege over the game beyond what any funder has: it
- * bets on a player's behalf and can only cash out bets it itself funded. It
+ * bets on a player's behalf and nothing else. It
  * has NO admin, NO upgrade path, and the set of games it will talk to is
  * fixed at construction. A session key is strictly LESS powerful than the
  * player -- it can only bet up to its cap, only until its expiry, only on
@@ -57,7 +57,6 @@ contract PlankBank is ReentrancyGuard {
     event SessionGranted(address indexed player, address indexed key, uint256 spendCap, uint64 expiry);
     event SessionRevoked(address indexed player, address indexed key);
     event BetPlaced(address indexed player, address indexed game, address indexed by, uint256 amount);
-    event CashedOut(address indexed player, address indexed game, address indexed by, uint256 roundId);
     event Credited(address indexed player, address indexed game, uint256 amount);
 
     error ZeroAddress();
@@ -131,40 +130,26 @@ contract PlankBank is ReentrancyGuard {
 
     // ── Play: root-key path (no session needed) ─────────────────────────
 
-    function bet(address game, uint256 amount, uint256 autoCashOutBps) external nonReentrant {
-        _bet(msg.sender, game, amount, autoCashOutBps, msg.sender);
-    }
-
-    function cashOut(address game, uint256 roundId) external nonReentrant {
-        _cashOut(msg.sender, game, roundId, msg.sender);
+    function bet(address game, uint256 amount, uint256 targetBps) external nonReentrant {
+        _bet(msg.sender, game, amount, targetBps, msg.sender);
     }
 
     // ── Play: session-key path (instant, no wallet popup) ───────────────
 
-    /// The third argument is the player's precommitted auto-cashout target,
+    /// The third argument is the player's committed target multiplier (bps),
     /// never an entropy input.
-    function betVia(address game, uint256 amount, uint256 autoCashOutBps) external nonReentrant {
-        _betVia(game, amount, autoCashOutBps);
-    }
-
-    function _betVia(address game, uint256 amount, uint256 autoCashOutBps) private {
+    function betVia(address game, uint256 amount, uint256 targetBps) external nonReentrant {
         Session storage s = _liveSession(msg.sender);
         uint256 newSpent = uint256(s.spent) + amount;
         if (newSpent > s.spendCap) revert CapExceeded();
         s.spent = uint128(newSpent);
-        _bet(s.player, game, amount, autoCashOutBps, msg.sender);
-    }
-
-    function cashOutVia(address game, uint256 roundId) external nonReentrant {
-        Session storage s = _liveSession(msg.sender);
-        _cashOut(s.player, game, roundId, msg.sender);
+        _bet(s.player, game, amount, targetBps, msg.sender);
     }
 
     // ── Winnings recycling (only a whitelisted game can call) ───────────
 
-    /// A game pushes `player`'s winnings back into their play buffer. Kept
-    /// trivial and non-reverting so the game's claim() best-effort push
-    /// always succeeds; guarded to games so no one can mint balance.
+    /// A game pushes `player`'s winnings back into their play buffer
+    /// (PlankCrash.withdrawToBank). Guarded to games so no one can mint balance.
     function creditFor(address player) external payable {
         if (!isGame[msg.sender]) revert NotAGame();
         balanceOf[player] += msg.value;
@@ -173,19 +158,13 @@ contract PlankBank is ReentrancyGuard {
 
     // ── Internals ───────────────────────────────────────────────────────
 
-    function _bet(address player, address game, uint256 amount, uint256 autoCashOutBps, address by) private {
+    function _bet(address player, address game, uint256 amount, uint256 targetBps, address by) private {
         if (!isGame[game]) revert NotAGame();
         uint256 bal = balanceOf[player];
         if (amount == 0 || amount > bal) revert InsufficientBalance();
         balanceOf[player] = bal - amount;
-        IPlankGame(game).placeBetFor{value: amount}(player, autoCashOutBps);
+        IPlankGame(game).placeBetFor{value: amount}(player, targetBps);
         emit BetPlaced(player, game, by, amount);
-    }
-
-    function _cashOut(address player, address game, uint256 roundId, address by) private {
-        if (!isGame[game]) revert NotAGame();
-        IPlankGame(game).cashOutFor(roundId, player);
-        emit CashedOut(player, game, by, roundId);
     }
 
     function _liveSession(address key) private view returns (Session storage s) {
