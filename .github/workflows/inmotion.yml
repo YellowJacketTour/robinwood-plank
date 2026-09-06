@@ -1272,8 +1272,8 @@ jobs:
           # recurring schedule -- a broken script must never get scheduled
           # to fail silently every two minutes with nobody watching.
           cd "$app_dir/current"
-          "$flock_bin" -w 55 "$lock_file" \
-            "$node_bin" --env-file="$env_file" "$artifact" --limit=6 --max-seconds=180 \
+          UV_THREADPOOL_SIZE=2 "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$env_file" "$artifact" --limit=2 --in-process --max-seconds=180 \
             >> "$log_file" 2>&1 || { echo "[provision] proof run failed; last 60 log lines:" >&2; tail -n 60 "$log_file" >&2; exit 1; }
           tail -n 5 "$log_file"
 
@@ -1284,7 +1284,7 @@ jobs:
           awk '!/market-mesh/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# market-mesh (managed by inmotion branch)'
-            printf '*/5 * * * * cd %s && %s -n %s %s --env-file=%s %s --limit=6 --max-seconds=240 >> %s 2>&1\n' \
+            printf '*/5 * * * * cd %s && %s -n %s UV_THREADPOOL_SIZE=2 MESH_IN_PROCESS=1 %s --env-file=%s %s --limit=2 --max-seconds=240 >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
               "$artifact" "$log_file"
             # OpenSea Stream ingest (lib/market/multichain/edge/opensea-stream.ts):

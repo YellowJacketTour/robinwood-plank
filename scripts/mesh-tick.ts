@@ -18,6 +18,10 @@ const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("-
 // finish). A cron tick under flock can otherwise run for hours on a deep
 // queue; the provisioning job's proof run and the 5-minute cadence both
 // want a bounded pass. Unset = drain the queue, the historical behaviour.
+// --in-process (or MESH_IN_PROCESS=1): run every lane inside this process
+// instead of one child per lane. Required on hosts with a per-user process
+// limit (production cPanel: `spawn node EAGAIN` on the first real run).
+const inProcess = process.argv.includes("--in-process") || process.env.MESH_IN_PROCESS === "1";
 const maxSecondsArg = process.argv.find((a) => a.startsWith("--max-seconds="));
 const claimDeadline = maxSecondsArg ? Date.now() + Number(maxSecondsArg.slice("--max-seconds=".length)) * 1000 : Number.POSITIVE_INFINITY;
 
@@ -148,6 +152,8 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
  * block the scheduler for more than one real "unit" of sequential delay.
  */
 const LANE_TIMEOUT_MS = 90_000;
+/** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
+const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
 function withTimeout(promise: Promise<number>, ms: number, label: string): Promise<number> {
   return new Promise((resolve) => {
@@ -193,6 +199,13 @@ function laneEntry(): string[] {
 function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
   const label = `${source}:${chain}`;
   if (LIGHT_SOURCES.has(source)) return withTimeout(runLightSourceInProcess(source, chain, subject), LANE_TIMEOUT_MS, label);
+  if (inProcess) {
+    return withTimeout(
+      import("./mesh-lane").then(({ runMeshLane }) => runMeshLane(source as MeshLane["source"], chain, subject ?? "")),
+      IN_PROCESS_LANE_TIMEOUT_MS,
+      label
+    );
+  }
   return withTimeout(
     new Promise((resolve) => {
       const p = spawn(
@@ -220,6 +233,7 @@ function runLane(source: string, chain: string, subject?: string | null): Promis
 }
 
 async function main(): Promise<void> {
+  if (inProcess) console.log(`[mesh-tick] in-process lanes (no child processes), limit=${limit}`);
   const { hasDurableKv } = await import("../lib/market/durable-kv");
   if (!hasDurableKv()) throw new Error("mesh-tick: no PG");
 
