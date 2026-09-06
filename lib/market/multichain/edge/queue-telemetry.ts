@@ -26,7 +26,7 @@ export async function readQueueTelemetry(): Promise<QueueTelemetry | null> {
   if (!hasPostgresConfig()) return null;
   const [totals, recent, backlog, jails, incidents] = await Promise.all([
     postgresQuery<{ status: string; n: string }>(`SELECT status, COUNT(*)::text n FROM plank_data_jobs WHERE status IN ('queued','running','failed') GROUP BY status`),
-    postgresQuery<{ n: string }>(`SELECT COUNT(*)::text n FROM plank_data_jobs WHERE status = 'succeeded' AND completed_at >= NOW() - INTERVAL '15 minutes'`),
+    postgresQuery<{ n: string }>(`SELECT COUNT(*)::text n FROM plank_data_jobs WHERE completed_at >= NOW() - INTERVAL '15 minutes'`),
     postgresQuery<{ chain_slug: string | null; source: string; queued: string; running: string; failed: string; oldest: string | null; max_priority: string | null }>(
       `SELECT chain_slug, source,
               COUNT(*) FILTER (WHERE status = 'queued')::text AS queued,
