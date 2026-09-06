@@ -1284,7 +1284,7 @@ jobs:
           awk '!/market-mesh/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# market-mesh (managed by inmotion branch)'
-            printf '*/5 * * * * cd %s && %s -n %s UV_THREADPOOL_SIZE=2 MESH_IN_PROCESS=1 %s --env-file=%s %s --limit=2 --max-seconds=240 >> %s 2>&1\n' \
+            printf '*/5 * * * * cd %s && %s -n %s /usr/bin/env UV_THREADPOOL_SIZE=2 MESH_IN_PROCESS=1 %s --env-file=%s %s --limit=2 --max-seconds=240 >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
               "$artifact" "$log_file"
             # OpenSea Stream ingest (lib/market/multichain/edge/opensea-stream.ts):
