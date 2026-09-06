@@ -114,6 +114,7 @@
  * backfill lane is a real, separate future addition, not attempted here.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 
 const SOLANA_RPC_URL =
   process.env.SOLANA_RPC_URL?.trim() ||
@@ -381,7 +382,19 @@ export async function writeTensorFills(rows: DecodedTensorFill[]): Promise<numbe
       ]
     );
     written += (result.rowCount ?? 0) > 0 ? 1 : 0;
+    if ((result.rowCount ?? 0) > 0 && r.mint) {
+      // One sink (2026-09-06): the fill's collection comes from the token
+      // projection (mint -> collection_slug); unknown mints are skipped, never guessed.
+      const coll = await postgresQuery<{ collection_slug: string }>(
+        `SELECT collection_slug FROM plank_collection_tokens WHERE chain_slug = 'solana-mainnet' AND token_id = $1 LIMIT 1`, [r.mint]
+      );
+      const collectionKey = coll.rows[0]?.collection_slug ?? null;
+      if (collectionKey) {
+        await recordSaleEvent({ chainSlug: "solana-mainnet", venue: "tensor", protocol: r.instructionName, collectionKey, tokenId: r.mint, txHash: r.signature, logIndex: r.instructionIndex, blockNumber: r.slot, blockTimestamp: r.blockTime ?? null, seller: r.seller, buyer: r.buyer, currencyToken: null, priceWei: r.priceLamports != null ? String(r.priceLamports) : null, raw: { settlementKind: r.settlementKind }, chainNamespace: "solana" });
+      }
+    }
   }
+  await flushLedgerAggregation();
   return written;
 }
 
