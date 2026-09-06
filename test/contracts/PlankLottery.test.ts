@@ -259,4 +259,104 @@ describe("PlankLottery -- round-only draw, progressive carve, actuarial hit rule
     await expect(Fl.deploy({ ...env.lotteryConfig, contributionBps: 0n })).to.be.revertedWithCustomError(Fl, "BadConfig");
     void resultSeedOf;
   });
+
+  // ── v3: participation-count carve adaptation (SPEC-monotonic-vault-
+  // positive-sum-2026-09-05 §5.2) — adapts the EXISTING carve() rather than
+  // adding a parallel mechanism: the half-saturation constant `c` shrinks
+  // toward a floor as roundsContributed grows, so the same prize pays the
+  // winner more over time. carve()'s own conservation/monotonicity proofs
+  // hold for ANY positive c (see PlankCcs2LSettlement.test.ts's sibling
+  // suite for the same reasoning applied to PlankCrash's vault bonus).
+  describe("v3 participation-count carve adaptation", () => {
+    it("config validation: the ceiling must be strictly greater than the base, and the decay ratio strictly between 0 and 1 WAD, only when the feature is enabled", async () => {
+      const env2 = await deployCasino();
+      const Fl = await ethers.getContractFactory("PlankLottery");
+      // Feature OFF (ceiling == 0): decayWad is unchecked, any value is fine.
+      await Fl.deploy({ ...env2.lotteryConfig, carveDecayWad: 0n, carveHalfSaturationCeilingWei: 0n });
+      // Feature ON: ceiling must be strictly ABOVE the base (c grows toward it).
+      await expect(
+        Fl.deploy({
+          ...env2.lotteryConfig,
+          carveDecayWad: 999_000_000_000_000_000n,
+          carveHalfSaturationCeilingWei: env2.lotteryConfig.carveHalfSaturationWei,
+        }),
+      ).to.be.revertedWithCustomError(Fl, "BadConfig");
+      // Feature ON: decayWad == 0 would jump straight to the ceiling on round 1 — rejected.
+      await expect(
+        Fl.deploy({ ...env2.lotteryConfig, carveDecayWad: 0n, carveHalfSaturationCeilingWei: 2_500_000n * CREDIT }),
+      ).to.be.revertedWithCustomError(Fl, "BadConfig");
+      // Feature ON: decayWad >= 1e18 would never grow — rejected.
+      await expect(
+        Fl.deploy({ ...env2.lotteryConfig, carveDecayWad: 10n ** 18n, carveHalfSaturationCeilingWei: 2_500_000n * CREDIT }),
+      ).to.be.revertedWithCustomError(Fl, "BadConfig");
+    });
+
+    it("feature OFF is byte-identical to pre-v3 carve() regardless of roundsContributed", async () => {
+      const env2 = await deployCasino();
+      // Play several rounds so roundsContributed genuinely advances internally
+      // (it always tracks, even when unused) — must have zero effect on carve().
+      for (let i = 0; i < 3; i++) await playRound(env2, null);
+      const before = await env2.lottery.effectiveHalfSaturationWei();
+      expect(before).to.equal(DEFAULT_LOTTERY.carveHalfSaturationWei);
+      const [w1, s1] = await env2.lottery.carve(E("5"));
+      const js = carve(E("5"));
+      expect(w1).to.equal(js.W);
+      expect(s1).to.equal(js.S);
+    });
+
+    it("feature ON: effectiveHalfSaturationWei GROWS monotonically toward the ceiling as real rounds settle, and the winner's take increases as a result", async () => {
+      const decayWad = 900_000_000_000_000_000n; // r = 0.9 — fast ramp for a short test
+      const ceiling = 2_500_000n * CREDIT; // 10x base
+      const base = DEFAULT_LOTTERY.carveHalfSaturationWei;
+      const env2 = await deployCasino({ lottery: { carveDecayWad: decayWad, carveHalfSaturationCeilingWei: ceiling } });
+      let prevC = await env2.lottery.effectiveHalfSaturationWei();
+      expect(prevC).to.equal(base); // round 0: identical to the base, no regression
+      const prize = E("5");
+      let prevW = carve(prize, DEFAULT_LOTTERY.carveMinBps, DEFAULT_LOTTERY.carveMaxBps, prevC).W;
+      for (let i = 0; i < 6; i++) {
+        await playRound(env2, null);
+        const c = await env2.lottery.effectiveHalfSaturationWei();
+        expect(c, `round ${i + 1}: c must be >= previous (growing toward the ceiling)`).to.be.gte(prevC);
+        expect(c, `round ${i + 1}: c must never exceed the ceiling`).to.be.lte(ceiling);
+        // Same prize, larger c => larger winner take (x(P) decreases in c).
+        const [wNow] = await env2.lottery.carve(prize);
+        expect(wNow, `round ${i + 1}: winner take must not be less than at the previous (smaller) c`).to.be.gte(prevW);
+        prevC = c;
+        prevW = wNow;
+      }
+    });
+
+    it("a fundVault-style donation (fund()) can NEVER advance roundsContributed on its own — only recordRound, gated to the crash's own source, can", async () => {
+      const decayWad = 900_000_000_000_000_000n;
+      const ceiling = 2_500_000n * CREDIT;
+      const env2 = await deployCasino({ lottery: { carveDecayWad: decayWad, carveHalfSaturationCeilingWei: ceiling } });
+      const before = await env2.lottery.roundsContributed();
+      // Many donations, various sizes, no real crash round in between.
+      for (let i = 0; i < 5; i++) await env2.lottery.fund({ value: E("0.01") + BigInt(i) });
+      expect(await env2.lottery.roundsContributed(), "donations alone must never move the counter").to.equal(before);
+      // A real settled round is the ONLY thing that can.
+      await playRound(env2, null);
+      expect(await env2.lottery.roundsContributed()).to.equal(before + 1n);
+    });
+
+    it("roundsContributed advances by AT MOST one per real crash round, however many recordRound calls somehow reference the same roundId", async () => {
+      // recordRound is gated to msg.sender === source (the crash contract) and
+      // called exactly once per real settlement in normal operation, so this
+      // proves the GATE itself (not just the happy path): a second call for
+      // the SAME roundId must be a no-op on the counter.
+      const env2 = await deployCasino();
+      const crashAddr = await env2.crash.getAddress();
+      await ethers.provider.send("hardhat_impersonateAccount", [crashAddr]);
+      await ethers.provider.send("hardhat_setBalance", [crashAddr, "0x56BC75E2D63100000"]); // 100 ETH
+      const asCrash = await ethers.getSigner(crashAddr);
+      const before = await env2.lottery.roundsContributed();
+      await env2.lottery.connect(asCrash).recordRound(1n, toBeHex(1n, 32), env2.alice.address, 0n);
+      expect(await env2.lottery.roundsContributed()).to.equal(before + 1n);
+      await env2.lottery.connect(asCrash).recordRound(1n, toBeHex(2n, 32), env2.alice.address, 0n);
+      expect(await env2.lottery.roundsContributed(), "same roundId twice must not double-count").to.equal(before + 1n);
+      await env2.lottery.connect(asCrash).recordRound(2n, toBeHex(3n, 32), env2.alice.address, 0n);
+      expect(await env2.lottery.roundsContributed(), "a genuinely new roundId must advance it").to.equal(before + 2n);
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [crashAddr]);
+    });
+  });
 });

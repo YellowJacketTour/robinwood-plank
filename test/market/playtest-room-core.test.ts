@@ -112,27 +112,28 @@ test("genesis funding: 65% of the community leg reaches the prize net of the fou
   const players = [{ id: "a", stake: 10_000n, targetBps: 15_000n }, { id: "b", stake: 10_000n, targetBps: 15_000n }];
   const round = (state: ReturnType<typeof initialSimulationState>, sample: bigint) => simulateIteration(state, policy, { players, crashBps: 20_000n, lotteryOutcome: "none", lotteryDrawE18: sample });
   const first = round(initialSimulationState(policy), 0n);
-  // 20,000 pot × 4.50% = 900 rake → community 360 → 65% = 234 to the prize
-  // (fee 23 → 211 banked); the retained 126 splits 50/50 principal / buffer.
-  assert.equal(first.state.totals.communityFunded, 360n);
-  assert.equal(first.state.totals.powerboardFunded, 234n);
-  assert.equal(first.state.lottery.pool, 211n);
-  assert.equal(first.state.lottery.committedPrize, 211n);
-  assert.equal(first.state.protectedPrincipal, 63n);
-  assert.equal(first.state.emissionBuffer, 63n);
+  // 20,000 pot × 4.50% = 900 rake → community 621 (69%, revised 2026-09-05
+  // from 40% -- SPEC-monotonic-vault-positive-sum §4) → 65% = 403 to the
+  // prize (fee 40 → 363 banked); the retained 218 splits 50/50 principal / buffer.
+  assert.equal(first.state.totals.communityFunded, 621n);
+  assert.equal(first.state.totals.powerboardFunded, 403n);
+  assert.equal(first.state.lottery.pool, 363n);
+  assert.equal(first.state.lottery.committedPrize, 363n);
+  assert.equal(first.state.protectedPrincipal, 109n);
+  assert.equal(first.state.emissionBuffer, 109n);
   assert.equal(first.lotteryEvent, "funding", "nothing was on the board before the genesis round");
-  // Second round: a 211-credit prize is in the flat regime (W tiny) -> 1 in 16; sample 0 hits.
+  // Second round: a 363-credit prize is in the flat regime (W tiny) -> 1 in 16; sample 0 hits.
   const second = round(first.state, 0n);
   assert.equal(second.lotteryEvent, "hit");
   assert.equal(second.lotteryDraw?.thresholdE18, PROB_ONE / 16n);
-  const { winnerPaid, seeded } = carvePrize(211n, policy);
+  const { winnerPaid, seeded } = carvePrize(363n, policy);
   assert.equal(second.lotteryDraw?.winnerPaid, winnerPaid);
-  assert.equal(second.state.lottery.pool, seeded + 211n, "next board = carve seed + this round's own net contribution");
+  assert.equal(second.state.lottery.pool, seeded + 363n, "next board = carve seed + this round's own net contribution");
   assert.equal(second.state.totals.lotteryWinnerPayouts, winnerPaid);
   // A miss (sample at the top of the range) leaves the pool growing.
   const third = round(second.state, PROB_ONE - 1n);
   assert.equal(third.lotteryEvent, "miss");
-  assert.equal(third.state.lottery.pool, second.state.lottery.pool + 211n);
+  assert.equal(third.state.lottery.pool, second.state.lottery.pool + 363n);
 });
 
 test("pre-actuarial snapshots migrate to the pool model conserving accounted assets exactly, and stay replayable", () => {

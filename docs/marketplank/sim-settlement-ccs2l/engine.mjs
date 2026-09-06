@@ -76,6 +76,11 @@ export const DEFAULT_CCS2L = Object.freeze({
   playerWeight: "ln", // "ln" (variant A, CANONICAL) | "odds" (variant B dial)
   houseCapBps: 1_000n, // GLOBAL aggregate house-purse cap, of reserveAtLock
   houseRakeCapBps: 5_000n, // v2 GLOBAL house-purse cap, of the round's own rake
+  // v3 participation-count vault bonus (SPEC-monotonic-vault-positive-sum-
+  // 2026-09-05): an ADDITIONAL cap on hAvail keyed to a round-count, never a
+  // vault balance. 0 = feature off (default here, matching pre-v3 behavior).
+  maxVaultBonusBps: 0n,
+  vaultBonusDecayWad: 0n,
 });
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,36 @@ export function playerG(targetBps, playerWeight) {
 }
 
 /**
+ * Fixed-point r^n at WAD (1e18) precision via exponentiation by squaring --
+ * exact mirror of PlankCcs2LMath.powWad. Verified 2026-09-05: a 1e6/ppm scale
+ * drifts up to ~2.6% by n=10,000; WAD is exact to integer-division rounding
+ * at every scale tested.
+ */
+export function powWad(baseWad, exponent) {
+  let result = LAMBDA_DENOM; // 1.0 in WAD
+  let b = baseWad;
+  let e = exponent;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) / LAMBDA_DENOM;
+    b = (b * b) / LAMBDA_DENOM;
+    e >>= 1n;
+  }
+  return result;
+}
+
+/**
+ * The participation-count vault bonus ceiling for THIS round, in bps of the
+ * round's own rake: maxVaultBonusBps * (1 - r^n), the geometric ratchet of
+ * SPEC-monotonic-vault-positive-sum's §3.4. Exact mirror of
+ * PlankCcs2LMath.vaultBonusBps.
+ */
+export function vaultBonusBps(maxVaultBonusBps, vaultBonusDecayWad, roundsContributed) {
+  if (maxVaultBonusBps === 0n) return 0n;
+  const rn = powWad(vaultBonusDecayWad, roundsContributed);
+  return (maxVaultBonusBps * (LAMBDA_DENOM - rn)) / LAMBDA_DENOM;
+}
+
+/**
  * Settle one round under CCS-2L.
  *
  * @param playerDistributable D_players = playerPool - rake (player money).
@@ -139,8 +174,21 @@ export function playerG(targetBps, playerWeight) {
  *                            actuarial house cap. The chain ALWAYS applies it;
  *                            omitted (undefined) = v1 house layer, kept only so
  *                            the historical campaigns/scenarios still replay.
+ * @param vaultRoundsContributed v3: the live participation counter at round
+ *                            lock (round data, not a rule parameter). Omitted
+ *                            = v2 house layer (no vault bonus), kept only so
+ *                            pre-v3 campaigns/scenarios still replay exactly.
  */
-export function settleCcs2L(playerDistributable, seedH, crashBps, seats, reserveAtLock, params = DEFAULT_CCS2L, rakeWei = undefined) {
+export function settleCcs2L(
+  playerDistributable,
+  seedH,
+  crashBps,
+  seats,
+  reserveAtLock,
+  params = DEFAULT_CCS2L,
+  rakeWei = undefined,
+  vaultRoundsContributed = undefined,
+) {
   assertInputs(playerDistributable, seedH, crashBps, seats);
   if (reserveAtLock < 0n) throw new RangeError("negative reserve");
   if (rakeWei !== undefined && (rakeWei < 0n || rakeWei > MAX_POT)) throw new RangeError("rake out of range");
@@ -206,6 +254,13 @@ export function settleCcs2L(playerDistributable, seedH, crashBps, seats, reserve
     if (rakeWei !== undefined) {
       const rakeCap = (rakeWei * (params.houseRakeCapBps ?? 0n)) / BPS;
       if (rakeCap < hAvail) hAvail = rakeCap;
+    }
+    // v3 participation-count vault bonus (SPEC-monotonic-vault-positive-sum-
+    // 2026-09-05 §3.4): an ADDITIONAL cap, narrowing hAvail further toward a
+    // ceiling that rises with sustained play, never with vault balance.
+    if (rakeWei !== undefined && vaultRoundsContributed !== undefined && (params.maxVaultBonusBps ?? 0n) > 0n) {
+      const vaultCap = (rakeWei * vaultBonusBps(params.maxVaultBonusBps, params.vaultBonusDecayWad, vaultRoundsContributed)) / BPS;
+      if (vaultCap < hAvail) hAvail = vaultCap;
     }
     // House weight: s*lnScaled(m) — linear in stake at fixed m, so additive
     // under any wallet split of the same economic position.

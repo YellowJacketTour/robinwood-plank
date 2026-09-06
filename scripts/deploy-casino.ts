@@ -177,17 +177,26 @@ async function main() {
   // Lottery (DESIGN s6.1/s6.5 + actuarial hit rule, RESEARCH-game-theory-
   // lottery-seed-resolution-2026-09-05): 10% founder fee on fresh inflow only;
   // p_hit = min(1/oddsOneIn, c/(kappa * W)) with c the round's routed
-  // contribution (40% community x communityLotteryBps of the rake) and
+  // contribution (69% community x communityLotteryBps of the rake, revised
+  // 2026-09-05 from 40% -- SPEC-monotonic-vault-positive-sum §4) and
   // kappa = 2 (the pool keeps >= half of every contribution in expectation);
   // NO forced hit -- a progressive lottery pays when the ball falls;
   // progressive carve x(P) = 0.10 + 0.20 * P / (P + 250,000 credits) (D2).
   const LOTTERY_FOUNDER_FEE_BPS = envBig("CASINO_LOTTERY_FOUNDER_FEE_BPS", 1000n);
   const LOTTERY_ODDS_ONE_IN = envBig("CASINO_LOTTERY_ODDS_ONE_IN", 16n);
-  const LOTTERY_CONTRIBUTION_BPS = (4000n * COMMUNITY_LOTTERY_BPS) / 10_000n; // router bytecode: community 40%
+  const LOTTERY_CONTRIBUTION_BPS = (6900n * COMMUNITY_LOTTERY_BPS) / 10_000n; // router bytecode: community 69%
   const LOTTERY_KAPPA_BPS = envBig("CASINO_LOTTERY_KAPPA_BPS", 20_000n);
   const CARVE_MIN_BPS = envBig("CASINO_CARVE_MIN_BPS", 1000n);
   const CARVE_MAX_BPS = envBig("CASINO_CARVE_MAX_BPS", 3000n);
   const CARVE_HALF_SATURATION_WEI = envBig("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n * CREDIT);
+  // v3 vault bonus/carve-ceiling (SPEC-monotonic-vault-positive-sum-2026-09-05).
+  // Off by default (0/0) -- an explicit env opt-in is required to enable
+  // either mechanism, so an existing deployment's redeploy never silently
+  // changes behavior.
+  const CRASH_MAX_VAULT_BONUS_BPS = envBig("CASINO_MAX_VAULT_BONUS_BPS", 0n);
+  const CRASH_VAULT_BONUS_DECAY_WAD = envBig("CASINO_VAULT_BONUS_DECAY_WAD", 0n);
+  const LOTTERY_CARVE_DECAY_WAD = envBig("CASINO_LOTTERY_CARVE_DECAY_WAD", 0n);
+  const LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI = envBig("CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI", 0n);
 
   // Burn engine + TWAP
   const MAX_ETH_PER_BURN = envBig("CASINO_MAX_ETH_PER_BURN_WEI", ethers.parseEther("0.25"));
@@ -240,6 +249,8 @@ async function main() {
     carveMinBps: CARVE_MIN_BPS,
     carveMaxBps: CARVE_MAX_BPS,
     carveHalfSaturationWei: CARVE_HALF_SATURATION_WEI,
+    carveDecayWad: LOTTERY_CARVE_DECAY_WAD,
+    carveHalfSaturationCeilingWei: LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI,
   }); // nonce
   await lottery.waitForDeployment();
 
@@ -281,6 +292,8 @@ async function main() {
     floorBps: FLOOR_BPS,
     houseCapBps: HOUSE_CAP_BPS,
     houseRakeCapBps: HOUSE_RAKE_CAP_BPS,
+    maxVaultBonusBps: CRASH_MAX_VAULT_BONUS_BPS,
+    vaultBonusDecayWad: CRASH_VAULT_BONUS_DECAY_WAD,
     seedBootstrapBudgetWei: SEED_BOOTSTRAP_BUDGET_WEI,
     refundTimeoutSeconds: REFUND_TIMEOUT_SECONDS,
   }); // nonce+2

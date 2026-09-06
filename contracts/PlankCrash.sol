@@ -126,6 +126,11 @@ contract PlankCrash is ReentrancyGuard {
         uint256 seed;
         uint256 playerPool;
         uint256 reserveAtLock; // house-cap base: buffer after the seed draw
+        // Snapshotted at the SAME moment as reserveAtLock (round start), same
+        // reasoning: a later preview/view of an already-settled round must
+        // reproduce its EXACT historical vault-bonus cap, never today's
+        // higher (roundsContributed only ever grows) live counter.
+        uint256 vaultRoundsContributedAtLock;
         uint256 largestStake;
         uint256 crashBps;
         uint256 effectiveRakeBps;
@@ -160,6 +165,12 @@ contract PlankCrash is ReentrancyGuard {
         uint256 floorBps; // CCS-2L f (ratified 7_500)
         uint256 houseCapBps; // CCS-2L GLOBAL house cap (ratified 1_000)
         uint256 houseRakeCapBps; // CCS-2L v2 actuarial house cap, of the round's rake (ratified 5_000)
+        // CCS-2L v3, SPEC-monotonic-vault-positive-sum-2026-09-05 §3.4/§4.
+        // 0 = feature OFF (backward-compatible default; see PlankCcs2LMath's
+        // own _houseLayer guard) -- setting maxVaultBonusBps > 0 opts a
+        // deployment into the participation-count vault bonus.
+        uint256 maxVaultBonusBps; // ceiling, bps of the round's rake (ratified 2_500 = 25%)
+        uint256 vaultBonusDecayWad; // r, WAD-scaled, must be < 1e18 (ratified 0.999e18)
         uint256 seedBootstrapBudgetWei;
         uint256 refundTimeoutSeconds;
     }
@@ -188,6 +199,8 @@ contract PlankCrash is ReentrancyGuard {
     uint256 public immutable floorBps;
     uint256 public immutable houseCapBps;
     uint256 public immutable houseRakeCapBps;
+    uint256 public immutable maxVaultBonusBps;
+    uint256 public immutable vaultBonusDecayWad;
     uint256 public immutable seedBootstrapBudgetWei;
     uint256 public immutable refundTimeoutSeconds;
     bytes32 public immutable settlementRuleId;
@@ -205,6 +218,14 @@ contract PlankCrash is ReentrancyGuard {
     uint256 public totalOwed;
     uint256 public totalSeeded;
     uint256 public totalSeedReturned;
+    // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.4/§4.1. Monotone: only
+    // ever incremented, by AT MOST one per real round, whichever of organic
+    // rake-routing (fundCommunityReturn) or a fundVault() donation happens
+    // FIRST in that round -- see the shared _creditRoundsContributed gate.
+    // Reads only this counter, never a balance, so a single large donation
+    // can never advance it faster than real time and real rounds allow.
+    uint256 public roundsContributed;
+    uint256 private _lastRoundCountedFor;
 
     mapping(uint256 => Round) public rounds;
     mapping(uint256 => Seat[]) private _seats;
@@ -306,6 +327,21 @@ contract PlankCrash is ReentrancyGuard {
         // Actuarial identity: the house may never risk MORE than the round's
         // rake on that round (>= BPS would re-open the seed farm, F-2).
         if (cfg.houseRakeCapBps >= BPS) revert BadConfig();
+        // v3 vault bonus: maxVaultBonusBps == 0 is the valid "feature off"
+        // default (see PlankCcs2LMath's own guard) so it is NOT bounded below;
+        // only bounded above, same actuarial reasoning as houseRakeCapBps —
+        // this additional cap must never be able to authorize MORE room than
+        // houseRakeCapBps already permits. vaultBonusDecayWad must be a real
+        // decay ratio strictly between 0 and 1 WAD: 0 would make the curve
+        // jump to its ceiling on round 1 (defeats "constant growth, no
+        // threshold" — the whole point of this mechanism), and >= 1 WAD would
+        // make it non-decaying (r^n never shrinks, bonus never grows) or
+        // divergent. Only checked when the feature is actually enabled — an
+        // unused decay ratio on an off deployment is inert, not a real config.
+        if (cfg.maxVaultBonusBps > cfg.houseRakeCapBps) revert BadConfig();
+        if (cfg.maxVaultBonusBps > 0 && (cfg.vaultBonusDecayWad == 0 || cfg.vaultBonusDecayWad >= 1e18)) {
+            revert BadConfig();
+        }
         if (cfg.refundTimeoutSeconds == 0) revert BadConfig();
 
         genesisTimestamp = block.timestamp;
@@ -328,6 +364,8 @@ contract PlankCrash is ReentrancyGuard {
         floorBps = cfg.floorBps;
         houseCapBps = cfg.houseCapBps;
         houseRakeCapBps = cfg.houseRakeCapBps;
+        maxVaultBonusBps = cfg.maxVaultBonusBps;
+        vaultBonusDecayWad = cfg.vaultBonusDecayWad;
         seedBootstrapBudgetWei = cfg.seedBootstrapBudgetWei;
         seedBudget = cfg.seedBootstrapBudgetWei;
         refundTimeoutSeconds = cfg.refundTimeoutSeconds;
@@ -341,7 +379,13 @@ contract PlankCrash is ReentrancyGuard {
     // ── Round lifecycle ─────────────────────────────────────────────────
 
     function _params() private view returns (PlankCcs2LMath.Params memory) {
-        return PlankCcs2LMath.Params({floorBps: floorBps, houseCapBps: houseCapBps, houseRakeCapBps: houseRakeCapBps});
+        return PlankCcs2LMath.Params({
+            floorBps: floorBps,
+            houseCapBps: houseCapBps,
+            houseRakeCapBps: houseRakeCapBps,
+            maxVaultBonusBps: maxVaultBonusBps,
+            vaultBonusDecayWad: vaultBonusDecayWad
+        });
     }
 
     function _nextSlot() private view returns (uint256) {
@@ -366,6 +410,7 @@ contract PlankCrash is ReentrancyGuard {
         uint256 seed = _drawSeed();
         r.seed = seed;
         r.reserveAtLock = _buffer();
+        r.vaultRoundsContributedAtLock = roundsContributed;
         emit RoundStarted(id, r.bettingEndsAt, target, r.revealNotBefore, seed, r.reserveAtLock, r.paramsHash);
     }
 
@@ -510,7 +555,9 @@ contract PlankCrash is ReentrancyGuard {
             mseats[i] = PlankCcs2LMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
         }
         PlankCcs2LMath.Result memory res =
-            PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, _params());
+            PlankCcs2LMath.settle(
+                playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, r.vaultRoundsContributedAtLock, _params()
+            );
 
         uint256 paidSum = 0;
         for (uint256 i = 0; i < n; i++) {
@@ -659,10 +706,28 @@ contract PlankCrash is ReentrancyGuard {
 
     // ── Vault funding and escrow delivery (all permissionless) ─────────
 
+    /// @notice SPEC-monotonic-vault-positive-sum-2026-09-05 §4.1: advances
+    ///         roundsContributed by AT MOST one per real round, whichever of
+    ///         organic vault growth (fundCommunityReturn) or an external
+    ///         fundVault() donation happens FIRST in that round. Both paths
+    ///         check and set the SAME _lastRoundCountedFor, so neither can
+    ///         double-count a round the other already claimed, and no amount
+    ///         of donation calls -- however many, however large -- can ever
+    ///         advance the counter faster than real rounds pass. Never called
+    ///         for a zero-value vault credit (protectedPrincipalBps == 0 on
+    ///         some deployment must not count as participation).
+    function _creditRoundsContributed() private {
+        uint256 id = currentRoundId;
+        if (id == _lastRoundCountedFor) return;
+        _lastRoundCountedFor = id;
+        roundsContributed += 1;
+    }
+
     /// @notice Donations grow the buffer and count as bootstrap income.
     function fundVault() external payable nonReentrant {
         if (msg.value == 0) revert NothingToFund();
         _creditBuffer(msg.value, true);
+        _creditRoundsContributed();
         emit VaultFunded(msg.sender, msg.value, reserve);
     }
 
@@ -675,6 +740,11 @@ contract PlankCrash is ReentrancyGuard {
         protectedPrincipal += principal;
         reserve += principal;
         _creditBuffer(msg.value - principal, true);
+        // Only real, positive vault (protectedPrincipal) growth counts as
+        // participation -- a deployment with protectedPrincipalBps == 0 routes
+        // every community-return wei into the recyclable buffer instead, which
+        // is not the monotonic vault this counter tracks.
+        if (principal > 0) _creditRoundsContributed();
         emit CommunityReturn(msg.value, principal, msg.value - principal, reserve);
     }
 
@@ -797,7 +867,9 @@ contract PlankCrash is ReentrancyGuard {
         uint256 playerDistributable = (r.playerPool * (BPS - rake)) / BPS;
         uint256 grossRake = r.playerPool - playerDistributable;
         uint256 netRake = grossRake - (grossRake * keeperRewardBps) / BPS;
-        return PlankCcs2LMath.settle(playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, _params());
+        return PlankCcs2LMath.settle(
+            playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, r.vaultRoundsContributedAtLock, _params()
+        );
     }
 
     /// @notice Every wei this contract is responsible for (S-8). Equals

@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {PlankCcs2LMath} from "./lib/PlankCcs2LMath.sol";
 
 /**
  * PlankLottery -- the site's ONE progressive lottery, on the ratified design
@@ -60,7 +61,26 @@ contract PlankLottery is ReentrancyGuard {
     uint256 public immutable kappaBps; // actuarial loading kappa (> 1x): pool keeps >= 1-1/kappa of inflow
     uint256 public immutable carveMinBps; // x_min
     uint256 public immutable carveMaxBps; // x_max (< BPS)
-    uint256 public immutable carveHalfSaturationWei; // c
+    uint256 public immutable carveHalfSaturationWei; // c (base value, at roundsContributed == 0)
+    // v3 PARTICIPATION-COUNT CARVE ADAPTATION (docs/marketplank/SPEC-monotonic-
+    // vault-positive-sum-2026-09-05.md §5.2, corrected 2026-09-05). Adapts the
+    // EXISTING, audited carve formula rather than bolting a parallel
+    // mechanism alongside it: x(P) = xMin + (xMax-xMin)*P/(P+c) is DECREASING
+    // in c (verified by direct computation: larger c pushes x toward xMin,
+    // i.e. MORE of the pool goes to the winner, less reseeds the next board)
+    // -- so for the "same pool pays the winner more over time" goal, c must
+    // GROW toward carveHalfSaturationCeilingWei as roundsContributed grows,
+    // never shrink. (An earlier draft of this comment had the direction
+    // backwards -- shrinking c toward a floor -- which a differential test
+    // against this exact carve() caught as producing the OPPOSITE of the
+    // intended effect; fixed before merge.) Every existing carve() proof
+    // (exact conservation W+S==P, monotonicity S(P+1)-S(P)<=1) holds for ANY
+    // positive c, verified by direct computation, not just today's fixed
+    // constant. 0 for both fields (the default) means the feature is OFF:
+    // carveHalfSaturationWei is used unconditionally, byte-for-byte identical
+    // to pre-v3 behavior.
+    uint256 public immutable carveDecayWad; // r, WAD-scaled (1e18 == 1.0); 0 = feature off
+    uint256 public immutable carveHalfSaturationCeilingWei; // the ceiling c grows toward
 
     /// @notice Net (fee-paid) money banked on the board right now.
     uint256 public pool;
@@ -77,6 +97,14 @@ contract PlankLottery is ReentrancyGuard {
     uint256 public totalWinnerPaid;
     uint256 public totalSeeded;
     uint256 public highWaterPrize;
+    // SPEC-monotonic-vault-positive-sum-2026-09-05 §5.2/§4.1. Monotone: only
+    // ever incremented, by AT MOST one per real round, whichever of an
+    // organic funded round (fund()) or an external donation happens FIRST in
+    // that round -- mirrors PlankCrash's own _creditRoundsContributed gate
+    // exactly (same exploit-resistance reasoning: no amount of donations can
+    // advance it faster than real rounds pass).
+    uint256 public roundsContributed;
+    uint256 private _lastRoundCountedFor;
 
     event Funded(address indexed from, uint256 amount, uint256 fee, uint256 poolAfter);
     event Draw(
@@ -109,6 +137,10 @@ contract PlankLottery is ReentrancyGuard {
         uint256 carveMinBps;
         uint256 carveMaxBps;
         uint256 carveHalfSaturationWei;
+        // v3 vault bonus (SPEC-monotonic-vault-positive-sum-2026-09-05 §5.2).
+        // 0/0 = feature off (backward-compatible default).
+        uint256 carveDecayWad;
+        uint256 carveHalfSaturationCeilingWei;
     }
 
     constructor(Config memory cfg) {
@@ -130,6 +162,20 @@ contract PlankLottery is ReentrancyGuard {
         // progressive (design directive 2) rather than constant.
         if (cfg.carveMaxBps >= BPS || cfg.carveMinBps == 0 || cfg.carveMinBps >= cfg.carveMaxBps) revert BadConfig();
         if (cfg.carveHalfSaturationWei == 0) revert BadConfig();
+        // v3: carveDecayWad == 0 is the valid "feature off" default, so it is
+        // NOT bounded below -- only checked when the feature is actually
+        // enabled (carveHalfSaturationCeilingWei > 0). A real decay ratio
+        // must be strictly between 0 and 1 WAD (same reasoning as PlankCrash's
+        // own vaultBonusDecayWad validation: 0 would jump the curve straight
+        // to its ceiling on round 1, >= 1 WAD would never grow at all). The
+        // ceiling must be strictly GREATER than the base -- c GROWS toward it
+        // (see the field's own docs on why growth, not shrinkage, is the
+        // correct direction) -- otherwise the curve has nothing to grow
+        // toward and the feature does nothing while still costing gas.
+        if (cfg.carveHalfSaturationCeilingWei > 0) {
+            if (cfg.carveDecayWad == 0 || cfg.carveDecayWad >= 1e18) revert BadConfig();
+            if (cfg.carveHalfSaturationCeilingWei <= cfg.carveHalfSaturationWei) revert BadConfig();
+        }
         source = cfg.source;
         founderSink = cfg.founderSink;
         founderFeeBps = cfg.founderFeeBps;
@@ -139,6 +185,8 @@ contract PlankLottery is ReentrancyGuard {
         carveMinBps = cfg.carveMinBps;
         carveMaxBps = cfg.carveMaxBps;
         carveHalfSaturationWei = cfg.carveHalfSaturationWei;
+        carveDecayWad = cfg.carveDecayWad;
+        carveHalfSaturationCeilingWei = cfg.carveHalfSaturationCeilingWei;
     }
 
     // ── Funding (router leg, Vault overflow, donations) ─────────────────
@@ -163,6 +211,20 @@ contract PlankLottery is ReentrancyGuard {
     function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) external {
         if (msg.sender != source) revert UnauthorizedSource();
         if (winner == address(0)) revert ZeroAddress();
+        // SPEC-monotonic-vault-positive-sum-2026-09-05 §5.2: advances
+        // roundsContributed by exactly one per real crash round. Unlike
+        // PlankCrash's own fundVault()/fundCommunityReturn() pair, fund()
+        // here has no roundId to gate on at all -- this contract has no
+        // reference back to PlankCrash, so "a round happened" is a fact only
+        // recordRound's caller (PlankCrash itself, enforced by the
+        // UnauthorizedSource check above) can ever attest to. A donor
+        // calling fund() any number of times, of any size, therefore cannot
+        // move this counter even indirectly: only genuine settled crash
+        // rounds can, at the fixed rate of one per round.
+        if (roundId != _lastRoundCountedFor) {
+            _lastRoundCountedFor = roundId;
+            roundsContributed += 1;
+        }
         uint256 prize = committedPrize;
         if (prize == 0) {
             // Nothing banked before this round was committed: no draw.
@@ -229,20 +291,47 @@ contract PlankLottery is ReentrancyGuard {
         return actuarial < flat ? actuarial : flat;
     }
 
+    /// @notice The real, on-chain-verified half-saturation `c` for THIS
+    ///         moment: carveHalfSaturationWei unconditionally when the v3
+    ///         feature is off (carveHalfSaturationCeilingWei == 0, byte-for-
+    ///         byte pre-v3 behavior), or the geometric ratchet GROWING toward
+    ///         the ceiling once enabled: c = cCeiling - (cCeiling - cBase) *
+    ///         r^n. Growth, not shrinkage, is the correct direction: x(P) =
+    ///         xMin + (xMax-xMin)*P/(P+c) is DECREASING in c (verified by
+    ///         direct computation), so a LARGER c means a SMALLER reseed
+    ///         fraction and a LARGER winner take for the same pool -- which is
+    ///         the actual "the game pays the winner more as it matures" goal.
+    ///         Every existing carve() proof holds for ANY positive c (verified
+    ///         by direct computation, not just today's fixed constant) so
+    ///         this substitution changes generosity over time without
+    ///         touching the formula's own conservation/monotonicity
+    ///         guarantees.
+    function effectiveHalfSaturationWei() public view returns (uint256) {
+        if (carveHalfSaturationCeilingWei == 0) return carveHalfSaturationWei;
+        uint256 rn = PlankCcs2LMath.powWad(carveDecayWad, roundsContributed);
+        // carveHalfSaturationCeilingWei > carveHalfSaturationWei by
+        // construction (constructor validation), so this subtraction never
+        // underflows.
+        uint256 range = carveHalfSaturationCeilingWei - carveHalfSaturationWei;
+        return carveHalfSaturationCeilingWei - (range * rn) / 1e18;
+    }
+
     /// @notice The progressive carve as ONE floor division:
     ///   S = P * (xMin*(P+c) + (xMax-xMin)*P) / (BPS*(P+c)),  W = P - S.
     function carve(uint256 prize) public view returns (uint256 winnerPaid, uint256 seeded) {
         if (prize == 0) return (0, 0);
-        uint256 denom = prize + carveHalfSaturationWei;
+        uint256 denom = prize + effectiveHalfSaturationWei();
         uint256 numer = carveMinBps * denom + (carveMaxBps - carveMinBps) * prize;
         seeded = (prize * numer) / (BPS * denom);
         winnerPaid = prize - seeded;
     }
 
-    /// @notice Effective carve rate at `prize`, in bps (informational).
+    /// @notice Effective carve rate at `prize`, in bps (informational). Uses
+    ///         the SAME effectiveHalfSaturationWei() as carve() itself, so
+    ///         this figure is never stale relative to what a real draw pays.
     function carveBps(uint256 prize) external view returns (uint256) {
         if (prize == 0) return carveMinBps;
-        return carveMinBps + ((carveMaxBps - carveMinBps) * prize) / (prize + carveHalfSaturationWei);
+        return carveMinBps + ((carveMaxBps - carveMinBps) * prize) / (prize + effectiveHalfSaturationWei());
     }
 
     /// @notice What the next draw pays: the committed pool, the winner's exact

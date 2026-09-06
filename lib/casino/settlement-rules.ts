@@ -76,8 +76,16 @@ export function ccs2lParamsHash(params: Ccs2LParams, version = CCS2L_RULE_VERSIO
   }
   return keccak256(
     AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "uint256", "uint256", "uint256", "uint256"],
-      [CCS2L_RULE_ID, version, params.floorBps, params.houseCapBps, params.houseRakeCapBps],
+      ["bytes32", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256"],
+      [
+        CCS2L_RULE_ID,
+        version,
+        params.floorBps,
+        params.houseCapBps,
+        params.houseRakeCapBps,
+        params.maxVaultBonusBps,
+        params.vaultBonusDecayWad,
+      ],
     ),
   );
 }
@@ -129,6 +137,8 @@ export interface CommittedCcs2LRound {
     reserveAtLock: bigint;
     /** v2: the rake the round left behind (base of the actuarial house cap). */
     rakeWei?: bigint;
+    /** v3: the live participation counter at round lock (round data, not a rule parameter). */
+    vaultRoundsContributed?: bigint;
   };
 }
 
@@ -145,6 +155,10 @@ function reviveCcs2lParams(params: Record<string, string>): Ccs2LParams {
     playerWeight: params.playerWeight,
     houseCapBps: BigInt(params.houseCapBps),
     houseRakeCapBps: BigInt(params.houseRakeCapBps ?? "0"),
+    // v3: absent on any record committed before this feature existed — 0 is
+    // the correct, honest revival (feature was off), never a guess.
+    maxVaultBonusBps: BigInt(params.maxVaultBonusBps ?? "0"),
+    vaultBonusDecayWad: BigInt(params.vaultBonusDecayWad ?? "0"),
   };
 }
 
@@ -175,6 +189,7 @@ export function replayCommittedRound(record: CommittedRound): Settlement | Ccs2L
       inputs.reserveAtLock,
       params,
       inputs.rakeWei,
+      inputs.vaultRoundsContributed,
     );
   }
   const expected = parimutuelParamsHash(descriptor.rule, descriptor.version);

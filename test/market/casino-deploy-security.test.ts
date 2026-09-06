@@ -32,10 +32,10 @@ test("production deploys exactly the canonical CCS-2L set and nothing retired", 
   }
 });
 
-test("the 40/40/20 split of NET rake is router bytecode, not a deploy parameter", async () => {
+test("the 25/69/6 split of NET rake is router bytecode, not a deploy parameter", async () => {
   const router = await source("contracts/PlankRakeRouter.sol");
-  assert.match(router, /uint256 public constant BURN_BPS = 4_000;/);
-  assert.match(router, /uint256 public constant COMMUNITY_BPS = 4_000;/);
+  assert.match(router, /uint256 public constant BURN_BPS = 2_500;/);
+  assert.match(router, /uint256 public constant COMMUNITY_BPS = 6_900;/);
   assert.match(router, /founders = net - burnAmount - community;/);
   const deploy = await source("scripts/deploy-casino.ts");
   assert.doesNotMatch(deploy, /CASINO_BURN_BPS|CASINO_AIRDROP_BPS/);
@@ -54,7 +54,7 @@ test("ratified settlement and lottery parameters are the deploy defaults", async
   assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 5000n\)/);
   assert.match(deploy, /envBig\("CASINO_LOTTERY_ODDS_ONE_IN", 16n\)/);
   assert.match(deploy, /envBig\("CASINO_LOTTERY_KAPPA_BPS", 20_000n\)/);
-  assert.match(deploy, /LOTTERY_CONTRIBUTION_BPS = \(4000n \* COMMUNITY_LOTTERY_BPS\) \/ 10_000n/);
+  assert.match(deploy, /LOTTERY_CONTRIBUTION_BPS = \(6900n \* COMMUNITY_LOTTERY_BPS\) \/ 10_000n/);
   assert.doesNotMatch(deploy, /MUST_HIT_BY|mustHitBy/);
   assert.match(deploy, /envBig\("CASINO_CARVE_MIN_BPS", 1000n\)/);
   assert.match(deploy, /envBig\("CASINO_CARVE_MAX_BPS", 3000n\)/);

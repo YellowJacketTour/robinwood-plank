@@ -111,20 +111,21 @@ export function playerRoundOdds(thresholdE18: bigint, myStake: bigint, roundStak
 }
 
 /** Share of each round's pot that reaches the protected Vault, in parts per
- * million: rake × community leg (40% of net rake) × retained community
- * share (1 − powerboardFundingBps) × protectedPrincipalBps. With the
- * default playtest policy: 4.5% × 40% × 35% × 50% = 0.315% = 3,150 ppm. */
+ * million: rake × community leg (69% of net rake, revised 2026-09-05 from
+ * 40% -- SPEC-monotonic-vault-positive-sum §4) × retained community share
+ * (1 − powerboardFundingBps) × protectedPrincipalBps. With the default
+ * playtest policy: 4.5% × 69% × 35% × 50% = 0.5434% ≈ 5,434 ppm. */
 export function vaultShareOfPotPpm(policy: SimulationPolicy, effectiveRakeBps: bigint): bigint {
   const netRakeBps = effectiveRakeBps * (BPS - policy.keeperRewardBps) / BPS;
-  const communityBps = 4_000n;
+  const communityBps = 6_900n;
   const retainedBps = BPS - policy.powerboardFundingBps;
   return (netRakeBps * communityBps * retainedBps * policy.protectedPrincipalBps * 1_000_000n) / (BPS * BPS * BPS * BPS);
 }
 
-/** Lottery funding share of each round's pot, ppm (default: 4.5% × 40% × 65% = 1.17%). */
+/** Lottery funding share of each round's pot, ppm (default: 4.5% × 69% × 65% ≈ 2.02%). */
 export function lotteryShareOfPotPpm(policy: SimulationPolicy, effectiveRakeBps: bigint): bigint {
   const netRakeBps = effectiveRakeBps * (BPS - policy.keeperRewardBps) / BPS;
-  return (netRakeBps * 4_000n * policy.powerboardFundingBps * 1_000_000n) / (BPS * BPS * BPS);
+  return (netRakeBps * 6_900n * policy.powerboardFundingBps * 1_000_000n) / (BPS * BPS * BPS);
 }
 
 /** Growth of the Vault this round in bps of the previous balance; null on

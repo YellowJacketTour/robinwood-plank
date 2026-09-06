@@ -120,6 +120,16 @@
      },
      {
       "internalType": "uint256",
+      "name": "maxVaultBonusBps",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "vaultBonusDecayWad",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
       "name": "seedBootstrapBudgetWei",
       "type": "uint256"
      },
@@ -1011,6 +1021,11 @@
      },
      {
       "internalType": "uint256",
+      "name": "vaultRoundsContributedAtLock",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
       "name": "largestStake",
       "type": "uint256"
      },
@@ -1289,6 +1304,19 @@
  {
   "inputs": [],
   "name": "maxTargetBps",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "maxVaultBonusBps",
   "outputs": [
    {
     "internalType": "uint256",
@@ -1769,6 +1797,11 @@
    },
    {
     "internalType": "uint256",
+    "name": "vaultRoundsContributedAtLock",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
     "name": "largestStake",
     "type": "uint256"
    },
@@ -1806,6 +1839,19 @@
     "internalType": "address",
     "name": "lotteryWinner",
     "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "roundsContributed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
    }
   ],
   "stateMutability": "view",
@@ -2054,6 +2100,19 @@
  {
   "inputs": [],
   "name": "unclassifiedSurplus",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "vaultBonusDecayWad",
   "outputs": [
    {
     "internalType": "uint256",

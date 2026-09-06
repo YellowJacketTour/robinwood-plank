@@ -79,6 +79,20 @@ library PlankCcs2LMath {
         uint256 floorBps; // f, provisionally 7_500
         uint256 houseCapBps; // GLOBAL house-purse cap, of reserveAtLock
         uint256 houseRakeCapBps; // GLOBAL house-purse cap, of the round's own rake (v2)
+        // v3 PARTICIPATION-COUNT VAULT BONUS (docs/marketplank/SPEC-monotonic-
+        // vault-positive-sum-2026-09-05.md). maxVaultBonusBps is an ADDITIONAL
+        // cap on hAvail, keyed to how many rounds have EVER contributed to the
+        // vault -- never to the vault's own balance (unexploitable by a single
+        // large deposit; see the spec's §3.4/§3.6). It only ever narrows the
+        // room already carved out by houseRakeCapBps; it never creates new
+        // room beyond what the round's own rake can fund. These two fields are
+        // RATIFIED CONSTANTS (commitment-time, part of paramsHash) -- the
+        // round-varying input is vaultRoundsContributed, passed separately to
+        // settle() alongside rakeWei, exactly like crashBps: a live counter is
+        // round data, not a rule parameter, and must never be committed into
+        // the hash that proves the RULE didn't change underneath a round.
+        uint256 maxVaultBonusBps; // ceiling, bps of the round's rake (ratified 2_500 = 25%)
+        uint256 vaultBonusDecayWad; // r, WAD-scaled (1e18 == 1.0; ratified 0.999e18)
     }
 
     struct Result {
@@ -98,9 +112,61 @@ library PlankCcs2LMath {
     ///         round commitment; never re-derive settlement semantics from the
     ///         then-current configuration. Matches lib/casino/settlement-rules.ts
     ///         ccs2lParamsHash() byte-for-byte:
-    ///         keccak256(abi.encode(RULE_ID, RULE_VERSION, floorBps, houseCapBps, houseRakeCapBps)).
+    ///         keccak256(abi.encode(RULE_ID, RULE_VERSION, floorBps, houseCapBps,
+    ///         houseRakeCapBps, maxVaultBonusBps, vaultBonusDecayWad)).
+    ///         vaultRoundsContributed is deliberately NOT part of this hash --
+    ///         it is round-varying settlement data (like crashBps or rakeWei),
+    ///         not a rule parameter; see the Params struct's own docs.
     function paramsHash(Params memory params) internal pure returns (bytes32) {
-        return keccak256(abi.encode(RULE_ID, RULE_VERSION, params.floorBps, params.houseCapBps, params.houseRakeCapBps));
+        return keccak256(
+            abi.encode(
+                RULE_ID,
+                RULE_VERSION,
+                params.floorBps,
+                params.houseCapBps,
+                params.houseRakeCapBps,
+                params.maxVaultBonusBps,
+                params.vaultBonusDecayWad
+            )
+        );
+    }
+
+    /// @notice Fixed-point r^n at WAD (1e18) precision via exponentiation by
+    ///         squaring -- identical convention to LAMBDA_DENOM, and required
+    ///         precision (verified 2026-09-05: a 1e6/ppm scale drifts up to
+    ///         ~2.6% by n=10,000; WAD is exact to integer-division rounding at
+    ///         every scale tested). Bounded: <= ~20 iterations for n up to
+    ///         ~1,000,000 (2^20), far past any realistic roundsContributed.
+    function powWad(uint256 baseWad, uint256 exponent) internal pure returns (uint256 result) {
+        result = LAMBDA_DENOM; // 1.0 in WAD
+        uint256 b = baseWad;
+        uint256 e = exponent;
+        while (e > 0) {
+            if (e & 1 == 1) result = (result * b) / LAMBDA_DENOM;
+            b = (b * b) / LAMBDA_DENOM;
+            e >>= 1;
+        }
+    }
+
+    /// @notice The participation-count vault bonus ceiling for THIS round, in
+    ///         bps of the round's own rake: maxVaultBonusBps * (1 - r^n), the
+    ///         geometric ratchet of SPEC-monotonic-vault-positive-sum's §3.4.
+    ///         Monotone non-decreasing in `roundsContributed` (r < 1 => r^n is
+    ///         non-increasing), asymptotes toward maxVaultBonusBps, and reads
+    ///         ONLY the participation counter -- never a vault balance -- so a
+    ///         single large deposit can never move it (spec §3.6).
+    function vaultBonusBps(uint256 maxVaultBonusBps_, uint256 vaultBonusDecayWad_, uint256 roundsContributed)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (maxVaultBonusBps_ == 0) return 0;
+        uint256 rn = powWad(vaultBonusDecayWad_, roundsContributed); // r^n, WAD
+        // (1 - r^n) * maxVaultBonusBps_, exact integer math, no precision loss
+        // beyond the single floor-division here (rn <= LAMBDA_DENOM always,
+        // since vaultBonusDecayWad_ < 1e18 by construction -- see PlankCrash's
+        // own config validation).
+        return (maxVaultBonusBps_ * (LAMBDA_DENOM - rn)) / LAMBDA_DENOM;
     }
 
     /// @notice Fixed-point natural log: lnScaled(xBps) ~= ln(x/1e4)*1e6, floor.
@@ -162,6 +228,9 @@ library PlankCcs2LMath {
     /// @param seedH the round's rolled/committed seed (house money).
     /// @param reserveAtLock reserve snapshot for the GLOBAL house-purse cap.
     /// @param rakeWei the rake this round leaves behind (actuarial house cap, v2).
+    /// @param vaultRoundsContributed live participation counter (round data,
+    ///        not a rule parameter -- see Params' own docs on why this is a
+    ///        separate argument rather than a Params field).
     function settle(
         uint256 playerDistributable,
         uint256 seedH,
@@ -169,6 +238,7 @@ library PlankCcs2LMath {
         Seat[] memory seats,
         uint256 reserveAtLock,
         uint256 rakeWei,
+        uint256 vaultRoundsContributed,
         Params memory params
     ) internal pure returns (Result memory r) {
         if (crashBps < BPS) revert InvalidCrash();
@@ -187,7 +257,7 @@ library PlankCcs2LMath {
         }
 
         _playerLayer(r, p, playerDistributable);
-        _houseLayer(r, p, seats, seedH, reserveAtLock, rakeWei, params);
+        _houseLayer(r, p, seats, seedH, reserveAtLock, rakeWei, vaultRoundsContributed, params);
     }
 
     /// ── LAYER 1: player purse, distributed in full ──────────────────
@@ -226,6 +296,7 @@ library PlankCcs2LMath {
         uint256 seedH,
         uint256 reserveAtLock,
         uint256 rakeWei,
+        uint256 vaultRoundsContributed,
         Params memory params
     ) private pure {
         uint256 reserveCap = (reserveAtLock * params.houseCapBps) / BPS;
@@ -234,6 +305,20 @@ library PlankCcs2LMath {
         // what THIS round paid it. Sybil-proof by construction (Thm 2).
         uint256 rakeCap = (rakeWei * params.houseRakeCapBps) / BPS;
         if (rakeCap < hAvail) hAvail = rakeCap;
+        // v3 participation-count vault bonus (SPEC-monotonic-vault-positive-
+        // sum-2026-09-05 §3.4): an ADDITIONAL cap, narrowing hAvail further
+        // toward a ceiling that rises with sustained play, never with vault
+        // balance. Never widens hAvail past houseRakeCapBps's own room.
+        // maxVaultBonusBps == 0 means the feature is OFF for this deployment
+        // (backward-compatible default) -- never treated as "cap everything
+        // to zero," which would silently zero out the pre-existing house
+        // bonus for any config that hasn't opted in.
+        if (params.maxVaultBonusBps > 0) {
+            uint256 vaultCap = (
+                rakeWei * vaultBonusBps(params.maxVaultBonusBps, params.vaultBonusDecayWad, vaultRoundsContributed)
+            ) / BPS;
+            if (vaultCap < hAvail) hAvail = vaultCap;
+        }
         if (hAvail > 0 && p.W > 0) {
             uint256 bSum = 0;
             uint256 n = seats.length;
