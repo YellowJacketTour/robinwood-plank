@@ -33,6 +33,7 @@
  */
 import { Interface } from "ethers";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
+import { amountUsdAtSale } from "@/lib/market/asset-price-hourly";
 import { MARKET_FEE_RECIPIENT } from "@/lib/constants";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import { confirmedHead, planScan } from "@/lib/market/chain-indexer";
@@ -545,6 +546,9 @@ export async function scanChainForFills(
 export async function writeFills(
   rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp?: number | null; deploymentAddress?: string | null; fill: DecodedFill }[]
 ): Promise<number> {
+  // Collections touched by this batch -> the ledger aggregator runs once for
+  // them after the loop (2026-09-06, "one sink, one aggregator").
+  const touchedKeys = new Set<string>();
   // Dedupe within-batch -- same reason appendChainEvents does: Postgres
   // rejects ON CONFLICT DO NOTHING against two conflicting rows in one
   // statement.
@@ -599,15 +603,19 @@ export async function writeFills(
       // than left as a second, unconfirmed copy.
       if ((parent.rowCount ?? 0) > 0 && r.fill.nftContract) {
         const nativeSymbol = chainManifest(r.chainSlug)?.nativeCurrencySymbol ?? null;
+        const priced = await amountUsdAtSale(r.chainSlug, r.fill.currencyToken ?? null, r.fill.priceWei, r.blockTimestamp ?? null);
+        touchedKeys.add(r.fill.nftContract.toLowerCase());
         await client.query(
           `INSERT INTO plank_market_events
              (chain_slug, venue_id, protocol, event_type, collection_key, token_id, tx_hash,
               event_index, sub_index, block_number, block_timestamp, seller, buyer,
               currency_address, currency_symbol, currency_decimals, amount_atomic,
+              amount_usd, usd_price_source, usd_price_timestamp,
               finality, chain_namespace, event_identity, raw_event)
            VALUES ($1, 'seaport', 'seaport', 'sale', $2, $3, $4,
               $5, 0, $6, to_timestamp($7), $8, $9,
               $10, $11, 18, $12::numeric,
+              $15::numeric, $16, to_timestamp($7),
               'confirmed', 'eip155', $13, $14::jsonb)
            ON CONFLICT (chain_slug, venue_id, tx_hash, event_index, sub_index) DO NOTHING`,
           [
@@ -625,6 +633,8 @@ export async function writeFills(
             r.fill.priceWei,
             `${r.chainSlug}:seaport:${r.txHash}:${r.logIndex}`,
             JSON.stringify({ orderHash: r.fill.orderHash, shape: r.fill.shape }),
+            priced.amountUsd,
+            priced.source,
           ]
         );
         await client.query(
@@ -716,6 +726,19 @@ export async function writeFills(
         // never make the indexer itself look like it failed.
       }
     }
+  }
+  if (touchedKeys.size > 0) {
+    const { updateVolumeFromMarketEvents } = await import("@/lib/market/multichain/store");
+    const byChain = new Map<string, string[]>();
+    for (const r of rows) {
+      if (!r.fill.nftContract) continue;
+      const key = r.fill.nftContract.toLowerCase();
+      if (!touchedKeys.has(key)) continue;
+      const list = byChain.get(r.chainSlug) ?? [];
+      list.push(key);
+      byChain.set(r.chainSlug, list);
+    }
+    for (const [chain, keys] of byChain) await updateVolumeFromMarketEvents(chain, keys).catch(() => undefined);
   }
   return written;
 }

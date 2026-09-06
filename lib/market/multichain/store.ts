@@ -386,14 +386,35 @@ export async function updateCollectionMarketStats(
     volume30dWei?: string | null;
     sales30d?: number | null;
     floorChangePct?: number | null;
+    /**
+     * Who computed these numbers (2026-09-06, AUDIT lens 6 #5). 'ledger' =
+     * updateVolumeFromMarketEvents over this app's own sales ledger; anything
+     * else is a vendor feed. While the ledger's numbers are fresh (24h) a
+     * vendor write leaves the volume/sales columns alone, so the hub never
+     * flips between two definitions of the same figure.
+     */
+    source?: "ledger" | "vendor";
+    volume24hUsd?: string | null;
+    volume7dUsd?: string | null;
+    volume30dUsd?: string | null;
   }
 ): Promise<void> {
-  const collection = await postgresQuery<{ id: number }>(
-    `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+  const collection = await postgresQuery<{ id: number; ledger_owned: boolean }>(
+    `SELECT c.id, (s.volume_source = 'ledger' AND s.volume_computed_at > NOW() - INTERVAL '24 hours') AS ledger_owned
+       FROM plank_multichain_collections c LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+      WHERE c.chain_slug = $1 AND c.contract_address = $2`,
     [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const id = collection.rows[0]?.id;
   if (!id) return;
+  const source = stats.source ?? "vendor";
+  if (source !== "ledger" && collection.rows[0]?.ledger_owned) {
+    // Only the floor-change hint may still land; volume/sales are the ledger's.
+    if (stats.floorChangePct != null && stats.floorChangePct !== 0) {
+      await postgresQuery(`UPDATE plank_multichain_snapshots SET floor_change_pct = $2, synced_at = NOW() WHERE collection_id = $1`, [id, stats.floorChangePct]);
+    }
+    return;
+  }
   await postgresQuery(
     // AUDIT lens 6 #4 (2026-09-06): a caller that only knows the 24h window
     // (the seaport-fills lane) used to write NULL into 7d/30d, wiping what
@@ -406,6 +427,11 @@ export async function updateCollectionMarketStats(
          volume_30d_wei = CASE WHEN $10 THEN volume_30d_wei ELSE $6 END,
          sales_30d = CASE WHEN $10 THEN sales_30d ELSE $7 END,
          floor_change_pct = COALESCE($8, floor_change_pct),
+         volume_24h_usd = CASE WHEN $11 = 'ledger' THEN $12::numeric ELSE volume_24h_usd END,
+         volume_7d_usd = CASE WHEN $11 = 'ledger' THEN $13::numeric ELSE volume_7d_usd END,
+         volume_30d_usd = CASE WHEN $11 = 'ledger' THEN $14::numeric ELSE volume_30d_usd END,
+         volume_source = $11,
+         volume_computed_at = NOW(),
          synced_at = NOW()
      WHERE collection_id = $1`,
     [
@@ -419,6 +445,10 @@ export async function updateCollectionMarketStats(
       stats.floorChangePct === 0 ? null : (stats.floorChangePct ?? null),
       stats.volume7dWei === undefined && stats.sales7d === undefined,
       stats.volume30dWei === undefined && stats.sales30d === undefined,
+      source,
+      stats.volume24hUsd ?? null,
+      stats.volume7dUsd ?? null,
+      stats.volume30dUsd ?? null,
     ]
   );
 }
@@ -485,6 +515,63 @@ export async function sanitizeUnknownZeros(): Promise<{ floors: number; volumes:
  * at their prior value (never zeroed out -- a real zero-volume day and
  * "we haven't observed anything yet" must not be conflated).
  */
+/**
+ * THE aggregator (2026-09-06, AUDIT lens 6 section 3): every 24h/7d/30d
+ * sales count, native-wei sum and USD sum for a collection comes from one
+ * place -- plank_market_events sales -- with wash trades (seller = buyer)
+ * excluded, reverted rows excluded, and stream rows whose transaction the
+ * Seaport indexer already holds excluded. Called from the writers (stream
+ * flush, fill indexers) with the keys they just touched, so a sale on any
+ * venue moves volume, grade and the buyer board within seconds.
+ */
+export async function updateVolumeFromMarketEvents(chainSlug: string, collectionKeys: string[]): Promise<{ updated: number }> {
+  const keys = [...new Set(collectionKeys.map((k) => k.toLowerCase()))].slice(0, 200);
+  if (keys.length === 0) return { updated: 0 };
+  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const rows = await postgresQuery<{
+    collection_key: string; sales_24h: string; sales_7d: string; sales_30d: string;
+    wei_24h: string | null; wei_7d: string | null; wei_30d: string | null;
+    usd_24h: string | null; usd_7d: string | null; usd_30d: string | null;
+  }>(
+    `WITH sales AS (
+       SELECT lower(e.collection_key) AS collection_key, e.block_timestamp, e.amount_usd,
+              CASE WHEN e.currency_address IS NULL OR lower(e.currency_address) = $3 THEN e.amount_atomic ELSE NULL END AS native_wei
+         FROM plank_market_events e
+        WHERE e.chain_slug = $1 AND e.event_type = 'sale' AND lower(e.collection_key) = ANY($2::text[])
+          AND e.finality <> 'reverted' AND e.block_timestamp > NOW() - INTERVAL '30 days'
+          AND NOT (e.seller IS NOT NULL AND e.seller = e.buyer)
+          AND NOT (e.venue_id = 'opensea-stream' AND EXISTS (SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = e.chain_slug AND f.tx_hash = e.tx_hash))
+     )
+     SELECT collection_key,
+            COUNT(*) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')::text AS sales_24h,
+            COUNT(*) FILTER (WHERE block_timestamp > NOW() - INTERVAL '7 days')::text AS sales_7d,
+            COUNT(*)::text AS sales_30d,
+            SUM(native_wei) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')::text AS wei_24h,
+            SUM(native_wei) FILTER (WHERE block_timestamp > NOW() - INTERVAL '7 days')::text AS wei_7d,
+            SUM(native_wei)::text AS wei_30d,
+            SUM(amount_usd) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')::text AS usd_24h,
+            SUM(amount_usd) FILTER (WHERE block_timestamp > NOW() - INTERVAL '7 days')::text AS usd_7d,
+            SUM(amount_usd)::text AS usd_30d
+       FROM sales GROUP BY collection_key`,
+    [chainSlug, keys, wrappedNative ?? ""]
+  );
+  let updated = 0;
+  const seen = new Set<string>();
+  for (const row of rows.rows) {
+    seen.add(row.collection_key);
+    await updateCollectionMarketStats(chainSlug, row.collection_key, {
+      source: "ledger",
+      volume24hWei: row.wei_24h, sales24h: Number(row.sales_24h),
+      volume7dWei: row.wei_7d, sales7d: Number(row.sales_7d),
+      volume30dWei: row.wei_30d, sales30d: Number(row.sales_30d),
+      volume24hUsd: row.usd_24h, volume7dUsd: row.usd_7d, volume30dUsd: row.usd_30d,
+      currentFloorPriceWei: null,
+    });
+    updated += 1;
+  }
+  return { updated };
+}
+
 export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promise<{ updated: number }> {
   // AUDIT lens 6 #3 / lens 1 #5 (2026-09-06): a sale is a sale whatever it
   // was paid in, so the COUNT covers every fill. The native-denominated
