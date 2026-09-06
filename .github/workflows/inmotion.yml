@@ -652,13 +652,33 @@ jobs:
             echo "pg_dump not found on the server - cannot take a pre-migration backup." >&2
             exit 1
           fi
-          INMOTION_APP_DIR="$app_dir" \
-          PLANK_BACKUP_DIR="$app_dir/shared/backups" \
-          PLANK_BACKUP_LABEL="predeploy" \
-          PLANK_BACKUP_KEEP=14 \
-            "$node_bin" \
-              --env-file="$app_dir/shared/.env.production" \
-              "$release_dir/scripts/backup-postgres.mjs"
+          # 2026-09-06: the full pg_dump takes 40+ minutes on the production
+          # database and was running on EVERY release, even ones with no
+          # schema change (four Marketplank hot-fixes in a row each waited
+          # an hour). Back up only when a migration is actually pending;
+          # a release with nothing to migrate has nothing this dump would
+          # roll back. Exit 3 = pending, 0 = current, anything else = error.
+          set +e
+          "$node_bin" \
+            --env-file="$app_dir/shared/.env.production" \
+            "$release_dir/scripts/migrate-postgres.mjs" --check
+          check_status=$?
+          set -e
+          if [ "$check_status" -eq 3 ]; then
+            echo "[deploy] migrations pending - taking the pre-migration backup"
+            INMOTION_APP_DIR="$app_dir" \
+            PLANK_BACKUP_DIR="$app_dir/shared/backups" \
+            PLANK_BACKUP_LABEL="predeploy" \
+            PLANK_BACKUP_KEEP=14 \
+              "$node_bin" \
+                --env-file="$app_dir/shared/.env.production" \
+                "$release_dir/scripts/backup-postgres.mjs"
+          elif [ "$check_status" -eq 0 ]; then
+            echo "[deploy] schema is current - skipping the pre-migration backup (nothing to roll back)"
+          else
+            echo "[deploy] migration check failed (exit $check_status)" >&2
+            exit 1
+          fi
 
           "$node_bin" \
             --env-file="$app_dir/shared/.env.production" \
