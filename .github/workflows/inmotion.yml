@@ -1274,7 +1274,7 @@ jobs:
           cd "$app_dir/current"
           UV_THREADPOOL_SIZE=2 "$flock_bin" -w 55 "$lock_file" \
             "$node_bin" --env-file="$env_file" "$artifact" --limit=2 --in-process --max-seconds=180 \
-            >> "$log_file" 2>&1 || { echo "[provision] proof run failed; last 60 log lines:" >&2; tail -n 60 "$log_file" >&2; exit 1; }
+            >> "$log_file" 2>&1 || { status=$?; echo "[provision] proof run failed with exit status $status (137/143 = killed by the host); host limits:" >&2; ulimit -u -v -m 2>&1 | sed 's/^/  /' >&2; cat /proc/loadavg >&2; echo "[provision] last 120 log lines:" >&2; tail -n 120 "$log_file" >&2; exit 1; }
           tail -n 5 "$log_file"
 
           cron_before="$(mktemp)"
