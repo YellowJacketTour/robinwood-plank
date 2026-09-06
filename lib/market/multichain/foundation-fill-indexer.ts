@@ -41,6 +41,7 @@
  * are venue-generic -- reused here with venue_id = 'foundation'.
  */
 import { Interface } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery } from "@/lib/postgres";
 
 export const FOUNDATION_MARKET_ADDRESS = "0xcda72070e455bb31c7690a170224ce43623d0b6f";
@@ -296,6 +297,9 @@ export async function writeFoundationEvents(rows: FoundationLogRow[]): Promise<n
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && nftContract && priceWei != null) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "foundation", protocol: "foundation", collectionKey: String(nftContract), tokenId: tokenId != null ? String(tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: seller ?? null, buyer: buyer ?? null, currencyToken: null, priceWei: String(priceWei), raw: { eventName, auctionId } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew || !nftContract || !tokenId) continue;
 
@@ -314,5 +318,6 @@ export async function writeFoundationEvents(rows: FoundationLogRow[]): Promise<n
       [r.chainSlug, FOUNDATION_MARKET_ADDRESS, r.txHash, r.logIndex, priceWei, seller]
     );
   }
+  await flushLedgerAggregation();
   return written;
 }

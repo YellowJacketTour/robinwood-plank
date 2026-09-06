@@ -90,6 +90,7 @@
  * documented stance as the other three fill indexers' own bundle handling.
  */
 import { AbiCoder, Interface } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 
 /** The real, live-traffic proxy -- events are emitted here via delegatecall, NOT from the X2Y2_r1 implementation address. See this file's own header. */
@@ -250,6 +251,9 @@ export async function writeX2Y2Fills(rows: X2Y2FillRow[]): Promise<number> {
       )
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && r.fill.nftContract) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "x2y2", protocol: "x2y2", collectionKey: r.fill.nftContract, tokenId: r.fill.tokenId != null ? String(r.fill.tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: r.fill.seller, buyer: r.fill.buyer, currencyToken: r.fill.currencyToken ?? null, priceWei: r.fill.priceWei != null ? String(r.fill.priceWei) : null, raw: { itemHash: r.fill.itemHash, op: r.fill.op } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew || !r.fill.nftContract || !r.fill.tokenId) continue;
 
@@ -271,5 +275,6 @@ export async function writeX2Y2Fills(rows: X2Y2FillRow[]): Promise<number> {
       [r.chainSlug, X2Y2_ADDRESS, r.txHash, r.logIndex, r.fill.currencyToken, r.fill.priceWei, r.fill.seller]
     );
   }
+  await flushLedgerAggregation();
   return written;
 }
