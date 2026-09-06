@@ -147,18 +147,31 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     const cgHeaders: Record<string, string> = cgDemo
       ? { accept: "application/json", "x-cg-demo-api-key": cgDemo }
       : { accept: "application/json" };
-    const cg = await fetch(
-      `https://api.coingecko.com/api/v3/nfts/${platform}/contract/${encodeURIComponent(contractAddress)}`,
-      { headers: cgHeaders, signal: AbortSignal.timeout(12_000) }
-    ).catch(() => null);
-    if (cg?.ok) {
-      const d = (await cg.json()) as {
-        volume_24h?: { native_currency?: number };
-        one_day_sales?: number;
-        floor_price_24h_percentage_change?: { native_currency?: number };
-        number_of_unique_addresses?: number;
-        total_supply?: number;
-      };
+    type CgStats = {
+      volume_24h?: { native_currency?: number };
+      one_day_sales?: number;
+      floor_price_24h_percentage_change?: { native_currency?: number };
+      number_of_unique_addresses?: number;
+      total_supply?: number;
+    };
+    // Single point: one CoinGecko call per (chain, contract) per stats
+    // window, shared across every visitor's hydrate-stats poll.
+    const { edgeRead } = await import("@/lib/market/multichain/edge/read-gateway");
+    const { meteredFetch } = await import("@/lib/market/multichain/edge/provider-ledger");
+    const d = await edgeRead<CgStats>(
+      { kind: "collection-stats", chainSlug, subject: contractAddress, variant: { src: "coingecko" } },
+      async () => {
+        const cg = await meteredFetch(
+          `https://api.coingecko.com/api/v3/nfts/${platform}/contract/${encodeURIComponent(contractAddress)}`,
+          { headers: cgHeaders, signal: AbortSignal.timeout(12_000) },
+          { source: "coingecko-nft", chainSlug }
+        );
+        if (!cg.ok) throw new Error(`coingecko ${cg.status}`);
+        return (await cg.json()) as CgStats;
+      },
+      { provider: "coingecko-nft" }
+    ).then((r) => r.value).catch(() => null);
+    if (d) {
       await updateCollectionMarketStats(chainSlug, contractAddress, {
         volume24hWei: nativeToWei(d.volume_24h?.native_currency),
         sales24h: typeof d.one_day_sales === "number" ? d.one_day_sales : null,

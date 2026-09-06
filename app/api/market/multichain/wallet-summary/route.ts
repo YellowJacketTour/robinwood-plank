@@ -30,6 +30,8 @@ import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 import { getListings, getOffers } from "@/lib/market/orders-store";
 import { ROBINHOOD_CHAIN_SLUG, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { meteredFetch } from "@/lib/market/multichain/edge/provider-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -50,27 +52,37 @@ const ALCHEMY_SUBDOMAIN: Record<string, string> = {
 type OwnedItem = { chainSlug: string; contractAddress: string; collectionName: string | null; tokenId: string };
 
 async function fetchOwnedAll(owner: string): Promise<OwnedItem[]> {
-  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
+  const keyEntry = await pickAlchemyKey("live");
+  const apiKey = keyEntry?.apiKey || "demo";
   const results = await Promise.all(
     FOREIGN_CHAINS.map(async (chain): Promise<OwnedItem[]> => {
       const subdomain = ALCHEMY_SUBDOMAIN[chain.chainSlug];
       if (!subdomain) return [];
       try {
-        const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
-        url.searchParams.set("owner", owner);
-        url.searchParams.set("withMetadata", "true");
-        url.searchParams.set("pageSize", "50");
-        const res = await fetch(url.toString());
-        if (!res.ok) return [];
-        const data = (await res.json()) as {
-          ownedNfts?: Array<{ tokenId: string; contract?: { address: string; name?: string | null } }>;
-        };
-        return (data.ownedNfts ?? []).map((n) => ({
-          chainSlug: chain.chainSlug,
-          contractAddress: n.contract?.address ?? "",
-          collectionName: n.contract?.name ?? null,
-          tokenId: n.tokenId,
-        }));
+        // Same edge cell owned-all/route.ts uses, so the two routes share one
+        // Alchemy call per (chain, wallet) per TTL window.
+        const { value } = await edgeRead<OwnedItem[]>(
+          { kind: "owned", chainSlug: chain.chainSlug, subject: owner.toLowerCase(), variant: { scope: "all", pageSize: 50 } },
+          async () => {
+            const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
+            url.searchParams.set("owner", owner);
+            url.searchParams.set("withMetadata", "true");
+            url.searchParams.set("pageSize", "50");
+            const res = await meteredFetch(url.toString(), undefined, { source: "alchemy-nft", keyId: keyEntry?.id ?? null, chainSlug: chain.chainSlug, costUnits: 480 });
+            if (!res.ok) throw new Error(`Alchemy ${res.status}`);
+            const data = (await res.json()) as {
+              ownedNfts?: Array<{ tokenId: string; contract?: { address: string; name?: string | null } }>;
+            };
+            return (data.ownedNfts ?? []).map((n) => ({
+              chainSlug: chain.chainSlug,
+              contractAddress: n.contract?.address ?? "",
+              collectionName: n.contract?.name ?? null,
+              tokenId: n.tokenId,
+            }));
+          },
+          { provider: "alchemy" }
+        );
+        return value;
       } catch {
         return [];
       }
@@ -172,7 +184,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
+    const keyEntry = await pickOpenSeaKey("live");
+    const key = keyEntry?.apiKey ?? null;
     const [foreignOwned, robinhoodOwned] = await Promise.all([fetchOwnedAll(owner), fetchOwnedRobinhood(owner)]);
     const owned = [...foreignOwned, ...robinhoodOwned.owned];
 
@@ -211,11 +224,20 @@ export async function GET(req: NextRequest) {
           // request; skip explicitly instead of wasting the round trip.
           if (!chain.openSeaChain) return null;
           try {
-            const res = await fetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${c.contractAddress}`, {
-              headers: { "x-api-key": key, accept: "application/json" },
-            });
-            if (!res.ok) return null;
-            const data = (await res.json()) as { collection?: string };
+            // Contract -> OpenSea slug changes on human timescales: one call
+            // per contract per collection-meta window, shared by every wallet
+            // that holds it.
+            const { value: data } = await edgeRead<{ collection?: string }>(
+              { kind: "collection-meta", chainSlug: c.chainSlug, subject: c.contractAddress, variant: { fact: "opensea-slug" } },
+              async () => {
+                const res = await meteredFetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${c.contractAddress}`, {
+                  headers: { "x-api-key": key, accept: "application/json" },
+                }, { source: "opensea", keyId: keyEntry?.id ?? null, chainSlug: c.chainSlug });
+                if (!res.ok) throw new Error(`OpenSea ${res.status}`);
+                return (await res.json()) as { collection?: string };
+              },
+              { provider: "opensea" }
+            );
             if (!data.collection) return null;
             return { ...c, collectionSlug: data.collection };
           } catch {
