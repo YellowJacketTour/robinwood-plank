@@ -914,9 +914,14 @@ export async function listCollectionsWithSnapshotsPage(input: {
   // NULLS LAST regardless of direction -- a collection with no real value for
   // the chosen column is genuinely absent data, not a "lowest" one; matches
   // compareNullable()'s own always-sorts-to-the-end convention client-side.
+  // AUDIT lens 1 (2026-09-06): among rows with no sales the old tie-break
+  // was chain_slug then contract, so "arb-mainnet" shells (alphabetically
+  // first) filled the hub's whole window ahead of real collections on other
+  // chains. Rows with a floor, then holders, now outrank empty shells.
+  const shellTieBreak = `(s.floor_price_wei IS NOT NULL) DESC, s.holder_count DESC NULLS LAST, s.volume_30d_wei DESC NULLS LAST, c.chain_slug, c.contract_address`;
   const orderBy = sortSql
-    ? `${sortSql} ${dir} NULLS LAST, (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, c.chain_slug, c.contract_address`
-    : `(c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, c.chain_slug, c.contract_address`;
+    ? `${sortSql} ${dir} NULLS LAST, (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, ${shellTieBreak}`
+    : `(c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, ${shellTieBreak}`;
   params.push(limit, offset);
   const result = await postgresQuery<
     CollectionRow & {
