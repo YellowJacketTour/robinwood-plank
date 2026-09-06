@@ -4,6 +4,8 @@ import { readProviderLedger, readInProcessLedger, flushProviderLedger } from "@/
 import { readEdgeStats } from "@/lib/market/multichain/edge/read-gateway";
 import { readProviderBudget, PROVIDER_BUDGET_DEFAULTS } from "@/lib/market/multichain/freshness-budget";
 import { hasPostgresConfig } from "@/lib/postgres";
+import { readQueueTelemetry } from "@/lib/market/multichain/edge/queue-telemetry";
+import { readLiveFeedStats } from "@/lib/market/multichain/edge/live-feed";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -71,6 +73,9 @@ export async function GET(req: Request) {
         note: "Per-process counter. Multiply by worker count for a fleet estimate.",
       },
       edge: readEdgeStats(),
+      liveFeed: readLiveFeedStats(),
+      /** Real backlog depth, throughput-derived ETA (null when nothing completes), jailed keys, rate-limit incidents per day. */
+      queue: durable ? await readQueueTelemetry().catch(() => null) : null,
       ledger: {
         scope: ledgerRows ? "durable" : "in-process",
         minutes,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import { ExplorerAddress } from "../ExplorerAddress";
+import ProviderLedgerPanel from "./ProviderLedgerPanel";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, LABEL, NOTE_ERR, NOTE_OK } from "../ui";
 import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
 import { signMessage } from "@/lib/wallet";
@@ -472,6 +473,8 @@ export default function SystemSection({ address }: { address: string | null }) {
           </ul>
         ) : null}
       </section>
+
+      <ProviderLedgerPanel />
 
       <section className={CARD}>
         <h2 className="font-display text-xl text-gold-300">Action log</h2>
