@@ -80,6 +80,42 @@ test("settlement acknowledgement survives numeric/string round hydration and can
   );
 });
 
+// BUGFIX 2026-09-06 (reported live): a player who left the settled-round
+// reveal card open past the real launch instant, then dismissed it, saw the
+// intermission countdown jump back up toward a near-full "30 seconds" while
+// the real, server-fixed launch fired on schedule regardless. Root cause:
+// paintPrivateSnapshot recomputed a naive Date.now()-based server-time offset
+// on EVERY call, including acknowledgePrivateSettlement's repaint of the SAME
+// cached (stale) snapshot -- re-anchoring "now" to whenever that snapshot was
+// first fetched and discarding all real elapsed time since. Fixed by routing
+// through ServerClockSync (RTT-compensated, monotonic, only advances from a
+// REAL network round trip -- ported to public/arcade/private-server-clock.js
+// from the already-tested lib/playtest-live-shared.ts source). These pins
+// guard the two halves of the fix: a real fetch must observe a real send
+// timestamp, and a stale-data repaint must NOT.
+test("the intermission clock cannot be corrupted by a repaint of stale cached data", () => {
+  assert.match(arcadeSource, /import \{ ServerClockSync \} from "\.\/private-server-clock\.js"/);
+  assert.doesNotMatch(arcadeSource, /privateServerOffsetMs/, "the naive, repaint-corruptible offset must be fully removed, not just unused");
+  // paintPrivateSnapshot must accept an explicit sentPerfMs and only observe
+  // a real round trip when one was actually provided.
+  assert.match(arcadeSource, /function paintPrivateSnapshot\(snapshot, sentPerfMs = null\)/);
+  assert.match(arcadeSource, /if \(sentPerfMs !== null\) \{/);
+  assert.match(arcadeSource, /privateServerClock\.observe\(serverNowMs, sentPerfMs, receivedPerfMs\)/);
+  // The reveal-dismiss repaint (acknowledgePrivateSettlement) must call
+  // paintPrivateSnapshot with NO second argument -- passing a fresh
+  // performance.now() here for stale cached data is exactly the bug.
+  assert.match(arcadeSource, /try \{ paintPrivateSnapshot\(privateSnapshot\); \} catch \(error\) \{ console\.error\("\[playtest\] result acknowledgement repaint failed", error\); \}/);
+  // Real fetch call sites must capture sentPerfMs BEFORE the request and pass
+  // it through, so ServerClockSync can bound the estimate by the true RTT.
+  assert.match(arcadeSource, /const sentPerfMs = performance\.now\(\);\s*\n\s*const response = await fetch\(`\/api\/playtest\/rooms\/\$\{roomId\}\/updates/);
+  assert.match(arcadeSource, /paintPrivateSnapshot\(update\.snapshot, sentPerfMs\)/);
+  assert.match(arcadeSource, /const refreshSentPerfMs = performance\.now\(\);/);
+  assert.match(arcadeSource, /paintPrivateSnapshot\(await privateJson\(await fetch\(`\/api\/playtest\/rooms\/\$\{privateRoomId\}`[^)]*\)\), refreshSentPerfMs\)/);
+  // updatePrivateIntermissionAction (the actual countdown display) must read
+  // the monotonic estimate, never the removed naive offset.
+  assert.match(arcadeSource, /privateServerClock\.synchronized \? privateServerClock\.now\(performance\.now\(\)\) : Date\.now\(\)/);
+});
+
 test("Powerboard conclusion has an authoritative settlement lane and never renders a blank art shell", () => {
   assert.match(arcadeSource, /snapshot\.currentSettlement \|\|/);
   assert.match(arcadeSource, /DRAW RECORD RECOVERING/);
