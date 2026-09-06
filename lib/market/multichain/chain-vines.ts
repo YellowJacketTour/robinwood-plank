@@ -75,6 +75,13 @@ export const CHAIN_VINES: ChainVine[] = [
     never: ["Alchemy", "title-prune empty UniSat names"],
   },
   {
+    chainSlug: "zksync-mainnet",
+    acquire: ["hypersync transfers (chain 324)", "native Seaport book (no OpenSea orderbook: confirmed 2026-08-17)"],
+    harness: ["evm-metadata tokenURI multicall + IPFS", "seaport fills"],
+    express: ["native listings/offers only; OpenSea cells stay dash"],
+    never: ["Alchemy NFT API", "OpenSea slug lookups"],
+  },
+  {
     chainSlug: "robinhood",
     acquire: ["robinhood-chain-scan", "opensea-robinhood-scan", "native Seaport book + plank.love canonical overlay"],
     harness: ["getListings(robinwood) no chain filter", "owner-index unique wallets", "seaport fills / ledger"],
