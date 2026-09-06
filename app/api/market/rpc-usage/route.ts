@@ -1,6 +1,6 @@
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 import { projectedMonthlyCu, readRpcMeter } from "@/lib/market/rpc-meter";
-import { readProviderLedger, readInProcessLedger, flushProviderLedger } from "@/lib/market/multichain/edge/provider-ledger";
+import { readProviderLedger, readInProcessLedger, flushProviderLedger, readLedgerHealth } from "@/lib/market/multichain/edge/provider-ledger";
 import { readEdgeStats } from "@/lib/market/multichain/edge/read-gateway";
 import { readProviderBudget, PROVIDER_BUDGET_DEFAULTS } from "@/lib/market/multichain/freshness-budget";
 import { hasPostgresConfig } from "@/lib/postgres";
@@ -82,6 +82,7 @@ export async function GET(req: Request) {
         rows,
         /** Current 60s Freshness Budget Controller windows per provider (live path). */
         budgets,
+        health: readLedgerHealth(),
         note: ledgerRows
           ? "Cross-process ledger from plank_provider_ledger; jailedMs is the durable mesh jail for that source."
           : "Postgres not configured or unreachable: this is this process's own buffer only.",
