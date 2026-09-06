@@ -130,7 +130,13 @@ against live ledger evidence (pure scoring is tested); market-focus over the liv
 - **Queue telemetry** (`edge/queue-telemetry.ts`, in `/api/market/rpc-usage.queue`): backlog per chain/source,
   throughput-derived ETA (null when nothing completes), jailed keys, rate-limit incidents per day. Rendered in the
   admin System section (`ProviderLedgerPanel.tsx`) together with the ledger and edge counters.
-- **Browser proof**: not obtained. The only dev server in this worktree belongs to another session and its render
+- **Browser proof (obtained later the same night, own dev server on :3800 with the real env)**: the collection
+  intelligence view renders the Trading coverage panel for Base ("0 proven · 15 built · 1 gated · 2 no venue", 18
+  feature cells); `/api/market/rpc-usage` returned the DURABLE ledger (opensea 18 calls incl. per-key rows, hypersync
+  17 on base-mainnet), queue telemetry (11 queued, 279 failed, ETA null because nothing completed in 15 min, 1 jailed
+  key) and edge counters; `/api/market/multichain/live` opened an SSE stream (`event: hello`); a POST sweep intent
+  with $420 at stake on a known Base collection enqueued 3 real jobs at priority 130 with an explainable decision.
+- **Browser proof (earlier attempt)**: not obtained at first. The only dev server in this worktree belongs to another session and its render
   worker was crashing (jest-worker exceptions); a second isolated worktree could not run Turbopack over a junctioned
   `node_modules`, and there is no disk for a second install. Parity/rpc-usage/demand routes answered 200 over HTTP.
 
