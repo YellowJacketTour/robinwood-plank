@@ -114,9 +114,24 @@ applied locally.
 Built, unproven: every wired intent path end-to-end in a browser (no Playwright run this pass); source selector
 against live ledger evidence (pure scoring is tested); market-focus over the live catalog (dry-run script exists).
 
-Not done: time-to-100% per chain for a fresh 20k collection; jail incidents per day and backlog ETA dashboards;
-HyperSync `stream()` transport (SDK 1.4.0 exposes `stream/streamHeight/streamEvents`; current cursors already saturate
-request-side speed — switching is a transport change with no measured win yet); Playwright flows.
+### Measurements added later on 2026-09-05
+
+- **HyperSync transport** (`scripts/hypersync-stream-bench.ts`, Base, blocks 50936591..50939591, 904,669 Transfer
+  logs, identical count both ways): paged `get()` 9,453 ms in 16 requests; `stream()` 4,880 ms in 19 batches.
+  **1.94× faster** for the same data. Decision: worth switching the discovery/backfill cursors to `stream()`; not done
+  in this pass (cursor semantics per lane need their own change + proof).
+- **Time-to-100%** (`scripts/hydration-time-to-complete.ts --chain=base-mainnet --run-mesh`, collection
+  `0x0c801a24dc6cf18a2fd7c81467b1414381fdf284`, supply 788): 0 → 1 rows in 485 s, **not reached**. Cause was the
+  local database, not the mesh: four lanes died on `canceling statement due to statement timeout` (15 s) against the
+  315 GB local `plank_market_events` set. The script is ready; the number must come from production or a healthy DB.
+- **Queue telemetry** (`edge/queue-telemetry.ts`, in `/api/market/rpc-usage.queue`): backlog per chain/source,
+  throughput-derived ETA (null when nothing completes), jailed keys, rate-limit incidents per day. Rendered in the
+  admin System section (`ProviderLedgerPanel.tsx`) together with the ledger and edge counters.
+- **Browser proof**: not obtained. The only dev server in this worktree belongs to another session and its render
+  worker was crashing (jest-worker exceptions); a second isolated worktree could not run Turbopack over a junctioned
+  `node_modules`, and there is no disk for a second install. Parity/rpc-usage/demand routes answered 200 over HTTP.
+
+Not done: Playwright flows; switching lanes to HyperSync `stream()`; production time-to-100% numbers.
 
 Owner-gated: `MAGICEDEN_API_KEY` (Solana writes), `NATIVE_BITCOIN_MAINNET_ENABLED` (Bitcoin mainnet), bridge
 receiver/executor deployments (cross-chain sweep), paid HyperSync/OpenSea tiers, dedicated RPC.
