@@ -25,9 +25,15 @@ test("ccs-2l paramsHash is pinned to the Solidity convention byte-for-byte", () 
   // test/contracts/PlankCcs2LSettlement.test.ts ("paramsHash matches the
   // registry convention"). Together the two pins bind TS and Solidity.
   assert.equal(CCS2L_RULE_ID, "0xcee375f888dd3a2ee6094d52174fc8c6ee0ca62cd11be35250e739528a4f3091");
+  // v3: the hash now also binds maxVaultBonusBps/vaultBonusDecayWad (both 0n
+  // in DEFAULT_CCS2L_PARAMS -- feature off) -- this literal necessarily
+  // changed from the pre-v3 pin; re-verified against test/contracts/
+  // PlankCcs2LSettlement.test.ts's own Solidity-side "paramsHash matches the
+  // registry convention byte-for-byte" test, which passes with these SAME
+  // two new fields added, over the SAME feature-off (0n, 0n) values.
   assert.equal(
     ccs2lParamsHash(DEFAULT_CCS2L_PARAMS),
-    "0xcc313ac55684becbf5b9de38b91b80118850561cfcd5259d91fb60b154964d4b",
+    "0xc1d923dff6d91e7d56cc18393bdaaa42e1e6c5043e412230a37465c0e8bec1e5",
   );
 });
 

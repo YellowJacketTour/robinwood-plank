@@ -42,13 +42,20 @@ test("credits convert to ETH exactly at 1 cr = 1e-6 ETH, and to USD only with a 
   assert.equal(creditsToUsd(10_000n, 0), null);
 });
 
-test("vault share of the pot is derived from the policy: 4.5% x 40% x 35% x 50% = 0.315%", () => {
-  assert.equal(vaultShareOfPotPpm(policy, policy.rakeBps), 3_150n);
-  assert.equal(lotteryShareOfPotPpm(policy, policy.rakeBps), 11_700n);
-  // A 2 x 10,000 round: rake 900 -> community 360 -> lottery 234, vault 63.
+test("vault share of the pot is derived from the policy: 4.5% x 69% x 35% x 50% ~= 0.5433% (revised 2026-09-05 from 40% community, SPEC-monotonic-vault-positive-sum §4)", () => {
+  assert.equal(vaultShareOfPotPpm(policy, policy.rakeBps), 5_433n);
+  assert.equal(lotteryShareOfPotPpm(policy, policy.rakeBps), 20_182n);
   const genesis = simulateIteration(initialSimulationState(policy), policy, { players: twoPlayers, crashBps: 20_000n, lotteryOutcome: "none" });
-  assert.equal(genesis.state.protectedPrincipal, 20_000n * 3_150n / 1_000_000n);
-  assert.equal(genesis.state.totals.powerboardFunded, 20_000n * 11_700n / 1_000_000n);
+  // The real multi-step settlement (rake -> community -> vault-leg ->
+  // principal split, each its own floor division) can land one wei off the
+  // single-shot ppm approximation above at some inputs -- 108n vs 109n here,
+  // confirmed by cross-checking against the SAME real genesis-round figures
+  // asserted exactly in playtest-room-core.test.ts's own "genesis funding"
+  // test (protectedPrincipal: 109n there too). The ppm helpers are an
+  // informational approximation for reporting/UI, not the settlement's own
+  // arithmetic -- this assertion uses the real value, not the approximation.
+  assert.equal(genesis.state.protectedPrincipal, 109n);
+  assert.equal(genesis.state.totals.powerboardFunded, 403n);
 });
 
 test("vault growth and seed share: genesis has no ratio; later rounds are delta / previous", () => {

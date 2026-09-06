@@ -172,14 +172,22 @@ export function roundEconomics(seed: bigint, stakes: readonly bigint[], rakeBps:
   return { seed, playerPool, gross, rake: playerPool - playerDistributable, distributable };
 }
 
-/** Ratified one-pass 40% burn / 40% community / 20% founder split of net player rake. */
+/**
+ * Ratified one-pass 25% burn / 69% community / 6% founder split of net
+ * player rake. Revised 2026-09-05 (SPEC-monotonic-vault-positive-sum) from
+ * the earlier 40/40/20: shifting weight from burn and founders into the
+ * community share is the entire growth engine behind PlankCrash's
+ * participation-count vault bonus and PlankLottery's growing carve ceiling,
+ * both fed exclusively by this community leg via PlankRakeRouter. Exact
+ * mirror of contracts/PlankRakeRouter.sol's BURN_BPS/COMMUNITY_BPS.
+ */
 export function ratifiedRakeSplit(grossRake: bigint, keeperRewardBps = 0n) {
   if (grossRake < 0n) throw new RangeError("negative rake");
   if (keeperRewardBps < 0n || keeperRewardBps > BPS) throw new RangeError("invalid keeper reward");
   const keeper = (grossRake * keeperRewardBps) / BPS;
   const netRake = grossRake - keeper;
-  const burn = (netRake * 4_000n) / BPS;
-  const community = (netRake * 4_000n) / BPS;
+  const burn = (netRake * 2_500n) / BPS;
+  const community = (netRake * 6_900n) / BPS;
   const founders = netRake - burn - community;
   return { grossRake, keeper, netRake, burn, community, founders };
 }

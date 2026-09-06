@@ -47,6 +47,16 @@
       "internalType": "uint256",
       "name": "carveHalfSaturationWei",
       "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "carveDecayWad",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "carveHalfSaturationCeilingWei",
+      "type": "uint256"
      }
     ],
     "internalType": "struct PlankLottery.Config",
@@ -289,6 +299,32 @@
  },
  {
   "inputs": [],
+  "name": "carveDecayWad",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "carveHalfSaturationCeilingWei",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
   "name": "carveHalfSaturationWei",
   "outputs": [
    {
@@ -355,6 +391,19 @@
  {
   "inputs": [],
   "name": "draws",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "effectiveHalfSaturationWei",
   "outputs": [
    {
     "internalType": "uint256",
@@ -568,6 +617,19 @@
   "name": "recordRound",
   "outputs": [],
   "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "roundsContributed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
   "type": "function"
  },
  {

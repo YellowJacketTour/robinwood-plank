@@ -62,6 +62,16 @@ export interface Ccs2LParams {
   houseCapBps: bigint;
   /** GLOBAL aggregate house-purse cap as bps of the round's OWN rake (v2 actuarial identity). */
   houseRakeCapBps: bigint;
+  /**
+   * v3 PARTICIPATION-COUNT VAULT BONUS (docs/marketplank/SPEC-monotonic-
+   * vault-positive-sum-2026-09-05.md). An ADDITIONAL cap on hAvail, keyed to
+   * how many rounds have EVER contributed to the vault -- never to the
+   * vault's own balance. 0 = feature off (backward-compatible default).
+   * Ceiling, bps of the round's rake (ratified 2_500 = 25%).
+   */
+  maxVaultBonusBps: bigint;
+  /** r, WAD-scaled (1e18 == 1.0; ratified 0.999e18). Must be 0 < r < 1e18 whenever maxVaultBonusBps > 0. */
+  vaultBonusDecayWad: bigint;
 }
 
 export const DEFAULT_CCS2L_PARAMS: Ccs2LParams = {
@@ -69,6 +79,8 @@ export const DEFAULT_CCS2L_PARAMS: Ccs2LParams = {
   playerWeight: "ln",
   houseCapBps: 1_000n,
   houseRakeCapBps: 5_000n,
+  maxVaultBonusBps: 0n,
+  vaultBonusDecayWad: 0n,
 };
 
 export interface Ccs2LAllocation {
@@ -136,6 +148,36 @@ export function lnScaled(xBps: bigint): bigint {
   return ((k * (1n << 40n) + frac) * 693_147n) >> 40n;
 }
 
+/**
+ * Fixed-point r^n at WAD (1e18) precision via exponentiation by squaring --
+ * exact mirror of PlankCcs2LMath.powWad. Verified 2026-09-05: a 1e6/ppm scale
+ * drifts up to ~2.6% by n=10,000; WAD is exact to integer-division rounding
+ * at every scale tested.
+ */
+export function powWad(baseWad: bigint, exponent: bigint): bigint {
+  let result = CCS2L_LAMBDA_DENOM; // 1.0 in WAD
+  let b = baseWad;
+  let e = exponent;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) / CCS2L_LAMBDA_DENOM;
+    b = (b * b) / CCS2L_LAMBDA_DENOM;
+    e >>= 1n;
+  }
+  return result;
+}
+
+/**
+ * The participation-count vault bonus ceiling for THIS round, in bps of the
+ * round's own rake: maxVaultBonusBps * (1 - r^n), the geometric ratchet of
+ * SPEC-monotonic-vault-positive-sum's §3.4. Exact mirror of
+ * PlankCcs2LMath.vaultBonusBps.
+ */
+export function vaultBonusBps(maxVaultBonusBpsValue: bigint, vaultBonusDecayWad: bigint, roundsContributed: bigint): bigint {
+  if (maxVaultBonusBpsValue === 0n) return 0n;
+  const rn = powWad(vaultBonusDecayWad, roundsContributed);
+  return (maxVaultBonusBpsValue * (CCS2L_LAMBDA_DENOM - rn)) / CCS2L_LAMBDA_DENOM;
+}
+
 function playerG(targetBps: bigint, playerWeight: Ccs2LPlayerWeight): bigint {
   return playerWeight === "odds" ? targetBps - BPS : lnScaled(targetBps);
 }
@@ -172,6 +214,13 @@ export function settleCcs2L(
    * to replay v1-era records or historical campaigns (no rake cap).
    */
   rakeWei?: bigint,
+  /**
+   * v3: the live participation counter AT ROUND LOCK (round data, not a rule
+   * parameter -- see Ccs2LParams' own docs on why this is a separate
+   * argument). Omit to replay pre-v3 records/campaigns, or on a deployment
+   * with maxVaultBonusBps == 0 where it has no effect either way.
+   */
+  vaultRoundsContributed?: bigint,
 ): Ccs2LSettlement {
   assertInputs(playerDistributable, seedH, crashBps, seats);
   if (reserveAtLock < 0n) throw new RangeError("negative reserve");
@@ -232,6 +281,15 @@ export function settleCcs2L(
     if (rakeWei !== undefined) {
       const rakeCap = (rakeWei * params.houseRakeCapBps) / BPS;
       if (rakeCap < hAvail) hAvail = rakeCap;
+    }
+    // v3 participation-count vault bonus (SPEC-monotonic-vault-positive-sum-
+    // 2026-09-05 §3.4): an ADDITIONAL cap, narrowing hAvail further toward a
+    // ceiling that rises with sustained play, never with vault balance.
+    // maxVaultBonusBps === 0n means the feature is OFF (backward-compatible
+    // default) -- never treated as "cap everything to zero."
+    if (rakeWei !== undefined && vaultRoundsContributed !== undefined && params.maxVaultBonusBps > 0n) {
+      const vaultCap = (rakeWei * vaultBonusBps(params.maxVaultBonusBps, params.vaultBonusDecayWad, vaultRoundsContributed)) / BPS;
+      if (vaultCap < hAvail) hAvail = vaultCap;
     }
     const hws = seats.map((s, i) => (survived[i] ? s.stake * lnScaled(s.targetBps) : 0n));
     const HW = hws.reduce((a, b) => a + b, 0n);

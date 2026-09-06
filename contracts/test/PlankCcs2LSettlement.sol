@@ -26,9 +26,12 @@ contract PlankCcs2LSettlement {
         PlankCcs2LMath.Seat[] calldata seats,
         uint256 reserveAtLock,
         uint256 rakeWei,
+        uint256 vaultRoundsContributed,
         PlankCcs2LMath.Params memory params
     ) public pure returns (PlankCcs2LMath.Result memory r) {
-        return PlankCcs2LMath.settle(playerDistributable, seedH, crashBps, seats, reserveAtLock, rakeWei, params);
+        return PlankCcs2LMath.settle(
+            playerDistributable, seedH, crashBps, seats, reserveAtLock, rakeWei, vaultRoundsContributed, params
+        );
     }
 
     /// @notice Non-pure wrapper so hardhat reports real gas for settle().
@@ -41,10 +44,11 @@ contract PlankCcs2LSettlement {
         PlankCcs2LMath.Seat[] calldata seats,
         uint256 reserveAtLock,
         uint256 rakeWei,
+        uint256 vaultRoundsContributed,
         PlankCcs2LMath.Params memory params
     ) external returns (uint256) {
         PlankCcs2LMath.Result memory r =
-            settle(playerDistributable, seedH, crashBps, seats, reserveAtLock, rakeWei, params);
+            settle(playerDistributable, seedH, crashBps, seats, reserveAtLock, rakeWei, vaultRoundsContributed, params);
         _sink = r.totalPlayerPaid ^ r.totalBonus ^ r.lambda;
         return r.totalPlayerPaid + r.totalBonus;
     }

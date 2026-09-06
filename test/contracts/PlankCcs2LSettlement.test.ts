@@ -5,7 +5,13 @@ import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
 import { ethers } from "./helpers/hardhat.js";
 
 type SolSeat = { stake: bigint; targetBps: bigint };
-type SolParams = { floorBps: bigint; houseCapBps: bigint; houseRakeCapBps: bigint };
+type SolParams = {
+  floorBps: bigint;
+  houseCapBps: bigint;
+  houseRakeCapBps: bigint;
+  maxVaultBonusBps: bigint;
+  vaultBonusDecayWad: bigint;
+};
 
 interface SolResult {
   mode: bigint;
@@ -23,11 +29,11 @@ interface SolResult {
 interface CcsHarness {
   settle(
     playerD: bigint, seedH: bigint, crashBps: bigint,
-    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, params: SolParams,
+    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, vaultRoundsContributed: bigint, params: SolParams,
   ): Promise<SolResult>;
   settleGas(
     playerD: bigint, seedH: bigint, crashBps: bigint,
-    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, params: SolParams,
+    seats: SolSeat[], reserveAtLock: bigint, rakeWei: bigint, vaultRoundsContributed: bigint, params: SolParams,
   ): Promise<{ wait(): Promise<{ gasUsed: bigint }> }>;
   lnScaled(xBps: bigint): Promise<bigint>;
   paramsHash(params: SolParams): Promise<string>;
@@ -53,13 +59,22 @@ interface CcsEngine {
     crashBps: bigint,
     seats: Array<{ id: string; stake: bigint; targetBps: bigint }>,
     reserveAtLock: bigint,
-    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint; houseRakeCapBps: bigint },
+    params: {
+      floorBps: bigint;
+      playerWeight: string;
+      houseCapBps: bigint;
+      houseRakeCapBps: bigint;
+      maxVaultBonusBps: bigint;
+      vaultBonusDecayWad: bigint;
+    },
     rakeWei?: bigint,
+    vaultRoundsContributed?: bigint,
   ) => EngineSettlement;
   lnScaled: (xBps: bigint) => bigint;
   makeRng: (seed: bigint) => () => bigint;
   rngBelow: (rng: () => bigint, bound: bigint) => bigint;
   deriveCrashBps: (r: bigint) => bigint;
+  vaultBonusBps: (maxVaultBonusBps: bigint, vaultBonusDecayWad: bigint, roundsContributed: bigint) => bigint;
 }
 
 /**
@@ -79,7 +94,17 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
   const MODES = ["no-survivor", "floor-degenerate", "normal"] as const;
   let engine: CcsEngine;
   let ccs: CcsHarness;
-  const params = { floorBps: 7_500n, houseCapBps: 1_000n, houseRakeCapBps: 5_000n };
+  const params = {
+    floorBps: 7_500n,
+    houseCapBps: 1_000n,
+    houseRakeCapBps: 5_000n,
+    maxVaultBonusBps: 0n,
+    vaultBonusDecayWad: 0n,
+  };
+  // A second, feature-ON params set for the dedicated vault-bonus differential
+  // cases below -- kept separate from `params` so every EXISTING case above
+  // still exercises the feature-off (backward-compatible) path unchanged.
+  const vaultParams = { ...params, maxVaultBonusBps: 2_500n, vaultBonusDecayWad: 999_000_000_000_000_000n };
   const gasRows: Array<{ n: number; mode: string; gas: bigint }> = [];
   const E = (x: number) => BigInt(Math.round(x * 1e6)) * 10n ** 12n;
   const RESERVE = E(500);
@@ -111,6 +136,8 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
     // Default: the rake a 4.5%-rake round would leave against this D, so the
     // v2 rake cap is exercised (binding or not) in every differential case.
     rakeWei: bigint = (playerD * 450n) / 9_550n,
+    activeParams: SolParams = params,
+    vaultRoundsContributed: bigint = 0n,
   ) {
     const js = engine.settleCcs2L(
       playerD,
@@ -118,10 +145,18 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
       crashBps,
       seats.map((s, i) => ({ id: `s${i}`, ...s })),
       reserveAtLock,
-      { floorBps: params.floorBps, playerWeight: "ln", houseCapBps: params.houseCapBps, houseRakeCapBps: params.houseRakeCapBps },
+      {
+        floorBps: activeParams.floorBps,
+        playerWeight: "ln",
+        houseCapBps: activeParams.houseCapBps,
+        houseRakeCapBps: activeParams.houseRakeCapBps,
+        maxVaultBonusBps: activeParams.maxVaultBonusBps,
+        vaultBonusDecayWad: activeParams.vaultBonusDecayWad,
+      },
       rakeWei,
+      vaultRoundsContributed,
     );
-    const sol = await ccs.settle(playerD, seedH, crashBps, seats, reserveAtLock, rakeWei, params);
+    const sol = await ccs.settle(playerD, seedH, crashBps, seats, reserveAtLock, rakeWei, vaultRoundsContributed, activeParams);
     expect(MODES[Number(sol.mode)], `${label}: mode`).to.equal(
       js.allBust ? "no-survivor" : js.meta.mode === "floor-degenerate" ? "floor-degenerate" : "normal",
     );
@@ -160,16 +195,29 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
   });
 
   it("paramsHash matches the registry convention byte-for-byte", async () => {
-    // keccak256(abi.encode(keccak256("ccs-2l"), 2, floorBps, houseCapBps, houseRakeCapBps)) —
-    // the same bytes lib/casino/settlement-rules.ts ccs2lParamsHash() emits
-    // (pinned there against this literal expression in its own test).
+    // keccak256(abi.encode(keccak256("ccs-2l"), 2, floorBps, houseCapBps,
+    // houseRakeCapBps, maxVaultBonusBps, vaultBonusDecayWad)) — the same
+    // bytes lib/casino/settlement-rules.ts ccs2lParamsHash() emits (pinned
+    // there against this literal expression in its own test).
     const expected = keccak256(
       AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "uint256", "uint256", "uint256", "uint256"],
-        [keccak256(toUtf8Bytes("ccs-2l")), 2n, params.floorBps, params.houseCapBps, params.houseRakeCapBps],
+        ["bytes32", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256"],
+        [
+          keccak256(toUtf8Bytes("ccs-2l")),
+          2n,
+          params.floorBps,
+          params.houseCapBps,
+          params.houseRakeCapBps,
+          params.maxVaultBonusBps,
+          params.vaultBonusDecayWad,
+        ],
       ),
     );
     expect(await ccs.paramsHash(params)).to.equal(expected);
+  });
+
+  it("paramsHash changes when the vault-bonus params change (feature-on differs from feature-off)", async () => {
+    expect(await ccs.paramsHash(vaultParams)).to.not.equal(await ccs.paramsHash(params));
   });
 
   it("lnScaled agrees bit-for-bit across the multiplier range", async () => {
@@ -229,8 +277,16 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
         { id: "s1", stake: E(4), targetBps: 80_000n },
       ],
       RESERVE,
-      { floorBps: 7_500n, playerWeight: "ln", houseCapBps: 1_000n, houseRakeCapBps: 5_000n },
+      {
+        floorBps: 7_500n,
+        playerWeight: "ln",
+        houseCapBps: 1_000n,
+        houseRakeCapBps: 5_000n,
+        maxVaultBonusBps: 0n,
+        vaultBonusDecayWad: 0n,
+      },
       (E(1) * 450n) / 9_550n,
+      0n,
     );
     expect(js.meta.mode).to.equal("floor-degenerate");
     await differential("floor-degenerate", E(1), 0n, 100_000n, [
@@ -257,6 +313,96 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
     }
   });
 
+  // ── v3: participation-count vault bonus (SPEC-monotonic-vault-positive-
+  // sum-2026-09-05 §3.4) — JS<->Solidity differential + the mechanism's own
+  // real invariants (monotone in roundsContributed, capped by rake, never
+  // reads a vault balance, backward-compatible when the feature is off).
+  describe("v3 participation-count vault bonus", () => {
+    it("feature OFF (maxVaultBonusBps == 0) is byte-identical to the pre-v3 house layer regardless of roundsContributed", async () => {
+      // A large roundsContributed must have ZERO effect when the feature is
+      // off -- proves the off-switch is real, not just "usually zero."
+      for (const rounds of [0n, 1n, 1_000n, 1_000_000n]) {
+        await differential(`feature-off-rounds-${rounds}`, E(100), E(5), 30_000n, [
+          { stake: E(1), targetBps: 14_000n },
+          { stake: E(99), targetBps: 50_000n },
+        ], RESERVE, undefined, params, rounds);
+      }
+    });
+
+    it("feature ON matches wei-for-wei across a sweep of roundsContributed, and the bonus is monotone non-decreasing", async () => {
+      const sweep = [0n, 1n, 100n, 500n, 1_000n, 2_000n, 4_000n, 10_000n, 100_000n];
+      let prevBonus: bigint = -1n;
+      for (const rounds of sweep) {
+        const js = await differential(`vault-on-rounds-${rounds}`, E(100), E(5), 30_000n, [
+          { stake: E(1), targetBps: 14_000n },
+          { stake: E(99), targetBps: 50_000n },
+        ], RESERVE, undefined, vaultParams, rounds);
+        const bonus = js.allocations.reduce((a, alloc) => a + alloc.houseBonus, 0n);
+        expect(bonus, `rounds=${rounds}: monotone non-decreasing`).to.be.gte(prevBonus);
+        prevBonus = bonus;
+      }
+    });
+
+    it("the vault bonus cap can only ever NARROW hAvail, never widen it past houseRakeCapBps's own room", async () => {
+      // Same seats/pot, feature off vs. on at rounds=0 (curve's own floor,
+      // smallest possible bonus fraction): the ON case must never pay MORE
+      // than the OFF case, since maxVaultBonusBps <= houseRakeCapBps by the
+      // contract's own config validation and the curve starts near zero.
+      const seats = [
+        { stake: E(1), targetBps: 14_000n },
+        { stake: E(99), targetBps: 50_000n },
+      ];
+      const off = await differential("cap-narrows-off", E(100), E(5), 30_000n, seats, RESERVE, undefined, params, 0n);
+      const on = await differential("cap-narrows-on", E(100), E(5), 30_000n, seats, RESERVE, undefined, vaultParams, 0n);
+      const offBonus = off.allocations.reduce((a, alloc) => a + alloc.houseBonus, 0n);
+      const onBonus = on.allocations.reduce((a, alloc) => a + alloc.houseBonus, 0n);
+      expect(onBonus, "vault cap at rounds=0 must not exceed the feature-off bonus").to.be.lte(offBonus);
+    });
+
+    it("at a moderately large roundsContributed the curve is asymptotically close to, but strictly under, maxVaultBonusBps", async () => {
+      // At n=10,000 (r=0.999) the curve is real-valued-close to the ceiling
+      // but WAD fixed-point precision has not yet underflowed r^n to exactly
+      // 0 -- the honest "still climbing" regime, matching the spec's own
+      // worked table (docs/marketplank/SPEC-monotonic-vault-positive-sum-
+      // 2026-09-05.md §3.4.1: 25.00% at 10,000 rounds, verified there by
+      // direct computation too). Confirmed by direct computation here that
+      // WAD precision saturation (r^n floors to exactly 0) does not begin
+      // until n is somewhere between 40,000 and 50,000 -- well past this.
+      const nearCeiling = engine.vaultBonusBps(vaultParams.maxVaultBonusBps, vaultParams.vaultBonusDecayWad, 10_000n);
+      expect(nearCeiling, "must be strictly under the ceiling at this scale").to.be.lt(vaultParams.maxVaultBonusBps);
+      expect(nearCeiling, "must be extremely close to the ceiling at this scale").to.be.gte(vaultParams.maxVaultBonusBps - 1n);
+    });
+
+    it("at an astronomically large roundsContributed, WAD precision saturates r^n to exactly 0 -- the cap equals but NEVER EXCEEDS maxVaultBonusBps", async () => {
+      // Real, honest fixed-point behavior, not a bug: 0.999^10,000,000 is far
+      // below any representable WAD (1e-18) precision, so r^n correctly
+      // computes to exactly 0 and the bonus cap saturates AT the ceiling.
+      // The one invariant that must hold at every scale, forever, is
+      // "never exceeds" -- verified here at the most extreme scale tested,
+      // and in the sweep test above across every earlier, still-climbing one.
+      const saturated = engine.vaultBonusBps(vaultParams.maxVaultBonusBps, vaultParams.vaultBonusDecayWad, 10_000_000n);
+      expect(saturated, "must equal the ceiling once WAD precision saturates").to.equal(vaultParams.maxVaultBonusBps);
+    });
+
+    it("roundsContributed alone (never a vault balance) drives the bonus: identical seats/pot, only the round-count input differs", async () => {
+      // This is the exploit-resistance property from spec §3.6, verified at
+      // the settlement-math layer: the function signature has NO vault
+      // balance parameter at all -- there is structurally nothing for a
+      // single large deposit to move. Confirmed by re-running the exact same
+      // economic inputs at two different roundsContributed values and seeing
+      // the bonus move ONLY with that one input.
+      const seats = [
+        { stake: E(1), targetBps: 14_000n },
+        { stake: E(99), targetBps: 50_000n },
+      ];
+      const low = await differential("rounds-driver-low", E(100), E(5), 30_000n, seats, RESERVE, undefined, vaultParams, 10n);
+      const high = await differential("rounds-driver-high", E(100), E(5), 30_000n, seats, RESERVE, undefined, vaultParams, 5_000n);
+      const lowBonus = low.allocations.reduce((a, alloc) => a + alloc.houseBonus, 0n);
+      const highBonus = high.allocations.reduce((a, alloc) => a + alloc.houseBonus, 0n);
+      expect(highBonus, "more participation must never pay LESS").to.be.gt(lowBonus);
+    });
+  });
+
   it("measures gas for n = 2, 10, 50, 100 survivors", async () => {
     for (const n of [2, 10, 50, 100]) {
       const seats: SolSeat[] = [];
@@ -269,7 +415,7 @@ describe("PlankCcs2LSettlement -- CCS-2L JS<->Solidity wei-exact differential", 
       const crash = 400_000n;
       const playerD = (E(1) * BigInt(n) * 9_700n) / 10_000n;
       const seedH = E(0.5);
-      const tx = await ccs.settleGas(playerD, seedH, crash, seats, RESERVE, RESERVE / 100n, params);
+      const tx = await ccs.settleGas(playerD, seedH, crash, seats, RESERVE, RESERVE / 100n, 0n, params);
       const receipt = await tx.wait();
       gasRows.push({ n, mode: "normal", gas: receipt.gasUsed });
     }

@@ -39,8 +39,16 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
   it("S-9/S-10: the round commitment binds rule, params hash and drand target BEFORE any stake; targets are unique; revealNotBefore > bettingEndsAt", async () => {
     const env = await fresh();
     const expectedHash = keccak256(AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "uint256", "uint256", "uint256", "uint256"],
-      [keccak256(toUtf8Bytes("ccs-2l")), 2n, DEFAULT_CRASH.floorBps, DEFAULT_CRASH.houseCapBps, DEFAULT_CRASH.houseRakeCapBps],
+      ["bytes32", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256"],
+      [
+        keccak256(toUtf8Bytes("ccs-2l")),
+        2n,
+        DEFAULT_CRASH.floorBps,
+        DEFAULT_CRASH.houseCapBps,
+        DEFAULT_CRASH.houseRakeCapBps,
+        DEFAULT_CRASH.maxVaultBonusBps,
+        DEFAULT_CRASH.vaultBonusDecayWad,
+      ],
     ));
     expect(await env.crash.settlementRuleId()).to.equal(keccak256(toUtf8Bytes("ccs-2l")));
     expect(await env.crash.settlementParamsHash()).to.equal(expectedHash);
@@ -175,7 +183,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
 
   it("S-4: partition invariance -- splitting one seat across k wallets gains at most k wei (same library the game inlines)", async () => {
     const harness: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: 7500n, houseCapBps: 1000n, houseRakeCapBps: 5000n };
+    const params = { floorBps: 7500n, houseCapBps: 1000n, houseRakeCapBps: 5000n, maxVaultBonusBps: 0n, vaultBonusDecayWad: 0n };
     let s = 99n;
     const rng = () => { s = (s * 6364136223846793005n + 1442695040888963407n) & ((1n << 64n) - 1n); return s; };
     for (let t = 0; t < 40; t++) {
@@ -187,7 +195,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
       const seedH = rng() % E("3");
       const reserve = E("20");
       const rakeWei = D / 20n; // ~4.5% rake against D; the rake cap binds in most cases
-      const base = await harness.settle(D, seedH, crash, seats, reserve, rakeWei, params);
+      const base = await harness.settle(D, seedH, crash, seats, reserve, rakeWei, 0n, params);
       const victim = Number(rng() % BigInt(n));
       const k = 2 + Number(rng() % 6n);
       const parts: Array<{ stake: bigint; targetBps: bigint }> = [];
@@ -198,7 +206,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
         left -= part;
       }
       const split = [...seats.slice(0, victim), ...parts, ...seats.slice(victim + 1)];
-      const res = await harness.settle(D, seedH, crash, split, reserve, rakeWei, params);
+      const res = await harness.settle(D, seedH, crash, split, reserve, rakeWei, 0n, params);
       const unsplitTake = base.playerPayouts[victim] + base.bonuses[victim];
       let splitTake = 0n;
       for (let j = 0; j < k; j++) splitTake += res.playerPayouts[victim + j] + res.bonuses[victim + j];

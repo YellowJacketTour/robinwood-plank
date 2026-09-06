@@ -182,7 +182,13 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
   // ── A-5 sybil partition at MAX_SEATS-1 ─────────────────────────────────
   it("A-5: MAX_SEATS-1 sybils at the same and at adjacent targets never beat one whole seat by more than k wei (player layer) and never at all (house layer)", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
+    const params = {
+      floorBps: DEFAULT_CRASH.floorBps,
+      houseCapBps: DEFAULT_CRASH.houseCapBps,
+      houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps,
+      maxVaultBonusBps: DEFAULT_CRASH.maxVaultBonusBps,
+      vaultBonusDecayWad: DEFAULT_CRASH.vaultBonusDecayWad,
+    };
     const honest = [{ stake: E("3"), targetBps: 18_000n }, { stake: E("2"), targetBps: 35_000n }];
     const whole = E("7.123456789012345678");
     const k = MAX_SEATS - honest.length; // 126 sybils
@@ -204,8 +210,8 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
         const seed = E("0.5");
         const reserve = E("40");
         const rakeWei = pool - D;
-        const one = await ccs.settle(D, seed, crash, [...honest, { stake: whole, targetBps: adjacent ? m + 1n : m }], reserve, rakeWei, params);
-        const split = await ccs.settle(D, seed, crash, [...honest, ...parts], reserve, rakeWei, params);
+        const one = await ccs.settle(D, seed, crash, [...honest, { stake: whole, targetBps: adjacent ? m + 1n : m }], reserve, rakeWei, 0n, params);
+        const split = await ccs.settle(D, seed, crash, [...honest, ...parts], reserve, rakeWei, 0n, params);
         const aggPlayer = (r: any, from: number) => r.playerPayouts.slice(from).reduce((a: bigint, b: bigint) => a + b, 0n);
         const aggBonus = (r: any, from: number) => r.bonuses.slice(from).reduce((a: bigint, b: bigint) => a + b, 0n);
         const gainPlayer = aggPlayer(split, 2) - aggPlayer(one, 2);
@@ -290,7 +296,13 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
   // ── A-9 seed extraction by a manufactured table ────────────────────────
   it("A-9: a same-target solo table is strictly negative-EV against the seed for every target and pool (fair-odds cap + rake), on-chain law", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
+    const params = {
+      floorBps: DEFAULT_CRASH.floorBps,
+      houseCapBps: DEFAULT_CRASH.houseCapBps,
+      houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps,
+      maxVaultBonusBps: DEFAULT_CRASH.maxVaultBonusBps,
+      vaultBonusDecayWad: DEFAULT_CRASH.vaultBonusDecayWad,
+    };
     const rake = DEFAULT_CRASH.rakeBps;
     let checked = 0;
     for (const pool of [DEFAULT_CRASH.minPoolWei, DEFAULT_CRASH.minPoolWei * 10n, E("5")]) {
@@ -298,7 +310,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
         for (const m of [10_100n, 10_500n, 11_000n, 15_000n, 20_000n, 29_999n, 30_000n, 30_001n, 40_000n, 100_000n, 1_000_000n, 100_000_000n]) {
           const D = (pool * (BPS - rake)) / BPS;
           const seats = [{ stake: (pool * 6n) / 10n, targetBps: m }, { stake: pool - (pool * 6n) / 10n, targetBps: m }];
-          const res = await ccs.settle(D, seed, m, seats, seed * 100n, pool - D, params); // reserve cap never binds: worst case for the house
+          const res = await ccs.settle(D, seed, m, seats, seed * 100n, pool - D, 0n, params); // reserve cap never binds: worst case for the house
           // Exact discrete law: P(crash >= m) = floor(1e8 / m) / 1e4.
           const pSurv = 100_000_000n / m; // x 1e-4
           const evScaled = pSurv * (res.totalPlayerPaid + res.totalBonus) - 10_000n * pool;
@@ -312,7 +324,13 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
 
   it("A-9b (F-2 CLOSED): a TWO-target quiet round (1.01x pool-keeper + seed-farmer) is strictly negative-EV against the seed for every pool, seed, split and target -- the v2 rake cap makes the house draw <= half the round's own rake", async () => {
     const ccs: any = await (await ethers.getContractFactory("PlankCcs2LSettlement")).deploy();
-    const params = { floorBps: DEFAULT_CRASH.floorBps, houseCapBps: DEFAULT_CRASH.houseCapBps, houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps };
+    const params = {
+      floorBps: DEFAULT_CRASH.floorBps,
+      houseCapBps: DEFAULT_CRASH.houseCapBps,
+      houseRakeCapBps: DEFAULT_CRASH.houseRakeCapBps,
+      maxVaultBonusBps: DEFAULT_CRASH.maxVaultBonusBps,
+      vaultBonusDecayWad: DEFAULT_CRASH.vaultBonusDecayWad,
+    };
     const rake = DEFAULT_CRASH.rakeBps;
     let checked = 0;
     let worst = -(1n << 200n);
@@ -328,8 +346,8 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
             for (const mB of [10_100n, 10_800n, 12_000n, 20_000n, 10_000n + (seed * 10_000n) / sB, 10_000n + ((rakeWei / 2n) * 10_000n) / sB, 100_000n, 10_000_000n]) {
               if (mB <= mA || mB > DEFAULT_CRASH.maxTargetBps) continue;
               const seats = [{ stake: sA, targetBps: mA }, { stake: sB, targetBps: mB }];
-              const both = await ccs.settle(D, seed, mB, seats, seed * 100n, rakeWei, params);
-              const onlyA = await ccs.settle(D, seed, mA, seats, seed * 100n, rakeWei, params);
+              const both = await ccs.settle(D, seed, mB, seats, seed * 100n, rakeWei, 0n, params);
+              const onlyA = await ccs.settle(D, seed, mA, seats, seed * 100n, rakeWei, 0n, params);
               const pB = 100_000_000n / mB; // x1e-4: both survive
               const pA = 100_000_000n / mA - pB; // A alone survives
               const ev = pB * (both.totalPlayerPaid + both.totalBonus) + pA * (onlyA.totalPlayerPaid + onlyA.totalBonus) - 10_000n * pool;

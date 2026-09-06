@@ -24,11 +24,13 @@ export type CrashConfig = {
   keeperRewardBps: bigint; minParticipants: bigint; minPoolWei: bigint; minStakeWei: bigint;
   maxStakePerWalletBps: bigint; maxTargetBps: bigint; maxSeats: bigint; crashSeedWei: bigint;
   emissionBufferCapWei: bigint; protectedPrincipalBps: bigint; floorBps: bigint; houseCapBps: bigint;
-  houseRakeCapBps: bigint; seedBootstrapBudgetWei: bigint; refundTimeoutSeconds: bigint;
+  houseRakeCapBps: bigint; maxVaultBonusBps: bigint; vaultBonusDecayWad: bigint;
+  seedBootstrapBudgetWei: bigint; refundTimeoutSeconds: bigint;
 };
 export type LotteryConfig = {
   source: string; founderSink: string; founderFeeBps: bigint; oddsOneIn: bigint; contributionBps: bigint; kappaBps: bigint;
   carveMinBps: bigint; carveMaxBps: bigint; carveHalfSaturationWei: bigint;
+  carveDecayWad: bigint; carveHalfSaturationCeilingWei: bigint;
 };
 /** Probability fixed point of PlankLottery (PROB_ONE == certainty). */
 export const PROB_ONE = 10n ** 18n;
@@ -53,6 +55,12 @@ export const DEFAULT_CRASH: Omit<CrashConfig, "beacon" | "router" | "lottery" | 
   floorBps: 7500n,
   houseCapBps: 1000n,
   houseRakeCapBps: 5000n, // v2 actuarial: house risks at most half the round's rake
+  // v3 vault bonus: off by default in every existing test fixture, so no
+  // pre-v3 test's behavior changes unless it explicitly opts in via
+  // `opts.crash` overrides (see PlankCcs2LSettlement.test.ts's own
+  // dedicated vaultParams for the feature-on case).
+  maxVaultBonusBps: 0n,
+  vaultBonusDecayWad: 0n,
   seedBootstrapBudgetWei: 200_000n * CREDIT,
   refundTimeoutSeconds: 86400n,
 };
@@ -64,6 +72,11 @@ export const DEFAULT_LOTTERY: Omit<LotteryConfig, "source" | "founderSink"> = {
   carveMinBps: 1000n,
   carveMaxBps: 3000n,
   carveHalfSaturationWei: 250_000n * CREDIT,
+  // v3: off by default in every existing test fixture, matching DEFAULT_CRASH's
+  // own maxVaultBonusBps: 0n convention -- no pre-v3 test's behavior changes
+  // unless it explicitly opts in via `opts.lottery` overrides.
+  carveDecayWad: 0n,
+  carveHalfSaturationCeilingWei: 0n,
 };
 
 export interface CasinoEnv {

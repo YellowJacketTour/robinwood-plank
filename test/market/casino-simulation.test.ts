@@ -72,8 +72,9 @@ test("ratified split, principal, emissions, and payouts conserve a qualified rou
   ];
   const result = simulateIteration(before, policy, { players, crashBps: 20_000n, lotteryOutcome: "none" });
   assert.equal(result.state.totals.grossRake, (2n * ETH * 450n) / 10_000n);
-  assert.equal(result.state.totals.burned, (result.state.totals.grossRake * 4_000n) / 10_000n);
-  assert.equal(result.state.totals.communityFunded, (result.state.totals.grossRake * 4_000n) / 10_000n);
+  // 25/69/6 (revised 2026-09-05 from 40/40/20, SPEC-monotonic-vault-positive-sum §4).
+  assert.equal(result.state.totals.burned, (result.state.totals.grossRake * 2_500n) / 10_000n);
+  assert.equal(result.state.totals.communityFunded, (result.state.totals.grossRake * 6_900n) / 10_000n);
   assert.equal(result.state.totals.powerboardFunded, (result.state.totals.communityFunded * 2_500n) / 10_000n);
   assert.equal(
     result.state.totals.grossRake,

@@ -4,11 +4,12 @@ import { BPS, assertConserved, bet, deployCasino, findRandomness, settleCurrent 
 import { ratifiedRakeSplit } from "../../lib/casino/economics.js";
 
 /**
- * PlankRakeRouter -- the ratified 40/40/20 of NET rake with escrowed-pull legs,
- * plus C.8 R-1 (accounting) and R-2 (burn floor) end to end through the real
- * PlankBurnEngine.
+ * PlankRakeRouter -- the ratified 25/69/6 of NET rake (revised 2026-09-05
+ * from 40/40/20, SPEC-monotonic-vault-positive-sum §4) with escrowed-pull
+ * legs, plus C.8 R-1 (accounting) and R-2 (burn floor) end to end through the
+ * real PlankBurnEngine.
  */
-describe("PlankRakeRouter -- 40/40/20 of net, escrowed pull, R-1/R-2", () => {
+describe("PlankRakeRouter -- 25/69/6 of net, escrowed pull, R-1/R-2", () => {
   const E = (x: string) => ethers.parseEther(x);
 
   it("splits exactly like lib ratifiedRakeSplit and subdivides the community leg 65/35; only the crash may route", async () => {
@@ -34,7 +35,7 @@ describe("PlankRakeRouter -- 40/40/20 of net, escrowed pull, R-1/R-2", () => {
     expect(await env.rakeRouter.vaultEscrow()).to.equal(split.community - lotteryLeg);
     expect(split.burn + split.community + split.founders).to.equal(split.netRake);
     expect(await env.rakeRouter.rulesHash()).to.equal(
-      ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "uint256", "uint256", "uint256"], [ethers.id("plank.rake-router.v1"), 4000n, 4000n, 6500n])),
+      ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "uint256", "uint256", "uint256"], [ethers.id("plank.rake-router.v1"), 2500n, 6900n, 6500n])),
     );
     await assertConserved(env, expect);
   });

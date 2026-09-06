@@ -14,15 +14,20 @@ interface IPlankVaultReturn {
 }
 
 /**
- * PlankRakeRouter -- the ratified one-pass 40 / 40 / 20 split of NET crash
+ * PlankRakeRouter -- the ratified one-pass 25 / 69 / 6 split of NET crash
  * rake (net = gross minus the settling keeper's bounty, which PlankCrash pays
  * itself before routing). Successor to PlankRakeDistributor (push, post-Vault,
- * effective 24/24/12) and PlankEconomicRouterV2 (prototype); it keeps V2's
- * escrowed-pull shape, `accountedBalance`, and `rulesHash`.
+ * effective 24/24/12), PlankEconomicRouterV2 (prototype), and the v1 40/40/20
+ * split (owner-ratified revision, SPEC-monotonic-vault-positive-sum-2026-09-05
+ * §4: shifting weight from burn and founders into the community share is the
+ * entire growth engine behind the participation-count vault/lottery bonus --
+ * see PlankCrash.sol's maxVaultBonusBps and PlankLottery.sol's
+ * carveHalfSaturationCeilingWei, both fed by this router's community leg).
+ * It keeps V2's escrowed-pull shape, `accountedBalance`, and `rulesHash`.
  *
  * Mirrors lib/casino/economics.ts ratifiedRakeSplit() exactly:
- *   burn      = net * 4000 / 10000
- *   community = net * 4000 / 10000
+ *   burn      = net * 2500 / 10000
+ *   community = net * 6900 / 10000
  *   founders  = net - burn - community           (all integer dust -> founders)
  * and lib/casino/simulation.ts's community subdivision:
  *   lottery   = community * communityLotteryBps / 10000   (playtest: 6500)
@@ -35,9 +40,9 @@ interface IPlankVaultReturn {
  */
 contract PlankRakeRouter is ReentrancyGuard {
     uint256 private constant BPS = 10_000;
-    uint256 public constant BURN_BPS = 4_000;
-    uint256 public constant COMMUNITY_BPS = 4_000;
-    // founders = BPS - BURN_BPS - COMMUNITY_BPS = 2_000, taken as the remainder.
+    uint256 public constant BURN_BPS = 2_500;
+    uint256 public constant COMMUNITY_BPS = 6_900;
+    // founders = BPS - BURN_BPS - COMMUNITY_BPS = 600 (6%), taken as the remainder.
 
     address public immutable source; // the PlankCrash allowed to route
     address payable public immutable burnSink; // PlankBurnEngine (receive())

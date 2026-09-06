@@ -72,13 +72,13 @@ test("round accounting uses one exact gross, rake, and distributable identity", 
   assert.equal(round.distributable, 125n + (600n * 9_550n) / 10_000n);
 });
 
-test("ratified rake split routes 40% burn, 40% community, and 20% founder", () => {
+test("ratified rake split routes 25% burn, 69% community, and 6% founder (revised 2026-09-05 from 40/40/20)", () => {
   const wagers = 100n * 10n ** 18n;
   const rake = (wagers * 450n) / 10_000n;
   const split = ratifiedRakeSplit(rake);
-  assert.equal(split.burn, 18n * 10n ** 17n);
-  assert.equal(split.community, 18n * 10n ** 17n);
-  assert.equal(split.founders, 9n * 10n ** 17n);
+  assert.equal(split.burn, 1_125n * 10n ** 15n);
+  assert.equal(split.community, 3_105n * 10n ** 15n);
+  assert.equal(split.founders, 270n * 10n ** 15n);
   assert.equal(split.keeper + split.burn + split.community + split.founders, rake);
 });
 
