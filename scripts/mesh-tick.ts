@@ -14,6 +14,12 @@ import { configuredOpenSeaKeyCount } from "../lib/market/multichain/discovery/op
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
 const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length);
+// --max-seconds=N: stop claiming new jobs after N seconds (running lanes
+// finish). A cron tick under flock can otherwise run for hours on a deep
+// queue; the provisioning job's proof run and the 5-minute cadence both
+// want a bounded pass. Unset = drain the queue, the historical behaviour.
+const maxSecondsArg = process.argv.find((a) => a.startsWith("--max-seconds="));
+const claimDeadline = maxSecondsArg ? Date.now() + Number(maxSecondsArg.slice("--max-seconds=".length)) * 1000 : Number.POSITIVE_INFINITY;
 
 /**
  * Real bug found live 2026-08-26 (throughput audit follow-up): --limit
@@ -169,6 +175,21 @@ function withTimeout(promise: Promise<number>, ms: number, label: string): Promi
   });
 }
 
+/**
+ * Production (2026-09-06): the release tree has no tsx, so the mesh was
+ * never runnable there and the documented cron could not be installed --
+ * production hydration was 0 jobs/15 min with 400+ queued. Both scripts are
+ * now esbuild-bundled (package.json build:mesh) and, when this scheduler is
+ * itself the bundle, lanes are spawned as plain node on the sibling bundle.
+ */
+function laneEntry(): string[] {
+  const self = process.argv[1] ?? "";
+  if (self.endsWith("mesh-tick-standalone.mjs")) {
+    return [self.replace(/mesh-tick-standalone\.mjs$/, "mesh-lane-standalone.mjs")];
+  }
+  return ["--import", "tsx", "scripts/mesh-lane.ts"];
+}
+
 function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
   const label = `${source}:${chain}`;
   if (LIGHT_SOURCES.has(source)) return withTimeout(runLightSourceInProcess(source, chain, subject), LANE_TIMEOUT_MS, label);
@@ -179,7 +200,7 @@ function runLane(source: string, chain: string, subject?: string | null): Promis
         // The scheduler process is the environment boundary. Children inherit
         // its production/local environment; hard-coding .env.local here made a
         // correctly configured production tick fail before a lane could run.
-        ["--import", "tsx", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
+        [...laneEntry(), `--source=${source}`, `--chain=${chain}`,
           ...(subject ? [`--subject=${subject}`] : [])],
         { cwd: process.cwd(), stdio: "inherit", shell: false }
       );
@@ -261,6 +282,7 @@ async function main(): Promise<void> {
   async function worker(): Promise<void> {
     const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
     while (true) {
+      if (Date.now() >= claimDeadline) break;
       const job = await claimDataJob(claimKinds);
       if (!job) break;
       if (!job.chainSlug) {
