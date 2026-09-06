@@ -38,8 +38,8 @@ one shape, and this program adopts it:
 | Hub index through the edge, backstage door, Cloudflare-correct rate limiting | LIVE | hub renders for the owner; index 200 in ~3.5 s |
 | Singleflight cache lease | FIXED | production PostgreSQL rejected the old `jsonb::bigint` cast; every cached read had been failing silently |
 | Deploys | 2 min when no migration is pending (was 41 min: full `pg_dump` on every release) | run 34025542310 |
-| Convergence mesh (memberships, metadata, traits, rarity, stats lanes) | BUNDLED + PACKAGED, cron NOT yet installed | first `provision-market-mesh` proof run exited 1 in 5 s; the next run echoes the server log |
-| OpenSea Stream ingest (sales rows + floor state, all OpenSea chains) | BUILT, PROVEN LOCALLY, DEPLOYING | 145k events / 41 s, 6 sales written, 7 unit tests; run 34028150001 |
+| Convergence mesh (memberships, metadata, traits, rarity, stats lanes) | LIVE, in-process lanes, cron every 5 min | the shared host's process limit killed spawned lanes (`spawn node EAGAIN`); lanes now run inside the scheduler; provisioning run 34030953181 observed the cron firing; live feed showed 5,391 mesh-written rows in 65 s |
+| OpenSea Stream ingest (sales rows + floor state, all OpenSea chains) | LIVE, cron every minute with a 59-minute budget | 433 batch writes / 0 errors in the production ledger; 9 stream sales on the live feed in 65 s; stream sales on collection activity shipped after |
 
 Hydration truth before this program started: 412 queued jobs, 0 completed in 15 minutes, because the mesh needed
 `tsx`, which the release tree never ships. The mesh had never run in production.
