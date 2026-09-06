@@ -1255,7 +1255,7 @@ jobs:
           test -s "$artifact"
           test -s "$app_dir/current/scripts/mesh-lane-standalone.mjs"
           test -s "$app_dir/current/scripts/opensea-stream-standalone.mjs"
-          touch "$logs_dir/opensea-stream.log" && chmod 600 "$logs_dir/opensea-stream.log"
+          mkdir -p "$app_dir/logs" && touch "$app_dir/logs/opensea-stream.log" && chmod 600 "$app_dir/logs/opensea-stream.log"
 
           logs_dir="$app_dir/logs"
           log_file="$logs_dir/market-mesh.log"
