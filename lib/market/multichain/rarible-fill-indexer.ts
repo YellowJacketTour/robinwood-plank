@@ -77,6 +77,7 @@
  * are venue-generic -- reused here with venue_id = 'rarible'.
  */
 import { Interface, AbiCoder, id as keccakId } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery } from "@/lib/postgres";
 
 export const RARIBLE_EXCHANGE_V2_ADDRESS = "0x9757f2d2b135150bbeb65308d4a91804107cd8d6";
@@ -300,6 +301,9 @@ export async function writeRaribleFills(rows: RaribleFillRow[]): Promise<number>
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && r.match.nftContract) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "rarible", protocol: "rarible", collectionKey: r.match.nftContract, tokenId: r.match.tokenId != null ? String(r.match.tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: r.match.seller, buyer: r.match.buyer, currencyToken: r.match.currencyToken ?? null, priceWei: r.match.priceWei != null ? String(r.match.priceWei) : null, raw: { leftHash: r.match.leftHash, rightHash: r.match.rightHash } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew || !r.match.nftContract || !r.match.tokenId) continue;
 
@@ -320,5 +324,6 @@ export async function writeRaribleFills(rows: RaribleFillRow[]): Promise<number>
       );
     }
   }
+  await flushLedgerAggregation();
   return written;
 }

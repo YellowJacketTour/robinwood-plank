@@ -34,6 +34,7 @@
  * row as a transfer must filter on auction_kind='sale' first.
  */
 import { Interface } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import { cryptoKittiesAuctionKindForAddress, KITTY_CORE_ADDRESS } from "@/lib/market/multichain/cryptokitties-deployments";
 
@@ -154,6 +155,10 @@ export async function writeCryptoKittiesFills(
       )
     );
     written += (result.rowCount ?? 0) > 0 ? 1 : 0;
+    if ((result.rowCount ?? 0) > 0) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "cryptokitties", protocol: "cryptokitties-auction", collectionKey: KITTY_CORE_ADDRESS, tokenId: r.fill.tokenId != null ? String(r.fill.tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: null, buyer: r.fill.winner, currencyToken: null, priceWei: r.fill.totalPriceWei != null ? String(r.fill.totalPriceWei) : null, raw: { auctionKind } });
+    }
   }
+  await flushLedgerAggregation();
   return written;
 }

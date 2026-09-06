@@ -75,6 +75,7 @@
  * per real traded tokenId, one payment leg only when price_wei was decoded.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 
 export const SUDOSWAP_FACTORY_ADDRESS = "0xb16c1342e617a5b6e4b631eb114483fdb289c0a4";
 export const SUDOSWAP_CHAIN_SLUG = "eth-mainnet";
@@ -239,6 +240,12 @@ export async function writeSudoswapFills(rows: SudoswapFillRow[]): Promise<numbe
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && r.swap.nftContract) {
+      const buyer = r.swap.direction === "buy-from-pool" ? r.swap.counterparty : null;
+      const seller = r.swap.direction === "sell-to-pool" ? r.swap.counterparty : null;
+      const firstToken = Array.isArray(r.swap.tokenIds) && r.swap.tokenIds.length > 0 ? String(r.swap.tokenIds[0]) : null;
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "sudoswap", protocol: "sudoswap", collectionKey: r.swap.nftContract, tokenId: firstToken, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller, buyer, currencyToken: r.swap.currencyToken ?? null, priceWei: r.swap.priceWei != null ? String(r.swap.priceWei) : null, raw: { pool: r.swap.poolAddress, direction: r.swap.direction, quantity: Array.isArray(r.swap.tokenIds) ? r.swap.tokenIds.length : 1 } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew || !r.swap.nftContract) continue;
 
@@ -281,5 +288,6 @@ export async function writeSudoswapFills(rows: SudoswapFillRow[]): Promise<numbe
       );
     }
   }
+  await flushLedgerAggregation();
   return written;
 }
