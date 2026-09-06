@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import { MESH_LANES, type MeshLane } from "../lib/market/multichain/mesh/matrix";
 import { isSourceJailed } from "../lib/market/multichain/mesh/jail";
-import { claimDataJob, enqueueDataJob, finishDataJob } from "../lib/market/multichain/control-plane";
+import { claimDataJob, deferDataJob, enqueueDataJob, finishDataJob } from "../lib/market/multichain/control-plane";
 import { configuredOpenSeaKeyCount } from "../lib/market/multichain/discovery/opensea-key-pool";
 
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
@@ -107,15 +107,20 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
   try {
     if (source === "evm-metadata") {
       const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
-      const ceiling = subject ? 250 : 75;
+      const ceiling = subject ? 500 : 75;
       let attempted = 0;
+      let lastAttempted = 0;
       const deadline = Date.now() + 45_000;
       while (attempted < ceiling && Date.now() < deadline) {
         const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
+        lastAttempted = batch.attempted;
         attempted += batch.attempted;
         if (batch.attempted === 0) break;
       }
-      return 0;
+      // AUDIT lens 4 #1: stopped on ceiling/deadline with work left -> 2, so
+      // the job is re-enqueued at its priority instead of marked done.
+      const moreWork = lastAttempted > 0 && (attempted >= ceiling || Date.now() >= deadline);
+      return subject && moreWork ? 2 : 0;
     }
     if (source === "erc4906-rescan") {
       const { runMetadataUpdateRescanBatch } = await import("../lib/market/multichain/discovery/erc4906-rescan");
@@ -152,6 +157,8 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
  * block the scheduler for more than one real "unit" of sequential delay.
  */
 const LANE_TIMEOUT_MS = 90_000;
+/** In-process lanes that asked for a delayed retry (see mesh-lane.ts markDeferred), keyed source:chain:subject. */
+const pendingDefer = new Map<string, { ms: number; reason: string | null }>();
 /** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
 const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
@@ -201,7 +208,11 @@ function runLane(source: string, chain: string, subject?: string | null): Promis
   if (LIGHT_SOURCES.has(source)) return withTimeout(runLightSourceInProcess(source, chain, subject), LANE_TIMEOUT_MS, label);
   if (inProcess) {
     return withTimeout(
-      import("./mesh-lane").then(({ runMeshLane }) => runMeshLane(source as MeshLane["source"], chain, subject ?? "")),
+      import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
+        const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "");
+        if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
+        return outcome.code;
+      }),
       IN_PROCESS_LANE_TIMEOUT_MS,
       label
     );
@@ -256,11 +267,24 @@ async function main(): Promise<void> {
     console.error("[mesh-tick] demoteStaleVisibleDemand failed", error instanceof Error ? error.message : error);
   }
 
+  // AUDIT lens 5 B: under the always-on cron this process lives ~55 min,
+  // so enqueuing the standing lanes once at start meant fills/discovery
+  // ran once an hour. They are re-enqueued every STANDING_LANE_PERIOD_MS
+  // (idempotent by job_key) for as long as the pass runs.
+  const STANDING_LANE_PERIOD_MS = 5 * 60_000;
+  const lanes: MeshLane[] = await enqueueStandingLanes(true);
+  const standingTimer = setInterval(() => {
+    if (Date.now() >= claimDeadline) return;
+    void enqueueStandingLanes(false).catch((error) => console.error("[mesh-tick] standing re-enqueue failed", error instanceof Error ? error.message : error));
+  }, STANDING_LANE_PERIOD_MS);
+  standingTimer.unref();
+
+  async function enqueueStandingLanes(verbose: boolean): Promise<MeshLane[]> {
   const lanes: MeshLane[] = [];
   for (const lane of MESH_LANES) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;
     if (await isSourceJailed(lane.source, lane.chainSlug)) {
-      console.log(`[mesh-tick] skip jailed ${lane.id}`);
+      if (verbose) console.log(`[mesh-tick] skip jailed ${lane.id}`);
       continue;
     }
     lanes.push(lane);
@@ -289,6 +313,8 @@ async function main(): Promise<void> {
       priority: lane.source === "seaport-fills" || lane.source === "seaport-fills-genesis" || lane.source === "native-robinwood" ? 60 : 20,
     });
   }
+  return lanes;
+  }
 
   console.log(`[mesh-tick] ${lanes.length} live lanes queued, concurrency=${limit}`);
   if (lanes.length === 0) return;
@@ -307,11 +333,13 @@ async function main(): Promise<void> {
     while (true) {
       if (Date.now() >= claimDeadline) break;
       const job = express ? await claimDataJob(claimKinds, 300_000, EXPRESS_MIN_PRIORITY) : await claimDataJob(claimKinds);
-      if (!job && express) {
+      if (!job) {
+        // AUDIT lens 5 C: general workers used to exit on the first empty
+        // claim, leaving only the express slot for the rest of the hour.
+        // Every worker now idles and re-polls until the deadline.
         await new Promise((resolve) => setTimeout(resolve, EXPRESS_IDLE_MS));
         continue;
       }
-      if (!job) break;
       if (!job.chainSlug) {
         await finishDataJob(job, "mesh lane has no chain slug");
         continue;
@@ -343,6 +371,17 @@ async function main(): Promise<void> {
       // -- fixes a real bug live 2026-08-25: a bounded-window job that
       // finished one slice and returned was marked terminally 'succeeded'
       // and never claimed again, despite real remaining work.
+      const deferKey = `${job.source}:${job.chainSlug}:${job.subject ?? ""}`;
+      const defer = pendingDefer.get(deferKey);
+      pendingDefer.delete(deferKey);
+      if (defer) {
+        // The lane asked for a delayed retry (jailed / pool busy): release
+        // the slot now, come back at not_before, never sleep in a slot.
+        await deferDataJob(job, new Date(Date.now() + defer.ms), defer.reason);
+        await recordLaneOutcome(laneKey, true);
+        console.log(`[mesh-tick] deferred ${job.jobKey} for ${Math.round(defer.ms / 1000)}s (${defer.reason ?? "no reason"})`);
+        continue;
+      }
       const isPartial = code === 2;
       await finishDataJob(job, code === 0 || isPartial ? undefined : `lane exited ${code}`);
       if (isPartial) {
@@ -385,6 +424,7 @@ async function main(): Promise<void> {
     })();
   });
   await Promise.all(workers);
+  clearInterval(standingTimer);
   console.log("[mesh-tick] pass done");
 }
 

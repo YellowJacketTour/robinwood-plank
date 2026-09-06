@@ -143,7 +143,9 @@ export async function enqueueDataJob(input: DataJobInput): Promise<number> {
        not_before = LEAST(plank_data_jobs.not_before, EXCLUDED.not_before),
        payload = plank_data_jobs.payload || EXCLUDED.payload,
        status = CASE WHEN plank_data_jobs.status IN ('failed', 'succeeded') THEN 'queued' ELSE plank_data_jobs.status END,
-       completed_at = NULL,
+       -- completed_at is kept as "last completion" (2026-09-06): a partial
+       -- lane that re-enqueues itself still completed real work, and the
+       -- throughput telemetry counts completions in a window, not statuses.
        updated_at = NOW()
      RETURNING id::text`,
     [input.jobKey, input.kind, input.source, input.chainSlug ?? null, input.subject ?? null,
@@ -229,6 +231,22 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
   } finally {
     client.release();
   }
+}
+
+/**
+ * Put a running job back in the queue to be claimed no earlier than
+ * `notBefore` (2026-09-06, AUDIT lens 5 E/F). enqueueDataJob's LEAST()
+ * ratchet can never push not_before forward, so "retry after the jail
+ * lifts" or "retry in 10 s" was impossible; lanes slept inside a slot
+ * instead. This releases the slot immediately.
+ */
+export async function deferDataJob(job: Pick<ClaimedDataJob, "id" | "leaseOwner">, notBefore: Date, reason?: string | null): Promise<void> {
+  await postgresQuery(
+    `UPDATE plank_data_jobs SET status = 'queued', not_before = $2, last_error = $3, lease_owner = NULL,
+       lease_expires_at = NULL, updated_at = NOW()
+     WHERE id = $1 AND lease_owner = $4`,
+    [job.id, notBefore, reason ?? null, job.leaseOwner]
+  );
 }
 
 export async function finishDataJob(job: Pick<ClaimedDataJob, "id" | "leaseOwner">, error?: string): Promise<void> {
