@@ -4,6 +4,10 @@ pragma solidity 0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {PlankCcs2LMath} from "./lib/PlankCcs2LMath.sol";
 
+interface IPlankCrashSpillover {
+    function creditSpilloverRound() external;
+}
+
 /**
  * PlankLottery -- the site's ONE progressive lottery, on the ratified design
  * (docs/marketplank/DESIGN-vault-lottery-progressive-carve-2026-09-04.md) with
@@ -105,6 +109,11 @@ contract PlankLottery is ReentrancyGuard {
     // advance it faster than real rounds pass).
     uint256 public roundsContributed;
     uint256 private _lastRoundCountedFor;
+    // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.5, mirrored from
+    // PlankCrash's identical constant: once this pool's own carve-ceiling
+    // curve is already ~98.2% saturated, further contributing rounds
+    // accelerate the crash vault's still-climbing curve instead.
+    uint256 public constant SPILLOVER_THRESHOLD_ROUNDS = 4_000;
 
     event Funded(address indexed from, uint256 amount, uint256 fee, uint256 poolAfter);
     event Draw(
@@ -202,6 +211,16 @@ contract PlankLottery is ReentrancyGuard {
         emit Funded(msg.sender, msg.value, fee, pool);
     }
 
+    /// @notice Called by PlankCrash once ITS OWN curve has passed its
+    ///         spillover threshold, crediting a round of participation here
+    ///         instead. Same authentication and exploit-resistance as
+    ///         `recordRound`: only `source`, by exactly one per call, with no
+    ///         amount or size for an attacker to inflate.
+    function creditSpilloverRound() external {
+        if (msg.sender != source) revert UnauthorizedSource();
+        roundsContributed += 1;
+    }
+
     // ── The draw (called by PlankCrash at every qualified settlement) ────
 
     /// @param roundId the crash round that was just settled.
@@ -223,7 +242,16 @@ contract PlankLottery is ReentrancyGuard {
         // rounds can, at the fixed rate of one per round.
         if (roundId != _lastRoundCountedFor) {
             _lastRoundCountedFor = roundId;
-            roundsContributed += 1;
+            if (roundsContributed >= SPILLOVER_THRESHOLD_ROUNDS) {
+                // Bounded, non-reverting: a paused/bricked crash-side vault
+                // path must never block the lottery's own draw settlement.
+                // Failure silently forfeits that round's spillover credit --
+                // it never falls back to growing this pool's own
+                // already-near-ceiling curve instead.
+                try IPlankCrashSpillover(source).creditSpilloverRound() {} catch {}
+            } else {
+                roundsContributed += 1;
+            }
         }
         uint256 prize = committedPrize;
         if (prize == 0) {

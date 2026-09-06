@@ -8,6 +8,7 @@ import {PlankCcs2LMath} from "./lib/PlankCcs2LMath.sol";
 interface IPlankLottery {
     function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) external;
     function fund() external payable;
+    function creditSpilloverRound() external;
 }
 
 interface IPlankRakeRouter {
@@ -226,6 +227,12 @@ contract PlankCrash is ReentrancyGuard {
     // can never advance it faster than real time and real rounds allow.
     uint256 public roundsContributed;
     uint256 private _lastRoundCountedFor;
+    // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.5. Once this contract's
+    // OWN curve is already at ~98.2% of its ceiling (25 x (1 - 0.999^4000) =
+    // 24.55%, verified by direct computation), further contributing rounds
+    // stop growing a curve that's effectively full and instead accelerate the
+    // lottery's still-climbing curve -- the "unified economics" mechanism.
+    uint256 public constant SPILLOVER_THRESHOLD_ROUNDS = 4_000;
 
     mapping(uint256 => Round) public rounds;
     mapping(uint256 => Seat[]) private _seats;
@@ -284,6 +291,7 @@ contract PlankCrash is ReentrancyGuard {
     error RandomnessNotYetAvailable();
     error RandomnessAvailable();
     error NotRouter();
+    error NotLottery();
     error NotBank();
     error NothingToFund();
     error NothingToWithdraw();
@@ -720,6 +728,27 @@ contract PlankCrash is ReentrancyGuard {
         uint256 id = currentRoundId;
         if (id == _lastRoundCountedFor) return;
         _lastRoundCountedFor = id;
+        if (roundsContributed >= SPILLOVER_THRESHOLD_ROUNDS) {
+            // Bounded, non-reverting: a paused/bricked lottery must never
+            // block crash-side vault funding. Failure silently forfeits that
+            // round's spillover credit; it never falls back to growing this
+            // contract's own already-near-ceiling curve instead (that would
+            // reopen the thing spillover exists to close off).
+            try IPlankLottery(lottery).creditSpilloverRound() {} catch {}
+            return;
+        }
+        roundsContributed += 1;
+    }
+
+    /// @notice Called by the lottery once ITS OWN curve has passed its
+    ///         spillover threshold, crediting a round of participation here
+    ///         instead. Mirrors the exploit-resistance of every other
+    ///         `roundsContributed` write path: at most one call site
+    ///         (the lottery, authenticated by address) can ever invoke this,
+    ///         and it moves the counter by exactly one, unconditionally --
+    ///         there is no size or amount for an attacker to inflate.
+    function creditSpilloverRound() external {
+        if (msg.sender != lottery) revert NotLottery();
         roundsContributed += 1;
     }
 

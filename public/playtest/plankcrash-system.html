@@ -1109,10 +1109,19 @@
             </div>
           </div>
         </div>
+        <p>
+          Past 4,000 contributing rounds a curve is already ~98% saturated —
+          squeezing out its last fraction of a percent does less than
+          accelerating a still-climbing sibling. Once a game passes that
+          point, its further rounds credit the other game's curve instead.
+          Nothing here ever touches either vault's balance; only the two
+          growth curves cross over.
+        </p>
         <code class="formula">
           <small>formula</small>
           bonus cap(n) = 25% × (1 − 0.999<sup>n</sup>), n = rounds ever contributed<br />
-          reseed ceiling(n) = ceiling − (ceiling − base) × 0.999<sup>n</sup>
+          reseed ceiling(n) = ceiling − (ceiling − base) × 0.999<sup>n</sup><br />
+          past 4,000 rounds: further rounds credit the OTHER game's n instead
         </code>
         <code class="formula">
           <small>invariants checked every round</small>

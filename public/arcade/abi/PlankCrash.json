@@ -204,6 +204,11 @@
  },
  {
   "inputs": [],
+  "name": "NotLottery",
+  "type": "error"
+ },
+ {
+  "inputs": [],
   "name": "NotRouter",
   "type": "error"
  },
@@ -834,6 +839,19 @@
  },
  {
   "inputs": [],
+  "name": "SPILLOVER_THRESHOLD_ROUNDS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
   "name": "TARGET_ROUND_SAFETY_PERIODS",
   "outputs": [
    {
@@ -971,6 +989,13 @@
    }
   ],
   "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "creditSpilloverRound",
+  "outputs": [],
+  "stateMutability": "nonpayable",
   "type": "function"
  },
  {

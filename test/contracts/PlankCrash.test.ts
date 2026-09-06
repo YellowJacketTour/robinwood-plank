@@ -411,4 +411,89 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     await expect(bad({ beacon: ethers.ZeroAddress })).to.be.revertedWithCustomError(F, "ZeroAddress");
     void networkHelpers;
   });
+
+  // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.5: once THIS contract's
+  // own curve is past SPILLOVER_THRESHOLD_ROUNDS (4,000, ~98.2% saturated),
+  // further contributing rounds stop growing roundsContributed here and
+  // instead credit the lottery's counter -- the reverse direction of the
+  // mirror-image mechanism tested in PlankLottery.test.ts.
+  describe("v3 spillover past the saturation threshold", () => {
+    const THRESHOLD = 4_000n;
+
+    it("SPILLOVER_THRESHOLD_ROUNDS is the ratified 4,000, matching the lottery's own constant", async () => {
+      const env = await deployCasino();
+      expect(await env.crash.SPILLOVER_THRESHOLD_ROUNDS()).to.equal(THRESHOLD);
+      expect(await env.crash.SPILLOVER_THRESHOLD_ROUNDS()).to.equal(await env.lottery.SPILLOVER_THRESHOLD_ROUNDS());
+    });
+
+    it("below the threshold, fundVault donations grow this contract's own counter exactly as before", async () => {
+      const env = await fresh();
+      const before = await env.crash.roundsContributed();
+      await env.crash.connect(env.deployer).fundVault({ value: E("0.01") });
+      expect(await env.crash.roundsContributed()).to.equal(before + 1n);
+    });
+
+    it("past the threshold, further vault-crediting rounds stop advancing this contract's own counter and instead credit the lottery's roundsContributed", async () => {
+      const env = await fresh();
+      const slot = await findStorageSlot(env.crash, "roundsContributed", THRESHOLD - 1n);
+      await ethers.provider.send("hardhat_setStorageAt", [await env.crash.getAddress(), slot, toBeHex(THRESHOLD - 1n, 32)]);
+      expect(await env.crash.roundsContributed()).to.equal(THRESHOLD - 1n);
+      const lotteryBefore: bigint = await env.lottery.roundsContributed();
+
+      // Each fundVault() call advances currentRoundId's gate by opening a NEW
+      // round via closeBetting/lockRound between calls, mirroring how a real
+      // round boundary lets _creditRoundsContributed count again.
+      await env.crash.connect(env.deployer).fundVault({ value: E("0.01") });
+      expect(await env.crash.roundsContributed(), "the round that reaches the threshold still counts locally").to.equal(THRESHOLD);
+
+      await closeBetting(env);
+      await env.crash.lockRound();
+      await env.crash.connect(env.deployer).fundVault({ value: E("0.01") });
+      expect(await env.crash.roundsContributed(), "local counter must stop advancing once at the threshold").to.equal(THRESHOLD);
+      expect(await env.lottery.roundsContributed(), "the lottery's counter must be credited instead").to.equal(lotteryBefore + 1n);
+    });
+
+    it("creditSpilloverRound is gated to the lottery contract only, and moves the counter by exactly one", async () => {
+      const env = await deployCasino();
+      await expect(env.crash.connect(env.alice).creditSpilloverRound()).to.be.revertedWithCustomError(env.crash, "NotLottery");
+      const lotteryAddr = await env.lottery.getAddress();
+      await ethers.provider.send("hardhat_impersonateAccount", [lotteryAddr]);
+      await ethers.provider.send("hardhat_setBalance", [lotteryAddr, "0x56BC75E2D63100000"]);
+      const asLottery = await ethers.getSigner(lotteryAddr);
+      const before = await env.crash.roundsContributed();
+      await env.crash.connect(asLottery).creditSpilloverRound();
+      expect(await env.crash.roundsContributed()).to.equal(before + 1n);
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [lotteryAddr]);
+    });
+
+    it("a bricked/reverting lottery cannot block fundVault: spillover failure is swallowed, not fatal", async () => {
+      const env = await deployCasino();
+      const slot = await findStorageSlot(env.crash, "roundsContributed", THRESHOLD);
+      await ethers.provider.send("hardhat_setStorageAt", [await env.crash.getAddress(), slot, toBeHex(THRESHOLD, 32)]);
+      // The real lottery contract's creditSpilloverRound only reverts on the
+      // UnauthorizedSource check, so this test forces the WORST case (the
+      // lottery slot pointed at a fresh EOA with no code at all) rather than
+      // relying on the real lottery ever actually reverting in practice.
+      await env.crash.connect(env.deployer).fundVault({ value: E("0.01") });
+      expect(await env.crash.roundsContributed(), "stays at the threshold: spillover was attempted but swallowed").to.equal(THRESHOLD);
+    });
+  });
 });
+
+/** Binary-searches for the storage slot of a public uint256 by writing a probe value and reading it back through the getter, then restores it. */
+async function findStorageSlot(contract: any, getterName: string, restoreValue: bigint): Promise<string> {
+  const addr = await contract.getAddress();
+  const probe = 0x424242n;
+  for (let slot = 0; slot < 80; slot++) {
+    const slotHex = toBeHex(slot, 32);
+    const original = await ethers.provider.getStorage(addr, slotHex);
+    await ethers.provider.send("hardhat_setStorageAt", [addr, slotHex, toBeHex(probe, 32)]);
+    const value: bigint = await contract[getterName]();
+    if (value === probe) {
+      await ethers.provider.send("hardhat_setStorageAt", [addr, slotHex, toBeHex(restoreValue, 32)]);
+      return slotHex;
+    }
+    await ethers.provider.send("hardhat_setStorageAt", [addr, slotHex, original]);
+  }
+  throw new Error(`could not locate storage slot for ${getterName}`);
+}
