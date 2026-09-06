@@ -32,6 +32,7 @@
  * which collection/token/price it was for.
  */
 import { Interface } from "ethers";
+import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { MARKET_FEE_RECIPIENT } from "@/lib/constants";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 import { confirmedHead, planScan } from "@/lib/market/chain-indexer";
@@ -590,6 +591,48 @@ export async function writeFills(
         r.blockTimestamp ?? null,
         JSON.stringify(r.fill.paymentLegs),
       ]);
+      // AUDIT lens 6 #1/#2 (2026-09-06, "one sink"): every Seaport fill also
+      // lands in plank_market_events as a confirmed sale in the same
+      // transaction, so the buyer board, the live feed and any aggregator
+      // reading that ledger see on-chain sales, not only stream sales. A
+      // stream row for the same transaction is promoted to confirmed rather
+      // than left as a second, unconfirmed copy.
+      if ((parent.rowCount ?? 0) > 0 && r.fill.nftContract) {
+        const nativeSymbol = chainManifest(r.chainSlug)?.nativeCurrencySymbol ?? null;
+        await client.query(
+          `INSERT INTO plank_market_events
+             (chain_slug, venue_id, protocol, event_type, collection_key, token_id, tx_hash,
+              event_index, sub_index, block_number, block_timestamp, seller, buyer,
+              currency_address, currency_symbol, currency_decimals, amount_atomic,
+              finality, chain_namespace, event_identity, raw_event)
+           VALUES ($1, 'seaport', 'seaport', 'sale', $2, $3, $4,
+              $5, 0, $6, to_timestamp($7), $8, $9,
+              $10, $11, 18, $12::numeric,
+              'confirmed', 'eip155', $13, $14::jsonb)
+           ON CONFLICT (chain_slug, venue_id, tx_hash, event_index, sub_index) DO NOTHING`,
+          [
+            r.chainSlug,
+            r.fill.nftContract.toLowerCase(),
+            r.fill.tokenId,
+            r.txHash,
+            r.logIndex,
+            r.blockNumber,
+            r.blockTimestamp ?? null,
+            r.fill.seller,
+            r.fill.buyer,
+            r.fill.currencyToken ?? null,
+            r.fill.currencyToken ? null : nativeSymbol,
+            r.fill.priceWei,
+            `${r.chainSlug}:seaport:${r.txHash}:${r.logIndex}`,
+            JSON.stringify({ orderHash: r.fill.orderHash, shape: r.fill.shape }),
+          ]
+        );
+        await client.query(
+          `UPDATE plank_market_events SET finality = 'confirmed', block_number = COALESCE(block_number, $3), block_timestamp = COALESCE(block_timestamp, to_timestamp($4))
+            WHERE chain_slug = $1 AND venue_id = 'opensea-stream' AND tx_hash = $2 AND finality = 'observed'`,
+          [r.chainSlug, r.txHash, r.blockNumber, r.blockTimestamp ?? null]
+        );
+      }
       for (const leg of r.fill.assetLegs) {
         await client.query(
           `INSERT INTO plank_market_event_assets
