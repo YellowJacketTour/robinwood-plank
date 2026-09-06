@@ -139,6 +139,14 @@ test(
     await cleanupBudget(providerA);
     await cleanupBudget(providerB);
     try {
+      // The budget is a fixed 60 s window. In CI the 90 sequential writes
+      // below can straddle a window boundary, splitting the spend across
+      // two windows so neither reaches the ceiling (seen live 2026-09-06 as
+      // a spurious "expected true, actual false"). Start at a safe distance
+      // from the boundary.
+      const WINDOW_MS = 60_000;
+      const remaining = WINDOW_MS - (Date.now() % WINDOW_MS);
+      if (remaining < 15_000) await new Promise((r) => setTimeout(r, remaining + 250));
       const budgetA = await readProviderBudget(providerA);
       for (let i = 0; i < budgetA.hardCeiling; i++) await recordProviderCall(providerA);
       assert.equal(await isProviderBudgetExhausted(providerA), true);
