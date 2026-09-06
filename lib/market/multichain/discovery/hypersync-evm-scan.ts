@@ -387,13 +387,16 @@ export async function runAddressScopedMembershipScan(input: {
 
   let nextBlock = scannedUpTo;
   try {
-    // Transport: stream() by default (measured 2026-09-05 on Base, same
-    // 904,669 logs: get() 9,453 ms in 16 requests vs stream() 4,880 ms --
-    // scripts/hypersync-stream-bench.ts). HYPERSYNC_STREAM=0 restores the
-    // paged get() walk; a stream failure also falls back to it, so the
-    // lane never loses its slice to a transport bug.
+    // Transport, measured 2026-09-05 on Base (scripts/hypersync-stream-bench.ts
+    // and a live run of THIS function): stream() wins on bulk, unfiltered
+    // ranges (904,669 logs: get() 9,453 ms / 16 requests vs stream() 4,880
+    // ms) but LOSES on a sparse, address-scoped range like this one (285
+    // logs over 400k blocks: get() 1,432 ms vs stream() 2,819 ms -- the
+    // stream's setup cost dominates). So get() stays the default here;
+    // HYPERSYNC_STREAM=1 opts a lane into stream(), and a stream failure
+    // falls back to get() so the lane never loses its slice.
     let stream: Awaited<ReturnType<typeof client.stream>> | null = null;
-    if (process.env.HYPERSYNC_STREAM?.trim() !== "0") {
+    if (process.env.HYPERSYNC_STREAM?.trim() === "1") {
       try {
         stream = await withHypersyncReservation(() => client.stream(query, {}));
       } catch {

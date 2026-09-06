@@ -118,8 +118,11 @@ against live ledger evidence (pure scoring is tested); market-focus over the liv
 
 - **HyperSync transport** (`scripts/hypersync-stream-bench.ts`, Base, blocks 50936591..50939591, 904,669 Transfer
   logs, identical count both ways): paged `get()` 9,453 ms in 16 requests; `stream()` 4,880 ms in 19 batches.
-  **1.94× faster** for the same data. Decision: worth switching the discovery/backfill cursors to `stream()`; not done
-  in this pass (cursor semantics per lane need their own change + proof).
+  **1.94× faster** for bulk. But a live run of `runAddressScopedMembershipScan` on a sparse, address-scoped range
+  (285 logs over 400k blocks, same tokens found both ways) measured `get()` 1,432 ms vs `stream()` 2,819 ms: the
+  stream's setup cost dominates sparse scans. Decision: `stream()` is wired into the address-scoped scan behind
+  `HYPERSYNC_STREAM=1` (default stays `get()`); the bulk discovery/backfill cursors are the right place to adopt it
+  next, with the same before/after measurement.
 - **Time-to-100%** (`scripts/hydration-time-to-complete.ts --chain=base-mainnet --run-mesh`, collection
   `0x0c801a24dc6cf18a2fd7c81467b1414381fdf284`, supply 788): 0 → 1 rows in 485 s, **not reached**. Cause was the
   local database, not the mesh: four lanes died on `canceling statement due to statement timeout` (15 s) against the
