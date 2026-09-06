@@ -70,6 +70,7 @@ import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
 import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import TradingParityMatrix from "@/components/market/TradingParityMatrix";
+import BiggestBuyersBoard from "@/components/market/BiggestBuyersBoard";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
 import { displayMugsName } from "@/lib/market/multichain/mugs-display";
@@ -2497,7 +2498,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             />
           ) : null}
           {browseMode === "intelligence" ? (
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
+              {collection?.contractAddress && <BiggestBuyersBoard chainSlug={chainSlug} collectionKey={collection.contractAddress} />}
               <TradingParityMatrix chainSlug={chainSlug} />
             </div>
           ) : (
