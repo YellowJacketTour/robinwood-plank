@@ -35,6 +35,7 @@ on:
           - reset-plank-koth-rpc-cursor
           - evaluate-plank-koth-tx
           - provision-plank-koth-gap-finder
+          - provision-market-mesh
           - configure-plankspace-x
       repair_from_block:
         description: >-
@@ -171,6 +172,7 @@ jobs:
       - run: npm run build:market-refresh
       - run: npm run build:reindex
       - run: npm run build:plank-koth-watch
+      - run: npm run build:mesh
       - run: npm run build:audit-preseason
       - run: npm run build:koth-diag
       - run: npm run build:koth-reprocess
@@ -200,6 +202,8 @@ jobs:
           test -s .next/standalone/scripts/refresh-market-data.mjs
           test -s .next/standalone/scripts/reindex-chain-events.mjs
           test -s .next/standalone/scripts/plank-koth-watch-standalone.mjs
+          test -s .next/standalone/scripts/mesh-tick-standalone.mjs
+          test -s .next/standalone/scripts/mesh-lane-standalone.mjs
           test -s .next/standalone/scripts/audit-plank-historical-record.mjs
           test -s .next/standalone/scripts/plank-koth-review-queue-dump.mjs
           test -s .next/standalone/scripts/reprocess-plank-koth-review-queue.mjs
@@ -1167,6 +1171,142 @@ jobs:
           done
           test "$cron_observed" = "true"
           echo "PLANK_KOTH_WATCH_PROVISIONED={\"managedEntries\":$managed_count}"
+          tail -n 5 "$log_file"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # Multichain convergence mesh cron (docs/INMOTION_DEPLOYMENT.md section
+  # "Multichain convergence mesh (required)"). Added 2026-09-06: production
+  # showed 400+ queued hydration jobs and 0 completed because the documented
+  # cron line needed tsx, which the release tree never ships. Runs the
+  # esbuild-bundled scheduler (build:mesh) every 5 minutes under flock; the
+  # scheduler spawns the bundled lane runner with plain node.
+  # ---------------------------------------------------------------------------
+  provision-market-mesh:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-market-mesh'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Run once, then install the managed cron entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -v -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          echo "REACHED REMOTE SHELL"
+          set -euxo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+          # The standalone Next.js release tree ships no devDependencies at
+          # all (npx does not exist next to node there either, confirmed
+          # 2026-08-26) -- there is no tsx and never will be. This script
+          # runs from the esbuild-bundled .mjs (package.json's own
+          # build:market-mesh), same convention as reindex-chain-
+          # events.mjs/refresh-market-data.mjs, not the raw .ts source.
+          artifact="$app_dir/current/scripts/mesh-tick-standalone.mjs"
+          test -s "$artifact"
+          test -s "$app_dir/current/scripts/mesh-lane-standalone.mjs"
+
+          logs_dir="$app_dir/logs"
+          log_file="$logs_dir/market-mesh.log"
+          lock_file="$app_dir/shared/market-mesh.lock"
+          mkdir -p "$logs_dir"
+          chmod 700 "$logs_dir"
+          touch "$log_file"
+          chmod 600 "$log_file"
+
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          # Prove one real pass actually succeeds BEFORE installing the
+          # recurring schedule -- a broken script must never get scheduled
+          # to fail silently every two minutes with nobody watching.
+          cd "$app_dir/current"
+          "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$env_file" "$artifact" --limit=6 --max-seconds=180 \
+            >> "$log_file" 2>&1
+          tail -n 5 "$log_file"
+
+          cron_before="$(mktemp)"
+          cron_after="$(mktemp)"
+          trap 'rm -f "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          awk '!/market-mesh/' "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# market-mesh (managed by inmotion branch)'
+            printf '*/5 * * * * cd %s && %s -n %s %s --env-file=%s %s --limit=6 --max-seconds=240 >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
+              "$artifact" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          # Count only the tag comment line, not the substring match against
+          # the schedule line too -- unlike provision-relayer's own tag
+          # ("plank-drand-relayer", which never collides with that job's
+          # artifact path), this artifact's own filename
+          # (mesh-tick-standalone.mjs) legitimately contains
+          # "market-mesh", so a bare substring grep double-counts one
+          # real managed entry as two. Confirmed live 2026-08-26:
+          # managed_count=2 for a single real entry with the bare grep.
+          managed_count="$(crontab -l | grep -c '^# market-mesh' || true)"
+          test "$managed_count" -eq 1
+
+          # Confirm the cron actually fires on its own before declaring
+          # success -- same real "don't trust the schedule until it's been
+          # observed running" discipline provision-relayer already uses.
+          lines_before="$(wc -l < "$log_file")"
+          cron_observed=false
+          for attempt in $(seq 1 75); do
+            sleep 5
+            lines_after="$(wc -l < "$log_file")"
+            if [ "$lines_after" -gt "$lines_before" ]; then
+              cron_observed=true
+              break
+            fi
+          done
+          test "$cron_observed" = "true"
+          echo "MARKET_MESH_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 5 "$log_file"
           REMOTE
 
