@@ -79,6 +79,9 @@ export type Listing = {
   /** Wallet that placed this order — the seller for a listing. */
   maker: string;
   priceWei: string;
+  /** Per-row currency (2026-09-06). Absent = the chain's native token. Wrapped native (WETH/WBNB/...) is priced 1:1 and labelled. */
+  currencySymbol?: string;
+  currencyAddress?: string | null;
   /** ISO 8601 */
   expiresAt: string;
   kind: "fixed" | "dutch-auction";
