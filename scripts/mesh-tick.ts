@@ -293,11 +293,24 @@ async function main(): Promise<void> {
   console.log(`[mesh-tick] ${lanes.length} live lanes queued, concurrency=${limit}`);
   if (lanes.length === 0) return;
   const claimKinds = [...new Set(lanes.map((lane) => `mesh-lane:${lane.chainSlug}`))];
-  async function worker(): Promise<void> {
+  // Express lane (2026-09-06, owner: "I thought we had prioritization that
+  // expedited the most on-demand surfaces"): with only a few slots on the
+  // production host, a visitor's open collection (click intent, priority
+  // 118+) could still wait up to a full lane behind rankings backfill that
+  // had already been claimed. One worker now claims ONLY jobs at or above
+  // EXPRESS_MIN_PRIORITY and idles when there are none, so that slot is
+  // always free within seconds for the page someone is actually looking at.
+  const EXPRESS_MIN_PRIORITY = 118;
+  const EXPRESS_IDLE_MS = 2_000;
+  async function worker(express = false): Promise<void> {
     const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
     while (true) {
       if (Date.now() >= claimDeadline) break;
-      const job = await claimDataJob(claimKinds);
+      const job = express ? await claimDataJob(claimKinds, 300_000, EXPRESS_MIN_PRIORITY) : await claimDataJob(claimKinds);
+      if (!job && express) {
+        await new Promise((resolve) => setTimeout(resolve, EXPRESS_IDLE_MS));
+        continue;
+      }
       if (!job) break;
       if (!job.chainSlug) {
         await finishDataJob(job, "mesh lane has no chain slug");
@@ -361,11 +374,14 @@ async function main(): Promise<void> {
   // instant -- the jail/pacing circuit breaker still protects against any
   // REAL sustained overuse; this only removes the artificial, avoidable
   // burst mesh-tick's own startup was creating.
+  const expressSlots = n >= 2 ? 1 : 0;
+  if (expressSlots) console.log(`[mesh-tick] express lane reserved for priority >= ${EXPRESS_MIN_PRIORITY}`);
   const workers = Array.from({ length: n }, (_, i) => {
     const startDelayMs = i * 150;
+    const express = i === 0 && expressSlots === 1;
     return (async () => {
       if (startDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, startDelayMs));
-      return worker();
+      return worker(express);
     })();
   });
   await Promise.all(workers);
