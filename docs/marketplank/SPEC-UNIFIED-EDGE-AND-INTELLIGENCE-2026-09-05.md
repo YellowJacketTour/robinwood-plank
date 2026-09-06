@@ -104,8 +104,8 @@ Gates run 2026-09-05/06: `npx tsc --noEmit` clean; `npm run lint:inmotion` clean
 1196 pass, 38 skipped (Postgres-backed, run individually with the env file: all green), 1 pre-existing failure
 (`arcade-abi.test.ts` needs compiled hardhat artifacts, untouched by this branch). **`npm run build` passed (exit 0)** once the stray dev cache was cleared (8.9 GB free) -- that build
 included everything on the branch except the last commit (buyer board + criteria-mode). A second build with that
-commit FAILED on `ENOSPC` (disk back to 0 free while prerendering); it is a disk failure, not a code failure, and must
-be rerun once the Docker volumes are pruned.
+commit hit `ENOSPC` (disk at 0 mid-prerender); the third build, with the whole branch and 13 GB free, **passed
+(exit 0, 65/65 static pages)**.
 
 Also built 2026-09-06: **Biggest Buyer Board** per collection from the real fill ledger only
 (`lib/market/multichain/biggest-buyers.ts`, `/api/market/multichain/biggest-buyers`, `BiggestBuyersBoard.tsx` in
