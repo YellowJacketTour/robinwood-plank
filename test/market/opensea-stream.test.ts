@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapStreamEvent, parseNftId, chainSlugForOpenSeaChain, subIndexFor, parseEnvelope, selectEvent } from "../../lib/market/multichain/edge/opensea-stream";
+import { mapStreamEvent, parseNftId, chainSlugForOpenSeaChain, subIndexFor, parseEnvelope, selectEvent, floorEligible } from "../../lib/market/multichain/edge/opensea-stream";
 
 const sold = {
   item: { nft_id: "ethereum/0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D/1234", chain: { name: "ethereum" } },
@@ -82,4 +82,18 @@ test("selection: sales as rows for everyone, listings as floor state for tracked
 test("the inner payload's own chain string wins over nft_id", () => {
   const row = mapStreamEvent("item_sold", { ...sold, chain: "base" });
   assert.equal(row?.chainSlug, "base-mainnet");
+});
+
+test("floor eligibility: native or wrapped-native basic asks only, unexpired", () => {
+  const base = { ...sold, base_price: "1000", order_hash: "0xl" };
+  const native = mapStreamEvent("item_listed", base);
+  assert.ok(native && floorEligible(native), "native ETH ask is eligible");
+  const weth = mapStreamEvent("item_listed", { ...base, payment_token: { address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", symbol: "WETH", decimals: 18 } });
+  assert.ok(weth && floorEligible(weth), "WETH on Ethereum is eligible");
+  const usdc = mapStreamEvent("item_listed", { ...base, payment_token: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", symbol: "USDC", decimals: 6 } });
+  assert.ok(usdc && !floorEligible(usdc), "USDC ask never sets the floor");
+  const auction = mapStreamEvent("item_listed", { ...base, listing_type: "english" });
+  assert.ok(auction && !floorEligible(auction), "auction start price is not an ask");
+  const expired = mapStreamEvent("item_listed", { ...base, expiration_date: "2020-01-01T00:00:00Z" });
+  assert.ok(expired && !floorEligible(expired), "expired ask ignored");
 });

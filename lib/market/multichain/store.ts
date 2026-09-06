@@ -3,6 +3,7 @@
  * See that migration for why this is a separate, current-state cache rather
  * than an extension of lib/market/chain-events.ts's append-only ledger.
  */
+import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import type { CollectionSnapshot, TrackedCollection } from "@/lib/market/multichain/types";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -394,10 +395,16 @@ export async function updateCollectionMarketStats(
   const id = collection.rows[0]?.id;
   if (!id) return;
   await postgresQuery(
+    // AUDIT lens 6 #4 (2026-09-06): a caller that only knows the 24h window
+    // (the seaport-fills lane) used to write NULL into 7d/30d, wiping what
+    // opensea-stats had written minutes earlier. Windows the caller did not
+    // supply (undefined) are now left alone; an explicit null still clears.
     `UPDATE plank_multichain_snapshots
      SET volume_24h_wei = $2, sales_24h = $3,
-         volume_7d_wei = $4, sales_7d = $5,
-         volume_30d_wei = $6, sales_30d = $7,
+         volume_7d_wei = CASE WHEN $9 THEN volume_7d_wei ELSE $4 END,
+         sales_7d = CASE WHEN $9 THEN sales_7d ELSE $5 END,
+         volume_30d_wei = CASE WHEN $10 THEN volume_30d_wei ELSE $6 END,
+         sales_30d = CASE WHEN $10 THEN sales_30d ELSE $7 END,
          floor_change_pct = COALESCE($8, floor_change_pct),
          synced_at = NOW()
      WHERE collection_id = $1`,
@@ -410,6 +417,8 @@ export async function updateCollectionMarketStats(
       nonzeroWei(stats.volume30dWei ?? null),
       nonzeroCount(stats.sales30d ?? null),
       stats.floorChangePct === 0 ? null : (stats.floorChangePct ?? null),
+      stats.volume7dWei === undefined && stats.sales7d === undefined,
+      stats.volume30dWei === undefined && stats.sales30d === undefined,
     ]
   );
 }
@@ -477,21 +486,26 @@ export async function sanitizeUnknownZeros(): Promise<{ floors: number; volumes:
  * "we haven't observed anything yet" must not be conflated).
  */
 export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promise<{ updated: number }> {
+  // AUDIT lens 6 #3 / lens 1 #5 (2026-09-06): a sale is a sale whatever it
+  // was paid in, so the COUNT covers every fill. The native-denominated
+  // SUM includes the chain's wrapped native token (WETH on Ethereum/Base/
+  // Arbitrum/Optimism, WBNB, WAVAX, ...) at 1:1 -- that is what every
+  // accepted OpenSea offer settles in, and excluding it left whole chains
+  // with NULL sales_24h at the bottom of the hub. Other ERC-20s (USDC,
+  // DAI) are still excluded from the wei sum; they stay in payment_legs
+  // for USD aggregation.
+  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
   const result = await postgresQuery<{ contract_address: string; volume_wei: string; sales: string }>(
-    `SELECT LOWER(nft_contract) AS contract_address, SUM(price_wei)::text AS volume_wei, COUNT(*)::text AS sales
+    `SELECT LOWER(nft_contract) AS contract_address,
+            SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) = $2)::text AS volume_wei,
+            COUNT(*)::text AS sales
      FROM plank_seaport_fills
      WHERE chain_slug = $1
        AND nft_contract IS NOT NULL
        AND price_wei IS NOT NULL
-       -- Snapshot volume_24h_wei is denominated in the chain's native
-       -- 18-decimal unit. ERC-20 atomic values (often 6 decimals) cannot
-       -- be added to it. Those remain durably preserved in payment_legs
-       -- for USD-normalized aggregation; excluding them here is honest
-       -- and prevents corrupt headline volume until that projection runs.
-       AND currency_token IS NULL
        AND block_timestamp > NOW() - INTERVAL '24 hours'
      GROUP BY LOWER(nft_contract)`,
-    [chainSlug]
+    [chainSlug, wrappedNative ?? ""]
   );
   let updated = 0;
   for (const row of result.rows) {
