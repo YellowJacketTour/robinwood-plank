@@ -118,7 +118,7 @@ export function edgeKey(cell: EdgeCell): string {
 }
 
 type CellStat = { reads: number; fetches: number; lastReadAt: number };
-type KindStat = { reads: number; fetches: number; live: number; cached: number; staleBudget: number; cells: Map<string, CellStat> };
+type KindStat = { reads: number; fetches: number; live: number; cached: number; staleBudget: number; cells: Map<string, CellStat>; lastError: { message: string; at: string; key: string } | null };
 
 type EdgeGlobal = typeof globalThis & { __plankEdgeStats?: { since: number; byKind: Map<EdgeKind, KindStat> } };
 
@@ -132,7 +132,7 @@ function kindStat(kind: EdgeKind): KindStat {
   const s = stats();
   let k = s.byKind.get(kind);
   if (!k) {
-    k = { reads: 0, fetches: 0, live: 0, cached: 0, staleBudget: 0, cells: new Map() };
+    k = { reads: 0, fetches: 0, live: 0, cached: 0, staleBudget: 0, cells: new Map(), lastError: null };
     s.byKind.set(kind, k);
   }
   return k;
@@ -187,7 +187,9 @@ export async function edgeRead<T>(cell: EdgeCell, fetcher: () => Promise<T>, opt
   k.reads += 1;
   touchCell(k, key, false);
 
-  const result = await getOrRefreshWithMeta<T>(
+  let result: EnvelopeResult<T>;
+  try {
+    result = await getOrRefreshWithMeta<T>(
     key,
     { softTtlMs: policy.softTtlMs, hardTtlMs: policy.hardTtlMs, provider: policy.provider },
     async () => {
@@ -210,6 +212,13 @@ export async function edgeRead<T>(cell: EdgeCell, fetcher: () => Promise<T>, opt
       }
     }
   );
+  } catch (error) {
+    // Diagnosable, never silent: the last failure per kind is exposed on
+    // /api/market/rpc-usage (added 2026-09-06 after production showed 180
+    // hub-index reads with zero successes and no server log access).
+    k.lastError = { message: (error instanceof Error ? error.message : String(error)).slice(0, 300), at: new Date().toISOString(), key };
+    throw error;
+  }
   countFreshness(k, result.freshness);
   return { ...result, key };
 }
@@ -233,6 +242,7 @@ export type EdgeKindStats = {
   fetchesPerCell: number | null;
   /** reads / fetches: how many browser reads each vendor call served. */
   readsPerFetch: number | null;
+  lastError: { message: string; at: string; key: string } | null;
 };
 
 export type EdgeStats = {
@@ -264,6 +274,7 @@ export function readEdgeStats(): EdgeStats {
       uniqueCells: k.cells.size,
       fetchesPerCell: k.cells.size > 0 ? Number((k.fetches / k.cells.size).toFixed(3)) : null,
       readsPerFetch: k.fetches > 0 ? Number((k.reads / k.fetches).toFixed(2)) : null,
+      lastError: k.lastError,
     });
   }
   byKind.sort((a, b) => b.reads - a.reads);
