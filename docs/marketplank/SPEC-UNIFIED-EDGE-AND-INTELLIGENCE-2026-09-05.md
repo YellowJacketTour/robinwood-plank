@@ -100,6 +100,13 @@ from the real fill median; tier/trait scope are filters before pricing).
 
 ## 6. Honest status
 
+Gates run 2026-09-05: `npx tsc --noEmit` clean; `npm run lint:inmotion` clean; `npm run test:market` 1237 tests,
+1196 pass, 38 skipped (Postgres-backed, run individually with the env file: all green), 1 pre-existing failure
+(`arcade-abi.test.ts` needs compiled hardhat artifacts, untouched by this branch). `npm run build` NOT run: the
+machine had 2.3 GB free on C: (Docker's WSL vhdx at 78 GB is the consumer; a stray `.next` dev build in this worktree
+is 2.3 GB) -- run it after reclaiming space. Never run the market suite with `--env-file` against the real
+`.env.local`: several tests are live integration tests that write `plank_market_events` (~4 GB in minutes).
+
 Proven this pass (real writes or real measurements): O(1) vendor cost per cell (load proof + test); ledger rows
 survive flush and carry outcomes; live feed fan-out with real inserted rows; manifest consistency; migration 099
 applied locally.
