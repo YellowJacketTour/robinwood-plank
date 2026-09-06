@@ -6,11 +6,43 @@
 import { isSourceJailed, jailSource } from "../lib/market/multichain/mesh/jail";
 import type { MeshSource } from "../lib/market/multichain/mesh/matrix";
 
-const source = (process.argv.find((a) => a.startsWith("--source="))?.slice("--source=".length) ?? "") as MeshSource;
-const chain = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length) ?? "";
-const subject = process.argv.find((a) => a.startsWith("--subject="))?.slice("--subject=".length) ?? "";
+import { AsyncLocalStorage } from "node:async_hooks";
 
-async function main(): Promise<void> {
+const argvSource = (process.argv.find((a) => a.startsWith("--source="))?.slice("--source=".length) ?? "") as MeshSource;
+const argvChain = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length) ?? "";
+const argvSubject = process.argv.find((a) => a.startsWith("--subject="))?.slice("--subject=".length) ?? "";
+
+/**
+ * In-process mode (2026-09-06). Production is a shared cPanel host with a
+ * hard per-user process/thread limit: the scheduler's one-child-per-lane
+ * design died there with `spawn node EAGAIN` and "OS can't spawn worker
+ * thread: Resource temporarily unavailable" the first time it ran. So the
+ * lane body is now callable in the scheduler's own process via
+ * runMeshLane(); the "more work remains" signal that the script mode
+ * expresses as `process.exitCode = 2` is carried per call in an
+ * AsyncLocalStorage store so concurrent in-process lanes never clobber
+ * each other's signal. Script mode (one lane per child) is unchanged.
+ */
+const laneSignal = new AsyncLocalStorage<{ code: number }>();
+function markIncomplete(): void {
+  const store = laneSignal.getStore();
+  if (store) store.code = 2;
+  else markIncomplete();
+}
+
+/** Run one lane in this process. 0 = done, 2 = succeeded but more work remains, 1 = failed. */
+export async function runMeshLane(source: MeshSource, chain: string, subject = ""): Promise<number> {
+  const store = { code: 0 };
+  try {
+    await laneSignal.run(store, () => main(source, chain, subject));
+    return store.code;
+  } catch (e) {
+    console.error(`[mesh-lane] ${source}:${chain} failed`, e instanceof Error ? e.message : e);
+    return 1;
+  }
+}
+
+async function main(source: MeshSource = argvSource, chain: string = argvChain, subject: string = argvSubject): Promise<void> {
   if (!source || !chain) {
     throw new Error("mesh-lane requires --source= and --chain=");
   }
@@ -57,7 +89,7 @@ async function main(): Promise<void> {
     // roughly 40 wasted checks instead of tens of thousands.
     if (subject) {
       await new Promise((resolve) => setTimeout(resolve, 30_000));
-      process.exitCode = 2;
+      markIncomplete();
     }
     return;
   }
@@ -280,7 +312,7 @@ async function main(): Promise<void> {
           // hammering it continuously.
           console.log(`[mesh-lane] opensea-membership pool busy, will retry: ${msg.slice(0, 180)}`);
           await new Promise((resolve) => setTimeout(resolve, 8_000));
-          process.exitCode = 2;
+          markIncomplete();
           return;
         }
         throw e;
@@ -292,7 +324,7 @@ async function main(): Promise<void> {
       // so a genuinely incomplete, actively-viewed collection keeps getting
       // picked back up every mesh-tick pass instead of waiting for the
       // next client visibility ping.
-      if (!result.complete) process.exitCode = 2;
+      if (!result.complete) markIncomplete();
       return;
     }
     if (source === "anchored-membership") {
@@ -328,7 +360,7 @@ async function main(): Promise<void> {
       // would race finishDataJob's later UPDATE (matched by id/lease_owner,
       // unconditional) and get silently overwritten back to 'succeeded'
       // with no future pickup.
-      if (!result.done) process.exitCode = 2;
+      if (!result.done) markIncomplete();
       return;
     }
     if (source === "token-index-probe") {
@@ -347,7 +379,7 @@ async function main(): Promise<void> {
       const { runTokenIndexProbe } = await import("../lib/market/multichain/discovery/token-index-probe");
       const result = await runTokenIndexProbe(chain, subject);
       console.log("[mesh-lane] token-index-probe", JSON.stringify(result));
-      if (!result.done) process.exitCode = 2;
+      if (!result.done) markIncomplete();
       return;
     }
     if (source === "plank-koth-watch") {
@@ -358,7 +390,7 @@ async function main(): Promise<void> {
       // `done: false` means a real, unfinalized (or unscanned-this-pass)
       // buy is still waiting, so mesh-tick should reclaim this lane again
       // promptly rather than waiting for its own next scheduled cadence.
-      if (!result.done) process.exitCode = 2;
+      if (!result.done) markIncomplete();
       return;
     }
     if (source === "coingecko-nft") {
@@ -477,7 +509,11 @@ async function main(): Promise<void> {
   }
 }
 
-main()
+// Script mode only: when this file is the entry point (tsx or the esbuild
+// bundle). When the scheduler bundle imports it for in-process lanes, the
+// import must not start a lane.
+const isDirectRun = /mesh-lane(\.ts|-standalone\.mjs)$/.test((process.argv[1] ?? "").replace(/\\/g, "/"));
+if (isDirectRun) main()
   .then(async () => {
     try {
       const { hasPostgresConfig, postgresPool } = await import("../lib/postgres");
