@@ -60,6 +60,14 @@ test("ratified settlement and lottery parameters are the deploy defaults", async
   assert.match(deploy, /envBig\("CASINO_CARVE_MAX_BPS", 3000n\)/);
   assert.match(deploy, /envBig\("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n \* CREDIT\)/);
   assert.match(deploy, /CASINO_MAX_MULTIPLIER_BPS is unset/);
+  // v3 vault bonus/carve-ceiling, ON BY DEFAULT (SPEC-monotonic-vault-
+  // positive-sum-2026-09-05, owner decision 2026-09-05): 25% bonus ceiling,
+  // r=0.999 on both curves, lottery ceiling 10x the base carve constant. An
+  // explicit env override to 0 still disables either mechanism.
+  assert.match(deploy, /envBig\("CASINO_MAX_VAULT_BONUS_BPS", 2_500n\)/);
+  assert.match(deploy, /envBig\("CASINO_VAULT_BONUS_DECAY_WAD", 999_000_000_000_000_000n\)/);
+  assert.match(deploy, /envBig\("CASINO_LOTTERY_CARVE_DECAY_WAD", 999_000_000_000_000_000n\)/);
+  assert.match(deploy, /envBig\(\s*"CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI",\s*2_500_000n \* CREDIT,\s*\)/);
 });
 
 test("production TWAP liquidity floor has no permissive generic default", async () => {
