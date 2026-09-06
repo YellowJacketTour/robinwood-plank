@@ -52,6 +52,13 @@ const files = (await fs.readdir(migrationsDir))
   .filter((file) => /^\d+.*\.sql$/.test(file))
   .sort();
 
+// `--check`: report pending migrations without applying anything. Exit 0
+// when the schema is current, 3 when at least one file is pending. The
+// deploy uses this to skip the full pre-migration pg_dump (40+ minutes on
+// the production database as of 2026-09-06) on releases that carry no
+// schema change, while keeping the backup on every release that does.
+const checkOnly = process.argv.includes("--check");
+
 const client = await pool.connect();
 try {
   await client.query(`
@@ -60,6 +67,22 @@ try {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  if (checkOnly) {
+    const applied = await client.query("SELECT version FROM plank_schema_migrations");
+    const appliedSet = new Set(applied.rows.map((row) => row.version));
+    const pending = files.filter((file) => !appliedSet.has(file));
+    if (pending.length === 0) {
+      console.log("[postgres-migrate] check: schema is current, nothing pending");
+      process.exitCode = 0;
+    } else {
+      console.log(`[postgres-migrate] check: ${pending.length} pending: ${pending.join(", ")}`);
+      process.exitCode = 3;
+    }
+    client.release();
+    await pool.end();
+    process.exit();
+  }
 
   for (const file of files) {
     const alreadyApplied = await client.query(
