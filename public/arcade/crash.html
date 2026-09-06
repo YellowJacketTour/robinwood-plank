@@ -708,7 +708,7 @@
     #privateRoster{display:flex;flex-direction:column;gap:6px}.private-player{display:grid;gap:4px;padding:9px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.025)}.private-player.me{border-color:rgba(61,220,132,.35);background:rgba(61,220,132,.055)}.private-player-identity{display:flex;align-items:center;gap:7px}.private-player-identity strong{font-size:12px}.private-player-identity small{margin-left:auto;color:#78857d;font:700 8px var(--font-mono);letter-spacing:.08em}.private-player-dot{width:7px;height:7px;border-radius:50%;background:#778078}.private-player-dot.committed{background:#3ddc84;box-shadow:0 0 8px rgba(61,220,132,.6)}.private-player-state{padding-left:14px;color:#aeb7b1;font:600 10px/1.3 var(--font-mono)}.private-player-state.win{color:#75f0ae}
     .private-host-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.private-host-actions button,.private-host-actions a{min-height:38px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:#122018;color:#efe7d8;font:700 10px var(--font-mono);display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.private-host-actions [hidden]{display:none!important}.private-host-actions .launch{grid-column:1/-1;border-color:#3ddc84;color:#8dffc0}.private-host-actions button:disabled{opacity:.4;cursor:not-allowed}.private-host-actions .danger{color:#ff9bad}.private-host-actions .leave{color:#aeb9b1}
     .result-card.private-result{width:min(860px,calc(100% - 40px));padding:22px 26px;background:rgba(5,9,12,.96);border-width:2px;z-index:45}.private-result .result-mult{font-size:clamp(32px,5vw,58px)}.private-result-balance{margin-top:12px;font:800 14px var(--font-mono);color:#f1e6cc}.private-result-note{max-width:680px;margin:12px auto 0;color:#9ba7a0;font:600 11px/1.5 var(--font-mono)}.private-result-next{margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.13);color:#ffc857;font:800 11px var(--font-mono);letter-spacing:.1em}
-    .private-result-world{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-top:14px}.private-result-world span{overflow-wrap:anywhere}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:11px;letter-spacing:.06em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="crash"] .private-result-next,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note,.private-result[data-reveal="personal"] .private-result-next{opacity:0;transform:translateY(8px)}
+    .private-result-world{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-top:14px}.private-result-world span{overflow-wrap:anywhere}.private-result-world span{padding:8px 4px;border:1px solid rgba(255,255,255,.09);border-radius:8px;color:#dcd1bd;font:800 11px var(--font-mono)}.private-result-world small{display:block;margin-bottom:4px;color:#78857d;font-size:11px;letter-spacing:.06em}.private-result .result-mult,.private-result .result-delta,.private-result-balance,.private-result-world,.private-result-note,.private-result-next{transition:opacity .35s ease,transform .35s ease}.private-result[data-reveal="crash"] .result-mult,.private-result[data-reveal="crash"] .result-delta,.private-result[data-reveal="crash"] .private-result-balance,.private-result[data-reveal="crash"] .private-result-world,.private-result[data-reveal="crash"] .private-result-note,.private-result[data-reveal="personal"] .private-result-balance,.private-result[data-reveal="personal"] .private-result-world,.private-result[data-reveal="personal"] .private-result-note{opacity:0;transform:translateY(8px)}
     #privateIntermissionCountdown{position:absolute;z-index:44;left:50%;top:clamp(10px,6vh,48px);transform:translateX(-50%);display:grid;grid-template-columns:auto auto;grid-template-areas:"label number" "unit number";align-items:center;gap:0 14px;min-width:240px;padding:12px 18px;border:1px solid rgba(255,200,87,.65);border-radius:16px;background:rgba(4,8,11,.9);box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 30px rgba(255,200,87,.1);backdrop-filter:blur(10px);pointer-events:none;text-align:right}#privateIntermissionCountdown[hidden]{display:none}#privateIntermissionCountdown small{grid-area:label;color:#ffc857;font:900 10px var(--font-mono);letter-spacing:.16em}#privateIntermissionCountdown strong{grid-area:number;color:#fff2cf;font:400 clamp(54px,7vw,92px)/.8 var(--font-display);font-variant-numeric:tabular-nums}#privateIntermissionCountdown span{grid-area:unit;color:#8fa19a;font:800 9px var(--font-mono);letter-spacing:.18em}#privateIntermissionCountdown.urgent{border-color:#ff5b72;box-shadow:0 18px 55px rgba(0,0,0,.48),0 0 42px rgba(255,77,106,.3)}#privateIntermissionCountdown.urgent strong{color:#ff5b72}
     .private-jackpot-fireworks{position:fixed;inset:0;z-index:110;overflow:hidden;pointer-events:none;background:radial-gradient(circle at 50% 60%,rgba(255,200,87,.12),transparent 42%)}.private-jackpot-fireworks i{position:absolute;left:var(--x);top:var(--y);width:7px;height:7px;border-radius:50%;background:var(--c);box-shadow:0 0 12px var(--c),0 0 24px var(--c);opacity:0;animation:private-firework 1.65s cubic-bezier(.16,.7,.2,1) var(--delay) both}@keyframes private-firework{0%{opacity:0;transform:translate(0,0) scale(.2)}12%{opacity:1}72%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.05)}}
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
@@ -720,7 +720,7 @@
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
     .private-powerball-outcome{text-align:center}.private-powerball-outcome strong,.private-powerball-outcome span{display:block}.private-powerball-outcome strong{color:#eec164;font:900 13px/1.3 var(--font-mono)}.private-powerball.hit .private-powerball-outcome strong{color:#34d399}.private-powerball-outcome span{margin-top:5px;color:#c9b58a;font:700 11px var(--font-mono)}.private-powerball-ledger{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}.private-powerball-ledger span{padding:8px;border:1px solid rgba(233,180,63,.2);border-radius:6px;background:rgba(17,10,5,.72);color:#fff2cf;font:900 11px var(--font-mono);text-align:center}.private-powerball-ledger small{display:block;margin-bottom:4px;color:#c9b58a;font-size:11px;letter-spacing:.06em}.private-powerball-lab{margin-top:8px;padding:7px;border:1px solid rgba(255,77,106,.35);color:#ff8da0;font:900 11px var(--font-mono);text-align:center}
     .private-reveal-skip,.private-reveal-continue{position:relative;z-index:20;min-height:44px;border-radius:6px;font:900 10px var(--font-mono);pointer-events:auto;touch-action:manipulation;cursor:pointer}.private-result-next{position:relative;z-index:20;display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:14px}.result-card.show .private-result-next{pointer-events:auto}.result-card:not(.show),.result-card:not(.show) *{pointer-events:none!important}.private-reveal-skip{border:1px solid rgba(233,180,63,.3);background:#110a05;color:#c9b58a}.private-reveal-continue{border:1px solid #e9b43f;background:#e9b43f;color:#261105}
-    .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="ejected"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="ejected"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.22,1,.36,1)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="powerball"] .private-result-next,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note,.private-result[data-reveal="drawn"] .private-result-next{opacity:0;transform:translateY(8px)}
+    .private-result[data-reveal="crash"] .private-powerball,.private-result[data-reveal="personal"] .private-powerball{opacity:0;transform:translateY(14px) scale(.985)}.private-result[data-reveal="powerball"] .private-powerball-canvas,.private-result[data-reveal="drawn"] .private-powerball-canvas,.private-result[data-reveal="ejected"] .private-powerball-canvas,.private-result[data-reveal="world"] .private-powerball-canvas{opacity:1;transform:translateY(0) scale(1);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(174,125,255,.22))}.private-result[data-reveal="ejected"] .private-powerball-drum b,.private-result[data-reveal="world"] .private-powerball-drum b{opacity:1;transform:scale(1) rotate(0);transition:opacity .18s,transform .75s cubic-bezier(.22,1,.36,1)}.private-result[data-reveal="powerball"] .private-powerball-outcome,.private-result[data-reveal="powerball"] .private-powerball-ledger,.private-result[data-reveal="powerball"] .private-result-world,.private-result[data-reveal="powerball"] .private-result-note,.private-result[data-reveal="drawn"] .private-powerball-outcome,.private-result[data-reveal="drawn"] .private-powerball-ledger,.private-result[data-reveal="drawn"] .private-result-world,.private-result[data-reveal="drawn"] .private-result-note{opacity:0;transform:translateY(8px)}
     @keyframes private-ball-orbit{from{transform:rotate(0deg) translateX(37px) rotate(0deg)}to{transform:rotate(360deg) translateX(37px) rotate(-360deg)}}@keyframes private-haze{from{opacity:.55;transform:scale(1)}to{opacity:1;transform:scale(1.06)}}
     @media(max-width:700px){
       html,body{min-height:100%;min-height:100dvh;overscroll-behavior-y:none}
@@ -826,6 +826,31 @@
       .private-powerball-copy{display:contents}.private-powerball-copy>small,.private-powerball-copy h3,.private-powerball-rule{position:relative;z-index:3;margin-left:14px;margin-right:14px}
       .private-powerball-copy>small{order:0;margin-top:16px}.private-powerball-copy h3{order:1;max-width:none;font-size:30px}.private-powerball-rule{order:1;max-width:none;font-size:11px}
       .private-powerball-drum{order:3;margin:-58px auto 10px}.private-powerball-outcome{order:4;padding:0 12px}.private-powerball-ledger{order:5;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:0 8px 10px}.private-powerball-lab{order:6;margin:0 12px 12px}
+      /* Disclosure tier: the mechanism paragraph is collapsed on phones and
+         sits directly under the act title, so the chamber and the verdict own
+         the screen. Opening it is opt-in; the text is unchanged. */
+      .private-powerball-rule-disclosure{order:1;position:relative;z-index:3;margin:2px 14px 4px}
+      .private-powerball-rule-disclosure .private-powerball-rule{margin:4px 0 0;padding-left:8px;border-left:2px solid rgba(255,200,87,.25)}
+      /* GENUINE staged disclosure on the phone sheet: a stage that has not been
+         reached is removed from LAYOUT, not merely faded. Previously every act
+         was in the sheet the whole time, so the "reveal" was one long dense
+         scroll with parts dimmed. Now each act is a short, calm screen.
+         Desktop keeps the simultaneous fade (it has the room for it). */
+      .private-result[data-reveal="crash"] .private-result-personal,
+      .private-result[data-reveal="crash"] .private-powerball,
+      .private-result[data-reveal="crash"] .private-result-world,
+      .private-result[data-reveal="crash"] .private-result-note,
+      .private-result[data-reveal="personal"] .private-powerball,
+      .private-result[data-reveal="personal"] .private-result-world,
+      .private-result[data-reveal="personal"] .private-result-note,
+      .private-result[data-reveal="powerball"] .private-result-world,
+      .private-result[data-reveal="powerball"] .private-result-note,
+      .private-result[data-reveal="drawn"] .private-result-world,
+      .private-result[data-reveal="drawn"] .private-result-note{display:none}
+      /* The verdict is the one number that matters: at the act where it lands
+         it is the visually dominant thing on screen, not one of six equals. */
+      .private-result[data-reveal="personal"] .private-result-personal{padding:8vh 0 6vh}
+      .private-result-personal{transition:padding .35s ease}
       .private-result-world{grid-template-columns:1fr 1fr}.private-result-world span:last-child:nth-child(odd){grid-column:1/-1}.private-result-next{grid-template-columns:1fr;position:fixed;z-index:96;left:max(6px,env(safe-area-inset-left));right:max(6px,env(safe-area-inset-right));bottom:max(6px,env(safe-area-inset-bottom));margin:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid rgba(255,255,255,.13);border-radius:0 0 14px 14px;background:#07100c}
       .private-reveal-skip,.private-reveal-continue{min-height:48px}.private-reveal-skip{order:2}
       #privateHow,#privateMenu,#privateWelcome,#privateInvite,#privateSimulation{width:calc(100vw - 16px);max-height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
@@ -5426,6 +5451,11 @@ function paintPrivateConclusion(snapshot, me, seat) {
   clearPrivateRevealTimers();
   card.removeAttribute("aria-hidden"); card.style.pointerEvents = "auto";
   card.className = `result-card private-result show ${profitable ? "win" : "lose"}`;
+  // replaceChildren() does NOT clear the dataset: without this reset the new
+  // round's WebGL render loop (which reads card.dataset.reveal every frame)
+  // can read the PREVIOUS round's stage — e.g. "world" — on its first frames
+  // and show a settled/revealed chamber before this round's sequence starts.
+  card.dataset.reveal = "crash";
   card.replaceChildren();
   const eyebrow = document.createElement("div"); eyebrow.className = "result-tier"; eyebrow.textContent = `ROUND ${snapshot.room.currentRound} COMPLETE · CRASHED AT ${crash}×`;
   // THE REALIZED RETURN (owner display law, 2026-09-04). Under parimutuel
@@ -5449,6 +5479,15 @@ function paintPrivateConclusion(snapshot, me, seat) {
     ? `0.00× returned · ${privateMoney3(seat.stake)} staked and lost`
     : `${realized.toFixed(2)}× returned · ${privateMoney3(seat.payout)} paid · ${privateMoney3(net, { sign: true })} net`;
   const balance = document.createElement("div"); balance.className = "private-result-balance"; balance.textContent = `Available balance · ${privateCredits(me?.balance)} credits`;
+  // A11y: the lottery draw is announced (.private-powerball is role=status),
+  // but the player's OWN win/loss never was. The personal verdict is written
+  // once here, before insertion, and never mutated again — so a single polite
+  // live region announces the headline + money + balance exactly once when the
+  // card mounts. Deliberately NOT on the whole card, and deliberately not
+  // re-set on stage transitions, which would re-announce every 500ms.
+  const personal = document.createElement("div"); personal.className = "private-result-personal";
+  personal.setAttribute("role", "status"); personal.setAttribute("aria-live", "polite");
+  personal.append(headline, money, balance);
   const settlementEvent = snapshot.currentSettlement || [...snapshot.events].reverse().find((event) => event.type === "round.settled");
   const winner = settlementEvent?.payload?.lotteryWinner;
   const draw = settlementEvent?.payload?.powerboardDraw;
@@ -5487,6 +5526,21 @@ function paintPrivateConclusion(snapshot, me, seat) {
     powerball.querySelector(".private-powerball-outcome strong").textContent = outcome;
     powerball.setAttribute("role", "status");
     powerball.setAttribute("aria-live", "polite");
+    // Disclosure hierarchy (phone): the ~90-word fairness/mechanism paragraph
+    // and the exact committed-draw percentages are for the provably-fair
+    // audience, not mandatory scroll-past content on a 390px screen. The SAME
+    // <p class="private-powerball-rule"> element and text are kept verbatim —
+    // only moved behind a collapsed <details>, matching the existing
+    // "How this settled" pattern. Nothing is dropped; it is opt-in.
+    if (window.matchMedia("(max-width:700px)").matches) {
+      const rule = powerball.querySelector(".private-powerball-rule");
+      const ruleWrap = document.createElement("details");
+      ruleWrap.className = "private-result-note--phone private-powerball-rule-disclosure";
+      const ruleSummary = document.createElement("summary");
+      ruleSummary.textContent = drawActive ? "How this number was drawn" : "How the prize is funded";
+      rule.replaceWith(ruleWrap);
+      ruleWrap.append(ruleSummary, rule);
+    }
   } else {
     const prize = privateBig(snapshot.simulation.lottery?.committedPrize);
     const { winnerTake } = privateCarve(prize, snapshot.policy);
@@ -5510,7 +5564,17 @@ function paintPrivateConclusion(snapshot, me, seat) {
   if (boardCarve.nextSeed > 0n) worldTiles.push(`<span data-econ="lottery" role="button" tabindex="0" title="Open the economy panel"><small>SEEDS NEXT PRIZE</small>${privateCredits(boardCarve.nextSeed)} cr</span>`);
   worldTiles.push(`<span data-econ="vault" role="button" tabindex="0" title="Open the economy panel"><small>COMMUNITY FUNDED</small>${privateCredits(snapshot.simulation.totals?.communityFunded)} cr</span>`);
   world.innerHTML = worldTiles.join("");
-  for (const tile of world.querySelectorAll("[data-econ]")) tile.addEventListener("click", () => openPrivateEconomy(tile.dataset.econ));
+  for (const tile of world.querySelectorAll("[data-econ]")) {
+    tile.addEventListener("click", () => openPrivateEconomy(tile.dataset.econ));
+    // These tiles are role=button + tabindex=0, so keyboard users can focus
+    // them — but only a click listener existed, so Enter/Space did nothing.
+    // Space is preventDefault'ed so activating a tile never scrolls the sheet.
+    tile.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+      event.preventDefault();
+      openPrivateEconomy(tile.dataset.econ);
+    });
+  }
   world.dataset.tiles = String(worldTiles.length);
   const phoneSheet = window.matchMedia("(max-width:700px)").matches;
   const note = document.createElement(phoneSheet && seat ? "details" : "div"); note.className = "private-result-note";
@@ -5567,7 +5631,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
   continueButton.onclick = (event) => { event.preventDefault(); event.stopPropagation(); acknowledgePrivateSettlement(); };
   skip.onclick = () => { finishPrivateRevealImmediately(); card.dataset.reveal = "world"; skip.hidden = true; continueButton.focus(); };
   next.append(skip, continueButton);
-  card.append(eyebrow, headline, money, balance, powerball, world, note, next);
+  card.append(eyebrow, personal, powerball, world, note, next);
   if (privateDockObserver) { privateDockObserver.disconnect(); privateDockObserver = null; }
   if (phoneSheet && "ResizeObserver" in window) {
     // The action block is docked to the sheet's bottom edge; reserve exactly
