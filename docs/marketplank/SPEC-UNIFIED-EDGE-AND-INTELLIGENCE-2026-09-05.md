@@ -100,11 +100,17 @@ from the real fill median; tier/trait scope are filters before pricing).
 
 ## 6. Honest status
 
-Gates run 2026-09-05: `npx tsc --noEmit` clean; `npm run lint:inmotion` clean; `npm run test:market` 1237 tests,
+Gates run 2026-09-05/06: `npx tsc --noEmit` clean; `npm run lint:inmotion` clean; `npm run test:market` 1237 tests,
 1196 pass, 38 skipped (Postgres-backed, run individually with the env file: all green), 1 pre-existing failure
-(`arcade-abi.test.ts` needs compiled hardhat artifacts, untouched by this branch). `npm run build` NOT run: the
-machine had 2.3 GB free on C: (Docker's WSL vhdx at 78 GB is the consumer; a stray `.next` dev build in this worktree
-is 2.3 GB) -- run it after reclaiming space. Never run the market suite with `--env-file` against the real
+(`arcade-abi.test.ts` needs compiled hardhat artifacts, untouched by this branch). **`npm run build` passed (exit 0)
+twice**, the second time with everything on the branch, once the stray dev cache was cleared (8.9 GB free).
+
+Also built 2026-09-06: **Biggest Buyer Board** per collection from the real fill ledger only
+(`lib/market/multichain/biggest-buyers.ts`, `/api/market/multichain/biggest-buyers`, `BiggestBuyersBoard.tsx` in
+the intelligence view; USD only where the fill carried one, unpriced fills counted and shown, empty ledger = honest
+empty board -- rendered live on :3800), and **criteria mode by completeness** (`trading/criteria-mode.ts`: collection
+scope prefers a proven wildcard, else a complete Merkle set under the cap, else refuses; trait/tier never wildcard,
+refuse on an incomplete index). Never run the market suite with `--env-file` against the real
 `.env.local`: several tests are live integration tests that write `plank_market_events` (~4 GB in minutes).
 
 Proven this pass (real writes or real measurements): O(1) vendor cost per cell (load proof + test); ledger rows
