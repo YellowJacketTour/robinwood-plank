@@ -63,7 +63,7 @@ import { Contract, BrowserProvider } from "ethers";
 import type { TipInputItem } from "@opensea/seaport-js/lib/types";
 import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_FILL_TIP_BPS, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
 import { foreignChainByChainSlug, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { priceForeignOrder } from "@/lib/market/multichain/trading/foreign-orders";
+import { priceForeignOrder } from "@/lib/market/multichain/trading/order-pricing";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
 import type { SeaportChain } from "@/lib/market/seaport";

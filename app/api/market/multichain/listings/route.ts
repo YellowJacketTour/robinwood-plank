@@ -29,7 +29,8 @@
  * calls, not one per listing.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchForeignAllListingsPaged, priceForeignOrder, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
+import { fetchForeignAllListingsPaged, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
+import { priceForeignOrder } from "@/lib/market/multichain/trading/order-pricing";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import {

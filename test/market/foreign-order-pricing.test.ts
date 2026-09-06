@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { priceForeignOrder } from "../../lib/market/multichain/trading/foreign-orders";
+import { priceForeignOrder } from "../../lib/market/multichain/trading/order-pricing";
 
 const eth = { nativeCurrencySymbol: "ETH", offerCurrencyAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", offerCurrencySymbol: "WETH" };
 const polygon = { nativeCurrencySymbol: "POL", offerCurrencyAddress: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", offerCurrencySymbol: "WETH" };
