@@ -61,6 +61,15 @@ Hydration truth before this program started: 412 queued jobs, 0 completed in 15 
 6. **Incremental traits and rarity**: on metadata arrival, update the projected trait index and Merkle set for
    that collection only (today a full pass per collection).
 
+Research-adopted moves (RESEARCH-SOTA-CORROBORATION-2026-09-06.md): M1 Seaport-only chain-wide truth with the
+stream as cache-warmer; M2 nightly traded-catalog import from Dune/Allium instead of transfer-threshold discovery;
+M3 order-state engine invalidated by chain events (replaces floor-only folding); M4 content-addressed public
+metadata cache; M5 self-hosted SQD Portal + bitcoind/ord; S2 deadline scheduler proportional to sqrt(views x
+events); S4 browser-assisted hydration with signed receipts; S5 deterministic replay from BigQuery as golden tests.
+Corrections applied: Magic Eden Bitcoin/EVM are gone (Bitcoin = OKX + UniSat + BestInSlot + on-chain settlement);
+Solana push = Helius webhooks + Tensor WS; OpenSea stream host is stream-api.opensea.io with vsn=2.0.0, best-effort,
+unordered, no replay; USD at time of sale uses hourly rates; Magic Eden REST price is decimal SOL.
+
 ## 4. The constraint that no code removes
 
 Production is a shared cPanel host: `PGPOOL_MAX=4` per process, cron at one-minute granularity, no resident
@@ -68,9 +77,11 @@ worker processes, database on the same shared box. The stream worker already run
 laptop; the constraint is the database's write headroom and the absence of an always-on process. State of the art
 here means one of:
 
-- **Worker VPS** (any $20-40/month box): runs `mesh-tick-standalone.mjs --loop` and `opensea-stream-standalone.mjs`
-  as systemd services against the existing database over the network, with `PGPOOL_MAX=16` and PgBouncer. Zero
-  code change: the bundles are built for exactly this.
+- **Worker sidecar** (Hetzner CX22, about EUR 3.79/month per RESEARCH-SOTA-CORROBORATION section 3): runs
+  `mesh-tick-standalone.mjs --in-process --max-seconds=...` in a loop and `opensea-stream-standalone.mjs` as systemd
+  services with `Restart=always`, local PgBouncer in transaction mode, against the existing database over a TLS
+  tunnel. The app keeps `PGPOOL_MAX=4`; the worker gets its own pool. Zero code change: the bundles are built for
+  exactly this. Needs the cPanel remote-Postgres allowlist for one IP (owner action).
 - **Managed PostgreSQL** (Neon, Supabase, RDS) for the ledger and token projection, keeping cPanel for the app.
   Needed once the token projection passes what shared storage can serve (locally it is 19M rows / 16 GB).
 
