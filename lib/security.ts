@@ -27,6 +27,19 @@ export const MAX_BODY_BYTES = 64 * 1024;
  * bucket, which is deliberately strict (one shared limit) rather than open.
  */
 export function getClientIp(req: Request): string {
+  // Real production bug found live 2026-09-06 (owner: "there is still no
+  // global"): plank.love is fronted by Cloudflare (Server: cloudflare on
+  // every response). Behind it, the rightmost x-forwarded-for hop is the
+  // Cloudflare edge, so EVERY visitor -- and this app's own polling --
+  // shared one rate-limit bucket per key; the hub index (60/min) returned
+  // 429 to everyone as soon as the site had a few readers. Cloudflare sets
+  // cf-connecting-ip to the real client on every proxied request; a
+  // spoofed copy on a non-proxied request only earns the spoofer its own
+  // bucket, never someone else's, so trusting it first is safe.
+  const cf = req.headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
+  const trueClient = req.headers.get("true-client-ip")?.trim();
+  if (trueClient) return trueClient;
   const vercel = req.headers.get("x-vercel-forwarded-for");
   if (vercel) {
     // Vercel's value is the client IP directly (may carry a port); take the
