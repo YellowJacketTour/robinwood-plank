@@ -216,7 +216,7 @@
         position: absolute;
         font-size: clamp(30px, 6vw, 64px);
         offset-path: path(
-          "M 35 510 C 330 505 610 455 790 285 C 900 180 960 70 990 15"
+          "M60 530C218 528 402 493 545 400C660 322 760 200 850 100C900 47 940 25 980 12"
         );
         animation: fly 5s ease-in-out infinite;
         filter: drop-shadow(0 0 18px var(--blue));
@@ -575,10 +575,10 @@
         <div class="eyebrow">PLANKCRASH × POWERBOARD · SYSTEM &amp; MATH</div>
         <h1>What you put in.<br /><span>What you can get back.</span></h1>
         <p>
-          PlankCrash is a shared-pot flight game with a lottery attached. This
-          page answers, in order: what a round costs you, what a round can pay
-          you, how the lottery works and what it costs, where the whole table's
-          money goes, and what is guaranteed versus what varies.
+          A shared pot climbs with a rocket. Lock before it crashes and you
+          split the pot with every other survivor — weighted by how long you
+          held on. A lottery rides on top, funded for free out of the same
+          rake, and never resets backward.
         </p>
         <div class="route" aria-label="The six steps of every round">
           <div><b>01</b>COMMIT<small>put in a stake</small></div>
@@ -615,9 +615,8 @@
             <div class="flight">
               <svg
                 role="img"
-                aria-label="Accelerating multiplier curve"
+                aria-label="Multiplier vs. time, with gridlines: 1x at 0s, 2x at 3s, 9x at 10s"
                 viewBox="0 0 1000 560"
-                preserveAspectRatio="none"
               >
                 <defs>
                   <linearGradient id="curve" x1="0" y1="1" x2="1" y2="0">
@@ -625,26 +624,55 @@
                     <stop offset="1" stop-color="#34d399" />
                   </linearGradient>
                 </defs>
+                <!-- gridlines: y = 1x,2x,4x,9x mapped log-ish for legibility; x = 0,2,4,6,8,10s -->
+                <g stroke="#ffffff14" stroke-width="1.5">
+                  <line x1="60" y1="60" x2="60" y2="530" />
+                  <line x1="248" y1="60" x2="248" y2="530" />
+                  <line x1="436" y1="60" x2="436" y2="530" />
+                  <line x1="624" y1="60" x2="624" y2="530" />
+                  <line x1="812" y1="60" x2="812" y2="530" />
+                  <line x1="1000" y1="60" x2="1000" y2="530" />
+                  <line x1="60" y1="530" x2="1000" y2="530" />
+                  <line x1="60" y1="405" x2="1000" y2="405" />
+                  <line x1="60" y1="280" x2="1000" y2="280" />
+                  <line x1="60" y1="155" x2="1000" y2="155" />
+                  <line x1="60" y1="60" x2="1000" y2="60" />
+                </g>
+                <g fill="#c9b58a" font-size="20" font-family="ui-monospace, monospace">
+                  <text x="60" y="550">0s</text>
+                  <text x="238" y="550">2s</text>
+                  <text x="426" y="550">4s</text>
+                  <text x="614" y="550">6s</text>
+                  <text x="802" y="550">8s</text>
+                  <text x="970" y="550">10s</text>
+                  <text x="16" y="536">1×</text>
+                  <text x="10" y="411">2×</text>
+                  <text x="10" y="286">4×</text>
+                  <text x="4" y="161">9×</text>
+                  <text x="4" y="66">∞</text>
+                </g>
                 <path
-                  d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
+                  d="M60 530C218 528 402 493 545 400C660 322 760 200 850 100C900 47 940 25 980 12"
                   fill="none"
                   stroke="#ffffff18"
-                  stroke-width="25"
+                  stroke-width="20"
                 />
                 <path
                   class="trace"
-                  d="M20 530C320 528 590 482 765 320C885 210 950 95 985 12"
+                  d="M60 530C218 528 402 493 545 400C660 322 760 200 850 100C900 47 940 25 980 12"
                   fill="none"
                   stroke="url(#curve)"
-                  stroke-width="8"
+                  stroke-width="7"
                 />
+                <circle cx="248" cy="405" r="7" fill="var(--gold2)" />
+                <circle cx="812" cy="155" r="7" fill="var(--gold2)" />
               </svg>
               <div class="rocket">🚀</div>
               <div class="equation">x(t)=e<sup>0.22t</sup></div>
             </div>
             <div class="caption">
-              1× at launch · about 2× after 3 seconds · about 9× after 10
-              seconds. The curve never slows down; the crash ends it.
+              Marked points: 2× at t=3s, 9× at t=10s. The curve never slows
+              down — the crash ends it, not the shape of the flight.
             </div>
           </div>
         </div>
@@ -653,15 +681,13 @@
       <section id="put-in">
         <h2><span>02</span> · What am I putting in?</h2>
         <p class="answer">
-          Your stake, and nothing else. The only cost is a 4.50% rake taken
-          from the table's stakes each round. There are no per-lock fees and
-          no hidden edge in the random draw.
+          Your stake — a 4.50% rake, no per-lock fees, no hidden edge in the
+          draw.
         </p>
         <p>
-          The rake rate falls as the table's lifetime volume grows: 0.25% off
-          for every 25,000,000 credits wagered, down to a floor of 2.50%. That
-          means the player pot grows from 95.5% of stakes today toward 97.5%.
-          The table's current rate is shown in the game header.
+          Rake falls 0.25% for every 25,000,000 credits the table has ever
+          wagered, down to a 2.50% floor. The player pot rises from 95.5% of
+          stakes today toward 97.5%. Current rate: shown in the game header.
         </p>
         <code class="formula">
           <small>formula</small>
@@ -671,21 +697,21 @@
         <h3>Where every credit of rake goes</h3>
         <div class="tiles">
           <div class="tile burn">
-            <strong>40%</strong><span>$PLANK buy &amp; burn</span>
+            <strong>25%</strong><span>$PLANK buy &amp; burn</span>
             <small>Rake buys real $PLANK on the open market and burns it. The burn engine can only burn what it buys; nobody receives it.</small>
           </div>
           <div class="tile board">
-            <strong>40%</strong><span>Powerboard prize</span>
-            <small>The community lottery. This is the only thing that funds it.</small>
+            <strong>69%</strong><span>Community: Powerboard + Vault</span>
+            <small>Split between the lottery prize and the protected vault — see below.</small>
           </div>
           <div class="tile ops">
-            <strong>20%</strong><span>Operations</span>
+            <strong>6%</strong><span>Operations</span>
             <small>Running the table. Fixed share, disclosed here.</small>
           </div>
         </div>
         <code class="formula">
           <small>as a share of every stake</small>
-          rake 4.50% = $PLANK buy-and-burn 1.80% + Powerboard 1.80% + operations 0.90%
+          rake 4.50% = $PLANK buy-and-burn 1.125% + community 3.105% + operations 0.27%
         </code>
         <p>
           Minimum stake is 500 credits. Test credits in the playtest have no
@@ -696,43 +722,77 @@
       <section id="get-back">
         <h2><span>03</span> · What can I get back on a flight?</h2>
         <p class="answer">
-          Survivors share the player pot. There is no fixed payout: the
-          multiplier you lock at is your claim weight, not a promise of
-          stake × multiplier.
+          Two parts: a guaranteed floor, plus a weighted share of whatever is
+          left. Your lock multiplier is claim weight, not a fixed payout
+          promise. Bust and you get 0.
         </p>
-        <p>Each survivor's payout has two parts:</p>
-        <ul>
-          <li>
-            <b>Survivor floor.</b> If you lock before the crash, you get 75%
-            of your stake back, guaranteed.
-          </li>
-          <li>
-            <b>Performance premium.</b> Whatever remains in the player pot
-            after all floors is split among survivors by weight. Your weight
-            is your stake × ln(your lock multiplier). Higher locks and bigger
-            stakes weigh more.
-          </li>
-          <li>
-            <b>House bonus (optional).</b> When the table's reserve holds funds,
-            a bonus can be added on top, capped at fair odds
-            (stake × (multiplier − 1)) and by a global reserve cap. It can be
-            zero; it is never taken from other players.
-          </li>
-        </ul>
-        <p>Busting returns 0.</p>
-        <code class="formula">
-          <small>formula</small>
-          pot = stakes × 95.5%<br />
-          weight_i = stake_i × ln(m_i)<br />
-          premium = pot − Σ floors = pot − 0.75 × Σ survivor stakes<br />
-          payout_i = 0.75 × stake_i + premium × weight_i ÷ Σ weights
-        </code>
+        <div class="split">
+          <div>
+            <ul>
+              <li>
+                <b>Survivor floor — 75% of stake, guaranteed.</b> Locked
+                before the crash, this is yours no matter what anyone else
+                does.
+              </li>
+              <li>
+                <b>Performance premium.</b> What's left of the pot after every
+                floor, split by weight = stake × ln(your multiplier). Higher
+                locks and bigger stakes weigh more.
+              </li>
+              <li>
+                <b>House bonus (optional, can be 0).</b> Only from table
+                reserve, capped at fair odds. Never taken from other players.
+              </li>
+            </ul>
+            <code class="formula">
+              <small>formula</small>
+              pot = stakes × 95.5%<br />
+              weight_i = stake_i × ln(m_i)<br />
+              premium = pot − 0.75 × Σ survivor stakes<br />
+              payout_i = 0.75 × stake_i + premium × weight_i ÷ Σ weights
+            </code>
+          </div>
+          <div class="card">
+            <svg role="img" aria-label="Payout weight grows with the log of your lock multiplier" viewBox="0 0 480 320">
+              <g stroke="#ffffff14" stroke-width="1.5">
+                <line x1="60" y1="20" x2="60" y2="270" />
+                <line x1="60" y1="270" x2="460" y2="270" />
+                <line x1="60" y1="210" x2="460" y2="210" />
+                <line x1="60" y1="150" x2="460" y2="150" />
+                <line x1="60" y1="90" x2="460" y2="90" />
+              </g>
+              <g fill="#c9b58a" font-size="16" font-family="ui-monospace, monospace">
+                <text x="10" y="275">0</text>
+                <text x="4" y="215">0.6</text>
+                <text x="4" y="155">1.2</text>
+                <text x="4" y="95">1.8</text>
+                <text x="145" y="298">1.5×</text>
+                <text x="245" y="298">2.0×</text>
+                <text x="345" y="298">2.5×</text>
+                <text x="445" y="298">3.0×</text>
+              </g>
+              <!-- bars scaled to ln(m) * 100, baseline y=270 -->
+              <rect x="110" y="229" width="60" height="41" fill="var(--blue)" />
+              <rect x="210" y="201" width="60" height="69" fill="var(--gold)" />
+              <rect x="310" y="178" width="60" height="92" fill="var(--gold)" />
+              <rect x="410" y="160" width="60" height="110" fill="var(--green)" />
+              <text x="140" y="222" text-anchor="middle" fill="#fff2cf" font-size="15" font-weight="900">ln 1.5</text>
+              <text x="240" y="194" text-anchor="middle" fill="#fff2cf" font-size="15" font-weight="900">ln 2.0</text>
+              <text x="340" y="171" text-anchor="middle" fill="#fff2cf" font-size="15" font-weight="900">ln 2.5</text>
+              <text x="440" y="153" text-anchor="middle" fill="#fff2cf" font-size="15" font-weight="900">ln 3.0</text>
+            </svg>
+            <div class="caption">
+              Weight per credit staked, by lock multiplier. Doubling your
+              multiplier does not double your weight — the log curve rewards
+              surviving longer, but with diminishing returns.
+            </div>
+          </div>
+        </div>
 
         <h3>Worked example: 10 players, 1,000 credits each, you lock at 2.0×</h3>
         <p>
-          Stakes total 10,000. Rake 450. Player pot 9,550. Suppose four
-          players survive: two lock at 1.5×, you lock at 2.0×, one locks at
-          3.0×. Six bust.
+          Stakes 10,000 → rake 450 → pot 9,550. Four survive: two at 1.5×, you
+          at 2.0×, one at 3.0×. Six bust.
         </p>
         <div class="table-wrap">
           <table class="ledger">
@@ -803,35 +863,31 @@
           </div>
         </div>
         <p>
-          Across all players, the table returns exactly 95.5% of stakes to
-          survivors every round. That is a table-wide identity, not an
-          individual promise. Individual results vary enormously with
-          strategy: in simulation campaigns, locking early averaged about
-          1.04× of stakes back over a long run, while chasing high multipliers
-          averaged about 0.15×.<sup>1</sup>
+          95.5% back to survivors is a table-wide identity, not a personal
+          guarantee. Strategy moves the needle hard: locking early averaged
+          about 1.04× of stake back over 2M simulated rounds; chasing high
+          multipliers averaged about 0.15×.<sup>1</sup>
         </p>
       </section>
 
       <section id="lottery">
         <h2><span>04</span> · How does the lottery work and what does it cost me?</h2>
         <p class="answer">
-          It costs you nothing extra. The Powerboard prize is funded only by
-          the 40% community share of rake. Every stake you place is
-          automatically a ticket.
+          Nothing extra. Every stake is automatically a ticket, funded from
+          rake you already paid.
         </p>
         <div class="lottery">
           <div>
             <ul>
               <li>
-                <b>Funding.</b> Every round, the 40% community share of the
-                4.50% rake (pot × 1.8%) is routed by the table's setting:
-                mainnet routes all of it to the prize; playtest tables route
-                65% to the prize (pot × 1.17%) and keep 35% compounding the
-                protected vault.
+                <b>Funding.</b> The community's 69% rake share splits, fixed
+                on-chain, 65/35: 65% to the Powerboard prize (pot × 2.02%),
+                35% to the protected vault (pot × 1.09%). Same split on every
+                table — playtest and mainnet alike.
               </li>
               <li>
                 <b>Your ticket weight</b> is your total stake in the current
-                prize epoch. Bigger stake, bigger share of the odds.
+                prize epoch. Bigger stake, bigger odds.
               </li>
               <li>
                 <b>The draw.</b> On a funded round, one of 16 balls is drawn
@@ -848,8 +904,8 @@
             <code class="formula">
               <small>formula</small>
               your odds this draw = (your weight ÷ everyone's weight) × 1/16<br />
-              prize funding per round = pot × 0.045 × 0.40 × routed share<br />
-              &nbsp;&nbsp;mainnet (100% routed) = pot × 0.018 · playtest (65% routed) = pot × 0.0117
+              prize funding per round = pot × 0.045 × 0.69 × 0.65 ≈ pot × 0.0202<br />
+              vault funding per round = pot × 0.045 × 0.69 × 0.35 ≈ pot × 0.0109
             </code>
           </div>
           <div class="odds">
@@ -886,13 +942,11 @@
 
         <h3>When can a draw actually happen?</h3>
         <p>
-          A win must never empty the board, so a draw is only allowed once
-          <b>two</b> amounts are fully sealed: the current prize, and the
-          reset reserve for the next prize. After a hit, the next base prize
-          ratchets up by 5% or 50,000 credits, whichever is larger, and can
-          never go down. Sealing takes a 10% operations fee on the funding
-          that constitutes each prize, so the credits needed are the target
-          ÷ 0.90.
+          Only once <b>two</b> amounts are fully sealed: the current prize,
+          and the reset reserve for the next one. A win can never empty the
+          board. Each hit ratchets the next base prize up by 5% or 50,000
+          credits, whichever is bigger — never down. A 10% ops fee applies
+          to the funding, so credits needed = target ÷ 0.90.
         </p>
         <code class="formula">
           <small>formula</small>
@@ -903,17 +957,15 @@
         </code>
         <h3>Example at a 10,000-credit pot per round</h3>
         <div class="steps">
-          <div><b>117</b>credits added to the prize each round on a playtest table (180 on mainnet)</div>
-          <div><b>≈ 475</b>rounds to seal the playtest's 50,000-credit prize (55,555 needed; ≈ 309 at mainnet routing)</div>
-          <div><b>≈ 6,173</b>rounds to seal a 1,000,000-credit mainnet prize (1,111,111 needed)</div>
+          <div><b>202</b>credits added to the prize each round (pot × 0.0202)</div>
+          <div><b>≈ 275</b>rounds to seal a 50,000-credit prize (55,555 needed)</div>
+          <div><b>≈ 5,505</b>rounds to seal a 1,000,000-credit prize (1,111,111 needed)</div>
           <div><b>30 s</b>between launches, so 120 rounds an hour at full tempo</div>
         </div>
         <p>
-          The reset reserve for the next prize is filled the same way after
-          the current prize seals, so the first real draw needs roughly twice
-          the rounds shown. The table's current prize target and funding
-          progress are shown in the game header. The playtest uses a smaller
-          test-credit prize target than mainnet.
+          The reset reserve fills the same way after the prize seals, so the
+          first real draw needs roughly double the rounds shown. Current
+          target and progress: game header.
         </p>
       </section>
 
@@ -921,8 +973,8 @@
         <h2><span>05</span> · What does the whole table's money do?</h2>
         <p class="answer">
           Out of every 100 credits staked across all players: 95.5 go back to
-          survivors, 1.8 buy and burn $PLANK, 1.8 fund the Powerboard prize, and 0.9
-          pay for operations.
+          survivors, 1.125 buy and burn $PLANK, 2.02 fund the Powerboard prize,
+          1.09 grow the protected vault, and 0.27 pay for operations.
         </p>
         <div class="card flow-map">
           <svg
@@ -952,7 +1004,7 @@
             <text x="785" y="138" text-anchor="middle" fill="#c9b58a" font-size="22">rising to 97.5% as the rake falls</text>
             <rect x="525" y="172" width="525" height="92" rx="18" fill="#302013" stroke="#e9b43f" />
             <text x="787" y="208" text-anchor="middle" fill="#fff2cf" font-size="30" font-weight="900">4.5% ROUTED RAKE</text>
-            <text x="787" y="243" text-anchor="middle" fill="#c9b58a" font-size="21" textLength="470" lengthAdjust="spacingAndGlyphs">$PLANK buy &amp; burn · Powerboard prize · operations</text>
+            <text x="787" y="243" text-anchor="middle" fill="#c9b58a" font-size="21" textLength="470" lengthAdjust="spacingAndGlyphs">$PLANK buy &amp; burn · Powerboard prize · vault · operations</text>
           </svg>
         </div>
         <div class="tiles wide" style="margin-top: 14px">
@@ -961,37 +1013,110 @@
             <small>Returned to that round's survivors, every round, exactly.</small>
           </div>
           <div class="tile burn">
-            <strong>1.8%</strong><span>$PLANK buy &amp; burn</span>
+            <strong>1.125%</strong><span>$PLANK buy &amp; burn</span>
             <small>Permanently removed. Total supply only goes down from play.</small>
           </div>
           <div class="tile blue">
-            <strong>1.8%</strong><span>Powerboard prize</span>
+            <strong>2.02%</strong><span>Powerboard prize</span>
             <small>Accumulates until a prize and its reset reserve are sealed.</small>
           </div>
+          <div class="tile board">
+            <strong>1.09%</strong><span>Protected vault</span>
+            <small>Never decreases. See below for how it makes future rounds more generous.</small>
+          </div>
           <div class="tile ops">
-            <strong>0.9%</strong><span>Operations</span>
-            <small>The 20% share of rake.</small>
+            <strong>0.27%</strong><span>Operations</span>
+            <small>The 6% share of rake.</small>
           </div>
         </div>
         <h3>The protected vault and the prize base only go up</h3>
         <ul>
           <li>
             <b>Protected vault.</b> A reserve that can only grow, funded only
-            from routed rake: half of whatever community share is not sent
-            to the prize. On playtest tables 35% of the community share is
-            kept back, so the vault receives pot × 0.315% every round (the
-            other half of that kept share seeds future flights). A brand-new
-            table starts at 0 and the vault grows from its first settled
-            round; it never decreases.
+            from routed rake: 35% of the community's 69% share, i.e. pot ×
+            1.09% every round. A brand-new table starts at 0 and the vault
+            grows from its first settled round; it never decreases.
           </li>
           <li>
             <b>Prize base.</b> The guaranteed reset base for the lottery never
             decreases; each hit ratchets it upward.
           </li>
         </ul>
+        <h3>The table gets more generous the more it has been played</h3>
+        <p>
+          Two curves key off <b>rounds ever played</b> — never stake size,
+          never the vault's own balance. One large deposit cannot buy its way
+          up either curve; only repeated play can. Both climb only, never back.
+        </p>
+        <div class="split">
+          <div class="card">
+            <svg role="img" aria-label="Bonus cap climbs from 0% toward 25% as rounds accumulate, on a 0.999 decay curve" viewBox="0 0 480 300">
+              <g stroke="#ffffff14" stroke-width="1.5">
+                <line x1="55" y1="20" x2="55" y2="260" />
+                <line x1="55" y1="260" x2="460" y2="260" />
+                <line x1="55" y1="195" x2="460" y2="195" />
+                <line x1="55" y1="130" x2="460" y2="130" />
+                <line x1="55" y1="65" x2="460" y2="65" />
+              </g>
+              <g fill="#c9b58a" font-size="15" font-family="ui-monospace, monospace">
+                <text x="8" y="264">0%</text>
+                <text x="0" y="134">12.5%</text>
+                <text x="8" y="69">25%</text>
+                <text x="45" y="284">0</text>
+                <text x="150" y="284">1,000</text>
+                <text x="280" y="284">3,000</text>
+                <text x="400" y="284">5,000</text>
+                <text x="470" y="284" text-anchor="end">rounds</text>
+              </g>
+              <line x1="55" y1="65" x2="460" y2="65" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" />
+              <path d="M55 260C120 187 175 145 250 110C320 78 390 68 460 65" fill="none" stroke="var(--gold)" stroke-width="6" />
+              <circle cx="150" cy="153" r="6" fill="var(--gold2)" />
+              <text x="160" y="145" fill="#fff2cf" font-size="14" font-weight="900">63% there</text>
+              <circle cx="400" cy="67" r="6" fill="var(--gold2)" />
+              <text x="330" y="55" fill="#fff2cf" font-size="14" font-weight="900">99% there</text>
+            </svg>
+            <div class="caption">
+              House bonus cap: 25% × (1 − 0.999<sup>n</sup>). Narrows house
+              risk budget only — never widens what a player is owed.
+            </div>
+          </div>
+          <div class="card">
+            <svg role="img" aria-label="Lottery reseed ceiling climbs from base toward a 10x ceiling on the same decay curve" viewBox="0 0 480 300">
+              <g stroke="#ffffff14" stroke-width="1.5">
+                <line x1="55" y1="20" x2="55" y2="260" />
+                <line x1="55" y1="260" x2="460" y2="260" />
+                <line x1="55" y1="195" x2="460" y2="195" />
+                <line x1="55" y1="130" x2="460" y2="130" />
+                <line x1="55" y1="65" x2="460" y2="65" />
+              </g>
+              <g fill="#c9b58a" font-size="15" font-family="ui-monospace, monospace">
+                <text x="4" y="264">1×</text>
+                <text x="0" y="134">5×</text>
+                <text x="0" y="69">10×</text>
+                <text x="45" y="284">0</text>
+                <text x="150" y="284">1,000</text>
+                <text x="280" y="284">3,000</text>
+                <text x="400" y="284">5,000</text>
+                <text x="470" y="284" text-anchor="end">rounds</text>
+              </g>
+              <line x1="55" y1="65" x2="460" y2="65" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" />
+              <path d="M55 260C120 187 175 145 250 110C320 78 390 68 460 65" fill="none" stroke="var(--green)" stroke-width="6" />
+            </svg>
+            <div class="caption">
+              Lottery reseed ceiling: base → 10× base, same 0.999-per-round
+              curve. A mature table's winners keep more of a given prize than
+              a brand-new table's would.
+            </div>
+          </div>
+        </div>
+        <code class="formula">
+          <small>formula</small>
+          bonus cap(n) = 25% × (1 − 0.999<sup>n</sup>), n = rounds ever contributed<br />
+          reseed ceiling(n) = ceiling − (ceiling − base) × 0.999<sup>n</sup>
+        </code>
         <code class="formula">
           <small>invariants checked every round</small>
-          vault(t+1) ≥ vault(t) · prize base(t+1) ≥ prize base(t) · Σ payouts ≤ funded capacity
+          vault(t+1) ≥ vault(t) · prize base(t+1) ≥ prize base(t) · both curves monotonic in n · Σ payouts ≤ funded capacity
         </code>
       </section>
 
@@ -1007,6 +1132,8 @@
               <li>Crash point, drawn ball and winner all come from committed randomness published before the round.</li>
               <li>Fixed 30-second cadence between launches.</li>
               <li>Splitting a stake across wallets earns no extra claim.</li>
+              <li>The vault and the lottery's reseed curve only ever grow; neither can regress.</li>
+              <li>Both growth curves key off rounds played, never off stake size, so no single deposit can buy a bigger share of either.</li>
             </ul>
           </div>
           <div class="seal varies">
@@ -1016,7 +1143,7 @@
               <li>How fast the prize grows: it scales with the table's pot size.</li>
               <li>The crash point, every round.</li>
               <li>The rake rate over time (only downward, with volume).</li>
-              <li>The house bonus, which may be zero.</li>
+              <li>The house bonus, which may be zero, and its ceiling, which climbs as the table matures.</li>
             </ul>
           </div>
         </div>
