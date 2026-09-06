@@ -165,7 +165,7 @@ export type ClaimedDataJob = {
   leaseOwner: string;
 };
 
-export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number): Promise<ClaimedDataJob | null> {
+export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number, maxPriority?: number): Promise<ClaimedDataJob | null> {
   const owner = `${process.pid}:${randomUUID()}`;
   const pool = postgresPool();
   const client = await pool.connect();
@@ -185,6 +185,14 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     if (typeof minPriority === "number" && Number.isFinite(minPriority)) {
       params.push(minPriority);
       priorityClause = `AND priority >= $${params.length}`;
+    }
+    // Standing-lane worker (2026-09-06): discovery/stats/fills lanes sit at
+    // priority 20-60 and were starved by hundreds of demand jobs at 100+, so
+    // no new collections were being discovered while visitors browsed. A
+    // worker may cap the priority it claims so those lanes always get a slot.
+    if (typeof maxPriority === "number" && Number.isFinite(maxPriority)) {
+      params.push(maxPriority);
+      priorityClause += ` AND priority <= $${params.length}`;
     }
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
