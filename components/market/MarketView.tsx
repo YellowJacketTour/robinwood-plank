@@ -728,9 +728,16 @@ export default function MarketView() {
       const { buyForeignListingNow } = await import(
         "@/lib/market/multichain/trading/foreign-fulfill"
       );
+      // AUDIT lens 3 #3 (2026-09-06): the fresh third-party order is asserted
+      // against what this card showed (price, token, maker) before it is
+      // fulfilled -- the same C1 guard the collection page already applies.
       await buyForeignListingNow({
         chainSlug: foreignBuyTarget.listing.foreignChainSlug!,
         orderHash: foreignBuyTarget.listing.foreignOrderHash!,
+        collectionSlug: foreignBuyTarget.listing.collectionSlug,
+        priceWei: foreignBuyTarget.priceWei,
+        expectedTokenId: foreignBuyTarget.listing.tokenId,
+        expectedMaker: foreignBuyTarget.listing.maker,
       });
       setForeignBuyTarget(null);
       setStatus("Purchase confirmed.");
