@@ -212,14 +212,15 @@
         stroke-dashoffset: 1600;
         animation: trace 5s ease-in-out infinite;
       }
+      /* Lives INSIDE the flight <svg> now (an <animateMotion> along the same
+         <path> the curve draws), not a sibling HTML element with its own
+         offset-path: that mismatched the SVG's 1000x560 viewBox units against
+         the element's actual rendered CSS-pixel box, so the rocket flew a
+         path scaled for the wrong canvas and landed off the curve entirely.
+         Sharing the exact path guarantees pixel-identical alignment at any
+         rendered size. */
       .rocket {
-        position: absolute;
-        font-size: clamp(30px, 6vw, 64px);
-        offset-path: path(
-          "M60 530C218 528 402 493 545 400C660 322 760 200 850 100C900 47 940 25 980 12"
-        );
-        animation: fly 5s ease-in-out infinite;
-        filter: drop-shadow(0 0 18px var(--blue));
+        filter: drop-shadow(0 0 10px var(--blue));
       }
       .equation {
         position: absolute;
@@ -519,18 +520,6 @@
           stroke-dashoffset: -1600;
         }
       }
-      @keyframes fly {
-        0% {
-          offset-distance: 0;
-        }
-        70%,
-        78% {
-          offset-distance: 100%;
-        }
-        100% {
-          offset-distance: 0;
-        }
-      }
       @keyframes tumble {
         to {
           transform: translate(16px, -20px) rotate(340deg);
@@ -666,8 +655,18 @@
                 />
                 <circle cx="248" cy="405" r="7" fill="var(--gold2)" />
                 <circle cx="812" cy="155" r="7" fill="var(--gold2)" />
+                <text class="rocket" font-size="52" text-anchor="middle" dominant-baseline="central">
+                  🚀
+                  <animateMotion
+                    dur="5s"
+                    repeatCount="indefinite"
+                    keyPoints="0;0;1;1;0"
+                    keyTimes="0;0;0.7;0.78;1"
+                    calcMode="linear"
+                    path="M60 530C218 528 402 493 545 400C660 322 760 200 850 100C900 47 940 25 980 12"
+                  />
+                </text>
               </svg>
-              <div class="rocket">🚀</div>
               <div class="equation">x(t)=e<sup>0.22t</sup></div>
             </div>
             <div class="caption">
