@@ -105,8 +105,13 @@ async function tick(): Promise<void> {
       // range's dead entries) and blew the 15s statement timeout on the
       // next tick; the id sequence is the same tip for our purpose and is
       // a single-row read.
-      const seq = await postgresQuery<{ last_value: string }>(`SELECT last_value::text FROM plank_market_events_id_seq`);
-      s.lastId = Number(seq.rows[0]?.last_value ?? 0);
+      // A never-used sequence reports last_value = 1 with is_called = false;
+      // the first insert then GETS id 1, so the tip must be 0 in that case
+      // (found by the CI Postgres service, which starts empty).
+      const seq = await postgresQuery<{ tip: string }>(
+        `SELECT (CASE WHEN is_called THEN last_value ELSE 0 END)::text AS tip FROM plank_market_events_id_seq`
+      );
+      s.lastId = Number(seq.rows[0]?.tip ?? 0);
       return;
     }
     const events = await readNewest(s.lastId);

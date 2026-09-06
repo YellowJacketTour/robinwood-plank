@@ -49,21 +49,35 @@ async function isMembershipSourceComplete(
  * pass, not a scroll frame; 30 s of memory per (chain, key) is honest.
  */
 const COMPLETION_MEMO_MS = 30_000;
-const completionMemo = new Map<string, { at: number; value: Promise<boolean> }>();
+/** A "not complete" answer is memoized for a shorter window -- rows only grow, so "complete" is the stable direction. */
+const INCOMPLETE_MEMO_MS = 10_000;
+const completionMemo = new Map<string, { at: number; ttl: number; value: Promise<boolean> }>();
+/** Tests seed rows and re-check within milliseconds; the memo would hide the change, so it is off under the node test runner. */
+const MEMO_ENABLED = !process.env.NODE_TEST_CONTEXT;
+export function resetCompletionMemo(): void {
+  completionMemo.clear();
+}
 function memoized(name: string, chainSlug: string, collectionKey: string, compute: () => Promise<boolean>): Promise<boolean> {
+  if (!MEMO_ENABLED) return compute();
   const key = `${name}|${chainSlug}|${collectionKey.toLowerCase()}`;
   const now = Date.now();
   const hit = completionMemo.get(key);
-  if (hit && now - hit.at < COMPLETION_MEMO_MS) return hit.value;
-  const value = compute().catch((error) => {
-    completionMemo.delete(key);
-    throw error;
-  });
-  completionMemo.set(key, { at: now, value });
+  if (hit && now - hit.at < hit.ttl) return hit.value;
+  const entry = { at: now, ttl: INCOMPLETE_MEMO_MS, value: undefined as unknown as Promise<boolean> };
+  entry.value = compute()
+    .then((result) => {
+      if (result) entry.ttl = COMPLETION_MEMO_MS;
+      return result;
+    })
+    .catch((error) => {
+      completionMemo.delete(key);
+      throw error;
+    });
+  completionMemo.set(key, entry);
   if (completionMemo.size > 5_000) {
-    for (const [k, v] of completionMemo) if (now - v.at >= COMPLETION_MEMO_MS) completionMemo.delete(k);
+    for (const [k, v] of completionMemo) if (now - v.at >= v.ttl) completionMemo.delete(k);
   }
-  return value;
+  return entry.value;
 }
 
 export async function isOpenseaMembershipComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
