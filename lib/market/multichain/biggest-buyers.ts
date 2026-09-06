@@ -52,11 +52,24 @@ export async function readBiggestBuyers(input: { chainSlug: string; collectionKe
     first_buy: Date | null; last_buy: Date | null; distinct_tokens: string;
   }>(
     `WITH fills AS (
-       SELECT buyer, amount_usd, amount_atomic, currency_symbol, block_timestamp, token_id
-         FROM plank_market_events
-        WHERE chain_slug = $1 AND lower(collection_key) = lower($2) AND event_type = 'sale' AND buyer IS NOT NULL
-          AND block_timestamp >= NOW() - ($3::text || ' hours')::interval
-          AND finality <> 'reverted'
+       -- AUDIT lens 6 #7 (2026-09-06): a stream row whose transaction the
+       -- on-chain Seaport indexer already holds is the same sale, so it is
+       -- excluded here; and a stream item_sold fires once per item of a
+       -- bundle carrying the whole bundle price, so each item takes its
+       -- 1/quantity share.
+       SELECT e.buyer,
+              CASE WHEN e.venue_id = 'opensea-stream'
+                   THEN e.amount_usd / GREATEST(COALESCE((e.raw_event->>'quantity')::numeric, 1), 1)
+                   ELSE e.amount_usd END AS amount_usd,
+              CASE WHEN e.venue_id = 'opensea-stream'
+                   THEN e.amount_atomic / GREATEST(COALESCE((e.raw_event->>'quantity')::numeric, 1), 1)
+                   ELSE e.amount_atomic END AS amount_atomic,
+              e.currency_symbol, e.block_timestamp, e.token_id
+         FROM plank_market_events e
+        WHERE e.chain_slug = $1 AND lower(e.collection_key) = lower($2) AND e.event_type = 'sale' AND e.buyer IS NOT NULL
+          AND e.block_timestamp >= NOW() - ($3::text || ' hours')::interval
+          AND e.finality <> 'reverted'
+          AND NOT (e.venue_id = 'opensea-stream' AND EXISTS (SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = $1 AND f.tx_hash = e.tx_hash))
      ), dominant AS (
        SELECT currency_symbol FROM fills WHERE currency_symbol IS NOT NULL GROUP BY currency_symbol ORDER BY COUNT(*) DESC LIMIT 1
      )
@@ -74,9 +87,10 @@ export async function readBiggestBuyers(input: { chainSlug: string; collectionKe
     [input.chainSlug, input.collectionKey, windowHours, limit]
   );
   const total = await postgresQuery<{ n: string }>(
-    `SELECT COUNT(*)::text n FROM plank_market_events
-      WHERE chain_slug = $1 AND lower(collection_key) = lower($2) AND event_type = 'sale'
-        AND block_timestamp >= NOW() - ($3::text || ' hours')::interval AND finality <> 'reverted'`,
+    `SELECT COUNT(*)::text n FROM plank_market_events e
+      WHERE e.chain_slug = $1 AND lower(e.collection_key) = lower($2) AND e.event_type = 'sale'
+        AND e.block_timestamp >= NOW() - ($3::text || ' hours')::interval AND e.finality <> 'reverted'
+        AND NOT (e.venue_id = 'opensea-stream' AND EXISTS (SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = $1 AND f.tx_hash = e.tx_hash))`,
     [input.chainSlug, input.collectionKey, windowHours]
   );
   const buyers = rankBuyers(
