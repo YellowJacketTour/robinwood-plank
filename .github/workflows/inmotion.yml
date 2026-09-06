@@ -204,6 +204,12 @@ jobs:
           test -s .next/standalone/scripts/plank-koth-watch-standalone.mjs
           test -s .next/standalone/scripts/mesh-tick-standalone.mjs
           test -s .next/standalone/scripts/mesh-lane-standalone.mjs
+          test -s .next/standalone/scripts/opensea-stream-standalone.mjs
+          # `ws` is a runtime dependency of the stream worker; the standalone
+          # tracer only follows the Next app, so copy it in explicitly.
+          mkdir -p .next/standalone/node_modules/ws
+          cp -R node_modules/ws/. .next/standalone/node_modules/ws/
+          test -f .next/standalone/node_modules/ws/package.json
           test -s .next/standalone/scripts/audit-plank-historical-record.mjs
           test -s .next/standalone/scripts/plank-koth-review-queue-dump.mjs
           test -s .next/standalone/scripts/reprocess-plank-koth-review-queue.mjs
@@ -1248,6 +1254,8 @@ jobs:
           artifact="$app_dir/current/scripts/mesh-tick-standalone.mjs"
           test -s "$artifact"
           test -s "$app_dir/current/scripts/mesh-lane-standalone.mjs"
+          test -s "$app_dir/current/scripts/opensea-stream-standalone.mjs"
+          touch "$logs_dir/opensea-stream.log" && chmod 600 "$logs_dir/opensea-stream.log"
 
           logs_dir="$app_dir/logs"
           log_file="$logs_dir/market-mesh.log"
@@ -1266,7 +1274,7 @@ jobs:
           cd "$app_dir/current"
           "$flock_bin" -w 55 "$lock_file" \
             "$node_bin" --env-file="$env_file" "$artifact" --limit=6 --max-seconds=180 \
-            >> "$log_file" 2>&1
+            >> "$log_file" 2>&1 || { echo "[provision] proof run failed; last 60 log lines:" >&2; tail -n 60 "$log_file" >&2; exit 1; }
           tail -n 5 "$log_file"
 
           cron_before="$(mktemp)"
@@ -1279,6 +1287,13 @@ jobs:
             printf '*/5 * * * * cd %s && %s -n %s %s --env-file=%s %s --limit=6 --max-seconds=240 >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
               "$artifact" "$log_file"
+            # OpenSea Stream ingest (lib/market/multichain/edge/opensea-stream.ts):
+            # started every minute under its own lock with a 59-minute budget,
+            # so it is effectively always-on and restarts cleanly each hour.
+            printf '%s\n' '# market-mesh opensea-stream (managed by inmotion branch)'
+            printf '* * * * * cd %s && %s -n %s %s --env-file=%s %s --max-seconds=3540 >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$app_dir/shared/opensea-stream.lock" "$node_bin" "$env_file" \
+              "$app_dir/current/scripts/opensea-stream-standalone.mjs" "$logs_dir/opensea-stream.log"
           } >> "$cron_after"
           crontab "$cron_after"
           # Count only the tag comment line, not the substring match against
@@ -1290,7 +1305,7 @@ jobs:
           # real managed entry as two. Confirmed live 2026-08-26:
           # managed_count=2 for a single real entry with the bare grep.
           managed_count="$(crontab -l | grep -c '^# market-mesh' || true)"
-          test "$managed_count" -eq 1
+          test "$managed_count" -eq 2
 
           # Confirm the cron actually fires on its own before declaring
           # success -- same real "don't trust the schedule until it's been
