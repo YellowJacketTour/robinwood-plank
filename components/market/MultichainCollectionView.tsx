@@ -336,6 +336,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // previewed with real money -- so the mesh focuses on what this person
   // is about to need. Best-effort, deduped, never affects rendering.
   const publishIntent = useDemandIntent();
+  // Opening the page IS the strongest demand signal for this collection
+  // (2026-09-06): publish a click intent on mount so its remaining
+  // hydration jobs go to the scheduler's express lane immediately, not on
+  // the next viewport ping.
+  useEffect(() => {
+    if (!chainSlug || !collectionSlug) return;
+    publishIntent({ kind: "click", chainSlug, subjects: [collectionSlug], context: "detail-open" });
+  }, [chainSlug, collectionSlug, publishIntent]);
 
   // SMART SEARCH / FILTER -- point-and-click, no page reload, applies
   // instantly to whatever is already loaded. Token-id search matches

@@ -163,7 +163,7 @@ export type ClaimedDataJob = {
   leaseOwner: string;
 };
 
-export async function claimDataJob(kinds?: string[], leaseMs = 300_000): Promise<ClaimedDataJob | null> {
+export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number): Promise<ClaimedDataJob | null> {
   const owner = `${process.pid}:${randomUUID()}`;
   const pool = postgresPool();
   const client = await pool.connect();
@@ -176,6 +176,14 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000): Promise
     const params: unknown[] = [];
     const kindClause = kinds?.length ? `AND kind = ANY($1::text[])` : "";
     if (kinds?.length) params.push(kinds);
+    // Express lane (2026-09-06): a worker may claim only jobs at or above a
+    // priority floor, so a visitor's own open collection never waits behind
+    // rankings backfill for a free slot.
+    let priorityClause = "";
+    if (typeof minPriority === "number" && Number.isFinite(minPriority)) {
+      params.push(minPriority);
+      priorityClause = `AND priority >= $${params.length}`;
+    }
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
     params.push(owner);
@@ -200,7 +208,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000): Promise
       // failures compound into permanent starvation of untried work.
       `WITH candidate AS (
          SELECT id FROM plank_data_jobs
-         WHERE status = 'queued' AND not_before <= NOW() ${kindClause}
+         WHERE status = 'queued' AND not_before <= NOW() ${kindClause} ${priorityClause}
          ORDER BY priority DESC, attempts, not_before, id
          FOR UPDATE SKIP LOCKED LIMIT 1
        )
