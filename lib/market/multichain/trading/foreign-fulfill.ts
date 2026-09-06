@@ -484,12 +484,21 @@ async function buyBitcoinListingNow(input: { auctionId: string; priceSats: strin
     bidId: string;
   };
 
+  // AUDIT lens 3 #7 (2026-09-06): never sign a marketplace-built PSBT
+  // blind. Decode it and assert the inscription lands with the buyer, the
+  // seller and platform are paid no more than the confirmed price plus fee,
+  // only the enumerated buyer inputs are signed (never the seller's
+  // SINGLE|ANYONECANPAY input), and the miner fee is sane -- all before the
+  // wallet prompt. See psbt-safety.ts for the rule set and its tests.
+  const { assertBuyPsbtSafe } = await import("@/lib/market/multichain/trading/psbt-safety");
+  const safety = assertBuyPsbtSafe({ psbtBase64, buyerAddress, signIndexes, priceSats: BigInt(input.priceSats) });
+
   // UniSat's signPsbt wants hex, the create step returned base64 -- convert
   // via Buffer, never re-derive/guess the byte content.
   const psbtHex = Buffer.from(psbtBase64, "base64").toString("hex");
   const signedPsbtHex = await provider.signPsbt(psbtHex, {
     autoFinalized: true,
-    toSignInputs: signIndexes.map((index) => ({ index })),
+    toSignInputs: safety.inputsToSign.map((index) => ({ index })),
   });
   const signedPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
 
