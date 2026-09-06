@@ -37,7 +37,10 @@ export const runtime = "nodejs";
  * upsertTrackedCollection in lib/market/multichain/store.ts.
  */
 export async function GET(req: Request) {
-  const limited = rateLimit(req, { key: "market-multichain", limit: 60, windowMs: 60_000 });
+  // 240/min: the hub's infinite scroll plus its error retries can exceed 60
+  // from one household, and every read is edge-cached now (one build per
+  // 30 s window), so the limit guards bursts, not cost.
+  const limited = rateLimit(req, { key: "market-multichain", limit: 240, windowMs: 60_000 });
   if (limited) return limited;
 
   if (!hasMultichainStore()) {
@@ -65,6 +68,19 @@ export async function GET(req: Request) {
     );
     return NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    // Private diagnostics (2026-09-06): a door/admin preview holder gets the
+    // real failure text; the public still gets the generic message.
+    const { cookies } = await import("next/headers");
+    const { verifyDoorCookieValue, DOOR_COOKIE_NAME } = await import("@/lib/market-preview-door");
+    const { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } = await import("@/lib/market-preview-auth");
+    const jar = await cookies().catch(() => null);
+    const privileged = jar ? verifyDoorCookieValue(jar.get(DOOR_COOKIE_NAME)?.value) || verifyPreviewCookieValue(jar.get(MARKET_PREVIEW_COOKIE_NAME)?.value) : false;
+    if (privileged) {
+      return NextResponse.json(
+        { error: "INTERNAL", message: "Failed to load the multichain index.", detail: (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 400) },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      );
+    }
     return publicError(error, "Failed to load the multichain index.");
   }
 }
