@@ -122,6 +122,20 @@ applied locally.
 Built, unproven: every wired intent path end-to-end in a browser (no Playwright run this pass); source selector
 against live ledger evidence (pure scoring is tested); market-focus over the live catalog (dry-run script exists).
 
+### Fixed live 2026-09-06: "when i click on collections they do not open"
+
+Reproduced in a real browser: the click fired, the server even rendered the target page (200), but the URL never
+changed. Three causes, all fixed and re-verified (click now navigates, 6.1 s on a cold dev server):
+1. The hub synced its filter state with `router.replace()` (an RSC round trip inside a React transition) on mount and
+   on every change; while one was in flight, every later navigation was batched into the same stalled transition.
+   Now native `history.replaceState`, only when the query string actually changed.
+2. Viewport-demand pings (one per visible chain every 2.5 s) awaited 4-19 s of completion checks before answering and
+   stacked up, saturating the browser's per-host connection pool. Now the route acknowledges immediately and does the
+   work in `after()`; the hook keeps one in-flight POST per chain at low fetch priority.
+3. Those checks were `COUNT(*)` over the 19M-row token projection per key; `pg_stat_activity` showed 11 concurrent
+   copies on a PGPOOL_MAX=4 pool, starving every other read (the hub index took 96 s). Now memoized 30 s in-process,
+   and the hub index is built once per 30 s window through the edge gateway.
+
 ### Measurements added later on 2026-09-05
 
 - **HyperSync transport** (`scripts/hypersync-stream-bench.ts`, Base, blocks 50936591..50939591, 904,669 Transfer
