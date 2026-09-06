@@ -668,12 +668,17 @@ jobs:
           # an hour). Back up only when a migration is actually pending;
           # a release with nothing to migrate has nothing this dump would
           # roll back. Exit 3 = pending, 0 = current, anything else = error.
-          set +e
-          "$node_bin" \
+          # The remote script has an ERR trap, which fires on any non-zero
+          # command even under `set +e` (found live 2026-09-06: a release with
+          # pending migrations failed with "exit 3" before the backup ran). A
+          # command in an `if` condition never triggers the ERR trap.
+          if "$node_bin" \
             --env-file="$app_dir/shared/.env.production" \
-            "$release_dir/scripts/migrate-postgres.mjs" --check
-          check_status=$?
-          set -e
+            "$release_dir/scripts/migrate-postgres.mjs" --check; then
+            check_status=0
+          else
+            check_status=$?
+          fi
           if [ "$check_status" -eq 3 ]; then
             echo "[deploy] migrations pending - taking the pre-migration backup"
             INMOTION_APP_DIR="$app_dir" \
