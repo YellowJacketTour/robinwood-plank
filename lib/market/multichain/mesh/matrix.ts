@@ -6,6 +6,8 @@
  * that lane is allowed to write. exactMatchOnly is always true.
  */
 
+import { coingeckoSlugs, hypersyncEvmSlugs, openSeaEvmSlugs } from "@/lib/market/multichain/chains/manifest";
+
 export type MeshCell =
   | "name"
   | "image"
@@ -75,29 +77,11 @@ export type MeshLane = {
   notes: string;
 };
 
-const OS_EVM = [
-  "eth-mainnet",
-  "polygon-mainnet",
-  "arb-mainnet",
-  "base-mainnet",
-  "opt-mainnet",
-  "bnb-mainnet",
-  "avax-mainnet",
-] as const;
+const OS_EVM = openSeaEvmSlugs();
 
-const CG_CHAINS = [
-  "eth-mainnet",
-  "polygon-mainnet",
-  "base-mainnet",
-  "arb-mainnet",
-  "opt-mainnet",
-  "bnb-mainnet",
-  "avax-mainnet",
-  "solana-mainnet",
-  "bitcoin-mainnet",
-] as const;
+const CG_CHAINS = coingeckoSlugs();
 
-const HYPERSYNC_EVM = [...OS_EVM, "zksync-mainnet"] as const;
+const HYPERSYNC_EVM = hypersyncEvmSlugs();
 
 export const MESH_LANES: MeshLane[] = [
   {

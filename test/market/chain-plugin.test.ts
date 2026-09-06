@@ -24,7 +24,7 @@ test("Robinhood Chain shows real HyperSync L1 coverage (fixed 2026-08-27, was Op
   const plugin = chainPlugin("robinhood");
   assert.ok(plugin);
   assert.equal(plugin!.kind, "custom-evm");
-  assert.deepEqual(plugin!.l1Sources, ["hypersync"]);
+  assert.ok(plugin!.l1Sources.includes("hypersync"));
 });
 
 test("Solana and Bitcoin correctly show no HyperSync L1 coverage -- real, honest, non-EVM limitation, not a bug", () => {

@@ -42,6 +42,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
+import { useDemandIntent } from "@/hooks/useDemandIntent";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency, nativeCurrencySymbol } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -328,6 +329,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // table, there is exactly one composite key to observe here, attached to
   // this component's own root element below.
   useVisibleCollectionDemand({ context: "detail" });
+  // Demand bus (lib/market/multichain/edge/demand-bus.ts): this page's
+  // intent beyond "it is on screen" -- a trait facet opened, a sweep
+  // previewed with real money -- so the mesh focuses on what this person
+  // is about to need. Best-effort, deduped, never affects rendering.
+  const publishIntent = useDemandIntent();
 
   // SMART SEARCH / FILTER -- point-and-click, no page reload, applies
   // instantly to whatever is already loaded. Token-id search matches
@@ -1356,6 +1362,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     () => Object.entries(selectedTraits).filter(([, value]) => value !== "").map(([traitType, value]) => ({ traitType, value })),
     [selectedTraits]
   );
+  useEffect(() => {
+    if (traitClauses.length === 0) return;
+    publishIntent({ kind: "facet", chainSlug, subjects: [collectionSlug], context: traitClauses[0].traitType.slice(0, 40) });
+  }, [traitClauses, publishIntent, chainSlug, collectionSlug]);
 
   const rarityFor = useCallback(
     (tokenId: string) => {
@@ -1580,7 +1590,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return;
     }
     setSweepPreview(cheapest);
-  }, [listings, filteredListings, traitClauses, sweepCount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
+    const totalWei = cheapest.reduce((sum, l) => sum + BigInt(l.priceWei), BigInt(0)).toString();
+    publishIntent({
+      kind: "sweep",
+      chainSlug,
+      subjects: [collectionSlug],
+      moneyAtStakeUsd: toUsd(totalWei, nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)) ?? 0,
+      tokenIds: cheapest.map((l) => l.tokenId),
+      context: sweepScope,
+    });
+  }, [listings, filteredListings, traitClauses, sweepCount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses, publishIntent, chainSlug, collectionSlug, toUsd, isSolana, isBitcoin]);
 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;

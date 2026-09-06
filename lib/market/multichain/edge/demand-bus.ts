@@ -176,6 +176,7 @@ export type PublishResult = {
  * in the counts, not hidden.
  */
 export async function publishIntent(intent: DemandIntent, client: { hash: string }): Promise<PublishResult> {
+  if (intent.kind === "wallet-connect" && intent.chainSlug === "all") return publishWalletConnect(intent, client);
   const subjects = [...new Set(intent.subjects.map(normalizeKey).filter(Boolean))].slice(0, MAX_SUBJECTS);
   const result: PublishResult = { accepted: subjects.length, enqueued: 0, decisions: [] };
   if (subjects.length === 0) return result;
@@ -233,5 +234,63 @@ export async function publishIntent(intent: DemandIntent, client: { hash: string
       }
     })
   );
+  return result;
+}
+
+/**
+ * A wallet just connected: what it holds is what its owner will open next.
+ * Resolve the wallet's collections per foreign EVM chain through the edge
+ * (the same `owned` cells owned-all/route.ts reads, so this costs nothing
+ * extra when that tab is open and at most one Alchemy call per chain per
+ * TTL window otherwise), then publish one wallet-connect intent per chain
+ * with the collections it actually holds as subjects. Solana/Bitcoin
+ * holdings are not resolved here (no keyless owned-by-wallet source is
+ * wired for them); that is an honest gap, not a fabricated empty.
+ */
+async function publishWalletConnect(intent: DemandIntent, client: { hash: string }): Promise<PublishResult> {
+  const owner = intent.subjects[0]?.trim();
+  const result: PublishResult = { accepted: owner ? 1 : 0, enqueued: 0, decisions: [] };
+  if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) return result;
+  const [{ FOREIGN_CHAINS }, { edgeRead }, { meteredFetch }, { pickAlchemyKey }, { ALCHEMY_NETWORK_SUBDOMAIN }] = await Promise.all([
+    import("@/lib/market/multichain/trading/foreign-chain-registry"),
+    import("@/lib/market/multichain/edge/read-gateway"),
+    import("@/lib/market/multichain/edge/provider-ledger"),
+    import("@/lib/market/multichain/discovery/alchemy-key-pool"),
+    import("@/lib/market/multichain/adapters/alchemy-network"),
+  ]);
+  const keyEntry = await pickAlchemyKey("live").catch(() => null);
+  const apiKey = keyEntry?.apiKey || "demo";
+  type OwnedItem = { chainSlug: string; contractAddress: string; collectionName: string | null; tokenId: string };
+  const perChain = await Promise.all(
+    FOREIGN_CHAINS.map(async (chain) => {
+      const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chain.chainSlug];
+      if (!subdomain || chain.chainSlug === "zksync-mainnet") return { chainSlug: chain.chainSlug, keys: [] as string[] };
+      try {
+        const { value } = await edgeRead<OwnedItem[]>(
+          { kind: "owned", chainSlug: chain.chainSlug, subject: owner.toLowerCase(), variant: { scope: "all", pageSize: 50 } },
+          async () => {
+            const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
+            url.searchParams.set("owner", owner);
+            url.searchParams.set("withMetadata", "true");
+            url.searchParams.set("pageSize", "50");
+            const res = await meteredFetch(url.toString(), undefined, { source: "alchemy-nft", keyId: keyEntry?.id ?? null, chainSlug: chain.chainSlug, costUnits: 480 });
+            if (!res.ok) throw new Error(`Alchemy ${res.status}`);
+            const data = (await res.json()) as { ownedNfts?: Array<{ tokenId: string; contract?: { address: string; name?: string | null } }> };
+            return (data.ownedNfts ?? []).map((n) => ({ chainSlug: chain.chainSlug, contractAddress: n.contract?.address ?? "", collectionName: n.contract?.name ?? null, tokenId: n.tokenId }));
+          },
+          { provider: "alchemy" }
+        );
+        return { chainSlug: chain.chainSlug, keys: [...new Set(value.map((v) => v.contractAddress).filter(Boolean))] };
+      } catch {
+        return { chainSlug: chain.chainSlug, keys: [] as string[] };
+      }
+    })
+  );
+  for (const { chainSlug, keys } of perChain) {
+    if (keys.length === 0) continue;
+    const r = await publishIntent({ kind: "wallet-connect", chainSlug, subjects: keys, context: "wallet" }, client);
+    result.enqueued += r.enqueued;
+    result.decisions.push(...r.decisions);
+  }
   return result;
 }

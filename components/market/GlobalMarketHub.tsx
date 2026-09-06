@@ -22,6 +22,7 @@ import DataSourceChip from "@/components/market/DataSourceChip";
 import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlankChip";
 import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
 import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
+import { useDemandIntent } from "@/hooks/useDemandIntent";
 
 const CollectionThumb = CollectionArtImage;
 
@@ -1396,6 +1397,21 @@ export default function GlobalMarketHub() {
     );
     return [...localMatches, ...serverOnly];
   }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices, serverCollectionHits]);
+
+  // Demand bus: a search that matched real collections is intent -- the top
+  // hits per chain get a nudge before the person clicks one.
+  const publishIntent = useDemandIntent();
+  useEffect(() => {
+    const q = debouncedFilterQuery.trim();
+    if (q.length < 2 || filtered === ranked) return;
+    const perChain = new Map<string, string[]>();
+    for (const c of filtered.slice(0, 24)) {
+      const arr = perChain.get(c.chainSlug) ?? [];
+      if (arr.length < 8) arr.push(c.contractAddress);
+      perChain.set(c.chainSlug, arr);
+    }
+    for (const [chainSlug, subjects] of perChain) publishIntent({ kind: "search", chainSlug, subjects, context: "hub" });
+  }, [filtered, ranked, debouncedFilterQuery, publishIntent]);
 
   /**
    * Creator-entity-linked search expansion, computed client-side against the
