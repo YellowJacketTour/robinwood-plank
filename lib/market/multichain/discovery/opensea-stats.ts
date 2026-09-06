@@ -140,9 +140,11 @@ export async function resolveOpenSeaSlug(
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
+    lastSlugNotFound = res.status === 404;
     await recordOpenSeaAccountFailure(slot.providerAccount, isQuotaError(res.status, bodyText), res);
     return null;
   }
+  lastSlugNotFound = false;
 
   let body: { collection?: string };
   try {
@@ -157,6 +159,10 @@ export async function resolveOpenSeaSlug(
 }
 
 let lastStatsNotFound = false;
+/** True only when the most recent slug resolution got a confirmed 404 (never for 429/5xx/timeouts). */
+let lastSlugNotFound = false;
+/** A confirmed "OpenSea does not know this contract" is remembered for a week, then re-asked (AUDIT lens 1 #4). */
+const NONE_TTL_SECONDS = 7 * 24 * 60 * 60;
 function statsNoneKey(slug: string): string {
   return `plank:market:opensea-stats-none:${slug}`;
 }
@@ -441,10 +447,13 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
        OR c.image_url IS NULL
        OR s.listed_count IS NULL
      )
-     -- Missing display metadata must outrank periodic refreshes of rows that
-     -- are already usable.  The old ordering did the reverse, so a large
-     -- catalog could permanently starve newly discovered contract shells.
-     ORDER BY (c.name IS NULL OR c.name ILIKE '0x%' OR c.image_url IS NULL) DESC, c.id
+     -- AUDIT lens 1 #3 (2026-09-06): the cursor is c.id > afterId and is
+     -- advanced to the highest id examined, so the window MUST be ordered
+     -- by id -- the earlier junk-first ordering let a window of high-id
+     -- shells advance the cursor past every real, lower-id collection.
+     -- Shells are now gated at discovery (hypersync-evm-scan.ts), which is
+     -- the right place to keep them from competing for this budget.
+     ORDER BY c.id
      LIMIT $3`,
     [chainSlug, afterId, Math.max(maxUpdates * 40, 200)]
   );
@@ -470,10 +479,14 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       continue;
     }
     if (!slug) {
+      lastSlugNotFound = false;
       slug = await resolveOpenSeaSlug(openSeaChain, row.contract_address);
       if (!slug) {
         if (!anyKeyAvailable()) break;
-        await kv.set(cacheKey, NO_SLUG);
+        // AUDIT lens 1 #4: only a confirmed 404 is remembered (with expiry);
+        // a rate limit or timeout during resolution used to brand a real
+        // collection "no slug" forever.
+        if (lastSlugNotFound) await kv.set(cacheKey, NO_SLUG, { ex: NONE_TTL_SECONDS }).catch(() => {});
         result.errors += 1;
         lastSeenId = row.id;
         continue;
@@ -492,7 +505,7 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
 
     const stats = await fetchOpenSeaCollectionStats(slug);
     if (!stats) {
-      if (lastStatsNotFound) await kv.set(noneKey, "1").catch(() => {});
+      if (lastStatsNotFound) await kv.set(noneKey, "1", { ex: NONE_TTL_SECONDS }).catch(() => {});
       result.errors += 1;
       lastSeenId = row.id;
       continue;
