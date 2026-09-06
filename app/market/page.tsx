@@ -4,6 +4,8 @@ import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
 import MarketView from "@/components/market/MarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
+import { verifyDoorCookieValue, DOOR_COOKIE_NAME } from "@/lib/market-preview-door";
+
 import { MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
@@ -37,7 +39,7 @@ export default async function MarketPage() {
   // stays false for everyone else. Never widens access the other way: a
   // false siteWideEnabled + no/invalid cookie still shows ComingSoonGate.
   const previewCookie = (await cookies()).get(MARKET_PREVIEW_COOKIE_NAME)?.value;
-  const marketEnabled = siteWideEnabled || verifyPreviewCookieValue(previewCookie);
+  const marketEnabled = siteWideEnabled || verifyPreviewCookieValue(previewCookie) || verifyDoorCookieValue((await cookies()).get(DOOR_COOKIE_NAME)?.value);
 
   return (
     <>
