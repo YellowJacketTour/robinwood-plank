@@ -91,7 +91,10 @@ export function computeIntentPriority(input: IntentPriorityInput): number {
   const usd = Math.max(0, input.moneyAtStakeUsd);
   const moneyBoost = Math.min(10, Math.floor(Math.log10(1 + usd)) * 2);
   const stalenessBoost = input.stalenessMs == null ? 6 : Math.min(6, Math.floor(Math.max(0, input.stalenessMs) / (10 * 60_000)));
-  const costPenalty = Math.min(6, Math.floor(Math.max(0, input.refreshCostUnits) / 50));
+  // A click or a sweep is the strongest signal there is; penalising it for
+  // being expensive is exactly backwards (AUDIT lens 5 D: an incomplete
+  // collection's click landed at 116, below the express lane's 118).
+  const costPenalty = input.kind === "click" || input.kind === "sweep" ? 0 : Math.min(6, Math.floor(Math.max(0, input.refreshCostUnits) / 50));
   const raw = base + watcherBoost + moneyBoost + stalenessBoost - costPenalty;
   return Math.max(DEMAND_PRIORITY.ARCHIVAL_FRONTIER, Math.min(INTENT_MAX_PRIORITY, raw));
 }

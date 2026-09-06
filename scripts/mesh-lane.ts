@@ -23,23 +23,43 @@ const argvSubject = process.argv.find((a) => a.startsWith("--subject="))?.slice(
  * AsyncLocalStorage store so concurrent in-process lanes never clobber
  * each other's signal. Script mode (one lane per child) is unchanged.
  */
-const laneSignal = new AsyncLocalStorage<{ code: number }>();
+const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null }>();
 function markIncomplete(): void {
   const store = laneSignal.getStore();
   if (store) store.code = 2;
-  else markIncomplete();
+  else process.exitCode = 2;
+}
+/**
+ * Ask the scheduler to put this job back with not_before = now + ms and
+ * release the slot now (in-process mode). In script mode the best we can
+ * do is the incomplete signal. Replaces the old sleep-inside-the-lane.
+ */
+function markDeferred(ms: number, reason: string): void {
+  const store = laneSignal.getStore();
+  if (store) {
+    store.deferMs = ms;
+    store.deferReason = reason;
+  } else {
+    process.exitCode = 2;
+  }
 }
 
-/** Run one lane in this process. 0 = done, 2 = succeeded but more work remains, 1 = failed. */
-export async function runMeshLane(source: MeshSource, chain: string, subject = ""): Promise<number> {
-  const store = { code: 0 };
+export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null };
+
+/** Run one lane in this process. code 0 = done, 2 = more work remains, 1 = failed; deferMs asks for a delayed retry. */
+export async function runMeshLaneDetailed(source: MeshSource, chain: string, subject = ""): Promise<LaneOutcome> {
+  const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null };
   try {
     await laneSignal.run(store, () => main(source, chain, subject));
-    return store.code;
+    return { code: store.code, deferMs: store.deferMs, deferReason: store.deferReason };
   } catch (e) {
     console.error(`[mesh-lane] ${source}:${chain} failed`, e instanceof Error ? e.message : e);
-    return 1;
+    return { code: 1, deferMs: null, deferReason: null };
   }
+}
+
+export async function runMeshLane(source: MeshSource, chain: string, subject = ""): Promise<number> {
+  return (await runMeshLaneDetailed(source, chain, subject)).code;
 }
 
 async function main(source: MeshSource = argvSource, chain: string = argvChain, subject: string = argvSubject): Promise<void> {
@@ -61,6 +81,14 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
   // account pool concept (unisat, ordiscan, etc.) still need this exact
   // check -- it's only wrong for the ones with a real per-account pool.
   const OPENSEA_POOL_SOURCES = new Set(["opensea-membership", "opensea-stats", "evm-metadata", "robinhood-membership"]);
+  // AUDIT lens 5 G: these handlers advance "the next tracked collection"
+  // and ignore `subject`; a demand job for a specific Solana/Bitcoin
+  // collection was being marked succeeded after hydrating something else.
+  // Fail it visibly until each handler can target a subject.
+  const SUBJECT_BLIND_SOURCES = new Set(["helius-membership", "unisat-membership", "unisat-rarity", "magiceden-solana", "ordinals-wallet"]);
+  if (subject && SUBJECT_BLIND_SOURCES.has(source)) {
+    throw new Error(`subject targeting unsupported for ${source} (job for ${subject} not executed)`);
+  }
   if (!OPENSEA_POOL_SOURCES.has(source) && await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
     // Real gap found live 2026-08-26 (Decentraland "still not progressing"
@@ -87,10 +115,7 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     // small, safe fraction of the 90s LANE_TIMEOUT_MS ceiling while being
     // long enough that repeated retries during a 20-minute jail cost
     // roughly 40 wasted checks instead of tens of thousands.
-    if (subject) {
-      await new Promise((resolve) => setTimeout(resolve, 30_000));
-      markIncomplete();
-    }
+    if (subject) markDeferred(20 * 60_000, `source ${source} jailed`);
     return;
   }
 
@@ -170,14 +195,21 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
       let attempted = 0, complete = 0, empty = 0, retry = 0, rarityFinalized = 0;
       const deadline = Date.now() + 45_000;
-      const ceiling = subject ? 250 : 75;
+      const ceiling = subject ? 500 : 75;
+      let lastAttempted = 0;
       while (attempted < ceiling && Date.now() < deadline) {
         const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
+        lastAttempted = batch.attempted;
         attempted += batch.attempted; complete += batch.complete; empty += batch.empty;
         retry += batch.retry; rarityFinalized += batch.rarityFinalized;
         if (batch.attempted === 0) break;
       }
-      console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized }));
+      // AUDIT lens 4 #1: a subject job that stopped on the ceiling or the
+      // deadline (not on exhaustion) has more work; say so, so it is
+      // re-enqueued at the same priority instead of marked done at 250.
+      const moreWork = lastAttempted > 0 && (attempted >= ceiling || Date.now() >= deadline);
+      if (subject && moreWork) markIncomplete();
+      console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized, moreWork }));
       return;
     }
     if (source === "erc4906-rescan") {
@@ -298,7 +330,13 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
         // is a far smaller cost than silently failing every genuinely
         // transient case.
         const msg = e instanceof Error ? e.message : String(e);
-        if (/pool exhausted|no OpenSea slug/i.test(msg)) {
+        if (/no OpenSea slug/i.test(msg)) {
+          // Terminal for this source: a collection OpenSea does not know
+          // cannot be enumerated from OpenSea. Not a retry (AUDIT lens 5 F).
+          console.log(`[mesh-lane] opensea-membership not applicable: ${msg.slice(0, 160)}`);
+          return;
+        }
+        if (/pool exhausted/i.test(msg)) {
           // Real regression found live 2026-08-26, moments after shipping
           // the fix above: mesh-tick.ts re-enqueues on exit=2 with no
           // delay, and its worker loop reclaims the very next job
@@ -310,9 +348,8 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
           // reclaim genuinely waits this long) gives the shared pace queue
           // real wall-clock time to drain between retries instead of
           // hammering it continuously.
-          console.log(`[mesh-lane] opensea-membership pool busy, will retry: ${msg.slice(0, 180)}`);
-          await new Promise((resolve) => setTimeout(resolve, 8_000));
-          markIncomplete();
+          console.log(`[mesh-lane] opensea-membership pool busy, deferring 10s: ${msg.slice(0, 180)}`);
+          markDeferred(10_000, "opensea pool busy");
           return;
         }
         throw e;
@@ -503,6 +540,9 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
         if (providerSource !== source) await jailSource(source, 20 * 60_000, true);
       }
       console.log(`[mesh-lane] jailed ${source}: ${msg.slice(0, 180)}`);
+      // AUDIT lens 5 G: returning here marked a demand job succeeded with
+      // no work done. Defer it past the jail instead.
+      if (subject) markDeferred(OPENSEA_POOL_SOURCES.has(source) ? 60_000 : 20 * 60_000, `rate limited: ${msg.slice(0, 120)}`);
       return;
     }
     throw e;

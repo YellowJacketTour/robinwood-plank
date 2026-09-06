@@ -361,3 +361,5 @@ E6 L1 #9/#10 per-chain source-down banner; zkSync `statsCapable:false` shown hon
 Owner-side prerequisites that no batch removes: `MAGICEDEN_API_KEY`, `UNISAT_API_KEY` mainnet, `NATIVE_BITCOIN_MAINNET_ENABLED`, funded wallets for one proof fill per chain, external audit for the foreign fill math, PSBT builders and bridge receivers, and a worker host with real connection headroom (PROGRAM-INSTANT-MAX-SYNC section 4).
 
 # FIX LOG
+
+- **Batch A shipped (2026-09-06):** A1 evm-metadata subject jobs signal `moreWork` and re-enqueue at priority (ceiling 500/slice); A2 click/sweep intents exempt from the cost penalty; A3 general workers idle-poll to the deadline; A4 standing lanes re-enqueued every 5 min inside the pass; A5 `deferDataJob` -- jailed subject jobs defer 20 min, pool-busy defers 10 s, slug-less collections are terminal for the OpenSea lane; A6 rate-limit catch defers subject jobs instead of marking them succeeded; subject-blind non-EVM sources fail visibly for subject jobs; A7 `markIncomplete` script-mode recursion fixed; A9 telemetry counts completions in the window regardless of status. Open: A8 abort signal for timed-out in-process lanes.
