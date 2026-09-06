@@ -428,6 +428,18 @@ export async function runOpenSeaStream(opts: StreamOptions): Promise<StreamStats
       const written = batch.length > 0 ? await writeMarketEventRows(batch) : 0;
       stats.written += written;
       stats.skipped += batch.length - written;
+      if (written > 0) {
+        // One aggregator for volume/grade/board: refresh the collections
+        // this flush touched, per chain (2026-09-06).
+        const { updateVolumeFromMarketEvents } = await import("@/lib/market/multichain/store");
+        const byChain = new Map<string, Set<string>>();
+        for (const row of batch) {
+          const set = byChain.get(row.chainSlug) ?? new Set<string>();
+          set.add(row.collectionKey);
+          byChain.set(row.chainSlug, set);
+        }
+        for (const [chain, keys] of byChain) await updateVolumeFromMarketEvents(chain, [...keys]).catch(() => undefined);
+      }
       if (floors.length > 0) stats.floors += await writeFloorObservations(floors);
       recordExternalCall({ source: "opensea-stream", keyId: opts.keyId ?? null, chainSlug: null, costUnits: 0, latencyMs: Date.now() - t0, outcome: "ok" });
     } catch (error) {
