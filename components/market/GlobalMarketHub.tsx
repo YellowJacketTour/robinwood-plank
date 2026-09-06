@@ -409,17 +409,22 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
   const isSolana = c.chainSlug === "solana-mainnet";
   const isBitcoin = c.chainSlug === "bitcoin-mainnet";
   const isRobinhood = c.chainSlug === "robinhood";
+  // AUDIT lens 1 fabrication (2026-09-06): these explanations used to promise
+  // data that the pipeline could not deliver ("loads the first time viewed",
+  // "lands on the next sync"). Each now states what is actually known.
   if (field === "holders") {
     if (isSolana || isBitcoin) return "Holder counts aren't sourced for this chain yet -- no clean single-call endpoint exists on Helius DAS or UniSat/Ordiscan.";
-    return "Not fetched yet -- holder count loads the first time this collection's own page is viewed.";
+    return "Holder count not observed yet -- it is filled by the Alchemy owner pass, which is skipped while that source is rate-limited.";
   }
-  if (isSolana) return "Magic Eden's public API has no volume/sales/change feed for this collection -- floor price is all it exposes.";
-  if (isBitcoin) return "UniSat/Ordiscan expose collection metadata, not a volume/sales/change feed for this collection.";
+  if (isSolana) return field === "volume" || field === "sales"
+    ? "Solana volume/sales come from CoinGecko's daily feed when this collection is listed there; not every collection is."
+    : "No second Solana floor observation yet -- change needs two real observations about a day apart.";
+  if (isBitcoin) return "UniSat/Ordiscan expose collection metadata; volume/sales/change come from CoinGecko's daily feed when this collection is listed there.";
   if (isRobinhood && field !== "listed") {
     return "OpenSea indexed this Robinhood contract with no floor/volume snapshot -- a dash is unknown, not a fake zero.";
   }
-  if (field === "change") return "Needs at least two real syncs of this collection to compute a real change -- not yet available.";
-  return "This collection hasn't been through an OpenSea stats pass yet -- real data lands on the next sync, never fabricated in the meantime.";
+  if (field === "change") return "Change needs two real floor observations about a day apart -- not yet available.";
+  return "No OpenSea stats observed for this collection yet -- OpenSea may not know it, or its turn in the stats pass hasn't come; a dash is unknown, never a fake zero.";
 }
 
 function isHomeRow(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): boolean {
