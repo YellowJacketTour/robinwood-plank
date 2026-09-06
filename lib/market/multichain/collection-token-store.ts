@@ -387,12 +387,23 @@ export async function writeTokenMetadataResult(input: {
   chainSlug: string; collectionSlug: string; tokenId: string;
   state: "complete" | "empty" | "retry"; error?: string | null;
 }): Promise<void> {
+  // AUDIT lens 4 #3 (2026-09-06): retries are counted (migration 101) and
+  // capped -- past METADATA_ATTEMPT_CAP a token becomes 'empty' with the
+  // reason, instead of recycling every 30 minutes forever and blocking the
+  // collection's rarity finalize.
   await postgresQuery(
-    `UPDATE plank_collection_tokens SET metadata_state = $4,
-       metadata_attempted_at = NOW(), metadata_error = $5, projected_at = NOW()
+    `UPDATE plank_collection_tokens SET
+       metadata_attempts = CASE WHEN $4 = 'retry' THEN metadata_attempts + 1 ELSE metadata_attempts END,
+       metadata_state = CASE WHEN $4 = 'retry' AND metadata_attempts + 1 >= $6 THEN 'empty' ELSE $4 END,
+       metadata_attempted_at = NOW(),
+       metadata_error = CASE WHEN $4 = 'retry' AND metadata_attempts + 1 >= $6 THEN 'gave up after ' || $6 || ' attempts: ' || COALESCE($5, 'unknown error') ELSE $5 END,
+       projected_at = NOW()
      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3`,
-    [input.chainSlug, input.collectionSlug, input.tokenId, input.state, input.error?.slice(0, 500) ?? null]);
+    [input.chainSlug, input.collectionSlug, input.tokenId, input.state, input.error?.slice(0, 400) ?? null, METADATA_ATTEMPT_CAP]);
 }
+
+/** Retries per token before it is declared empty (AUDIT lens 4 #3). */
+export const METADATA_ATTEMPT_CAP = 5;
 
 function normalizeTraits(value: unknown): Array<{ traitType: string; value: string }> {
   if (!Array.isArray(value)) return [];
