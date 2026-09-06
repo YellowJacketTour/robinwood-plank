@@ -112,6 +112,24 @@ export type MagicEdenTxInstruction = {
  * EVM tokenId -- there is no separate contract+tokenId pair on Solana,
  * the mint address IS the unique identifier).
  */
+/**
+ * Magic Eden's v2 REST instruction endpoints take `price` as a DECIMAL SOL
+ * number ("Price in SOL" in the OpenAPI); only the official TypeScript SDK
+ * accepts lamports and converts internally. Sending lamports over REST is
+ * a 1e9x overbid attempt (AUDIT lens 3 #6, confirmed by the research pass
+ * against docs.magiceden.io/reference/get_instructions-buy-now).
+ */
+export function lamportsToSolDecimal(lamports: string): number {
+  const value = BigInt(lamports);
+  if (value < 0n) throw new Error("lamports must be non-negative");
+  const whole = value / 1_000_000_000n;
+  const frac = value % 1_000_000_000n;
+  const sol = Number(`${whole}.${frac.toString().padStart(9, "0")}`);
+  if (!Number.isFinite(sol)) throw new Error("lamports out of range for a decimal SOL price");
+  if (BigInt(Math.round(sol * 1e9)) !== value) throw new Error("lamports cannot be represented exactly as decimal SOL");
+  return sol;
+}
+
 export async function buildMagicEdenBuyNow(input: {
   buyerAddress: string;
   tokenMint: string;
@@ -123,7 +141,7 @@ export async function buildMagicEdenBuyNow(input: {
   return meFetch<MagicEdenTxInstruction>("/instructions/buy_now", {
     buyer: input.buyerAddress,
     tokenMint: input.tokenMint,
-    price: input.priceLamports,
+    price: lamportsToSolDecimal(input.priceLamports),
     // Marketplank's Solana fee capture (audit finding fix, 2026-08-19) --
     // Magic Eden's own documented `buyerReferral` field, paid from their
     // Auction House fee, not a second fee layer on top of the trade price.
@@ -157,7 +175,7 @@ export async function buildMagicEdenBid(input: {
   return meFetch<MagicEdenTxInstruction>("/instructions/buy", {
     buyer: input.buyerAddress,
     tokenMint: input.tokenMint,
-    price: input.priceLamports,
+    price: lamportsToSolDecimal(input.priceLamports),
     buyerReferral: SOLANA_FEE_RECIPIENT,
     ...(input.priorityFeeMicroLamports ? { prioFeeMicroLamports: input.priorityFeeMicroLamports } : {}),
   });
@@ -198,7 +216,7 @@ export async function buildMagicEdenList(input: {
   return meFetch<MagicEdenTxInstruction>("/instructions/sell", {
     seller: input.sellerAddress,
     tokenMint: input.tokenMint,
-    price: input.priceLamports,
+    price: lamportsToSolDecimal(input.priceLamports),
   });
 }
 
@@ -212,6 +230,6 @@ export async function buildMagicEdenSellNow(input: {
   return meFetch<MagicEdenTxInstruction>("/instructions/sell_now", {
     seller: input.sellerAddress,
     tokenMint: input.tokenMint,
-    price: input.priceLamports,
+    price: lamportsToSolDecimal(input.priceLamports),
   });
 }

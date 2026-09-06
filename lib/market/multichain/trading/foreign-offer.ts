@@ -44,6 +44,7 @@ import {
   FOREIGN_SEAPORT_ADDRESS,
 } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
+import { chainDisplayName, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { normalizeTokenIds } from "@/lib/market/criteria";
 import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_OFFER_FEE_BPS } from "@/lib/constants";
 
@@ -55,12 +56,16 @@ async function connectedSeaport(chainSlug: string) {
   if (!chain) throw new Error(`foreign-offer: "${chainSlug}" is not a supported foreign chain.`);
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
+  // AUDIT lens 3 #4 (2026-09-06): this used to add the chain to the wallet
+  // with symbol "ETH" (wrong on Polygon/BNB/Avalanche), a "/v2/demo" RPC and
+  // no explorer -- persisting a broken network into the user's wallet. Same
+  // registry-sourced parameters the buy path uses (foreign-fulfill.ts).
   await ensureChain({
     chainId: chain.chainId,
-    name: chainSlug,
-    nativeCurrencySymbol: "ETH",
-    rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/demo`,
-    blockExplorerUrl: "",
+    name: chainDisplayName(chainSlug),
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
+    rpcUrl: foreignRpcUrls(chainSlug)[0],
+    blockExplorerUrl: chain.blockExplorerUrl,
   });
   const browserProvider = new BrowserProvider(injected, { chainId: chain.chainId, name: chainSlug });
   const signer = await browserProvider.getSigner();

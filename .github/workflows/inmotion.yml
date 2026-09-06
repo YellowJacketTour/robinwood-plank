@@ -1272,7 +1272,10 @@ jobs:
           # recurring schedule -- a broken script must never get scheduled
           # to fail silently every two minutes with nobody watching.
           cd "$app_dir/current"
-          UV_THREADPOOL_SIZE=2 "$flock_bin" -w 55 "$lock_file" \
+          # The proof run must not compete with the live always-on scheduler
+          # for the same lock (found 2026-09-06: flock -w 55 timed out against
+          # the 55-minute cron hold and reported a healthy release as failed).
+          UV_THREADPOOL_SIZE=2 "$flock_bin" -w 55 "$lock_file.proof" \
             "$node_bin" --env-file="$env_file" "$artifact" --limit=2 --in-process --max-seconds=180 \
             >> "$log_file" 2>&1 || { status=$?; echo "[provision] proof run failed with exit status $status (137/143 = killed by the host); host limits:" >&2; ulimit -u -v -m 2>&1 | sed 's/^/  /' >&2; cat /proc/loadavg >&2; echo "[provision] last 120 log lines:" >&2; tail -n 120 "$log_file" >&2; exit 1; }
           tail -n 5 "$log_file"
