@@ -301,7 +301,7 @@ test("the live curve advances across a CONTINUOUS time horizon and the launch co
 
 test("the SYSTEM & MATH manual is a readable, plain-language, formula-accurate field manual", () => {
   // Illustrations that anchor the visual identity survive.
-  assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Accelerating multiplier curve"/);
+  assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Multiplier vs\. time,/);
   assert.match(mechanicsDeckSource, /<svg[^>]+aria-label="Flow diagram of credits"/);
   assert.equal((mechanicsDeckSource.match(/class="ball(?: win)?"/g) || []).length, 16);
   // Six-step strip.
@@ -330,9 +330,13 @@ test("the SYSTEM & MATH manual is a readable, plain-language, formula-accurate f
   assert.match(mechanicsDeckSource, /e\^\(0\.22·t\)/);
   assert.match(mechanicsDeckSource, /4\.50%/);
   assert.match(mechanicsDeckSource, /2\.50%/);
-  assert.match(mechanicsDeckSource, /pot × 0\.018/);
+  assert.match(mechanicsDeckSource, /pot × 0\.0202/);
   assert.match(mechanicsDeckSource, /max\(base × 1\.05, base \+ 50,000\)/);
-  assert.match(mechanicsDeckSource, />20%<\/strong><span>Operations</);
+  assert.match(mechanicsDeckSource, />6%<\/strong><span>Operations</);
+  // v3 vault-bonus/carve-ceiling mechanism (SPEC-monotonic-vault-positive-
+  // sum-2026-09-05), now that it ships on by default.
+  assert.match(mechanicsDeckSource, /25% × \(1 − 0\.999<sup>n<\/sup>\)/);
+  assert.match(mechanicsDeckSource, /rounds ever contributed/);
 });
 
 test("the SYSTEM & MATH manual reserves no viewport-height block and has no text under 11px", () => {
