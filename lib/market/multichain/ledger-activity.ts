@@ -58,6 +58,7 @@ export type LedgerActivityKind =
 
 export type LedgerVenueId =
   | "wallet-transfer"
+  | "opensea-stream"
   | "seaport"
   | "wyvern"
   | "looksrare"
@@ -126,6 +127,19 @@ const UNION_SQL = `
          NULL::text AS currency_token, NULL::text AS price_wei
   FROM plank_market_events
   WHERE chain_slug = $1 AND lower(collection_key) = $2 AND event_type IN ('transfer', 'mint')
+
+  UNION ALL
+  -- OpenSea Stream sales (lib/market/multichain/edge/opensea-stream.ts):
+  -- observed within seconds of the trade, no block number yet. Once the
+  -- on-chain fill indexer has the same transaction, the indexed row wins
+  -- and the stream row is excluded, so a sale never shows twice.
+  SELECT 'sale', 'opensea-stream',
+         e.tx_hash, e.sub_index AS log_index, NULL::text AS block_number, e.block_timestamp,
+         e.seller, e.buyer, e.token_id::text, NULL,
+         e.currency_address, e.amount_atomic::text
+  FROM plank_market_events e
+  WHERE e.chain_slug = $1 AND lower(e.collection_key) = $2 AND e.event_type = 'sale' AND e.venue_id = 'opensea-stream'
+    AND NOT EXISTS (SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = $1 AND f.tx_hash = e.tx_hash)
 
   UNION ALL
   SELECT 'sale', 'seaport',
