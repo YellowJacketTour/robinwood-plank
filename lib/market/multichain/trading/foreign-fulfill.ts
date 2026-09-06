@@ -63,6 +63,8 @@ import { Contract, BrowserProvider } from "ethers";
 import type { TipInputItem } from "@opensea/seaport-js/lib/types";
 import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_FILL_TIP_BPS, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
 import { foreignChainByChainSlug, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { priceForeignOrder } from "@/lib/market/multichain/trading/foreign-orders";
+import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
 import type { SeaportChain } from "@/lib/market/seaport";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
@@ -932,6 +934,46 @@ export async function buyForeignListingNow(input: {
 export type ForeignSweepResult = { txHash: string; attempted: number };
 
 /**
+ * AUDIT lens 3 #1/#2 (2026-09-06, confirmed by the execution-safety research):
+ * a sweep must execute exactly the order set the buyer confirmed, each order
+ * at no more than its previewed price, and the whole batch under a total
+ * cap that includes this app's own tips. Pure so it is unit-tested.
+ * Returns the checked orders and the total in native wei.
+ */
+export function assertSweepMatchesPreview(input: {
+  freshOrders: ForeignSeaportOrder[];
+  expectedPrices: Record<string, string>;
+  expectedTotalWei?: string | null;
+  chain: { nativeCurrencySymbol: string; offerCurrencyAddress: string | null; offerCurrencySymbol: string };
+  tipBps: number;
+}): { orders: ForeignSeaportOrder[]; totalWei: bigint; tipsWei: bigint } {
+  const orders: ForeignSeaportOrder[] = [];
+  let total = 0n;
+  let tips = 0n;
+  for (const order of input.freshOrders) {
+    const expected = input.expectedPrices[order.orderHash.toLowerCase()] ?? input.expectedPrices[order.orderHash];
+    if (expected == null) throw new Error(`Sweep refused: order ${order.orderHash.slice(0, 10)} was not in the confirmed preview.`);
+    const pricing = priceForeignOrder(order.parameters, input.chain);
+    if (!pricing.nativeEquivalent) {
+      throw new Error(`Sweep refused: order ${order.orderHash.slice(0, 10)} is priced in ${pricing.currencySymbol}, not ${input.chain.nativeCurrencySymbol}.`);
+    }
+    if (pricing.priceAtomic > BigInt(expected)) {
+      throw new Error(`Sweep refused: the price of ${order.orderHash.slice(0, 10)} rose above what you confirmed.`);
+    }
+    const tip = (pricing.priceAtomic * BigInt(input.tipBps)) / 10_000n;
+    total += pricing.priceAtomic + tip;
+    tips += tip;
+    orders.push(order);
+  }
+  if (input.expectedTotalWei != null) {
+    const expectedTips = Object.values(input.expectedPrices).reduce((acc, p) => acc + (BigInt(p) * BigInt(input.tipBps)) / 10_000n, 0n);
+    const cap = BigInt(input.expectedTotalWei) + expectedTips;
+    if (total > cap) throw new Error("Sweep refused: the batch total exceeds the confirmed total.");
+  }
+  return { orders, totalWei: total, tipsWei: tips };
+}
+
+/**
  * Sweep the current cheapest N foreign-chain listings for a collection in
  * one transaction. Re-fetches fresh fulfillment data for EACH item (same
  * freshness requirement as buyForeignListingNow) right before building the
@@ -946,6 +988,15 @@ export async function sweepForeignListings(input: {
   traits?: ForeignTraitClause[];
   /** Hard ceiling on total native spend (price + tips) for the whole batch -- see the cap check below. */
   maxTotalSpendWei?: string;
+  /**
+   * The exact order hashes the buyer confirmed, with the price each was
+   * shown at (2026-09-06). When present, ONLY these orders are fetched and
+   * filled, each asserted at or below its previewed price, and the batch is
+   * capped at the confirmed total plus this app's tips.
+   */
+  orderHashes?: string[];
+  expectedPrices?: Record<string, string>;
+  expectedTotalWei?: string;
 }): Promise<ForeignSweepResult> {
   // Same real fix as buyForeignListingNow: router.sweepBuy always threw
   // (undeployed router). Now batch-fulfills directly against Seaport,
@@ -959,15 +1010,18 @@ export async function sweepForeignListings(input: {
   }
   const { buyerAddress } = await connectedForeignAccount(input.chainSlug);
 
-  const summaries = await fetchFloorListingSummaries({
-    chainSlug: input.chainSlug,
-    collectionSlug: input.collectionSlug,
-    count: input.count,
-    traits: input.traits,
-  });
+  const confirmedHashes = input.orderHashes?.length ? input.orderHashes : null;
+  const summaries = confirmedHashes
+    ? confirmedHashes.map((orderHash) => ({ orderHash }))
+    : await fetchFloorListingSummaries({
+        chainSlug: input.chainSlug,
+        collectionSlug: input.collectionSlug,
+        count: input.count,
+        traits: input.traits,
+      });
   if (summaries.length === 0) throw new Error("No listings available to sweep right now.");
 
-  const freshOrders: ForeignSeaportOrder[] = [];
+  let freshOrders: ForeignSeaportOrder[] = [];
   for (const summary of summaries) {
     try {
       const fresh = await fetchFulfillmentData({
@@ -984,6 +1038,23 @@ export async function sweepForeignListings(input: {
     }
   }
   if (freshOrders.length === 0) throw new Error("None of the current listings could be freshly re-signed -- try again.");
+
+  if (confirmedHashes && input.expectedPrices) {
+    const manifest = chainManifest(input.chainSlug) ?? { nativeCurrencySymbol: "ETH", offerCurrencyAddress: null, offerCurrencySymbol: "WETH" };
+    const checked = assertSweepMatchesPreview({
+      freshOrders,
+      expectedPrices: input.expectedPrices,
+      expectedTotalWei: input.expectedTotalWei ?? input.maxTotalSpendWei ?? null,
+      chain: manifest,
+      tipBps: MARKETPLANK_FOREIGN_FILL_TIP_BPS,
+    });
+    freshOrders = checked.orders;
+  } else if (input.maxTotalSpendWei) {
+    // Legacy callers without a preview: still honour the declared cap
+    // (it was previously accepted and never read).
+    const total = freshOrders.reduce((acc, o) => acc + considerationTotal(o), 0n);
+    if (total > BigInt(input.maxTotalSpendWei)) throw new Error("Sweep refused: the batch total exceeds the spend cap.");
+  }
 
   const { fulfillOrdersBatch } = await import("@/lib/market/seaport");
   const chain = await seaportChainFor(input.chainSlug);

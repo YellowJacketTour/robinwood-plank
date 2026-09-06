@@ -1647,11 +1647,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setStatus(`Swept ${attempted} of ${sweepPreview.length} item(s).`);
       } else {
         const { sweepForeignListings } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+        // AUDIT lens 3 #1/#2 (2026-09-06): the sweep executes exactly the
+        // previewed orders (tier/trait scope included, because the preview
+        // already applied it) at no more than their previewed prices.
+        const previewed = sweepPreview.filter((l) => l.foreignOrderHash);
+        const expectedPrices = Object.fromEntries(previewed.map((l) => [l.foreignOrderHash as string, l.priceWei]));
+        const expectedTotalWei = previewed.reduce((acc, l) => acc + BigInt(l.priceWei), 0n).toString();
         const result = await sweepForeignListings({
           chainSlug,
           collectionSlug,
-          count: sweepPreview.length,
+          count: previewed.length,
           traits: traitClauses.length > 0 ? traitClauses : undefined,
+          orderHashes: previewed.map((l) => l.foreignOrderHash as string),
+          expectedPrices,
+          expectedTotalWei,
         });
         setSweepPreview(null);
         setStatus(`Swept ${result.attempted} item(s).`);
