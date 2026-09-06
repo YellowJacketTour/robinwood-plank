@@ -509,8 +509,8 @@ function compareByColumn(
     case "name":
       return dir === "asc" ? (a.name ?? "").localeCompare(b.name ?? "") : (b.name ?? "").localeCompare(a.name ?? "");
     case "floor": {
-      const fa = toUsd(a.floorPriceWei, a.floorPriceCurrency);
-      const fb = toUsd(b.floorPriceWei, b.floorPriceCurrency);
+      const fa = toUsd(displayFloorWei(a), a.floorPriceCurrency);
+      const fb = toUsd(displayFloorWei(b), b.floorPriceCurrency);
       return compareNullable(fa, fb, dir);
     }
     case "change":
@@ -1278,7 +1278,10 @@ export default function GlobalMarketHub() {
   }, [collections, chainCounts]);
 
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
-  const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
+  const floorNative = (c: TrackedCollection): number | null => {
+    const wei = displayFloorWei(c);
+    return wei ? Number(wei) / 1e18 : null;
+  };
 
   // A marketplace may intentionally group several contracts under one
   // branded collection (XCOPY Editions is a live example). Shared art is
@@ -2091,9 +2094,9 @@ export default function GlobalMarketHub() {
                         })()}
                       </span>
                       {hero.sales24h ? <span>{" · "}{hero.sales24h} sales</span> : null}
-                      {hero.floorPriceWei && (
+                      {displayFloorWei(hero) && (
                         <span className="inline-flex items-center gap-1">
-                          {" · "}Floor {formatCompactNative(hero.floorPriceWei).display}
+                          {" · "}Floor {formatCompactNative(displayFloorWei(hero) as string).display}
                           <FloorCurrencyMark collection={hero} />
                         </span>
                       )}
@@ -2595,11 +2598,11 @@ export default function GlobalMarketHub() {
                     {displayName(c)}
                   </p>
                   <p className="truncate text-[0.65rem] text-foreground/50">
-                    {c.floorPriceWei ? (
+                    {displayFloorWei(c) ? (
                       <>
-                        {formatCompactNative(c.floorPriceWei).display}
+                        {formatCompactNative(displayFloorWei(c) as string).display}
                         {(() => {
-                          const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                          const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
                           return usd != null ? ` · ${formatUsdCompact(usd)}` : "";
                         })()}
                       </>

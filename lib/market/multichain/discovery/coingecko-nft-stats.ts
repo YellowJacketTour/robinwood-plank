@@ -201,8 +201,10 @@ type NftDetail = {
 };
 
 /** Same 18-decimal-equivalent wei-string convention every adapter in this app uses for a native-currency decimal amount. */
+/** Same ceiling opensea-stats.ts and alchemy-nft.ts enforce (AUDIT lens 1 fabrication, 2026-09-06): a garbage vendor value must never become a real floor. */
+const MAX_PLAUSIBLE_FLOOR = 100_000;
 function toWeiString(decimalAmount: number | null | undefined): string | null {
-  if (decimalAmount == null || !Number.isFinite(decimalAmount) || decimalAmount <= 0) return null;
+  if (decimalAmount == null || !Number.isFinite(decimalAmount) || decimalAmount <= 0 || decimalAmount > MAX_PLAUSIBLE_FLOOR) return null;
   const scaled = Math.round(decimalAmount * 1e9);
   return (BigInt(scaled) * BigInt(1_000_000_000)).toString();
 }
