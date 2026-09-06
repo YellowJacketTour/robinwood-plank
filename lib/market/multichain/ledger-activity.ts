@@ -250,7 +250,7 @@ export async function deriveApproxHolderCountFromLedger(
        SELECT DISTINCT ON (token_id) token_id, to_addr
        FROM events
        WHERE token_id IS NOT NULL AND to_addr IS NOT NULL
-       ORDER BY token_id, block_number DESC, log_index DESC
+       ORDER BY token_id, block_number::numeric DESC NULLS LAST, log_index DESC
      )
      SELECT COUNT(DISTINCT to_addr)::text AS holder_count, (SELECT COUNT(*) FROM events)::text AS sample_size
      FROM latest_per_token`,
@@ -292,7 +292,9 @@ export async function readLedgerActivity(input: {
 
   const result = await postgresQuery<UnionRow>(
     `SELECT * FROM (${UNION_SQL}) AS unioned
-     ORDER BY block_number DESC, log_index DESC
+     -- AUDIT lens 6 #6: block_number is text in the union; text ordering put
+     -- "9999999" above "10000000" and NULL stream rows first forever.
+     ORDER BY COALESCE(block_timestamp, to_timestamp(0)) DESC, block_number::numeric DESC NULLS LAST, log_index DESC
      LIMIT $3`,
     [input.chainSlug, contract, input.limit]
   );

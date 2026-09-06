@@ -41,7 +41,13 @@ test("staleness raises and refresh cost lowers priority; never-hydrated counts a
   const expensive = computeIntentPriority({ ...base, stalenessMs: 0, refreshCostUnits: 300 });
   assert.equal(stale - fresh, 3);
   assert.equal(never - fresh, 6);
-  assert.equal(fresh - expensive, 6);
+  // AUDIT lens 5 D (2026-09-06): a click is never cost-penalised -- an
+  // expensive incomplete collection is exactly what the visitor opened.
+  assert.equal(fresh - expensive, 0);
+  const facetBase = { kind: "facet" as const, watchers: 1, moneyAtStakeUsd: 0 };
+  const facetFresh = computeIntentPriority({ ...facetBase, stalenessMs: 0, refreshCostUnits: 0 });
+  const facetExpensive = computeIntentPriority({ ...facetBase, stalenessMs: 0, refreshCostUnits: 300 });
+  assert.equal(facetFresh - facetExpensive, 6, "non-click intents still pay the cost penalty");
 });
 
 test("unknown keys are pinned to the UNKNOWN_KEY tier regardless of money or watchers (junk cannot skip the line)", () => {

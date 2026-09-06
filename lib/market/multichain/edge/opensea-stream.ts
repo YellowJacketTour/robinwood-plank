@@ -25,6 +25,7 @@ import { recordExternalCall } from "@/lib/market/multichain/edge/provider-ledger
  */
 
 export const OPENSEA_STREAM_URL = "wss://stream.openseabeta.com/socket/websocket";
+const WANTED_KIND_RE = /"(item_sold|item_listed|item_metadata_updated|phx_reply)"/;
 
 export type StreamEventKind =
   | "item_listed"
@@ -204,7 +205,7 @@ export async function writeMarketEventRows(rows: MarketEventRow[]): Promise<numb
       row.chainSlug, row.eventType, row.collectionKey, row.tokenId, row.txHash, row.subIndex, row.blockTimestamp,
       row.seller, row.buyer, row.maker, row.taker, row.currencyAddress, row.currencySymbol, row.currencyDecimals,
       row.amountAtomic, row.amountUsd, row.amountUsd ? "opensea-stream-payment-token" : null,
-      `${row.chainSlug}:opensea-stream:${row.txHash}:${row.subIndex}`, JSON.stringify(row.raw)
+      `${row.chainSlug}:opensea-stream:${row.txHash}:${row.subIndex}`, JSON.stringify(row.raw).slice(0, 4_000)
     );
     const ph = Array.from({ length: cols }, (_, i) => `$${base + i + 1}`);
     tuples.push(`(${ph[0]}, 'opensea-stream', 'opensea', ${ph[1]}, ${ph[2]}, ${ph[3]}, ${ph[4]}, 0, ${ph[5]}, ${ph[6]}::timestamptz, ${ph[7]}, ${ph[8]}, ${ph[9]}, ${ph[10]}, ${ph[11]}, ${ph[12]}, ${ph[13]}, ${ph[14]}::numeric, ${ph[15]}::numeric, ${ph[16]}, 'observed', 'eip155', ${ph[17]}, ${ph[18]}::jsonb)`);
@@ -314,29 +315,54 @@ export function selectEvent(kind: string, row: MarketEventRow | null, tracked: S
 }
 
 /** Lowest ask per (chain, collection) in a flush window -> one floor observation each. */
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/**
+ * A listing is eligible to move a collection's floor only when it is a
+ * plain ask (not an auction), unexpired, and priced in the chain's native
+ * token or its wrapped native (1:1). AUDIT lens 2 #7: before this, a
+ * 6-decimal USDC ask always "won" the lowest-amount comparison and an
+ * English auction's start price was treated as an ask.
+ */
+export function floorEligible(row: MarketEventRow, now: number = Date.now()): boolean {
+  if (!row.amountAtomic || !row.currencySymbol) return false;
+  const listingType = typeof row.raw.listing_type === "string" ? row.raw.listing_type.toLowerCase() : null;
+  if (listingType && listingType !== "basic") return false;
+  const exp = typeof row.raw.expiration_date === "string" ? Date.parse(row.raw.expiration_date) : NaN;
+  if (Number.isFinite(exp) && exp < now) return false;
+  const wrapped = CHAIN_MANIFESTS.find((m) => m.chainSlug === row.chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const addr = row.currencyAddress?.toLowerCase() ?? null;
+  if (addr === null || addr === ZERO_ADDRESS) return true;
+  return wrapped !== null && addr === wrapped;
+}
+
 export async function writeFloorObservations(rows: MarketEventRow[]): Promise<number> {
   const { recordFloorObservation } = await import("@/lib/market/multichain/store");
   const lowest = new Map<string, MarketEventRow>();
   for (const row of rows) {
-    if (!row.amountAtomic || !row.currencySymbol) continue;
+    if (!floorEligible(row)) continue;
     const key = `${row.chainSlug}:${row.collectionKey}`;
     const cur = lowest.get(key);
     try {
-      if (!cur || BigInt(row.amountAtomic) < BigInt(cur.amountAtomic as string)) lowest.set(key, row);
+      if (!cur || BigInt(row.amountAtomic as string) < BigInt(cur.amountAtomic as string)) lowest.set(key, row);
     } catch {
       /* non-numeric amount: ignore */
     }
   }
   let written = 0;
   for (const row of lowest.values()) {
-    await recordFloorObservation(row.chainSlug, row.collectionKey, {
-      priceAtomic: row.amountAtomic,
-      currency: row.currencySymbol,
-      marketplace: "opensea",
-      listedCount: null,
-      source: "opensea-stream",
-    });
-    written += 1;
+    try {
+      await recordFloorObservation(row.chainSlug, row.collectionKey, {
+        priceAtomic: row.amountAtomic,
+        currency: row.currencySymbol,
+        marketplace: "opensea",
+        listedCount: null,
+        source: "opensea-stream",
+      });
+      written += 1;
+    } catch {
+      // One untracked or renormalized key must not discard the rest of the window (AUDIT lens 5 stream risks).
+    }
   }
   return written;
 }
@@ -429,6 +455,8 @@ export async function runOpenSeaStream(opts: StreamOptions): Promise<StreamStats
       let ref = 1;
       let heartbeat: NodeJS.Timeout | null = null;
       let watchdog: NodeJS.Timeout | null = null;
+      let lastMessageAt = Date.now();
+      const SILENCE_MS = 90_000;
       const ws = new WS(`${OPENSEA_STREAM_URL}?token=${encodeURIComponent(opts.apiKey)}`);
       const finish = () => {
         if (heartbeat) clearInterval(heartbeat);
@@ -444,14 +472,34 @@ export async function runOpenSeaStream(opts: StreamOptions): Promise<StreamStats
             /* closing */
           }
         }, 30_000);
+        lastMessageAt = Date.now();
         watchdog = setInterval(() => {
-          if (stop || Date.now() >= deadline) ws.close();
+          if (stop || Date.now() >= deadline) {
+            ws.close();
+            return;
+          }
+          // Liveness (AUDIT lens 5 stream risks): the wildcard topic never
+          // goes quiet for long; a socket with no frame for SILENCE_MS is
+          // half-open. Close it so the reconnect loop takes over.
+          if (Date.now() - lastMessageAt > SILENCE_MS) {
+            log(`[opensea-stream] no frames for ${Math.round((Date.now() - lastMessageAt) / 1000)}s, reconnecting`);
+            ws.close();
+          }
         }, 1_000);
         log(`[opensea-stream] connected, joined collection:*`);
         backoffMs = 1_000;
       });
       ws.on("message", (data: unknown) => {
-        const env = parseEnvelope(String(data));
+        lastMessageAt = Date.now();
+        const text = String(data);
+        // Cheap pre-filter: ~3,600 frames/s on a shared core; only three
+        // event kinds can produce a write, so skip JSON.parse for the rest.
+        if (!WANTED_KIND_RE.test(text)) {
+          stats.received += 1;
+          stats.skipped += 1;
+          return;
+        }
+        const env = parseEnvelope(text);
         if (!env) return;
         if (env.event === "phx_reply" && env.topic === "collection:*") {
           const status = (env.payload as Record<string, unknown> | undefined)?.status;
