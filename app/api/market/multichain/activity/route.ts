@@ -96,6 +96,42 @@ type OpenSeaEvent = {
   nft?: { identifier?: string; name?: string; image_url?: string } | null;
 };
 
+/**
+ * Ledger sales for a non-EVM collection (AUDIT lens 6 #10, 2026-09-06):
+ * plank_market_events rows written by the Helius / UniSat / settlement
+ * scans, tagged source "first-party-ledger" like the EVM branch's rows.
+ */
+async function readLedgerSalesNonEvm(chainSlug: string, collectionKey: string, limit: number) {
+  const { postgresQuery, hasPostgresConfig } = await import("@/lib/postgres");
+  if (!hasPostgresConfig()) return [];
+  const decimals = isSolanaChainSlug(chainSlug) ? 9 : 8;
+  const symbol = isSolanaChainSlug(chainSlug) ? "SOL" : "BTC";
+  const rows = await postgresQuery<{ venue_id: string; event_type: string; tx_hash: string; block_timestamp: Date | null; seller: string | null; buyer: string | null; token_id: string | null; amount_atomic: string | null; amount_usd: string | null }>(
+    `SELECT venue_id, event_type, tx_hash, block_timestamp, seller, buyer, token_id, amount_atomic::text, amount_usd::text
+       FROM plank_market_events
+      WHERE chain_slug = $1 AND lower(collection_key) = lower($2) AND event_type IN ('sale','transfer','mint') AND finality <> 'reverted'
+      ORDER BY COALESCE(block_timestamp, to_timestamp(0)) DESC, id DESC
+      LIMIT $3`,
+    [chainSlug, collectionKey, limit]
+  );
+  return Promise.all(rows.rows.map(async (r) => ({
+    source: "first-party-ledger" as const,
+    type: r.event_type,
+    kind: r.event_type,
+    venueId: r.venue_id,
+    timestamp: r.block_timestamp ? new Date(r.block_timestamp).toISOString() : null,
+    transaction: r.tx_hash,
+    priceWei: r.amount_atomic ? (BigInt(r.amount_atomic) * BigInt(10 ** (18 - decimals))).toString() : null,
+    ...(await activityValue({ atomic: r.amount_atomic, decimals, symbol: r.amount_atomic ? symbol : null })),
+    from: r.seller,
+    to: r.buyer,
+    tokenId: r.token_id,
+    tokenName: null,
+    imageUrl: null,
+    evidenceSource: "first-party-ledger" as const,
+  })));
+}
+
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-activity", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
@@ -283,7 +319,16 @@ export async function GET(req: NextRequest) {
         // Magic Eden branch above.
       }
 
-      const events = [...meEvents, ...tensorEvents]
+      const ledgerEvents = await readLedgerSalesNonEvm(chainSlug, collectionSlug, limit).catch(() => []);
+      const seenTx = new Set<string>();
+      const events = [...meEvents, ...tensorEvents, ...ledgerEvents]
+        .filter((e) => {
+          // One row per transaction: the live API and the ledger can both carry the same sale.
+          const k = `${e.type}:${e.transaction}`;
+          if (seenTx.has(k)) return false;
+          seenTx.add(k);
+          return true;
+        })
         .sort((a, b) => (b.timestamp ?? "").localeCompare(a.timestamp ?? ""))
         .slice(0, limit);
       return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
@@ -296,7 +341,10 @@ export async function GET(req: NextRequest) {
   // "bitcoin" branch: no keyless/documented activity-query endpoint was
   // found for UniSat's Marketplace API during this research pass.
   if (isBitcoinChainSlug(chainSlug)) {
-    return NextResponse.json({ events: [], marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
+    // AUDIT lens 6 #10: the UniSat transfer scan and the settlement scan write
+    // real rows into the ledger; read them instead of returning nothing.
+    const events = await readLedgerSalesNonEvm(chainSlug, collectionSlug, limit).catch(() => []);
+    return NextResponse.json({ events, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
   }
 
   if (!foreignChainByChainSlug(chainSlug)) {
