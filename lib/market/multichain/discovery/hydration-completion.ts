@@ -37,6 +37,35 @@ async function isMembershipSourceComplete(
  * OPENSEA_NFTS_SOURCE row (see rarity-index-runner.ts's own
  * advanceNextRobinhoodMembership, which shares the OpenSea source constant
  * across both chains) -- one check covers both job kinds. */
+
+/**
+ * In-process TTL memo for completion checks. Real bug found live 2026-09-06
+ * ("when i click on collections they do not open"): every viewport ping
+ * (one per visible chain every 2.5 s, up to 40 keys each) re-ran these
+ * COUNT(*) queries over the 19M-row token projection per key, holding all
+ * PGPOOL_MAX=4 connections for seconds at a time and starving every other
+ * read (pg_stat_activity showed 11 concurrent copies of the count below).
+ * A collection's completion state changes on the timescale of a hydrate
+ * pass, not a scroll frame; 30 s of memory per (chain, key) is honest.
+ */
+const COMPLETION_MEMO_MS = 30_000;
+const completionMemo = new Map<string, { at: number; value: Promise<boolean> }>();
+function memoized(name: string, chainSlug: string, collectionKey: string, compute: () => Promise<boolean>): Promise<boolean> {
+  const key = `${name}|${chainSlug}|${collectionKey.toLowerCase()}`;
+  const now = Date.now();
+  const hit = completionMemo.get(key);
+  if (hit && now - hit.at < COMPLETION_MEMO_MS) return hit.value;
+  const value = compute().catch((error) => {
+    completionMemo.delete(key);
+    throw error;
+  });
+  completionMemo.set(key, { at: now, value });
+  if (completionMemo.size > 5_000) {
+    for (const [k, v] of completionMemo) if (now - v.at >= COMPLETION_MEMO_MS) completionMemo.delete(k);
+  }
+  return value;
+}
+
 export async function isOpenseaMembershipComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
   return isMembershipSourceComplete(chainSlug, collectionKey, OPENSEA_NFTS_SOURCE);
 }
@@ -73,7 +102,11 @@ export async function isUnisatMembershipComplete(chainSlug: string, collectionKe
  * correctly returns false -- absence of a known ceiling is not evidence of
  * completeness.
  */
-export async function isMembershipCountComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
+export function isMembershipCountComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
+  return memoized("count", chainSlug, collectionKey, () => isMembershipCountCompleteUncached(chainSlug, collectionKey));
+}
+
+async function isMembershipCountCompleteUncached(chainSlug: string, collectionKey: string): Promise<boolean> {
   const result = await postgresQuery<{ observed: string; total_supply: number | null }>(
     `SELECT
        (SELECT COUNT(*) FROM plank_collection_tokens t
@@ -95,7 +128,11 @@ export async function isMembershipCountComplete(chainSlug: string, collectionKey
  * source could usefully do for this collection right now -- new pending rows
  * can still appear later (e.g. a fresh mint), at which point this correctly
  * reports incomplete again. */
-export async function isEvmMetadataComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
+export function isEvmMetadataComplete(chainSlug: string, collectionKey: string): Promise<boolean> {
+  return memoized("metadata", chainSlug, collectionKey, () => isEvmMetadataCompleteUncached(chainSlug, collectionKey));
+}
+
+async function isEvmMetadataCompleteUncached(chainSlug: string, collectionKey: string): Promise<boolean> {
   const result = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
     `SELECT COUNT(*) FILTER (WHERE t.metadata_state IN ('pending','retry'))::text AS remaining,
        EXISTS (

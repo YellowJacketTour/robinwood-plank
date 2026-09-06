@@ -32,7 +32,8 @@ export function publishDemandIntent(intent: ClientIntent, opts?: { keepalive?: b
     headers: { "content-type": "application/json" },
     body: JSON.stringify(intent),
     keepalive: opts?.keepalive ?? false,
-  }).catch(() => {
+    priority: "low",
+  } as RequestInit).catch(() => {
     // A dropped intent only means the mesh did not get this nudge.
   });
 }

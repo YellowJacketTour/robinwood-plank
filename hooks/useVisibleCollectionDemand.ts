@@ -80,6 +80,15 @@ function groupByChain(composites: string[]): Map<string, string[]> {
   return groups;
 }
 
+/**
+ * One in-flight POST per chain at a time. Real bug found live 2026-09-06:
+ * with a slow server the 2.5 s flush cadence stacked a dozen pending POSTs,
+ * saturating the browser's per-host connection pool and starving page
+ * navigation. A batch that arrives while one is pending is folded into the
+ * next flush (the pending Set keeps accumulating), never sent in parallel.
+ */
+const inFlightByChain = new Set<string>();
+
 function sendVisibilityBatch(
   chainSlug: string,
   keys: string[],
@@ -87,8 +96,9 @@ function sendVisibilityBatch(
   pageKeys: string[] | undefined,
   context: VisibilityContext,
   useBeacon: boolean
-): void {
-  if (keys.length === 0 && (!pageKeys || pageKeys.length === 0)) return;
+): boolean {
+  if (keys.length === 0 && (!pageKeys || pageKeys.length === 0)) return true;
+  if (!useBeacon && inFlightByChain.has(chainSlug)) return false;
   const payload = JSON.stringify({
     chainSlug,
     keys: keys.slice(0, MAX_KEYS_PER_FLUSH),
@@ -98,17 +108,23 @@ function sendVisibilityBatch(
   });
   if (useBeacon && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
     const ok = navigator.sendBeacon(VISIBILITY_DEMAND_URL, new Blob([payload], { type: "application/json" }));
-    if (ok) return;
+    if (ok) return true;
   }
+  inFlightByChain.add(chainSlug);
   void fetch(VISIBILITY_DEMAND_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: payload,
     keepalive: useBeacon,
-  }).catch(() => {
-    // Best-effort demand signal -- a dropped POST never affects rendering,
-    // it just means this batch didn't get to nudge mesh priority this time.
-  });
+    // Navigation must always win over a demand ping.
+    priority: "low",
+  } as RequestInit)
+    .catch(() => {
+      // Best-effort demand signal -- a dropped POST never affects rendering,
+      // it just means this batch didn't get to nudge mesh priority this time.
+    })
+    .finally(() => inFlightByChain.delete(chainSlug));
+  return true;
 }
 
 export function useVisibleCollectionDemand(opts: UseVisibleCollectionDemandOptions): void {
@@ -158,7 +174,7 @@ export function useVisibleCollectionDemand(opts: UseVisibleCollectionDemandOptio
       const orderGroups = pageOrderRef.current ? groupByChain(pageOrderRef.current) : undefined;
       const pageKeyGroups = pageKeysRef.current ? groupByChain(pageKeysRef.current) : undefined;
       for (const [chainSlug, keys] of groups) {
-        sendVisibilityBatch(
+        const sent = sendVisibilityBatch(
           chainSlug,
           keys,
           orderGroups?.get(chainSlug),
@@ -166,6 +182,8 @@ export function useVisibleCollectionDemand(opts: UseVisibleCollectionDemandOptio
           context,
           useBeacon
         );
+        // Folded into the next flush rather than dropped.
+        if (!sent) for (const k of keys) pendingRef.current.add(`${chainSlug}:${k}`);
       }
     };
 
