@@ -196,6 +196,13 @@ export async function publishIntent(intent: DemandIntent, client: { hash: string
 
   const facts = await readSubjectFacts(intent.chainSlug, subjects);
   const tokenIds = (intent.tokenIds ?? []).map((t) => String(t).trim()).filter(Boolean).slice(0, MAX_TOKEN_IDS);
+  // Predictive focus (user half): the tokens a sweep would take / a facet
+  // shows / the next page needs get hydrated ahead of the click, bounded.
+  if (tokenIds.length > 0 && subjects.length === 1 && (intent.kind === "sweep" || intent.kind === "facet" || intent.kind === "click")) {
+    void import("@/lib/market/multichain/edge/predictive-focus")
+      .then(({ focusTokens }) => focusTokens(intent.chainSlug, subjects[0], tokenIds))
+      .catch(() => undefined);
+  }
 
   await Promise.all(
     subjects.map(async (subject) => {

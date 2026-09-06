@@ -69,6 +69,7 @@ import type { RarityTier } from "@/lib/rarity";
 import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
 import CollectionIntelligence from "@/components/market/CollectionIntelligence";
+import TradingParityMatrix from "@/components/market/TradingParityMatrix";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
 import { displayMugsName } from "@/lib/market/multichain/mugs-display";
@@ -2494,6 +2495,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               chainSlug={isNonEvm ? null : chainSlug}
               contractAddress={collection?.contractAddress ?? null}
             />
+          ) : null}
+          {browseMode === "intelligence" ? (
+            <div className="mt-3">
+              <TradingParityMatrix chainSlug={chainSlug} />
+            </div>
           ) : (
           <>
           {criteriaOpen && !isNonEvm && collection && (
