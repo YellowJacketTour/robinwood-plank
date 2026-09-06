@@ -338,7 +338,10 @@ async function buildHubIndex(req: Request) {
           Boolean(foreignChainByChainSlug(c.chainSlug)) ||
           isRobinhoodChainSlug(c.chainSlug) ||
           isSolanaChainSlug(c.chainSlug) ||
-          isBitcoinChainSlug(c.chainSlug),
+          // AUDIT lens 1 fabrication (2026-09-06): the comment above already
+          // said Bitcoin must be FALSE while mainnet buying is gated; the code
+          // disagreed. Honoured now via the same flag the buy route checks.
+          (isBitcoinChainSlug(c.chainSlug) && process.env.NATIVE_BITCOIN_MAINNET_ENABLED === "true"),
         recentActivity: activityByContract.get(`${c.chainSlug}:${c.contractAddress.toLowerCase()}`) ?? 0,
         creatorHandle: c.creatorHandle,
         creatorAddress: c.creatorAddress,

@@ -409,17 +409,22 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
   const isSolana = c.chainSlug === "solana-mainnet";
   const isBitcoin = c.chainSlug === "bitcoin-mainnet";
   const isRobinhood = c.chainSlug === "robinhood";
+  // AUDIT lens 1 fabrication (2026-09-06): these explanations used to promise
+  // data that the pipeline could not deliver ("loads the first time viewed",
+  // "lands on the next sync"). Each now states what is actually known.
   if (field === "holders") {
     if (isSolana || isBitcoin) return "Holder counts aren't sourced for this chain yet -- no clean single-call endpoint exists on Helius DAS or UniSat/Ordiscan.";
-    return "Not fetched yet -- holder count loads the first time this collection's own page is viewed.";
+    return "Holder count not observed yet -- it is filled by the Alchemy owner pass, which is skipped while that source is rate-limited.";
   }
-  if (isSolana) return "Magic Eden's public API has no volume/sales/change feed for this collection -- floor price is all it exposes.";
-  if (isBitcoin) return "UniSat/Ordiscan expose collection metadata, not a volume/sales/change feed for this collection.";
+  if (isSolana) return field === "volume" || field === "sales"
+    ? "Solana volume/sales come from CoinGecko's daily feed when this collection is listed there; not every collection is."
+    : "No second Solana floor observation yet -- change needs two real observations about a day apart.";
+  if (isBitcoin) return "UniSat/Ordiscan expose collection metadata; volume/sales/change come from CoinGecko's daily feed when this collection is listed there.";
   if (isRobinhood && field !== "listed") {
     return "OpenSea indexed this Robinhood contract with no floor/volume snapshot -- a dash is unknown, not a fake zero.";
   }
-  if (field === "change") return "Needs at least two real syncs of this collection to compute a real change -- not yet available.";
-  return "This collection hasn't been through an OpenSea stats pass yet -- real data lands on the next sync, never fabricated in the meantime.";
+  if (field === "change") return "Change needs two real floor observations about a day apart -- not yet available.";
+  return "No OpenSea stats observed for this collection yet -- OpenSea may not know it, or its turn in the stats pass hasn't come; a dash is unknown, never a fake zero.";
 }
 
 function isHomeRow(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): boolean {
@@ -509,8 +514,8 @@ function compareByColumn(
     case "name":
       return dir === "asc" ? (a.name ?? "").localeCompare(b.name ?? "") : (b.name ?? "").localeCompare(a.name ?? "");
     case "floor": {
-      const fa = toUsd(a.floorPriceWei, a.floorPriceCurrency);
-      const fb = toUsd(b.floorPriceWei, b.floorPriceCurrency);
+      const fa = toUsd(displayFloorWei(a), a.floorPriceCurrency);
+      const fb = toUsd(displayFloorWei(b), b.floorPriceCurrency);
       return compareNullable(fa, fb, dir);
     }
     case "change":
@@ -1278,7 +1283,10 @@ export default function GlobalMarketHub() {
   }, [collections, chainCounts]);
 
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
-  const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
+  const floorNative = (c: TrackedCollection): number | null => {
+    const wei = displayFloorWei(c);
+    return wei ? Number(wei) / 1e18 : null;
+  };
 
   // A marketplace may intentionally group several contracts under one
   // branded collection (XCOPY Editions is a live example). Shared art is
@@ -2091,9 +2099,9 @@ export default function GlobalMarketHub() {
                         })()}
                       </span>
                       {hero.sales24h ? <span>{" · "}{hero.sales24h} sales</span> : null}
-                      {hero.floorPriceWei && (
+                      {displayFloorWei(hero) && (
                         <span className="inline-flex items-center gap-1">
-                          {" · "}Floor {formatCompactNative(hero.floorPriceWei).display}
+                          {" · "}Floor {formatCompactNative(displayFloorWei(hero) as string).display}
                           <FloorCurrencyMark collection={hero} />
                         </span>
                       )}
@@ -2595,11 +2603,11 @@ export default function GlobalMarketHub() {
                     {displayName(c)}
                   </p>
                   <p className="truncate text-[0.65rem] text-foreground/50">
-                    {c.floorPriceWei ? (
+                    {displayFloorWei(c) ? (
                       <>
-                        {formatCompactNative(c.floorPriceWei).display}
+                        {formatCompactNative(displayFloorWei(c) as string).display}
                         {(() => {
-                          const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                          const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
                           return usd != null ? ` · ${formatUsdCompact(usd)}` : "";
                         })()}
                       </>
