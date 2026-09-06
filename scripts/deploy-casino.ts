@@ -189,14 +189,29 @@ async function main() {
   const CARVE_MIN_BPS = envBig("CASINO_CARVE_MIN_BPS", 1000n);
   const CARVE_MAX_BPS = envBig("CASINO_CARVE_MAX_BPS", 3000n);
   const CARVE_HALF_SATURATION_WEI = envBig("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n * CREDIT);
-  // v3 vault bonus/carve-ceiling (SPEC-monotonic-vault-positive-sum-2026-09-05).
-  // Off by default (0/0) -- an explicit env opt-in is required to enable
-  // either mechanism, so an existing deployment's redeploy never silently
-  // changes behavior.
-  const CRASH_MAX_VAULT_BONUS_BPS = envBig("CASINO_MAX_VAULT_BONUS_BPS", 0n);
-  const CRASH_VAULT_BONUS_DECAY_WAD = envBig("CASINO_VAULT_BONUS_DECAY_WAD", 0n);
-  const LOTTERY_CARVE_DECAY_WAD = envBig("CASINO_LOTTERY_CARVE_DECAY_WAD", 0n);
-  const LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI = envBig("CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI", 0n);
+  // v3 vault bonus/carve-ceiling (SPEC-monotonic-vault-positive-sum-2026-09-05),
+  // ON BY DEFAULT as of 2026-09-05 (owner decision, after reviewing the
+  // mechanism live) with the spec's own ratified worked-example numbers:
+  //   - maxVaultBonusBps 2_500 (25%) -- the ratified ceiling on how much of a
+  //     round's rake the participation-count signal can ever unlock; still
+  //     capped by houseRakeCapBps's own room, never widens it (see
+  //     PlankCcs2LMath.vaultBonusBps's own docs).
+  //   - vaultBonusDecayWad 0.999e18 -- r=0.999, the spec's own default: curve
+  //     ~63% saturated by 1,000 contributing rounds (~9h at full 30s-launch
+  //     tempo), ~99.3% by 5,000 rounds (spec §3.4.1's worked table).
+  //   - lottery carve ceiling 10x today's carveHalfSaturationWei (2,500,000
+  //     credits against the 250,000-credit base) with the SAME r=0.999 decay
+  //     -- same ramp pace as the crash-game curve for a consistent feel
+  //     across both games, per spec §6.2's worked table.
+  // Explicit env overrides still work (0/0 disables either mechanism again),
+  // so this is a default, not a hardcoded floor.
+  const CRASH_MAX_VAULT_BONUS_BPS = envBig("CASINO_MAX_VAULT_BONUS_BPS", 2_500n);
+  const CRASH_VAULT_BONUS_DECAY_WAD = envBig("CASINO_VAULT_BONUS_DECAY_WAD", 999_000_000_000_000_000n);
+  const LOTTERY_CARVE_DECAY_WAD = envBig("CASINO_LOTTERY_CARVE_DECAY_WAD", 999_000_000_000_000_000n);
+  const LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI = envBig(
+    "CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI",
+    2_500_000n * CREDIT,
+  );
 
   // Burn engine + TWAP
   const MAX_ETH_PER_BURN = envBig("CASINO_MAX_ETH_PER_BURN_WEI", ethers.parseEther("0.25"));
