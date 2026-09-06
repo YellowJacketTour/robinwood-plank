@@ -349,24 +349,98 @@ export async function fetchForeignAllListings(input: {
   collectionSlug: string;
   limit?: number;
 }): Promise<ForeignSeaportOrder[]> {
+  return (await fetchForeignAllListingsPaged(input)).orders;
+}
+
+/**
+ * Same endpoint, walked through OpenSea's `next` cursor (pages of at most
+ * 100) until `limit` orders or the cursor ends. AUDIT lens 2 #2
+ * (2026-09-06): the single-page read silently truncated any book over 100
+ * listings and could hide the real floor. `complete` is false when the
+ * walk stopped on `limit` with a cursor still pending.
+ */
+export async function fetchForeignAllListingsPaged(input: {
+  chainSlug: string;
+  collectionSlug: string;
+  limit?: number;
+}): Promise<{ orders: ForeignSeaportOrder[]; complete: boolean; pages: number }> {
   const chain = foreignChainByChainSlug(input.chainSlug);
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
-  if (!chain.openSeaChain) return [];
-  const result = await openSeaFetch<{
-    listings: Array<{
-      order_hash: string;
-      chain: string;
-      protocol_data: { parameters: SeaportOrderParameters; signature: string | null };
-    }>;
-  }>(`/listings/collection/${encodeURIComponent(input.collectionSlug)}/all?chain=${chain.openSeaChain}${input.limit ? `&limit=${input.limit}` : ""}`);
-  return (result?.listings ?? []).map((l) => ({
-    orderHash: l.order_hash,
-    chain: l.chain,
-    parameters: l.protocol_data.parameters,
-    signature: l.protocol_data.signature,
-  }));
+  if (!chain.openSeaChain) return { orders: [], complete: true, pages: 0 };
+  const target = Math.max(1, Math.min(input.limit ?? 100, 1_000));
+  const orders: ForeignSeaportOrder[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  while (orders.length < target && pages < 10) {
+    const pageSize = Math.min(100, target - orders.length);
+    const result: {
+      listings: Array<{ order_hash: string; chain: string; protocol_data: { parameters: SeaportOrderParameters; signature: string | null } }>;
+      next?: string | null;
+    } | null = await openSeaFetch(
+      `/listings/collection/${encodeURIComponent(input.collectionSlug)}/all?chain=${chain.openSeaChain}&limit=${pageSize}${cursor ? `&next=${encodeURIComponent(cursor)}` : ""}`
+    );
+    pages += 1;
+    for (const l of result?.listings ?? []) {
+      orders.push({ orderHash: l.order_hash, chain: l.chain, parameters: l.protocol_data.parameters, signature: l.protocol_data.signature });
+    }
+    cursor = result?.next ?? null;
+    if (!cursor || (result?.listings ?? []).length === 0) return { orders, complete: true, pages };
+  }
+  return { orders, complete: cursor == null, pages };
+}
+
+/** Seaport ItemType values this pricing helper understands. */
+const ITEM_NATIVE = 0;
+const ITEM_ERC20 = 1;
+
+export type OrderPricing = {
+  /** Sum of consideration in the priced currency's atomic unit. */
+  priceAtomic: bigint;
+  currencyAddress: string | null;
+  currencySymbol: string;
+  currencyDecimals: number;
+  /** True when the order is payable in the chain's native token or its wrapped native (1:1). */
+  nativeEquivalent: boolean;
+};
+
+/**
+ * AUDIT lens 2 #1 (2026-09-06): consideration legs were summed as if every
+ * leg were the chain's native token, so a 5 USDC ask displayed as
+ * "0.000005" with the native icon and won the floor. Legs are now read per
+ * item type and token: native legs price in native; ERC-20 legs priced in
+ * that token; an order mixing tokens or priced in a non-native token is
+ * reported with `nativeEquivalent: false` so callers can exclude it from
+ * floor and cheapest math and label it honestly.
+ */
+export function priceForeignOrder(
+  parameters: SeaportOrderParameters,
+  chain: { nativeCurrencySymbol: string; offerCurrencyAddress: string | null; offerCurrencySymbol: string }
+): OrderPricing {
+  let native = 0n;
+  const erc20 = new Map<string, bigint>();
+  for (const leg of parameters.consideration ?? []) {
+    const amount = BigInt(leg.startAmount ?? "0");
+    const itemType = Number(leg.itemType);
+    if (itemType === ITEM_NATIVE) native += amount;
+    else if (itemType === ITEM_ERC20) {
+      const token = String(leg.token ?? "").toLowerCase();
+      erc20.set(token, (erc20.get(token) ?? 0n) + amount);
+    }
+  }
+  if (erc20.size === 0) {
+    return { priceAtomic: native, currencyAddress: null, currencySymbol: chain.nativeCurrencySymbol, currencyDecimals: 18, nativeEquivalent: true };
+  }
+  if (erc20.size === 1 && native === 0n) {
+    const [token, amount] = [...erc20.entries()][0];
+    const wrapped = chain.offerCurrencyAddress?.toLowerCase() ?? null;
+    if (wrapped && token === wrapped) {
+      return { priceAtomic: amount, currencyAddress: token, currencySymbol: chain.offerCurrencySymbol, currencyDecimals: 18, nativeEquivalent: true };
+    }
+    return { priceAtomic: amount, currencyAddress: token, currencySymbol: "TOKEN", currencyDecimals: 18, nativeEquivalent: false };
+  }
+  return { priceAtomic: native, currencyAddress: null, currencySymbol: "MIXED", currencyDecimals: 18, nativeEquivalent: false };
 }
 
 /**

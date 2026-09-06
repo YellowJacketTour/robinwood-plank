@@ -29,7 +29,8 @@
  * calls, not one per listing.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
+import { fetchForeignAllListingsPaged, priceForeignOrder, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
+import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import {
   fetchAllOpenSeaListings,
@@ -685,8 +686,8 @@ export async function GET(req: NextRequest) {
     // timescales at most.
     type OpenSeaCollectionMeta = { name?: string; image_url?: string; contracts?: Array<{ address: string; chain: string }> };
     const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
-    const [rawOrders, collectionMeta] = await Promise.all([
-      fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit }),
+    const [paged, collectionMeta] = await Promise.all([
+      fetchForeignAllListingsPaged({ chainSlug, collectionSlug: openSeaSlug, limit }),
       getOrRefresh<OpenSeaCollectionMeta | null>(
         `opensea-collection-meta:${chain.openSeaChain}:${openSeaSlug}`,
         { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
@@ -710,18 +711,30 @@ export async function GET(req: NextRequest) {
     // dedup already guards against for the Robinhood-chain path ("two
     // listings of the same plank can't both fill, so only the cheapest is
     // kept"). Same rule, same reason, applied here for display.
+    // AUDIT lens 2 #1/#6 (2026-09-06): price every order in its own
+    // currency. Only native / wrapped-native asks compete for "cheapest"
+    // and the floor; orders priced in another token are excluded from the
+    // grid rather than shown at a wrong number with the wrong icon.
+    const rawOrders = paged.orders;
+    const pagedComplete = paged.complete;
+    const pricingChain = chainManifest(chainSlug) ?? { nativeCurrencySymbol: "ETH", offerCurrencyAddress: null, offerCurrencySymbol: "WETH" };
+    const pricingOf = (o: (typeof rawOrders)[number]) => priceForeignOrder(o.parameters, pricingChain);
+    let excludedNonNative = 0;
     const cheapestByToken = new Map<string, (typeof rawOrders)[number]>();
     for (const order of rawOrders) {
       const tokenId = order.parameters.offer[0]?.identifierOrCriteria;
       if (!tokenId) continue;
-      const priceOf = (o: (typeof rawOrders)[number]) =>
-        o.parameters.consideration.reduce((sum, c) => sum + BigInt(c.startAmount), BigInt(0));
+      const pricing = pricingOf(order);
+      if (!pricing.nativeEquivalent) {
+        excludedNonNative += 1;
+        continue;
+      }
       const existing = cheapestByToken.get(tokenId);
-      if (!existing || priceOf(order) < priceOf(existing)) cheapestByToken.set(tokenId, order);
+      if (!existing || pricing.priceAtomic < pricingOf(existing).priceAtomic) cheapestByToken.set(tokenId, order);
     }
     const orders = [...cheapestByToken.values()].sort((a, b) => {
-      const pa = a.parameters.consideration.reduce((s, c) => s + BigInt(c.startAmount), BigInt(0));
-      const pb = b.parameters.consideration.reduce((s, c) => s + BigInt(c.startAmount), BigInt(0));
+      const pa = pricingOf(a).priceAtomic;
+      const pb = pricingOf(b).priceAtomic;
       return pa < pb ? -1 : pa > pb ? 1 : 0;
     });
 
@@ -778,9 +791,8 @@ export async function GET(req: NextRequest) {
     const listings: Listing[] = orders.map((order) => {
       const item = order.parameters.offer[0];
       const tokenId = item?.identifierOrCriteria ?? "";
-      const priceWei = order.parameters.consideration
-        .reduce((sum, c) => sum + BigInt(c.startAmount), BigInt(0))
-        .toString();
+      const pricing = pricingOf(order);
+      const priceWei = pricing.priceAtomic.toString();
       const art = artByToken.get(tokenId);
       return {
         id: order.orderHash,
@@ -789,6 +801,8 @@ export async function GET(req: NextRequest) {
         tokenName: art?.name ?? undefined,
         maker: order.parameters.offerer,
         priceWei,
+        currencySymbol: pricing.currencySymbol,
+        currencyAddress: pricing.currencyAddress,
         expiresAt: new Date(Number(order.parameters.endTime) * 1000).toISOString(),
         kind: "fixed",
         imageUrl: art?.imageUrl ?? undefined,
@@ -808,6 +822,12 @@ export async function GET(req: NextRequest) {
       {
         collection: { ...fromIndex, contractAddress: contractAddress || fromIndex.contractAddress },
         listings,
+        bookCoverage: {
+          complete: pagedComplete,
+          partial: !pagedComplete,
+          sources: { opensea: pagedComplete ? "cursor-exhausted" : "truncated-at-limit" },
+          excludedNonNativeCurrency: excludedNonNative,
+        },
       },
       { headers: { "Cache-Control": "no-store" } }
     );
