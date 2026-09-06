@@ -4,6 +4,8 @@ import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
 import GlobalMultichainMarketView from "@/components/market/GlobalMultichainMarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
+import { verifyDoorCookieValue, DOOR_COOKIE_NAME } from "@/lib/market-preview-door";
+
 import { MARKET_ENABLED, GLOBAL_MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
@@ -32,7 +34,8 @@ export default async function GlobalMarketPage() {
   // Admin-only preview bypass -- see app/market/page.tsx's identical comment
   // and lib/market-preview-auth.ts's own header.
   const previewCookie = (await cookies()).get(MARKET_PREVIEW_COOKIE_NAME)?.value;
-  const previewBypass = verifyPreviewCookieValue(previewCookie);
+  const jar = await cookies();
+  const previewBypass = verifyPreviewCookieValue(previewCookie) || verifyDoorCookieValue(jar.get(DOOR_COOKIE_NAME)?.value);
   const marketEnabled = (siteWideEnabled && GLOBAL_MARKET_ENABLED) || previewBypass;
 
   return (

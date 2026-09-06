@@ -3,6 +3,10 @@ import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
 import MultichainCollectionView from "@/components/market/MultichainCollectionView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
+import { verifyDoorCookieValue, DOOR_COOKIE_NAME } from "@/lib/market-preview-door";
+import { cookies } from "next/headers";
+import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
+
 import { MARKET_ENABLED, GLOBAL_MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
@@ -42,7 +46,10 @@ export default async function MultichainCollectionPage({
   const { chainSlug, collectionSlug } = await params;
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
   const siteWideEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
-  const marketEnabled = siteWideEnabled && GLOBAL_MARKET_ENABLED;
+  // Same bypasses as the hub page: admin preview cookie or the backstage door cookie.
+  const jar = await cookies();
+  const bypass = verifyPreviewCookieValue(jar.get(MARKET_PREVIEW_COOKIE_NAME)?.value) || verifyDoorCookieValue(jar.get(DOOR_COOKIE_NAME)?.value);
+  const marketEnabled = (siteWideEnabled && GLOBAL_MARKET_ENABLED) || bypass;
 
   return (
     <>
