@@ -45,6 +45,7 @@ export const KIND_LABEL: Record<LedgerActivityKind, string> = {
 
 export const VENUE_LABEL: Record<LedgerVenueId, string> = {
   "wallet-transfer": "Wallet transfer",
+  "opensea-stream": "OpenSea (live)",
   seaport: "Seaport",
   wyvern: "OpenSea (Wyvern, legacy)",
   looksrare: "LooksRare",
