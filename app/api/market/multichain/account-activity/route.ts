@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { activityValue } from "@/lib/market/activity-value";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { meteredFetch } from "@/lib/market/multichain/edge/provider-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,17 +46,26 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
+    const keyEntry = await pickOpenSeaKey("live");
+    const key = keyEntry?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }
-    const res = await fetch(`${OPENSEA}/events/accounts/${owner}?event_type=sale&event_type=transfer&limit=${limit}`, {
-      headers: { "x-api-key": key, accept: "application/json" },
-    });
-    if (!res.ok) {
-      return NextResponse.json({ error: `OpenSea ${res.status}` }, { status: 502 });
-    }
-    const data = (await res.json()) as { asset_events?: OpenSeaEvent[] };
+    // Single point: N tabs/users on the same wallet share one OpenSea call
+    // per TTL window (lib/market/multichain/edge/read-gateway.ts).
+    const { value: data } = await edgeRead<{ asset_events?: OpenSeaEvent[] }>(
+      { kind: "account-activity", chainSlug: "all", subject: owner.toLowerCase(), variant: { limit } },
+      async () => {
+        const res = await meteredFetch(
+          `${OPENSEA}/events/accounts/${owner}?event_type=sale&event_type=transfer&limit=${limit}`,
+          { headers: { "x-api-key": key, accept: "application/json" } },
+          { source: "opensea", keyId: keyEntry?.id ?? null }
+        );
+        if (!res.ok) throw new Error(`OpenSea ${res.status}`);
+        return (await res.json()) as { asset_events?: OpenSeaEvent[] };
+      },
+      { provider: "opensea" }
+    );
     const events = await Promise.all((data.asset_events ?? []).map(async (e) => ({
       type: e.event_type,
       timestamp: new Date(e.event_timestamp * 1000).toISOString(),

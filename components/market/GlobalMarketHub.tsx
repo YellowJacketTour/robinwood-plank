@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { computeDemandScore } from "@/lib/market/multichain/demand-score";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
@@ -22,6 +22,7 @@ import DataSourceChip from "@/components/market/DataSourceChip";
 import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlankChip";
 import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
 import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
+import { useDemandIntent } from "@/hooks/useDemandIntent";
 
 const CollectionThumb = CollectionArtImage;
 
@@ -943,7 +944,6 @@ function GradeBadge({ breakdown, ctx }: { breakdown: GradeBreakdown; ctx: GradeP
  * only by chain until that field exists.
  */
 export default function GlobalMarketHub() {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [collections, setCollections] = useState<TrackedCollection[]>([]);
@@ -1397,6 +1397,21 @@ export default function GlobalMarketHub() {
     return [...localMatches, ...serverOnly];
   }, [ranked, searchIndex, chainFilter, debouncedFilterQuery, sortColumn, sortDir, rankingsWindow, onlyWatched, watchlist, deadArt, usdPrices, serverCollectionHits]);
 
+  // Demand bus: a search that matched real collections is intent -- the top
+  // hits per chain get a nudge before the person clicks one.
+  const publishIntent = useDemandIntent();
+  useEffect(() => {
+    const q = debouncedFilterQuery.trim();
+    if (q.length < 2 || filtered === ranked) return;
+    const perChain = new Map<string, string[]>();
+    for (const c of filtered.slice(0, 24)) {
+      const arr = perChain.get(c.chainSlug) ?? [];
+      if (arr.length < 8) arr.push(c.contractAddress);
+      perChain.set(c.chainSlug, arr);
+    }
+    for (const [chainSlug, subjects] of perChain) publishIntent({ kind: "search", chainSlug, subjects, context: "hub" });
+  }, [filtered, ranked, debouncedFilterQuery, publishIntent]);
+
   /**
    * Creator-entity-linked search expansion, computed client-side against the
    * already-loaded `collections` catalog (no extra request needed): when a
@@ -1653,8 +1668,22 @@ export default function GlobalMarketHub() {
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract; including them would re-run this on every render for no reason.
+    // Real bug found live 2026-09-06 ("when i click on collections they do
+    // not open"): this used router.replace(), which is a full App Router
+    // navigation (an RSC round trip for the hub page) inside a React
+    // transition -- it ran on mount and on every filter change, and while
+    // one was still in flight on a slow server every LATER navigation
+    // (the click on a collection) was batched into the same pending
+    // transition and could not commit; the page request completed on the
+    // server and the browser stayed on the hub. URL persistence needs no
+    // server round trip at all: Next integrates native history.replaceState
+    // with useSearchParams, so write the query string directly and only
+    // when it actually changed.
+    if (typeof window === "undefined") return;
+    const next = qs ? `${pathname}?${qs}` : pathname;
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (next !== current) window.history.replaceState(window.history.state, "", next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pathname is stable per Next.js contract; including it would re-run this on every render for no reason.
   }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real

@@ -11,7 +11,7 @@
  * calls a third-party provider directly and never touches singleflight-
  * cache/freshness-budget's live-read paths.
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { rateLimit } from "@/lib/security";
 import { prioritizeVisibleCollections, partitionKnownCollectionKeys, dedupeAndCapKeys } from "@/lib/market/multichain/collection-demand";
 
@@ -90,18 +90,26 @@ export async function POST(req: NextRequest) {
     if (tightened) return tightened;
   }
 
-  try {
-    const result = await prioritizeVisibleCollections(chainSlug, merged, {
-      context: ctx,
-      pageOrder: order.length > 0 ? order : undefined,
-    });
-    return NextResponse.json(
-      { accepted: Math.min(merged.length, MAX_KEYS), enqueued: result.enqueued },
-      { headers: { "Cache-Control": "no-store" } }
-    );
-  } catch {
-    // Fail closed with a clear, honest message -- never fabricate a success
-    // count when the underlying enqueue actually failed.
-    return NextResponse.json({ error: "Failed to record visibility demand" }, { status: 500 });
-  }
+  // Real bug found live 2026-09-06 ("when i click on collections they do
+  // not open"): this route awaited the full per-key completion-check +
+  // enqueue pass (4-19 s on a cold/slow Postgres) BEFORE responding, and
+  // the client fires one POST per visible chain every 2.5 s -- so a dozen
+  // slow in-flight POSTs saturated the browser's per-host connection pool
+  // and the App Router's own navigation fetch for the clicked collection
+  // queued behind them; the click looked dead. Demand is a write-only
+  // signal: acknowledge now, do the queue work after the response.
+  after(async () => {
+    try {
+      await prioritizeVisibleCollections(chainSlug, merged, {
+        context: ctx,
+        pageOrder: order.length > 0 ? order : undefined,
+      });
+    } catch (error) {
+      console.error(`[visibility-demand] ${chainSlug}:`, error instanceof Error ? error.message : error);
+    }
+  });
+  return NextResponse.json(
+    { accepted: Math.min(merged.length, MAX_KEYS), queued: true },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

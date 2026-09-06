@@ -63,6 +63,7 @@
  */
 
 import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-network";
+import { CHAIN_MANIFESTS, chainManifest, deriveForeignChains, deriveOfferCurrencies } from "@/lib/market/multichain/chains/manifest";
 
 export type ForeignChainConfig = {
   /** Matches lib/market/multichain's chainSlug convention (e.g. alchemy-nft.ts). */
@@ -90,58 +91,20 @@ export type ForeignChainConfig = {
  * Robinhood Chain (4663) is intentionally absent -- its trading path is
  * lib/market/seaport.ts + lib/constants.ts, unaffected by this file.
  */
-export const FOREIGN_CHAINS: ForeignChainConfig[] = [
-  { chainSlug: "eth-mainnet", chainId: 1, openSeaChain: "ethereum", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://etherscan.io" },
-  { chainSlug: "polygon-mainnet", chainId: 137, openSeaChain: "matic", nativeCurrencySymbol: "POL", blockExplorerUrl: "https://polygonscan.com" },
-  { chainSlug: "arb-mainnet", chainId: 42161, openSeaChain: "arbitrum", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://arbiscan.io" },
-  { chainSlug: "base-mainnet", chainId: 8453, openSeaChain: "base", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://basescan.org" },
-  { chainSlug: "opt-mainnet", chainId: 10, openSeaChain: "optimism", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://optimistic.etherscan.io" },
-  { chainSlug: "bnb-mainnet", chainId: 56, openSeaChain: "bsc", nativeCurrencySymbol: "BNB", blockExplorerUrl: "https://bscscan.com" },
-  { chainSlug: "avax-mainnet", chainId: 43114, openSeaChain: "avalanche", nativeCurrencySymbol: "AVAX", blockExplorerUrl: "https://snowtrace.io" },
-  // zkSync Era -- native trading only (openSeaChain: null), see this
-  // file's own header ("ZKSYNC IS DELIBERATELY EXCLUDED" section, now
-  // superseded: it's included for Marketplank-native listings, which never
-  // read openSeaChain, while every OpenSea-orderbook consumer of this
-  // registry treats null as "no orders from there" and degrades cleanly).
-  // Confirmed live 2026-08-19: real Seaport bytecode + name() returning
-  // "Seaport" at the canonical address on chainId 324 via Alchemy's
-  // zksync-mainnet RPC (already in ALCHEMY_NETWORK_SUBDOMAIN).
-  { chainSlug: "zksync-mainnet", chainId: 324, openSeaChain: null, nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://explorer.zksync.io" },
-];
+// DERIVED from lib/market/multichain/chains/manifest.ts (one manifest per
+// chain). Add a chain there, never here -- test/market/chain-manifest.test.ts
+// fails on manual wiring.
+export const FOREIGN_CHAINS: ForeignChainConfig[] = deriveForeignChains();
 
 export function foreignChainByChainSlug(chainSlug: string): ForeignChainConfig | null {
   return FOREIGN_CHAINS.find((c) => c.chainSlug === chainSlug) ?? null;
 }
 
 /** Human-readable chain name for UI badges/labels -- one source of truth, not restated per component. */
-const CHAIN_DISPLAY_NAME: Record<string, string> = {
-  "eth-mainnet": "Ethereum",
-  "polygon-mainnet": "Polygon",
-  "arb-mainnet": "Arbitrum",
-  "base-mainnet": "Base",
-  "opt-mainnet": "Optimism",
-  "bnb-mainnet": "BNB Chain",
-  "avax-mainnet": "Avalanche",
-  "zksync-mainnet": "zkSync",
-  "solana-mainnet": "Solana",
-  "bitcoin-mainnet": "Bitcoin (Ordinals)",
-  robinhood: "Robinhood Chain",
-  // "solana"/"bitcoin" (bare, no "-mainnet" suffix) kept as aliases only --
-  // an EARLIER pass claimed these were "the REAL chainSlug values" this
-  // codebase writes; that was wrong. non-evm-chains.ts's own header (and a
-  // live check of what scripts/seed-multichain-collections.ts and
-  // discover-multichain-collections.ts actually write to Postgres)
-  // confirmed the real, current values are "solana-mainnet" and
-  // "bitcoin-mainnet" -- matching every other chain's own "-mainnet"
-  // convention. These bare aliases stay only so an old link/bookmark using
-  // the earlier (wrong) slug still resolves to a real display name instead
-  // of falling back to the raw slug string.
-  solana: "Solana",
-  bitcoin: "Bitcoin (Ordinals)",
-};
+const CHAIN_DISPLAY_NAME: Record<string, string> = Object.fromEntries(CHAIN_MANIFESTS.map((m) => [m.chainSlug, m.displayName]));
 
 export function chainDisplayName(chainSlug: string): string {
-  return CHAIN_DISPLAY_NAME[chainSlug] ?? chainSlug;
+  return CHAIN_DISPLAY_NAME[chainSlug] ?? chainManifest(chainSlug)?.displayName ?? chainSlug;
 }
 
 /**
@@ -150,24 +113,10 @@ export function chainDisplayName(chainSlug: string): string {
  * etc. -- not an invented palette). Used for at-a-glance chain
  * identification on cards, distinct from the tier-rarity color system.
  */
-const CHAIN_BRAND_COLOR: Record<string, string> = {
-  "eth-mainnet": "#627EEA",
-  "polygon-mainnet": "#8247E5",
-  "arb-mainnet": "#28A0F0",
-  "base-mainnet": "#0052FF",
-  "opt-mainnet": "#FF0420",
-  "bnb-mainnet": "#F0B90B",
-  "avax-mainnet": "#E84142",
-  "zksync-mainnet": "#8C8DFC",
-  "solana-mainnet": "#9945FF",
-  "bitcoin-mainnet": "#F7931A", // Bitcoin's real published brand orange.
-  robinhood: "#eec164", // This app's own gold token (--color-gold-400, app/globals.css) -- Robinhood Chain IS this app, not a third-party brand to source a color from.
-  solana: "#9945FF", // alias, see CHAIN_DISPLAY_NAME's header
-  bitcoin: "#F7931A", // alias, see CHAIN_DISPLAY_NAME's header
-};
+const CHAIN_BRAND_COLOR: Record<string, string> = Object.fromEntries(CHAIN_MANIFESTS.map((m) => [m.chainSlug, m.brandColor]));
 
 export function chainBrandColor(chainSlug: string): string {
-  return CHAIN_BRAND_COLOR[chainSlug] ?? "#58BDF0";
+  return CHAIN_BRAND_COLOR[chainSlug] ?? chainManifest(chainSlug)?.brandColor ?? "#58BDF0";
 }
 
 /**
@@ -190,24 +139,10 @@ export function chainBrandColorInverted(chainSlug: string): string {
 }
 
 /** Short glyph for a compact colored chain badge -- avoids hotlinking third-party logo assets while staying instantly recognizable per chain. */
-const CHAIN_GLYPH: Record<string, string> = {
-  "eth-mainnet": "Ξ",
-  "polygon-mainnet": "P",
-  "arb-mainnet": "A",
-  "base-mainnet": "B",
-  "opt-mainnet": "O",
-  "bnb-mainnet": "BNB",
-  "avax-mainnet": "AVAX",
-  "zksync-mainnet": "ZK",
-  "solana-mainnet": "S",
-  "bitcoin-mainnet": "₿",
-  robinhood: "RW",
-  solana: "S",
-  bitcoin: "₿",
-};
+const CHAIN_GLYPH: Record<string, string> = Object.fromEntries(CHAIN_MANIFESTS.map((m) => [m.chainSlug, m.glyph]));
 
 export function chainGlyph(chainSlug: string): string {
-  return CHAIN_GLYPH[chainSlug] ?? chainSlug.slice(0, 2).toUpperCase();
+  return CHAIN_GLYPH[chainSlug] ?? chainManifest(chainSlug)?.glyph ?? chainSlug.slice(0, 2).toUpperCase();
 }
 
 /**
@@ -241,17 +176,7 @@ export function nativeCurrencySymbol(chainSlug: string, isSolana: boolean, isBit
  * OP-stack chains with the same predeploy convention, confirmed
  * independently for Base via a real OpenSea /offers/build response.
  */
-const FOREIGN_OFFER_CURRENCY: Record<string, string> = {
-  "eth-mainnet": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-  "polygon-mainnet": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
-  "arb-mainnet": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  "base-mainnet": "0x4200000000000000000000000000000000000006",
-  "opt-mainnet": "0x4200000000000000000000000000000000000006",
-  "bnb-mainnet": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
-  "avax-mainnet": "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",
-  // Confirmed live 2026-08-19 via eth_call name() -> "Wrapped Ether".
-  "zksync-mainnet": "0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91",
-};
+const FOREIGN_OFFER_CURRENCY: Record<string, string> = deriveOfferCurrencies();
 
 export function foreignOfferCurrency(chainSlug: string): string | null {
   return FOREIGN_OFFER_CURRENCY[chainSlug] ?? null;

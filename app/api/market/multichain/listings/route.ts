@@ -112,8 +112,9 @@ async function collectionEnvelope(
   };
 }
 
-async function openSeaJson<T>(path: string, key: string): Promise<T | null> {
-  const res = await fetch(`${OPENSEA}${path}`, { headers: { "x-api-key": key, accept: "application/json" } });
+async function openSeaJson<T>(path: string, key: string, keyId?: string | null, chainSlug?: string | null): Promise<T | null> {
+  const { meteredFetch } = await import("@/lib/market/multichain/edge/provider-ledger");
+  const res = await meteredFetch(`${OPENSEA}${path}`, { headers: { "x-api-key": key, accept: "application/json" } }, { source: "opensea", keyId: keyId ?? null, chainSlug: chainSlug ?? null });
   if (!res.ok) return null;
   return (await res.json()) as T;
 }

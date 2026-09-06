@@ -42,6 +42,7 @@
  * indexed by a real marketplace) instead of inventing a new heuristic.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { deriveEvmChainIds } from "@/lib/market/multichain/chains/manifest";
 import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { writeChainCoverage } from "@/lib/market/multichain/control-plane";
@@ -73,29 +74,10 @@ export const TRANSFER_SINGLE_TOPIC = "0xc3d58168c5ae7397731d063d5bbf3d6578544273
 export const TRANSFER_BATCH_TOPIC = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
 
 /** Mirrors alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN chainSlug set. */
-export const EVM_CHAIN_ID: Record<string, number> = {
-  "eth-mainnet": 1,
-  "polygon-mainnet": 137,
-  "arb-mainnet": 42161,
-  "base-mainnet": 8453,
-  "opt-mainnet": 10,
-  "bnb-mainnet": 56,
-  "avax-mainnet": 43114,
-  "zksync-mainnet": 324,
-  // Real gap found live 2026-08-27 (external research): this app's own
-  // Robinhood Chain had zero HyperSync coverage, treated as permanently
-  // OpenSea-only, on the assumption Envio's public indexing infrastructure
-  // doesn't cover a private/custom L2. That assumption was live-verified
-  // FALSE the same day -- Envio published HyperIndex for Robinhood Chain
-  // 2026-07-10: https://robinhood.hypersync.xyz and
-  // https://4663.hypersync.xyz both return real, live, matching block
-  // height (confirmed via a direct authenticated curl, not assumed).
-  // hypersyncUrl() below builds its URL as `https://${chainId}.hypersync.xyz`,
-  // so this entry alone is what's needed to bring Robinhood onto the same
-  // HyperSync-backed anchored-membership/token-index-probe path every
-  // other EVM chain already has.
-  robinhood: 4663,
-};
+// DERIVED from lib/market/multichain/chains/manifest.ts -- see that file. The
+// Robinhood Chain HyperSync proof (2026-08-27, https://4663.hypersync.xyz live)
+// now lives on its manifest entry (`hypersync: true`).
+export const EVM_CHAIN_ID: Record<string, number> = deriveEvmChainIds();
 
 /**
  * Verified live 2026-08-17 against a real Alchemy key: 10 blocks is the
