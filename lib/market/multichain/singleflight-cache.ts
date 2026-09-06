@@ -70,6 +70,13 @@ import {
 const inFlight = new Map<string, Promise<unknown>>();
 const LEASE_MS = 15_000; // generous vs. the 10s fetch timeout used by callers
 
+// Real production bug found live 2026-09-06 ("still no global"): this
+// predicate used `(value)::bigint`, a direct jsonb->bigint cast that the
+// production PostgreSQL major rejects ("cannot cast type jsonb to bigint"),
+// so EVERY getOrRefresh on production threw here -- hidden for weeks by the
+// callers' `.catch(() => null)`, exposed the moment the hub index went
+// through the edge. `#>> '{}'` extracts the scalar as text on every
+// supported major (json and jsonb alike) before the cast.
 async function tryAcquireRefreshLease(key: string): Promise<boolean> {
   const leaseKey = `${key}:lease`;
   const now = Date.now();
@@ -78,7 +85,7 @@ async function tryAcquireRefreshLease(key: string): Promise<boolean> {
      VALUES ($1, to_jsonb($2::bigint), NULL, NOW())
      ON CONFLICT (key_name) DO UPDATE
        SET value = to_jsonb($2::bigint), updated_at = NOW()
-       WHERE (plank_kv_values.value)::bigint < $3::bigint
+       WHERE (plank_kv_values.value #>> '{}')::bigint < $3::bigint
      RETURNING TRUE AS claimed`,
     [leaseKey, now + LEASE_MS, now]
   );
