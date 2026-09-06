@@ -232,9 +232,19 @@ export async function advanceEvmCollectionMembership(
     });
     await writeCollectionMembershipCursor({ chainSlug, collectionSlug: contractAddress,
       source: OPENSEA_MEMBERSHIP_SOURCE, cursor: next, complete, sourceObservedAt: observedAt });
-    if (complete) {
+    // AUDIT lens 4 #2 (2026-09-06): the list endpoint returns no traits, so
+    // finalizing rarity here produced a "complete" ranking of 10k trait-less
+    // tokens, all tied and all "Common". Rarity is computed only when traits
+    // are actually present, and it is labelled partial unless nearly every
+    // token carries traits.
+    const withTraitsCount = complete ? (await readProjectedRarityInputs(chainSlug, contractAddress)).filter((i) => i.traits.length > 0).length : 0;
+    if (complete && withTraitsCount === 0) {
+      console.log(`[rarity-index] ${chainSlug}:${contractAddress} membership complete but no traits yet; rarity deferred to the metadata pass`);
+    }
+    if (complete && withTraitsCount > 0) {
       const items = await readProjectedRarityInputs(chainSlug, contractAddress);
-      const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };
+      const coverage = withTraitsCount / Math.max(1, items.length);
+      const snapshot = { ...computeGenericRaritySnapshot(items), partial: coverage < 0.995 };
       const traitIndex: ForeignTraitIndex = {};
       for (const item of items) for (const trait of item.traits) {
         traitIndex[trait.traitType] ??= {};
@@ -246,7 +256,7 @@ export async function advanceEvmCollectionMembership(
         tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
           name: token.name, rarityScore: token.score, rarityRank: token.rank,
           rarityPercentile: token.percentile, rarityTier: token.tier })),
-        expectedCount: items.length, partial: false,
+        expectedCount: items.length, partial: coverage < 0.995,
         provenance: [OPENSEA_MEMBERSHIP_SOURCE, "bespoke-information-content-rarity"], sourceObservedAt: observedAt,
       });
     }

@@ -41,6 +41,7 @@
  * duplicated.
  */
 import { HypersyncClient, type Query, type Log as HypersyncLog } from "@envio-dev/hypersync-client";
+import { MIN_TRANSFERS_TO_CONSIDER } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { alchemyNftAdapter, fetchSnapshotsBatch } from "@/lib/market/multichain/adapters/alchemy-nft";
 import {
   EVM_CHAIN_ID,
@@ -524,7 +525,11 @@ export async function runHypersyncDiscoveryScan(input: {
   await recordActivity(input.chainSlug, tally);
   await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
-  const candidates = [...tally.entries()];
+  // AUDIT lens 1 #1 (2026-09-06): registering every contract with a single
+  // Transfer log produced 1,567 Arbitrum shells competing for a 20-per-pass
+  // stats budget. The same threshold evm-log-scan.ts already applies gates
+  // discovery here too.
+  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
 
   const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, lastBlockSeen - 1);
   await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-live");
@@ -653,7 +658,11 @@ export async function runHypersyncBackfillScan(input: {
   await recordActivity(input.chainSlug, tally);
   await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
-  const candidates = [...tally.entries()];
+  // AUDIT lens 1 #1 (2026-09-06): registering every contract with a single
+  // Transfer log produced 1,567 Arbitrum shells competing for a 20-per-pass
+  // stats budget. The same threshold evm-log-scan.ts already applies gates
+  // discovery here too.
+  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
 
   const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
   await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-genesis");
@@ -814,7 +823,11 @@ export async function runHypersyncPriorityWindowScan(input: {
   await recordActivity(input.chainSlug, tally);
   await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
-  const candidates = [...tally.entries()];
+  // AUDIT lens 1 #1 (2026-09-06): registering every contract with a single
+  // Transfer log produced 1,567 Arbitrum shells competing for a 20-per-pass
+  // stats budget. The same threshold evm-log-scan.ts already applies gates
+  // discovery here too.
+  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
 
   const { registered, skippedNoMetadata, accepted } = await registerObservedCandidates(input.chainSlug, candidates, nextBlock);
   await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-priority");
