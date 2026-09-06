@@ -387,8 +387,25 @@ export async function runAddressScopedMembershipScan(input: {
 
   let nextBlock = scannedUpTo;
   try {
+    // Transport, measured 2026-09-05 on Base (scripts/hypersync-stream-bench.ts
+    // and a live run of THIS function): stream() wins on bulk, unfiltered
+    // ranges (904,669 logs: get() 9,453 ms / 16 requests vs stream() 4,880
+    // ms) but LOSES on a sparse, address-scoped range like this one (285
+    // logs over 400k blocks: get() 1,432 ms vs stream() 2,819 ms -- the
+    // stream's setup cost dominates). So get() stays the default here;
+    // HYPERSYNC_STREAM=1 opts a lane into stream(), and a stream failure
+    // falls back to get() so the lane never loses its slice.
+    let stream: Awaited<ReturnType<typeof client.stream>> | null = null;
+    if (process.env.HYPERSYNC_STREAM?.trim() === "1") {
+      try {
+        stream = await withHypersyncReservation(() => client.stream(query, {}));
+      } catch {
+        stream = null;
+      }
+    }
     while (logsScanned < MAX_LOGS_PER_RUN) {
-      const res = await withHypersyncReservation(() => client.get(query));
+      const res = stream ? await stream.recv() : await withHypersyncReservation(() => client.get(query));
+      if (res == null) break; // stream exhausted: reached toBlock
       seenBlocks.push(...res.data.blocks);
       for (const log of res.data.logs) {
         if (!log.address) continue;
@@ -406,8 +423,9 @@ export async function runAddressScopedMembershipScan(input: {
       }
       nextBlock = res.nextBlock;
       if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
-      query = { ...query, fromBlock: nextBlock };
+      if (!stream) query = { ...query, fromBlock: nextBlock };
     }
+    if (stream) await stream.close().catch(() => undefined);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (isHypersyncQuotaError(message)) await jailHypersyncAccount().catch(() => {});

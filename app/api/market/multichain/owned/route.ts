@@ -13,6 +13,8 @@ import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { meteredFetch } from "@/lib/market/multichain/edge/provider-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -67,14 +69,19 @@ export async function GET(req: NextRequest) {
   if (isSolanaChainSlug(chainSlug)) {
     try {
       type MeToken = { mintAddress: string; name?: string; image?: string };
-      const res = await fetch(
-        `https://api-mainnet.magiceden.dev/v2/wallets/${encodeURIComponent(owner)}/tokens?collection_symbol=${encodeURIComponent(contractAddress)}&limit=100`,
-        { headers: { accept: "application/json" } }
+      const { value: raw } = await edgeRead<MeToken[]>(
+        { kind: "owned", chainSlug, subject: owner, variant: { collection: contractAddress, limit: 100 } },
+        async () => {
+          const res = await meteredFetch(
+            `https://api-mainnet.magiceden.dev/v2/wallets/${encodeURIComponent(owner)}/tokens?collection_symbol=${encodeURIComponent(contractAddress)}&limit=100`,
+            { headers: { accept: "application/json" } },
+            { source: "magiceden", chainSlug }
+          );
+          if (!res.ok) throw new Error(`Magic Eden ${res.status}`);
+          return (await res.json()) as MeToken[];
+        },
+        { provider: "magiceden" }
       );
-      if (!res.ok) {
-        return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
-      }
-      const raw = (await res.json()) as MeToken[];
       const items = raw.map((t) => ({ tokenId: t.mintAddress, name: t.name ?? null, imageUrl: t.image ?? null }));
       return NextResponse.json({ tokenIds: items.map((i) => i.tokenId), items }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
@@ -156,26 +163,37 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `No Alchemy NFT API mapping for "${chainSlug}"` }, { status: 400 });
   }
 
-  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
-  const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
-  url.searchParams.set("owner", owner);
-  url.searchParams.append("contractAddresses[]", contractAddress);
-  // withMetadata=true -- the "My NFTs" tab renders real card art (matching
-  // the native MyNfts.tsx grid), not just a bare list of token ids.
-  url.searchParams.set("withMetadata", "true");
-
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    return NextResponse.json({ error: `Alchemy ${res.status}` }, { status: 502 });
+  const keyEntry = await pickAlchemyKey("live");
+  const apiKey = keyEntry?.apiKey || "demo";
+  type OwnedArt = { tokenId: string; name: string | null; imageUrl: string | null };
+  let items: OwnedArt[];
+  try {
+    const { value } = await edgeRead<OwnedArt[]>(
+      { kind: "owned", chainSlug, subject: owner.toLowerCase(), variant: { collection: contractAddress.toLowerCase() } },
+      async () => {
+        const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
+        url.searchParams.set("owner", owner);
+        url.searchParams.append("contractAddresses[]", contractAddress);
+        // withMetadata=true -- the "My NFTs" tab renders real card art (matching
+        // the native MyNfts.tsx grid), not just a bare list of token ids.
+        url.searchParams.set("withMetadata", "true");
+        const res = await meteredFetch(url.toString(), undefined, { source: "alchemy-nft", keyId: keyEntry?.id ?? null, chainSlug, costUnits: 480 });
+        if (!res.ok) throw new Error(`Alchemy ${res.status}`);
+        const data = (await res.json()) as {
+          ownedNfts?: Array<{ tokenId: string; name?: string; image?: { cachedUrl?: string; originalUrl?: string } }>;
+        };
+        return (data.ownedNfts ?? []).map((n) => ({
+          tokenId: n.tokenId,
+          name: n.name ?? null,
+          imageUrl: n.image?.cachedUrl ?? n.image?.originalUrl ?? null,
+        }));
+      },
+      { provider: "alchemy" }
+    );
+    items = value;
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Alchemy request failed" }, { status: 502 });
   }
-  const data = (await res.json()) as {
-    ownedNfts?: Array<{ tokenId: string; name?: string; image?: { cachedUrl?: string; originalUrl?: string } }>;
-  };
-  const items = (data.ownedNfts ?? []).map((n) => ({
-    tokenId: n.tokenId,
-    name: n.name ?? null,
-    imageUrl: n.image?.cachedUrl ?? n.image?.originalUrl ?? null,
-  }));
   return NextResponse.json(
     { tokenIds: items.map((i) => i.tokenId), items },
     { headers: { "Cache-Control": "no-store" } }

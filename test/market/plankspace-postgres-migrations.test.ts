@@ -19,7 +19,14 @@ const expected = [
 test("PlankSpace migrations follow current master without version collisions", () => {
   const files = readdirSync(migrationRoot).filter((file) => /^\d+.*\.sql$/.test(file)).sort();
   assert.deepEqual(files.filter((file) => file.includes("plankspace") || file.includes("woodstock")), expected);
-  assert.equal(files.at(-1), expected.at(-1));
+  // Later migrations are allowed (append-only), but they must sort after
+  // the PlankSpace set and each must own a unique prefix -- the collision
+  // this test exists to catch is two files sharing one version number.
+  const last = expected.at(-1)!;
+  const after = files.filter((file) => file > last);
+  const prefixes = after.map((file) => file.match(/^\d+/)?.[0]);
+  assert.equal(new Set(prefixes).size, prefixes.length, `post-PlankSpace migrations must have unique prefixes: ${after.join(", ")}`);
+  for (const prefix of prefixes) assert.ok(Number(prefix) > Number(last.match(/^\d+/)?.[0]), `${prefix} must sort after ${last}`);
   for (const expectedFile of expected) {
     const prefix = expectedFile.match(/^\d+/)?.[0];
     assert.deepEqual(

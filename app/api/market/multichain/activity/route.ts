@@ -23,6 +23,8 @@ import { activityValue } from "@/lib/market/activity-value";
 import { readSeaportFillHistory } from "@/lib/market/multichain/seaport-fill-history";
 import { readLedgerActivity } from "@/lib/market/multichain/ledger-activity";
 import { isCompleteVenueCoverage, venuesForChain } from "@/lib/market/multichain/venue-registry";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { meteredFetch, recordExternalCall } from "@/lib/market/multichain/edge/provider-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -137,18 +139,33 @@ export async function GET(req: NextRequest) {
       if (!rpcUrl) {
         return NextResponse.json({ error: "Robinhood Chain RPC is not configured on this deployment." }, { status: 503 });
       }
-      const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
-      const latest = Number.parseInt(latestHex, 16);
-      const fromBlock = Math.max(0, latest - ACTIVITY_SCAN_BLOCKS);
-
-      const logs = await rpcCall<RawTransferLog[]>(rpcUrl, "eth_getLogs", [
-        {
-          address: collection.contractAddress,
-          fromBlock: "0x" + fromBlock.toString(16),
-          toBlock: "0x" + latest.toString(16),
-          topics: [TRANSFER_TOPIC],
+      // Single point: one eth_blockNumber + one eth_getLogs per collection
+      // per TTL window, however many browsers are on the tab.
+      const { value: logs } = await edgeRead<RawTransferLog[]>(
+        { kind: "activity", chainSlug, subject: collection.contractAddress, variant: { scan: ACTIVITY_SCAN_BLOCKS } },
+        async () => {
+          const started = Date.now();
+          try {
+            const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
+            const latest = Number.parseInt(latestHex, 16);
+            const fromBlock = Math.max(0, latest - ACTIVITY_SCAN_BLOCKS);
+            const result = await rpcCall<RawTransferLog[]>(rpcUrl, "eth_getLogs", [
+              {
+                address: collection.contractAddress,
+                fromBlock: "0x" + fromBlock.toString(16),
+                toBlock: "0x" + latest.toString(16),
+                topics: [TRANSFER_TOPIC],
+              },
+            ]);
+            recordExternalCall({ source: "rpc:robinhood", chainSlug, costUnits: 70, latencyMs: Date.now() - started, outcome: "ok" });
+            return result;
+          } catch (error) {
+            recordExternalCall({ source: "rpc:robinhood", chainSlug, costUnits: 70, latencyMs: Date.now() - started, outcome: "error", error: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
         },
-      ]);
+        { provider: "rpc" }
+      );
 
       const sorted = logs
         .filter((l) => l.topics.length === 4) // ERC-20 Transfer shares the same topic0 with only 3 topics -- excluded, same filter evm-log-scan.ts uses.
@@ -200,14 +217,19 @@ export async function GET(req: NextRequest) {
         price?: number | null;
         tokenMint?: string | null;
       };
-      const res = await fetch(
-        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/activities?limit=${limit}`,
-        { headers: { accept: "application/json" } }
+      const { value: raw } = await edgeRead<MeActivity[]>(
+        { kind: "activity", chainSlug, subject: collectionSlug, variant: { limit } },
+        async () => {
+          const res = await meteredFetch(
+            `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/activities?limit=${limit}`,
+            { headers: { accept: "application/json" } },
+            { source: "magiceden", chainSlug }
+          );
+          if (!res.ok) throw new Error(`Magic Eden ${res.status}`);
+          return (await res.json()) as MeActivity[];
+        },
+        { provider: "magiceden" }
       );
-      if (!res.ok) {
-        return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
-      }
-      const raw = (await res.json()) as MeActivity[];
       const meEvents = await Promise.all(raw.map(async (a) => ({
         source: "magiceden_live" as const,
         type: a.type === "buyNow" ? "sale" : a.type,
@@ -355,7 +377,8 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ...ledger, marketCoverage: venueCoverage(chainSlug) }, { headers: { "Cache-Control": "no-store" } });
       }
     }
-    const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
+    const keyEntry = await pickOpenSeaKey("live");
+    const key = keyEntry?.apiKey ?? null;
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }
@@ -376,11 +399,15 @@ export async function GET(req: NextRequest) {
     const url =
       `${OPENSEA}/events/collection/${encodeURIComponent(openSeaSlug)}` +
       `?event_type=sale&event_type=transfer&limit=${Math.min(limit, 50)}`;
-    const res = await fetch(url, { headers: { "x-api-key": key, accept: "application/json" } });
-    if (!res.ok) {
-      return NextResponse.json({ error: `OpenSea ${res.status}` }, { status: 502 });
-    }
-    const data = (await res.json()) as { asset_events?: OpenSeaEvent[] };
+    const { value: data } = await edgeRead<{ asset_events?: OpenSeaEvent[] }>(
+      { kind: "activity", chainSlug, subject: openSeaSlug, variant: { limit: Math.min(limit, 50), src: "opensea" } },
+      async () => {
+        const res = await meteredFetch(url, { headers: { "x-api-key": key, accept: "application/json" } }, { source: "opensea", keyId: keyEntry?.id ?? null, chainSlug });
+        if (!res.ok) throw new Error(`OpenSea ${res.status}`);
+        return (await res.json()) as { asset_events?: OpenSeaEvent[] };
+      },
+      { provider: "opensea" }
+    );
     const events = await Promise.all((data.asset_events ?? []).map(async (e) => ({
       type: e.event_type,
       timestamp: new Date(e.event_timestamp * 1000).toISOString(),

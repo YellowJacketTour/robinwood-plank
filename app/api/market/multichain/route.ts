@@ -47,7 +47,30 @@ export async function GET(req: Request) {
     );
   }
 
+  // Single point (2026-09-06): the hub index is the hottest read in the app
+  // and one build of it is dozens of Postgres round trips (a page of the
+  // catalog, one activity query per chain, native book, ledger stats). Live
+  // it took 96 s on a saturated PGPOOL_MAX=4 pool and every visitor paid it
+  // again. Now N visitors of the same window share one build per soft TTL
+  // and get stale-while-revalidate past it -- the hub GET still reads
+  // snapshots only, it just reads them once.
+  const url = new URL(req.url);
+  const variant = Object.fromEntries(["limit", "offset", "chains", "sort", "dir", "v"].map((k) => [k, url.searchParams.get(k) ?? ""]));
   try {
+    const { edgeRead } = await import("@/lib/market/multichain/edge/read-gateway");
+    const { value } = await edgeRead(
+      { kind: "search", chainSlug: "all", subject: "hub-index", variant },
+      () => buildHubIndex(req),
+      { policy: { softTtlMs: 30_000, hardTtlMs: 5 * 60_000 } }
+    );
+    return NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return publicError(error, "Failed to load the multichain index.");
+  }
+}
+
+async function buildHubIndex(req: Request) {
+  {
     const rawLimit = Number(new URL(req.url).searchParams.get("limit") ?? "5000");
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 20000) : 5000;
     const rawOffset = Number(new URL(req.url).searchParams.get("offset") ?? "0");
@@ -356,7 +379,7 @@ export async function GET(req: Request) {
     // duplicate it in the client's appended list.
     const includeNativeRow = offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"));
     const windowCollections = includeNativeRow ? [nativeRow, ...withoutDupNative] : withoutDupNative;
-    return NextResponse.json({
+    return {
       count: windowCollections.length,
       // Real total tracked-collection count (all 317k+, not just this
       // window) so the UI can honestly show "showing N of totalCount"
@@ -367,8 +390,6 @@ export async function GET(req: Request) {
       limit,
       offset,
       collections: windowCollections,
-    });
-  } catch (error) {
-    return publicError(error, "Failed to load the multichain index.");
+    };
   }
 }

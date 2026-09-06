@@ -71,11 +71,13 @@ export type ForeignSeaportOrder = {
 
 async function openSeaFetch<T>(path: string): Promise<T | null> {
   // Live order fetch/prepare for a real buy/sell action -- "live" priority.
-  const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
+  const keyEntry = await pickOpenSeaKey("live");
+  const key = keyEntry?.apiKey ?? null;
   if (!key) {
     throw new Error("foreign-orders: no OpenSea API key available (set OPENSEA_API_KEY or let the managed-key cron issue one)");
   }
-  const res = await fetch(`${BASE}${path}`, { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+  const { meteredFetch } = await import("@/lib/market/multichain/edge/provider-ledger");
+  const res = await meteredFetch(`${BASE}${path}`, { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(15_000) }, { source: "opensea", keyId: keyEntry?.id ?? null });
   if (res.status === 404) return null; // no order exists -- a real, expected state, not an error
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -85,16 +87,18 @@ async function openSeaFetch<T>(path: string): Promise<T | null> {
 }
 
 async function openSeaPost<T>(path: string, body: unknown): Promise<T> {
-  const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
+  const keyEntry = await pickOpenSeaKey("live");
+  const key = keyEntry?.apiKey ?? null;
   if (!key) {
     throw new Error("foreign-orders: no OpenSea API key available (set OPENSEA_API_KEY or let the managed-key cron issue one)");
   }
-  const res = await fetch(`${BASE}${path}`, {
+  const { meteredFetch } = await import("@/lib/market/multichain/edge/provider-ledger");
+  const res = await meteredFetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "x-api-key": key, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
-  });
+  }, { source: "opensea", keyId: keyEntry?.id ?? null });
   if (!res.ok) {
     const responseBody = await res.text().catch(() => "");
     throw new Error(`foreign-orders: OpenSea ${res.status} posting ${path} -- ${responseBody.slice(0, 300)}`);

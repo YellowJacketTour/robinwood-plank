@@ -133,6 +133,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       bindActiveProvider();
       setAddress(addr);
       setStatus("connected");
+      // Demand bus: a connected wallet's holdings are what its owner opens
+      // next. Server resolves the collections (lib/market/multichain/edge/
+      // demand-bus.ts publishWalletConnect); this is fire-and-forget.
+      void import("@/hooks/useDemandIntent").then(({ publishDemandIntent }) =>
+        publishDemandIntent({ kind: "wallet-connect", chainSlug: "all", subjects: [addr] })
+      ).catch(() => undefined);
       void getChainId().then(setChainId).catch(() => undefined);
     },
     [bindActiveProvider]

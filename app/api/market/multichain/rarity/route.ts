@@ -62,6 +62,19 @@ export async function GET(req: NextRequest) {
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
     const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
     const sampleSize = meta?.sampleSize ?? map.size;
+    // Universal rarity (lib/rarity-universal.ts): coverage is real rows vs
+    // the real known supply, never a source's own flag; collection type is
+    // detected from the stored trait index, not assumed.
+    const { getCollectionSupplyStats } = await import("@/lib/market/multichain/store");
+    const { rarityCoverage, collectionTypeSignals, detectCollectionType } = await import("@/lib/rarity-universal");
+    const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
+    const coverage = rarityCoverage(map.size, supply?.totalSupply ?? null);
+    let collectionType: string = "unknown";
+    if (meta?.traitIndex) {
+      const { itemsFromTraitIndex } = await import("@/lib/market/multichain/foreign-rarity-store");
+      const items = itemsFromTraitIndex(meta.traitIndex);
+      collectionType = detectCollectionType(collectionTypeSignals(items, { totalSupply: supply?.totalSupply ?? null, standard: chainSlug === "bitcoin-mainnet" ? "ordinals" : null }));
+    }
     // Old first-pass caps (1k/2k/5k) left Claynosaurz stuck at 5,000 forever
     // because we only enqueued when the map was empty. Resume those samples.
     // Resume only historical first-pass caps. 2_000 is also itemCeiling(unknown
@@ -84,7 +97,9 @@ export async function GET(req: NextRequest) {
         byTokenId,
         indexed: map.size > 0,
         sampleSize,
-        partial: map.size === 0 || staleFirstPass || chainSlug === "bitcoin-mainnet",
+        partial: map.size === 0 || staleFirstPass || chainSlug === "bitcoin-mainnet" || coverage.partial,
+        coverage,
+        collectionType,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

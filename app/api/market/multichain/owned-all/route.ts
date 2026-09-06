@@ -15,6 +15,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { rateLimit } from "@/lib/security";
 import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-pool";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { meteredFetch } from "@/lib/market/multichain/edge/provider-ledger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,28 +43,38 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "owner is required" }, { status: 400 });
   }
 
-  const apiKey = (await pickAlchemyKey("live"))?.apiKey || "demo";
+  const keyEntry = await pickAlchemyKey("live");
+  const apiKey = keyEntry?.apiKey || "demo";
 
   const results = await Promise.all(
     FOREIGN_CHAINS.map(async (chain): Promise<OwnedItem[]> => {
       const subdomain = ALCHEMY_SUBDOMAIN[chain.chainSlug];
       if (!subdomain) return [];
       try {
-        const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
-        url.searchParams.set("owner", owner);
-        url.searchParams.set("withMetadata", "true");
-        url.searchParams.set("pageSize", "50");
-        const res = await fetch(url.toString());
-        if (!res.ok) return [];
-        const data = (await res.json()) as {
-          ownedNfts?: Array<{ tokenId: string; contract?: { address: string; name?: string | null } }>;
-        };
-        return (data.ownedNfts ?? []).map((n) => ({
-          chainSlug: chain.chainSlug,
-          contractAddress: n.contract?.address ?? "",
-          collectionName: n.contract?.name ?? null,
-          tokenId: n.tokenId,
-        }));
+        // Single point: one Alchemy call per (chain, wallet) per TTL window
+        // regardless of how many tabs open "My NFTs".
+        const { value } = await edgeRead<OwnedItem[]>(
+          { kind: "owned", chainSlug: chain.chainSlug, subject: owner.toLowerCase(), variant: { scope: "all", pageSize: 50 } },
+          async () => {
+            const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
+            url.searchParams.set("owner", owner);
+            url.searchParams.set("withMetadata", "true");
+            url.searchParams.set("pageSize", "50");
+            const res = await meteredFetch(url.toString(), undefined, { source: "alchemy-nft", keyId: keyEntry?.id ?? null, chainSlug: chain.chainSlug, costUnits: 480 });
+            if (!res.ok) throw new Error(`Alchemy ${res.status}`);
+            const data = (await res.json()) as {
+              ownedNfts?: Array<{ tokenId: string; contract?: { address: string; name?: string | null } }>;
+            };
+            return (data.ownedNfts ?? []).map((n) => ({
+              chainSlug: chain.chainSlug,
+              contractAddress: n.contract?.address ?? "",
+              collectionName: n.contract?.name ?? null,
+              tokenId: n.tokenId,
+            }));
+          },
+          { provider: "alchemy" }
+        );
+        return value;
       } catch {
         return [];
       }
