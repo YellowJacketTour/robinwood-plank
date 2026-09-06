@@ -23,6 +23,7 @@ import { HydrationPlankChip } from "@/components/market/hydration/HydrationPlank
 import { ArchivalDepthBar } from "@/components/market/hydration/ArchivalDepthBar";
 import type { MarketCoverage } from "@/lib/market/multichain/venue-registry";
 import { useDemandIntent } from "@/hooks/useDemandIntent";
+import { useLiveChainCounts } from "@/hooks/useLiveChainCounts";
 
 const CollectionThumb = CollectionArtImage;
 
@@ -1069,6 +1070,14 @@ export default function GlobalMarketHub() {
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
   const [chainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
+  // collections increase while I'm on screen"): polled every 15 s; a chain
+  // whose count grew pulses its badge for a few seconds.
+  const liveCounts = useLiveChainCounts(15_000);
+  useEffect(() => {
+    if (Object.keys(liveCounts.counts).length > 0) setChainCounts(liveCounts.counts);
+  }, [liveCounts.counts]);
+  const countDelta = (slug: string): number => liveCounts.deltas[slug] ?? 0;
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1873,7 +1882,10 @@ export default function GlobalMarketHub() {
               <span className="min-w-0 flex-1 truncate text-foreground/80" title={chainDisplayName(slug)}>
                 {chainDisplayName(slug)}
               </span>
-              <span className="shrink-0 whitespace-nowrap text-foreground/40">{count}</span>
+              <span className={["shrink-0 whitespace-nowrap", countDelta(slug) > 0 ? "text-emerald-300 animate-plank-glow" : "text-foreground/40"].join(" ")}>
+                {count}
+                {countDelta(slug) > 0 && <span className="ml-1 text-[10px] font-black text-emerald-300">+{countDelta(slug)}</span>}
+              </span>
             </label>
           ))}
         </div>
@@ -2226,6 +2238,7 @@ export default function GlobalMarketHub() {
                     }}
                   >
                     {count}
+                    {countDelta(slug) > 0 && <span className="ml-1 rounded bg-emerald-400/20 px-1 text-[10px] text-emerald-300 animate-plank-glow">+{countDelta(slug)}</span>}
                   </span>
                 </button>
               );

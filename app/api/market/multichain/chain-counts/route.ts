@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
     return NextResponse.json(
       { counts, total },
-      { headers: { "Cache-Control": "public, max-age=30, s-maxage=120, stale-while-revalidate=600" } }
+      { headers: { "Cache-Control": "public, max-age=10, s-maxage=10, stale-while-revalidate=30" } }
     );
   } catch (error) {
     return publicError(error, "Failed to load chain counts.");
