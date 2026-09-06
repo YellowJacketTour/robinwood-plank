@@ -53,6 +53,7 @@
  * protocol's fills into it would misrepresent what the table means.
  */
 import { Interface } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery } from "@/lib/postgres";
 
 export const LOOKSRARE_V1_ADDRESS = "0x59728544b08ab483533076417fbbb2fd0b17ce3a";
@@ -214,6 +215,9 @@ export async function writeLooksRareFills(rows: LooksRareFillRow[]): Promise<num
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && r.fill.nftContract) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "looksrare", protocol: "looksrare", collectionKey: r.fill.nftContract, tokenId: r.fill.tokenId != null ? String(r.fill.tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: r.fill.seller, buyer: r.fill.buyer, currencyToken: r.fill.currencyToken ?? null, priceWei: r.fill.priceWei != null ? String(r.fill.priceWei) : null, raw: { orderHash: r.fill.orderHash, strategy: r.fill.strategy } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew) continue;
 
@@ -255,5 +259,6 @@ export async function writeLooksRareFills(rows: LooksRareFillRow[]): Promise<num
       ]
     );
   }
+  await flushLedgerAggregation();
   return written;
 }

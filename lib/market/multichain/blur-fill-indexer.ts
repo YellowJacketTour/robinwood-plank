@@ -56,6 +56,7 @@
  * sell/buy-order matches.
  */
 import { Interface } from "ethers";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 
 export const BLUR_EXCHANGE_ADDRESS = "0x000000000000ad05ccc4f10045630fb830b95127";
@@ -195,6 +196,9 @@ export async function writeBlurFills(rows: BlurFillRow[]): Promise<number> {
       )
     );
     const isNew = (result.rowCount ?? 0) > 0;
+    if (isNew && r.fill.nftContract) {
+      await recordSaleEvent({ chainSlug: r.chainSlug, venue: "blur", protocol: "blur", collectionKey: r.fill.nftContract, tokenId: r.fill.tokenId != null ? String(r.fill.tokenId) : null, txHash: r.txHash, logIndex: r.logIndex, blockNumber: r.blockNumber, blockTimestamp: r.blockTimestamp ?? null, seller: r.fill.seller, buyer: r.fill.buyer, currencyToken: r.fill.currencyToken ?? null, priceWei: r.fill.priceWei != null ? String(r.fill.priceWei) : null, raw: { sellHash: r.fill.sellHash, buyHash: r.fill.buyHash } });
+    }
     written += isNew ? 1 : 0;
     if (!isNew) continue;
 
@@ -215,5 +219,6 @@ export async function writeBlurFills(rows: BlurFillRow[]): Promise<number> {
       [r.chainSlug, BLUR_EXCHANGE_ADDRESS, r.txHash, r.logIndex, r.fill.currencyToken, r.fill.priceWei, r.fill.seller]
     );
   }
+  await flushLedgerAggregation();
   return written;
 }
