@@ -84,6 +84,7 @@
  * signature+mint.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { amountUsdAtSale } from "@/lib/market/asset-price-hourly";
 import { reserveHeliusKey, settleHeliusKey } from "@/lib/market/multichain/discovery/helius-key-pool";
 
 const ENHANCED_TX_BASE = "https://api.helius.xyz/v0/addresses";
@@ -239,19 +240,28 @@ export type WriteSolanaLedgerResult = { written: number };
 export async function writeSolanaTransferLedgerEvents(events: DecodedSolanaEvent[]): Promise<WriteSolanaLedgerResult> {
   let written = 0;
   const seen = new Set<string>();
+  const touched = new Set<string>();
   for (const e of events) {
     const dedupeKey = `${e.signature}:${e.venueId}:${e.subIndex}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     const eventIdentity = `solana:${e.signature}:0:${e.subIndex}`;
+    // AUDIT lens 6 #10 (2026-09-06): sale rows used to carry the lamports
+    // only inside raw_event, so every Solana sale was "unpriced" on the
+    // buyer board and invisible to the aggregator. Now amount_atomic (SOL,
+    // 9 decimals) and amount_usd at the sale hour are real columns.
+    const isSale = e.eventType === "sale" && e.amountLamports != null;
+    const priced = isSale ? await amountUsdAtSale(CHAIN_SLUG, null, e.amountLamports, e.blockTimestamp).catch(() => ({ amountUsd: null, source: null, asset: null })) : { amountUsd: null, source: null, asset: null };
     const result = await postgresQuery(
       `INSERT INTO plank_market_events
          (chain_slug, venue_id, protocol, event_type, collection_key, token_id, tx_hash,
           event_index, sub_index, block_number, block_timestamp, seller, buyer,
+          currency_symbol, currency_decimals, amount_atomic, amount_usd, usd_price_source, finality,
           chain_namespace, event_identity, raw_event)
        VALUES
          ($1, $2, $3, $4, $5, $6, $7,
           0, $8, $9, to_timestamp($10), $11, $12,
+          $15, $16, $17::numeric, $18::numeric, $19, 'confirmed',
           'solana', $13, $14::jsonb)
        ON CONFLICT (chain_slug, venue_id, tx_hash, event_index, sub_index) DO NOTHING`,
       [
@@ -269,9 +279,21 @@ export async function writeSolanaTransferLedgerEvents(events: DecodedSolanaEvent
         e.toAddress,
         eventIdentity,
         JSON.stringify({ mint: e.mint, from: e.fromAddress, to: e.toAddress, amountLamports: e.amountLamports }),
+        isSale ? "SOL" : null,
+        isSale ? 9 : null,
+        isSale ? e.amountLamports : null,
+        priced.amountUsd,
+        priced.source,
       ]
     );
-    if ((result.rowCount ?? 0) > 0) written += 1;
+    if ((result.rowCount ?? 0) > 0) {
+      written += 1;
+      if (isSale && e.collectionSlug) touched.add(e.collectionSlug.toLowerCase());
+    }
+  }
+  if (touched.size > 0) {
+    const { updateVolumeFromMarketEvents } = await import("@/lib/market/multichain/store");
+    await updateVolumeFromMarketEvents(CHAIN_SLUG, [...touched]).catch(() => undefined);
   }
   return { written };
 }
