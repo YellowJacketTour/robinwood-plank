@@ -103,7 +103,7 @@ const openSeaSemaphore = new Semaphore(MAX_CONCURRENT_OPENSEA_LANES);
  */
 const LIGHT_SOURCES = new Set(["evm-metadata", "erc4906-rescan", "ipfs-corroboration"]);
 
-async function runLightSourceInProcess(source: string, chain: string, subject?: string | null): Promise<number> {
+async function runLightSourceInProcess(source: string, chain: string, subject?: string | null, signal?: AbortSignal): Promise<number> {
   try {
     if (source === "evm-metadata") {
       const { advanceEvmTokenMetadata } = await import("../lib/market/multichain/rarity-index-runner");
@@ -111,7 +111,10 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
       let attempted = 0;
       let lastAttempted = 0;
       const deadline = Date.now() + 45_000;
-      while (attempted < ceiling && Date.now() < deadline) {
+      // AUDIT lens 5 A / A8: the scheduler's timeout aborts this signal; the
+      // loop stops within one iteration instead of running on past the
+      // lane's own failure verdict (and past the next claim of the same job).
+      while (attempted < ceiling && Date.now() < deadline && !signal?.aborted) {
         const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
         lastAttempted = batch.attempted;
         attempted += batch.attempted;
@@ -119,7 +122,7 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
       }
       // AUDIT lens 4 #1: stopped on ceiling/deadline with work left -> 2, so
       // the job is re-enqueued at its priority instead of marked done.
-      const moreWork = lastAttempted > 0 && (attempted >= ceiling || Date.now() >= deadline);
+      const moreWork = lastAttempted > 0 && (attempted >= ceiling || Date.now() >= deadline || Boolean(signal?.aborted));
       return subject && moreWork ? 2 : 0;
     }
     if (source === "erc4906-rescan") {
@@ -162,13 +165,23 @@ const pendingDefer = new Map<string, { ms: number; reason: string | null }>();
 /** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
 const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
-function withTimeout(promise: Promise<number>, ms: number, label: string): Promise<number> {
+/**
+ * AUDIT lens 5 A / A8 (2026-09-06): an in-process lane cannot be SIGKILLed,
+ * so the timeout now also aborts a signal the lane threads into its own
+ * loops (mesh-lane.ts runMeshLaneDetailed / runLightSourceInProcess). The
+ * scheduler still moves on at `ms` exactly as before; the lane stops within
+ * one iteration instead of silently running on beside the next claim.
+ */
+function withTimeout(run: (signal: AbortSignal) => Promise<number>, ms: number, label: string): Promise<number> {
+  const controller = new AbortController();
+  const promise = run(controller.signal);
   return new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       console.error(`[mesh-tick] lane ${label} exceeded ${ms}ms -- treating as failed, unblocking scheduler`);
+      controller.abort(new Error(`lane ${label} exceeded ${ms}ms`));
       resolve(1);
     }, ms);
     promise.then(
@@ -205,20 +218,22 @@ function laneEntry(): string[] {
 
 function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
   const label = `${source}:${chain}`;
-  if (LIGHT_SOURCES.has(source)) return withTimeout(runLightSourceInProcess(source, chain, subject), LANE_TIMEOUT_MS, label);
+  if (LIGHT_SOURCES.has(source)) return withTimeout((signal) => runLightSourceInProcess(source, chain, subject, signal), LANE_TIMEOUT_MS, label);
   if (inProcess) {
     return withTimeout(
-      import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
-        const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "");
-        if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
-        return outcome.code;
-      }),
+      (signal) =>
+        import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
+          const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "", signal);
+          if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
+          return outcome.code;
+        }),
       IN_PROCESS_LANE_TIMEOUT_MS,
       label
     );
   }
   return withTimeout(
-    new Promise((resolve) => {
+    () =>
+      new Promise((resolve) => {
       const p = spawn(
         process.execPath,
         // The scheduler process is the environment boundary. Children inherit

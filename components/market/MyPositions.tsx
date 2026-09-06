@@ -11,6 +11,7 @@ import {
   type MarketApprovals,
 } from "@/lib/market/seaport";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { seaportChainForListing } from "@/lib/market/multichain/trading/native-fulfill";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, Offer } from "@/lib/market/types";
 import EthUsdValue from "@/components/market/EthUsdValue";
@@ -32,6 +33,8 @@ type Row = {
   priceWei: string;
   expiresAt: string;
   rawOrder: unknown;
+  /** Same field as Listing/Offer.chainSlug -- absent/"robinhood" = home chain; a foreign slug routes the cancel through sendForeignTransaction. */
+  chainSlug?: string;
 };
 
 const COLLECTION = MARKET_COLLECTIONS[0];
@@ -59,6 +62,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         priceWei: l.priceWei,
         expiresAt: l.expiresAt,
         rawOrder: l.rawOrder,
+        chainSlug: l.chainSlug,
       })),
     ...offers
       .filter((o) => o.maker?.toLowerCase() === account.toLowerCase())
@@ -71,6 +75,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         priceWei: o.priceWei,
         expiresAt: o.expiresAt,
         rawOrder: o.rawOrder,
+        chainSlug: o.chainSlug,
       })),
   ];
 
@@ -104,7 +109,9 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         const raw = row.rawOrder as {
           parameters: Parameters<typeof cancelOrder>[0];
         };
-        await cancelOrder(raw.parameters, account);
+        // AUDIT lens 3 D5 (2026-09-06): a Marketplank-native order on a
+        // foreign EVM chain cancels on THAT chain's Seaport, not Robinhood's.
+        await cancelOrder(raw.parameters, account, seaportChainForListing(row.chainSlug));
 
         // Cancelling on-chain doesn't remove the order from the relay, so
         // without this the dead listing keeps showing and buyers waste gas

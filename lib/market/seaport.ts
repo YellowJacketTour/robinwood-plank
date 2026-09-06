@@ -1049,38 +1049,61 @@ export async function sweepFloor(
  * Destructive by design: live listings and offers die too, and re-listing means
  * signing fresh orders. Callers must say so before offering the button.
  */
-export async function cancelAllOrders(accountAddress: string): Promise<string> {
-  const seaport = await getSeaport();
+export async function cancelAllOrders(accountAddress: string, chain?: SeaportChain): Promise<string> {
+  const seaport = await getSeaport(undefined, chain);
   const methods = seaport.bulkCancelOrders(accountAddress);
   const tx = await methods.buildTransaction();
   if (!tx.to || !tx.data) throw new Error("Could not build bulk-cancel transaction.");
-  const hash = await sendTransaction({
-    to: tx.to,
-    from: accountAddress,
-    data: String(tx.data),
-    kind: "market",
-  });
+  const hash = await sendCancelTransaction(tx.to, String(tx.data), accountAddress, chain, chain?.seaportAddress ?? "");
   await waitForTransaction(hash, { label: "Cancel all" });
   return hash;
 }
 
-/** Cancels one of the caller's own orders on-chain, via the wallet safety rail. */
+/**
+ * Cancels one of the caller's own orders on-chain, via the wallet safety
+ * rail. AUDIT lens 3 #9 / D5 (2026-09-06): `chain` routes a Marketplank-
+ * native order on a foreign EVM chain through sendForeignTransaction
+ * (chain re-check + Seaport/conduit/collection allowlist + simulation)
+ * instead of the Robinhood-only sendTransaction; omitted = Robinhood.
+ */
 export async function cancelOrder(
   parameters: Parameters<Seaport["cancelOrders"]>[0][number],
-  accountAddress: string
+  accountAddress: string,
+  chain?: SeaportChain
 ): Promise<string> {
-  const seaport = await getSeaport();
+  const seaport = await getSeaport(undefined, chain);
   const methods = seaport.cancelOrders([parameters], accountAddress);
   const tx = await methods.buildTransaction();
   if (!tx.to || !tx.data) throw new Error("Could not build cancel transaction.");
-  const hash = await sendTransaction({
-    to: tx.to,
-    from: accountAddress,
-    data: String(tx.data),
-    kind: "market",
-  });
+  const contracts = chain ? erc721ContractsOf({ parameters } as unknown as FulfillableOrder) : [];
+  const hash = await sendCancelTransaction(tx.to, String(tx.data), accountAddress, chain, contracts.length > 0 ? contracts : chain?.seaportAddress ?? "");
   await waitForTransaction(hash, { label: "Cancel" });
   return hash;
+}
+
+/** A cancel targets Seaport itself (always allowlisted); the collection contract(s) are passed only so the allowlist call is honest about the order's scope. */
+async function sendCancelTransaction(
+  to: string,
+  data: string,
+  accountAddress: string,
+  chain: SeaportChain | undefined,
+  contractAddress: string | string[]
+): Promise<string> {
+  if (!chain) {
+    return sendTransaction({ to, from: accountAddress, data, kind: "market" });
+  }
+  return sendForeignTransaction({
+    to,
+    from: accountAddress,
+    data,
+    chainSlug: chain.chainSlug,
+    chainId: chain.chainId,
+    chainName: chain.chainName,
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
+    rpcUrl: chain.rpcUrl,
+    blockExplorerUrl: chain.blockExplorerUrl,
+    contractAddress,
+  });
 }
 
 /**

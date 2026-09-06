@@ -37,13 +37,13 @@
  */
 import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, Interface } from "ethers";
 import {
   foreignChainByChainSlug,
   foreignOfferCurrency,
   FOREIGN_SEAPORT_ADDRESS,
 } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { getEthereumProvider, ensureChain } from "@/lib/wallet";
+import { getEthereumProvider, ensureChain, sendForeignTransaction, waitForTransaction } from "@/lib/wallet";
 import { chainDisplayName, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { normalizeTokenIds } from "@/lib/market/criteria";
 import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_OFFER_FEE_BPS } from "@/lib/constants";
@@ -51,9 +51,22 @@ import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_OFFER_FEE_BPS } from "@/lib/c
 type SeaportTransactionMethods = { buildTransaction: () => Promise<{ to?: string; data?: string; value?: bigint }> };
 type SeaportAction = { type: string; transactionMethods?: SeaportTransactionMethods; createOrder?: () => Promise<unknown> };
 
-async function connectedSeaport(chainSlug: string) {
+/** The registry-sourced chain parameters every send on this chain uses -- one source of truth for ensureChain and sendForeignTransaction alike. */
+function chainParamsFor(chainSlug: string) {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain) throw new Error(`foreign-offer: "${chainSlug}" is not a supported foreign chain.`);
+  return {
+    chainSlug,
+    chainId: chain.chainId,
+    chainName: chainDisplayName(chainSlug),
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
+    rpcUrl: foreignRpcUrls(chainSlug)[0],
+    blockExplorerUrl: chain.blockExplorerUrl,
+  };
+}
+
+async function connectedSeaport(chainSlug: string) {
+  const params = chainParamsFor(chainSlug);
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
   // AUDIT lens 3 #4 (2026-09-06): this used to add the chain to the wallet
@@ -61,13 +74,13 @@ async function connectedSeaport(chainSlug: string) {
   // no explorer -- persisting a broken network into the user's wallet. Same
   // registry-sourced parameters the buy path uses (foreign-fulfill.ts).
   await ensureChain({
-    chainId: chain.chainId,
-    name: chainDisplayName(chainSlug),
-    nativeCurrencySymbol: chain.nativeCurrencySymbol,
-    rpcUrl: foreignRpcUrls(chainSlug)[0],
-    blockExplorerUrl: chain.blockExplorerUrl,
+    chainId: params.chainId,
+    name: params.chainName,
+    nativeCurrencySymbol: params.nativeCurrencySymbol,
+    rpcUrl: params.rpcUrl,
+    blockExplorerUrl: params.blockExplorerUrl,
   });
-  const browserProvider = new BrowserProvider(injected, { chainId: chain.chainId, name: chainSlug });
+  const browserProvider = new BrowserProvider(injected, { chainId: params.chainId, name: chainSlug });
   const signer = await browserProvider.getSigner();
   const seaport = new Seaport(signer as unknown as ConstructorParameters<typeof Seaport>[0], {
     overrides: { contractAddress: FOREIGN_SEAPORT_ADDRESS },
@@ -75,8 +88,30 @@ async function connectedSeaport(chainSlug: string) {
   return { seaport, signer };
 }
 
-/** Sequences seaport-js actions exactly like lib/market/seaport.ts's own executeActionsViaWallet, minus the market-tx allowlist (that's Robinhood-Chain-specific) -- WETH approval sends go through the wallet's normal path here. */
-async function executeActions(actions: SeaportAction[], signer: Awaited<ReturnType<typeof connectedSeaport>>["signer"]): Promise<unknown | null> {
+/**
+ * Sequences seaport-js actions exactly like lib/market/seaport.ts's own
+ * executeActionsViaWallet. AUDIT lens 3 #4 / D3 (2026-09-06): every on-chain
+ * send (the WETH `approve(conduit)` before an offer signature, the token
+ * approval before an accept) now goes through lib/wallet.ts
+ * sendForeignTransaction -- chain re-check, destination allowlist
+ * (Seaport / conduit / the chain's wrapped native / this collection), and
+ * hard-fail pre-flight simulation -- instead of a raw signer.sendTransaction
+ * that the wallet alone had to vet. Each tx is awaited to a receipt before
+ * the next action because the next action is "create" (the signature
+ * request), which must see the allowance already on-chain (bug fix
+ * 2026-08-19: this loop once built the approval and never sent it).
+ *
+ * Signature actions ("create") still use seaport-js's own signer path --
+ * that is an eth_signTypedData_v4 with the chainId-pinned domain, not a send.
+ */
+async function executeActions(
+  actions: SeaportAction[],
+  accountAddress: string,
+  chainSlug: string,
+  /** The ONE collection contract this action sequence is for (see assertSafeForeignMarketDestination). */
+  contractAddress: string
+): Promise<unknown | null> {
+  const params = chainParamsFor(chainSlug);
   let order: unknown | null = null;
   for (const action of actions) {
     if (action.type === "create" && action.createOrder) {
@@ -86,21 +121,15 @@ async function executeActions(actions: SeaportAction[], signer: Awaited<ReturnTy
     if (!action.transactionMethods) throw new Error(`Unsupported Seaport action "${action.type}".`);
     const tx = await action.transactionMethods.buildTransaction();
     if (!tx.to || !tx.data) throw new Error("Malformed Seaport approval transaction.");
-    // No dedicated wallet-tx pre-flight exists for foreign chains (that
-    // machinery is Robinhood-Chain-specific) -- the wallet's own
-    // simulation/confirmation UI is the safety net here, same as every
-    // other raw signer.sendTransaction call in this multichain module.
-    //
-    // MUST ACTUALLY SEND AND CONFIRM THIS (bug fix, 2026-08-19): this loop
-    // previously built the approval transaction and discarded it without
-    // ever calling sendTransaction -- a first-time offerer (WETH allowance
-    // not yet granted to Seaport's conduit) would sign and submit a real
-    // offer that could never be fulfilled, with no error surfaced. Waiting
-    // for one confirmation before the next action matters here specifically
-    // because the very next action is "create" (the signature request),
-    // which must see the allowance already on-chain.
-    const sent = await signer.sendTransaction(tx);
-    await sent.wait(1);
+    const hash = await sendForeignTransaction({
+      to: tx.to,
+      from: accountAddress,
+      data: tx.data,
+      value: tx.value !== undefined && tx.value !== null ? tx.value.toString() : undefined,
+      ...params,
+      contractAddress,
+    });
+    await waitForTransaction(hash, { label: action.type === "approval" ? "Approval" : "Order" });
   }
   return order;
 }
@@ -166,7 +195,7 @@ export async function buildForeignOffer(input: {
     };
   }
 
-  const { seaport, signer } = await connectedSeaport(input.chainSlug);
+  const { seaport } = await connectedSeaport(input.chainSlug);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
 
   // Marketplank's fee on this offer, via seaport-js's own `fees` param --
@@ -188,7 +217,7 @@ export async function buildForeignOffer(input: {
     /* exactApproval */ true
   );
 
-  const order = (await executeActions(actions as unknown as SeaportAction[], signer)) as
+  const order = (await executeActions(actions as unknown as SeaportAction[], input.accountAddress, input.chainSlug, input.collectionAddress)) as
     | { parameters: unknown; signature: string }
     | null;
   if (!order) throw new Error("Offer was not signed.");
@@ -213,31 +242,117 @@ export async function buildForeignOffer(input: {
   return { orderHash: submitted.order_hash ?? "" };
 }
 
+/** OpenSea `fulfillment_data.transaction` -- the exact call OpenSea resolved for this fulfiller (criteria resolvers included). */
+export type OpenSeaFulfillmentTransaction = {
+  function: string;
+  to: string;
+  value: number | string;
+  /** Either hex calldata or OpenSea's decoded argument object (keys in ABI order). */
+  input_data: unknown;
+};
+
 /**
- * Accept a token-specific offer -- the NFT owner becomes the Seaport
- * fulfiller, paying nothing and receiving the bid amount while Seaport
- * pulls the token from them (requires the owner to approve Seaport's
- * conduit for this token first; seaport-js's fulfillOrder handles that
- * approval step itself, same as lib/market/seaport.ts's own fulfillOrder).
+ * Pure guard for the calldata OpenSea vends (AUDIT lens 3 #5 / D4): the
+ * seller sends it verbatim, so the ONLY things this app can and must check
+ * are (a) it targets Seaport itself and nothing else, (b) it moves no
+ * native value out of the seller (accepting a bid costs gas only), and
+ * (c) the signed order's bid equals the price the seller was shown.
+ * Throws with a user-facing message; returns the normalized `to`/value.
+ */
+export function assertOfferFulfillmentCalldata(input: {
+  to: string;
+  value: number | string | null | undefined;
+  /** Bid amount from the signed order's own offer item(s), wei. */
+  orderBidWei: bigint | string;
+  /** The price the UI displayed for this offer, wei. */
+  expectedPriceWei: bigint | string;
+  seaportAddress?: string;
+}): { to: string; valueWei: bigint } {
+  const seaport = (input.seaportAddress ?? FOREIGN_SEAPORT_ADDRESS).toLowerCase();
+  if (typeof input.to !== "string" || input.to.toLowerCase() !== seaport) {
+    throw new Error("Refusing to send: OpenSea's fulfillment transaction does not target Seaport.");
+  }
+  let valueWei: bigint;
+  try {
+    valueWei =
+      input.value === null || input.value === undefined || input.value === ""
+        ? BigInt(0)
+        : typeof input.value === "number"
+          ? BigInt(Math.trunc(input.value))
+          : BigInt(input.value);
+  } catch {
+    throw new Error("Refusing to send: OpenSea's fulfillment transaction carries an unreadable value.");
+  }
+  if (valueWei !== BigInt(0)) {
+    throw new Error("Refusing to send: accepting an offer must not send native value from your wallet.");
+  }
+  if (BigInt(input.orderBidWei) !== BigInt(input.expectedPriceWei)) {
+    throw new Error("This offer's price no longer matches what was shown. Refresh and try again.");
+  }
+  return { to: input.to, valueWei };
+}
+
+function arrayifyArgs(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(arrayifyArgs);
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).map(arrayifyArgs);
+  return value;
+}
+
+/**
+ * Pure: turn OpenSea's `transaction` into hex calldata. OpenSea returns
+ * `input_data` as the decoded argument object keyed in ABI order (its
+ * `function` field is the full signature with tuple types); when it is
+ * already hex it is used verbatim.
+ */
+export function encodeOpenSeaFulfillmentCalldata(tx: Pick<OpenSeaFulfillmentTransaction, "function" | "input_data">): string {
+  if (typeof tx.input_data === "string") {
+    if (!/^0x[0-9a-fA-F]*$/.test(tx.input_data) || tx.input_data.length < 10) {
+      throw new Error("OpenSea's fulfillment calldata is not hex.");
+    }
+    return tx.input_data;
+  }
+  const signature = tx.function.trim();
+  const name = signature.slice(0, signature.indexOf("("));
+  if (!name) throw new Error("OpenSea's fulfillment transaction has no function signature.");
+  const iface = new Interface([`function ${signature}`]);
+  const args = tx.input_data && typeof tx.input_data === "object" ? (arrayifyArgs(tx.input_data) as unknown[]) : [];
+  return iface.encodeFunctionData(name, args);
+}
+
+/**
+ * Accept an OpenSea offer -- the NFT owner becomes the Seaport fulfiller,
+ * paying nothing and receiving the bid amount while Seaport pulls the token
+ * from them.
  *
- * DELIBERATELY LIMITED TO TOKEN-SPECIFIC OFFERS. Collection-wide "any
- * token" bids (itemType 4 ERC721_WITH_CRITERIA, identifierOrCriteria "0")
- * need a Merkle proof against a wildcard root that has no generic
- * resolution -- lib/market/seaport.ts's own buildOffer documents this
- * exact form as "never proven fillable" for the native path too. This
- * function does not attempt it; offers/route.ts tags each offer
- * `acceptable: false` for that case so the UI never offers an Accept
- * button on one.
+ * AUDIT lens 3 #5 / D4 + RESEARCH R3 (5) (2026-09-06): token-specific,
+ * collection-wide (root 0) and trait (non-zero root) offers all go through
+ * ONE path now -- OpenSea's `/offers/fulfillment_data` with
+ * `consideration.{asset_contract_address, token_id}` resolves the criteria
+ * proof server-side and returns `fulfillment_data.transaction`; this
+ * function sends that calldata verbatim through sendForeignTransaction
+ * after assertOfferFulfillmentCalldata (to == Seaport, value == 0, bid ==
+ * displayed price). No homemade Merkle proof, ever.
+ *
+ * The seller's conduit approval for the token is a separate, ordinary
+ * `setApprovalForAll`/`approve` the wallet must already hold (OpenSea's own
+ * gotcha: "seller must have approved the conduit"); seaport-js's fulfillOrder
+ * would insert it for a token-specific order, so for parity this function
+ * builds that approval step via seaport-js first (approval only -- the
+ * fulfillment itself is OpenSea's calldata, not seaport-js's).
  */
 export async function acceptForeignOffer(input: {
   chainSlug: string;
   orderHash: string;
   accountAddress: string;
-  /** Required for collection-wide (wildcard) offers -- the token the seller delivers. */
+  /** The token the seller delivers -- required for collection-wide / trait offers, optional for a token-specific one. */
   tokenId?: string;
-}): Promise<void> {
-  const chain = foreignChainByChainSlug(input.chainSlug);
-  if (!chain) throw new Error(`foreign-offer: "${input.chainSlug}" is not a supported foreign chain.`);
+  /** The collection contract (OpenSea's consideration.asset_contract_address). */
+  contractAddress: string;
+  /** The price the UI showed for this offer, wei -- asserted against the signed order's bid. */
+  expectedPriceWei: string;
+}): Promise<{ txHash: string }> {
+  const params = chainParamsFor(input.chainSlug);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(input.contractAddress)) throw new Error("A collection contract is required to accept this offer.");
 
   const fulfillRes = await fetch("/api/market/multichain/offer-fulfillment-data", {
     method: "POST",
@@ -248,19 +363,58 @@ export async function acceptForeignOffer(input: {
       orderHash: input.orderHash,
       fulfillerAddress: input.accountAddress,
       tokenId: input.tokenId,
+      contractAddress: input.contractAddress,
     }),
   });
   if (!fulfillRes.ok) {
     const body = await fulfillRes.text().catch(() => "");
-    throw new Error(`Could not fetch a fulfillable offer (${fulfillRes.status}): ${body.slice(0, 200)}`);
+    let message = body.slice(0, 200);
+    try {
+      const parsed = JSON.parse(body) as { message?: string; error?: string };
+      message = parsed.message ?? parsed.error ?? message;
+    } catch {
+      /* raw text */
+    }
+    throw new Error(`Could not fetch a fulfillable offer (${fulfillRes.status}): ${message}`);
   }
-  const { parameters, signature } = (await fulfillRes.json()) as { parameters: unknown; signature: string };
+  const { parameters, signature, transaction } = (await fulfillRes.json()) as {
+    parameters: { offer: Array<{ itemType: number | string; startAmount: string }> };
+    signature: string;
+    transaction: OpenSeaFulfillmentTransaction;
+  };
 
-  const { seaport, signer } = await connectedSeaport(input.chainSlug);
+  const orderBidWei = parameters.offer.reduce((sum, item) => {
+    const t = Number(item.itemType);
+    return t === 0 || t === 1 ? sum + BigInt(item.startAmount) : sum;
+  }, BigInt(0));
+  const checked = assertOfferFulfillmentCalldata({
+    to: transaction.to,
+    value: transaction.value,
+    orderBidWei,
+    expectedPriceWei: input.expectedPriceWei,
+  });
+  const data = encodeOpenSeaFulfillmentCalldata(transaction);
+
+  // Approval step only (never seaport-js's own fulfillment transaction):
+  // build the actions for this order so the collection approval -- if the
+  // wallet lacks it -- is sent through the same allowlisted path first.
+  const { seaport } = await connectedSeaport(input.chainSlug);
   const { actions } = await seaport.fulfillOrder({
     order: { parameters, signature } as Parameters<Seaport["fulfillOrder"]>[0]["order"],
     accountAddress: input.accountAddress,
     exactApproval: true,
   });
-  await executeActions(actions as unknown as SeaportAction[], signer);
+  const approvals = (actions as unknown as SeaportAction[]).filter((a) => a.type === "approval");
+  await executeActions(approvals, input.accountAddress, input.chainSlug, input.contractAddress);
+
+  const txHash = await sendForeignTransaction({
+    to: checked.to,
+    from: input.accountAddress,
+    data,
+    value: checked.valueWei.toString(),
+    ...params,
+    contractAddress: input.contractAddress,
+  });
+  await waitForTransaction(txHash, { label: "Accept offer" });
+  return { txHash };
 }

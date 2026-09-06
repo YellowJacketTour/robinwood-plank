@@ -144,10 +144,12 @@ export async function GET(req: NextRequest) {
           maker: o.parameters.offerer,
           priceWei: bid.startAmount,
           expiresAt: new Date(Number(o.parameters.endTime) * 1000).toISOString(),
-          // AUDIT lens 2 #5 / lens 3 #5 (2026-09-06): acceptForeignOffer only
-          // fulfills token-specific offers (no criteria resolvers), so a
-          // criteria/wildcard offer must not carry an Accept button.
-          acceptable: !isCriteria,
+          // AUDIT lens 2 #5 / lens 3 #5 D4 (2026-09-06): criteria/wildcard
+          // offers are accepted through OpenSea's own fulfillment_data
+          // transaction (offer-fulfillment-data route + acceptForeignOffer
+          // send the resolved calldata verbatim), so they are acceptable
+          // again -- only on that path, never via a homemade proof.
+          acceptable: true,
           isWildcard: isCriteria && consideration?.identifierOrCriteria === "0",
           tokenId: isCriteria ? null : (consideration?.identifierOrCriteria ?? null),
           contractAddress: isCriteria ? null : consideration?.token ?? null,
