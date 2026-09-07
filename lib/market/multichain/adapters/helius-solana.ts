@@ -146,20 +146,32 @@ async function onchainFallbackSnapshot(assetId: string): Promise<CollectionSnaps
  * Magic Eden `GET /v2/tokens/{mint}` -> its `collection` field (the ME
  * symbol). Never a name match. Null when any step has no real answer.
  */
-export async function resolveMagicEdenAliasForCollection(collectionAddress: string): Promise<string | null> {
-  let members: { items?: Array<{ id?: string }> } | null = null;
+export type MagicEdenAliasDeps = {
+  /** First DAS member mint of the collection (default: getAssetsByGroup page 1, limit 1). Null = no real member. */
+  firstMember?: (collectionAddress: string) => Promise<string | null>;
+  /** HTTP for the Magic Eden token lookup (default: global fetch). Injectable for unit tests. */
+  fetchImpl?: typeof fetch;
+};
+
+async function firstDasMember(collectionAddress: string): Promise<string | null> {
+  const members = await rpc<{ items?: Array<{ id?: string }> }>(
+    "getAssetsByGroup",
+    { groupKey: "collection", groupValue: collectionAddress, page: 1, limit: 1 },
+    "background"
+  );
+  return members?.items?.[0]?.id ?? null;
+}
+
+export async function resolveMagicEdenAliasForCollection(collectionAddress: string, deps: MagicEdenAliasDeps = {}): Promise<string | null> {
+  let memberMint: string | null = null;
   try {
-    members = await rpc<{ items?: Array<{ id?: string }> }>(
-      "getAssetsByGroup",
-      { groupKey: "collection", groupValue: collectionAddress, page: 1, limit: 1 },
-      "background"
-    );
+    memberMint = await (deps.firstMember ?? firstDasMember)(collectionAddress);
   } catch {
     return null;
   }
-  const memberMint = members?.items?.[0]?.id;
   if (!memberMint) return null;
-  const res = await fetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(memberMint)}`, {
+  const doFetch = deps.fetchImpl ?? fetch;
+  const res = await doFetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(memberMint)}`, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });

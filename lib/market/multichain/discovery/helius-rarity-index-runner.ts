@@ -41,12 +41,18 @@ import {
 } from "@/lib/market/multichain/collection-token-store";
 
 import { reserveDasSlot, settleDasSlot } from "@/lib/market/multichain/discovery/solana-das-pool";
+import {
+  resolveSolanaOffchainMetadata,
+  shouldFetchJsonUriFallback,
+  traitsFromAttributes,
+} from "@/lib/market/multichain/discovery/solana-token-hydrate";
 
 const PAGE_SIZE = 1000;
 
 type HeliusGroupedAsset = {
   id: string;
   content?: {
+    json_uri?: string | null;
     links?: { image?: string | null };
     files?: Array<{ uri?: string | null; mime?: string | null }>;
     metadata?: {
@@ -66,10 +72,57 @@ function assetsToItems(assets: HeliusGroupedAsset[]): GenericRarityInput[] {
   return assets.map((asset) => ({
     tokenId: asset.id,
     name: asset.content?.metadata?.name ?? null,
-    traits: (asset.content?.metadata?.attributes ?? [])
-      .filter((a) => a.trait_type && a.value != null)
-      .map((a) => ({ traitType: a.trait_type!, value: String(a.value) })),
+    traits: traitsFromAttributes(asset.content?.metadata?.attributes),
   }));
+}
+
+/** AUDIT lens 4 #9 (Batch F9): per DAS page, how many trait-less assets
+ * get one json_uri fetch. Bounds a 1,000-asset page to at most this many
+ * off-chain fetches (at the concurrency below), so one membership tick
+ * stays inside the lane's wall clock; the rest of the page's trait-less
+ * assets are picked up by the on-demand path (solana-token-hydrate.ts)
+ * or the next walk. */
+export const JSON_URI_FALLBACK_PER_PAGE = 200;
+const JSON_URI_FALLBACK_CONCURRENCY = 8;
+
+/**
+ * Fills traits/name/image from json_uri for assets whose DAS attributes
+ * are empty. Pure over its inputs apart from `resolve` (injectable for
+ * tests). Returns the same assets with content.metadata.attributes /
+ * links.image / metadata.name back-filled where the JSON really had them.
+ */
+export async function backfillTraitsFromJsonUri(
+  assets: HeliusGroupedAsset[],
+  opts: { limit?: number; concurrency?: number; resolve?: typeof resolveSolanaOffchainMetadata } = {},
+): Promise<{ assets: HeliusGroupedAsset[]; attempted: number; filled: number }> {
+  const limit = opts.limit ?? JSON_URI_FALLBACK_PER_PAGE;
+  const concurrency = Math.max(1, opts.concurrency ?? JSON_URI_FALLBACK_CONCURRENCY);
+  const resolve = opts.resolve ?? resolveSolanaOffchainMetadata;
+  const candidates = assets
+    .map((asset, index) => ({ asset, index }))
+    .filter(({ asset }) => shouldFetchJsonUriFallback(traitsFromAttributes(asset.content?.metadata?.attributes), asset.content?.json_uri))
+    .slice(0, limit);
+  const out = assets.slice();
+  let filled = 0;
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, candidates.length) }, async () => {
+    while (next < candidates.length) {
+      const { asset, index } = candidates[next++];
+      const offchain = await resolve(asset.content?.json_uri);
+      if (!offchain) continue;
+      const content = { ...(asset.content ?? {}) };
+      const metadata = { ...(content.metadata ?? {}) };
+      if (offchain.traits.length) {
+        metadata.attributes = offchain.traits.map((t) => ({ trait_type: t.traitType, value: t.value }));
+        filled += 1;
+      }
+      if (!metadata.name && offchain.name) metadata.name = offchain.name;
+      content.metadata = metadata;
+      if (!content.links?.image && offchain.imageUrl) content.links = { ...(content.links ?? {}), image: offchain.imageUrl };
+      out[index] = { ...asset, content };
+    }
+  }));
+  return { assets: out, attempted: candidates.length, filled };
 }
 
 /** Background discovery lane -- reserves+settles a FRESH pool key per call (priority "background" so live user traffic on the same project keys is not contended with). */
@@ -185,7 +238,9 @@ export async function advanceSolanaCollectionMembership(collectionAddress: strin
   const page = Math.max(1, Number.parseInt(checkpoint?.cursor ?? "1", 10) || 1);
   const observedAt = new Date();
   try {
-    const result = await fetchGroupedPageWithTotal(mint, page);
+    const fetched = await fetchGroupedPageWithTotal(mint, page);
+    // F9: json_uri fallback for assets whose DAS attributes came back empty.
+    const result = { ...fetched, items: (await backfillTraitsFromJsonUri(fetched.items)).assets };
     const expected = result.total ?? checkpoint?.expectedCount ?? null;
     // Real bug found live 2026-08-26 (systemic audit: "why doesn't this
     // ever reach 100%"): checkpoint.observedCount is NOT this walk's own
