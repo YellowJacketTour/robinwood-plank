@@ -448,6 +448,8 @@ export type ArchivalApiShape = {
 export type MetadataCoverageCounterShape = {
   expected: number;
   terminal: number;
+  /** Confirmed-empty rows: nothing more will ever arrive for them. */
+  empty: number;
   withTraits: number;
   withImage: number;
   terminalCoverage: number | null;
@@ -458,8 +460,27 @@ export type MetadataCoverageCounterShape = {
 /** Same 99.5% line rarity-index-runner.ts finalizes at (RARITY_FINALIZE_THRESHOLD). */
 export const RARITY_PROVISIONAL_THRESHOLD = 0.995;
 
+/**
+ * Provisional means MORE DATA IS STILL COMING. A collection is FINAL when
+ * every expected token is terminal AND every trait-less token is a
+ * confirmed-empty one (dead tokenURI after the attempt cap, burned,
+ * genuinely trait-less) rather than a fetched row still owed its traits.
+ * Owner report 2026-09-07: "green synced still shows the archiving
+ * progress bar even though they should be finished" -- a collection with
+ * a handful of permanently empty tokens sat below the 99.5% traits line
+ * forever and stayed "provisional" under a green dot. A BAYC-shaped row
+ * (100% fetched, 3% traits, 0 empty) is still provisional: those rows
+ * are owed traits, and the re-verify lane will fill them.
+ */
+export function metadataIsFinal(shape: Pick<MetadataCoverageCounterShape, "expected" | "terminal" | "empty" | "withTraits">): boolean {
+  if (shape.expected <= 0) return false;
+  const allTerminal = shape.terminal / shape.expected >= RARITY_PROVISIONAL_THRESHOLD;
+  const gapsAreEmpty = (shape.withTraits + shape.empty) / shape.expected >= RARITY_PROVISIONAL_THRESHOLD;
+  return allTerminal && gapsAreEmpty;
+}
+
 /** Pure: raw counters -> ratios + provisional flag. Exported for tests. */
-export function metadataCountersToShape(counters: { expected: number; terminal: number; withTraits: number; withImage: number }): {
+export function metadataCountersToShape(counters: { expected: number; terminal: number; empty?: number; withTraits: number; withImage: number }): {
   shape: MetadataCoverageCounterShape;
   provisional: boolean;
 } {
@@ -468,13 +489,14 @@ export function metadataCountersToShape(counters: { expected: number; terminal: 
   const shape: MetadataCoverageCounterShape = {
     expected,
     terminal: Math.max(0, Number(counters.terminal) || 0),
+    empty: Math.max(0, Number(counters.empty) || 0),
     withTraits: Math.max(0, Number(counters.withTraits) || 0),
     withImage: Math.max(0, Number(counters.withImage) || 0),
     terminalCoverage: ratio(counters.terminal),
     traitsCoverage: ratio(counters.withTraits),
     imageCoverage: ratio(counters.withImage),
   };
-  const provisional = shape.traitsCoverage == null || shape.traitsCoverage < RARITY_PROVISIONAL_THRESHOLD;
+  const provisional = shape.traitsCoverage == null || (shape.traitsCoverage < RARITY_PROVISIONAL_THRESHOLD && !metadataIsFinal(shape));
   return { shape, provisional };
 }
 

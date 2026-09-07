@@ -92,7 +92,7 @@ test("readTokenMetadataWork skips retry rows at the attempt cap; coverage counte
     assert.deepEqual(work.map((w) => w.tokenId), ["4"], "only the under-cap retry is handed out");
 
     const counters = await readMetadataCoverageCounters(chainSlug, collectionSlug);
-    assert.deepEqual(counters, { expected: 10, rows: 4, terminal: 2, withTraits: 1, withImage: 1 });
+    assert.deepEqual(counters, { expected: 10, rows: 4, terminal: 2, empty: 1, withTraits: 1, withImage: 1 }, "the capped row is closed as confirmed-empty");
 
     // Expected can never be smaller than the rows we hold.
     await postgresQuery(`UPDATE plank_collection_token_projections SET expected_count = 2 WHERE chain_slug = $1 AND collection_slug = $2`, [chainSlug, collectionSlug]);

@@ -325,7 +325,7 @@ async function main(): Promise<void> {
     // One book, one floor (2026-09-06): observe the same merged,
     // liveness-checked book the /market page and the hub row read, so the
     // 24h floor comparison never mixes our-rows-only with every-venue.
-    const { readNativeRobinwoodBook } = await import("../lib/market/native-book");
+    const { readNativeRobinwoodBook, NATIVE_BOOK_OBSERVATION_KEY } = await import("../lib/market/native-book");
     const book = await readNativeRobinwoodBook({ hostHeader: null }).catch(() => null);
     let floor: bigint | null = book?.floorWei ?? null;
     let listedCount = book?.listedCount ?? 0;
@@ -359,7 +359,10 @@ async function main(): Promise<void> {
     await recordFloorObservation("robinhood", NFT_CONTRACT_ADDRESS, {
       priceAtomic: floor?.toString() ?? null,
       currency: "ETH",
-      marketplace: "marketplank",
+      // The merged-book floor lives under its own key so the hub's 24h
+      // change never compares a merged floor against an our-rows-only one
+      // (that mix showed a fictitious -60% the day the merge shipped).
+      marketplace: NATIVE_BOOK_OBSERVATION_KEY,
       listedCount,
       source,
     });

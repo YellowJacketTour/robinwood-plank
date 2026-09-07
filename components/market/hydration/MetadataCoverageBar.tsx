@@ -31,7 +31,7 @@ export type MetadataCoverageBarProps = {
   traitsCoverage?: number | null;
   /** The raw counters, for the tooltip/summary line only. */
   metadataCounters?: {
-    expected: number; terminal: number; withTraits: number; withImage: number;
+    expected: number; terminal: number; empty?: number; withTraits: number; withImage: number;
   } | null;
 };
 
@@ -86,7 +86,13 @@ export function MetadataCoverageBar({
   const growing = known && tweenedPct != null && rawPct != null && Math.abs(tweenedPct - rawPct) > 0.01;
   const pctLabel = displayPct != null ? displayPct.toFixed(2) : null;
   const restColor = chainSlug ? chainBrandColorInverted(chainSlug) : null;
-  const provisional = provisionalTraitsLabel(traitsCoverage);
+  // Finished is finished (owner, 2026-09-07): once every expected token is
+  // terminal and every trait-less token is confirmed empty, the traits gap
+  // is the collection's final shape -- no "provisional" under a green dot.
+  const final = metadataCounters != null && metadataCounters.expected > 0
+    && metadataCounters.terminal / metadataCounters.expected >= PROVISIONAL_TRAITS_THRESHOLD
+    && (metadataCounters.withTraits + (metadataCounters.empty ?? 0)) / metadataCounters.expected >= PROVISIONAL_TRAITS_THRESHOLD;
+  const provisional = final ? null : provisionalTraitsLabel(traitsCoverage);
 
   const countersLine = metadataCounters && metadataCounters.expected > 0
     ? ` - traits ${metadataCounters.withTraits.toLocaleString()}/${metadataCounters.expected.toLocaleString()}, images ${metadataCounters.withImage.toLocaleString()}/${metadataCounters.expected.toLocaleString()}, fetched ${metadataCounters.terminal.toLocaleString()}/${metadataCounters.expected.toLocaleString()}`

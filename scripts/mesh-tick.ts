@@ -162,6 +162,8 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
 const LANE_TIMEOUT_MS = 90_000;
 /** In-process lanes that asked for a delayed retry (see mesh-lane.ts markDeferred), keyed source:chain:subject. */
 const pendingDefer = new Map<string, { ms: number; reason: string | null }>();
+/** Hunter work receipts, keyed like pendingDefer; the worker attaches them to the job it ran. */
+const pendingReceipt = new Map<string, unknown>();
 /** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
 const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
@@ -216,15 +218,18 @@ function laneEntry(): string[] {
   return ["--import", "tsx", "scripts/mesh-lane.ts"];
 }
 
-function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
+function runLane(source: string, chain: string, subject?: string | null, jobId?: number): Promise<number> {
   const label = `${source}:${chain}`;
+  // Review M3: outcomes are keyed by job id so a lane that finishes after its in-process timeout can never stamp the NEXT job with the same key.
+  const outcomeKey = jobId != null ? `job:${jobId}` : `${source}:${chain}:${subject ?? ""}`;
   if (LIGHT_SOURCES.has(source)) return withTimeout((signal) => runLightSourceInProcess(source, chain, subject, signal), LANE_TIMEOUT_MS, label);
   if (inProcess) {
     return withTimeout(
       (signal) =>
         import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
           const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "", signal);
-          if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
+          if (outcome.receipt) pendingReceipt.set(outcomeKey, outcome.receipt);
+          if (outcome.deferMs != null) pendingDefer.set(outcomeKey, { ms: outcome.deferMs, reason: outcome.deferReason });
           return outcome.code;
         }),
       IN_PROCESS_LANE_TIMEOUT_MS,
@@ -291,7 +296,29 @@ async function main(): Promise<void> {
   const standingTimer = setInterval(() => {
     if (Date.now() >= claimDeadline) return;
     void enqueueStandingLanes(false).catch((error) => console.error("[mesh-tick] standing re-enqueue failed", error instanceof Error ? error.message : error));
+    void decayStaleDemand().catch((error) => console.error("[mesh-tick] stale-demand decay failed", error instanceof Error ? error.message : error));
   }, STANDING_LANE_PERIOD_MS);
+
+  /**
+   * Stale demand decays (2026-09-07). Measured live: 1,007 evm-metadata
+   * jobs sat queued at priority 120 with the oldest 10 DAYS old -- every
+   * visitor click ratchets its subject to express priority and nothing ever
+   * lowered it, so the express slot and the general slot were both eating a
+   * backlog of clicks nobody was waiting on any more, at ~5 jobs/min, while
+   * fresh clicks queued behind them. A click is urgent for about as long as
+   * the visitor is still on the page: after an hour without a re-touch
+   * (enqueue bumps updated_at), the job drops to the ordinary demand tier
+   * (90) and the express slot goes back to serving live visitors.
+   */
+  async function decayStaleDemand(): Promise<void> {
+    const { postgresQuery } = await import("../lib/postgres");
+    const r = await postgresQuery(
+      `UPDATE plank_data_jobs SET priority = 90
+        WHERE status = 'queued' AND priority >= $1 AND updated_at < NOW() - INTERVAL '1 hour'`,
+      [EXPRESS_MIN_PRIORITY]
+    );
+    if ((r.rowCount ?? 0) > 0) console.log(`[mesh-tick] stale demand decayed: ${r.rowCount} job(s) 118+ -> 90`);
+  }
   standingTimer.unref();
 
   async function enqueueStandingLanes(verbose: boolean): Promise<MeshLane[]> {
@@ -379,7 +406,7 @@ async function main(): Promise<void> {
       if (needsOpenSeaSlot) await openSeaSemaphore.acquire();
       let code: number;
       try {
-        code = await runLane(job.source, job.chainSlug, job.subject);
+        code = await runLane(job.source, job.chainSlug, job.subject, job.id);
       } finally {
         if (needsOpenSeaSlot) openSeaSemaphore.release();
       }
@@ -394,9 +421,15 @@ async function main(): Promise<void> {
       // -- fixes a real bug live 2026-08-25: a bounded-window job that
       // finished one slice and returned was marked terminally 'succeeded'
       // and never claimed again, despite real remaining work.
-      const deferKey = `${job.source}:${job.chainSlug}:${job.subject ?? ""}`;
+      const deferKey = `job:${job.id}`;
       const defer = pendingDefer.get(deferKey);
       pendingDefer.delete(deferKey);
+      const receipt = pendingReceipt.get(deferKey);
+      pendingReceipt.delete(deferKey);
+      if (receipt) {
+        const { attachReceipt } = await import("../lib/market/multichain/hunter/receipt");
+        await attachReceipt(job.id, receipt as import("../lib/market/multichain/hunter/types").HunterReceipt);
+      }
       if (defer) {
         // The lane asked for a delayed retry (jailed / pool busy): release
         // the slot now, come back at not_before, never sleep in a slot.

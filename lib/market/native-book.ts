@@ -26,21 +26,49 @@ export type NativeBookSummary = {
   ownListedCount: number;
 };
 
-async function withTimeout<T>(label: string, read: () => Promise<T[]>, ms = 2_000): Promise<T[]> {
+const LAST_GOOD_TTL_MS = 15 * 60_000;
+const lastGood = new Map<string, { rows: NormalisedForeignListing[]; at: number }>();
+
+/**
+ * Read one venue's mirrored rows with a hard timeout. A timeout or a
+ * throw returns the venue's LAST GOOD rows (up to 15 minutes old) instead
+ * of nothing: measured live 2026-09-07, a busy connection pool made the
+ * OpenSea KV read miss its 2 s budget now and then, and every such miss
+ * silently shrank the merged book to our own rows, so the floor flipped
+ * between the real 0.012 ETH and a stale 0.03 ETH from one request to
+ * the next ("racing information cancelling out our good hydrations").
+ */
+async function readVenueSticky(label: string, read: () => Promise<NormalisedForeignListing[]>, ms = 2_000): Promise<NormalisedForeignListing[]> {
+  const fallback = (): NormalisedForeignListing[] => {
+    const prev = lastGood.get(label);
+    if (prev && Date.now() - prev.at <= LAST_GOOD_TTL_MS) return prev.rows;
+    return [];
+  };
   try {
-    return await Promise.race([
+    const rows = await Promise.race([
       read(),
-      new Promise<T[]>((resolve) =>
+      new Promise<NormalisedForeignListing[] | null>((resolve) =>
         setTimeout(() => {
-          console.warn(`[native-book] ${label} read timed out; serving without it`);
-          resolve([]);
+          console.warn(`[native-book] ${label} read timed out; serving last good rows`);
+          resolve(null);
         }, ms)
       ),
     ]);
+    if (rows == null) return fallback();
+    lastGood.set(label, { rows, at: Date.now() });
+    return rows;
   } catch {
-    return [];
+    return fallback();
   }
 }
+
+/** Test seam: forget the sticky last-good venue reads. */
+export function resetNativeBookCache(): void {
+  lastGood.clear();
+}
+
+/** Marketplace key under which the MERGED book's floor is observed (24h change compares only like with like). */
+export const NATIVE_BOOK_OBSERVATION_KEY = "marketplank-book";
 
 export function summariseBook(listings: Listing[], ownListedCount: number): NativeBookSummary {
   let floorWei: bigint | null = null;
@@ -94,8 +122,8 @@ export async function readNativeRobinwoodBook(opts: { hostHeader?: string | null
   const { readOpenSeaListings } = await import("@/lib/market/opensea");
   const { readPulpListings } = await import("@/lib/market/pulp");
   const foreign: NormalisedForeignListing[] = [
-    ...(await withTimeout("opensea", readOpenSeaListings)),
-    ...(await withTimeout("pulp", () => readPulpListings())),
+    ...(await readVenueSticky("opensea", readOpenSeaListings)),
+    ...(await readVenueSticky("pulp", () => readPulpListings())),
   ];
   const { mergeBook } = await import("@/lib/market/book");
   const merged = mergeBook(live, foreign, "robinwood");
