@@ -138,7 +138,12 @@ async function buildHubIndex(req: Request) {
     // header on DeFiLlama's real limits) -- the volume half of the
     // "volume + floor hybrid" default sort the hub uses. One query per
     // distinct EVM chain represented, not per collection.
-    const chainSlugs = [...new Set(collections.map((c) => c.chainSlug))].filter((s) => foreignChainByChainSlug(s));
+    // 2026-09-07 (owner: "recent chain activity ... calculated wrong, plank
+    // doesn't have an A"): the home chain records its own transfer tallies
+    // (robinhood-chain-scan -> recordActivity) but was filtered out here, so
+    // RobinWood's row was hard-wired to 0 transfers and lost the 300-point
+    // activity axis of its grade.
+    const chainSlugs = [...new Set([...collections.map((c) => c.chainSlug), "robinhood"])].filter((s) => s === "robinhood" || foreignChainByChainSlug(s));
     const activityByChain = await Promise.all(
       chainSlugs.map(async (slug) => [slug, await getTopByActivity(slug, 7, 500).catch(() => [])] as const)
     );
@@ -221,7 +226,7 @@ async function buildHubIndex(req: Request) {
       syncedAt: new Date().toISOString(),
       syncError: null as string | null,
       tradeable: true,
-      recentActivity: 0,
+      recentActivity: activityByContract.get(`robinhood:${NFT_CONTRACT_ADDRESS.toLowerCase()}`) ?? 0,
       creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,

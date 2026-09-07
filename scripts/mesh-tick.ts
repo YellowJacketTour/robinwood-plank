@@ -291,7 +291,29 @@ async function main(): Promise<void> {
   const standingTimer = setInterval(() => {
     if (Date.now() >= claimDeadline) return;
     void enqueueStandingLanes(false).catch((error) => console.error("[mesh-tick] standing re-enqueue failed", error instanceof Error ? error.message : error));
+    void decayStaleDemand().catch((error) => console.error("[mesh-tick] stale-demand decay failed", error instanceof Error ? error.message : error));
   }, STANDING_LANE_PERIOD_MS);
+
+  /**
+   * Stale demand decays (2026-09-07). Measured live: 1,007 evm-metadata
+   * jobs sat queued at priority 120 with the oldest 10 DAYS old -- every
+   * visitor click ratchets its subject to express priority and nothing ever
+   * lowered it, so the express slot and the general slot were both eating a
+   * backlog of clicks nobody was waiting on any more, at ~5 jobs/min, while
+   * fresh clicks queued behind them. A click is urgent for about as long as
+   * the visitor is still on the page: after an hour without a re-touch
+   * (enqueue bumps updated_at), the job drops to the ordinary demand tier
+   * (90) and the express slot goes back to serving live visitors.
+   */
+  async function decayStaleDemand(): Promise<void> {
+    const { postgresQuery } = await import("../lib/postgres");
+    const r = await postgresQuery(
+      `UPDATE plank_data_jobs SET priority = 90
+        WHERE status = 'queued' AND priority >= $1 AND updated_at < NOW() - INTERVAL '1 hour'`,
+      [EXPRESS_MIN_PRIORITY]
+    );
+    if ((r.rowCount ?? 0) > 0) console.log(`[mesh-tick] stale demand decayed: ${r.rowCount} job(s) 118+ -> 90`);
+  }
   standingTimer.unref();
 
   async function enqueueStandingLanes(verbose: boolean): Promise<MeshLane[]> {
