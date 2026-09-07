@@ -67,6 +67,59 @@ export async function getLaneHealth(): Promise<LaneHealthRow[]> {
   }));
 }
 
+export type ChainLaneHealth = {
+  /** Lane keys (`source:chain`) that are down: status 'backoff', or claimed but with no success for longer than `downAfterMs`. */
+  down: Array<{ source: string; since: string | null; reason: "backoff" | "no-success" }>;
+  /** Discovery/stats lanes seen for this chain at all. */
+  lanes: Array<{ source: string; lastClaimAt: string | null; lastSuccessAt: string | null; status: string }>;
+};
+
+/** Sources whose being down is worth a chain-tab banner: they are the ones that bring rows or floors in. */
+const BANNER_SOURCES = new Set([
+  "hypersync-discovery", "helius-discovery", "magiceden-catalog", "magiceden-alias", "unisat-discovery", "ordiscan-discovery", "robinhood-discovery",
+  "opensea-stats", "opensea-bulk", "coingecko-nft", "adapter-sync", "unisat-collections", "bestinslot-stats", "native-robinwood", "cryptopunks-native",
+]);
+
+/**
+ * AUDIT lens 1 #9 (2026-09-06, Batch E6): pure summarizer (unit-tested) that
+ * turns the raw lane rows into a per-chain "what is down and since when"
+ * so the hub can render "discovery source X down since T" instead of a
+ * small count that looks complete. A lane is down when the scheduler
+ * marked it 'backoff' (last child failed) or when it has been claimed
+ * but has produced no success for longer than `downAfterMs`. A lane
+ * that has never been claimed is not reported: we cannot honestly say
+ * it is "down since" anything.
+ */
+export function summarizeLaneHealthByChain(
+  rows: LaneHealthRow[],
+  opts: { now?: number; downAfterMs?: number } = {}
+): Record<string, ChainLaneHealth> {
+  const now = opts.now ?? Date.now();
+  const downAfterMs = opts.downAfterMs ?? 3 * 60 * 60_000;
+  const out: Record<string, ChainLaneHealth> = {};
+  for (const row of rows) {
+    const idx = row.laneKey.indexOf(":");
+    if (idx <= 0) continue;
+    const source = row.laneKey.slice(0, idx);
+    const chainSlug = row.laneKey.slice(idx + 1);
+    if (!BANNER_SOURCES.has(source)) continue;
+    const entry = (out[chainSlug] ??= { down: [], lanes: [] });
+    entry.lanes.push({ source, lastClaimAt: row.lastClaimAt, lastSuccessAt: row.lastSuccessAt, status: row.status });
+    if (!row.lastClaimAt) continue;
+    if (row.status === "backoff") {
+      entry.down.push({ source, since: row.lastSuccessAt ?? row.lastClaimAt, reason: "backoff" });
+      continue;
+    }
+    const lastOk = row.lastSuccessAt ? Date.parse(row.lastSuccessAt) : NaN;
+    const lastClaim = Date.parse(row.lastClaimAt);
+    const anchor = Number.isFinite(lastOk) ? lastOk : lastClaim;
+    if (Number.isFinite(anchor) && now - anchor > downAfterMs) {
+      entry.down.push({ source, since: new Date(anchor).toISOString(), reason: "no-success" });
+    }
+  }
+  return out;
+}
+
 /** Lanes whose last real claim is older than `staleAfterMs` -- a lane that
  * should be claimed regularly (it's in MESH_LANES) but hasn't been in a
  * while is either jailed for an unusually long time, starved by

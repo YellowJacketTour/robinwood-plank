@@ -46,11 +46,24 @@ function markDeferred(ms: number, reason: string): void {
 
 export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null };
 
+/**
+ * AUDIT lens 5 A / A8 (2026-09-06): cooperative cancellation. The scheduler
+ * (mesh-tick.ts withTimeout) aborts `signal` when a lane overruns; the
+ * handlers below consult this between loop iterations so a timed-out lane
+ * stops within ONE iteration instead of running on in the background beside
+ * the next claim of the same job. Pure so it is unit-testable: true when the
+ * loop should stop (aborted, or a deadline passed).
+ */
+export function laneShouldStop(signal: AbortSignal | undefined, deadline: number, now = Date.now()): boolean {
+  if (signal?.aborted) return true;
+  return now >= deadline;
+}
+
 /** Run one lane in this process. code 0 = done, 2 = more work remains, 1 = failed; deferMs asks for a delayed retry. */
-export async function runMeshLaneDetailed(source: MeshSource, chain: string, subject = ""): Promise<LaneOutcome> {
+export async function runMeshLaneDetailed(source: MeshSource, chain: string, subject = "", signal?: AbortSignal): Promise<LaneOutcome> {
   const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null };
   try {
-    await laneSignal.run(store, () => main(source, chain, subject));
+    await laneSignal.run(store, () => main(source, chain, subject, signal));
     return { code: store.code, deferMs: store.deferMs, deferReason: store.deferReason };
   } catch (e) {
     console.error(`[mesh-lane] ${source}:${chain} failed`, e instanceof Error ? e.message : e);
@@ -58,11 +71,11 @@ export async function runMeshLaneDetailed(source: MeshSource, chain: string, sub
   }
 }
 
-export async function runMeshLane(source: MeshSource, chain: string, subject = ""): Promise<number> {
-  return (await runMeshLaneDetailed(source, chain, subject)).code;
+export async function runMeshLane(source: MeshSource, chain: string, subject = "", signal?: AbortSignal): Promise<number> {
+  return (await runMeshLaneDetailed(source, chain, subject, signal)).code;
 }
 
-async function main(source: MeshSource = argvSource, chain: string = argvChain, subject: string = argvSubject): Promise<void> {
+async function main(source: MeshSource = argvSource, chain: string = argvChain, subject: string = argvSubject, signal?: AbortSignal): Promise<void> {
   if (!source || !chain) {
     throw new Error("mesh-lane requires --source= and --chain=");
   }
@@ -197,7 +210,8 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       const deadline = Date.now() + 45_000;
       const ceiling = subject ? 500 : 75;
       let lastAttempted = 0;
-      while (attempted < ceiling && Date.now() < deadline) {
+      // A8: stop within one iteration once the scheduler aborts this lane.
+      while (attempted < ceiling && !laneShouldStop(signal, deadline)) {
         const batch = await advanceEvmTokenMetadata(chain, 25, subject || null);
         lastAttempted = batch.attempted;
         attempted += batch.attempted; complete += batch.complete; empty += batch.empty;
@@ -207,7 +221,7 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       // AUDIT lens 4 #1: a subject job that stopped on the ceiling or the
       // deadline (not on exhaustion) has more work; say so, so it is
       // re-enqueued at the same priority instead of marked done at 250.
-      const moreWork = lastAttempted > 0 && (attempted >= ceiling || Date.now() >= deadline);
+      const moreWork = lastAttempted > 0 && (attempted >= ceiling || laneShouldStop(signal, deadline));
       if (subject && moreWork) markIncomplete();
       console.log("[mesh-lane] evm-metadata", JSON.stringify({ attempted, complete, empty, retry, rarityFinalized, moreWork }));
       return;
@@ -248,9 +262,14 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     }
     if (source === "opensea-stats") {
       const { runOpenSeaStatsSync, syncOpenSeaCollectionStats } = await import("../lib/market/multichain/discovery/opensea-stats");
+      // A8: the stats sync is one bounded call (its loop lives in
+      // opensea-stats.ts); honour an abort before spending pool capacity on
+      // it, and never claim success for a lane the scheduler already gave up on.
+      if (signal?.aborted) throw new Error("lane aborted before opensea-stats started");
       const output = subject
         ? await syncOpenSeaCollectionStats(chain, subject)
         : await runOpenSeaStatsSync(chain, 20);
+      if (signal?.aborted) throw new Error("lane aborted during opensea-stats (result discarded by scheduler)");
       console.log("[mesh-lane] os", JSON.stringify(output));
       return;
     }
@@ -305,7 +324,7 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
           result = await advanceEvmCollectionMembership(chain, subject, undefined, "live");
           itemsObserved += result.itemsObserved;
           pages += 1;
-        } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && Date.now() < deadline);
+        } while (!result.complete && result.itemsObserved > 0 && pages < MAX_PAGES_PER_INVOCATION && !laneShouldStop(signal, deadline));
       } catch (e) {
         // Real gap found live 2026-08-26 (contention audit follow-up):
         // "OpenSea pool exhausted" is a genuinely transient, expected
@@ -443,6 +462,29 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     if (source === "magiceden-solana") {
       const { hydrateSolanaFromMagicEden } = await import("../lib/market/multichain/discovery/hydrate-all-collection-art");
       console.log("[mesh-lane] me", JSON.stringify(await hydrateSolanaFromMagicEden()));
+      return;
+    }
+    if (source === "magiceden-catalog") {
+      // AUDIT lens 1 #6 (Batch E4): the exhaustive ME catalog walk now runs
+      // in the mesh. Bounded pages per tick; `done:false` re-enqueues.
+      const { runMagicEdenCatalogScan } = await import("../lib/market/multichain/discovery/magiceden-catalog-scan");
+      const result = await runMagicEdenCatalogScan({ maxPages: 25 });
+      console.log("[mesh-lane] magiceden-catalog", JSON.stringify(result));
+      if (!result.done) markIncomplete();
+      return;
+    }
+    if (source === "magiceden-alias") {
+      // AUDIT lens 1 #7 (Batch E4): Helius rows get an ME symbol alias and
+      // their floor/listed/holders through the ME adapter by that alias.
+      const { runMagicEdenAliasLane } = await import("../lib/market/multichain/adapters/helius-solana");
+      console.log("[mesh-lane] magiceden-alias", JSON.stringify(await runMagicEdenAliasLane({ statsLimit: 20, resolveLimit: 10 })));
+      return;
+    }
+    if (source === "bestinslot-stats") {
+      // E4-bitcoin: BestInSlot aggregated floor/listed/volume for Ordinals.
+      // Clean no-op (state: credential-missing) without BESTINSLOT_API_KEY.
+      const { runBestInSlotStatsLane } = await import("../lib/market/multichain/discovery/bitcoin-bestinslot");
+      console.log("[mesh-lane] bestinslot-stats", JSON.stringify(await runBestInSlotStatsLane(15)));
       return;
     }
     if (source === "unisat-collections") {

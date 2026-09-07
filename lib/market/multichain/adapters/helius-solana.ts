@@ -48,6 +48,15 @@ import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/t
 import { reserveDasSlot, settleDasSlot, type DasSlot } from "@/lib/market/multichain/discovery/solana-das-pool";
 import { readTokenMetadata } from "@/lib/market/multichain/discovery/solana-metaplex-reads";
 import { readMetaplexCoreAsset } from "@/lib/market/multichain/discovery/solana-editions";
+import { magicEdenSolanaAdapter } from "@/lib/market/multichain/adapters/magiceden-solana";
+import { durableKv } from "@/lib/market/durable-kv";
+import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
+
+const CHAIN_SLUG = "solana-mainnet";
+const ME_MARKETPLACE = "magiceden";
+/** A failed alias resolution is remembered this long before the row is tried again. */
+const ALIAS_MISS_TTL_MS = 7 * 24 * 60 * 60_000;
+const aliasMissKey = (collectionAddress: string) => `plank:market:me-alias-miss:${collectionAddress}`;
 
 type HeliusAsset = {
   id: string;
@@ -129,32 +138,199 @@ async function onchainFallbackSnapshot(assetId: string): Promise<CollectionSnaps
   return null;
 }
 
+/**
+ * AUDIT lens 1 #7 (2026-09-06, Batch E4): a Helius-discovered row is keyed
+ * by its collection asset id, which no marketplace stats API accepts, so
+ * these rows never got a floor. The Magic Eden symbol is resolved through
+ * real data only: one DAS `getAssetsByGroup` member of the collection ->
+ * Magic Eden `GET /v2/tokens/{mint}` -> its `collection` field (the ME
+ * symbol). Never a name match. Null when any step has no real answer.
+ */
+export async function resolveMagicEdenAliasForCollection(collectionAddress: string): Promise<string | null> {
+  let members: { items?: Array<{ id?: string }> } | null = null;
+  try {
+    members = await rpc<{ items?: Array<{ id?: string }> }>(
+      "getAssetsByGroup",
+      { groupKey: "collection", groupValue: collectionAddress, page: 1, limit: 1 },
+      "background"
+    );
+  } catch {
+    return null;
+  }
+  const memberMint = members?.items?.[0]?.id;
+  if (!memberMint) return null;
+  const res = await fetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(memberMint)}`, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`helius-solana: magiceden HTTP ${res.status} resolving alias for ${collectionAddress}`);
+  const body = (await res.json().catch(() => null)) as { collection?: unknown } | null;
+  const symbol = body && typeof body.collection === "string" ? body.collection.trim() : "";
+  return symbol ? symbol : null;
+}
+
+/** alias_symbol (migration 102) for one tracked Solana row, or null. */
+export async function readAliasSymbol(collectionAddress: string): Promise<string | null> {
+  if (!hasPostgresConfig()) return null;
+  const r = await postgresQuery<{ alias_symbol: string | null }>(
+    `SELECT alias_symbol FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+    [CHAIN_SLUG, collectionAddress]
+  );
+  return r.rows[0]?.alias_symbol ?? null;
+}
+
+async function writeAliasSymbol(collectionAddress: string, alias: string): Promise<void> {
+  await postgresQuery(`UPDATE plank_multichain_collections SET alias_symbol = $3 WHERE chain_slug = $1 AND contract_address = $2`, [CHAIN_SLUG, collectionAddress, alias]);
+}
+
+/**
+ * Floor/listed/holders for an aliased row, through the ME adapter. A 404
+ * (collection delisted/renamed on ME) is returned as a null floor whose
+ * marketplace is still "magiceden": writeSnapshot counts that as one
+ * authoritative-source miss, and the second consecutive miss nulls the
+ * stored floor (migration 102) instead of leaving it stale forever.
+ */
+export async function fetchMagicEdenStatsByAlias(alias: string): Promise<Pick<CollectionSnapshot, "floorPriceWei" | "floorPriceCurrency" | "floorPriceMarketplace" | "listedCount" | "holderCount">> {
+  try {
+    const me = await magicEdenSolanaAdapter.fetchSnapshot({ chainSlug: CHAIN_SLUG, contractAddress: alias });
+    return {
+      floorPriceWei: me.floorPriceWei,
+      floorPriceCurrency: me.floorPriceWei ? me.floorPriceCurrency : null,
+      floorPriceMarketplace: ME_MARKETPLACE,
+      listedCount: me.listedCount,
+      holderCount: me.holderCount ?? null,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/\b404\b/.test(msg)) {
+      return { floorPriceWei: null, floorPriceCurrency: null, floorPriceMarketplace: ME_MARKETPLACE, listedCount: null, holderCount: null };
+    }
+    throw error;
+  }
+}
+
+export type MagicEdenAliasLaneResult = {
+  statsCandidates: number;
+  statsWritten: number;
+  statsMisses: number;
+  aliasCandidates: number;
+  aliasResolved: number;
+  aliasMissed: number;
+  errors: number;
+};
+
+/**
+ * `magiceden-alias` mesh lane. Two bounded halves per tick: (1) refresh
+ * floor/listed/holders for already-aliased Helius rows, oldest floor
+ * observation first; (2) resolve aliases for un-aliased Helius rows not in
+ * the 7-day negative cache. Both halves write through writeSnapshot so the
+ * migration-102 floor_observed_at / miss-count rules apply unchanged.
+ */
+export async function runMagicEdenAliasLane(input: { statsLimit?: number; resolveLimit?: number } = {}): Promise<MagicEdenAliasLaneResult> {
+  const out: MagicEdenAliasLaneResult = { statsCandidates: 0, statsWritten: 0, statsMisses: 0, aliasCandidates: 0, aliasResolved: 0, aliasMissed: 0, errors: 0 };
+  if (!hasPostgresConfig()) return out;
+  const { writeSnapshot } = await import("@/lib/market/multichain/store");
+  const statsLimit = input.statsLimit ?? 20;
+  const resolveLimit = input.resolveLimit ?? 10;
+
+  const aliased = await postgresQuery<{ id: number; contract_address: string; alias_symbol: string }>(
+    `SELECT c.id, c.contract_address, c.alias_symbol
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE c.chain_slug = $1 AND c.adapter = 'helius-solana' AND c.alias_symbol IS NOT NULL
+     ORDER BY s.floor_observed_at ASC NULLS FIRST, c.id ASC
+     LIMIT $2`,
+    [CHAIN_SLUG, statsLimit]
+  );
+  out.statsCandidates = aliased.rows.length;
+  for (const row of aliased.rows) {
+    try {
+      const stats = await fetchMagicEdenStatsByAlias(row.alias_symbol);
+      await writeSnapshot(row.id, {
+        name: null,
+        imageUrl: null,
+        externalUrl: `https://magiceden.io/marketplace/${row.alias_symbol}`,
+        totalSupply: null,
+        ...stats,
+      });
+      if (stats.floorPriceWei) out.statsWritten += 1;
+      else out.statsMisses += 1;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/429|403|rate limit|quota/i.test(msg)) throw error; // let mesh-lane jail the source
+      out.errors += 1;
+    }
+  }
+
+  const unaliased = await postgresQuery<{ id: number; contract_address: string }>(
+    `SELECT c.id, c.contract_address
+     FROM plank_multichain_collections c
+     WHERE c.chain_slug = $1 AND c.adapter = 'helius-solana' AND c.alias_symbol IS NULL
+     ORDER BY c.id ASC
+     LIMIT $2`,
+    [CHAIN_SLUG, resolveLimit * 4]
+  );
+  for (const row of unaliased.rows) {
+    if (out.aliasCandidates >= resolveLimit) break;
+    const missedAt = await durableKv.get<number>(aliasMissKey(row.contract_address));
+    if (missedAt && Date.now() - missedAt < ALIAS_MISS_TTL_MS) continue;
+    out.aliasCandidates += 1;
+    try {
+      const alias = await resolveMagicEdenAliasForCollection(row.contract_address);
+      if (alias) {
+        await writeAliasSymbol(row.contract_address, alias);
+        out.aliasResolved += 1;
+      } else {
+        await durableKv.set(aliasMissKey(row.contract_address), Date.now());
+        out.aliasMissed += 1;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/429|403|rate limit|quota/i.test(msg)) throw error;
+      out.errors += 1;
+    }
+  }
+  return out;
+}
+
 export const heliusSolanaAdapter: ChainAdapter = {
   name: "helius-solana",
   async fetchSnapshot({ contractAddress: assetId }): Promise<CollectionSnapshot> {
     let asset: HeliusAsset;
+    let base: CollectionSnapshot;
     try {
       asset = await rpc<HeliusAsset>("getAsset", { id: assetId });
+      base = {
+        name: asset.content?.metadata?.name ?? null,
+        imageUrl: asset.content?.links?.image ?? null,
+        externalUrl: asset.content?.links?.external_url ?? null,
+        // DAS is asset/metadata data, not marketplace data -- no real floor
+        // or listed-count source exists here. Never fabricated.
+        floorPriceWei: null,
+        floorPriceCurrency: null,
+        floorPriceMarketplace: null,
+        totalSupply: null,
+        listedCount: null,
+        // Real DAS creators[] data -- first verified creator, else first
+        // listed creator. Never fabricated; null when the asset has none.
+        creatorAddress: pickCreatorAddress(asset.creators),
+        creatorHandle: null,
+      };
     } catch (error) {
       const fallback = await onchainFallbackSnapshot(assetId);
-      if (fallback) return fallback;
-      throw error; // real on-chain fallback also found nothing recoverable -- surface the real DAS error rather than a fabricated empty snapshot
+      if (!fallback) throw error; // real on-chain fallback also found nothing recoverable -- surface the real DAS error rather than a fabricated empty snapshot
+      base = fallback;
     }
-    return {
-      name: asset.content?.metadata?.name ?? null,
-      imageUrl: asset.content?.links?.image ?? null,
-      externalUrl: asset.content?.links?.external_url ?? null,
-      // DAS is asset/metadata data, not marketplace data -- no real floor
-      // or listed-count source exists here. Never fabricated.
-      floorPriceWei: null,
-      floorPriceCurrency: null,
-      floorPriceMarketplace: null,
-      totalSupply: null,
-      listedCount: null,
-      // Real DAS creators[] data -- first verified creator, else first
-      // listed creator. Never fabricated; null when the asset has none.
-      creatorAddress: pickCreatorAddress(asset.creators),
-      creatorHandle: null,
-    };
+    // AUDIT lens 1 #7: floor/listed/holders route through Magic Eden by
+    // alias_symbol when one has been resolved (magiceden-alias lane). No
+    // alias = exactly the old honest null floor.
+    const alias = await readAliasSymbol(assetId).catch(() => null);
+    if (!alias) return base;
+    try {
+      return { ...base, ...(await fetchMagicEdenStatsByAlias(alias)) };
+    } catch {
+      return base; // a transient ME failure must not fail the DAS snapshot write
+    }
   },
 };

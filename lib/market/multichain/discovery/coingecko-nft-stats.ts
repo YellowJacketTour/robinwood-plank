@@ -230,6 +230,26 @@ export type CoinGeckoNftStatsResult = {
  * API call count (rate-limit-respecting), same "an upper bound, not a
  * target" posture every other bounded scan in this app already uses.
  */
+/** Base58, 32-44 chars, mixed case: a Solana mint / collection asset id, which is never a CoinGecko id. */
+const SOLANA_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * AUDIT lens 1 #7 (2026-09-06, Batch E4): non-EVM rows used to match CG
+ * `id` against `contract_address`, which for Helius rows is a mint-like
+ * address and for Bitcoin/ME rows a slug/symbol -- so Helius rows never
+ * matched. Pure (unit-tested): the candidate CG ids for one row, in
+ * priority order -- the Magic Eden alias (migration 102) first, then the
+ * row key itself when it is a slug/symbol rather than a mint address.
+ */
+export function coingeckoIdCandidatesForNonEvm(row: { contractAddress: string; aliasSymbol?: string | null }): string[] {
+  const out: string[] = [];
+  const alias = row.aliasSymbol?.trim().toLowerCase();
+  if (alias) out.push(alias);
+  const key = row.contractAddress.trim();
+  if (key && !SOLANA_MINT_RE.test(key) && !out.includes(key.toLowerCase())) out.push(key.toLowerCase());
+  return out;
+}
+
 export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): Promise<CoinGeckoNftStatsResult> {
   const platform = PLATFORM_BY_CHAIN[chainSlug];
   if (!platform) throw new Error(`coingecko-nft-stats: no CoinGecko platform mapping for "${chainSlug}"`);
@@ -241,8 +261,8 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
   }
 
   const catalog = await fetchPlatformList(platform);
-  const missing = await postgresQuery<{ contract_address: string; name: string | null }>(
-    `SELECT c.contract_address, c.name
+  const missing = await postgresQuery<{ contract_address: string; name: string | null; alias_symbol: string | null }>(
+    `SELECT c.contract_address, c.name, c.alias_symbol
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1
@@ -265,10 +285,10 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
   if (isNonEvmChainSlug(chainSlug)) {
     const ids = new Set(catalog.map((r) => r.id.toLowerCase()));
     for (const c of trackedMissing) {
-      const key = c.contract_address.toLowerCase();
-      if (!ids.has(key) || seen.has(key)) continue;
-      seen.add(key);
-      jobs.push({ contractAddress: c.contract_address, cgId: key, name: c.name });
+      const cgId = coingeckoIdCandidatesForNonEvm({ contractAddress: c.contract_address, aliasSymbol: c.alias_symbol }).find((k) => ids.has(k));
+      if (!cgId || seen.has(cgId)) continue;
+      seen.add(cgId);
+      jobs.push({ contractAddress: c.contract_address, cgId, name: c.name });
     }
   } else {
     const byAddr = new Map<string, ListItem>();

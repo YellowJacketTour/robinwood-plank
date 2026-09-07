@@ -121,6 +121,8 @@ type TrackedCollection = {
   floorPriceWei: string | null;
   floorPriceCurrency: string | null;
   syncedAt: string | null;
+  /** When the floor itself was last observed (plank_multichain_snapshots.floor_observed_at, migration 102). The freshness dot and DataSourceChip read this, never syncedAt. */
+  floorObservedAt?: string | null;
   /** False for Solana today -- see route's own comment: the Seaport-based buy/sweep/offers/rarity pipeline has no Solana equivalent. */
   tradeable: boolean;
   /** Real observed 7-day Transfer count (evm-log-scan.ts) -- the honest volume proxy this app actually has; never a fabricated $ figure. 0 for Solana (not scanned by that pipeline) or a collection with no recent chain activity. */
@@ -388,7 +390,79 @@ function syncFreshness(syncedAt: string | null): { color: string; title: string 
   const ageHours = ageMs / 3_600_000;
   const color = ageHours < 6 ? "#48d7a4" : ageHours < 48 ? "#f4c95d" : "#ff718b";
   const label = ageHours < 1 ? "under 1h ago" : ageHours < 48 ? `${Math.round(ageHours)}h ago` : `${Math.round(ageHours / 24)}d ago`;
-  return { color, title: `Synced ${label} (${new Date(ts).toLocaleString()})` };
+  return { color, title: `Floor observed ${label} (${new Date(ts).toLocaleString()})` };
+}
+
+/**
+ * AUDIT lens 1 #8 / fabrication (2026-09-06, Batch E5): the dot used to read
+ * syncedAt, which every partial writer (supply, holders, sync errors) bumps,
+ * so a 3-week-old floor showed a green "synced under 1h" dot. It now reads
+ * floor_observed_at. A row with a floor but no observation timestamp (never
+ * observed since migration 102 seeded it) renders a grey dot, not green;
+ * a row with no floor renders nothing.
+ */
+function floorFreshness(c: { floorObservedAt?: string | null; floorPriceWei: string | null }): { color: string; title: string } | null {
+  if (!c.floorPriceWei) return null;
+  if (!c.floorObservedAt) return { color: "#8a8378", title: "Floor age unknown (no observation timestamp yet)" };
+  return syncFreshness(c.floorObservedAt);
+}
+
+type HubChainMeta = {
+  statsCapable: boolean;
+  laneHealth: { down: Array<{ source: string; since: string | null; reason: string }>; lanes: Array<{ source: string; status: string }> };
+};
+
+/** Human label for a mesh source in the chain-tab banner. */
+function laneSourceLabel(source: string): string {
+  return ({
+    "hypersync-discovery": "HyperSync discovery",
+    "helius-discovery": "Helius discovery",
+    "magiceden-catalog": "Magic Eden catalog",
+    "magiceden-alias": "Magic Eden stats",
+    "unisat-discovery": "UniSat discovery",
+    "ordiscan-discovery": "Ordiscan discovery",
+    "robinhood-discovery": "Robinhood Chain discovery",
+    "opensea-stats": "OpenSea stats",
+    "opensea-bulk": "OpenSea catalog",
+    "coingecko-nft": "CoinGecko stats",
+    "adapter-sync": "marketplace adapter",
+    "unisat-collections": "UniSat stats",
+    "bestinslot-stats": "BestInSlot stats",
+    "native-robinwood": "native book",
+    "cryptopunks-native": "CryptoPunks book",
+  } as Record<string, string>)[source] ?? source;
+}
+
+/**
+ * AUDIT lens 1 #9/#10 (Batch E6): the chain-tab banner. "no stats source on
+ * this chain" when the manifest says statsCapable:false; otherwise one line
+ * per down discovery/stats lane, "X down since T". Nothing when healthy.
+ */
+function ChainTabBanner({ chainSlug, meta }: { chainSlug: string; meta: HubChainMeta | null | undefined }) {
+  if (!meta) return null;
+  if (!meta.statsCapable) {
+    return (
+      <div role="status" className="mt-2 border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+        <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> no stats source on this chain. Collections are discovered from
+        chain logs only; floor, listed and volume cells are empty by design, not loading.
+      </div>
+    );
+  }
+  if (meta.laneHealth.down.length === 0) return null;
+  return (
+    <div role="status" className="mt-2 border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+      {meta.laneHealth.down.map((d) => {
+        const since = d.since ? new Date(d.since) : null;
+        const sinceLabel = since && Number.isFinite(since.getTime()) ? since.toLocaleString() : "an unknown time";
+        return (
+          <p key={d.source}>
+            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)} down since {sinceLabel}
+            {d.reason === "backoff" ? " (last run failed)" : " (no successful run)"} -- counts and floors on this tab may be stale.
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 function shortCollectionId(address: string): string {
@@ -1070,6 +1144,8 @@ export default function GlobalMarketHub() {
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
   const [chainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  // Per-chain honesty block from the index response (Batch E6): statsCapable + lane health.
+  const [chainMeta, setChainMeta] = useState<Record<string, HubChainMeta> | null>(null);
   // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
   // collections increase while I'm on screen"): polled every 15 s; a chain
   // whose count grew pulses its badge for a few seconds.
@@ -1133,7 +1209,7 @@ export default function GlobalMarketHub() {
         // ttlMs now below the poll interval below so every tick is a
         // genuine fetch, matching the same fix already applied to the
         // per-collection detail page's own identity/archival fetch.
-        const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number }>("/api/market/multichain?v=index-3", {
+        const data = await swrJson<{ collections: TrackedCollection[]; totalCount?: number; chains?: Record<string, HubChainMeta> }>("/api/market/multichain?v=index-3", {
           ttlMs: 15_000,
           swrMs: 600_000,
           session: true,
@@ -1145,6 +1221,7 @@ export default function GlobalMarketHub() {
         if (!cancelled) {
           const rows = data.collections ?? [];
           if (typeof data.totalCount === "number") setTotalTrackedCount(data.totalCount);
+          if (data.chains && typeof data.chains === "object") setChainMeta(data.chains);
           const hasHome = rows.some((c) => isHomeRow(c));
           setCollections(
             hasHome
@@ -2244,6 +2321,7 @@ export default function GlobalMarketHub() {
               );
             })}
           </div>
+          {activeChainSlug && <ChainTabBanner chainSlug={activeChainSlug} meta={chainMeta?.[activeChainSlug]} />}
 
           {/*
            * A dense ranked TABLE, not a card grid -- reverse-engineered from
@@ -2416,7 +2494,7 @@ export default function GlobalMarketHub() {
                                 {shortCollectionId(c.contractAddress)}
                               </span>
                               {(() => {
-                                const fresh = syncFreshness(c.syncedAt);
+                                const fresh = floorFreshness(c);
                                 return fresh ? (
                                   <span
                                     className="inline-block size-1.5 shrink-0 rounded-full"
@@ -2454,7 +2532,7 @@ export default function GlobalMarketHub() {
                                 venueLabel={c.primaryVenue.label}
                                 venueId={c.primaryVenue.id}
                                 coverage={c.primaryVenue.coverage}
-                                asOf={c.syncedAt}
+                                asOf={c.floorObservedAt ?? null}
                               />
                             )}
                           </span>
@@ -2894,7 +2972,7 @@ export default function GlobalMarketHub() {
                             </span>
                           )}
                           {c.primaryVenue && (
-                            <DataSourceChip venueLabel={c.primaryVenue.label} venueId={c.primaryVenue.id} coverage={c.primaryVenue.coverage} asOf={c.syncedAt} />
+                            <DataSourceChip venueLabel={c.primaryVenue.label} venueId={c.primaryVenue.id} coverage={c.primaryVenue.coverage} asOf={c.floorObservedAt ?? null} />
                           )}
                         </p>
                       )}

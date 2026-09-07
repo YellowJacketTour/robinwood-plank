@@ -512,21 +512,29 @@ export async function GET(req: NextRequest) {
       const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
       const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
       const { fetchSatflowListings, resolveSatflowCollectionStats } = await import("@/lib/market/multichain/adapters/satflow-ordinals");
-      const { fetchOkxOrdinalsListings, fetchOkxCollectionStats } = await import("@/lib/market/multichain/adapters/okx-ordinals");
-      const [unisatResult, owResult, ordnetResult, satflowResult, okxResult] = await Promise.allSettled([
+      // E4-bitcoin (2026-09-06): Magic Eden's Bitcoin API is gone (research
+      // lens R1). OKX Onchain OS and BestInSlot are the aggregator reads;
+      // both are key-gated and report `credential-missing` honestly.
+      const { readOkxOrdinalsListings, readOkxCollectionStats } = await import("@/lib/market/multichain/discovery/bitcoin-okx-listings");
+      const { readBestInSlotListings, readBestInSlotCollectionStats, satsToPriceWei: bisSatsToPriceWei } = await import("@/lib/market/multichain/discovery/bitcoin-bestinslot");
+      const [unisatResult, owResult, ordnetResult, satflowResult, okxResult, bisResult] = await Promise.allSettled([
         process.env.UNISAT_API_KEY
           ? fetchUniSatListings(collectionSlug, Math.min(limit, 20))
           : Promise.resolve([]),
         fetchOrdinalsWalletCatalog(collectionSlug),
         isOrdNetConfigured() ? fetchOrdNetListings(collectionSlug, limit) : Promise.resolve([]),
         fetchSatflowListings(collectionSlug, limit),
-        fetchOkxOrdinalsListings(collectionSlug, limit),
+        readOkxOrdinalsListings(collectionSlug, limit),
+        readBestInSlotListings(collectionSlug, limit),
       ]);
       const unisat = unisatResult.status === "fulfilled" ? unisatResult.value : [];
       const ow = owResult.status === "fulfilled" ? owResult.value : { listings: [] };
       const ordnet = ordnetResult.status === "fulfilled" ? ordnetResult.value : [];
       const satflow = satflowResult.status === "fulfilled" ? satflowResult.value : [];
-      const okx = okxResult.status === "fulfilled" ? okxResult.value : [];
+      const okxRead = okxResult.status === "fulfilled" ? okxResult.value : { state: "upstream-error" as const, listings: [] };
+      const okx = okxRead.listings;
+      const bisRead = bisResult.status === "fulfilled" ? bisResult.value : { state: "upstream-error" as const, listings: [] };
+      const bestinslot = bisRead.listings;
       const candidates: Listing[] = [
         ...mapBitcoinListings(collectionSlug, chainSlug, unisat, true),
         ...mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false, "ordinals-wallet"),
@@ -582,6 +590,23 @@ export async function GET(req: NextRequest) {
           externalUrl: `https://web3.okx.com/nft/collection/btc/${collectionSlug}`,
           foreignChainSlug: chainSlug,
         })),
+        // BestInSlot -- aggregated Ordinals listings (E4-bitcoin). The
+        // originating venue, when BestInSlot reports one, rides in the id
+        // so the cheapest-per-inscription merge below still dedups by
+        // inscription, never by aggregator.
+        ...bestinslot.map((row): Listing => ({
+          id: `bestinslot:${row.marketplace ?? "agg"}:${row.inscriptionId}`,
+          collectionSlug,
+          tokenId: row.inscriptionId,
+          maker: row.sellerAddress ?? "unknown",
+          priceWei: bisSatsToPriceWei(row.priceSats),
+          expiresAt: "9999-12-31T23:59:59.999Z",
+          kind: "fixed",
+          imageUrl: `https://ordinals.com/content/${row.inscriptionId}`,
+          venue: "bestinslot",
+          externalUrl: `https://bestinslot.xyz/ordinals/collection/${collectionSlug}`,
+          foreignChainSlug: chainSlug,
+        })),
       ];
       // Real, immediate hydration on visit (see this session's standing
       // "no unpopulated spot" directive): when every listing source above
@@ -595,8 +620,10 @@ export async function GET(req: NextRequest) {
       // all); OKX only contributes once real credentials exist.
       if (candidates.length === 0) {
         const satflowStats = await resolveSatflowCollectionStats(collectionSlug).catch(() => null);
-        const stats = satflowStats ?? (await fetchOkxCollectionStats(collectionSlug).catch(() => null));
-        const marketplace = satflowStats ? "satflow" : "okx";
+        const okxStats = satflowStats ? null : (await readOkxCollectionStats(collectionSlug)).stats;
+        const bisStats = satflowStats || okxStats ? null : (await readBestInSlotCollectionStats(collectionSlug)).stats;
+        const stats = satflowStats ?? okxStats ?? bisStats;
+        const marketplace = satflowStats ? "satflow" : okxStats ? "okx" : "bestinslot";
         if (stats?.floorPriceSats != null) {
           const { updateCollectionFloorOnly } = await import("@/lib/market/multichain/store");
           void updateCollectionFloorOnly(chainSlug, collectionSlug, {
@@ -635,7 +662,8 @@ export async function GET(req: NextRequest) {
               ordinalsWallet: owResult.status === "fulfilled" ? "catalog-overlay" : "upstream-error",
               ordnet: !isOrdNetConfigured() ? "wallet-session-missing" : ordnetResult.status === "fulfilled" ? "cursor-read" : "upstream-error",
               satflow: !process.env.SATFLOW_API_KEY ? "credential-missing" : satflowResult.status === "fulfilled" ? "queried" : "upstream-error",
-              okx: !process.env.OKX_API_KEY ? "credential-missing" : okxResult.status === "fulfilled" ? "queried" : "upstream-error",
+              okx: okxRead.state,
+              bestinslot: bisRead.state,
             },
           },
         },

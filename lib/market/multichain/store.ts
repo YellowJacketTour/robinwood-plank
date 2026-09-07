@@ -711,6 +711,51 @@ export async function recordFloorObservation(
       `Cannot record floor observation for untracked collection ${chainSlug}:${contractAddress}.`
     );
   }
+  // Migration 102: every real floor write stamps floor_observed_at on the
+  // snapshot row (updateCollectionFloorOnly and the OpenSea/CG stats
+  // writers all pass through here), and a real observation resets the
+  // consecutive-miss counter.
+  await postgresQuery(
+    `UPDATE plank_multichain_snapshots s SET floor_observed_at = NOW(), floor_miss_count = 0
+     FROM plank_multichain_collections c
+     WHERE s.collection_id = c.id AND c.chain_slug = $1 AND c.contract_address = $2`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
+  );
+}
+
+/** Consecutive authoritative-source misses (null / 404) after which the stored floor is nulled. */
+export const FLOOR_MISSES_TO_CLEAR = 2;
+
+/**
+ * The authoritative source for this collection's floor (the marketplace
+ * named in floor_price_marketplace) returned no floor -- a 404, or an
+ * empty stats body. Counts one miss; on the FLOOR_MISSES_TO_CLEAR-th
+ * consecutive miss the floor columns are nulled so a delisted collection
+ * cannot show a stale floor forever (AUDIT lens 1 #8). A miss from a
+ * marketplace that does not own the current floor is ignored: another
+ * venue going quiet says nothing about the floor we actually display.
+ * Returns whether the floor was cleared by this call.
+ */
+export async function recordFloorSourceMiss(
+  chainSlug: string,
+  contractAddress: string,
+  marketplace: string
+): Promise<{ cleared: boolean; misses: number }> {
+  const result = await postgresQuery<{ floor_miss_count: number; cleared: boolean }>(
+    `UPDATE plank_multichain_snapshots s
+     SET floor_miss_count = s.floor_miss_count + 1,
+         floor_price_wei = CASE WHEN s.floor_miss_count + 1 >= $3 THEN NULL ELSE s.floor_price_wei END,
+         floor_price_currency = CASE WHEN s.floor_miss_count + 1 >= $3 THEN NULL ELSE s.floor_price_currency END,
+         floor_price_marketplace = CASE WHEN s.floor_miss_count + 1 >= $3 THEN NULL ELSE s.floor_price_marketplace END
+     FROM plank_multichain_collections c
+     WHERE s.collection_id = c.id AND c.chain_slug = $1 AND c.contract_address = $2
+       AND s.floor_price_marketplace = $4
+     RETURNING s.floor_miss_count, (s.floor_price_wei IS NULL) AS cleared`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress), FLOOR_MISSES_TO_CLEAR, marketplace]
+  );
+  const row = result.rows[0];
+  if (!row) return { cleared: false, misses: 0 };
+  return { cleared: row.cleared, misses: Number(row.floor_miss_count) };
 }
 
 /**
@@ -766,7 +811,7 @@ export async function getObservedFloorChange24h(
   };
 }
 
-/** Write a real listed-count and/or total-supply without clobbering the other, or floor. 0 is a real count (nothing listed), null means skip that column. */
+/** Write a real listed-count and/or total-supply without clobbering the other, or floor. 0 is a real count (nothing listed), null means skip that column. Bumps synced_at but never floor_observed_at (migration 102): the hub's freshness dot reads floor age, and this writer observed no floor. */
 export async function updateCollectionSupplyFields(
   chainSlug: string,
   contractAddress: string,
@@ -818,13 +863,51 @@ export async function writeSnapshot(
   // reasoning in alchemy-nft.ts) passes null, and that null must never
   // clobber a real value a prior single-collection fetch already recorded.
   await postgresQuery(
+    // AUDIT lens 1 #8 (2026-09-06, migration 102): a floor, once written,
+    // could never be cleared. Now (a) a real floor stamps floor_observed_at
+    // and resets floor_miss_count; (b) a null floor from the SAME source
+    // that owns the current floor (EXCLUDED.floor_price_marketplace equals
+    // the stored one) counts a miss, and the second consecutive miss nulls
+    // the floor; (c) a null floor from a source that never owned the floor
+    // (DAS, a supply-only adapter) leaves floor columns and the miss count
+    // alone, exactly as before.
     `INSERT INTO plank_multichain_snapshots
-       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL)
+       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error,
+        floor_observed_at, floor_miss_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL, CASE WHEN $2::text IS NOT NULL THEN NOW() ELSE NULL END, 0)
      ON CONFLICT (collection_id) DO UPDATE SET
-       floor_price_wei = COALESCE(EXCLUDED.floor_price_wei, plank_multichain_snapshots.floor_price_wei),
-       floor_price_currency = COALESCE(EXCLUDED.floor_price_currency, plank_multichain_snapshots.floor_price_currency),
-       floor_price_marketplace = COALESCE(EXCLUDED.floor_price_marketplace, plank_multichain_snapshots.floor_price_marketplace),
+       floor_price_wei = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN EXCLUDED.floor_price_wei
+         WHEN EXCLUDED.floor_price_marketplace IS NOT NULL
+          AND EXCLUDED.floor_price_marketplace = plank_multichain_snapshots.floor_price_marketplace
+          AND plank_multichain_snapshots.floor_miss_count + 1 >= ${FLOOR_MISSES_TO_CLEAR}
+         THEN NULL
+         ELSE plank_multichain_snapshots.floor_price_wei
+       END,
+       floor_price_currency = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN COALESCE(EXCLUDED.floor_price_currency, plank_multichain_snapshots.floor_price_currency)
+         WHEN EXCLUDED.floor_price_marketplace IS NOT NULL
+          AND EXCLUDED.floor_price_marketplace = plank_multichain_snapshots.floor_price_marketplace
+          AND plank_multichain_snapshots.floor_miss_count + 1 >= ${FLOOR_MISSES_TO_CLEAR}
+         THEN NULL
+         ELSE plank_multichain_snapshots.floor_price_currency
+       END,
+       floor_price_marketplace = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN COALESCE(EXCLUDED.floor_price_marketplace, plank_multichain_snapshots.floor_price_marketplace)
+         WHEN EXCLUDED.floor_price_marketplace IS NOT NULL
+          AND EXCLUDED.floor_price_marketplace = plank_multichain_snapshots.floor_price_marketplace
+          AND plank_multichain_snapshots.floor_miss_count + 1 >= ${FLOOR_MISSES_TO_CLEAR}
+         THEN NULL
+         ELSE plank_multichain_snapshots.floor_price_marketplace
+       END,
+       floor_observed_at = CASE WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN NOW() ELSE plank_multichain_snapshots.floor_observed_at END,
+       floor_miss_count = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN 0
+         WHEN EXCLUDED.floor_price_marketplace IS NOT NULL
+          AND EXCLUDED.floor_price_marketplace = plank_multichain_snapshots.floor_price_marketplace
+         THEN plank_multichain_snapshots.floor_miss_count + 1
+         ELSE plank_multichain_snapshots.floor_miss_count
+       END,
        total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
        listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
        holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
@@ -880,6 +963,8 @@ export type CollectionWithSnapshot = TrackedCollection & {
   holderCount: number | null;
   /** Real 24h floor change % when a source reports it (CoinGecko) or when previous_floor is a ~24h-old observation. */
   floorChangePct: number | null;
+  /** When floor_price_wei was last written from a real observation (migration 102). Unlike syncedAt this is never bumped by supply/holder/error writers. */
+  floorObservedAt?: string | null;
 };
 
 /** Everything the read API needs in one query — collections joined to their latest snapshot. */
@@ -1028,6 +1113,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
       previous_floor_price_wei: string | null;
       holder_count: number | null;
       floor_change_pct: number | null;
+      floor_observed_at: string | null;
       total_count: string;
     }
   >(
@@ -1035,7 +1121,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
-            s.holder_count, s.floor_change_pct,
+            s.holder_count, s.floor_change_pct, s.floor_observed_at,
             COUNT(*) OVER() AS total_count
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
@@ -1063,6 +1149,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
+    floorObservedAt: row.floor_observed_at,
   }));
   return { collections, totalCount };
 }

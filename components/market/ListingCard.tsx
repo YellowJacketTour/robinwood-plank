@@ -27,6 +27,7 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   "cryptopunks-native": "bg-gold-500/15 text-gold-300",
   satflow: "bg-[#F7931A]/15 text-[#F7931A]",
   okx: "bg-[#000000]/40 text-[#B8FF33]",
+  bestinslot: "bg-[#F7931A]/15 text-[#F7931A]",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, formatTokenAmountCompact, shortAddress } from "@/lib/trade";

@@ -40,6 +40,9 @@ one shape, and this program adopts it:
 | Deploys | 2 min when no migration is pending (was 41 min: full `pg_dump` on every release) | run 34025542310 |
 | Convergence mesh (memberships, metadata, traits, rarity, stats lanes) | LIVE, in-process lanes, cron every 5 min | the shared host's process limit killed spawned lanes (`spawn node EAGAIN`); lanes now run inside the scheduler; provisioning run 34030953181 observed the cron firing; live feed showed 5,391 mesh-written rows in 65 s |
 | OpenSea Stream ingest (sales rows + floor state, all OpenSea chains) | LIVE, cron every minute with a 59-minute budget | 433 batch writes / 0 errors in the production ledger; 9 stream sales on the live feed in 65 s; stream sales on collection activity shipped after |
+| Scheduler after the audit (Batch A + G) | LIVE: always-on, express + standing + general lanes, deferrals instead of sleeps, no silent successes | 223 jobs / 15 min (14.9 per minute) measured 19:05 UTC, from 0.13 in the morning |
+| One ledger sink + one aggregator (Batch B1) | BUILT, on dev/master: every venue writer except Wyvern records confirmed USD-priced sales; `updateVolumeFromMarketEvents` owns 24h/7d/30d; vendor writes cannot clobber a fresh ledger figure | Postgres test volume-from-market-events; migration 100 |
+| Listings truth (Batch C), money-at-risk (Batch D), catalog honesty (Batch E) | BUILT and deployed per the audit FIX LOG | see AUDIT-MARKETPLANK-TOTAL-2026-09-06.md |
 
 Hydration truth before this program started: 412 queued jobs, 0 completed in 15 minutes, because the mesh needed
 `tsx`, which the release tree never ships. The mesh had never run in production.
