@@ -466,6 +466,14 @@ async function main(): Promise<void> {
       const laneError = pendingError.get(deferKey);
       pendingError.delete(deferKey);
       await finishDataJob(job, code === 0 || isPartial ? undefined : `lane exited ${code}${laneError ? `: ${laneError}` : ""}`);
+      // A standing lane that failed sits out for 15 minutes (2026-09-07):
+      // the standing re-enqueue would otherwise offer it again within five,
+      // and a lane failing on a source-side timeout burns its turn each time.
+      if (!(code === 0 || isPartial) && job.jobKey.startsWith(STANDING_JOB_KEY_PREFIX)) {
+        // Direct UPDATE: enqueueDataJob's LEAST() ratchet can never push not_before forward.
+        const { postgresQuery } = await import("../lib/postgres");
+        await postgresQuery(`UPDATE plank_data_jobs SET status = 'queued', not_before = NOW() + INTERVAL '15 minutes', updated_at = NOW() WHERE id = $1`, [job.id]).catch(() => undefined);
+      }
       if (isPartial) {
         await enqueueDataJob({
           jobKey: job.jobKey,

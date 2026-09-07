@@ -210,7 +210,14 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     // per chain) finished instantly, re-enqueued, and were claimed again
     // ahead of every priority-20 lane, 213 times in ten minutes. Standing
     // lanes are peers: the one that ran least recently goes next.
-    const orderClause = jobKeyPrefix ? "completed_at NULLS FIRST, attempts, not_before, id" : "priority DESC, attempts, not_before, id";
+    // Third probe (2026-09-07): completed_at is only set on success, so a lane
+    // that FAILS every time (hypersync-backfill:base-mainnet, client read
+    // timeout) sorted first on every claim and took the slot repeatedly.
+    // mesh_lane_health.last_claim_at is written on every claim whatever the
+    // outcome; least-recently-CLAIMED is the fair key.
+    const orderClause = jobKeyPrefix
+      ? "(SELECT h.last_claim_at FROM mesh_lane_health h WHERE h.lane_key = plank_data_jobs.source || ':' || plank_data_jobs.chain_slug) NULLS FIRST, attempts, not_before, id"
+      : "priority DESC, attempts, not_before, id";
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
     params.push(owner);
