@@ -43,7 +43,12 @@ const pool = new Pool({
   password: required("PGPASSWORD"),
   max: 1,
   connectionTimeoutMillis: 10_000,
-  statement_timeout: 30_000,
+  // 2026-09-07: a migration ALTER waiting on a lock held by the always-on
+  // workers was cancelled by a 30 s statement timeout. Migrations run with
+  // no statement timeout and a 2-minute LOCK timeout instead, so a real
+  // deadlock still fails loudly while a long-running ALTER can finish.
+  statement_timeout: 0,
+  options: "-c lock_timeout=120000",
   application_name: "plank-love-migrations",
   ssl,
 });
