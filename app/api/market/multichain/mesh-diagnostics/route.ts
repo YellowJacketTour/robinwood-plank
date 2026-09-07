@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { publicError, publicJson, rateLimit } from "@/lib/security";
+import { publicJson, rateLimit } from "@/lib/security";
 import { verifyDoorCookieValue, DOOR_COOKIE_NAME } from "@/lib/market-preview-door";
 import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
 import { readMeshDiagnostics } from "@/lib/market/multichain/edge/mesh-diagnostics";
@@ -20,6 +20,7 @@ export async function GET(req: Request) {
     const value = await readMeshDiagnostics();
     return NextResponse.json(value ?? { error: "NO_POSTGRES" }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return publicError(error, "Failed to read mesh diagnostics.");
+    // Door-only route: the real failure text is exactly what the reader needs.
+    return NextResponse.json({ error: "INTERNAL", detail: error instanceof Error ? error.message : String(error) }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
