@@ -162,6 +162,14 @@ async function buildHubIndex(req: Request) {
     let nativeListed = nativeBook?.listedCount ?? 0;
     const nativeFloorVenue = nativeBook?.floorVenue ?? "marketplank";
     const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
+    const nativeLedgerActivity7d = hasPostgresConfig()
+      ? await postgresQuery<{ n: string }>(
+          `SELECT COUNT(*)::text AS n FROM plank_chain_events
+            WHERE lower(contract) = lower($1) AND kind IN ('transfer','sale','mint')
+              AND block_timestamp >= NOW() - INTERVAL '7 days'`,
+          [NFT_CONTRACT_ADDRESS]
+        ).then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0)
+      : 0;
     const nativeSales = await salesStatsFromLedger().catch(() => null);
     let canonical: Awaited<
       ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
@@ -229,7 +237,10 @@ async function buildHubIndex(req: Request) {
       syncedAt: new Date().toISOString(),
       syncError: null as string | null,
       tradeable: true,
-      recentActivity: activityByContract.get(`robinhood:${NFT_CONTRACT_ADDRESS.toLowerCase()}`) ?? 0,
+      // The home collection's own ledger (plank_chain_events) holds every
+      // RobinWood transfer, mint and sale; the chain-wide tally table only
+      // sees what a discovery window happened to cover. Take the larger.
+      recentActivity: Math.max(activityByContract.get(`robinhood:${NFT_CONTRACT_ADDRESS.toLowerCase()}`) ?? 0, nativeLedgerActivity7d),
       creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,
