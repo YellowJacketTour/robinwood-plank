@@ -7,6 +7,34 @@ import type { HunterDriver, HunterFinding } from "../types";
 type RawLog = { address: string; topics: string[]; data: string; blockNumber: string };
 
 /**
+ * Token ids carried by one log. ERC-721 Transfer: topics[3]. ERC-1155
+ * TransferSingle: first data word is `id`. ERC-1155 TransferBatch: data is
+ * abi.encode(ids[], values[]) -- word0 = offset of ids, word at offset =
+ * length, then the ids (review M5: the first word is always 0x40, so
+ * reading it as an id collapsed every batch to one key).
+ */
+export function tokenIdsOf(topic0: string, log: Pick<RawLog, "topics" | "data">): string[] {
+  if (topic0 === TRANSFER_TOPIC) return log.topics[3] ? [log.topics[3].toLowerCase()] : [];
+  const hex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
+  const word = (i: number) => hex.slice(i * 64, i * 64 + 64);
+  if (topic0 === TRANSFER_SINGLE_TOPIC) return hex.length >= 64 ? [word(0)] : [];
+  if (topic0 === TRANSFER_BATCH_TOPIC) {
+    const offset = Number.parseInt(word(0) || "0", 16);
+    if (!Number.isFinite(offset) || offset % 32 !== 0) return [];
+    const lenIdx = offset / 32;
+    const len = Number.parseInt(word(lenIdx) || "0", 16);
+    if (!Number.isFinite(len) || len <= 0 || len > 10_000) return [];
+    const ids: string[] = [];
+    for (let i = 0; i < len; i += 1) {
+      const w = word(lenIdx + 1 + i);
+      if (w.length === 64) ids.push(w);
+    }
+    return ids;
+  }
+  return [];
+}
+
+/**
  * EVM driver: one adaptive eth_getLogs chunk of NFT Transfer topics,
  * chain-wide (no address filter), over the keyless public RPC pool.
  * Yields a per-contract transfer tally with distinct token ids, which is
@@ -46,7 +74,8 @@ export function createEvmHunter(opts: { confirmations?: number; maxBlocksPerRun?
           const msg = err instanceof Error ? err.message : String(err);
           if (isRangeTooLargeError(msg)) {
             const hint = suggestedRangeFromError(msg);
-            chunk = hint ? { ...chunk, size: Math.max(chunk.min, Math.min(chunk.size, hint)) } : onChunkTooLarge(chunk);
+            // A hint that is not smaller than the current size would retry the same range forever (review L3).
+            chunk = hint != null && hint < chunk.size ? { ...chunk, size: Math.max(chunk.min, hint) } : onChunkTooLarge(chunk);
             await writeChunkMemory("evm", ctx.chainSlug, chunk);
             if (chunk.size <= chunk.min && to - position + 1 <= chunk.min) {
               return { findings, cursorAfter: position > from ? { kind: "block", block: position - 1 } : cursor, sourceCalls: calls, sourceStatus: "error", note: `range rejected at min chunk: ${msg.slice(0, 120)}` };
@@ -63,9 +92,8 @@ export function createEvmHunter(opts: { confirmations?: number; maxBlocksPerRun?
           if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue; // ERC-20
           const key = log.address.toLowerCase();
           tally.set(key, (tally.get(key) ?? 0) + 1);
-          const tokenKey = topic0 === TRANSFER_TOPIC ? log.topics[3] : log.data.slice(0, 66);
           const set = distinct.get(key) ?? new Set<string>();
-          set.add(tokenKey ?? "");
+          for (const id of tokenIdsOf(topic0 ?? "", log)) set.add(id);
           distinct.set(key, set);
         }
         if (tally.size > 0) {

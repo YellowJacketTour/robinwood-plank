@@ -26,13 +26,15 @@ export function createHunterSink(): HuntSink {
   return async (f: HunterFinding): Promise<number> => {
     if (f.kind === "transfer-tally") {
       const { recordActivity, upsertTrackedCollection } = await import("@/lib/market/multichain/store");
+      // Review H3: sync.ts switches on adapter names and skips unknown ones forever; admit under the real EVM adapter.
+      const { alchemyNftAdapter } = await import("@/lib/market/multichain/adapters/alchemy-nft");
       const { chainManifest } = await import("@/lib/market/multichain/chains/manifest");
       await recordActivity(f.chainSlug, f.tally);
       let admitted = 0;
       const chainId = chainManifest(f.chainSlug)?.chainId ?? null;
       for (const [contract, transfers] of f.tally) {
         if (!admissible(transfers, f.distinctTokens.get(contract) ?? 0)) continue;
-        await upsertTrackedCollection({ chainSlug: f.chainSlug, chainId, contractAddress: contract, adapter: "hunter-evm" }).catch(() => undefined);
+        await upsertTrackedCollection({ chainSlug: f.chainSlug, chainId, contractAddress: contract, adapter: alchemyNftAdapter.name }).catch(() => undefined);
         admitted += 1;
       }
       return f.tally.size + admitted;

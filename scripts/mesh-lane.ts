@@ -24,7 +24,7 @@ const argvSubject = process.argv.find((a) => a.startsWith("--subject="))?.slice(
  * each other's signal. Script mode (one lane per child) is unchanged.
  */
 /** Hunter runs stop 10 s inside the 90 s lane ceiling so the receipt always lands. */
-const HUNT_BUDGET_MS = 80_000;
+const HUNT_BUDGET_MS = 50_000; // review L1: one eth_getLogs can take 45 s across providers; stay inside the 90 s lane kill
 const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown }>();
 function markIncomplete(): void {
   const store = laneSignal.getStore();

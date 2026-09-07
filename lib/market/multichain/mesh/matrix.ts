@@ -502,7 +502,9 @@ export const MESH_LANES: MeshLane[] = [
   // admission law. Solana: Tensor list-state program accounts -> listed +
   // floor under chain-derived provenance. Bitcoin: mempool.space
   // settlement-first index. Every run leaves a receipt on its job.
-  ...[...HYPERSYNC_EVM, "robinhood"].map((chainSlug) => ({
+  // Review M4: HyperSync lanes record the same activity tallies; when the
+  // token is configured the hunter covers only the chains HyperSync does not.
+  ...(process.env.ENVIO_API_TOKEN?.trim() ? ["robinhood"] : [...HYPERSYNC_EVM, "robinhood"]).map((chainSlug) => ({
     id: `hunter-evm:${chainSlug}`,
     source: "hunter-evm" as const,
     chainSlug,

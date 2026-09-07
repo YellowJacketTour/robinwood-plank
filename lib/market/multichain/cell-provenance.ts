@@ -105,27 +105,37 @@ export async function writeCells(input: {
   const out = { floor: false, listed: false };
   if (input.floorAtomic !== undefined) {
     const cur = await readCellProvenance(input.chainSlug, input.collectionKey, "floor");
-    if (mayOverwrite(cur, incoming)) {
-      await updateCollectionFloorOnly(input.chainSlug, input.collectionKey, {
-        floorPriceWei: input.floorAtomic,
-        floorPriceCurrency: chainManifest(input.chainSlug)?.nativeCurrencySymbol ?? null,
-        floorPriceMarketplace: input.source,
-      });
-      await durableKv.set(provKey(input.chainSlug, input.collectionKey, "floor"), { value: input.floorAtomic, source: input.source, observedAt } satisfies CellProvenance);
-      out.floor = true;
+    // Review M1: provenance is recorded only when the value actually landed.
+    const positive = input.floorAtomic != null && /^[0-9]+$/.test(input.floorAtomic) && BigInt(input.floorAtomic) > 0n;
+    if (positive && mayOverwrite(cur, incoming)) {
+      const exists = await postgresQuery<{ id: number }>(`SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND lower(contract_address) = lower($2)`, [input.chainSlug, input.collectionKey]);
+      if (exists.rows[0]) {
+        await updateCollectionFloorOnly(input.chainSlug, input.collectionKey, {
+          floorPriceWei: input.floorAtomic,
+          floorPriceCurrency: chainManifest(input.chainSlug)?.nativeCurrencySymbol ?? null,
+          floorPriceMarketplace: input.source,
+        });
+        await durableKv.set(provKey(input.chainSlug, input.collectionKey, "floor"), { value: input.floorAtomic, source: input.source, observedAt } satisfies CellProvenance);
+        out.floor = true;
+      }
     }
   }
   if (input.listedCount !== undefined) {
     const cur = await readCellProvenance(input.chainSlug, input.collectionKey, "listed");
     if (mayOverwrite(cur, incoming)) {
-      await postgresQuery(
-        `UPDATE plank_multichain_snapshots s SET listed_count = $3, synced_at = NOW()
-           FROM plank_multichain_collections c
-          WHERE s.collection_id = c.id AND c.chain_slug = $1 AND lower(c.contract_address) = lower($2)`,
+      // Upsert so a collection without a snapshot row still gets its listed count (review M1);
+      // synced_at is left alone so the floor-change window is not reset by a listed-only write (L4).
+      const r = await postgresQuery(
+        `INSERT INTO plank_multichain_snapshots (collection_id, listed_count, synced_at)
+         SELECT c.id, $3, NOW() FROM plank_multichain_collections c
+          WHERE c.chain_slug = $1 AND lower(c.contract_address) = lower($2)
+         ON CONFLICT (collection_id) DO UPDATE SET listed_count = EXCLUDED.listed_count`,
         [input.chainSlug, input.collectionKey, input.listedCount]
       );
-      await durableKv.set(provKey(input.chainSlug, input.collectionKey, "listed"), { value: input.listedCount, source: input.source, observedAt } satisfies CellProvenance);
-      out.listed = true;
+      if ((r.rowCount ?? 0) > 0) {
+        await durableKv.set(provKey(input.chainSlug, input.collectionKey, "listed"), { value: input.listedCount, source: input.source, observedAt } satisfies CellProvenance);
+        out.listed = true;
+      }
     }
   }
   return out;

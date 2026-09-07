@@ -41,11 +41,12 @@ export function createSolanaHunter(): HunterDriver {
         collectionKey: r.collection_slug,
         venue: "tensor",
         listedCount: Number(r.listed),
-        floorAtomic: r.floor,
+        // Solana floors are stored scaled to 18 dp everywhere else (lamports * 1e9): review H1.
+        floorAtomic: r.floor == null ? null : (BigInt(r.floor) * 1_000_000_000n).toString(),
         observedAt,
       }));
-      const slot = Date.now();
-      return { findings, cursorAfter: { kind: "signature", signature: null, slot }, sourceCalls: calls, sourceStatus: "ok", note: scanNote };
+      // One pass per run (review H2): the cursor does not move, so the engine stops after this chunk.
+      return { findings, cursorAfter: cursor, sourceCalls: calls, sourceStatus: "ok", note: scanNote };
     },
   };
 }

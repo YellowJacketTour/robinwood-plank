@@ -5,6 +5,8 @@ import { isNoop } from "../../lib/market/multichain/hunter/receipt";
 import { mayOverwrite } from "../../lib/market/multichain/cell-provenance";
 import { admissible } from "../../lib/market/multichain/hunter/sink";
 import { familyForChain } from "../../lib/market/multichain/hunter/engine";
+import { tokenIdsOf } from "../../lib/market/multichain/hunter/drivers/evm";
+import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC } from "../../lib/market/multichain/discovery/evm-log-scan";
 import type { HunterReceipt } from "../../lib/market/multichain/hunter/types";
 
 test("adaptive chunk: grows 1.5x on success, halves on too-large, honours vendor hints, never leaves [min,max]", () => {
@@ -51,4 +53,14 @@ test("admission law: breadth in one chunk, never a one-token airdrop", () => {
   assert.equal(familyForChain("solana-mainnet"), "solana");
   assert.equal(familyForChain("bitcoin-mainnet"), "bitcoin");
   assert.equal(familyForChain("robinhood"), "evm");
+});
+
+test("token ids per log: 721 from topics[3], 1155 single from word 0, 1155 batch decodes the ids array (not the offset word)", () => {
+  const w = (n: number) => n.toString(16).padStart(64, "0");
+  assert.deepEqual(tokenIdsOf(TRANSFER_TOPIC, { topics: ["a", "b", "c", "0x" + w(7)], data: "0x" }), ["0x" + w(7)]);
+  assert.deepEqual(tokenIdsOf(TRANSFER_SINGLE_TOPIC, { topics: [], data: "0x" + w(9) + w(1) }), [w(9)]);
+  // abi.encode(ids=[3,4,5], values=[1,1,1]): offsets 0x40 and 0xc0, then len 3 + ids, len 3 + values
+  const batch = "0x" + w(0x40) + w(0xc0) + w(3) + w(3) + w(4) + w(5) + w(3) + w(1) + w(1) + w(1);
+  assert.deepEqual(tokenIdsOf(TRANSFER_BATCH_TOPIC, { topics: [], data: batch }), [w(3), w(4), w(5)]);
+  assert.deepEqual(tokenIdsOf(TRANSFER_BATCH_TOPIC, { topics: [], data: "0x" + w(0x40) }), [], "truncated batch yields nothing, never the offset word");
 });

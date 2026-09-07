@@ -218,16 +218,18 @@ function laneEntry(): string[] {
   return ["--import", "tsx", "scripts/mesh-lane.ts"];
 }
 
-function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
+function runLane(source: string, chain: string, subject?: string | null, jobId?: number): Promise<number> {
   const label = `${source}:${chain}`;
+  // Review M3: outcomes are keyed by job id so a lane that finishes after its in-process timeout can never stamp the NEXT job with the same key.
+  const outcomeKey = jobId != null ? `job:${jobId}` : `${source}:${chain}:${subject ?? ""}`;
   if (LIGHT_SOURCES.has(source)) return withTimeout((signal) => runLightSourceInProcess(source, chain, subject, signal), LANE_TIMEOUT_MS, label);
   if (inProcess) {
     return withTimeout(
       (signal) =>
         import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
           const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "", signal);
-          if (outcome.receipt) pendingReceipt.set(`${source}:${chain}:${subject ?? ""}`, outcome.receipt);
-          if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
+          if (outcome.receipt) pendingReceipt.set(outcomeKey, outcome.receipt);
+          if (outcome.deferMs != null) pendingDefer.set(outcomeKey, { ms: outcome.deferMs, reason: outcome.deferReason });
           return outcome.code;
         }),
       IN_PROCESS_LANE_TIMEOUT_MS,
@@ -404,7 +406,7 @@ async function main(): Promise<void> {
       if (needsOpenSeaSlot) await openSeaSemaphore.acquire();
       let code: number;
       try {
-        code = await runLane(job.source, job.chainSlug, job.subject);
+        code = await runLane(job.source, job.chainSlug, job.subject, job.id);
       } finally {
         if (needsOpenSeaSlot) openSeaSemaphore.release();
       }
@@ -419,7 +421,7 @@ async function main(): Promise<void> {
       // -- fixes a real bug live 2026-08-25: a bounded-window job that
       // finished one slice and returned was marked terminally 'succeeded'
       // and never claimed again, despite real remaining work.
-      const deferKey = `${job.source}:${job.chainSlug}:${job.subject ?? ""}`;
+      const deferKey = `job:${job.id}`;
       const defer = pendingDefer.get(deferKey);
       pendingDefer.delete(deferKey);
       const receipt = pendingReceipt.get(deferKey);
