@@ -140,6 +140,11 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
       return;
     }
+    if (source === "parity") {
+      const { runParityLane } = await import("../lib/market/multichain/parity/lane");
+      console.log("[mesh-lane] parity", JSON.stringify(await runParityLane(chain)));
+      return;
+    }
     if (source === "hunter-evm" || source === "hunter-solana" || source === "hunter-bitcoin") {
       const { runHunt } = await import("../lib/market/multichain/hunter/engine");
       const { createHunterSink } = await import("../lib/market/multichain/hunter/sink");

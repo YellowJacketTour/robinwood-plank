@@ -71,7 +71,8 @@ export type MeshSource =
   | "plank-koth-watch"
   | "hunter-evm"
   | "hunter-solana"
-  | "hunter-bitcoin";
+  | "hunter-bitcoin"
+  | "parity";
 
 export type MeshLane = {
   id: string;
@@ -520,6 +521,18 @@ export const MESH_LANES: MeshLane[] = [
     sliceSec: 120,
     notes: "Tensor on-chain list state via getProgramAccounts -> per-collection listed + floor (provenance rank chain-derived).",
   },
+  // Parity oracle (2026-09-07): sample each chain's most active collections
+  // and compare our cells with independent references (CoinGecko, Magic
+  // Eden, Hiro coverage). Divergence enqueues a resync; verdicts are read
+  // by /api/market/multichain/parity-oracle (door) and the hub.
+  ...[...HYPERSYNC_EVM, "robinhood", "solana-mainnet", "bitcoin-mainnet"].map((chainSlug) => ({
+    id: `parity:${chainSlug}`,
+    source: "parity" as const,
+    chainSlug,
+    cells: ["floor", "listedCount", "volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 90,
+    notes: "Cross-verification against independent public references; disagreement becomes a resync job.",
+  })),
   {
     id: "hunter-bitcoin:bitcoin-mainnet",
     source: "hunter-bitcoin" as const,

@@ -109,3 +109,64 @@ by the adaptive EVM driver), separate ad-hoc cursors in three files
   provenance `hunter-solana`, and no REST vendor overwrites them inside
   30 minutes.
 - Bitcoin settlements keep landing with every vendor key removed.
+
+## Addendum (same day): proof, and "all Solana NFTs, all Ordinals"
+
+### Parity oracle: prove the numbers against independent references
+
+Owner: "sites like Dune or DefiLlama ... cross-verify against these
+sources to prove our work is accurate". Yes. `lib/market/multichain/parity/`
+samples each chain's most active collections every pass, reads independent
+references, compares floor / listed / supply / 24h sales / 24h volume with
+relative tolerances, and stores a verdict per collection (match, near,
+diverge, unverified) plus a per-chain agreement ratio. A divergent
+collection is enqueued for a fresh stats sync, so disagreement becomes work.
+Read at `/api/market/multichain/parity-oracle` (door).
+
+References, chosen for being readable without anyone's gate:
+
+| Family | Reference | Key? | Fields |
+|---|---|---|---|
+| all | CoinGecko NFT (EVM by platform + contract; Solana and Ordinals by id) | none (Demo key optional, free) | floor, 24h volume, 24h sales, supply |
+| Solana | Magic Eden collection stats | none | floor, listed, 24h volume |
+| Bitcoin | Hiro Ordinals API global count | none | coverage: inscriptions we hold / all inscriptions |
+
+Dune is the right fourth reference for sales and volume (its `nft.trades`
+and Solana tables are the industry benchmark) and needs one saved query
+per metric in the owner's own account plus a free API key; the reader slot
+is left for it. DefiLlama no longer publishes NFT volumes. CryptoSlam and
+NFTGo are paid.
+
+### The complete catalog: how "all" is reached without indexing a chain
+
+**Solana, every NFT.** Three enumerations, each exhaustive for its
+standard, unioned:
+1. Collections: the keyless Magic Eden catalog walk (`magiceden-catalog`,
+   exhaustive, paginated past 20,000 with no ceiling) plus Tensor and the
+   Helius Core scan. This is the long tail the 2026-08-20 cleanup removed;
+   it refills from here with names attached on entry.
+2. Members per collection: DAS `getAssetsByGroup` across the pooled
+   providers (Helius, QuickNode, Shyft each bill independently), which is
+   the only path that also covers compressed NFTs. Keyless fallback for
+   legacy metadata accounts: `getProgramAccounts` on Token Metadata with a
+   memcmp on the first verified creator, which identifies candy-machine
+   collections without a key.
+3. Listings and sales: program accounts (Tensor, Magic Eden M2) and
+   signature history, keyless.
+
+**Bitcoin, every Ordinal.** Inscriptions are numbered, so "all" has a
+denominator: Hiro's keyless API walks inscriptions by number and reports
+the total. Collections are a social layer (a published list of inscription
+ids), enumerated from the OrdinalsWallet catalog (keyless) and any keyed
+catalog the owner adds. Settlements come from mempool.space; content and
+metadata from the reveal transaction witness, parsed locally. The one
+piece no public API will give at full scale is ownership of every
+inscription at every block; that is the owner-device `bitcoind` + `ord`
+tier from FAILURES-AND-INVENTIONS failure 1, which pushes findings to
+plank.love instead of plank.love hosting the chain.
+
+**Capacity is the only real limit**, and compute-anywhere removes it:
+every device the owner controls runs the same worker bundle against the
+same job table; every visitor's browser hydrates the collection it is
+looking at. Coverage parity (held / total) on the parity endpoint is the
+progress bar for "all".
