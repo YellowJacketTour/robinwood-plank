@@ -176,7 +176,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
        WHERE status = 'running' AND lease_expires_at < NOW()`
     );
     const params: unknown[] = [];
-    const kindClause = kinds?.length ? `AND kind = ANY($1::text[])` : "";
+    const kindClause = kinds?.length ? `AND j.kind = ANY($1::text[])` : "";
     if (kinds?.length) params.push(kinds);
     // Express lane (2026-09-06): a worker may claim only jobs at or above a
     // priority floor, so a visitor's own open collection never waits behind
@@ -184,7 +184,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     let priorityClause = "";
     if (typeof minPriority === "number" && Number.isFinite(minPriority)) {
       params.push(minPriority);
-      priorityClause = `AND priority >= $${params.length}`;
+      priorityClause = `AND j.priority >= $${params.length}`;
     }
     // Standing-lane worker (2026-09-06): discovery/stats/fills lanes sit at
     // priority 20-60 and were starved by hundreds of demand jobs at 100+, so
@@ -192,7 +192,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     // worker may cap the priority it claims so those lanes always get a slot.
     if (typeof maxPriority === "number" && Number.isFinite(maxPriority)) {
       params.push(maxPriority);
-      priorityClause += ` AND priority <= $${params.length}`;
+      priorityClause += ` AND j.priority <= $${params.length}`;
     }
     // Standing-slot claim by IDENTITY (2026-09-07): the standing worker used
     // to claim "priority <= 60", and production's next candidates at that
@@ -203,7 +203,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     // tiers do.
     if (jobKeyPrefix) {
       params.push(`${jobKeyPrefix}%`);
-      priorityClause += ` AND job_key LIKE $${params.length}`;
+      priorityClause += ` AND j.job_key LIKE $${params.length}`;
     }
     // Fair rotation for the standing slot (2026-09-07, second probe): with
     // priority ordering the three priority-60 standing lanes (seaport-live
@@ -215,9 +215,18 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     // timeout) sorted first on every claim and took the slot repeatedly.
     // mesh_lane_health.last_claim_at is written on every claim whatever the
     // outcome; least-recently-CLAIMED is the fair key.
-    const orderClause = jobKeyPrefix
-      ? "(SELECT h.last_claim_at FROM mesh_lane_health h WHERE h.lane_key = plank_data_jobs.source || ':' || plank_data_jobs.chain_slug) NULLS FIRST, attempts, not_before, id"
-      : "priority DESC, attempts, not_before, id";
+    // Fair rotation for the standing slot, take four (2026-09-07, live: NO
+    // standing lane was claimed for six hours after take three shipped).
+    // Take three put a CORRELATED SUBQUERY in the ORDER BY of a SELECT ...
+    // FOR UPDATE. Postgres rejects that combination outright ("FOR UPDATE
+    // is not allowed with ... subquery"), so every standing claim threw,
+    // the worker's claim returned nothing, and only lanes that some other
+    // path re-enqueued ever ran. The same ordering as an explicit LEFT JOIN
+    // with FOR UPDATE OF j is valid, and locks only the job row.
+    const standingOrder = jobKeyPrefix;
+    const orderClause = standingOrder
+      ? "h.last_claim_at NULLS FIRST, j.attempts, j.not_before, j.id"
+      : "j.priority DESC, j.attempts, j.not_before, j.id";
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
     params.push(owner);
@@ -241,10 +250,11 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
       // second -- a fair round-robin instead of a queue where early
       // failures compound into permanent starvation of untried work.
       `WITH candidate AS (
-         SELECT id FROM plank_data_jobs
-         WHERE status = 'queued' AND not_before <= NOW() ${kindClause} ${priorityClause}
+         SELECT j.id FROM plank_data_jobs j
+         ${standingOrder ? "LEFT JOIN mesh_lane_health h ON h.lane_key = j.source || ':' || j.chain_slug" : ""}
+         WHERE j.status = 'queued' AND j.not_before <= NOW() ${kindClause} ${priorityClause}
          ORDER BY ${orderClause}
-         FOR UPDATE SKIP LOCKED LIMIT 1
+         FOR UPDATE OF j SKIP LOCKED LIMIT 1
        )
        UPDATE plank_data_jobs j SET status = 'running', attempts = attempts + 1,
          lease_owner = ${ownerParam}, lease_expires_at = NOW() + (${leaseParam}::text || ' milliseconds')::interval,
