@@ -165,7 +165,7 @@ export type ClaimedDataJob = {
   leaseOwner: string;
 };
 
-export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number, maxPriority?: number): Promise<ClaimedDataJob | null> {
+export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number, maxPriority?: number, jobKeyPrefix?: string): Promise<ClaimedDataJob | null> {
   const owner = `${process.pid}:${randomUUID()}`;
   const pool = postgresPool();
   const client = await pool.connect();
@@ -193,6 +193,17 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     if (typeof maxPriority === "number" && Number.isFinite(maxPriority)) {
       params.push(maxPriority);
       priorityClause += ` AND priority <= $${params.length}`;
+    }
+    // Standing-slot claim by IDENTITY (2026-09-07): the standing worker used
+    // to claim "priority <= 60", and production's next candidates at that
+    // bound were hundreds of demand:evm-metadata jobs at exactly 60, so the
+    // priority-20 standing lanes (hunters, parity, discovery, the Solana
+    // catalog walk) had never been claimed once. A prefix on job_key
+    // ("mesh:") names the standing lanes themselves, whatever the demand
+    // tiers do.
+    if (jobKeyPrefix) {
+      params.push(`${jobKeyPrefix}%`);
+      priorityClause += ` AND job_key LIKE $${params.length}`;
     }
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
