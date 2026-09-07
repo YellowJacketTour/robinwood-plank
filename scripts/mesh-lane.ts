@@ -25,7 +25,7 @@ const argvSubject = process.argv.find((a) => a.startsWith("--subject="))?.slice(
  */
 /** Hunter runs stop 10 s inside the 90 s lane ceiling so the receipt always lands. */
 const HUNT_BUDGET_MS = 50_000; // review L1: one eth_getLogs can take 45 s across providers; stay inside the 90 s lane kill
-const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown }>();
+const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown; error?: string }>();
 function markIncomplete(): void {
   const store = laneSignal.getStore();
   if (store) store.code = 2;
@@ -46,7 +46,7 @@ function markDeferred(ms: number, reason: string): void {
   }
 }
 
-export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown };
+export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown; error?: string };
 
 /**
  * AUDIT lens 5 A / A8 (2026-09-06): cooperative cancellation. The scheduler
@@ -63,13 +63,16 @@ export function laneShouldStop(signal: AbortSignal | undefined, deadline: number
 
 /** Run one lane in this process. code 0 = done, 2 = more work remains, 1 = failed; deferMs asks for a delayed retry. */
 export async function runMeshLaneDetailed(source: MeshSource, chain: string, subject = "", signal?: AbortSignal): Promise<LaneOutcome> {
-  const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null, receipt: undefined as unknown };
+  const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null, receipt: undefined as unknown, error: undefined as string | undefined };
   try {
     await laneSignal.run(store, () => main(source, chain, subject, signal));
     return { code: store.code, deferMs: store.deferMs, deferReason: store.deferReason, receipt: store.receipt };
   } catch (e) {
-    console.error(`[mesh-lane] ${source}:${chain} failed`, e instanceof Error ? e.message : e);
-    return { code: 1, deferMs: null, deferReason: null };
+    // The real message rides the outcome so the job row records it (2026-09-07:
+    // four standing lanes showed only "lane exited 1" in diagnostics).
+    store.error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    console.error(`[mesh-lane] ${source}:${chain} failed`, store.error);
+    return { code: 1, deferMs: null, deferReason: null, error: store.error };
   }
 }
 

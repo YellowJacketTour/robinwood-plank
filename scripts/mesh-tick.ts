@@ -164,6 +164,8 @@ const LANE_TIMEOUT_MS = 90_000;
 const pendingDefer = new Map<string, { ms: number; reason: string | null }>();
 /** Hunter work receipts, keyed like pendingDefer; the worker attaches them to the job it ran. */
 const pendingReceipt = new Map<string, unknown>();
+/** Lane error text, keyed like pendingDefer; lands in the job's last_error instead of a bare exit code. */
+const pendingError = new Map<string, string>();
 /** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
 const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
@@ -229,6 +231,7 @@ function runLane(source: string, chain: string, subject?: string | null, jobId?:
         import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
           const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "", signal);
           if (outcome.receipt) pendingReceipt.set(outcomeKey, outcome.receipt);
+          if (outcome.error) pendingError.set(outcomeKey, outcome.error);
           if (outcome.deferMs != null) pendingDefer.set(outcomeKey, { ms: outcome.deferMs, reason: outcome.deferReason });
           return outcome.code;
         }),
@@ -460,7 +463,9 @@ async function main(): Promise<void> {
         continue;
       }
       const isPartial = code === 2;
-      await finishDataJob(job, code === 0 || isPartial ? undefined : `lane exited ${code}`);
+      const laneError = pendingError.get(deferKey);
+      pendingError.delete(deferKey);
+      await finishDataJob(job, code === 0 || isPartial ? undefined : `lane exited ${code}${laneError ? `: ${laneError}` : ""}`);
       if (isPartial) {
         await enqueueDataJob({
           jobKey: job.jobKey,
