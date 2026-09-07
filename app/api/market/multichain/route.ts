@@ -138,7 +138,12 @@ async function buildHubIndex(req: Request) {
     // header on DeFiLlama's real limits) -- the volume half of the
     // "volume + floor hybrid" default sort the hub uses. One query per
     // distinct EVM chain represented, not per collection.
-    const chainSlugs = [...new Set(collections.map((c) => c.chainSlug))].filter((s) => foreignChainByChainSlug(s));
+    // 2026-09-07 (owner: "recent chain activity ... calculated wrong, plank
+    // doesn't have an A"): the home chain records its own transfer tallies
+    // (robinhood-chain-scan -> recordActivity) but was filtered out here, so
+    // RobinWood's row was hard-wired to 0 transfers and lost the 300-point
+    // activity axis of its grade.
+    const chainSlugs = [...new Set([...collections.map((c) => c.chainSlug), "robinhood"])].filter((s) => s === "robinhood" || foreignChainByChainSlug(s));
     const activityByChain = await Promise.all(
       chainSlugs.map(async (slug) => [slug, await getTopByActivity(slug, 7, 500).catch(() => [])] as const)
     );
@@ -152,7 +157,7 @@ async function buildHubIndex(req: Request) {
     // book the /market page renders (our Seaport rows + OpenSea + Pulp),
     // so this row's floor, listed count and grade agree with the
     // collection's own page. See lib/market/native-book.ts.
-    const { readNativeRobinwoodBook } = await import("@/lib/market/native-book");
+    const { readNativeRobinwoodBook, NATIVE_BOOK_OBSERVATION_KEY } = await import("@/lib/market/native-book");
     const nativeBook = await readNativeRobinwoodBook({ hostHeader: req.headers.get("host") }).catch(() => null);
     let nativeFloor: bigint | null = nativeBook?.floorWei ?? null;
     let nativeListed = nativeBook?.listedCount ?? 0;
@@ -192,7 +197,7 @@ async function buildHubIndex(req: Request) {
     const nativeFloorChange = await getObservedFloorChange24h(
       "robinhood",
       NFT_CONTRACT_ADDRESS,
-      "marketplank"
+      NATIVE_BOOK_OBSERVATION_KEY
     ).catch(() => null);
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
@@ -216,12 +221,16 @@ async function buildHubIndex(req: Request) {
       floorPriceWei: nativeFloor != null ? nativeFloor.toString() : null,
       floorPriceCurrency: "ETH",
       floorPriceMarketplace: nativeFloorVenue,
+      // The merged book was read live for this response, so the floor is
+      // observed NOW; without this the freshness dot rendered grey ("age
+      // unknown") on the home collection itself (owner, 2026-09-07).
+      floorObservedAt: nativeFloor != null ? new Date().toISOString() : null,
       totalSupply: ROBINWOOD_TOTAL_SUPPLY,
       listedCount: nativeListed,
       syncedAt: new Date().toISOString(),
       syncError: null as string | null,
       tradeable: true,
-      recentActivity: 0,
+      recentActivity: activityByContract.get(`robinhood:${NFT_CONTRACT_ADDRESS.toLowerCase()}`) ?? 0,
       creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,

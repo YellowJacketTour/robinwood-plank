@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hasPostgresConfig, postgresQuery } from "../../lib/postgres";
-import { metadataCountersToShape, RARITY_PROVISIONAL_THRESHOLD } from "../../lib/market/multichain/archival-ledger";
+import { metadataCountersToShape, metadataIsFinal, RARITY_PROVISIONAL_THRESHOLD } from "../../lib/market/multichain/archival-ledger";
 import { provisionalTraitsLabel, PROVISIONAL_TRAITS_THRESHOLD } from "../../components/market/hydration/MetadataCoverageBar";
 import { rarityDemandJob, rarityDemandSource, RARITY_DEMAND_PRIORITY } from "../../lib/market/multichain/rarity-index-runner";
 
@@ -125,3 +125,20 @@ test(
     }
   }
 );
+
+test("finished is finished: all-terminal with every trait-less token confirmed empty is final, not provisional; fetched-but-traitless rows stay provisional", () => {
+  // 8,888 expected, 8,871 with traits, 17 dead tokenURIs closed as empty after the attempt cap.
+  const pudgy = metadataCountersToShape({ expected: 8_888, terminal: 8_888, empty: 17, withTraits: 8_871, withImage: 8_871 });
+  assert.equal(pudgy.shape.traitsCoverage < RARITY_PROVISIONAL_THRESHOLD, false, "99.8% traits already clears the line");
+  const tight = metadataCountersToShape({ expected: 1_000, terminal: 1_000, empty: 40, withTraits: 960, withImage: 960 });
+  assert.equal(tight.shape.traitsCoverage, 0.96);
+  assert.equal(metadataIsFinal(tight.shape), true);
+  assert.equal(tight.provisional, false, "96% traits + 4% confirmed empty = final");
+  // BAYC-shaped: everything fetched, almost no traits, nothing confirmed empty -> those rows are owed traits.
+  const owed = metadataCountersToShape({ expected: 10_000, terminal: 10_000, empty: 0, withTraits: 312, withImage: 9_800 });
+  assert.equal(metadataIsFinal(owed.shape), false);
+  assert.equal(owed.provisional, true);
+  // Still fetching: not final regardless of the empty count.
+  const fetching = metadataCountersToShape({ expected: 1_000, terminal: 500, empty: 40, withTraits: 460, withImage: 460 });
+  assert.equal(fetching.provisional, true);
+});
