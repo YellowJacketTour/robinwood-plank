@@ -72,7 +72,8 @@ export type MeshSource =
   | "hunter-evm"
   | "hunter-solana"
   | "hunter-bitcoin"
-  | "parity";
+  | "parity"
+  | "creator-identity";
 
 export type MeshLane = {
   id: string;
@@ -532,6 +533,16 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "volume24h", "sales24h"] as MeshCell[],
     sliceSec: 90,
     notes: "Cross-verification against independent public references; disagreement becomes a resync job.",
+  })),
+  // Creator identity as its own cell (2026-09-07): the hub's known-creator
+  // check was only ever written by the rarity runner, once per collection.
+  ...[...HYPERSYNC_EVM, "robinhood", "solana-mainnet", "bitcoin-mainnet"].map((chainSlug) => ({
+    id: `creator-identity:${chainSlug}`,
+    source: "creator-identity" as const,
+    chainSlug,
+    cells: ["name"] as MeshCell[],
+    sliceSec: 90,
+    notes: "Fills creator handle / owner address / ENS from CoinGecko links, Magic Eden detail, on-chain owner() and ENS reverse; 7-day attempt memory.",
   })),
   {
     id: "hunter-bitcoin:bitcoin-mainnet",
