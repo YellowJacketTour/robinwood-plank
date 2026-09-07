@@ -629,14 +629,21 @@ export async function updateCollectionFloorOnly(
   );
   const id = collection.rows[0]?.id;
   if (!id || nonzeroWei(floor.floorPriceWei) == null) return;
+  // Migration 102: this IS a real floor observation, so floor_observed_at
+  // and the miss-count reset land in the same statement as the floor
+  // (recordFloorObservation below also stamps them, but it returns early
+  // when currency/marketplace is null -- the stamp must not depend on it).
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots
-       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
-     VALUES ($1, $2, $3, $4, NULL, NULL, NULL, NOW(), NULL)
+       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error,
+        floor_observed_at, floor_miss_count)
+     VALUES ($1, $2, $3, $4, NULL, NULL, NULL, NOW(), NULL, NOW(), 0)
      ON CONFLICT (collection_id) DO UPDATE SET
        floor_price_wei = EXCLUDED.floor_price_wei,
        floor_price_currency = EXCLUDED.floor_price_currency,
        floor_price_marketplace = EXCLUDED.floor_price_marketplace,
+       floor_observed_at = NOW(),
+       floor_miss_count = 0,
        total_supply = COALESCE(plank_multichain_snapshots.total_supply, EXCLUDED.total_supply),
        listed_count = COALESCE(plank_multichain_snapshots.listed_count, EXCLUDED.listed_count),
        holder_count = COALESCE(plank_multichain_snapshots.holder_count, EXCLUDED.holder_count),
@@ -874,7 +881,7 @@ export async function writeSnapshot(
     `INSERT INTO plank_multichain_snapshots
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error,
         floor_observed_at, floor_miss_count)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL, CASE WHEN $2::text IS NOT NULL THEN NOW() ELSE NULL END, 0)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL, CASE WHEN $8::boolean THEN NOW() ELSE NULL END, 0)
      ON CONFLICT (collection_id) DO UPDATE SET
        floor_price_wei = CASE
          WHEN EXCLUDED.floor_price_wei IS NOT NULL THEN EXCLUDED.floor_price_wei
@@ -929,6 +936,9 @@ export async function writeSnapshot(
       snapshot.totalSupply,
       snapshot.listedCount,
       snapshot.holderCount ?? null,
+      // $8: whether this write carries a real floor (drives floor_observed_at on first insert;
+      // a separate parameter because Postgres cannot type $2 from a CASE that precedes the column).
+      nonzeroWei(snapshot.floorPriceWei) != null,
     ]
   );
 }

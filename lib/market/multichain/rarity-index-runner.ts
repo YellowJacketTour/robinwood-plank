@@ -7,6 +7,7 @@
  * this is a background job, never a live per-request compute.
  */
 import { foreignChainByChainSlug, foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import type { DataJobInput } from "@/lib/market/multichain/control-plane";
 import { hasUnindexedNativeBook } from "@/lib/market/multichain/venue-registry";
 import { pickOpenSeaKey, reserveOpenSeaKey, settleOpenSeaKey, recordOpenSeaAccountFailure, recordOpenSeaRateLimitHeaders } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
@@ -970,6 +971,41 @@ async function resolveOpenSeaSlug(
 }
 
 /** Dispatches the same -log2 kernel to the chain's real enumerator. Never Alchemy. */
+/** AUDIT lens 4 #8 (Batch F8): priority of the demand job a rarity GET
+ * enqueues -- the "a visitor is looking at this right now" tier. */
+export const RARITY_DEMAND_PRIORITY = 100;
+
+/**
+ * Pure, exported for tests: which mesh source can hydrate membership +
+ * traits for a specific subject on this chain. Solana/Bitcoin membership
+ * lanes are subject-blind today (scripts/mesh-lane.ts SUBJECT_BLIND_SOURCES
+ * fails such a job visibly), and a chain with no OpenSea orderbook has no
+ * OpenSea walk to run -- both return null (no job).
+ */
+export function rarityDemandSource(chainSlug: string): "opensea-membership" | null {
+  if (chainSlug === "solana-mainnet" || chainSlug === "bitcoin-mainnet") return null;
+  if (chainSlug === "robinhood") return "opensea-membership";
+  return foreignChainByChainSlug(chainSlug)?.openSeaChain ? "opensea-membership" : null;
+}
+
+/** Pure, exported for tests: the demand job an un-indexed rarity GET
+ * enqueues (same job_key shape prioritizeCollectionDemand uses, so the
+ * two dedupe against each other on the queue). */
+export function rarityDemandJob(chainSlug: string, collectionSlug: string): DataJobInput | null {
+  const source = rarityDemandSource(chainSlug);
+  if (!source) return null;
+  const subject = /^0x[0-9a-f]{40}$/i.test(collectionSlug) ? collectionSlug.toLowerCase() : collectionSlug;
+  return {
+    jobKey: `demand:${source}:${chainSlug}:${subject}`,
+    kind: `mesh-lane:${chainSlug}`,
+    source,
+    chainSlug,
+    subject,
+    priority: RARITY_DEMAND_PRIORITY,
+    payload: { reason: "rarity-get" },
+  };
+}
+
 export async function indexRarityForCollectionLookup(chainSlug: string, lookup: string): Promise<IndexRunResult> {
   const backend = rarityIndexBackend(chainSlug, lookup);
   if (backend === "helius") {

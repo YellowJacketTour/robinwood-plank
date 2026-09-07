@@ -2,9 +2,25 @@
  * Reads pre-computed rarity from plank_foreign_rarity (see
  * scripts/index-foreign-rarity.ts and migration 014_foreign_rarity.sql).
  * Returns an empty map, not an error, when a collection hasn't been
- * indexed yet -- that's a real, expected state (indexing is a manual/cron
- * background job, not automatic on first view), and the UI falls back to
- * un-tiered cards rather than showing a fabricated rank.
+ * indexed yet -- that's a real, expected state (indexing is a background
+ * job, not automatic on first view), and the UI falls back to un-tiered
+ * cards rather than showing a fabricated rank.
+ *
+ * AUDIT lens 4 #8 (Batch F8): this GET used to kick off a full OpenSea
+ * membership walk (indexRarityForCollectionLookup -- up to 500 paged
+ * requests plus 10k+ single-row INSERTs) inside the web process. Public
+ * requests never fan out to providers here any more: an un-indexed or
+ * stale-first-pass collection ENQUEUES a demand job on the shared mesh
+ * queue (plank_data_jobs, source opensea-membership, priority 100) and
+ * the response is HTTP 202. The only in-request compute left is the
+ * in-memory re-rank from an already-stored trait index (no I/O beyond
+ * Postgres).
+ *
+ * AUDIT lens 4 #5 (Batch F5): while withTraits / expected is below the
+ * 99.5% finalize line the ranking is PROVISIONAL -- the response is 202
+ * (same JSON shape) and `coverage` carries the three honest counters
+ * (terminal / withTraits / withImage over expected) so the UI can say
+ * "Provisional (N% traits)" instead of presenting all-Common as final.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { hasForeignRarityStore, getForeignRarity, getForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
@@ -14,6 +30,26 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const inFlight = new Set<string>();
+/** Enqueue is idempotent (ON CONFLICT job_key), but there is no reason to
+ * hit Postgres for it on every poll of the same collection. */
+const recentlyEnqueued = new Map<string, number>();
+const ENQUEUE_DEBOUNCE_MS = 60_000;
+
+async function enqueueRarityDemand(chainSlug: string, collectionSlug: string): Promise<boolean> {
+  const { rarityDemandJob } = await import("@/lib/market/multichain/rarity-index-runner");
+  const job = rarityDemandJob(chainSlug, collectionSlug);
+  if (!job) return false;
+  const last = recentlyEnqueued.get(job.jobKey) ?? 0;
+  if (Date.now() - last < ENQUEUE_DEBOUNCE_MS) return true;
+  recentlyEnqueued.set(job.jobKey, Date.now());
+  if (recentlyEnqueued.size > 2_000) {
+    const cutoff = Date.now() - ENQUEUE_DEBOUNCE_MS;
+    for (const [k, t] of recentlyEnqueued) if (t < cutoff) recentlyEnqueued.delete(k);
+  }
+  const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+  await enqueueDataJob(job);
+  return true;
+}
 
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-rarity", limit: 60, windowMs: 60_000 });
@@ -82,26 +118,33 @@ export async function GET(req: NextRequest) {
     const staleFirstPass = sampleSize === 1_000 || sampleSize === 5_000;
     const needsIndex =
       map.size === 0 || (staleFirstPass && map.size < 6_000 && chainSlug !== "bitcoin-mainnet");
+    let enqueued = false;
     if (needsIndex) {
-      const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;
-      if (!inFlight.has(job)) {
-        inFlight.add(job);
-        const { indexRarityForCollectionLookup } = await import("@/lib/market/multichain/rarity-index-runner");
-        void indexRarityForCollectionLookup(chainSlug, collectionSlug)
-          .catch(() => {})
-          .finally(() => inFlight.delete(job));
-      }
+      // F8: demand job on the mesh queue, never a provider walk in-process.
+      enqueued = await enqueueRarityDemand(chainSlug, collectionSlug).catch(() => false);
     }
+    // F5: the three honest counters over the stored rows.
+    const { readMetadataCoverageCounters } = await import("@/lib/market/multichain/collection-token-store");
+    const { metadataCountersToShape } = await import("@/lib/market/multichain/archival-ledger");
+    const raw = await readMetadataCoverageCounters(chainSlug, collectionSlug).catch(() => null);
+    const shaped = raw ? metadataCountersToShape(raw) : null;
+    // No rows at all means nothing is known either way; a ranking that
+    // exists in that state (legacy Bitcoin/Solana index with no token rows)
+    // is not called provisional on the strength of an empty table.
+    const provisional = shaped ? (raw!.rows > 0 ? shaped.provisional : map.size === 0) : map.size === 0;
+    const counters = shaped ? { ...shaped.shape, provisional } : null;
+    const status = provisional || meta?.partial === true ? 202 : 200;
     return NextResponse.json(
       {
         byTokenId,
         indexed: map.size > 0,
         sampleSize,
-        partial: map.size === 0 || staleFirstPass || chainSlug === "bitcoin-mainnet" || coverage.partial,
-        coverage,
+        partial: map.size === 0 || staleFirstPass || chainSlug === "bitcoin-mainnet" || coverage.partial || provisional,
+        coverage: { ...coverage, ...(counters ?? {}), provisional },
         collectionType,
+        enqueued,
       },
-      { headers: { "Cache-Control": "no-store" } }
+      { status, headers: { "Cache-Control": "no-store" } }
     );
   } catch {
     return NextResponse.json({ byTokenId: {}, indexed: false }, { headers: { "Cache-Control": "no-store" } });

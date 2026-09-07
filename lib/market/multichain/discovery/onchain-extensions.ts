@@ -65,61 +65,136 @@ export type MetadataUpdateLogEntry = {
   blockNumber: number;
 };
 
+/** AUDIT lens 4 #4 (Batch F4): the largest block span one `eth_getLogs`
+ * call is allowed to cover. 2,000 blocks is at or under every public
+ * provider's documented range ceiling (Alchemy 2k for free tier, Infura
+ * 10k, QuickNode 10k, most self-hosted nodes unbounded), so a chunk never
+ * hits a "query returned more than N results / range too large" error. */
+export const ERC4906_LOG_CHUNK_BLOCKS = 2_000;
+
+/** Pure chunk planner, exported for tests: splits [fromBlock, toBlock]
+ * (inclusive) into consecutive inclusive ranges of at most `chunkSize`. */
+export function planBlockChunks(fromBlock: number, toBlock: number, chunkSize = ERC4906_LOG_CHUNK_BLOCKS): Array<{ fromBlock: number; toBlock: number }> {
+  const chunks: Array<{ fromBlock: number; toBlock: number }> = [];
+  if (!Number.isFinite(fromBlock) || !Number.isFinite(toBlock) || toBlock < fromBlock) return chunks;
+  const size = Math.max(1, Math.floor(chunkSize));
+  for (let start = fromBlock; start <= toBlock; start += size) {
+    chunks.push({ fromBlock: start, toBlock: Math.min(toBlock, start + size - 1) });
+  }
+  return chunks;
+}
+
+/** One raw `eth_getLogs` call for both ERC-4906 topics. THROWS on an RPC
+ * failure -- the caller decides whether a failure is fatal to its cursor
+ * (erc4906-rescan.ts must NOT advance past a range it never scanned). */
+async function fetchMetadataUpdateLogsRange(
+  chainSlug: string,
+  contractAddress: string,
+  fromBlock: number,
+  toBlock: number | "latest",
+): Promise<MetadataUpdateLogEntry[]> {
+  const fromBlockHex = `0x${fromBlock.toString(16)}`;
+  const toBlockHex = toBlock === "latest" ? "latest" : `0x${toBlock.toString(16)}`;
+  const metadataUpdateTopic = ERC4906_EVENTS_IFACE.getEvent("MetadataUpdate")!.topicHash;
+  const batchMetadataUpdateTopic = ERC4906_EVENTS_IFACE.getEvent("BatchMetadataUpdate")!.topicHash;
+  const { result } = await rpcCall<Array<{ topics: string[]; data: string; blockNumber: string }>>(
+    chainSlug,
+    "eth_getLogs",
+    [
+      {
+        address: contractAddress,
+        fromBlock: fromBlockHex,
+        toBlock: toBlockHex,
+        topics: [[metadataUpdateTopic, batchMetadataUpdateTopic]],
+      },
+    ],
+  );
+  if (!Array.isArray(result)) throw new Error(`eth_getLogs returned a non-array for ${contractAddress} ${fromBlockHex}..${toBlockHex}`);
+  const entries: MetadataUpdateLogEntry[] = [];
+  for (const log of result) {
+    try {
+      const blockNumber = Number(BigInt(log.blockNumber));
+      const topic0 = log.topics?.[0];
+      if (topic0 === metadataUpdateTopic) {
+        const parsed = ERC4906_EVENTS_IFACE.decodeEventLog("MetadataUpdate", log.data, log.topics);
+        entries.push({ tokenId: parsed._tokenId.toString(), fromTokenId: null, toTokenId: null, blockNumber });
+      } else if (topic0 === batchMetadataUpdateTopic) {
+        const parsed = ERC4906_EVENTS_IFACE.decodeEventLog("BatchMetadataUpdate", log.data, log.topics);
+        entries.push({
+          tokenId: null,
+          fromTokenId: parsed._fromTokenId.toString(),
+          toTokenId: parsed._toTokenId.toString(),
+          blockNumber,
+        });
+      }
+    } catch {
+      // one malformed/undecodable log entry is skipped, not fatal to the scan
+    }
+  }
+  return entries;
+}
+
 /**
  * Scans `eth_getLogs` for real `MetadataUpdate` and `BatchMetadataUpdate`
  * events emitted by a contract in a block range. A single-token update
  * entry has `tokenId` set and `fromTokenId`/`toTokenId` null; a batch entry
- * has the reverse.
+ * has the reverse. Swallows RPC failures as [] -- callers that need to
+ * know whether the range was actually covered use scanMetadataUpdateLogsChunked.
  */
 export async function scanMetadataUpdateLogs(
   chainSlug: string,
   contractAddress: string,
   opts: { fromBlock: number; toBlock: number | "latest" },
 ): Promise<MetadataUpdateLogEntry[]> {
-  const fromBlockHex = `0x${opts.fromBlock.toString(16)}`;
-  const toBlockHex = opts.toBlock === "latest" ? "latest" : `0x${opts.toBlock.toString(16)}`;
-  const metadataUpdateTopic = ERC4906_EVENTS_IFACE.getEvent("MetadataUpdate")!.topicHash;
-  const batchMetadataUpdateTopic = ERC4906_EVENTS_IFACE.getEvent("BatchMetadataUpdate")!.topicHash;
-
-  const entries: MetadataUpdateLogEntry[] = [];
   try {
-    const { result } = await rpcCall<Array<{ topics: string[]; data: string; blockNumber: string }>>(
-      chainSlug,
-      "eth_getLogs",
-      [
-        {
-          address: contractAddress,
-          fromBlock: fromBlockHex,
-          toBlock: toBlockHex,
-          topics: [[metadataUpdateTopic, batchMetadataUpdateTopic]],
-        },
-      ],
-    );
-    if (!Array.isArray(result)) return entries;
-    for (const log of result) {
-      try {
-        const blockNumber = Number(BigInt(log.blockNumber));
-        const topic0 = log.topics?.[0];
-        if (topic0 === metadataUpdateTopic) {
-          const parsed = ERC4906_EVENTS_IFACE.decodeEventLog("MetadataUpdate", log.data, log.topics);
-          entries.push({ tokenId: parsed._tokenId.toString(), fromTokenId: null, toTokenId: null, blockNumber });
-        } else if (topic0 === batchMetadataUpdateTopic) {
-          const parsed = ERC4906_EVENTS_IFACE.decodeEventLog("BatchMetadataUpdate", log.data, log.topics);
-          entries.push({
-            tokenId: null,
-            fromTokenId: parsed._fromTokenId.toString(),
-            toTokenId: parsed._toTokenId.toString(),
-            blockNumber,
-          });
-        }
-      } catch {
-        // one malformed/undecodable log entry is skipped, not fatal to the scan
-      }
-    }
+    return await fetchMetadataUpdateLogsRange(chainSlug, contractAddress, opts.fromBlock, opts.toBlock);
   } catch {
     return [];
   }
-  return entries;
+}
+
+export type ChunkedMetadataUpdateScan = {
+  entries: MetadataUpdateLogEntry[];
+  /** Highest block number PROVABLY covered (every chunk up to and
+   * including it succeeded). null when the very first chunk failed. */
+  scannedThrough: number | null;
+  chunksAttempted: number;
+  chunksSucceeded: number;
+  /** Message of the failure that stopped the walk, if any. */
+  error: string | null;
+};
+
+/**
+ * AUDIT lens 4 #4: chunked, fail-honest scan. Walks [fromBlock, toBlock]
+ * in <= `chunkSize`-block eth_getLogs calls (default 2,000) and STOPS at
+ * the first RPC failure, reporting exactly how far it got so the caller's
+ * durable cursor can advance only over ranges that were really scanned.
+ * `maxChunks` bounds one invocation (a cold or long-idle cursor is caught
+ * up across several passes rather than one unbounded burst).
+ */
+export async function scanMetadataUpdateLogsChunked(
+  chainSlug: string,
+  contractAddress: string,
+  opts: { fromBlock: number; toBlock: number; chunkSize?: number; maxChunks?: number },
+  deps: { fetchRange?: (fromBlock: number, toBlock: number) => Promise<MetadataUpdateLogEntry[]> } = {},
+): Promise<ChunkedMetadataUpdateScan> {
+  const fetchRange = deps.fetchRange ?? ((from: number, to: number) => fetchMetadataUpdateLogsRange(chainSlug, contractAddress, from, to));
+  const chunks = planBlockChunks(opts.fromBlock, opts.toBlock, opts.chunkSize ?? ERC4906_LOG_CHUNK_BLOCKS)
+    .slice(0, Math.max(1, opts.maxChunks ?? Number.POSITIVE_INFINITY));
+  const out: ChunkedMetadataUpdateScan = { entries: [], scannedThrough: null, chunksAttempted: 0, chunksSucceeded: 0, error: null };
+  for (const chunk of chunks) {
+    out.chunksAttempted += 1;
+    try {
+      const entries = await fetchRange(chunk.fromBlock, chunk.toBlock);
+      out.entries.push(...entries);
+      out.scannedThrough = chunk.toBlock;
+      out.chunksSucceeded += 1;
+    } catch (error) {
+      out.error = error instanceof Error ? error.message : String(error);
+      break;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
