@@ -162,6 +162,8 @@ async function runLightSourceInProcess(source: string, chain: string, subject?: 
 const LANE_TIMEOUT_MS = 90_000;
 /** In-process lanes that asked for a delayed retry (see mesh-lane.ts markDeferred), keyed source:chain:subject. */
 const pendingDefer = new Map<string, { ms: number; reason: string | null }>();
+/** Hunter work receipts, keyed like pendingDefer; the worker attaches them to the job it ran. */
+const pendingReceipt = new Map<string, unknown>();
 /** In-process lanes cannot be SIGKILLed on timeout; they get the same budget a spawned lane had plus margin, and the scheduler moves on. */
 const IN_PROCESS_LANE_TIMEOUT_MS = 120_000;
 
@@ -224,6 +226,7 @@ function runLane(source: string, chain: string, subject?: string | null): Promis
       (signal) =>
         import("./mesh-lane").then(async ({ runMeshLaneDetailed }) => {
           const outcome = await runMeshLaneDetailed(source as MeshLane["source"], chain, subject ?? "", signal);
+          if (outcome.receipt) pendingReceipt.set(`${source}:${chain}:${subject ?? ""}`, outcome.receipt);
           if (outcome.deferMs != null) pendingDefer.set(`${source}:${chain}:${subject ?? ""}`, { ms: outcome.deferMs, reason: outcome.deferReason });
           return outcome.code;
         }),
@@ -419,6 +422,12 @@ async function main(): Promise<void> {
       const deferKey = `${job.source}:${job.chainSlug}:${job.subject ?? ""}`;
       const defer = pendingDefer.get(deferKey);
       pendingDefer.delete(deferKey);
+      const receipt = pendingReceipt.get(deferKey);
+      pendingReceipt.delete(deferKey);
+      if (receipt) {
+        const { attachReceipt } = await import("../lib/market/multichain/hunter/receipt");
+        await attachReceipt(job.id, receipt as import("../lib/market/multichain/hunter/types").HunterReceipt);
+      }
       if (defer) {
         // The lane asked for a delayed retry (jailed / pool busy): release
         // the slot now, come back at not_before, never sleep in a slot.

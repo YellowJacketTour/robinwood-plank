@@ -68,7 +68,10 @@ export type MeshSource =
   | "erc4906-rescan"
   | "ipfs-corroboration"
   | "fills-reconcile"
-  | "plank-koth-watch";
+  | "plank-koth-watch"
+  | "hunter-evm"
+  | "hunter-solana"
+  | "hunter-bitcoin";
 
 export type MeshLane = {
   id: string;
@@ -492,6 +495,36 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["rarity"],
     sliceSec: 60,
     notes: "Lowest-priority gap-fill for never/rarely-organically-hit collections; self-gated, cross-chain, additive.",
+  },
+  // The Hunter (2026-09-07, lib/market/multichain/hunter): one engine,
+  // chain-native chunk primitives, no vendor key on the critical path.
+  // EVM: adaptive eth_getLogs over the public RPC pool -> activity axis +
+  // admission law. Solana: Tensor list-state program accounts -> listed +
+  // floor under chain-derived provenance. Bitcoin: mempool.space
+  // settlement-first index. Every run leaves a receipt on its job.
+  ...[...HYPERSYNC_EVM, "robinhood"].map((chainSlug) => ({
+    id: `hunter-evm:${chainSlug}`,
+    source: "hunter-evm" as const,
+    chainSlug,
+    cells: ["name"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Adaptive chain-wide Transfer log hunt over keyless public RPC; writes 7d activity and admits real collections.",
+  })),
+  {
+    id: "hunter-solana:solana-mainnet",
+    source: "hunter-solana" as const,
+    chainSlug: "solana-mainnet",
+    cells: ["floor", "listedCount"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Tensor on-chain list state via getProgramAccounts -> per-collection listed + floor (provenance rank chain-derived).",
+  },
+  {
+    id: "hunter-bitcoin:bitcoin-mainnet",
+    source: "hunter-bitcoin" as const,
+    chainSlug: "bitcoin-mainnet",
+    cells: ["sales24h", "volume24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Settlement-first: mempool.space tx/outspends for known inscription locations -> confirmed sales.",
   },
   {
     // Real gap found live 2026-08-26: fills_ever_stored was 0 across every

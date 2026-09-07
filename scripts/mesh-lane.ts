@@ -23,7 +23,9 @@ const argvSubject = process.argv.find((a) => a.startsWith("--subject="))?.slice(
  * AsyncLocalStorage store so concurrent in-process lanes never clobber
  * each other's signal. Script mode (one lane per child) is unchanged.
  */
-const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null }>();
+/** Hunter runs stop 10 s inside the 90 s lane ceiling so the receipt always lands. */
+const HUNT_BUDGET_MS = 80_000;
+const laneSignal = new AsyncLocalStorage<{ code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown }>();
 function markIncomplete(): void {
   const store = laneSignal.getStore();
   if (store) store.code = 2;
@@ -44,7 +46,7 @@ function markDeferred(ms: number, reason: string): void {
   }
 }
 
-export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null };
+export type LaneOutcome = { code: number; deferMs: number | null; deferReason: string | null; receipt?: unknown };
 
 /**
  * AUDIT lens 5 A / A8 (2026-09-06): cooperative cancellation. The scheduler
@@ -61,10 +63,10 @@ export function laneShouldStop(signal: AbortSignal | undefined, deadline: number
 
 /** Run one lane in this process. code 0 = done, 2 = more work remains, 1 = failed; deferMs asks for a delayed retry. */
 export async function runMeshLaneDetailed(source: MeshSource, chain: string, subject = "", signal?: AbortSignal): Promise<LaneOutcome> {
-  const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null };
+  const store = { code: 0, deferMs: null as number | null, deferReason: null as string | null, receipt: undefined as unknown };
   try {
     await laneSignal.run(store, () => main(source, chain, subject, signal));
-    return { code: store.code, deferMs: store.deferMs, deferReason: store.deferReason };
+    return { code: store.code, deferMs: store.deferMs, deferReason: store.deferReason, receipt: store.receipt };
   } catch (e) {
     console.error(`[mesh-lane] ${source}:${chain} failed`, e instanceof Error ? e.message : e);
     return { code: 1, deferMs: null, deferReason: null };
@@ -136,6 +138,23 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     if (source === "cryptopunks-native") {
       const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
       console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
+      return;
+    }
+    if (source === "hunter-evm" || source === "hunter-solana" || source === "hunter-bitcoin") {
+      const { runHunt } = await import("../lib/market/multichain/hunter/engine");
+      const { createHunterSink } = await import("../lib/market/multichain/hunter/sink");
+      const driver =
+        source === "hunter-evm"
+          ? (await import("../lib/market/multichain/hunter/drivers/evm")).createEvmHunter()
+          : source === "hunter-solana"
+            ? (await import("../lib/market/multichain/hunter/drivers/solana")).createSolanaHunter()
+            : (await import("../lib/market/multichain/hunter/drivers/bitcoin")).createBitcoinHunter();
+      const receipt = await runHunt({ driver, chainSlug: chain, budgetMs: HUNT_BUDGET_MS, signal, sink: createHunterSink() });
+      const store = laneSignal.getStore();
+      if (store) store.receipt = receipt;
+      console.log(`[mesh-lane] ${source}`, JSON.stringify(receipt));
+      if (receipt.sourceStatus === "rate-limited") markDeferred(5 * 60_000, `${source} rate limited`);
+      else if (receipt.sourceStatus === "no-provider") markDeferred(10 * 60_000, `${source} no provider`);
       return;
     }
     if (source === "hypersync-discovery") {
