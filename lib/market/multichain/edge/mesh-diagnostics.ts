@@ -97,7 +97,7 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
       `SELECT job_key, priority::text, not_before::text, kind, status
          FROM plank_data_jobs
         WHERE status = 'queued' AND not_before <= NOW() AND job_key LIKE 'mesh:%'
-        ORDER BY priority DESC, attempts, not_before, id
+        ORDER BY completed_at NULLS FIRST, attempts, not_before, id
         LIMIT 5`
     ).catch(() => ({ rows: [] as Row[] })),
   ]);
