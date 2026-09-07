@@ -157,7 +157,7 @@ async function buildHubIndex(req: Request) {
     // book the /market page renders (our Seaport rows + OpenSea + Pulp),
     // so this row's floor, listed count and grade agree with the
     // collection's own page. See lib/market/native-book.ts.
-    const { readNativeRobinwoodBook } = await import("@/lib/market/native-book");
+    const { readNativeRobinwoodBook, NATIVE_BOOK_OBSERVATION_KEY } = await import("@/lib/market/native-book");
     const nativeBook = await readNativeRobinwoodBook({ hostHeader: req.headers.get("host") }).catch(() => null);
     let nativeFloor: bigint | null = nativeBook?.floorWei ?? null;
     let nativeListed = nativeBook?.listedCount ?? 0;
@@ -197,7 +197,7 @@ async function buildHubIndex(req: Request) {
     const nativeFloorChange = await getObservedFloorChange24h(
       "robinhood",
       NFT_CONTRACT_ADDRESS,
-      "marketplank"
+      NATIVE_BOOK_OBSERVATION_KEY
     ).catch(() => null);
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
