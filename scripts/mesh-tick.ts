@@ -371,6 +371,8 @@ async function main(): Promise<void> {
   const EXPRESS_MIN_PRIORITY = 118;
   /** Standing lanes (discovery, stats, fills) are enqueued at 20-60; this worker claims nothing above it. */
   const STANDING_MAX_PRIORITY = 60;
+  /** Standing lanes are enqueued as `mesh:<lane id>` (enqueueStandingLanes); the standing slot claims by that identity. */
+  const STANDING_JOB_KEY_PREFIX = "mesh:";
   const EXPRESS_IDLE_MS = 2_000;
   type WorkerRole = "express" | "standing" | "general";
   async function worker(role: WorkerRole = "general"): Promise<void> {
@@ -395,7 +397,7 @@ async function main(): Promise<void> {
         role === "express"
           ? await claimDataJob(claimKinds, 300_000, EXPRESS_MIN_PRIORITY)
           : role === "standing"
-            ? await claimDataJob(claimKinds, 300_000, undefined, STANDING_MAX_PRIORITY)
+            ? await claimDataJob(claimKinds, 300_000, undefined, undefined, STANDING_JOB_KEY_PREFIX)
             : await claimDataJob(claimKinds);
       if (!job) {
         // AUDIT lens 5 C: general workers used to exit on the first empty
@@ -491,7 +493,7 @@ async function main(): Promise<void> {
   const expressSlots = n >= 2 ? 1 : 0;
   const standingSlots = n >= 3 ? 1 : 0;
   if (expressSlots) console.log(`[mesh-tick] express lane reserved for priority >= ${EXPRESS_MIN_PRIORITY}`);
-  if (standingSlots) console.log(`[mesh-tick] standing lane reserved for priority <= ${STANDING_MAX_PRIORITY} (discovery/stats/fills never starve)`);
+  if (standingSlots) console.log(`[mesh-tick] standing lane reserved for job_key ${STANDING_JOB_KEY_PREFIX}* (discovery/stats/fills never starve; priority bound ${STANDING_MAX_PRIORITY} no longer used for the claim)`);
   const workers = Array.from({ length: n }, (_, i) => {
     const startDelayMs = i * 150;
     const role: WorkerRole = i === 0 && expressSlots === 1 ? "express" : i === 1 && standingSlots === 1 ? "standing" : "general";
