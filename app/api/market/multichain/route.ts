@@ -6,6 +6,29 @@ import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/l
 import { hasUnindexedNativeBook, primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import { getArchivalStatsBatch, archivalStatsKey } from "@/lib/market/multichain/archival-ledger";
+import { CHAIN_MANIFESTS } from "@/lib/market/multichain/chains/manifest";
+import { getLaneHealth, summarizeLaneHealthByChain, type ChainLaneHealth } from "@/lib/market/multichain/mesh/lane-health";
+
+export type HubChainMeta = {
+  /** manifest.statsCapable: false = no floor/listed/volume source is wired for this chain at all (zkSync). */
+  statsCapable: boolean;
+  /** Per-chain discovery/stats lane health (mesh_lane_health); `down` is what the hub banners. */
+  laneHealth: ChainLaneHealth;
+};
+
+/**
+ * AUDIT lens 1 #9/#10 (2026-09-06, Batch E6): per-chain honesty block for
+ * the hub. Lane health is a best-effort read -- a failing mesh_lane_health
+ * query must never take the index down, so it degrades to "no lanes seen".
+ */
+async function buildHubChainMeta(): Promise<Record<string, HubChainMeta>> {
+  const byChain = await getLaneHealth().then((rows) => summarizeLaneHealthByChain(rows)).catch(() => ({} as Record<string, ChainLaneHealth>));
+  const out: Record<string, HubChainMeta> = {};
+  for (const m of CHAIN_MANIFESTS) {
+    out[m.chainSlug] = { statsCapable: m.statsCapable, laneHealth: byChain[m.chainSlug] ?? { down: [], lanes: [] } };
+  }
+  return out;
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -323,6 +346,10 @@ async function buildHubIndex(req: Request) {
             ? null
             : c.listedCount,
         syncedAt: c.syncedAt,
+        // AUDIT lens 1 #8 / fabrication (2026-09-06): the freshness dot and
+        // DataSourceChip read THIS, not syncedAt, which every partial writer
+        // bumps. Null = no real floor observation recorded for this row.
+        floorObservedAt: c.floorObservedAt ?? null,
         syncError: c.syncError,
         // TRUE for: the 7 real foreign EVM chains (Seaport buy/sweep/send/
         // offers), Robinhood Chain itself (native order book -- see
@@ -398,8 +425,11 @@ async function buildHubIndex(req: Request) {
     // duplicate it in the client's appended list.
     const includeNativeRow = offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"));
     const windowCollections = includeNativeRow ? [nativeRow, ...withoutDupNative] : withoutDupNative;
+    const chains = await buildHubChainMeta();
     return {
       count: windowCollections.length,
+      // Per-chain honesty (Batch E6): statsCapable + lane health, keyed by chain slug.
+      chains,
       // Real total tracked-collection count (all 317k+, not just this
       // window) so the UI can honestly show "showing N of totalCount"
       // instead of implying this response IS the whole catalog. See

@@ -51,6 +51,14 @@ export type ChainManifest = {
   seaport: boolean;
   /** Whether this chain is part of FOREIGN_CHAINS (foreign Seaport trading registry). Robinhood is its own path. */
   foreignSeaportTrading: boolean;
+  /**
+   * AUDIT lens 1 #10 (2026-09-06): whether ANY floor/listed/volume source is
+   * wired for this chain (OpenSea, CoinGecko, Magic Eden, UniSat/BestInSlot,
+   * a native book). False = every row is a discovery-only shell by design
+   * and the hub must say so instead of rendering dashes that imply "loading".
+   * zkSync: no OpenSea chain, no CoinGecko platform, no adapter lane.
+   */
+  statsCapable: boolean;
   /** Membership / metadata / book sources, for chain-plugin.ts. */
   sources: {
     l1: Array<"hypersync" | "helius-das" | "unisat" | "own-scan">;
@@ -68,75 +76,75 @@ export const CHAIN_MANIFESTS: readonly ChainManifest[] = [
     chainSlug: "eth-mainnet", kind: "evm", displayName: "Ethereum", chainId: 1, brandColor: "#627EEA", glyph: "Ξ",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://etherscan.io", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", openSeaChain: "ethereum", alchemySubdomain: "eth-mainnet",
-    coingeckoPlatform: "ethereum", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "ethereum", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "polygon-mainnet", kind: "evm", displayName: "Polygon", chainId: 137, brandColor: "#8247E5", glyph: "P",
     nativeCurrencySymbol: "POL", blockExplorerUrl: "https://polygonscan.com", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", openSeaChain: "matic", alchemySubdomain: "polygon-mainnet",
-    coingeckoPlatform: "polygon-pos", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "polygon-pos", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "arb-mainnet", kind: "evm", displayName: "Arbitrum", chainId: 42161, brandColor: "#28A0F0", glyph: "A",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://arbiscan.io", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", openSeaChain: "arbitrum", alchemySubdomain: "arb-mainnet",
-    coingeckoPlatform: "arbitrum-one", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "arbitrum-one", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "base-mainnet", kind: "evm", displayName: "Base", chainId: 8453, brandColor: "#0052FF", glyph: "B",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://basescan.org", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0x4200000000000000000000000000000000000006", openSeaChain: "base", alchemySubdomain: "base-mainnet",
-    coingeckoPlatform: "base", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "base", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "opt-mainnet", kind: "evm", displayName: "Optimism", chainId: 10, brandColor: "#FF0420", glyph: "O",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://optimistic.etherscan.io", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0x4200000000000000000000000000000000000006", openSeaChain: "optimism", alchemySubdomain: "opt-mainnet",
-    coingeckoPlatform: "optimistic-ethereum", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "optimistic-ethereum", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "bnb-mainnet", kind: "evm", displayName: "BNB Chain", chainId: 56, brandColor: "#F0B90B", glyph: "BNB",
     nativeCurrencySymbol: "BNB", blockExplorerUrl: "https://bscscan.com", offerCurrencySymbol: "WBNB",
     offerCurrencyAddress: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", openSeaChain: "bsc", alchemySubdomain: "bnb-mainnet",
-    coingeckoPlatform: "binance-smart-chain", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "binance-smart-chain", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "avax-mainnet", kind: "evm", displayName: "Avalanche", chainId: 43114, brandColor: "#E84142", glyph: "AVAX",
     nativeCurrencySymbol: "AVAX", blockExplorerUrl: "https://snowtrace.io", offerCurrencySymbol: "WAVAX",
     offerCurrencyAddress: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", openSeaChain: "avalanche", alchemySubdomain: "avax-mainnet",
-    coingeckoPlatform: "avalanche", hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: "avalanche", hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: true,
     sources: { l1: ["hypersync"], l2: ["opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "zksync-mainnet", kind: "evm", displayName: "zkSync", chainId: 324, brandColor: "#8C8DFC", glyph: "ZK",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://explorer.zksync.io", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: "0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91", openSeaChain: null, alchemySubdomain: "zksync-mainnet",
-    coingeckoPlatform: null, hypersync: true, seaport: true, foreignSeaportTrading: true,
+    coingeckoPlatform: null, hypersync: true, seaport: true, foreignSeaportTrading: true, statsCapable: false,
     sources: { l1: ["hypersync"], l2: [], l3l4: ["onchain-multicall", "ipfs"] }, art: {},
   },
   {
     chainSlug: "robinhood", kind: "custom-evm", displayName: "Robinhood Chain", chainId: 4663, brandColor: "#eec164", glyph: "RW",
     nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://robinhoodchain.blockscout.com", offerCurrencySymbol: "WETH",
     offerCurrencyAddress: null, openSeaChain: "robinhood", alchemySubdomain: null, coingeckoPlatform: null,
-    hypersync: true, seaport: true, foreignSeaportTrading: false,
+    hypersync: true, seaport: true, foreignSeaportTrading: false, statsCapable: true,
     sources: { l1: ["own-scan", "hypersync"], l2: ["native-robinwood", "opensea-rest"], l3l4: [...EVM_L3L4] }, art: {},
   },
   {
     chainSlug: "solana-mainnet", kind: "solana", displayName: "Solana", chainId: null, brandColor: "#9945FF", glyph: "S",
     nativeCurrencySymbol: "SOL", blockExplorerUrl: "https://solscan.io", offerCurrencySymbol: "SOL", offerCurrencyAddress: null,
-    openSeaChain: null, alchemySubdomain: null, coingeckoPlatform: "solana", hypersync: false, seaport: false, foreignSeaportTrading: false,
+    openSeaChain: null, alchemySubdomain: null, coingeckoPlatform: "solana", hypersync: false, seaport: false, foreignSeaportTrading: false, statsCapable: true,
     sources: { l1: ["helius-das"], l2: ["magiceden"], l3l4: ["helius-das"] }, art: {},
   },
   {
     chainSlug: "bitcoin-mainnet", kind: "ordinals", displayName: "Bitcoin (Ordinals)", chainId: null, brandColor: "#F7931A", glyph: "₿",
     nativeCurrencySymbol: "BTC", blockExplorerUrl: "https://mempool.space", offerCurrencySymbol: "BTC", offerCurrencyAddress: null,
-    openSeaChain: null, alchemySubdomain: null, coingeckoPlatform: "ordinals", hypersync: false, seaport: false, foreignSeaportTrading: false,
+    openSeaChain: null, alchemySubdomain: null, coingeckoPlatform: "ordinals", hypersync: false, seaport: false, foreignSeaportTrading: false, statsCapable: true,
     sources: { l1: ["unisat"], l2: ["unisat"], l3l4: ["unisat"] }, art: { pixelated: true },
   },
 ];
@@ -193,6 +201,11 @@ export function openSeaEvmSlugs(): string[] {
 /** Foreign EVM chains with HyperSync coverage (mesh hypersync-*, evm-metadata, seaport-fills lanes). */
 export function hypersyncEvmSlugs(): string[] {
   return CHAIN_MANIFESTS.filter((m) => m.foreignSeaportTrading && m.hypersync).map((m) => m.chainSlug);
+}
+
+/** Chains with no floor/listed/volume source at all (hub renders "no stats source on this chain"). */
+export function statsIncapableSlugs(): string[] {
+  return CHAIN_MANIFESTS.filter((m) => !m.statsCapable).map((m) => m.chainSlug);
 }
 
 /** Chains with a CoinGecko NFT platform (mesh coingecko-nft lanes). */

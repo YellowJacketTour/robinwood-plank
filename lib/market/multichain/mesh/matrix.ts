@@ -23,6 +23,9 @@ export type MeshSource =
   | "opensea-bulk"
   | "coingecko-nft"
   | "magiceden-solana"
+  | "magiceden-catalog"
+  | "magiceden-alias"
+  | "bestinslot-stats"
   | "ordinals-wallet"
   | "unisat-collections"
   | "adapter-sync"
@@ -384,9 +387,34 @@ export const MESH_LANES: MeshLane[] = [
     id: "me:solana-mainnet",
     source: "magiceden-solana",
     chainSlug: "solana-mainnet",
-    cells: ["floor", "listedCount", "holders", "name", "image"],
+    cells: ["name", "image"],
     sliceSec: 120,
-    notes: "Exact ME symbol. Do not attach to Helius mints by name.",
+    notes: "Exact ME symbol art hydration (hydrateSolanaFromMagicEden). Floor/listed/holders for symbol rows come from adapter:solana-mainnet; for Helius rows from magiceden-alias. Cells corrected 2026-09-06 (AUDIT lens 1 overstatement).",
+  },
+  {
+    // AUDIT lens 1 #6 (2026-09-06, Batch E4): the exhaustive ME catalog
+    // walk only ran from a local-dev supervisor, so prod Solana coverage
+    // was MplCore + ME top-N (184 rows). One bounded catalog slice per tick,
+    // durable offset cursor, `done` re-walks every 6 h.
+    id: "magiceden-catalog:solana-mainnet",
+    source: "magiceden-catalog",
+    chainSlug: "solana-mainnet",
+    cells: ["name", "image"],
+    sliceSec: 120,
+    notes: "Exhaustive keyless ME /v2/collections walk, 25 pages per tick; registers symbol rows for the legacy/pNFT long tail.",
+  },
+  {
+    // AUDIT lens 1 #7 (2026-09-06, Batch E4): Helius-discovered rows are
+    // keyed by a collection asset id and structurally never got a floor.
+    // Resolves each row's ME symbol (DAS grouping member -> ME token ->
+    // collection symbol) into alias_symbol (migration 102) and routes
+    // floor/listed/holders through the ME adapter by that alias.
+    id: "magiceden-alias:solana-mainnet",
+    source: "magiceden-alias",
+    chainSlug: "solana-mainnet",
+    cells: ["floor", "listedCount", "holders"],
+    sliceSec: 120,
+    notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
   },
   {
     id: "ow:bitcoin-mainnet",
@@ -403,6 +431,17 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders", "name", "image"],
     sliceSec: 90,
     notes: "List endpoint for art+stats. Exit 0 on 403 jail — OW/CG keep running.",
+  },
+  {
+    // E4-bitcoin (2026-09-06): Magic Eden's Bitcoin API is gone; BestInSlot
+    // aggregates floor/listed/volume across the surviving Ordinals venues.
+    // Key-gated (BESTINSLOT_API_KEY); the lane is a clean no-op without it.
+    id: "bestinslot-stats:bitcoin-mainnet",
+    source: "bestinslot-stats",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["floor", "listedCount", "volume24h", "sales24h", "holders"],
+    sliceSec: 90,
+    notes: "BestInSlot collection stats for tracked Ordinals collections, missing/stale floor first. Returns credential-missing without a key.",
   },
   {
     id: "adapter:solana-mainnet",

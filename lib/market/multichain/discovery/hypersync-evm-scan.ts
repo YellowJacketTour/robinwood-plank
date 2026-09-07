@@ -98,22 +98,59 @@ const HYPERSYNC_EVM_DAILY_ALLOWANCE = 200_000;
  */
 const CHUNK_BLOCKS = 50_000;
 
-// Transfer is shared by ERC-20 and ERC-721, and HyperSync cannot predicate on
-// "topic3 is present". Real production probes showed maxNumLogs may overshoot
-// heavily at server batch boundaries (e.g. 119k logs for a 5k target). These
-// per-chain spans are therefore the enforceable forward-scan bound, calibrated
-// from observed log density on 2026-08-22. Historical coverage remains on the
-// separately cursored backfill lanes; catalog APIs remain the roster fast path.
-const FORWARD_CHUNK_BLOCKS: Record<string, number> = {
-  "eth-mainnet": 10,
-  "polygon-mainnet": 10,
-  "arb-mainnet": 800,
-  "base-mainnet": 20,
-  "opt-mainnet": 10,
-  "bnb-mainnet": 15,
-  "avax-mainnet": 150,
-  "zksync-mainnet": 900,
-};
+/**
+ * AUDIT lens 1 #2 (2026-09-06, Batch E2): the forward scan used to advance
+ * a fixed 10-800 blocks per lane pass (FORWARD_CHUNK_BLOCKS) while the lane
+ * fires roughly once per ~48 min, so Polygon produced ~1,400 blocks per
+ * pass and the scanner advanced 10 -- permanently "backfilling", never
+ * "live". The forward scan is now TIME-BUDGETED: it keeps paging toward the
+ * chain head until the lane's own sliceSec (matrix.ts) is nearly spent or
+ * FORWARD_MAX_LOGS_PER_RUN logs have been processed, whichever first. A
+ * fresh chain's cursor starts only FRESH_CURSOR_LOOKBACK_BLOCKS behind the
+ * head (history belongs to runHypersyncBackfillScan), so the lane reaches
+ * `live` on its first pass and stays there.
+ */
+const FRESH_CURSOR_LOOKBACK_BLOCKS = 5_000;
+/** Run-level ceiling on processed Transfer logs; the per-request target stays MAX_LOGS_PER_RUN. */
+const FORWARD_MAX_LOGS_PER_RUN = 250_000;
+/** Fraction of the lane slice the scan may consume; the rest is left for the candidate/membership writes after the loop. */
+const FORWARD_BUDGET_FRACTION = 0.7;
+const DEFAULT_FORWARD_SLICE_SEC = 120;
+
+/**
+ * Pure planning helper (unit-tested): the forward-scan window and budget
+ * for one run. `cursor` null = never scanned this chain before.
+ */
+export function planForwardScan(input: {
+  height: number;
+  cursor: number | null;
+  sliceSec?: number | null;
+  budgetMs?: number | null;
+}): { fromBlock: number; toBlock: number; budgetMs: number; maxLogs: number } {
+  const fromBlock = input.cursor == null ? Math.max(0, input.height - FRESH_CURSOR_LOOKBACK_BLOCKS) : input.cursor + 1;
+  const sliceSec = input.sliceSec && input.sliceSec > 0 ? input.sliceSec : DEFAULT_FORWARD_SLICE_SEC;
+  const budgetMs = input.budgetMs && input.budgetMs > 0 ? input.budgetMs : Math.floor(sliceSec * 1000 * FORWARD_BUDGET_FRACTION);
+  return { fromBlock, toBlock: input.height, budgetMs, maxLogs: FORWARD_MAX_LOGS_PER_RUN };
+}
+
+/**
+ * Pure loop-continuation rule (unit-tested): keep paging while the head is
+ * not reached, the time budget has not elapsed, and the log ceiling holds.
+ */
+export function shouldContinueForwardScan(input: {
+  nextBlock: number;
+  toBlock: number;
+  startedAt: number;
+  now: number;
+  budgetMs: number;
+  logsScanned: number;
+  maxLogs: number;
+}): boolean {
+  if (input.nextBlock >= input.toBlock) return false;
+  if (input.now - input.startedAt >= input.budgetMs) return false;
+  if (input.logsScanned >= input.maxLogs) return false;
+  return true;
+}
 
 /** HyperSync documents maxNumLogs as a target that may overshoot at a block
  * boundary, not a strict ceiling. A 5k target kept observed dense-chain
@@ -454,7 +491,9 @@ export async function runAddressScopedMembershipScan(input: {
  */
 export async function runHypersyncDiscoveryScan(input: {
   chainSlug: string;
-}): Promise<DiscoveryScanResult> {
+  /** Wall-clock budget for the paging loop; defaults to 70% of this lane's matrix sliceSec. */
+  budgetMs?: number;
+}): Promise<DiscoveryScanResult & { budgetMs?: number; elapsedMs?: number; live?: boolean }> {
   const chainId = EVM_CHAIN_ID[input.chainSlug];
   if (!chainId) {
     return {
@@ -474,17 +513,28 @@ export async function runHypersyncDiscoveryScan(input: {
 
   const height = await withHypersyncReservation(() => client.getHeight());
   const cursor = await readCursor(input.chainSlug);
-  const fromBlock = cursor == null ? Math.max(0, height - CHUNK_BLOCKS) : cursor + 1;
-  const toBlock = Math.min(height, fromBlock + (FORWARD_CHUNK_BLOCKS[input.chainSlug] ?? 10));
+  const { MESH_LANES } = await import("@/lib/market/multichain/mesh/matrix");
+  const laneSliceSec = MESH_LANES.find((l) => l.source === "hypersync-discovery" && l.chainSlug === input.chainSlug)?.sliceSec ?? null;
+  const plan = planForwardScan({ height, cursor, sliceSec: laneSliceSec, budgetMs: input.budgetMs ?? null });
+  const { fromBlock, toBlock, budgetMs } = plan;
+  const startedAt = Date.now();
 
   if (fromBlock >= toBlock) {
-    return { chainSlug: input.chainSlug, fromBlock, toBlock: fromBlock, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0 };
+    await writeChainCoverage({
+      chainSlug: input.chainSlug,
+      lane: "forward",
+      standardGroup: "erc721+erc1155",
+      rangeStart: fromBlock,
+      nextBlock: fromBlock,
+      targetBlock: height,
+      observedHead: height,
+      state: "live",
+    });
+    return { chainSlug: input.chainSlug, fromBlock, toBlock: fromBlock, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0, budgetMs, elapsedMs: 0, live: true };
   }
 
   const tally = new Map<string, number>();
   const observedErc721 = new Map<string, Set<string>>();
-  const rawTransferLogs: HypersyncLog[] = [];
-  const seenBlocks: Array<{ number?: number; timestamp?: number }> = [];
   let logsScanned = 0;
   let query: Query = {
     fromBlock,
@@ -498,9 +548,9 @@ export async function runHypersyncDiscoveryScan(input: {
   };
 
   let lastBlockSeen = fromBlock;
-  while (logsScanned < MAX_LOGS_PER_RUN) {
+  for (;;) {
     const res = await withHypersyncReservation(() => client.get(query));
-    seenBlocks.push(...res.data.blocks);
+    const pageLogs: HypersyncLog[] = [];
     for (const log of res.data.logs) {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
@@ -508,7 +558,7 @@ export async function runHypersyncDiscoveryScan(input: {
       if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
-      rawTransferLogs.push(log);
+      pageLogs.push(log);
       if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
         const tokenId = BigInt(log.topics[3]).toString();
         const ids = observedErc721.get(key) ?? new Set<string>();
@@ -517,13 +567,18 @@ export async function runHypersyncDiscoveryScan(input: {
       }
       logsScanned += 1;
     }
+    // Flush per page: a time-budgeted run can process far more logs than
+    // the old fixed chunk, so the transfer ledger is written as we go
+    // instead of buffering the whole run in memory. The cursor is only
+    // advanced after the loop, so a crash mid-run re-scans (idempotent
+    // upserts), never skips.
+    if (pageLogs.length > 0) await writeTransfersFromHypersyncLogs(input.chainSlug, pageLogs, res.data.blocks);
     lastBlockSeen = res.nextBlock;
-    if (res.nextBlock >= toBlock || logsScanned >= MAX_LOGS_PER_RUN) break;
+    if (!shouldContinueForwardScan({ nextBlock: res.nextBlock, toBlock, startedAt, now: Date.now(), budgetMs, logsScanned, maxLogs: plan.maxLogs })) break;
     query = { ...query, fromBlock: res.nextBlock };
   }
 
   await recordActivity(input.chainSlug, tally);
-  await writeTransfersFromHypersyncLogs(input.chainSlug, rawTransferLogs, seenBlocks);
 
   // AUDIT lens 1 #1 (2026-09-06): registering every contract with a single
   // Transfer log produced 1,567 Arbitrum shells competing for a 20-per-pass
@@ -535,6 +590,7 @@ export async function runHypersyncDiscoveryScan(input: {
   await persistObservedErc721Membership(input.chainSlug, observedErc721, accepted, "hypersync-transfer-live");
 
   await writeCursor(input.chainSlug, lastBlockSeen - 1);
+  const live = lastBlockSeen >= height;
   await writeChainCoverage({
     chainSlug: input.chainSlug,
     lane: "forward",
@@ -543,9 +599,9 @@ export async function runHypersyncDiscoveryScan(input: {
     nextBlock: lastBlockSeen,
     targetBlock: height,
     observedHead: height,
-    state: lastBlockSeen >= height ? "live" : "backfilling",
+    state: live ? "live" : "backfilling",
   });
-  return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata };
+  return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, budgetMs, elapsedMs: Date.now() - startedAt, live };
 }
 
 /**
@@ -605,7 +661,7 @@ export async function runHypersyncBackfillScan(input: {
   // scanner's own cursor moves past it immediately on its first run).
   const forwardCursor = await readCursor(input.chainSlug);
   const height = await withHypersyncReservation(() => client.getHeight());
-  const ceiling = forwardCursor ?? Math.max(0, height - CHUNK_BLOCKS);
+  const ceiling = forwardCursor ?? Math.max(0, height - FRESH_CURSOR_LOOKBACK_BLOCKS);
 
   // How far genesis-forward this function has already scanned. Starts at 0.
   const scannedUpTo = (await readCursor(backfillKey)) ?? 0;

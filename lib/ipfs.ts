@@ -16,6 +16,25 @@ export const IPFS_GATEWAYS = [
 ] as const;
 
 /**
+ * AUDIT lens 4 #7 / R2 (2): the gateway pool is overridable with
+ * `PLANK_IPFS_GATEWAYS` (comma-separated `https://host/ipfs/` prefixes) so
+ * production can point bulk hydration at a dedicated/self-hosted gateway
+ * (ipfs.io and dweb.link started rate-limiting backend traffic 2026-08-25)
+ * without a code change. Server-only: the browser never sees the env var
+ * and keeps the public default list (its fetches go through /api/ipfs).
+ */
+export function activeIpfsGateways(): readonly string[] {
+  const raw = typeof process !== "undefined" ? process.env?.PLANK_IPFS_GATEWAYS : undefined;
+  if (!raw) return IPFS_GATEWAYS;
+  const parsed = raw
+    .split(",")
+    .map((g) => g.trim())
+    .filter((g) => /^https?:\/\/[^/]+\//.test(g))
+    .map((g) => (g.endsWith("/") ? g : `${g}/`));
+  return parsed.length ? parsed : IPFS_GATEWAYS;
+}
+
+/**
  * Convert ipfs:// CIDs (and nested paths with spaces) into a browser-loadable
  * image URL. Path segments are encoded so filenames like "Is This Art4.png"
  * work.
@@ -205,7 +224,7 @@ export function ipfsGatewayCandidates(uri: string): string[] {
       const cidPath = match[1];
       return [
         uri,
-        ...IPFS_GATEWAYS.map((gateway) => `${gateway}${cidPath}`),
+        ...activeIpfsGateways().map((gateway) => `${gateway}${cidPath}`),
       ];
     }
     return [uri];
@@ -217,7 +236,7 @@ export function ipfsGatewayCandidates(uri: string): string[] {
   // app/api/ipfs/image/route.ts itself) where a relative /api/ipfs/... path
   // isn't a fetchable URL at all — Node's fetch() has no page origin to
   // resolve it against.
-  return IPFS_GATEWAYS.map((gateway) => rawGatewayUrl(uri, gateway));
+  return activeIpfsGateways().map((gateway) => rawGatewayUrl(uri, gateway));
 }
 
 export type NftAttribute = {
@@ -303,9 +322,86 @@ async function fetchViaProxy(tokenUri: string): Promise<NftMetadata> {
   return data;
 }
 
+// ---------------------------------------------------------------------------
+// Gateway discipline (AUDIT lens 4 #7, R2 (2)). The old strategy raced three
+// gateways per token and the metadata pass ran 25 tokens concurrently: 75
+// simultaneous hits on the same public hosts, which is exactly the pattern
+// ipfs.io/dweb.link now throttle, and a 429 cost a 30-minute cooldown. Now:
+//   * ONE gateway per attempt, chosen by rotating through the pool so load
+//     spreads across operators instead of all landing on candidates[0];
+//   * a per-host token bucket (~8 requests/second, burst 8) that queues the
+//     caller instead of firing -- never a race;
+//   * 5 s timeout per attempt, and a retry on a DIFFERENT host;
+//   * a host that answers 429/503 is rested for a short window so the next
+//     attempt rotates past it.
+// ---------------------------------------------------------------------------
+export const GATEWAY_RATE_PER_SECOND = 8;
+export const GATEWAY_TIMEOUT_MS = 5_000;
+const GATEWAY_BURST = 8;
+const GATEWAY_REST_MS = 20_000;
+const MAX_GATEWAY_ATTEMPTS = 4;
+
+type Bucket = { tokens: number; updatedAt: number };
+const buckets = new Map<string, Bucket>();
+const restedUntil = new Map<string, number>();
+let rotation = 0;
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return url;
+  }
+}
+
+function refill(bucket: Bucket, now: number): void {
+  const elapsed = Math.max(0, now - bucket.updatedAt) / 1000;
+  bucket.tokens = Math.min(GATEWAY_BURST, bucket.tokens + elapsed * GATEWAY_RATE_PER_SECOND);
+  bucket.updatedAt = now;
+}
+
 /**
- * Race the first N gateways, then walk the rest serially.
- * Never permanently cache failures — only successful usable metadata.
+ * Wait for one request token on `host`. Resolves immediately when the host
+ * has capacity; otherwise sleeps until the bucket refills. Exported so the
+ * pacing itself is unit-testable without a network.
+ */
+export async function acquireGatewayToken(host: string, now: number = Date.now()): Promise<void> {
+  let bucket = buckets.get(host);
+  if (!bucket) {
+    bucket = { tokens: GATEWAY_BURST, updatedAt: now };
+    buckets.set(host, bucket);
+  }
+  refill(bucket, now);
+  if (bucket.tokens >= 1) {
+    bucket.tokens -= 1;
+    return;
+  }
+  const waitMs = Math.ceil(((1 - bucket.tokens) / GATEWAY_RATE_PER_SECOND) * 1000);
+  // Reserve the token now so concurrent waiters do not all wake and over-spend.
+  bucket.tokens -= 1;
+  await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+}
+
+/** Order the candidate URLs for one fetch: rotated start, rested hosts last. */
+export function rotateGatewayCandidates(candidates: string[], now: number = Date.now()): string[] {
+  if (candidates.length <= 1) return [...candidates];
+  const offset = rotation++ % candidates.length;
+  const rotated = candidates.map((_, i) => candidates[(i + offset) % candidates.length]);
+  const fresh = rotated.filter((url) => (restedUntil.get(hostOf(url)) ?? 0) <= now);
+  const rested = rotated.filter((url) => (restedUntil.get(hostOf(url)) ?? 0) > now);
+  return [...fresh, ...rested];
+}
+
+/** Test hook: forget every bucket, rest window and rotation offset. */
+export function __resetGatewayStateForTests(): void {
+  buckets.clear();
+  restedUntil.clear();
+  rotation = 0;
+}
+
+/**
+ * Fetch metadata through the gateway discipline above. Never permanently
+ * caches failures -- only successful usable metadata.
  */
 export async function fetchNftMetadata(
   tokenUri: string,
@@ -329,31 +425,27 @@ export async function fetchNftMetadata(
     return data;
   }
 
-  const candidates = ipfsGatewayCandidates(tokenUri);
+  const candidates = rotateGatewayCandidates(ipfsGatewayCandidates(tokenUri));
   let lastError: unknown;
-
-  // Race first 3 gateways for speed (newest mints need this)
-  const raceN = Math.min(3, candidates.length);
-  if (raceN > 0) {
+  const triedHosts = new Set<string>();
+  let attempts = 0;
+  for (const url of candidates) {
+    if (attempts >= MAX_GATEWAY_ATTEMPTS) break;
+    const host = hostOf(url);
+    // Retry on a DIFFERENT host: a host that just failed is not retried in
+    // this call (a single-candidate http(s) URI gets exactly one attempt).
+    if (triedHosts.has(host)) continue;
+    triedHosts.add(host);
+    attempts += 1;
+    await acquireGatewayToken(host);
     try {
-      const data = await Promise.any(
-        candidates.slice(0, raceN).map((url) => fetchJsonFromUrl(url, 8_000)),
-      );
+      const data = await fetchJsonFromUrl(url, GATEWAY_TIMEOUT_MS);
       setCachedMetadata(tokenUri, data);
       return data;
     } catch (error) {
       lastError = error;
-    }
-  }
-
-  // Remaining gateways serially with slightly longer timeout
-  for (const url of candidates.slice(raceN)) {
-    try {
-      const data = await fetchJsonFromUrl(url, 12_000);
-      setCachedMetadata(tokenUri, data);
-      return data;
-    } catch (error) {
-      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (/HTTP (429|503)/.test(message)) restedUntil.set(host, Date.now() + GATEWAY_REST_MS);
     }
   }
 

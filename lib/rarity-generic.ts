@@ -2,7 +2,9 @@
  * Generalized counterpart to lib/rarity.ts's computeRaritySnapshot —
  * same −log2 information-content kernel, competition rank, dual percentile.
  * Adaptive trait schema: official tier trait (Background-like) when present;
- * spam trait types excluded. Never invents missing traits.
+ * spam trait types excluded. Missing scored traits take the OpenRarity "None"
+ * pseudo-value (scored by how many tokens ALSO lack the type) -- see
+ * computeGenericRaritySnapshot.
  */
 import { informationContent, tierFromBackground, tierFromPercentile, type RarityTier } from "@/lib/rarity";
 
@@ -85,6 +87,26 @@ export function scoredTraitTypes(items: GenericRarityInput[]): string[] {
   return [...types].filter((t) => !isSpamTraitType(t, items)).sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * OpenRarity-exact pseudo-value for a token that lacks a scored trait type.
+ * OpenRarity (open-rarity/scoring/utils.py): "if the token does not have an
+ * attribute, the probability of the attribute being null is used". Missing
+ * traits are therefore scored by how many OTHER tokens also lack them --
+ * never silently penalised (AUDIT lens 4 #6, R2 (1)).
+ */
+export const NONE_TRAIT_VALUE = "None";
+
+/**
+ * OpenRarity-exact ranking (github.com/OpenRarity/open-rarity, rarity_ranker.py):
+ *   1. every scored trait type contributes exactly one value per token -- the
+ *      token's own value, or the "None" pseudo-value when it lacks the type;
+ *   2. score = sum of information content, -log2(count / N), over those values;
+ *   3. two-key sort: unique-attribute count desc (real values carried by
+ *      exactly one token; "None" never counts), then score desc;
+ *   4. RANK ties (1,2,2,2,5), never DENSE_RANK.
+ * Tier thresholds (tierFromPercentile) and the official-tier override are
+ * unchanged from the pre-OpenRarity kernel.
+ */
 export function computeGenericRaritySnapshot(items: GenericRarityInput[]): GenericRaritySnapshot {
   const sampleSize = items.length;
   if (sampleSize === 0) {
@@ -94,31 +116,46 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
   const officialTierTrait = detectOfficialTierTrait(items);
   const keepTypes = new Set(scoredTraitTypes(items));
 
-  const counts = new Map<string, number>();
-  for (const item of items) {
+  // One value per (token, scored type): the first occurrence wins, matching
+  // OpenRarity's attribute-name keyed token metadata.
+  const perToken = items.map((item) => {
+    const map = new Map<string, string>();
     for (const t of item.traits) {
-      if (!keepTypes.has(t.traitType)) continue;
-      const key = traitKey(t.traitType, t.value);
+      if (!keepTypes.has(t.traitType) || map.has(t.traitType)) continue;
+      map.set(t.traitType, t.value);
+    }
+    return map;
+  });
+
+  const counts = new Map<string, number>();
+  for (const values of perToken) {
+    for (const type of keepTypes) {
+      const key = traitKey(type, values.get(type) ?? NONE_TRAIT_VALUE);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
 
-  const rawScores = items.map((item) => {
-    const scored = item.traits.filter((t) => keepTypes.has(t.traitType));
-    const score = scored.reduce((sum, t) => {
-      const count = counts.get(traitKey(t.traitType, t.value)) ?? 1;
-      return sum + informationContent(count / sampleSize);
-    }, 0);
+  const rawScores = items.map((item, index) => {
+    const values = perToken[index];
+    let score = 0;
+    let uniques = 0;
+    for (const type of keepTypes) {
+      const value = values.get(type);
+      const count = counts.get(traitKey(type, value ?? NONE_TRAIT_VALUE)) ?? 1;
+      score += informationContent(count / sampleSize);
+      if (value !== undefined && count === 1) uniques += 1;
+    }
     const officialValue = officialTierTrait ? item.traits.find((t) => t.traitType === officialTierTrait)?.value : null;
     return {
       tokenId: item.tokenId,
       name: item.name ?? `#${item.tokenId}`,
       score,
+      uniques,
       officialValue: officialValue ?? null,
     };
   });
 
-  rawScores.sort((a, b) => b.score - a.score || a.tokenId.localeCompare(b.tokenId));
+  rawScores.sort((a, b) => b.uniques - a.uniques || b.score - a.score || a.tokenId.localeCompare(b.tokenId));
   const scoresAsc = [...rawScores].map((r) => r.score).sort((a, b) => a - b);
 
   function countStrictlyBelow(score: number): number {
@@ -136,8 +173,11 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
   let i = 0;
   while (i < rawScores.length) {
     const score = rawScores[i].score;
+    const uniques = rawScores[i].uniques;
     let j = i + 1;
-    while (j < rawScores.length && rawScores[j].score === score) j += 1;
+    while (j < rawScores.length && rawScores[j].score === score && rawScores[j].uniques === uniques) j += 1;
+    // RANK semantics: a tie group takes the rank of its first position and
+    // the next group resumes at the position AFTER the group (1,2,2,2,5).
     const rank = i + 1;
     const scorePercentile = sampleSize > 0 ? (countStrictlyBelow(score) / sampleSize) * 100 : 0;
     const tieSize = j - i;
@@ -146,7 +186,7 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
       const row = rawScores[k];
       const groupPositionPct =
         sampleSize > 1 ? ((sampleSize - 1 - k) / (sampleSize - 1)) * 100 : 100;
-      // A giant tie used to inherit the FIRST row's 100th-percentile → every
+      // A giant tie used to inherit the FIRST row's 100th-percentile -> every
       // Milady painted Legendary. Large ties use score percentile only.
       const pos = largeTie ? scorePercentile : Math.max(scorePercentile, groupPositionPct);
       const percentile = row.score <= 0 ? scorePercentile : pos;
@@ -200,16 +240,28 @@ export function scoreTokenAgainstTraitIndex(input: {
   const n = Math.max(1, input.sampleSize);
   let score = 0;
   let officialValue: string | null = null;
+  const seenTypes = new Set<string>();
   for (const t of input.traits) {
     const cat = findIndexValues(input.traitIndex, t.traitType);
     if (!cat) continue;
     const ids = findIndexIds(cat, t.value);
     const count = ids?.length ?? 0;
     if (count <= 0) continue;
+    seenTypes.add(t.traitType.toLowerCase());
     score += informationContent(Math.min(1, count / n));
     if (!officialValue && /background|tier|rarity|rank|class|edition/i.test(t.traitType.replace(/[\s_-]+/g, ""))) {
       officialValue = t.value;
     }
+  }
+  // OpenRarity "None" pseudo-value for every indexed type this token lacks --
+  // the same treatment computeGenericRaritySnapshot gives the stored scores
+  // this token is compared against (knownScoresAsc).
+  for (const [traitType, values] of Object.entries(input.traitIndex)) {
+    if (seenTypes.has(traitType.toLowerCase())) continue;
+    const holders = Object.values(values).reduce((sum, ids) => sum + ids.length, 0);
+    const noneCount = Math.max(1, n - Math.min(n, holders));
+    if (noneCount >= n) continue; // every token lacks it -> 0 bits
+    score += informationContent(noneCount / n);
   }
   const scoresAsc = input.knownScoresAsc;
   let lo = 0;
