@@ -36,6 +36,7 @@ on:
           - evaluate-plank-koth-tx
           - provision-plank-koth-gap-finder
           - provision-market-mesh
+          - deploy-mesh
           - configure-plankspace-x
       repair_from_block:
         description: >-
@@ -164,9 +165,16 @@ jobs:
       # (test/contracts/PlankCcs2LSettlement.test.ts) runs inside `npm test`
       # via test:contracts; this step adds the node-only simulation invariants
       # and the house-layer partition-invariance proof (exit 1 on any failure).
+      # The full suite (~6 min) runs on every pull request. A push to master
+      # is the already-tested head of dev, so it skips straight to build +
+      # deploy (2026-09-07, owner: "release these without the hour long
+      # deploy"). A manual `deploy` dispatch skips too; run tests via a PR.
       - run: npm run test:ccs2l
+        if: github.event_name == 'pull_request'
       - run: npm test
+        if: github.event_name == 'pull_request'
       - run: npm run test:postgres
+        if: github.event_name == 'pull_request'
       - run: npm run build
       - run: npm run build:relayer
       - run: npm run build:market-refresh
@@ -1203,6 +1211,77 @@ jobs:
   # esbuild-bundled scheduler (build:mesh) every 5 minutes under flock; the
   # scheduler spawns the bundled lane runner with plain node.
   # ---------------------------------------------------------------------------
+  # Mesh-only release (2026-09-07): the three worker bundles build in seconds
+  # and run from $app_dir/current/scripts, so a scheduler/lane change does
+  # not need the Next build, the test suite, or a Passenger restart. Copies
+  # fresh bundles into the CURRENT release atomically and stops the running
+  # mesh so the every-minute cron starts the new code within a minute.
+  deploy-mesh:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy-mesh'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npm run build:mesh
+      - name: Assert bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+            test -s ".next/standalone/scripts/$f"
+          done
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"; test -n "$INMOTION_USER"; test -n "$INMOTION_SSH_KEY"; test -n "$INMOTION_HOST_KEY"; test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+      - name: Swap bundles into the current release and restart the mesh
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          retry() { local a; for a in 1 2 3; do if "$@"; then return 0; fi; echo "::warning::attempt $a failed"; sleep $((a * 10)); done; return 1; }
+          target="${INMOTION_USER}@${INMOTION_HOST}"
+          sha="${GITHUB_SHA}"
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" "test -d '$INMOTION_APP_DIR/current/scripts' && mkdir -p '$INMOTION_APP_DIR/incoming/mesh-$sha'"
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" ".next/standalone/scripts/$f" "$target:$INMOTION_APP_DIR/incoming/mesh-$sha/$f"
+          done
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" bash -s <<REMOTE
+          set -euo pipefail
+          app_dir='$INMOTION_APP_DIR'
+          src="\$app_dir/incoming/mesh-$sha"
+          dst="\$(readlink -f "\$app_dir/current")/scripts"
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+            test -s "\$src/\$f"
+            mv -f "\$src/\$f" "\$dst/\$f.new"
+            mv -f "\$dst/\$f.new" "\$dst/\$f"
+          done
+          rmdir "\$src" || true
+          # Stop the running mesh + stream so the every-minute cron starts the new bundles.
+          pkill -f "mesh-tick-standalone.mjs" || true
+          pkill -f "opensea-stream-standalone.mjs" || true
+          echo "mesh bundles swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
+          REMOTE
+
   provision-market-mesh:
     if: >-
       github.event_name == 'workflow_dispatch' &&

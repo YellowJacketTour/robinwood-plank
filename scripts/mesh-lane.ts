@@ -103,9 +103,25 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
   // and ignore `subject`; a demand job for a specific Solana/Bitcoin
   // collection was being marked succeeded after hydrating something else.
   // Fail it visibly until each handler can target a subject.
-  const SUBJECT_BLIND_SOURCES = new Set(["helius-membership", "unisat-membership", "unisat-rarity", "magiceden-solana", "ordinals-wallet"]);
-  if (subject && SUBJECT_BLIND_SOURCES.has(source)) {
-    throw new Error(`subject targeting unsupported for ${source} (job for ${subject} not executed)`);
+  // Subject-aware routing (2026-09-07). These sources used to THROW on a
+  // subject job ("subject targeting unsupported"), and production showed
+  // unisat-membership / unisat-rarity at 1,827 attempts each, failing every
+  // time for a visitor's own click. A subject now runs that collection's own
+  // per-collection indexer; Bitcoin goes to the keyless OrdinalsWallet
+  // enumerator (every inscription with traits and rank), Solana to the DAS
+  // grouping walk. Sources with no per-collection form run their lane.
+  if (subject && source === "helius-membership") {
+    const { advanceSolanaCollectionMembership } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+    const r = await advanceSolanaCollectionMembership(subject);
+    console.log("[mesh-lane] helius-membership(subject)", JSON.stringify(r).slice(0, 300));
+    if (!r.complete) markIncomplete();
+    return;
+  }
+  if (subject && (source === "unisat-membership" || source === "unisat-rarity")) {
+    const { indexOrdinalsWalletCollectionRarity } = await import("../lib/market/multichain/discovery/ordinalswallet-rarity-index-runner");
+    const r = await indexOrdinalsWalletCollectionRarity(subject);
+    console.log(`[mesh-lane] ${source}(subject via ordinalswallet)`, JSON.stringify(r));
+    return;
   }
   if (!OPENSEA_POOL_SOURCES.has(source) && await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
@@ -141,6 +157,11 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     if (source === "cryptopunks-native") {
       const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
       console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
+      return;
+    }
+    if (source === "creator-identity") {
+      const { runCreatorIdentityLane } = await import("../lib/market/multichain/discovery/creator-identity");
+      console.log("[mesh-lane] creator-identity", JSON.stringify(await runCreatorIdentityLane(chain)));
       return;
     }
     if (source === "parity") {
@@ -479,6 +500,20 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     if (source === "coingecko-nft") {
       const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
       console.log("[mesh-lane] cg", JSON.stringify(await runCoinGeckoNftStats(chain, 15)));
+      return;
+    }
+    if (source === "m2-sweep") {
+      const { runM2Sweep } = await import("../lib/market/multichain/discovery/magiceden-m2-sweep");
+      const r = await runM2Sweep({ deadline: Date.now() + HUNT_BUDGET_MS });
+      console.log("[mesh-lane] m2-sweep", JSON.stringify(r));
+      if (r.error && /429|rate|Too many/i.test(r.error)) markDeferred(5 * 60_000, "m2-sweep rate limited");
+      return;
+    }
+    if (source === "ow-rarity") {
+      // Keyless Bitcoin membership + traits + rank for every tracked
+      // collection, a few per pass, oldest-first (the runner's own selector).
+      const { scaffoldAllTrackedOrdinalsWalletCollections } = await import("../lib/market/multichain/discovery/ordinalswallet-rarity-index-runner");
+      console.log("[mesh-lane] ow-rarity", JSON.stringify(await scaffoldAllTrackedOrdinalsWalletCollections({ limit: 3, delayMs: 0 })).slice(0, 400));
       return;
     }
     if (source === "ordinals-wallet") {

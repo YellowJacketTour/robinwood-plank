@@ -77,7 +77,10 @@ export type ChainLaneHealth = {
 /** Sources whose being down is worth a chain-tab banner: they are the ones that bring rows or floors in. */
 const BANNER_SOURCES = new Set([
   "hypersync-discovery", "helius-discovery", "magiceden-catalog", "magiceden-alias", "unisat-discovery", "ordiscan-discovery", "robinhood-discovery",
-  "opensea-stats", "opensea-bulk", "coingecko-nft", "adapter-sync", "unisat-collections", "bestinslot-stats", "native-robinwood", "cryptopunks-native",
+  // native-robinwood is a heal step (sanitizeUnknownZeros), not the native
+  // book -- the RobinWood book is read live per request. Listing it here
+  // produced a "native book down" banner on the Robinhood tab (2026-09-07).
+  "opensea-stats", "opensea-bulk", "coingecko-nft", "adapter-sync", "unisat-collections", "bestinslot-stats", "cryptopunks-native",
 ]);
 
 /**
