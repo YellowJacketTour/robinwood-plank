@@ -72,7 +72,7 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
       `SELECT c.chain_slug, COUNT(*)::text AS total,
               COUNT(*) FILTER (WHERE s.floor_price_wei IS NOT NULL)::text AS with_floor,
               COUNT(*) FILTER (WHERE c.name IS NOT NULL AND c.name <> '')::text AS with_name,
-              MAX(c.synced_at)::text AS newest_synced_at
+              MAX(s.synced_at)::text AS newest_synced_at
          FROM plank_multichain_collections c
          LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
         GROUP BY c.chain_slug ORDER BY c.chain_slug`
