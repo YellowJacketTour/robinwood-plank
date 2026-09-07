@@ -1469,6 +1469,34 @@ export type ActivityRankEntry = { contractAddress: string; totalTransfers: numbe
  * third-party ranking endpoint -- real, observed activity we scanned
  * ourselves, not a marketplace's notion of dollar volume.
  */
+/**
+ * 7-day transfer activity for EXACTLY the collections on a page (2026-09-07).
+ * The hub used to map only each chain's top 500 contracts by transfers, so
+ * every row outside that set graded 0/300 on "Recent chain activity" even
+ * when the table held its tallies (diagnostics: 55,923 Robinhood contracts
+ * with activity, RobinWood shown as 0).
+ */
+export async function getActivityForContracts(
+  pairs: Array<{ chainSlug: string; contractAddress: string }>,
+  windowDays = 7
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (pairs.length === 0) return out;
+  const chains = pairs.map((p) => p.chainSlug);
+  const contracts = pairs.map((p) => p.contractAddress.toLowerCase());
+  const result = await postgresQuery<{ chain_slug: string; contract_address: string; total: string }>(
+    `SELECT a.chain_slug, a.contract_address, SUM(a.transfer_count)::text AS total
+       FROM plank_multichain_activity_stats a
+       JOIN unnest($1::text[], $2::text[]) AS p(chain_slug, contract_address)
+         ON p.chain_slug = a.chain_slug AND p.contract_address = lower(a.contract_address)
+      WHERE a.activity_day >= CURRENT_DATE - $3::int
+      GROUP BY a.chain_slug, a.contract_address`,
+    [chains, contracts, windowDays]
+  );
+  for (const r of result.rows) out.set(`${r.chain_slug}:${r.contract_address.toLowerCase()}`, Number(r.total));
+  return out;
+}
+
 export async function getTopByActivity(
   chainSlug: string,
   windowDays: number,
