@@ -1074,6 +1074,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { PrivateLiveClock, privateCurveDurationSeconds } from "./private-live-clock.js";
+import { ServerClockSync } from "./private-server-clock.js";
 import { verifyPrivateRound } from "./private-fairness.js";
 import { persistFairnessEntry, readFairnessLedger } from "./fairness-ledger.js";
 import { ACTION_STAGES, actionStatusText, advanceActionState } from "./transaction-lifecycle.js";
@@ -4425,7 +4426,21 @@ let privateFirstSnapshot = true;
 let privateSessionCommitted = 0n;
 let privateSessionStart = Date.now();
 let privateSessionInitialBalance = null;
-let privateServerOffsetMs = 0;
+// SPEC/BUGFIX 2026-09-06: replaces a naive `Date.now() + (Date.parse(serverNow)
+// - Date.now())` offset that was recomputed on EVERY paintPrivateSnapshot call
+// -- including acknowledgePrivateSettlement's repaint of the SAME cached
+// snapshot when the reveal card is dismissed, which re-anchored "now" to
+// whenever that snapshot was originally fetched and silently discarded all
+// real elapsed time since (the intermission countdown would jump back up to
+// a near-full 30s if a player left the reveal open a few seconds, while the
+// real, server-fixed launch instant fired on schedule regardless -- see
+// private-server-clock.js's own header for the full trace). ServerClockSync
+// is RTT-compensated and only ever advances: a repaint of stale data cannot
+// move it, and a long-poll response that sat pending for many seconds (the
+// room version is static for the whole 30s intermission, so this is the
+// normal case, not an edge case) is correctly bounded rather than trusted at
+// face value.
+const privateServerClock = new ServerClockSync();
 const privateLiveClock = new PrivateLiveClock();
 // Server-published presentation lag δ (see lib/playtest-live-shared.ts): the
 // display plays the true timeline δ late, and a manual lock is granted at the
@@ -4480,7 +4495,8 @@ function privateDeriveStageName(perfMs) {
   const settledAtMs = Date.parse(snap.room.settledAt || "");
   const laggedCrashWallMs = Date.parse(snap.room.crashAt || "") + privateDisplayLagMs;
   const crashRenderedAtMs = Number.isFinite(laggedCrashWallMs) ? Math.max(settledAtMs || -Infinity, laggedCrashWallMs) : settledAtMs;
-  const sinceCrashMs = Number.isFinite(crashRenderedAtMs) ? (Date.now() + privateServerOffsetMs) - crashRenderedAtMs : Infinity;
+  const serverNowMs = privateServerClock.synchronized ? privateServerClock.now(perfMs) : Date.now();
+  const sinceCrashMs = Number.isFinite(crashRenderedAtMs) ? serverNowMs - crashRenderedAtMs : Infinity;
   if (sinceCrashMs <= 1100) return "crash-hold";
   return flightProgress <= 0.002 ? "parked" : "descent";
 }
@@ -5323,7 +5339,7 @@ function reconstructPrivateMultGraph(snapshot, endBps, receivedPerfMs) {
   const startedMs = Date.parse(snapshot.room.startedAt || "");
   const endWallMs = snapshot.room.phase === "settled"
     ? Date.parse(snapshot.room.crashAt || snapshot.serverNow)
-    : Date.now() + privateServerOffsetMs;
+    : (privateServerClock.synchronized ? privateServerClock.now(receivedPerfMs) : Date.now());
   if (!Number.isFinite(startedMs) || !Number.isFinite(endWallMs) || endWallMs < startedMs) return;
   const endX = Math.max(1, Number(endBps || 10000) / 10000);
   // Build the trace in the multiplier's own authoritative domain. A delayed
@@ -5348,7 +5364,12 @@ function reconstructPrivateMultGraph(snapshot, endBps, receivedPerfMs) {
 function updatePrivateIntermissionAction(snapshot = privateSnapshot, queuedSeat = null, me = null) {
   if (!snapshot || snapshot.room.phase !== "settled") return;
   const deadline = Date.parse(snapshot.room.nextLaunchAt || "");
-  const now = Date.now() + privateServerOffsetMs;
+  // ServerClockSync.now() is monotonic and only ever advances from a REAL
+  // network round trip -- unlike the old Date.now()+offset math, nothing here
+  // can be rewound by a repaint of stale cached data (see paintPrivateSnapshot
+  // and private-server-clock.js). Fall back to Date.now() only before the
+  // very first successful fetch has ever landed (synchronized === false).
+  const now = privateServerClock.synchronized ? privateServerClock.now(performance.now()) : Date.now();
   const remainingMs = Number.isFinite(deadline) ? Math.max(0, deadline - now) : 0;
   const seconds = Math.ceil(remainingMs / 1000);
   const nextRound = Number(snapshot.room.currentRound) + 1;
@@ -5686,9 +5707,26 @@ function tellPrivateReconnectStory(snapshot, seat) {
   window.setTimeout(() => overlay.classList.remove("show"), 2_200);
 }
 
-function paintPrivateSnapshot(snapshot) {
+/**
+ * `sentPerfMs` is the performance.now() taken immediately before the network
+ * request that produced `snapshot` was issued -- REQUIRED for a real fetch
+ * response so ServerClockSync can bound the estimate by the true round trip
+ * (see private-server-clock.js). MUST be omitted when repainting an
+ * already-cached snapshot with no new network round trip (e.g.
+ * acknowledgePrivateSettlement's dismiss-the-reveal repaint): observing a
+ * stale snapshot's serverNow against a fresh receivedPerfMs would fabricate
+ * an enormous, wrong "round trip" and corrupt the clock exactly the way the
+ * old naive offset did. Omitting it simply skips the observation and keeps
+ * whatever estimate the last REAL fetch already established -- correct,
+ * because no time has passed on the server axis that this repaint could
+ * possibly know about.
+ */
+function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
   const receivedPerfMs = performance.now();
-  privateServerOffsetMs = Date.parse(snapshot.serverNow) - Date.now();
+  if (sentPerfMs !== null) {
+    const serverNowMs = Date.parse(snapshot.serverNow);
+    privateServerClock.observe(serverNowMs, sentPerfMs, receivedPerfMs);
+  }
   privateDisplayLagMs = privateClampDisplayLagMs(snapshot.room.displayLagMs);
   const roundKey = `${snapshot.room.id}:${snapshot.room.currentRound}`;
   if (!privateLiveClock.synchronize({
@@ -6011,7 +6049,8 @@ async function refreshPrivatePlaytest() {
         return;
       }
     }
-    paintPrivateSnapshot(await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}`, { cache: "no-store" })));
+    const refreshSentPerfMs = performance.now();
+    paintPrivateSnapshot(await privateJson(await fetch(`/api/playtest/rooms/${privateRoomId}`, { cache: "no-store" })), refreshSentPerfMs);
   } catch (error) {
     if (error.message !== privateLastError) {
       privateLastError = error.message;
@@ -6046,6 +6085,13 @@ function startPrivateUpdates() {
     while (!controller.signal.aborted && generation === privateUpdatesGeneration && privateRoomId === roomId) {
       try {
         const after = privateSnapshot?.room.id === roomId ? privateSnapshot.room.version : -1;
+        // Captured BEFORE the request so ServerClockSync can bound the
+        // estimate by the true round trip -- this long poll can legitimately
+        // sit pending for many seconds (the room version is static for the
+        // whole 30s intermission), so sentPerfMs and receivedPerfMs can be far
+        // apart, and that gap is exactly what the RTT/2 error bound accounts
+        // for correctly instead of treating the whole gap as clock skew.
+        const sentPerfMs = performance.now();
         const response = await fetch(`/api/playtest/rooms/${roomId}/updates?after=${encodeURIComponent(after)}`, {
           cache: "no-store",
           signal: controller.signal,
@@ -6066,7 +6112,7 @@ function startPrivateUpdates() {
           continue;
         }
         const update = await privateJson(response);
-        if (update.snapshot) paintPrivateSnapshot(update.snapshot);
+        if (update.snapshot) paintPrivateSnapshot(update.snapshot, sentPerfMs);
         privateLastError = "";
       } catch (error) {
         if (controller.signal.aborted) return;
