@@ -26,7 +26,7 @@ export type MeshDiagnostics = {
   kv: Record<string, unknown>;
   /** Live worker heartbeats (role, claims, last job) from every mesh process seen in the last 10 minutes. */
   workers: unknown[];
-  /** What a standing-slot claim (priority <= 60, ready now) would pick next, or nothing if none is claimable. */
+  /** What a standing-slot claim (job_key 'mesh:%', ready now) would pick next, or nothing if none is claimable. */
   standingCandidates: Array<{ jobKey: string; priority: number; notBefore: string; kind: string; status: string }>;
 };
 
@@ -96,7 +96,7 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
     postgresQuery<Row>(
       `SELECT job_key, priority::text, not_before::text, kind, status
          FROM plank_data_jobs
-        WHERE status = 'queued' AND not_before <= NOW() AND priority <= 60
+        WHERE status = 'queued' AND not_before <= NOW() AND job_key LIKE 'mesh:%'
         ORDER BY priority DESC, attempts, not_before, id
         LIMIT 5`
     ).catch(() => ({ rows: [] as Row[] })),
