@@ -24,13 +24,17 @@ export type MeshDiagnostics = {
   collectionsByChain: Array<{ chainSlug: string; total: number; withFloor: number; withName: number; newestSyncedAt: string | null }>;
   staleDemand: { queuedAtOrAbove118: number; olderThan1h: number };
   kv: Record<string, unknown>;
+  /** Live worker heartbeats (role, claims, last job) from every mesh process seen in the last 10 minutes. */
+  workers: unknown[];
+  /** What a standing-slot claim (priority <= 60, ready now) would pick next, or nothing if none is claimable. */
+  standingCandidates: Array<{ jobKey: string; priority: number; notBefore: string; kind: string; status: string }>;
 };
 
 type Row = Record<string, string | null>;
 
 export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
   if (!hasPostgresConfig()) return null;
-  const [jobs, outcomes, lanes, activity, collections, stale, kv] = await Promise.all([
+  const [jobs, outcomes, lanes, activity, collections, stale, kv, workers, standing] = await Promise.all([
     postgresQuery<Row>(
       `SELECT source, chain_slug,
               COUNT(*) FILTER (WHERE status = 'queued')::text AS queued,
@@ -88,6 +92,14 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
            OR key_name LIKE 'plank:market:magiceden-catalog%'
         LIMIT 40`
     ).catch(() => ({ rows: [] as Array<{ key_name: string; value: unknown }> })),
+    postgresQuery<{ value: unknown }>(`SELECT value FROM plank_kv_values WHERE key_name LIKE 'plank:mesh:worker:%' ORDER BY key_name LIMIT 40`).catch(() => ({ rows: [] as Array<{ value: unknown }> })),
+    postgresQuery<Row>(
+      `SELECT job_key, priority::text, not_before::text, kind, status
+         FROM plank_data_jobs
+        WHERE status = 'queued' AND not_before <= NOW() AND priority <= 60
+        ORDER BY priority DESC, attempts, not_before, id
+        LIMIT 5`
+    ).catch(() => ({ rows: [] as Row[] })),
   ]);
   const num = (v: string | null | undefined) => (v == null ? null : Number(v));
   const err = (v: string | null | undefined) => (v ? v.slice(0, 300) : null);
@@ -104,5 +116,7 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
     collectionsByChain: collections.rows.map((r) => ({ chainSlug: r.chain_slug ?? "", total: Number(r.total), withFloor: Number(r.with_floor), withName: Number(r.with_name), newestSyncedAt: r.newest_synced_at })),
     staleDemand: { queuedAtOrAbove118: Number(stale.rows[0]?.n ?? 0), olderThan1h: Number(stale.rows[0]?.old ?? 0) },
     kv: Object.fromEntries(kv.rows.map((r) => [r.key_name, r.value])),
+    workers: workers.rows.map((r) => r.value),
+    standingCandidates: standing.rows.map((r) => ({ jobKey: r.job_key ?? "", priority: Number(r.priority), notBefore: r.not_before ?? "", kind: r.kind ?? "", status: r.status ?? "" })),
   };
 }

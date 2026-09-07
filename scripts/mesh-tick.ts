@@ -375,8 +375,22 @@ async function main(): Promise<void> {
   type WorkerRole = "express" | "standing" | "general";
   async function worker(role: WorkerRole = "general"): Promise<void> {
     const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
+    // Worker heartbeat (2026-09-07): diagnostics showed every standing lane
+    // with zero claims ever, and nothing said whether the standing slot even
+    // existed in the running process. Each worker now records its role,
+    // claim count and last job every loop (throttled to one write per 10 s).
+    const { durableKv } = await import("../lib/market/durable-kv");
+    const hb = { role, pid: process.pid, startedAt: new Date().toISOString(), claims: 0, lastClaimAt: null as string | null, lastJob: null as string | null, at: "" };
+    let lastBeat = 0;
+    const beat = async () => {
+      if (Date.now() - lastBeat < 10_000) return;
+      lastBeat = Date.now();
+      hb.at = new Date().toISOString();
+      await durableKv.set(`plank:mesh:worker:${process.pid}:${role}`, hb, { ex: 600 }).catch(() => undefined);
+    };
     while (true) {
       if (Date.now() >= claimDeadline) break;
+      await beat();
       const job =
         role === "express"
           ? await claimDataJob(claimKinds, 300_000, EXPRESS_MIN_PRIORITY)
@@ -395,6 +409,11 @@ async function main(): Promise<void> {
         continue;
       }
       const laneKey = `${job.source}:${job.chainSlug}`;
+      hb.claims += 1;
+      hb.lastClaimAt = new Date().toISOString();
+      hb.lastJob = job.jobKey;
+      lastBeat = 0;
+      await beat();
       await recordLaneClaim(laneKey);
       console.log(`[mesh-tick] start ${job.jobKey}`);
       // See OPENSEA_TOUCHING_SOURCES's own header: this job is already

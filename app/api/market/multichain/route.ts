@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshotsPage, getTopByActivity, getObservedFloorChange24h } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshotsPage, getObservedFloorChange24h } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { hasUnindexedNativeBook, primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
@@ -143,16 +143,15 @@ async function buildHubIndex(req: Request) {
     // (robinhood-chain-scan -> recordActivity) but was filtered out here, so
     // RobinWood's row was hard-wired to 0 transfers and lost the 300-point
     // activity axis of its grade.
-    const chainSlugs = [...new Set([...collections.map((c) => c.chainSlug), "robinhood"])].filter((s) => s === "robinhood" || foreignChainByChainSlug(s));
-    const activityByChain = await Promise.all(
-      chainSlugs.map(async (slug) => [slug, await getTopByActivity(slug, 7, 500).catch(() => [])] as const)
-    );
-    const activityByContract = new Map<string, number>();
-    for (const [chainSlug, rows] of activityByChain) {
-      for (const row of rows) activityByContract.set(`${chainSlug}:${row.contractAddress.toLowerCase()}`, row.totalTransfers);
-    }
-
+    // Activity for exactly the rows on this page plus the home collection
+    // (2026-09-07): the old top-500-per-chain map left most rows at 0.
     const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
+    const { getActivityForContracts } = await import("@/lib/market/multichain/store");
+    const activityByContract = await getActivityForContracts([
+      ...collections.map((c) => ({ chainSlug: c.chainSlug, contractAddress: c.contractAddress })),
+      { chainSlug: "robinhood", contractAddress: NFT_CONTRACT_ADDRESS },
+    ]).catch(() => new Map<string, number>());
+
     // One book, one floor (2026-09-06): the same merged, liveness-checked
     // book the /market page renders (our Seaport rows + OpenSea + Pulp),
     // so this row's floor, listed count and grade agree with the
