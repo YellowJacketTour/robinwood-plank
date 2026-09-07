@@ -5,6 +5,13 @@ import {
   type QueryResultRow,
 } from "pg";
 
+/** True inside mesh-tick / mesh-lane / opensea-stream processes (in-process env or the bundle's own argv). */
+function isMeshWorkerProcess(): boolean {
+  if (process.env.MESH_IN_PROCESS === "1") return true;
+  return process.argv.some((a) => /mesh-tick|mesh-lane|opensea-stream/.test(a));
+}
+
+
 type PostgresGlobal = typeof globalThis & {
   __plankPostgresPool?: Pool;
 };
@@ -81,7 +88,11 @@ export function postgresPool(): Pool {
       max: postgresPoolMax(),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-      statement_timeout: 15_000,
+      // Web requests keep the 15 s guard; mesh workers run bounded but real
+      // scans (HyperSync backfill windows, activity tallies) that legitimately
+      // exceed it -- 2026-09-07 diagnostics: "canceling statement due to
+      // statement timeout" on hypersync-backfill:base-mainnet.
+      statement_timeout: isMeshWorkerProcess() ? 120_000 : 15_000,
       query_timeout: 20_000,
       application_name: "plank-love-passenger",
       ssl: postgresSsl(),
