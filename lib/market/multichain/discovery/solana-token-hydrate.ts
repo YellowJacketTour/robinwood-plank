@@ -32,10 +32,65 @@ import { recordArchivalHydration, maybeExpandSiblingTokens } from "@/lib/market/
 
 type HeliusAssetDetail = {
   content?: {
+    json_uri?: string | null;
     metadata?: { name?: string | null; attributes?: Array<{ trait_type?: string; value?: unknown }> };
     links?: { image?: string | null };
   };
 };
+
+export type SolanaTrait = { traitType: string; value: string };
+
+/** Pure: Metaplex-standard `attributes` -> this app's trait rows. Exported
+ * for tests and shared with helius-rarity-index-runner.ts. Non-scalar
+ * values and blank trait types are dropped, never stringified to
+ * "[object Object]". */
+export function traitsFromAttributes(attributes: unknown): SolanaTrait[] {
+  if (!Array.isArray(attributes)) return [];
+  const out: SolanaTrait[] = [];
+  for (const a of attributes as Array<{ trait_type?: unknown; value?: unknown }>) {
+    if (!a || typeof a !== "object") continue;
+    const traitType = typeof a.trait_type === "string" ? a.trait_type.trim() : "";
+    const value = a.value;
+    if (!traitType) continue;
+    if (typeof value === "string") { const v = value.trim(); if (v) out.push({ traitType, value: v }); }
+    else if (typeof value === "number" || typeof value === "boolean") out.push({ traitType, value: String(value) });
+  }
+  return out;
+}
+
+const OFFCHAIN_URI = /^(https?:\/\/|ipfs:\/\/|ar:\/\/)/i;
+
+/**
+ * AUDIT lens 4 #9 (Batch F9): DAS `content.metadata.attributes` is
+ * frequently EMPTY even when the off-chain JSON the asset points at
+ * (`content.json_uri`) carries a full Metaplex-standard `attributes`
+ * array -- the indexer only mirrors what it parsed at index time. This
+ * fetches that JSON under lib/ipfs.ts's own gateway discipline (rotation,
+ * per-host token bucket, bounded timeout; https / ar:// / ipfs:// pointers
+ * all handled there) and returns the traits/name/image it really carries.
+ * Never throws; a fetch failure is an honest null.
+ */
+export async function resolveSolanaOffchainMetadata(jsonUri: string | null | undefined): Promise<{
+  name: string | null; imageUrl: string | null; traits: SolanaTrait[];
+} | null> {
+  const uri = typeof jsonUri === "string" ? jsonUri.trim() : "";
+  if (!uri || !OFFCHAIN_URI.test(uri)) return null;
+  try {
+    const { fetchNftMetadata } = await import("@/lib/ipfs");
+    const body = await fetchNftMetadata(uri);
+    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
+    const imageUrl = typeof body.image === "string" && body.image.trim() ? body.image.trim() : null;
+    return { name, imageUrl, traits: traitsFromAttributes(body.attributes) };
+  } catch {
+    return null;
+  }
+}
+
+/** Pure decision, exported for tests: DAS gave us no traits but a real
+ * pointer exists -> the fallback is worth one fetch. */
+export function shouldFetchJsonUriFallback(dasTraits: SolanaTrait[], jsonUri: string | null | undefined): boolean {
+  return dasTraits.length === 0 && typeof jsonUri === "string" && OFFCHAIN_URI.test(jsonUri.trim());
+}
 
 export type SolanaTokenHydrateResult = {
   resolved: boolean;
@@ -103,19 +158,24 @@ export async function hydrateSpecificSolanaToken(
   })();
   const das = await fetchViaDas(mintAddress);
   if (das) {
-    const name = das.content?.metadata?.name?.trim() || null;
-    const imageUrl = das.content?.links?.image?.trim() || null;
-    const traits = (das.content?.metadata?.attributes ?? []).flatMap((a) => {
-      const traitType = typeof a.trait_type === "string" ? a.trait_type.trim() : "";
-      const value = a.value;
-      return traitType && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
-        ? [{ traitType, value: String(value) }] : [];
-    });
+    let name = das.content?.metadata?.name?.trim() || null;
+    let imageUrl = das.content?.links?.image?.trim() || null;
+    let traits = traitsFromAttributes(das.content?.metadata?.attributes);
+    const provenance = ["on-demand-click-hydration-das"];
+    // F9: json_uri fallback when DAS attributes are empty.
+    if (shouldFetchJsonUriFallback(traits, das.content?.json_uri)) {
+      const offchain = await resolveSolanaOffchainMetadata(das.content?.json_uri);
+      if (offchain) {
+        if (offchain.traits.length) { traits = offchain.traits; provenance.push("solana-json-uri-fallback"); }
+        name = name ?? offchain.name;
+        imageUrl = imageUrl ?? offchain.imageUrl;
+      }
+    }
     if (name || imageUrl || traits.length > 0) {
       await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
         tokens: [{ tokenId: mintAddress, name, imageUrl, traits }],
         partial: true, preservePartial: true,
-        provenance: ["on-demand-click-hydration-das"], sourceObservedAt: new Date(),
+        provenance, sourceObservedAt: new Date(),
       });
       await recordArchivalHydration(chainSlug, collectionSlug, { isNewToken: !wasAlreadyArchived }).catch(() => {});
       await maybeExpandSiblingTokens(chainSlug, collectionSlug).catch(() => {});

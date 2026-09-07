@@ -26,7 +26,7 @@ import { postgresQuery } from "@/lib/postgres";
 import { enqueueDataJob } from "@/lib/market/multichain/control-plane";
 import { hydrationJobSources, DEMAND_PRIORITY } from "@/lib/market/multichain/collection-demand";
 import { getCollectionSupplyStats } from "@/lib/market/multichain/store";
-import { readTokenMetadataWork } from "@/lib/market/multichain/collection-token-store";
+import { readMetadataCoverageCounters, readTokenMetadataWork } from "@/lib/market/multichain/collection-token-store";
 import {
   nextHydrateDelayMs,
   ARCHIVAL_RECRAWL_BASE_TTL_MS,
@@ -425,7 +425,58 @@ export type ArchivalApiShape = {
    */
   metadataTokens?: number | null;
   metadataCoverage?: number | null;
+  /**
+   * AUDIT lens 4 #5 (Batch F5): the name-or-image count above lies in
+   * both directions (a bare membership row with a name counts as
+   * "metadata"; a token with an image but no traits counts the same as
+   * one fully scored). Three honest counters, all against the same
+   * `expected` denominator (projection expected_count / membership
+   * cursor / stored rows, whichever is largest -- see
+   * readMetadataCoverageCounters): terminal = metadata_state is
+   * complete|empty (the fetch lane is DONE with the row, one way or the
+   * other); withTraits = traits jsonb is non-empty; withImage = image_url
+   * present. Only the single-collection route computes them.
+   */
+  metadataCounters?: MetadataCoverageCounterShape | null;
+  /** withTraits / expected, or null when expected is 0. */
+  traitsCoverage?: number | null;
+  /** True while withTraits / expected is below RARITY_PROVISIONAL_THRESHOLD
+   * -- a rarity ranking shown in this state is labelled provisional. */
+  metadataProvisional?: boolean;
 };
+
+export type MetadataCoverageCounterShape = {
+  expected: number;
+  terminal: number;
+  withTraits: number;
+  withImage: number;
+  terminalCoverage: number | null;
+  traitsCoverage: number | null;
+  imageCoverage: number | null;
+};
+
+/** Same 99.5% line rarity-index-runner.ts finalizes at (RARITY_FINALIZE_THRESHOLD). */
+export const RARITY_PROVISIONAL_THRESHOLD = 0.995;
+
+/** Pure: raw counters -> ratios + provisional flag. Exported for tests. */
+export function metadataCountersToShape(counters: { expected: number; terminal: number; withTraits: number; withImage: number }): {
+  shape: MetadataCoverageCounterShape;
+  provisional: boolean;
+} {
+  const expected = Math.max(0, Number(counters.expected) || 0);
+  const ratio = (n: number) => (expected > 0 ? Math.max(0, Math.min(1, (Number(n) || 0) / expected)) : null);
+  const shape: MetadataCoverageCounterShape = {
+    expected,
+    terminal: Math.max(0, Number(counters.terminal) || 0),
+    withTraits: Math.max(0, Number(counters.withTraits) || 0),
+    withImage: Math.max(0, Number(counters.withImage) || 0),
+    terminalCoverage: ratio(counters.terminal),
+    traitsCoverage: ratio(counters.withTraits),
+    imageCoverage: ratio(counters.withImage),
+  };
+  const provisional = shape.traitsCoverage == null || shape.traitsCoverage < RARITY_PROVISIONAL_THRESHOLD;
+  return { shape, provisional };
+}
 
 type RawArchivalStatsRow = {
   chain_slug: string;
@@ -599,22 +650,30 @@ export async function getArchivalStatsForCollection(
 
   // Real, separate metadata (L3) signal -- see ArchivalApiShape's own
   // header for why this must never be conflated with membership above.
-  const metadataResult = await postgresQuery<{ metadata_count: string }>(
-    `SELECT COUNT(*)::text AS metadata_count FROM plank_collection_tokens
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND (name IS NOT NULL OR image_url IS NOT NULL)`,
-    [chainSlug, normalized]
-  ).catch(() => ({ rows: [{ metadata_count: "0" }] }));
+  const [metadataResult, rawCounters] = await Promise.all([
+    postgresQuery<{ metadata_count: string }>(
+      `SELECT COUNT(*)::text AS metadata_count FROM plank_collection_tokens
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND (name IS NOT NULL OR image_url IS NOT NULL)`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [{ metadata_count: "0" }] })),
+    // AUDIT lens 4 #5 (Batch F5): the three honest counters.
+    readMetadataCoverageCounters(chainSlug, normalized).catch(() => null),
+  ]);
   const metadataTokens = Number(metadataResult.rows[0]?.metadata_count ?? 0);
   const metadataDenominator = liveCount ?? shape.knownSupply ?? null;
   const metadataCoverage = metadataDenominator != null && metadataDenominator > 0
     ? Math.min(1, metadataTokens / metadataDenominator)
     : null;
+  const counters = rawCounters ? metadataCountersToShape(rawCounters) : null;
 
   return {
     ...shape,
     jobProcessing: jobResult.rows[0]?.exists === true,
     metadataTokens,
     metadataCoverage,
+    metadataCounters: counters?.shape ?? null,
+    traitsCoverage: counters?.shape.traitsCoverage ?? null,
+    metadataProvisional: counters ? counters.provisional : true,
   };
 }
 

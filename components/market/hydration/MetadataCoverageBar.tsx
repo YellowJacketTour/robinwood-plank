@@ -23,7 +23,31 @@ export type MetadataCoverageBarProps = {
   active?: boolean;
   compact?: boolean;
   className?: string;
+  /** AUDIT lens 4 #5 (Batch F5): withTraits / expected from
+   * archival-ledger.ts's metadataCounters. While below
+   * PROVISIONAL_TRAITS_THRESHOLD the bar stays visible (even at "100%"
+   * name-or-image) and carries a "Provisional (N% traits)" label, because
+   * a rarity ranking computed over trait-less rows is not a ranking. */
+  traitsCoverage?: number | null;
+  /** The raw counters, for the tooltip/summary line only. */
+  metadataCounters?: {
+    expected: number; terminal: number; withTraits: number; withImage: number;
+  } | null;
 };
+
+/** Same 99.5% line as archival-ledger.ts's RARITY_PROVISIONAL_THRESHOLD. */
+export const PROVISIONAL_TRAITS_THRESHOLD = 0.995;
+
+/** Pure label helper, exported for tests: null when not provisional. */
+export function provisionalTraitsLabel(traitsCoverage: number | null | undefined): string | null {
+  if (traitsCoverage == null || !Number.isFinite(traitsCoverage)) return null;
+  if (traitsCoverage >= PROVISIONAL_TRAITS_THRESHOLD) return null;
+  const pct = Math.max(0, Math.min(100, traitsCoverage * 100));
+  // Never round a real gap up to "100%": 99.6% traits is >= threshold and
+  // therefore never reaches this line; anything below shows at most 99.4.
+  const shown = pct >= 99.45 ? "99.4" : pct.toFixed(pct < 10 ? 2 : 1);
+  return `Provisional (${shown}% traits)`;
+}
 
 /**
  * Real, separate "traits & metadata" bar -- external research brief's own
@@ -51,6 +75,8 @@ export function MetadataCoverageBar({
   active = false,
   compact = false,
   className = "",
+  traitsCoverage = null,
+  metadataCounters = null,
 }: MetadataCoverageBarProps) {
   const reduced = usePrefersReducedMotion();
   const known = metadataCoverage != null;
@@ -60,19 +86,26 @@ export function MetadataCoverageBar({
   const growing = known && tweenedPct != null && rawPct != null && Math.abs(tweenedPct - rawPct) > 0.01;
   const pctLabel = displayPct != null ? displayPct.toFixed(2) : null;
   const restColor = chainSlug ? chainBrandColorInverted(chainSlug) : null;
+  const provisional = provisionalTraitsLabel(traitsCoverage);
 
+  const countersLine = metadataCounters && metadataCounters.expected > 0
+    ? ` - traits ${metadataCounters.withTraits.toLocaleString()}/${metadataCounters.expected.toLocaleString()}, images ${metadataCounters.withImage.toLocaleString()}/${metadataCounters.expected.toLocaleString()}, fetched ${metadataCounters.terminal.toLocaleString()}/${metadataCounters.expected.toLocaleString()}`
+    : "";
   const summary =
-    known && knownTokens != null && metadataTokens != null
+    (known && knownTokens != null && metadataTokens != null
       ? `Traits & metadata ${pctLabel}% - ${metadataTokens.toLocaleString()} of ${knownTokens.toLocaleString()} known tokens`
       : metadataTokens != null
         ? `Traits & metadata - ${metadataTokens.toLocaleString()} tokens with real data - denominator unknown`
-        : "Traits & metadata - not yet measured";
+        : "Traits & metadata - not yet measured") +
+    (provisional ? ` - ${provisional}` : "") + countersLine;
 
   // Nothing to show for a genuinely unmeasured collection, and nothing
   // to show once metadata has fully caught up to membership -- this bar
   // exists specifically to surface a real, current GAP, never to restate
   // "also 100%" a second time right under a bar that already said so.
-  if (!known || (displayPct != null && displayPct >= 99.9)) return null;
+  // EXCEPT while traits are provisional (F5): "100% name-or-image" with
+  // 3% traits is exactly the lie this bar exists to expose.
+  if (!known || (displayPct != null && displayPct >= 99.9 && !provisional)) return null;
 
   const fillStyle: CSSProperties = {
     width: `${displayPct}%`,
@@ -110,7 +143,14 @@ export function MetadataCoverageBar({
   return (
     <div className={["w-full", className].join(" ")}>
       <div className="mb-1 flex items-baseline justify-between gap-2 text-xs text-amber-100/80">
-        <span className="font-medium tracking-wide text-amber-50/90">Traits &amp; metadata</span>
+        <span className="font-medium tracking-wide text-amber-50/90">
+          Traits &amp; metadata
+          {provisional && (
+            <span className="ml-2 rounded-sm border border-amber-400/40 bg-amber-400/10 px-1 py-px text-[10px] font-normal uppercase tracking-wider text-amber-200/90" title={summary}>
+              {provisional}
+            </span>
+          )}
+        </span>
         <span className="tabular-nums text-amber-100/70" aria-live="polite">
           {pctLabel}%
         </span>

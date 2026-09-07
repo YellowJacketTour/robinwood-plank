@@ -173,6 +173,11 @@ export async function GET(req: NextRequest) {
                 knownSupply: archival.knownSupply,
                 lastArchivedAt: archival.lastArchivedAt,
                 jobProcessing: archival.jobProcessing ?? false,
+                // Honest coverage (AUDIT lens 4 #5, 2026-09-07): three counters +
+                // the provisional flag the bar and the rarity route agree on.
+                metadataCounters: archival.metadataCounters ?? null,
+                traitsCoverage: archival.traitsCoverage ?? null,
+                metadataProvisional: archival.metadataProvisional ?? null,
                 // Real, separate metadata (L3) signal -- see
                 // ArchivalApiShape's own header for why this must never be
                 // blended into archivalScore/tokensEverHydrated above.

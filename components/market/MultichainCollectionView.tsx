@@ -315,6 +315,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
      * vs real membership are two different, honest questions). */
     metadataTokens: number | null;
     metadataCoverage: number | null;
+    traitsCoverage?: number | null;
+    metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
   } | null>(null);
   /** Bitcoin/Solana-only per-venue coverage from the listings route's `bookCoverage` (see route.ts's own header) -- e.g. "unisat":"credential-missing" when UNISAT_API_KEY isn't configured on this deployment. Rendered so a genuinely-empty book (real market state, like Yonder's real 0 UniSat/OrdinalsWallet listings) is never indistinguishable from a venue that was silently never queried. */
   const [bookCoverage, setBookCoverage] = useState<{ complete?: boolean; partial?: boolean; sources: Record<string, string> } | null>(null);
@@ -578,6 +580,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             jobProcessing: boolean;
             metadataTokens: number | null;
             metadataCoverage: number | null;
+            traitsCoverage?: number | null;
+            metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
           } | null;
         };
       }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
@@ -2165,6 +2169,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           metadataCoverage={archival.metadataCoverage}
           metadataTokens={archival.metadataTokens}
           knownTokens={archival.tokensEverHydrated}
+          traitsCoverage={archival.traitsCoverage ?? undefined}
+          metadataCounters={archival.metadataCounters ?? undefined}
           pulseKey={archival.lastArchivedAt}
           chainSlug={chainSlug}
           active={isActivelyHydrating}
