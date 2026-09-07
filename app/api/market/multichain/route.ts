@@ -221,6 +221,10 @@ async function buildHubIndex(req: Request) {
       floorPriceWei: nativeFloor != null ? nativeFloor.toString() : null,
       floorPriceCurrency: "ETH",
       floorPriceMarketplace: nativeFloorVenue,
+      // The merged book was read live for this response, so the floor is
+      // observed NOW; without this the freshness dot rendered grey ("age
+      // unknown") on the home collection itself (owner, 2026-09-07).
+      floorObservedAt: nativeFloor != null ? new Date().toISOString() : null,
       totalSupply: ROBINWOOD_TOTAL_SUPPLY,
       listedCount: nativeListed,
       syncedAt: new Date().toISOString(),

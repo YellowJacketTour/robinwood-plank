@@ -471,14 +471,17 @@ export type MetadataCoverageCounters = {
   expected: number;
   rows: number;
   terminal: number;
+  /** Rows the fetch lane closed as confirmed-empty (dead tokenURI after the attempt cap, burned, trait-less). */
+  empty: number;
   withTraits: number;
   withImage: number;
 };
 
 export async function readMetadataCoverageCounters(chainSlug: string, collectionSlug: string): Promise<MetadataCoverageCounters> {
-  const result = await postgresQuery<{ rows: string; terminal: string; with_traits: string; with_image: string; expected: string | null }>(
+  const result = await postgresQuery<{ rows: string; terminal: string; empty: string; with_traits: string; with_image: string; expected: string | null }>(
     `SELECT COUNT(*)::text AS rows,
             COUNT(*) FILTER (WHERE metadata_state IN ('complete','empty'))::text AS terminal,
+            COUNT(*) FILTER (WHERE metadata_state = 'empty')::text AS empty,
             COUNT(*) FILTER (WHERE traits IS NOT NULL AND traits <> '[]'::jsonb)::text AS with_traits,
             COUNT(*) FILTER (WHERE image_url IS NOT NULL)::text AS with_image,
             (SELECT COALESCE(
@@ -499,6 +502,7 @@ export async function readMetadataCoverageCounters(chainSlug: string, collection
   return {
     expected, rows,
     terminal: Number(row?.terminal ?? 0),
+    empty: Number(row?.empty ?? 0),
     withTraits: Number(row?.with_traits ?? 0),
     withImage: Number(row?.with_image ?? 0),
   };
