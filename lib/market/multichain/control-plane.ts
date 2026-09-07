@@ -205,6 +205,12 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
       params.push(`${jobKeyPrefix}%`);
       priorityClause += ` AND job_key LIKE $${params.length}`;
     }
+    // Fair rotation for the standing slot (2026-09-07, second probe): with
+    // priority ordering the three priority-60 standing lanes (seaport-live
+    // per chain) finished instantly, re-enqueued, and were claimed again
+    // ahead of every priority-20 lane, 213 times in ten minutes. Standing
+    // lanes are peers: the one that ran least recently goes next.
+    const orderClause = jobKeyPrefix ? "completed_at NULLS FIRST, attempts, not_before, id" : "priority DESC, attempts, not_before, id";
     params.push(leaseMs);
     const leaseParam = `$${params.length}`;
     params.push(owner);
@@ -230,7 +236,7 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
       `WITH candidate AS (
          SELECT id FROM plank_data_jobs
          WHERE status = 'queued' AND not_before <= NOW() ${kindClause} ${priorityClause}
-         ORDER BY priority DESC, attempts, not_before, id
+         ORDER BY ${orderClause}
          FOR UPDATE SKIP LOCKED LIMIT 1
        )
        UPDATE plank_data_jobs j SET status = 'running', attempts = attempts + 1,
