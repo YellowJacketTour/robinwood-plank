@@ -695,6 +695,16 @@ jobs:
             exit 1
           fi
 
+          # 2026-09-07: the always-on scheduler and stream worker hold locks on
+          # the tables a migration alters; the first migration-carrying deploy
+          # was cancelled by Postgres (ProcessInterrupts) while waiting. Stop
+          # both before migrating; cron restarts them within a minute after
+          # activation. Only when a migration is actually pending.
+          if [ "$check_status" -eq 3 ]; then
+            pkill -f "mesh-tick-standalone.mjs" || true
+            pkill -f "opensea-stream-standalone.mjs" || true
+            sleep 5
+          fi
           "$node_bin" \
             --env-file="$app_dir/shared/.env.production" \
             "$release_dir/scripts/migrate-postgres.mjs"

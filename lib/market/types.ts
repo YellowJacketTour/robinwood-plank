@@ -56,7 +56,7 @@ export type MarketCollection = {
  * while foreign-fulfill.ts's buySolanaListingNow/buyBitcoinListingNow branch
  * on the venue to build the right kind of transaction.
  */
-export type ListingVenue = "opensea" | "pulp" | "magiceden" | "unisat" | "ordinals-wallet" | "ordnet" | "cryptopunks-native" | "satflow" | "okx";
+export type ListingVenue = "opensea" | "pulp" | "magiceden" | "unisat" | "ordinals-wallet" | "ordnet" | "cryptopunks-native" | "satflow" | "okx" | "bestinslot";
 
 export type Listing = {
   id: string;
@@ -216,6 +216,7 @@ export const VENUE_LABELS: Record<ListingVenue, string> = {
   "cryptopunks-native": "CryptoPunks",
   satflow: "Satflow",
   okx: "OKX",
+  bestinslot: "BestInSlot",
 };
 
 export const MARKETPLANK_VENUE_LABEL = "Marketplank";

@@ -152,7 +152,17 @@ export async function readProjectedTokensByIds(
   }]));
 }
 
-/** Merge one background-indexer page without erasing richer fields. */
+/** Rows per INSERT ... SELECT FROM unnest(...) statement (AUDIT lens 4 #10). */
+export const PROJECTION_WRITE_CHUNK = 500;
+
+/**
+ * Merge one background-indexer page without erasing richer fields.
+ * AUDIT lens 4 #10 (2026-09-06): this used to be one INSERT per token plus
+ * a COUNT(*) per call; a 10k collection was ~10k round trips on a
+ * 4-connection pool. Now each statement writes up to PROJECTION_WRITE_CHUNK
+ * rows via `INSERT ... SELECT FROM unnest(...)`, and the collection COUNT
+ * runs exactly once per batch.
+ */
 export async function upsertCollectionTokenProjection(
   chainSlug: string, collectionSlug: string, page: CollectionTokenProjectionPage
 ): Promise<void> {
@@ -160,14 +170,45 @@ export async function upsertCollectionTokenProjection(
   const provenance = [...new Set(page.provenance.map((value) => value.trim()).filter(Boolean))];
   if (!provenance.length) throw new Error("collection token projection requires provenance");
   if (!Number.isFinite(page.sourceObservedAt.getTime())) throw new Error("sourceObservedAt must be a valid date");
+  // ON CONFLICT cannot touch the same row twice in one statement, so a
+  // token id repeated within a page is merged first with the same field
+  // semantics the row-level upsert applies (later non-null wins, non-empty
+  // traits win) -- identical to what N sequential single-row writes produced.
+  type PageToken = CollectionTokenProjectionPage["tokens"][number];
+  const byId = new Map<string, PageToken>();
+  for (const token of page.tokens) {
+    const id = token.tokenId.trim();
+    if (!id) continue;
+    const prior = byId.get(id);
+    if (!prior) { byId.set(id, { ...token, tokenId: id }); continue; }
+    byId.set(id, {
+      tokenId: id,
+      name: token.name ?? prior.name,
+      imageUrl: token.imageUrl ?? prior.imageUrl,
+      animationUrl: token.animationUrl ?? prior.animationUrl,
+      mediaType: token.mediaType ?? prior.mediaType,
+      traits: normalizeTraits(token.traits).length ? token.traits : prior.traits,
+      rarityScore: token.rarityScore ?? prior.rarityScore,
+      rarityRank: token.rarityRank ?? prior.rarityRank,
+      rarityPercentile: token.rarityPercentile ?? prior.rarityPercentile,
+      rarityTier: token.rarityTier ?? prior.rarityTier,
+    });
+  }
+  const tokens = [...byId.values()];
   await withPostgresTransaction(async (client) => {
-    for (const token of page.tokens) {
-      if (!token.tokenId.trim()) continue;
+    for (let offset = 0; offset < tokens.length; offset += PROJECTION_WRITE_CHUNK) {
+      const chunk = tokens.slice(offset, offset + PROJECTION_WRITE_CHUNK);
       await client.query(
         `INSERT INTO plank_collection_tokens (
            chain_slug, collection_slug, token_id, name, image_url, animation_url, media_type, traits, rarity_score, rarity_rank,
            rarity_percentile, rarity_tier, provenance, source_observed_at, projected_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,NOW())
+         )
+         SELECT $1, $2, u.token_id, u.name, u.image_url, u.animation_url, u.media_type, u.traits::jsonb,
+                u.rarity_score, u.rarity_rank, u.rarity_percentile, u.rarity_tier, $13::text[], $14::timestamptz, NOW()
+         FROM unnest(
+           $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[],
+           $9::double precision[], $10::int[], $11::double precision[], $12::text[]
+         ) AS u(token_id, name, image_url, animation_url, media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier)
          ON CONFLICT (chain_slug, collection_slug, token_id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, plank_collection_tokens.name),
            image_url = COALESCE(EXCLUDED.image_url, plank_collection_tokens.image_url),
@@ -181,11 +222,18 @@ export async function upsertCollectionTokenProjection(
            provenance = ARRAY(SELECT DISTINCT unnest(plank_collection_tokens.provenance || EXCLUDED.provenance)),
            source_observed_at = GREATEST(plank_collection_tokens.source_observed_at, EXCLUDED.source_observed_at),
            projected_at = NOW()`,
-        [chainSlug, collectionSlug, token.tokenId, token.name ?? null, token.imageUrl ?? null,
-          token.animationUrl ?? null, token.mediaType ?? null,
-          JSON.stringify(normalizeTraits(token.traits)),
-          token.rarityScore ?? null, token.rarityRank ?? null, token.rarityPercentile ?? null,
-          token.rarityTier ?? null, provenance, page.sourceObservedAt]);
+        [chainSlug, collectionSlug,
+          chunk.map((t) => t.tokenId),
+          chunk.map((t) => t.name ?? null),
+          chunk.map((t) => t.imageUrl ?? null),
+          chunk.map((t) => t.animationUrl ?? null),
+          chunk.map((t) => t.mediaType ?? null),
+          chunk.map((t) => JSON.stringify(normalizeTraits(t.traits))),
+          chunk.map((t) => t.rarityScore ?? null),
+          chunk.map((t) => t.rarityRank ?? null),
+          chunk.map((t) => t.rarityPercentile ?? null),
+          chunk.map((t) => t.rarityTier ?? null),
+          provenance, page.sourceObservedAt]);
     }
     const count = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM plank_collection_tokens
@@ -365,17 +413,23 @@ export async function readTokenMetadataWork(
   limit: number,
   collectionSlug?: string | null
 ): Promise<TokenMetadataWork[]> {
-  const bounded = Math.min(Math.max(Math.trunc(limit), 1), 25);
+  // AUDIT lens 4 #10: the 25-row cap was the throughput ceiling of the whole
+  // metadata pass; a subject job may now pull up to METADATA_WORK_MAX rows.
+  const bounded = Math.min(Math.max(Math.trunc(limit), 1), METADATA_WORK_MAX);
   const params: unknown[] = [chainSlug];
   const collectionClause = collectionSlug ? `AND lower(collection_slug) = lower($2)` : "";
   if (collectionSlug) params.push(collectionSlug);
   params.push(bounded);
   const limitParam = `$${params.length}`;
+  // AUDIT lens 4 #3: a token past METADATA_ATTEMPT_CAP is never handed out
+  // again (writeTokenMetadataResult flips it to 'empty', and rows written
+  // before migration 101 with a high count are excluded here too).
   const result = await postgresQuery<{ collection_slug: string; token_id: string }>(
     `SELECT collection_slug, token_id FROM plank_collection_tokens
      WHERE chain_slug = $1 AND (
        metadata_state = 'pending'
-       OR (metadata_state = 'retry' AND metadata_attempted_at < NOW() - INTERVAL '30 minutes')
+       OR (metadata_state = 'retry' AND metadata_attempted_at < NOW() - INTERVAL '30 minutes'
+           AND COALESCE(metadata_attempts, 0) < ${METADATA_ATTEMPT_CAP})
      )
      ${collectionClause}
      ORDER BY metadata_attempted_at ASC NULLS FIRST, projected_at ASC
@@ -404,6 +458,51 @@ export async function writeTokenMetadataResult(input: {
 
 /** Retries per token before it is declared empty (AUDIT lens 4 #3). */
 export const METADATA_ATTEMPT_CAP = 5;
+/** Upper bound on rows one readTokenMetadataWork call may hand out. */
+export const METADATA_WORK_MAX = 500;
+
+/**
+ * Honest coverage triple (AUDIT lens 4 #5): terminal (complete + empty),
+ * withTraits and withImage rows against the expected population. `expected`
+ * prefers the projection's expected_count (a real supply from an enumerator),
+ * then the membership cursor's, then the row count itself.
+ */
+export type MetadataCoverageCounters = {
+  expected: number;
+  rows: number;
+  terminal: number;
+  withTraits: number;
+  withImage: number;
+};
+
+export async function readMetadataCoverageCounters(chainSlug: string, collectionSlug: string): Promise<MetadataCoverageCounters> {
+  const result = await postgresQuery<{ rows: string; terminal: string; with_traits: string; with_image: string; expected: string | null }>(
+    `SELECT COUNT(*)::text AS rows,
+            COUNT(*) FILTER (WHERE metadata_state IN ('complete','empty'))::text AS terminal,
+            COUNT(*) FILTER (WHERE traits IS NOT NULL AND traits <> '[]'::jsonb)::text AS with_traits,
+            COUNT(*) FILTER (WHERE image_url IS NOT NULL)::text AS with_image,
+            (SELECT COALESCE(
+               (SELECT expected_count FROM plank_collection_token_projections p
+                 WHERE p.chain_slug = $1 AND lower(p.collection_slug) = lower($2)),
+               (SELECT MAX(expected_count) FROM plank_collection_membership_cursors m
+                 WHERE m.chain_slug = $1 AND lower(m.collection_slug) = lower($2))
+             ))::text AS expected
+     FROM plank_collection_tokens
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+    [chainSlug, collectionSlug]);
+  const row = result.rows[0];
+  const rows = Number(row?.rows ?? 0);
+  const expectedRaw = row?.expected == null ? null : Number(row.expected);
+  // Never let a stale, too-small expected_count report >100%: expected is at
+  // least the rows we actually hold.
+  const expected = Math.max(rows, expectedRaw != null && Number.isFinite(expectedRaw) ? expectedRaw : 0);
+  return {
+    expected, rows,
+    terminal: Number(row?.terminal ?? 0),
+    withTraits: Number(row?.with_traits ?? 0),
+    withImage: Number(row?.with_image ?? 0),
+  };
+}
 
 function normalizeTraits(value: unknown): Array<{ traitType: string; value: string }> {
   if (!Array.isArray(value)) return [];

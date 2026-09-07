@@ -10,7 +10,7 @@ import {
 } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { getPreferredWalletProvider, isWalletConnectActive } from "@/lib/wallet-connect";
-import { FOREIGN_SEAPORT_ADDRESS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { FOREIGN_CONDUIT_CONTROLLER_ADDRESS, FOREIGN_SEAPORT_ADDRESS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -673,17 +673,28 @@ export function assertSafeForeignMarketDestination(
   const contractAddresses = Array.isArray(contractAddress) ? contractAddress : [contractAddress];
   const allowed = new Set([
     FOREIGN_SEAPORT_ADDRESS.toLowerCase(),
+    // AUDIT lens 3 D3 (2026-09-06): foreign offer creation/acceptance now
+    // routes through sendForeignTransaction instead of a raw signer. Those
+    // action sequences can target the conduit controller / OpenSea's
+    // conduit (Seaport 1.6 approval plumbing) as well as Seaport itself.
+    FOREIGN_CONDUIT_CONTROLLER_ADDRESS.toLowerCase(),
+    OPENSEA_CONDUIT_ADDRESS.toLowerCase(),
     ...contractAddresses.map((a) => a.toLowerCase()),
   ]);
+  // The chain's wrapped-native token (WETH/WBNB/WAVAX) is the ERC-20 an
+  // offer approval (`approve(conduit, amount)`) is sent TO.
   const offerCurrency = foreignOfferCurrency(chainSlug);
   if (offerCurrency) allowed.add(offerCurrency.toLowerCase());
   if (!allowed.has(lower)) {
     throw new Error(
       `Blocked unsafe foreign-chain marketplace target. Transactions for this listing only go to Seaport, ` +
-        `this chain's offer currency, or the collection contract(s) "${contractAddresses.join(", ")}" themselves.`
+        `its conduit, this chain's offer currency, or the collection contract(s) "${contractAddresses.join(", ")}" themselves.`
     );
   }
 }
+
+/** OpenSea's conduit (key 0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000), the same address on every chain OpenSea supports. */
+export const OPENSEA_CONDUIT_ADDRESS = "0x1E0049783F008A0085193E00003D00cd54003c71";
 
 /**
  * Build + send a tx with RH-chain-aware gas.

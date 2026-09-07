@@ -1190,6 +1190,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     try {
       setOfferBusy(true);
       const offerWei = BigInt(Math.round(Number(offerAmountEth) * 1e18));
+      if (isBitcoin) {
+        // AUDIT lens 3 lens-3 matrix "offer (item) / Bitcoin: registry B ->
+        // absent" (2026-09-06): this branch used to fall through into
+        // buildForeignOffer, which throws on a non-EVM slug after the user
+        // typed an amount. Fail before any wallet interaction, truthfully.
+        throw new Error("Offers on Bitcoin ordinals are not available yet -- buy the listing directly instead.");
+      }
       if (isSolana) {
         // offerTarget.tokenId IS the tokenMint for Solana rows (see
         // listings/route.ts's "solana" branch: tokenId: l.tokenMint) --
@@ -1224,7 +1231,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setOfferBusy(false);
       setStatus(null);
     }
-  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers, requireAccount]);
+  }, [offerTarget, account, collection, isSolana, isBitcoin, chainSlug, offerAmountEth, loadOffers, requireAccount]);
 
   const handleAcceptOffer = useCallback(
     async (offer: ForeignOffer) => {
@@ -1245,7 +1252,29 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           // path below (that one is for THIRD-PARTY OpenSea offers only).
           const { fulfillMarketplankNativeOrder } = await import("@/lib/market/multichain/trading/native-fulfill");
           if (offer.tokenId) {
-            // Plain single-token offer -- no criteria proof needed.
+            // Plain single-token offer. AUDIT lens 3 #8 / D4 (2026-09-06):
+            // re-derive and validate the signed order in THIS browser
+            // (validateOfferOrder + assertAcceptableOffer -- the same
+            // discipline the trait path below and MarketView's own accept
+            // already apply) before fulfilling a store row.
+            const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(offer.orderHash)}&kind=offer`);
+            if (!rawOrderRes.ok) throw new Error("This offer is no longer available.");
+            const { rawOrder } = (await rawOrderRes.json()) as { rawOrder: unknown };
+            const { validateOfferOrder } = await import("@/lib/market/order-validation");
+            const { assertAcceptableOffer } = await import("@/lib/market/seaport");
+            const nativeCollection: MarketCollection = {
+              slug: collection?.slug ?? `${chainSlug}:${collectionSlug}`,
+              name: collection?.name ?? collectionSlug,
+              contractAddress: collectionSlug,
+              tokenStandard: "ERC721",
+              image: collection?.image ?? "",
+              trustBadges: [],
+              feeBps: MARKETPLANK_NATIVE_LISTING_FEE_BPS,
+              royaltyBps: 0,
+              royaltyRecipient: "0x0000000000000000000000000000000000000000",
+            };
+            const derived = validateOfferOrder(rawOrder, nativeCollection, foreignOfferCurrency(chainSlug) ?? "");
+            assertAcceptableOffer({ tokenId: BigInt(offer.tokenId).toString(), priceWei: offer.priceWei }, derived);
             await fulfillMarketplankNativeOrder(chainSlug, offer.orderHash, "offer");
           } else if (offer.criteriaTokenIds && offer.criteriaTokenIds.length > 0) {
             // TRAIT-criteria offer -- same real cross-check MarketView.tsx's
@@ -1291,15 +1320,22 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
         } else {
           const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
-          const fillTokenId = offer.tokenId || (offer.isWildcard ? ownedTokenIds[0] : undefined);
-          if (offer.isWildcard && !fillTokenId) {
-            throw new Error("Own a token in this collection to accept a collection-wide bid.");
+          // Criteria (collection-wide or trait) offers need the token the
+          // seller delivers; OpenSea validates it against the criteria and
+          // returns the resolved calldata (see acceptForeignOffer).
+          const fillTokenId = offer.tokenId || ownedTokenIds[0];
+          if (!fillTokenId) {
+            throw new Error("Own a token in this collection to accept this bid.");
           }
+          const contractAddress = collection?.contractAddress ?? (/^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : "");
+          if (!contractAddress) throw new Error("Could not resolve this collection's contract.");
           await acceptForeignOffer({
             chainSlug,
             orderHash: offer.orderHash,
             accountAddress: who,
-            tokenId: fillTokenId ?? undefined,
+            tokenId: fillTokenId,
+            contractAddress,
+            expectedPriceWei: offer.priceWei,
           });
         }
         setStatus("Offer accepted.");
@@ -1316,7 +1352,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setStatus(null);
       }
     },
-    [chainSlug, collectionSlug, requireAccount, loadOffers, loadOwned]
+    [chainSlug, collectionSlug, collection, ownedTokenIds, requireAccount, loadOffers, loadOwned]
   );
 
   const handleBuy = useCallback(

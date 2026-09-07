@@ -29,6 +29,8 @@ export type SaleEventInput = {
   currencyToken: string | null;
   priceWei: string | null;
   raw?: Record<string, unknown>;
+  /** 'eip155' (default), 'solana' or 'bitcoin'. */
+  chainNamespace?: string;
 };
 
 const pendingAggregation = new Map<string, Set<string>>();
@@ -49,7 +51,7 @@ export async function recordSaleEvent(input: SaleEventInput): Promise<boolean> {
         $7, 0, $8, CASE WHEN $9::double precision IS NULL THEN NULL ELSE to_timestamp($9) END, $10, $11,
         $12, $13, 18, $14::numeric,
         $15::numeric, $16, CASE WHEN $9::double precision IS NULL THEN NULL ELSE to_timestamp($9) END,
-        'confirmed', 'eip155', $17, $18::jsonb)
+        'confirmed', $19, $17, $18::jsonb)
      ON CONFLICT (chain_slug, venue_id, tx_hash, event_index, sub_index) DO NOTHING`,
     [
       input.chainSlug,
@@ -70,6 +72,7 @@ export async function recordSaleEvent(input: SaleEventInput): Promise<boolean> {
       priced.source,
       `${input.chainSlug}:${input.venue}:${input.txHash}:${input.logIndex}`,
       JSON.stringify(input.raw ?? {}).slice(0, 4_000),
+      input.chainNamespace ?? "eip155",
     ]
   );
   const inserted = (result.rowCount ?? 0) > 0;

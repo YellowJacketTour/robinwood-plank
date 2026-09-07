@@ -22,9 +22,15 @@ import {
   writeCollectionMembershipCursor,
   readTokenMetadataWork,
   writeTokenMetadataResult,
+  readMetadataCoverageCounters,
+  type MetadataCoverageCounters,
 } from "@/lib/market/multichain/collection-token-store";
+import { durableKv } from "@/lib/market/durable-kv";
+import { AbiCoder, Interface } from "ethers";
+import { rpcCall as rpcCallUrl } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { MULTICALL3_ADDRESS } from "@/lib/market/multichain/discovery/evm-multicall";
 import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
-import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata, resolveMetadataFromUri } from "@/lib/market/multichain/discovery/evm-token-metadata";
+import { resolveEvmTokenMetadata, resolveOpenSeaTokenMetadata, resolveMetadataFromUri, type ResolvedEvmTokenMetadata } from "@/lib/market/multichain/discovery/evm-token-metadata";
 import { batchReadTokenUris } from "@/lib/market/multichain/discovery/evm-multicall";
 import { needsBodyFetch, pointerFingerprint } from "@/lib/market/multichain/hash-first-hydrate";
 import { readSequentialMintBoundary } from "@/lib/market/multichain/collection-capabilities";
@@ -369,109 +375,217 @@ export async function hydrateSpecificToken(
   }
 }
 
-/** Enrich a tiny durable batch from first-party tokenURI metadata. Public
+/** Tokens per Multicall3 aggregate3 call (AUDIT lens 4 #10). */
+export const MULTICALL_URI_BATCH = 250;
+/** Concurrent body fetches per pass; the per-host gateway bucket in
+ * lib/ipfs.ts is the real pacing, this only bounds open sockets. */
+const BODY_FETCH_CONCURRENCY = 16;
+/** Terminal-row share of the expected population that finalizes rarity. */
+export const RARITY_FINALIZE_THRESHOLD = 0.995;
+
+const MULTICALL_IFACE = new Interface([
+  "function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[] returnData)",
+]);
+const ABI = AbiCoder.defaultAbiCoder();
+// ERC-1155 uri(uint256) selector -- verified: keccak256("uri(uint256)")[0:4] = 0x0e89341c.
+const URI_ID_SELECTOR = "0x0e89341c";
+
+/** ERC-1155 `{id}` substitution: lowercase hex, no 0x, zero-padded to 64 (EIP-1155 metadata). */
+export function substituteErc1155Id(uri: string, tokenId: string): string {
+  if (!uri.includes("{id}")) return uri;
+  try {
+    return uri.replaceAll("{id}", BigInt(tokenId).toString(16).padStart(64, "0"));
+  } catch {
+    return uri;
+  }
+}
+
+/** Second Multicall3 leg for tokens the ERC-721 selector did not resolve:
+ * `uri(uint256)` with `{id}` substituted. Same allowFailure discipline as
+ * batchReadTokenUris. */
+async function batchReadUriIdSelector(
+  rpcUrl: string,
+  items: Array<{ contractAddress: string; tokenId: string }>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!items.length) return out;
+  const calls = items.map((item) => ({
+    target: item.contractAddress,
+    allowFailure: true,
+    callData: `${URI_ID_SELECTOR}${BigInt(item.tokenId).toString(16).padStart(64, "0")}`,
+  }));
+  const data = MULTICALL_IFACE.encodeFunctionData("aggregate3", [calls]);
+  const raw = await rpcCallUrl<string>(rpcUrl, "eth_call", [{ to: MULTICALL3_ADDRESS, data }, "latest"]);
+  const [decoded] = MULTICALL_IFACE.decodeFunctionResult("aggregate3", raw) as unknown as [Array<{ success: boolean; returnData: string }>];
+  items.forEach((item, i) => {
+    const leg = decoded[i];
+    if (!leg?.success || !leg.returnData || leg.returnData === "0x") return;
+    try {
+      const [uri] = ABI.decode(["string"], leg.returnData) as unknown as [string];
+      if (uri) out.set(`${item.contractAddress}:${item.tokenId}`, substituteErc1155Id(uri, item.tokenId));
+    } catch { /* one undecodable leg is skipped */ }
+  });
+  return out;
+}
+
+/** Resolve tokenURI / uri(id) for every work item: MULTICALL_URI_BATCH per
+ * aggregate3 call, both selectors, first RPC URL that answers. */
+async function resolveUrisViaMulticall(
+  rpcUrls: string[],
+  work: Array<{ collectionSlug: string; tokenId: string }>
+): Promise<Map<string, string>> {
+  const uriByKey = new Map<string, string>();
+  const numeric = work.filter((w) => /^[0-9]+$/.test(w.tokenId) && /^0x[0-9a-fA-F]{40}$/.test(w.collectionSlug));
+  for (let offset = 0; offset < numeric.length; offset += MULTICALL_URI_BATCH) {
+    const chunk = numeric.slice(offset, offset + MULTICALL_URI_BATCH)
+      .map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }));
+    for (const rpcUrl of rpcUrls) {
+      try {
+        const batched = await batchReadTokenUris(rpcUrl, chunk);
+        const missing: typeof chunk = [];
+        for (const r of batched) {
+          if (r.uri) uriByKey.set(`${r.contractAddress}:${r.tokenId}`, substituteErc1155Id(r.uri, r.tokenId));
+          else missing.push({ contractAddress: r.contractAddress, tokenId: r.tokenId });
+        }
+        if (missing.length) {
+          const viaUriId = await batchReadUriIdSelector(rpcUrl, missing).catch(() => new Map<string, string>());
+          for (const [key, uri] of viaUriId) uriByKey.set(key, uri);
+        }
+        break;
+      } catch {
+        // next configured RPC URL; if every one fails the per-item fallback covers the chunk
+      }
+    }
+  }
+  return uriByKey;
+}
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export type RarityFinalizeResult = MetadataCoverageCounters & {
+  finalized: boolean;
+  provisional: boolean;
+  reason: "finalized" | "below-threshold" | "unchanged" | "no-traits" | "no-rows";
+};
+
+/**
+ * AUDIT lens 4 #3 (Batch F3b): finalize rarity when terminal rows
+ * (complete + empty) reach RARITY_FINALIZE_THRESHOLD of the expected
+ * population -- decoupled from "the current batch left remaining == 0",
+ * which never fired while one token sat in retry. Idempotent: the
+ * (terminal, withTraits, rows) signature of the last finalize is kept in
+ * durable KV so an unchanged collection is not re-ranked every pass. The
+ * snapshot is labelled provisional (partial) until withTraits also clears
+ * the threshold.
+ */
+export async function finalizeRarityIfReady(chainSlug: string, collectionSlug: string): Promise<RarityFinalizeResult> {
+  const counters = await readMetadataCoverageCounters(chainSlug, collectionSlug);
+  const provisional = counters.expected === 0 || counters.withTraits / counters.expected < RARITY_FINALIZE_THRESHOLD;
+  if (counters.rows === 0 || counters.expected === 0) return { ...counters, finalized: false, provisional, reason: "no-rows" };
+  if (counters.terminal / counters.expected < RARITY_FINALIZE_THRESHOLD) {
+    return { ...counters, finalized: false, provisional, reason: "below-threshold" };
+  }
+  if (counters.withTraits === 0) return { ...counters, finalized: false, provisional, reason: "no-traits" };
+  const kvKey = `rarity:finalized:${chainSlug}:${collectionSlug.toLowerCase()}`;
+  const signature = `${counters.terminal}:${counters.withTraits}:${counters.rows}`;
+  const previous = await durableKv.get<string>(kvKey).catch(() => null);
+  if (previous === signature) return { ...counters, finalized: false, provisional, reason: "unchanged" };
+
+  const items = await readProjectedRarityInputs(chainSlug, collectionSlug);
+  const snapshot = { ...computeGenericRaritySnapshot(items), partial: provisional };
+  const traitIndex: ForeignTraitIndex = {};
+  for (const item of items) for (const trait of item.traits) {
+    traitIndex[trait.traitType] ??= {};
+    traitIndex[trait.traitType][trait.value] ??= [];
+    traitIndex[trait.traitType][trait.value].push(item.tokenId);
+  }
+  const chain = foreignChainByChainSlug(chainSlug);
+  const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
+  const slug = openSeaChain ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaChain).catch(() => null) : null;
+  await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, slug ? [slug] : []);
+  await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
+    tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
+      name: token.name, rarityScore: token.score, rarityRank: token.rank,
+      rarityPercentile: token.percentile, rarityTier: token.tier })),
+    expectedCount: counters.expected, partial: provisional,
+    provenance: ["bespoke-information-content-rarity"], sourceObservedAt: new Date(),
+  });
+  await durableKv.set(kvKey, signature, { ex: 30 * 24 * 60 * 60 }).catch(() => {});
+  return { ...counters, finalized: true, provisional, reason: "finalized" };
+}
+
+/**
+ * Enrich a durable batch from first-party tokenURI metadata. Public
  * requests never perform these RPC/IPFS calls. Missing metadata is recorded
- * honestly; transient failures are retried after a bounded cooldown. */
+ * honestly; transient failures are retried after a bounded cooldown and
+ * capped at METADATA_ATTEMPT_CAP.
+ *
+ * AUDIT lens 4 #10 (Batch F10) shape: one pass = (a) up to `limit` work
+ * rows in one query, (b) Multicall3 tokenURI/uri(id) 250 per call, (c)
+ * bodies fetched under the gateway discipline in lib/ipfs.ts, (d) ONE
+ * bulk projection write per collection + one bulk pointer update, (e)
+ * finalizeRarityIfReady for every collection touched.
+ */
 export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, collectionSlug?: string | null) {
   const chain = foreignChainByChainSlug(chainSlug);
   const openSeaChain = chainSlug === "robinhood" ? "robinhood" : chain?.openSeaChain;
   const rpcUrls = chainSlug === "robinhood" ? SERVER_DISPLAY_RPC_URLS : foreignRpcUrls(chainSlug);
   if (!rpcUrls.length) throw new Error(`${chainSlug} has no metadata enrichment route`);
   const work = await readTokenMetadataWork(chainSlug, limit, collectionSlug);
-  const openSeaKey = openSeaChain ? await backgroundOpenSeaKey() : null;
-  // Multicall3 batch pre-pass (Unified Mesh Continuum / intelligence-agency
-  // build, 2026-08-26 -- see GROK-FINDINGS-intelligence-agency-maximal-
-  // vision-2026-08-26.md, "likely highest unbuilt EVM leverage"): one real
-  // RPC call resolves tokenURI for every item in this batch at once,
-  // instead of each item paying its own RPC round-trip. Live-verified
-  // against real Pudgy Penguins token ids before shipping (cross-checked
-  // byte-for-byte against the existing single-call path). Best-effort: any
-  // item the batch doesn't resolve (ERC1155, non-standard contract, a
-  // genuine RPC hiccup) falls through to the existing per-token
-  // resolveEvmTokenMetadata path below unchanged, which already retries
-  // across every configured RPC URL and both selectors.
-  const batchUriByKey = new Map<string, string>();
-  // Real bug found and fixed during live verification 2026-08-26: this
-  // only ever tried rpcUrls[0] (Alchemy), with no fallback -- when that
-  // key is exhausted (real, live, currently true: "Monthly capacity limit
-  // exceeded"), the whole batch pre-pass silently failed every round and
-  // every item fell through to the slower per-item path. Now tries each
-  // configured RPC URL in order, same resilience the per-item readUri
-  // path already has.
-  for (const rpcUrl of rpcUrls) {
-    try {
-      const batched = await batchReadTokenUris(
-        rpcUrl,
-        work.map((item) => ({ contractAddress: item.collectionSlug, tokenId: item.tokenId }))
-      );
-      for (const r of batched) {
-        if (r.uri) batchUriByKey.set(`${r.contractAddress}:${r.tokenId}`, r.uri);
-      }
-      break;
-    } catch {
-      // Try the next configured RPC URL; if every one fails, the per-item
-      // fallback path below covers this batch entirely on its own.
-    }
-  }
+  const openSeaKey = openSeaChain && work.length ? await backgroundOpenSeaKey() : null;
+  const batchUriByKey = work.length ? await resolveUrisViaMulticall(rpcUrls, work) : new Map<string, string>();
+
   // Hash-First Multi-Source Hydration Doctrine (Grok findings, 2026-08-26):
-  // bulk-read each item's STORED pointer fingerprint (only ever set by a
-  // prior successful run of this same function, below) so an item being
-  // re-processed (e.g. reset to 'pending' by a real ERC-4906
-  // MetadataUpdate re-verification pass -- see onchain-metadata-
-  // reverify.ts) can skip the real IPFS/Arweave body fetch entirely when
-  // the on-chain pointer PROVABLY hasn't changed (content-addressing, not
-  // a guess -- see hash-first-hydrate.ts's own header).
+  // bulk-read each item's STORED pointer fingerprint so an item being
+  // re-processed (e.g. reset to 'pending' by an ERC-4906 MetadataUpdate
+  // rescan) skips the body fetch when the on-chain pointer PROVABLY has
+  // not changed (see hash-first-hydrate.ts).
   const storedFpByKey = new Map<string, string>();
+  const priorByKey = new Map<string, { name: string | null; imageUrl: string | null }>();
   if (work.length > 0) {
-    const fpResult = await postgresQuery<{ collection_slug: string; token_id: string; pointer_fp: string }>(
-      `SELECT t.collection_slug, t.token_id, t.pointer_fp
+    const fpResult = await postgresQuery<{ collection_slug: string; token_id: string; pointer_fp: string | null; name: string | null; image_url: string | null }>(
+      `SELECT t.collection_slug, t.token_id, t.pointer_fp, t.name, t.image_url
        FROM plank_collection_tokens t
        JOIN UNNEST($2::text[], $3::text[]) AS want(collection_slug, token_id)
          ON t.collection_slug = want.collection_slug AND t.token_id = want.token_id
-       WHERE t.chain_slug = $1 AND t.pointer_fp IS NOT NULL`,
+       WHERE t.chain_slug = $1`,
       [chainSlug, work.map((w) => w.collectionSlug), work.map((w) => w.tokenId)]
-    ).catch(() => ({ rows: [] as Array<{ collection_slug: string; token_id: string; pointer_fp: string }> }));
-    for (const row of fpResult.rows) storedFpByKey.set(`${row.collection_slug}:${row.token_id}`, row.pointer_fp);
+    ).catch(() => ({ rows: [] as Array<{ collection_slug: string; token_id: string; pointer_fp: string | null; name: string | null; image_url: string | null }> }));
+    for (const row of fpResult.rows) {
+      const key = `${row.collection_slug}:${row.token_id}`;
+      if (row.pointer_fp) storedFpByKey.set(key, row.pointer_fp);
+      priorByKey.set(key, { name: row.name, imageUrl: row.image_url });
+    }
   }
+
   let complete = 0, empty = 0, retry = 0, cidSkipped = 0;
   const errors: string[] = [];
-  // Real gap found live 2026-08-27 (external research: "surely there's a
-  // cheat code with hypersync/onchain/IPFS that can make full metadata
-  // populate instantly"): this loop ran every item in `work` FULLY
-  // SEQUENTIALLY, each one's own real IPFS/HTTP body fetch (with its own
-  // internal multi-gateway serial fallback chain, lib/ipfs.ts) blocking
-  // the next item's turn to even start. Live-reproduced: a direct call
-  // for a real, genuinely-incomplete Doodles batch (limit=5) produced
-  // zero output within 30s -- not an infinite hang, but slow-gateway
-  // latency compounding across 5 sequential items each paying their own
-  // full fallback chain. JS's single-threaded event loop means the
-  // existing shared-counter mutations below (complete += 1, etc.) stay
-  // race-free even when every item's awaits now interleave instead of
-  // running one at a time -- this is the same class of fix already
-  // applied to prioritizeVisibleCollections' per-key loop earlier
-  // tonight, same reasoning: nothing in one item's outcome depends on
-  // another's, so concurrent execution can only ever be faster, never
-  // less correct.
-  await Promise.all(work.map(async (item) => {
+  type Resolved = { item: (typeof work)[number]; metadata: ResolvedEvmTokenMetadata; batchedUri: string | null };
+  const resolved: Resolved[] = [];
+  await mapWithConcurrency(work, BODY_FETCH_CONCURRENCY, async (item) => {
     try {
       const itemKey = `${item.collectionSlug}:${item.tokenId}`;
-      const batchedUri = batchUriByKey.get(itemKey);
-
+      const batchedUri = batchUriByKey.get(itemKey) ?? null;
       if (batchedUri) {
         const gate = needsBodyFetch(batchedUri, storedFpByKey.get(itemKey) ?? null);
         if (!gate.fetch) {
-          // Real content-addressing proof the body is unchanged -- keep
-          // the existing row exactly as-is, just clear it out of the
-          // pending/retry work queue. Never a fabricated "nothing new"
-          // when we can't actually prove it (see needsBodyFetch's own
-          // honesty note on the weaker `http` pointer kind).
           await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
           cidSkipped += 1;
           complete += 1;
           return;
         }
       }
-
       const metadata = await (batchedUri
         ? resolveMetadataFromUri(batchedUri)
         : resolveEvmTokenMetadata({ rpcUrls, contractAddress: item.collectionSlug, tokenId: item.tokenId })
@@ -485,75 +599,65 @@ export async function advanceEvmTokenMetadata(chainSlug: string, limit = 6, coll
         empty += 1;
         return;
       }
-      // Same honest isNewToken check as hydrateSpecificToken's single-click
-      // path -- this bulk background lane is the app's actual highest-
-      // throughput metadata source (mesh-tick runs it continuously), and
-      // until this call the archival ledger only ever advanced from a
-      // real person clicking one token at a time, undercounting the
-      // system's real, already-running work. Real bug found and fixed
-      // 2026-08-25, live-reproduced: collection_archival_stats stayed at
-      // zero rows for collections with thousands of real background-
-      // hydrated tokens.
-      const priorBulkState = await readProjectedTokensByIds(chainSlug, item.collectionSlug, [item.tokenId]).catch(() => new Map());
-      const priorBulkToken = priorBulkState.get(item.tokenId);
-      const wasAlreadyArchivedInBulk = Boolean(priorBulkToken?.name || priorBulkToken?.imageUrl);
-      await upsertCollectionTokenProjection(chainSlug, item.collectionSlug, {
-        tokens: [{ tokenId: item.tokenId, ...metadata }], partial: true,
-        preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
-      });
-      await writeTokenMetadataResult({ chainSlug, ...item, state: "complete" });
-      // Store the real pointer fingerprint for a future re-verification
-      // pass to compare against -- only possible when we actually know the
-      // exact URI used (the Multicall3 batch path), never guessed for the
-      // per-token fallback path.
-      if (batchedUri) {
-        const { fp } = pointerFingerprint(batchedUri);
-        await postgresQuery(
-          `UPDATE plank_collection_tokens SET pointer_fp = $4, pointer_uri = $5
-           WHERE chain_slug = $1 AND collection_slug = $2 AND token_id = $3`,
-          [chainSlug, item.collectionSlug, item.tokenId, fp, batchedUri]
-        ).catch(() => {});
-      }
-      await recordArchivalHydration(chainSlug, item.collectionSlug, { isNewToken: !wasAlreadyArchivedInBulk }).catch(() => {});
-      complete += 1;
+      resolved.push({ item, metadata, batchedUri });
     } catch (error) {
       await writeTokenMetadataResult({ chainSlug, ...item, state: "retry",
         error: error instanceof Error ? error.message : String(error) });
       if (errors.length < 3) errors.push(error instanceof Error ? error.message : String(error));
       retry += 1;
     }
-  }));
-  let rarityFinalized = 0;
-  for (const collectionSlug of new Set(work.map((item) => item.collectionSlug))) {
-    const state = await postgresQuery<{ remaining: string; membership_complete: boolean }>(
-      `SELECT COUNT(*) FILTER (WHERE t.metadata_state IN ('pending','retry'))::text AS remaining,
-         EXISTS (
-           SELECT 1 FROM plank_collection_membership_cursors m
-           WHERE m.chain_slug = $1 AND lower(m.collection_slug) = lower($2) AND m.complete
-         ) AS membership_complete
-       FROM plank_collection_tokens t
-       WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)`,
-      [chainSlug, collectionSlug]);
-    if (Number(state.rows[0]?.remaining ?? 1) !== 0 || !state.rows[0]?.membership_complete) continue;
-    const items = await readProjectedRarityInputs(chainSlug, collectionSlug);
-    if (!items.length) continue;
-    const snapshot = { ...computeGenericRaritySnapshot(items), partial: false };
-    const traitIndex: ForeignTraitIndex = {};
-    for (const item of items) for (const trait of item.traits) {
-      traitIndex[trait.traitType] ??= {};
-      traitIndex[trait.traitType][trait.value] ??= [];
-      traitIndex[trait.traitType][trait.value].push(item.tokenId);
+  });
+
+  // (d) bulk writes: one projection upsert per collection (<= 500 rows per
+  // statement inside), then the terminal marks, then one pointer update.
+  const byCollection = new Map<string, Resolved[]>();
+  for (const r of resolved) {
+    const list = byCollection.get(r.item.collectionSlug) ?? [];
+    list.push(r);
+    byCollection.set(r.item.collectionSlug, list);
+  }
+  for (const [slug, rows] of byCollection) {
+    try {
+      await upsertCollectionTokenProjection(chainSlug, slug, {
+        tokens: rows.map((r) => ({ tokenId: r.item.tokenId, ...r.metadata })), partial: true,
+        preservePartial: true, provenance: ["robinhood-token-uri"], sourceObservedAt: new Date(),
+      });
+    } catch (error) {
+      for (const r of rows) {
+        await writeTokenMetadataResult({ chainSlug, ...r.item, state: "retry",
+          error: error instanceof Error ? error.message : String(error) }).catch(() => {});
+        retry += 1;
+      }
+      if (errors.length < 3) errors.push(error instanceof Error ? error.message : String(error));
+      byCollection.delete(slug);
     }
-    const slug = openSeaChain ? await resolveOpenSeaSlug(chainSlug, collectionSlug, openSeaChain).catch(() => null) : null;
-    await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, slug ? [slug] : []);
-    await upsertCollectionTokenProjection(chainSlug, collectionSlug, {
-      tokens: [...snapshot.byTokenId.values()].map((token) => ({ tokenId: token.tokenId,
-        name: token.name, rarityScore: token.score, rarityRank: token.rank,
-        rarityPercentile: token.percentile, rarityTier: token.tier })),
-      expectedCount: items.length, partial: false,
-      provenance: ["bespoke-information-content-rarity"], sourceObservedAt: new Date(),
-    });
-    rarityFinalized += 1;
+  }
+  const written = [...byCollection.values()].flat();
+  for (const r of written) {
+    await writeTokenMetadataResult({ chainSlug, ...r.item, state: "complete" });
+    complete += 1;
+  }
+  const pointed = written.filter((r) => r.batchedUri);
+  if (pointed.length) {
+    await postgresQuery(
+      `UPDATE plank_collection_tokens t SET pointer_fp = u.fp, pointer_uri = u.uri
+       FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[]) AS u(collection_slug, token_id, fp, uri)
+       WHERE t.chain_slug = $1 AND t.collection_slug = u.collection_slug AND t.token_id = u.token_id`,
+      [chainSlug, pointed.map((r) => r.item.collectionSlug), pointed.map((r) => r.item.tokenId),
+        pointed.map((r) => pointerFingerprint(r.batchedUri!).fp), pointed.map((r) => r.batchedUri)]
+    ).catch(() => {});
+  }
+  // Archival ledger counters: distinct-token honesty via the pre-read state.
+  for (const r of written) {
+    const prior = priorByKey.get(`${r.item.collectionSlug}:${r.item.tokenId}`);
+    await recordArchivalHydration(chainSlug, r.item.collectionSlug, { isNewToken: !(prior?.name || prior?.imageUrl) }).catch(() => {});
+  }
+
+  // (e) finalize -- decoupled from this batch's own remaining count.
+  let rarityFinalized = 0;
+  for (const slug of new Set(work.map((item) => item.collectionSlug))) {
+    const result = await finalizeRarityIfReady(chainSlug, slug).catch(() => null);
+    if (result?.finalized) rarityFinalized += 1;
   }
   return { attempted: work.length, complete, empty, retry, rarityFinalized, cidSkipped, errors };
 }

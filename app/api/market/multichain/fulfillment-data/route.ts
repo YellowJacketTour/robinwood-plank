@@ -11,6 +11,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { fetchListingFulfillmentData } from "@/lib/market/multichain/trading/foreign-orders";
+import { fungibleAmountWei, gateForeignTradeUsd } from "@/lib/market/multichain/trading/canary-limits";
 import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +34,26 @@ export async function POST(req: NextRequest) {
     if (!body.chainSlug || !body.orderHash || !body.fulfillerAddress) {
       return NextResponse.json({ error: "chainSlug, orderHash, and fulfillerAddress are required" }, { status: 400 });
     }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(body.fulfillerAddress)) {
+      return NextResponse.json({ error: "fulfillerAddress must be an EVM address" }, { status: 400 });
+    }
     const order = await fetchListingFulfillmentData({
       chainSlug: body.chainSlug,
       orderHash: body.orderHash,
       fulfillerAddress: body.fulfillerAddress,
     });
+    // AUDIT lens 3 D7 (2026-09-06): this signed order is what the buyer's
+    // wallet will fill next, so its price (the fungible consideration the
+    // buyer pays) is canary-gated per wallet/day BEFORE it is handed out.
+    const priceWei = fungibleAmountWei(order.parameters.consideration);
+    const gate = await gateForeignTradeUsd({
+      wallet: body.fulfillerAddress.toLowerCase(),
+      venue: "opensea",
+      chainSlug: body.chainSlug,
+      amountWei: priceWei,
+      txRef: `buy:${body.orderHash}`,
+    });
+    if (gate) return NextResponse.json(gate.body, { status: gate.status });
     return NextResponse.json(order, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to fetch fulfillment data");

@@ -134,6 +134,7 @@
  * live-verified" disclosure for why no trading code is extended here.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { recordSaleEvent, flushLedgerAggregation } from "@/lib/market/multichain/ledger-sink";
 import { getOrRefresh } from "@/lib/market/multichain/singleflight-cache";
 
 const CHAIN_SLUG = "bitcoin-mainnet";
@@ -216,6 +217,7 @@ export function inferSettlement(tx: MempoolTx, sellerAddress: string): InferredS
 
 type TransferCandidate = {
   id: number;
+  collection_key: string | null;
   inscription_id: string;
   txid: string;
   seller: string | null;
@@ -241,7 +243,7 @@ async function writeCursor(lastId: number): Promise<void> {
 
 async function fetchCandidates(afterId: number, limit: number): Promise<TransferCandidate[]> {
   const result = await postgresQuery<TransferCandidate>(
-    `SELECT id, token_id AS inscription_id, tx_hash AS txid, seller, buyer
+    `SELECT id, token_id AS inscription_id, tx_hash AS txid, seller, buyer, collection_key
        FROM plank_market_events
       WHERE chain_slug = $1 AND venue_id = 'wallet-transfer' AND id > $2
       ORDER BY id ASC
@@ -330,9 +332,14 @@ export async function runBitcoinSettlementScan(maxCandidates = BATCH_SIZE): Prom
       ]
     );
     written += 1;
+    if (candidate.collection_key && inferred.priceSats != null) {
+      // One sink (2026-09-06): the on-chain settlement is a confirmed sale in the ledger too.
+      await recordSaleEvent({ chainSlug: CHAIN_SLUG, venue: "bitcoin-settlement", protocol: "psbt-settlement", collectionKey: candidate.collection_key, tokenId: candidate.inscription_id, txHash: candidate.txid, logIndex: 0, blockNumber: blockHeight, blockTimestamp: tx.status.block_time ?? null, seller: candidate.seller, buyer: candidate.buyer, currencyToken: null, priceWei: String(inferred.priceSats), raw: { confidence: inferred.confidence }, chainNamespace: "bitcoin" });
+    }
   }
 
   await writeCursor(lastId);
+  await flushLedgerAggregation();
   return {
     fromId,
     toId: lastId,

@@ -21,7 +21,18 @@ import {
   foreignRpcUrls,
 } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
-function seaportChainFor(chainSlug: string): SeaportChain {
+/**
+ * SeaportChain descriptor for a foreign EVM chain -- exported (AUDIT lens 3
+ * D5, 2026-09-06) so MyPositions can route a foreign-chain cancel through
+ * seaport.ts's chain-aware cancelOrder. Returns undefined for the home
+ * chain ("robinhood"/absent) so callers fall through to the Robinhood path.
+ */
+export function seaportChainForListing(chainSlug: string | null | undefined): SeaportChain | undefined {
+  if (!chainSlug || chainSlug === "robinhood") return undefined;
+  return seaportChainFor(chainSlug);
+}
+
+export function seaportChainFor(chainSlug: string): SeaportChain {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain) throw new Error(`native-fulfill: "${chainSlug}" is not a supported foreign chain.`);
   return {

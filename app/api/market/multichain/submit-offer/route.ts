@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import { publicError, rateLimit } from "@/lib/security";
 import { FOREIGN_CHAINS, FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { fungibleAmountWei, gateForeignTradeUsd } from "@/lib/market/multichain/trading/canary-limits";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,12 +39,30 @@ export async function POST(req: NextRequest) {
     // from FOREIGN_CHAINS is accepted. protocol_address is pinned to the
     // one real Seaport address this app trusts (FOREIGN_SEAPORT_ADDRESS)
     // rather than trusting the client's copy of it, for the same reason.
-    if (!FOREIGN_CHAINS.some((c) => c.openSeaChain === body.openSeaChain)) {
+    const chain = FOREIGN_CHAINS.find((c) => c.openSeaChain === body.openSeaChain);
+    if (!chain) {
       return NextResponse.json({ error: `"${body.openSeaChain}" is not a supported OpenSea chain` }, { status: 400 });
     }
     if (body.protocol_address !== FOREIGN_SEAPORT_ADDRESS) {
       return NextResponse.json({ error: "Unexpected protocol_address." }, { status: 400 });
     }
+
+    // AUDIT lens 3 D7 (2026-09-06): a signed offer is a real WETH
+    // commitment the moment OpenSea lists it (any seller can fill it), so
+    // the bid amount is canary-gated per offerer wallet/day before relay.
+    const params = body.parameters as { offerer?: unknown; offer?: Array<{ itemType: number | string; startAmount: string }> };
+    const offerer = typeof params.offerer === "string" ? params.offerer : "";
+    if (!/^0x[0-9a-fA-F]{40}$/.test(offerer) || !Array.isArray(params.offer)) {
+      return NextResponse.json({ error: "parameters.offerer and parameters.offer are required" }, { status: 400 });
+    }
+    const gate = await gateForeignTradeUsd({
+      wallet: offerer.toLowerCase(),
+      venue: "opensea",
+      chainSlug: chain.chainSlug,
+      amountWei: fungibleAmountWei(params.offer),
+      txRef: "offer",
+    });
+    if (gate) return NextResponse.json(gate.body, { status: gate.status });
 
     const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     if (!key) {

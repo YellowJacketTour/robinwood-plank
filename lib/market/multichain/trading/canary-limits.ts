@@ -39,6 +39,18 @@
 import { hasPostgresConfig, withPostgresTransaction } from "@/lib/postgres";
 import { FOREIGN_TRADE_CANARY_ENABLED } from "@/lib/constants";
 import type { PoolClient } from "pg";
+import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+
+/**
+ * WIRING STATUS (AUDIT lens 3 D7, 2026-09-06): the routes that feed a real
+ * foreign-chain send now call checkAndRecordCanaryLimit before returning
+ * anything signable/sendable -- fulfillment-data (buy), offer-fulfillment-
+ * data (accept offer), submit-offer (offer becomes an on-chain WETH
+ * commitment) and floor-listings (sweep preview, check-only: the per-item
+ * record happens at fulfillment-data). The scope-boundary header below is
+ * kept verbatim as history; "NOT CALLED FROM ANY LIVE PATH" is no longer
+ * true.
+ */
 
 /**
  * Alpha default caps in USD, matching the research doc's suggested figures
@@ -114,7 +126,9 @@ export async function checkAndRecordCanaryLimit(
   venue: string,
   chain: string,
   usdNotional: number,
-  txRef?: string | null
+  txRef?: string | null,
+  /** `record: false` = check every bucket but write nothing (a sweep PREVIEW; the per-item fulfillment-data call records). Default records. */
+  options?: { record?: boolean }
 ): Promise<CanaryLimitResult> {
   if (!FOREIGN_TRADE_CANARY_ENABLED) {
     return { allowed: false, reason: "canary disabled" };
@@ -194,14 +208,103 @@ export async function checkAndRecordCanaryLimit(
       };
     }
 
-    await client.query(
-      `INSERT INTO canary_fill_ledger (wallet, venue, chain, usd_notional, tx_ref)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [normalizedWallet, normalizedVenue, normalizedChain, usdNotional, txRef ?? null]
-    );
+    if (options?.record !== false) {
+      await client.query(
+        `INSERT INTO canary_fill_ledger (wallet, venue, chain, usd_notional, tx_ref)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [normalizedWallet, normalizedVenue, normalizedChain, usdNotional, txRef ?? null]
+      );
+    }
 
     return { allowed: true };
   });
+}
+
+/**
+ * Pure mapping from a canary decision to the HTTP shape every gated route
+ * returns (AUDIT lens 3 D7). null = proceed. A cap breach is 429
+ * (CANARY_LIMIT, retry after the rolling window); the kill switch being OFF
+ * or the ledger being unreachable is 503 (FOREIGN_TRADE_DISABLED) -- the
+ * documented fail-closed contract of checkAndRecordCanaryLimit, surfaced
+ * as "this deployment is not accepting foreign trades" rather than as a
+ * per-wallet limit the user could wait out.
+ */
+export function canaryGateResponse(
+  result: CanaryLimitResult
+): { status: 429 | 503; body: { error: "CANARY_LIMIT" | "FOREIGN_TRADE_DISABLED"; message: string; retryAfterSec?: number } } | null {
+  if (result.allowed) return null;
+  const reason = result.reason;
+  if (/canary disabled|ledger unavailable/i.test(reason)) {
+    return {
+      status: 503,
+      body: { error: "FOREIGN_TRADE_DISABLED", message: `Foreign-chain trading is disabled on this deployment (${reason}).` },
+    };
+  }
+  return {
+    status: 429,
+    body: {
+      error: "CANARY_LIMIT",
+      message: `This trade exceeds today's safety limit: ${reason}. Limits reset on a rolling 24h window.`,
+      retryAfterSec: 60 * 60,
+    },
+  };
+}
+
+/**
+ * USD notional of a wei amount denominated in a foreign chain's native or
+ * wrapped-native token (WETH/WBNB/WAVAX are priced 1:1 with the gas token,
+ * same convention lib/market/types.ts's per-row currency note documents).
+ * Fails closed: null when no live price exists, which the gate treats as
+ * blocked.
+ */
+export async function foreignNativeUsdNotional(chainSlug: string, amountWei: bigint): Promise<number | null> {
+  if (amountWei < BigInt(0)) return null;
+  const chain = foreignChainByChainSlug(chainSlug);
+  if (!chain) return null;
+  const symbol = chain.nativeCurrencySymbol.toUpperCase().replace(/^W(?=ETH|BNB|AVAX|POL|MATIC)/, "");
+  const { getMultiAssetUsdPrices } = await import("@/lib/multi-asset-price");
+  const prices = await getMultiAssetUsdPrices();
+  const usd = prices[symbol === "MATIC" ? "POL" : symbol]?.usd ?? null;
+  if (usd === null || !Number.isFinite(usd) || usd <= 0) return null;
+  return weiToUsdNotional(amountWei, usd);
+}
+
+/** Pure: wei x usd-per-token, 6-decimal fixed point so sub-dollar notionals never round to 0. */
+export function weiToUsdNotional(amountWei: bigint, usdPerToken: number): number {
+  const micro = (amountWei * BigInt(Math.round(usdPerToken * 1_000_000))) / BigInt(10) ** BigInt(18);
+  return Number(micro) / 1_000_000;
+}
+
+/** Sum of a Seaport order's fungible items (itemType 0 native, 1 ERC-20) as wei. */
+export function fungibleAmountWei(items: ReadonlyArray<{ itemType: number | string; startAmount: string }>): bigint {
+  let total = BigInt(0);
+  for (const item of items) {
+    const t = Number(item.itemType);
+    if (t === 0 || t === 1) total += BigInt(item.startAmount);
+  }
+  return total;
+}
+
+/**
+ * One call for every gated route: prices the amount, runs the caps, maps
+ * to the HTTP shape. `venue` is "opensea" for every OpenSea-sourced order.
+ */
+export async function gateForeignTradeUsd(input: {
+  wallet: string;
+  venue: string;
+  chainSlug: string;
+  amountWei: bigint;
+  txRef?: string | null;
+  record?: boolean;
+}): Promise<ReturnType<typeof canaryGateResponse>> {
+  const usd = await foreignNativeUsdNotional(input.chainSlug, input.amountWei);
+  if (usd === null) {
+    return canaryGateResponse({ allowed: false, reason: "usd price unavailable for this chain's currency" });
+  }
+  const result = await checkAndRecordCanaryLimit(input.wallet, input.venue, input.chainSlug, usd, input.txRef ?? null, {
+    record: input.record,
+  });
+  return canaryGateResponse(result);
 }
 
 async function rollingSum(
