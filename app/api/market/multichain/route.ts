@@ -148,47 +148,15 @@ async function buildHubIndex(req: Request) {
     }
 
     const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
-    const { getListings } = await import("@/lib/market/orders-store");
-    // REAL BUG FIXED 2026-08-24, flagged live (a refresh showed RobinWood's
-    // OWN row with floor "—", listed 0 of 1,542, and its grade correctly
-    // but misleadingly cratering A -> D): getListings() reads real Postgres
-    // (postgresReadOrders) and CAN genuinely throw on a transient
-    // connection/query hiccup -- this exact class of hiccup was directly
-    // observed live elsewhere in this session's own supervisor logs
-    // ("canceling statement due to statement timeout"). A bare
-    // `.catch(() => [])` made that indistinguishable from "the order book
-    // is genuinely empty right now," which then triggered the FULL
-    // canonical-mirror fallback chain below (nativeListed === 0) -- if
-    // that fallback ALSO had a bad moment at the same instant, the row
-    // rendered fully null, producing an honest-looking but wrong D grade
-    // for a real, healthy, 108-listing collection. A transient DB blip
-    // typically clears within milliseconds, so retrying once before
-    // conceding to an empty result eliminates the vast majority of these
-    // false "the book is empty" moments without building a whole
-    // last-known-good cache layer for this route.
-    const getListingsWithRetry = async (slug: string) => {
-      try {
-        return await getListings(slug);
-      } catch {
-        try {
-          return await getListings(slug);
-        } catch {
-          return [];
-        }
-      }
-    };
-    const bySlug = await getListingsWithRetry("robinwood");
-    const byContract = await getListingsWithRetry(NFT_CONTRACT_ADDRESS.toLowerCase());
-    const nativeListings = bySlug.length >= byContract.length ? bySlug : byContract;
-    let nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
-      try {
-        const p = BigInt(l.priceWei);
-        return min == null || p < min ? p : min;
-      } catch {
-        return min;
-      }
-    }, null);
-    let nativeListed = nativeListings.length;
+    // One book, one floor (2026-09-06): the same merged, liveness-checked
+    // book the /market page renders (our Seaport rows + OpenSea + Pulp),
+    // so this row's floor, listed count and grade agree with the
+    // collection's own page. See lib/market/native-book.ts.
+    const { readNativeRobinwoodBook } = await import("@/lib/market/native-book");
+    const nativeBook = await readNativeRobinwoodBook({ hostHeader: req.headers.get("host") }).catch(() => null);
+    let nativeFloor: bigint | null = nativeBook?.floorWei ?? null;
+    let nativeListed = nativeBook?.listedCount ?? 0;
+    const nativeFloorVenue = nativeBook?.floorVenue ?? "marketplank";
     const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
     const nativeSales = await salesStatsFromLedger().catch(() => null);
     let canonical: Awaited<
@@ -247,7 +215,7 @@ async function buildHubIndex(req: Request) {
       isVaultBacked: true,
       floorPriceWei: nativeFloor != null ? nativeFloor.toString() : null,
       floorPriceCurrency: "ETH",
-      floorPriceMarketplace: "marketplank",
+      floorPriceMarketplace: nativeFloorVenue,
       totalSupply: ROBINWOOD_TOTAL_SUPPLY,
       listedCount: nativeListed,
       syncedAt: new Date().toISOString(),

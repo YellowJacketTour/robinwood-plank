@@ -321,21 +321,15 @@ async function main(): Promise<void> {
   // produce a real 24h comparison once both endpoints exist.
   await step("robinwood-floor-observation", async () => {
     const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
-    const { getListings } = await import("../lib/market/orders-store");
     const { recordFloorObservation, upsertTrackedCollection } = await import("../lib/market/multichain/store");
-    const bySlug = await getListings("robinwood").catch(() => []);
-    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
-    const listings = bySlug.length >= byContract.length ? bySlug : byContract;
-    let floor = listings.reduce<bigint | null>((minimum, listing) => {
-      try {
-        const price = BigInt(listing.priceWei);
-        return minimum == null || price < minimum ? price : minimum;
-      } catch {
-        return minimum;
-      }
-    }, null);
-    let listedCount = listings.length;
-    let source = "native-executable-order-book";
+    // One book, one floor (2026-09-06): observe the same merged,
+    // liveness-checked book the /market page and the hub row read, so the
+    // 24h floor comparison never mixes our-rows-only with every-venue.
+    const { readNativeRobinwoodBook } = await import("../lib/market/native-book");
+    const book = await readNativeRobinwoodBook({ hostHeader: null }).catch(() => null);
+    let floor: bigint | null = book?.floorWei ?? null;
+    let listedCount = book?.listedCount ?? 0;
+    let source = book?.floorVenue === "marketplank" || !book ? "native-executable-order-book" : `merged-book:${book.floorVenue}`;
     // A local/dev worker can legitimately have an empty local order store
     // while the canonical deployment owns the live signed book. Observe the
     // same canonical book the public projection uses, otherwise local refresh
