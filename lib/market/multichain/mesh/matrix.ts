@@ -73,7 +73,8 @@ export type MeshSource =
   | "hunter-solana"
   | "hunter-bitcoin"
   | "parity"
-  | "creator-identity";
+  | "creator-identity"
+  | "ow-rarity";
 
 export type MeshLane = {
   id: string;
@@ -420,6 +421,17 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders"],
     sliceSec: 120,
     notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
+  },
+  {
+    // Bitcoin zero-to-full without a key (2026-09-07): OrdinalsWallet's
+    // collection enumeration returns every inscription with attributes and
+    // rank; UniSat's membership/rarity lanes are key-gated and were failing.
+    id: "ow-rarity:bitcoin-mainnet",
+    source: "ow-rarity",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["rarity"],
+    sliceSec: 120,
+    notes: "Keyless turbo.ordinalswallet.com full-collection enumeration -> membership rows, traits, rank; 3 collections per pass, oldest-first.",
   },
   {
     id: "ow:bitcoin-mainnet",
