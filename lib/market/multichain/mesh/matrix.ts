@@ -72,7 +72,10 @@ export type MeshSource =
   | "hunter-evm"
   | "hunter-solana"
   | "hunter-bitcoin"
-  | "parity";
+  | "parity"
+  | "creator-identity"
+  | "ow-rarity"
+  | "m2-sweep";
 
 export type MeshLane = {
   id: string;
@@ -421,6 +424,17 @@ export const MESH_LANES: MeshLane[] = [
     notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
   },
   {
+    // Bitcoin zero-to-full without a key (2026-09-07): OrdinalsWallet's
+    // collection enumeration returns every inscription with attributes and
+    // rank; UniSat's membership/rarity lanes are key-gated and were failing.
+    id: "ow-rarity:bitcoin-mainnet",
+    source: "ow-rarity",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["rarity"],
+    sliceSec: 120,
+    notes: "Keyless turbo.ordinalswallet.com full-collection enumeration -> membership rows, traits, rank; 3 collections per pass, oldest-first.",
+  },
+  {
     id: "ow:bitcoin-mainnet",
     source: "ordinals-wallet",
     chainSlug: "bitcoin-mainnet",
@@ -514,6 +528,16 @@ export const MESH_LANES: MeshLane[] = [
     notes: "Adaptive chain-wide Transfer log hunt over keyless public RPC; writes 7d activity and admits real collections.",
   })),
   {
+    // Magic Eden M2 listings straight from the chain, sharded on the first
+    // byte of tokenMint so each getProgramAccounts call is bounded (2026-09-07).
+    id: "m2-sweep:solana-mainnet",
+    source: "m2-sweep" as const,
+    chainSlug: "solana-mainnet",
+    cells: ["floor", "listedCount"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Keyless M2 seller trade-state sweep, 12 shards per pass, per-shard reaping; the Solana hunter unions it with Tensor.",
+  },
+  {
     id: "hunter-solana:solana-mainnet",
     source: "hunter-solana" as const,
     chainSlug: "solana-mainnet",
@@ -532,6 +556,16 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "volume24h", "sales24h"] as MeshCell[],
     sliceSec: 90,
     notes: "Cross-verification against independent public references; disagreement becomes a resync job.",
+  })),
+  // Creator identity as its own cell (2026-09-07): the hub's known-creator
+  // check was only ever written by the rarity runner, once per collection.
+  ...[...HYPERSYNC_EVM, "robinhood", "solana-mainnet", "bitcoin-mainnet"].map((chainSlug) => ({
+    id: `creator-identity:${chainSlug}`,
+    source: "creator-identity" as const,
+    chainSlug,
+    cells: ["name"] as MeshCell[],
+    sliceSec: 90,
+    notes: "Fills creator handle / owner address / ENS from CoinGecko links, Magic Eden detail, on-chain owner() and ENS reverse; 7-day attempt memory.",
   })),
   {
     id: "hunter-bitcoin:bitcoin-mainnet",
