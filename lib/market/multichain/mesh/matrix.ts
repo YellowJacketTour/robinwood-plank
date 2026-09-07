@@ -74,7 +74,8 @@ export type MeshSource =
   | "hunter-bitcoin"
   | "parity"
   | "creator-identity"
-  | "ow-rarity";
+  | "ow-rarity"
+  | "m2-sweep";
 
 export type MeshLane = {
   id: string;
@@ -526,6 +527,16 @@ export const MESH_LANES: MeshLane[] = [
     sliceSec: 120,
     notes: "Adaptive chain-wide Transfer log hunt over keyless public RPC; writes 7d activity and admits real collections.",
   })),
+  {
+    // Magic Eden M2 listings straight from the chain, sharded on the first
+    // byte of tokenMint so each getProgramAccounts call is bounded (2026-09-07).
+    id: "m2-sweep:solana-mainnet",
+    source: "m2-sweep" as const,
+    chainSlug: "solana-mainnet",
+    cells: ["floor", "listedCount"] as MeshCell[],
+    sliceSec: 120,
+    notes: "Keyless M2 seller trade-state sweep, 12 shards per pass, per-shard reaping; the Solana hunter unions it with Tensor.",
+  },
   {
     id: "hunter-solana:solana-mainnet",
     source: "hunter-solana" as const,

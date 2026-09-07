@@ -502,6 +502,13 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] cg", JSON.stringify(await runCoinGeckoNftStats(chain, 15)));
       return;
     }
+    if (source === "m2-sweep") {
+      const { runM2Sweep } = await import("../lib/market/multichain/discovery/magiceden-m2-sweep");
+      const r = await runM2Sweep({ deadline: Date.now() + HUNT_BUDGET_MS });
+      console.log("[mesh-lane] m2-sweep", JSON.stringify(r));
+      if (r.error && /429|rate|Too many/i.test(r.error)) markDeferred(5 * 60_000, "m2-sweep rate limited");
+      return;
+    }
     if (source === "ow-rarity") {
       // Keyless Bitcoin membership + traits + rank for every tracked
       // collection, a few per pass, oldest-first (the runner's own selector).

@@ -27,19 +27,30 @@ export function createSolanaHunter(): HunterDriver {
         const msg = err instanceof Error ? err.message : String(err);
         return { findings: [], cursorAfter: cursor, sourceCalls: calls + 1, sourceStatus: /429|rate/i.test(msg) ? "rate-limited" : "error", note: msg.slice(0, 160) };
       }
-      const rows = await postgresQuery<{ collection_slug: string; listed: string; floor: string | null }>(
-        `SELECT t.collection_slug, COUNT(*)::text AS listed, MIN(l.price_lamports)::text AS floor
-           FROM tensor_onchain_listings l
-           JOIN plank_collection_tokens t ON t.chain_slug = l.chain_slug AND t.token_id = l.mint
-          WHERE l.chain_slug = 'solana-mainnet' AND l.is_active = TRUE
-          GROUP BY t.collection_slug`
+      // Union of every on-chain venue we sweep: Tensor list state and Magic
+      // Eden M2 seller trade state. Listed = distinct mints with an open
+      // listing on any venue; floor = cheapest ask; venue = who holds it.
+      const rows = await postgresQuery<{ collection_slug: string; listed: string; floor: string | null; venue: string | null }>(
+        `WITH asks AS (
+           SELECT l.mint, l.price_lamports, 'tensor'::text AS venue FROM tensor_onchain_listings l WHERE l.chain_slug = 'solana-mainnet' AND l.is_active = TRUE
+           UNION ALL
+           SELECT m.mint, m.price_lamports, 'magiceden'::text AS venue FROM m2_onchain_listings m WHERE m.chain_slug = 'solana-mainnet' AND m.is_active = TRUE
+         ), joined AS (
+           SELECT t.collection_slug, a.mint, a.price_lamports, a.venue
+             FROM asks a JOIN plank_collection_tokens t ON t.chain_slug = 'solana-mainnet' AND t.token_id = a.mint
+         ), floors AS (
+           SELECT DISTINCT ON (collection_slug) collection_slug, price_lamports, venue FROM joined ORDER BY collection_slug, price_lamports ASC
+         )
+         SELECT j.collection_slug, COUNT(DISTINCT j.mint)::text AS listed, MIN(j.price_lamports)::text AS floor, f.venue
+           FROM joined j JOIN floors f ON f.collection_slug = j.collection_slug
+          GROUP BY j.collection_slug, f.venue`
       );
       const observedAt = new Date().toISOString();
       const findings: HunterFinding[] = rows.rows.map((r) => ({
         kind: "listing-book",
         chainSlug: ctx.chainSlug,
         collectionKey: r.collection_slug,
-        venue: "tensor",
+        venue: r.venue ?? "tensor",
         listedCount: Number(r.listed),
         // Solana floors are stored scaled to 18 dp everywhere else (lamports * 1e9): review H1.
         floorAtomic: r.floor == null ? null : (BigInt(r.floor) * 1_000_000_000n).toString(),
