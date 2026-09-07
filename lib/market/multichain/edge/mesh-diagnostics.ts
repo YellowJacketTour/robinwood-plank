@@ -44,6 +44,10 @@ export async function readMeshDiagnostics(): Promise<MeshDiagnostics | null> {
               MAX(completed_at)::text AS last_completed_at,
               (ARRAY_AGG(last_error ORDER BY updated_at DESC) FILTER (WHERE last_error IS NOT NULL))[1] AS last_error
          FROM plank_data_jobs
+        -- Live rows plus the last day of completions only: the full table is
+        -- every subject job ever and a GROUP BY over it tripped the web
+        -- role's 30 s statement timeout on production (2026-09-07).
+        WHERE status IN ('queued','running','failed') OR completed_at >= NOW() - INTERVAL '24 hours'
         GROUP BY source, chain_slug
         ORDER BY source, chain_slug`
     ),
