@@ -78,7 +78,16 @@ export function ArchivalDepthBar({
   const displayPct = tweenedPct ?? rawPct;
   const growing = known && tweenedPct != null && rawPct != null && Math.abs(tweenedPct - rawPct) > 0.01;
   const pctLabel = displayPct != null ? displayPct.toFixed(2) : null;
-  const surgeColor = active && chainSlug ? chainBrandColor(chainSlug) : null;
+  // A finished archive never surges, however the job table looks.
+  //
+  // Measured on production 2026-09-08: BAYC reported archivalScore 1 with
+  // 10,000/10,000 stored AND jobProcessing true -- a job stuck in
+  // status='running' on a collection with nothing left to fetch. Colouring
+  // that bar as "live receiving data" announces work that is not happening,
+  // so completion wins over the job flag.
+  const isComplete = known && rawPct != null && rawPct >= 99.95;
+  const reallyActive = active && !isComplete;
+  const surgeColor = reallyActive && chainSlug ? chainBrandColor(chainSlug) : null;
 
   const summary =
     known && knownSupply != null && tokensEverHydrated != null
@@ -96,7 +105,7 @@ export function ArchivalDepthBar({
     // status to keep announcing: a 100% bar next to a green dot is pure
     // noise on every finished row. The bar exists to show a real REMAINING
     // gap, so at >= 99.95% (and not actively writing) it renders nothing.
-    if (displayPct != null && displayPct >= 99.95 && !active) return null;
+    if (displayPct != null && displayPct >= 99.95 && !reallyActive) return null;
     return (
       <span
         className={["inline-flex h-1.5 w-10 shrink-0 items-center", className].join(" ")}
@@ -123,8 +132,8 @@ export function ArchivalDepthBar({
               // glow keyed on "has ever been archived" made every idle row
               // look busy (owner, 2026-09-07: "yellow dot syncing needs to
               // actually sync, maybe pulses when its live receiving data").
-              !reduced && (active || growing) ? "animate-plank-glow" : "",
-              !reduced && (active || growing) ? "animate-archival-shimmer" : "",
+              !reduced && (reallyActive || growing) ? "animate-plank-glow" : "",
+              !reduced && (reallyActive || growing) ? "animate-archival-shimmer" : "",
             ]
               .filter(Boolean)
               .join(" ")}
@@ -139,6 +148,26 @@ export function ArchivalDepthBar({
       </span>
     );
   }
+
+  // The SAME rule the compact bar applies, which was missing here.
+  //
+  // The hide condition lived only in the `compact` branch, so a finished
+  // collection kept a full-width 100% bar on its own detail page -- the exact
+  // noise the compact rule exists to remove, on the page where it is largest.
+  // Owner, 2026-09-08: "if updates are fully fleshed out then they should be
+  // reduced for space efficiency and minimal noise."
+  //
+  // `active` is deliberately NOT enough to keep a finished bar on screen: see
+  // `reallyActive` above. A 100% archive with a stuck 'running' job is
+  // still a finished archive.
+  // NOT `if (!known) return null` here.
+  //
+  // The full bar must still render for an unknown supply, because that is
+  // where the "Completeness % requires a known supply; we do not invent one"
+  // disclaimer lives -- silently dropping the whole block would remove the
+  // honest statement along with the bar. Only a MEASURED, finished archive
+  // is hidden.
+  if (known && displayPct != null && displayPct >= 99.95 && !growing) return null;
 
   return (
     <div className={["w-full", className].join(" ")}>

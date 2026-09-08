@@ -95,16 +95,34 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
       const { fetchBestForeignListing, fetchListingFulfillmentData } = await import("@/lib/market/multichain/trading/foreign-orders");
       const { resolveOpenSeaSlug } = await import("@/lib/market/multichain/discovery/opensea-stats");
       let direct: Awaited<ReturnType<typeof fetchBestForeignListing>> = null;
+      const trace: string[] = [];
+      const osChain = (await import("@/lib/market/multichain/chains/manifest")).chainManifest(chainSlug)?.openSeaChain;
+      if (!osChain) return { chainSlug, step: "listing", ok: false, detail: "chain has no OpenSea orderbook" };
       for (const row of candidates) {
-        // resolveOpenSeaSlug takes OPENSEA's chain name ("ethereum"), not our slug.
-        const osChain = (await import("@/lib/market/multichain/chains/manifest")).chainManifest(chainSlug)?.openSeaChain;
-        if (!osChain) continue;
-        const slug = await resolveOpenSeaSlug(osChain, row.contractAddress, "live").catch(() => null);
-        if (!slug) continue;
-        direct = await fetchBestForeignListing({ chainSlug, collectionSlug: slug }).catch(() => null);
+        const short = row.contractAddress.slice(0, 10);
+        let slug: string | null = null;
+        try {
+          slug = await resolveOpenSeaSlug(osChain, row.contractAddress, "live");
+        } catch (e) {
+          trace.push(`${short}: slug threw ${(e instanceof Error ? e.message : String(e)).slice(0, 40)}`);
+          continue;
+        }
+        if (!slug) {
+          trace.push(`${short}: no slug`);
+          continue;
+        }
+        try {
+          direct = await fetchBestForeignListing({ chainSlug, collectionSlug: slug });
+        } catch (e) {
+          trace.push(`${slug}: listing threw ${(e instanceof Error ? e.message : String(e)).slice(0, 40)}`);
+          continue;
+        }
         if (direct) break;
+        trace.push(`${slug}: slug ok but no best listing`);
       }
-      if (!direct) return { chainSlug, step: "listing", ok: false, detail: "no live listing available right now" };
+      if (!direct) {
+        return { chainSlug, step: "listing", ok: false, detail: trace.slice(0, 3).join("; ") || "no candidates" };
+      }
       const signed = await fetchListingFulfillmentData({
         chainSlug,
         orderHash: direct.orderHash,
