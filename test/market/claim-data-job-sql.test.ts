@@ -77,3 +77,33 @@ test("standing rotation prefers the least-recently-CLAIMED lane, not the least-r
     await postgresQuery(`DELETE FROM mesh_lane_health WHERE lane_key = ANY($1::text[])`, [[`${stale.source}:rot-chain`, `${fresh.source}:rot-chain`]]).catch(() => undefined);
   }
 });
+
+test("a discovery-only worker claims only discovery lanes, and never a demand job", { skip: !hasPostgresConfig() }, async () => {
+  const suffix = Date.now().toString(36);
+  const kind = `mesh-lane:disc-${suffix}`;
+  const discKey = `mesh:hypersync-discovery:disc-${suffix}`;
+  const otherKey = `mesh:seaport-fills:disc-${suffix}`;
+  try {
+    // The non-discovery lane is made the OLDEST claim, so fair rotation alone
+    // would pick it -- only the source filter can keep discovery first.
+    await postgresQuery(
+      `INSERT INTO mesh_lane_health (lane_key, last_claim_at, status, updated_at) VALUES ($1, now() - interval '9 days', 'ok', now())
+       ON CONFLICT (lane_key) DO UPDATE SET last_claim_at = EXCLUDED.last_claim_at`,
+      [`seaport-fills:disc-${suffix}`]
+    );
+    await enqueueDataJob({ jobKey: otherKey, kind, source: "seaport-fills", chainSlug: `disc-${suffix}`, subject: null, payload: {}, priority: 20 });
+    await enqueueDataJob({ jobKey: discKey, kind, source: "hypersync-discovery", chainSlug: `disc-${suffix}`, subject: null, payload: {}, priority: 20 });
+
+    const claimed = await claimDataJob([kind], 60_000, undefined, undefined, "mesh:", ["hypersync-discovery", "helius-discovery"]);
+    assert.equal(claimed?.jobKey, discKey, "the discovery worker takes the discovery lane even though another lane waited longer");
+    if (claimed) await finishDataJob(claimed);
+
+    // With no discovery lane left, the filtered claim returns nothing (the
+    // caller then falls back to the general queue rather than idling).
+    const none = await claimDataJob([kind], 60_000, undefined, undefined, "mesh:", ["hypersync-discovery", "helius-discovery"]);
+    assert.equal(none, null, "filtered claim does not spill over into non-discovery lanes");
+  } finally {
+    await postgresQuery(`DELETE FROM plank_data_jobs WHERE job_key = ANY($1::text[])`, [[discKey, otherKey]]).catch(() => undefined);
+    await postgresQuery(`DELETE FROM mesh_lane_health WHERE lane_key = $1`, [`seaport-fills:disc-${suffix}`]).catch(() => undefined);
+  }
+});

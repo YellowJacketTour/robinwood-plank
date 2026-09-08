@@ -165,7 +165,7 @@ export type ClaimedDataJob = {
   leaseOwner: string;
 };
 
-export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number, maxPriority?: number, jobKeyPrefix?: string): Promise<ClaimedDataJob | null> {
+export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPriority?: number, maxPriority?: number, jobKeyPrefix?: string, sources?: string[]): Promise<ClaimedDataJob | null> {
   const owner = `${process.pid}:${randomUUID()}`;
   const pool = postgresPool();
   const client = await pool.connect();
@@ -204,6 +204,15 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
     if (jobKeyPrefix) {
       params.push(`${jobKeyPrefix}%`);
       priorityClause += ` AND j.job_key LIKE $${params.length}`;
+    }
+    // Restrict a worker to specific lane sources (2026-09-07). The standing
+    // slot rotates fairly over ALL 154 standing lanes, of which only 26
+    // discover collections, so each discovery lane got roughly one turn in
+    // 154 -- measured live at ~4 new collections in 3 minutes across every
+    // chain combined. A dedicated discovery worker claims only these.
+    if (sources?.length) {
+      params.push(sources);
+      priorityClause += ` AND j.source = ANY($${params.length}::text[])`;
     }
     // Fair rotation for the standing slot (2026-09-07, second probe): with
     // priority ordering the three priority-60 standing lanes (seaport-live
