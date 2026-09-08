@@ -181,6 +181,11 @@ jobs:
       - run: npm run build:reindex
       - run: npm run build:plank-koth-watch
       - run: npm run build:mesh
+      # The akasha hose. packages/akasha is not copied into the release tree,
+      # so like every other always-on worker here it ships as a pre-built
+      # bundle or it cannot run in production at all. Inert until someone sets
+      # AKASHA_CHAINS and points it at a database.
+      - run: npm run build:akasha-hose
       - run: npm run build:audit-preseason
       - run: npm run build:koth-diag
       - run: npm run build:koth-reprocess
@@ -213,6 +218,7 @@ jobs:
           test -s .next/standalone/scripts/mesh-tick-standalone.mjs
           test -s .next/standalone/scripts/mesh-lane-standalone.mjs
           test -s .next/standalone/scripts/opensea-stream-standalone.mjs
+          test -s .next/standalone/scripts/akasha-hose-standalone.mjs
           # `ws` is a runtime dependency of the stream worker; the standalone
           # tracer only follows the Next app, so copy it in explicitly.
           mkdir -p .next/standalone/node_modules/ws

@@ -6,6 +6,14 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // scripts/akasha-hose.ts imports packages/akasha, whose modules use
+    // explicit .ts specifiers (they run under node --experimental-strip-types,
+    // which requires them). That import pulls the package back into this
+    // program even though it is listed in `exclude`, so without this flag the
+    // root typecheck fails TS5097 on every akasha file -- the exact break that
+    // took CI down once already. Safe here because noEmit is true above: the
+    // flag is only rejected when tsc is actually emitting.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
