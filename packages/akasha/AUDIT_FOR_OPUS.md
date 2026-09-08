@@ -17,7 +17,34 @@ collection, and how does a stranger check that your numbers are right?*
 | Hydrate | `src/hydrate/` | What the archive accepts from a visitor |
 | Claims | `src/claims/` | Numbers that carry the evidence to recompute them |
 
-81 tests pass. Every module in `src/` has direct test coverage. `npm test` and `npm run typecheck` are both green.
+89 tests pass. Every module in `src/` has direct test coverage. `npm test` and `npm run typecheck` are both green.
+
+## The three oracles
+
+One species of bug keeps appearing here: **the tape looks healthy while the
+fact is missing.** A crash pages you; a wrong topic0, a reorg matched on
+presence, an empty assert, and a guard that can never pass all produce a green
+CI and a quiet chain. `test/oracles.test.ts` encodes the house rule:
+
+> If a miss is indistinguishable from "nothing happened", the test is wrong.
+
+1. **Topic** — every stored topic0 is recomputed from its declared signature by
+   a second implementation. A constant nobody can reproduce from a stated
+   signature is one nobody can ever prove wrong.
+2. **Ancestry** — a crafted fork of length 3 plus a self-parent genesis must
+   delete the orphans, keep the survivor, and terminate. The walk is timed, so
+   an unbounded version fails rather than hanging.
+3. **Quiet chain** — a fixture block that *contains* the event must not yield
+   zero events while coverage advances. This is the Seaport bug as a one-liner
+   and generalises: a module that can succeed with zero outputs on a fixture
+   containing the event is not covered. Also asserted on the Bitcoin side, where
+   a silent envelope parser is the same failure.
+
+**Each oracle was mutation-tested**: the original bug was reintroduced and the
+oracle confirmed to fail, then reverted. That exposed a real hole — ORACLE 3's
+Seaport fixture originally built its log *from* `TOPICS`, so it moved with the
+bug and passed. Fixtures now carry literal wire-form topic0s, never derived
+from the constant under test.
 
 ## The four corrections
 
