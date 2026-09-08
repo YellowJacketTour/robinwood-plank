@@ -59,8 +59,10 @@ recorded; no raw LPC final brand. Memoji Market is GPL-3.0 per brief: inspect li
 reuse; redraw UX patterns in project-native components rather than assuming source is unrestricted.
 xCaster source is a reference, not an unreviewed dependency to embed.
 
+Unicorn satchel/desktop/market-table captures are present in unicorn-memoji/, annotated as bag/desk/street.
+Use frame 04 for the open inventory grid with SEND; keep public book and financial columns out of slice 1.
 Missing captures: populated board original image, fresh Lumberyard, Woodstock, WoodAmp chip/window,
-Unicorn satchel/desktop/chart/ritual, 3–6 caster session/audio/queue states. Screenshot evidence must
+Unicorn chart/ritual/uwublack.market, 3–6 caster session/audio/queue states. Screenshot evidence must
 record URL or local source, date, viewport, and what it proves. Never label a constructed mock as live UI.
 
 ## Focused correctness tests

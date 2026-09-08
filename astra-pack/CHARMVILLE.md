@@ -52,6 +52,11 @@ maximizing a window. Wood click and drawstring effects respect the user's sound 
 
 Open satchel: wood/gold XP-like frame, cream grid, Uncial title, Nunito labels. Face and seed stacks
 are visibly different items. Counts belong to stacks. grain balance is a bottom strip, not an item.
+Visual authority: unicorn-memoji/04-github-screenshot.png, the Meme Inventory grid with SEND.
+Provide send/use from the bag through authorized implemented actions; wallet selection stays inside
+the window but cannot silently change primary. Frame 02 establishes the overlapping desktop; frame 01
+establishes the later street. Hide the sibling book pane in slice 1. Closed pouch is a Plank-native
+design decision, not a historical Unicorn screenshot. See unicorn-memoji/README.md for keep/reject notes.
 Rings belong to the person in the board header. No price chart or portfolio value in the bag.
 Later market is a separate window with its own charts, offer slots, and collection action.
 
