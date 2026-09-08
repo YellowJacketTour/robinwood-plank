@@ -34,6 +34,26 @@ import type { Hex } from "../packages/akasha/src/shared/hex";
 const TICK_MS = Number(process.env.AKASHA_TICK_MS ?? 15_000);
 const HEALTH_MS = Number(process.env.AKASHA_HEALTH_MS ?? 60_000);
 
+/**
+ * Bounded run, so this fits the host's cron-under-flock pattern.
+ *
+ * Every always-on worker here is started every minute under a lock with a
+ * budget just under the hour: effectively always-on, with a clean restart each
+ * hour that reclaims sockets and file handles on a shared box. `--max-seconds`
+ * is the budget; when it elapses the process flushes and exits 0, and the next
+ * minute's cron takes the lock.
+ *
+ * It also makes provisioning testable: a proof run with a small budget must
+ * complete and exit before the schedule is installed, so a broken worker never
+ * gets scheduled to fail silently every minute with nobody watching.
+ */
+function argSeconds(): number | null {
+  const arg = process.argv.find((a) => a.startsWith("--max-seconds="));
+  if (!arg) return null;
+  const n = Number(arg.split("=")[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function makePool(): Pool | null {
   if (process.env.DATABASE_URL) {
     return new Pool({ connectionString: process.env.DATABASE_URL, max: 2, application_name: "akasha-hose" });
@@ -144,9 +164,24 @@ async function main(): Promise<void> {
   }, HEALTH_MS).unref?.();
 
   await tick();
-  // Keep the event loop alive: the timers above are unref'd so they alone
-  // would let node exit.
-  setInterval(() => undefined, 1 << 30);
+
+  const budget = argSeconds();
+  if (budget != null) {
+    console.log(`[akasha-hose] bounded run: ${budget}s`);
+    setTimeout(() => {
+      console.log("[akasha-hose] budget reached");
+      void shutdown("budget");
+    }, budget * 1000);
+  }
+  // Keep the event loop alive. The tick and health timers are unref'd, so
+  // without this node would exit immediately.
+  //
+  // In a BOUNDED run the budget timer above is deliberately NOT unref'd and is
+  // the only thing that needs to hold the loop, so no keepalive is installed:
+  // adding one that is merely unref'd would work by accident, and a later edit
+  // that unref'd the budget timer too would turn a bounded run into an instant
+  // exit that still reported success.
+  if (budget == null) setInterval(() => undefined, 1 << 30);
 }
 
 main().catch((e) => {

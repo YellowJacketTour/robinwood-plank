@@ -82,3 +82,61 @@ test("the worker writes akasha_* and never plank_*", () => {
     "the hose must never write a plank_ table -- two writers on one tape is the failure",
   );
 });
+
+test("a provisioning operation exists and proves the worker before scheduling it", () => {
+  assert.ok(
+    /- provision-akasha-hose/.test(WORKFLOW),
+    "no operation to install the hose -- a bundle nothing schedules never runs",
+  );
+  const at = WORKFLOW.indexOf("provision-akasha-hose:");
+  assert.ok(at > 0, "the job itself exists");
+  const job = WORKFLOW.slice(at, at + 7000);
+
+  // Prove-then-schedule. A worker that cannot complete one bounded pass must
+  // never be installed to fail silently every minute with nobody watching --
+  // that is a scheduled version of the silent-failure species.
+  assert.ok(/--max-seconds=60/.test(job), "a bounded proof run happens first");
+  assert.ok(
+    job.indexOf("--max-seconds=60") < job.indexOf("crontab \"$cron_after\""),
+    "the proof must run BEFORE the schedule is installed",
+  );
+
+  // Missing tables is its own actionable failure, not a generic non-zero.
+  assert.ok(
+    /proof_status" -eq 3/.test(job) && /migration 104/.test(job),
+    "exit 3 must be reported as 'run deploy first so 104 applies'",
+  );
+
+  // And the schedule must be observed firing before success is declared.
+  assert.ok(/cron_observed/.test(job), "never trust a schedule until it has been seen to run");
+});
+
+test("the scheduled entry is Bitcoin-only and connection-frugal", () => {
+  const at = WORKFLOW.indexOf("provision-akasha-hose:");
+  const job = WORKFLOW.slice(at, at + 7000);
+  assert.ok(/AKASHA_CHAINS=bitcoin/.test(job), "one family at a time is the supported cutover");
+  assert.ok(!/AKASHA_CHAINS=[a-z,]*solana/.test(job), "Solana is unpinned and must not be scheduled");
+  // A background archiver on a shared box must never be what exhausts the pool.
+  assert.ok(/PGPOOL_MAX=2/.test(job), "two connections only");
+  // Started under a lock, like every other always-on worker here: the cron
+  // line is a printf whose `%s -n %s` takes $flock_bin and $lock_file as
+  // ARGUMENTS, so the literal path never appears inline.
+  assert.ok(/'\* \* \* \* \* cd %s && %s -n %s/.test(job), "the live entry runs under flock -n");
+  assert.ok(
+    /"\$flock_bin" "\$lock_file"/.test(job),
+    "and the lock it takes is the hose's own, not a shared one",
+  );
+});
+
+test("provisioning does NOT arm the cutover flag", () => {
+  const at = WORKFLOW.indexOf("provision-akasha-hose:");
+  const job = WORKFLOW.slice(at, at + 7000);
+  // Installing the writer and retiring the old pager are separate acts. If
+  // provisioning armed the flag, Bitcoin would lose its catalog pager at the
+  // same moment the hose first started -- before anyone had seen it hold a
+  // tip across a restart.
+  assert.ok(
+    !/AKASHA_HOSE_OWNS_BITCOIN=1/.test(job),
+    "provisioning must never arm the flag: that is a separate, later decision",
+  );
+});

@@ -36,6 +36,7 @@ on:
           - evaluate-plank-koth-tx
           - provision-plank-koth-gap-finder
           - provision-market-mesh
+          - provision-akasha-hose
           - deploy-mesh
           - configure-plankspace-x
       repair_from_block:
@@ -1455,6 +1456,160 @@ jobs:
   # per-transaction hashes, unlike DexScreener's free tier). Separate lock
   # file and coarser (10-minute) cadence from the primary watcher so a
   # slow DexPaprika response can never delay real-time primary detection.
+  # ---------------------------------------------------------------------------
+  # Akasha hose -- the archive's own writer. See packages/akasha/AUDIT_FOR_OPUS.md.
+  #
+  # Owns the akasha_* tables and NOTHING else; it never writes plank_*. That is
+  # what makes this safe to run beside the existing mesh indefinitely: the two
+  # write disjoint tables, so there is no second writer on anything. The Bitcoin
+  # catalog pagers only stop when AKASHA_HOSE_OWNS_BITCOIN=1 is set separately
+  # (see lib/market/multichain/mesh/matrix.ts), which is a deliberate later act.
+  #
+  # Requires migration 104 (akasha_tape). The worker checks for its own tables
+  # and exits 3 naming that migration, rather than running and throwing on every
+  # flush while reporting itself alive.
+  # ---------------------------------------------------------------------------
+  provision-akasha-hose:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-akasha-hose'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Prove one bounded pass, then install the managed cron entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-22}" \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$INMOTION_USER@$INMOTION_HOST" \
+            APP_DIR="$INMOTION_APP_DIR" NODE_BIN="$INMOTION_NODE_BIN" bash -s <<'REMOTE'
+          set -euo pipefail
+          app_dir="$APP_DIR"
+          node_bin="$NODE_BIN"
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+
+          # Like every other worker here: the standalone tree has no tsx, so
+          # this runs the esbuild bundle, never the .ts source.
+          artifact="$app_dir/current/scripts/akasha-hose-standalone.mjs"
+          test -s "$artifact"
+
+          logs_dir="$app_dir/logs"
+          log_file="$logs_dir/akasha-hose.log"
+          lock_file="$app_dir/shared/akasha-hose.lock"
+          mkdir -p "$logs_dir"
+          chmod 700 "$logs_dir"
+          touch "$log_file"
+          chmod 600 "$log_file"
+
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          # PROVE IT RUNS BEFORE SCHEDULING IT. A worker that cannot complete
+          # one bounded pass must never be installed to fail silently every
+          # minute with nobody watching. A separate lock from the live one, so
+          # this can never fight an already-running instance.
+          #
+          # Exit 3 means the akasha_* tables are missing, i.e. migration 104 has
+          # not been applied yet. Reported as its own actionable failure rather
+          # than a generic non-zero.
+          cd "$app_dir/current"
+          set +e
+          AKASHA_CHAINS=bitcoin PGPOOL_MAX=2 \
+            "$flock_bin" -w 55 "$lock_file.proof" \
+            "$node_bin" --env-file="$env_file" "$artifact" --max-seconds=60 \
+            >> "$log_file" 2>&1
+          proof_status=$?
+          set -e
+          if [ "$proof_status" -eq 3 ]; then
+            echo "[provision] the akasha_* tables are missing -- run the 'deploy' operation first so migration 104 applies." >&2
+            tail -n 40 "$log_file" >&2
+            exit 1
+          fi
+          if [ "$proof_status" -ne 0 ]; then
+            echo "[provision] hose proof run failed with exit status $proof_status (137/143 = killed by the host); host limits:" >&2
+            ulimit -u -v -m 2>&1 | sed 's/^/  /' >&2
+            cat /proc/loadavg >&2
+            echo "[provision] last 120 log lines:" >&2
+            tail -n 120 "$log_file" >&2
+            exit 1
+          fi
+          tail -n 8 "$log_file"
+
+          cron_before="$(mktemp)"
+          cron_after="$(mktemp)"
+          trap 'rm -f "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          awk '!/akasha-hose/' "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# akasha-hose (managed by inmotion branch)'
+            # Same shape as the mesh and the stream worker: started every
+            # minute under a lock with a budget just under the hour, so it is
+            # effectively always-on and restarts cleanly each hour. Two
+            # Postgres connections only -- this is a background archiver on a
+            # shared box and must never be what exhausts the pool.
+            #
+            # Bitcoin only. One family at a time is the supported cutover, and
+            # Solana is deliberately unpinned (assertPinnedForCutover throws
+            # for it) until its Token Metadata deploy slot is a real literal.
+            printf '* * * * * cd %s && %s -n %s /usr/bin/env AKASHA_CHAINS=bitcoin PGPOOL_MAX=2 UV_THREADPOOL_SIZE=2 %s --env-file=%s %s --max-seconds=3540 >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
+              "$artifact" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          managed_count="$(crontab -l | grep -c '^# akasha-hose' || true)"
+          test "$managed_count" -eq 1
+
+          # Confirm the schedule actually fires on its own before declaring
+          # success -- the same "don't trust the schedule until it has been
+          # observed running" discipline the mesh provisioning already uses.
+          lines_before="$(wc -l < "$log_file")"
+          cron_observed=false
+          for attempt in $(seq 1 30); do
+            sleep 5
+            lines_after="$(wc -l < "$log_file")"
+            if [ "$lines_after" -gt "$lines_before" ]; then
+              cron_observed=true
+              break
+            fi
+          done
+          test "$cron_observed" = "true"
+          echo "AKASHA_HOSE_PROVISIONED={\"managedEntries\":$managed_count}"
+          tail -n 8 "$log_file"
+          REMOTE
+
   # ---------------------------------------------------------------------------
   provision-plank-koth-gap-finder:
     if: >-
