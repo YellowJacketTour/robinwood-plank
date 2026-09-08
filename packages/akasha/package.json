@@ -4,8 +4,7 @@
   "description": "Push-first multi-chain NFT archive: firehose, announcement graph, attested hydrate, claim kits.",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test test/**/*.test.ts",
-    "test:watch": "vitest",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "hose": "tsx src/hose/main.ts",
     "measure": "tsx src/measure/run.ts",
