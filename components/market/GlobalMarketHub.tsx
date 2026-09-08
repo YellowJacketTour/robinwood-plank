@@ -673,7 +673,26 @@ function hasMarketEvidence(c: TrackedCollection): boolean {
  * home/brand exception. This keeps dead and partially hydrated rows from
  * displacing genuinely liquid collections. */
 function hasGradeEvidence(c: TrackedCollection): boolean {
-  return (c.listedCount != null && c.listedCount > 0) || c.isVaultBacked;
+  // 2026-09-07, owner: "bitcoin collections are missing grades". Grading
+  // required a POSITIVE listed count, so every collection on a chain whose
+  // listings we cannot read (all of Bitcoin: venue-held PSBTs, no keyless
+  // order book) was ungradeable no matter how much real market evidence it
+  // had. Live examples on the Bitcoin tab: Taproot Wizards (1,297 holders,
+  // real 24h volume, real sales) and PepeNals (1,812 holders) both rendered
+  // "--" while a sibling with one readable listing graded B.
+  //
+  // A listing is ONE market signal, not the definition of one. Real, chain-
+  // agnostic evidence of a live market is: an open listing, OR a real sale
+  // in the window, OR real 24h volume, OR a real holder base. Vault-backed
+  // stays its own always-eligible case. The axes themselves are unchanged
+  // and still curved -- a collection with no listings simply scores zero on
+  // the listed axis instead of being denied a letter entirely.
+  if (c.isVaultBacked) return true;
+  if (c.listedCount != null && c.listedCount > 0) return true;
+  if (c.sales24h != null && c.sales24h > 0) return true;
+  if (c.volume24hWei != null && c.volume24hWei !== "0") return true;
+  if (c.holderCount != null && c.holderCount > 0) return true;
+  return false;
 }
 
 /**
@@ -2495,11 +2514,18 @@ export default function GlobalMarketHub() {
                               </span>
                               {(() => {
                                 const fresh = floorFreshness(c);
+                                // The dot PULSES only while a real job is
+                                // writing this row right now (owner,
+                                // 2026-09-07: "yellow dot syncing needs to
+                                // actually sync, maybe pulses when its live
+                                // receiving data"). At rest it is a static
+                                // colour that means age, never activity.
+                                const live = jobProcessingByKey[rowKey] != null;
                                 return fresh ? (
                                   <span
-                                    className="inline-block size-1.5 shrink-0 rounded-full"
+                                    className={`inline-block size-1.5 shrink-0 rounded-full${live ? " animate-plank-glow" : ""}`}
                                     style={{ backgroundColor: fresh.color }}
-                                    title={fresh.title}
+                                    title={live ? `${fresh.title} - syncing now` : fresh.title}
                                   />
                                 ) : null;
                               })()}

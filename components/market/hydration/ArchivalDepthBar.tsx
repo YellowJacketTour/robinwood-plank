@@ -91,6 +91,12 @@ export function ArchivalDepthBar({
     // Nothing to show for a genuinely unmeasured collection -- never a
     // fabricated empty bar implying 0% when the real answer is "unknown".
     if (!known) return null;
+    // 2026-09-07, owner: "sync green doesn't need progress bar ... once
+    // completed, disappears". A full archive is the resting state, not a
+    // status to keep announcing: a 100% bar next to a green dot is pure
+    // noise on every finished row. The bar exists to show a real REMAINING
+    // gap, so at >= 99.95% (and not actively writing) it renders nothing.
+    if (displayPct != null && displayPct >= 99.95 && !active) return null;
     return (
       <span
         className={["inline-flex h-1.5 w-10 shrink-0 items-center", className].join(" ")}
@@ -112,8 +118,13 @@ export function ArchivalDepthBar({
             className={[
               "absolute inset-y-0 left-0 rounded-full transition-[background] duration-700",
               surgeColor ? "" : "bg-[linear-gradient(90deg,#c4a574,#8b5a2b)]",
-              !reduced && pulseKey != null ? "animate-plank-glow" : "",
-              !reduced && growing ? "animate-archival-shimmer" : "",
+              // Pulse ONLY while this row is actually receiving data (a live
+              // job is writing, or the number is still climbing) -- a static
+              // glow keyed on "has ever been archived" made every idle row
+              // look busy (owner, 2026-09-07: "yellow dot syncing needs to
+              // actually sync, maybe pulses when its live receiving data").
+              !reduced && (active || growing) ? "animate-plank-glow" : "",
+              !reduced && (active || growing) ? "animate-archival-shimmer" : "",
             ]
               .filter(Boolean)
               .join(" ")}
