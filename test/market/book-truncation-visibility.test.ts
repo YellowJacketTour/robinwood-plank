@@ -123,3 +123,56 @@ test("the pre-migration backup is not slower than it needs to be", () => {
     "retention must bound the extra disk a lower compression level costs",
   );
 });
+
+test("criteria orders are excluded from a per-token grid, and counted", () => {
+  // MEASURED LIVE 2026-09-08 on Milady Maker, AFTER the diagnostics shipped:
+  //
+  //   ordersFetched 200   ordersAfterDedup 2   excludedNonNativeCurrency 0
+  //   listedCount 117
+  //
+  // Two "tokens" out of two hundred orders is not a market, it is a key
+  // collision. The dedup keys on offer[0].identifierOrCriteria to keep the
+  // cheapest ask per token, but for a Seaport CRITERIA order (itemType 4/5)
+  // that field is a merkle root shared by every order in the set -- so they
+  // all land on one key and the grid renders a handful of rows.
+  //
+  // The same page read 35 a few hours earlier, so the collapse tracks whatever
+  // mix of order types OpenSea happens to return. That variability is exactly
+  // why it went unnoticed: the symptom moves.
+  //
+  // foreign-fulfill.ts already refuses to fulfil anything that is not itemType
+  // 2 or 3. The grid must apply the same rule, or it shows cards that the buy
+  // path would reject.
+  const src = readFileSync(
+    path.join(process.cwd(), "app/api/market/multichain/listings/route.ts"),
+    "utf8",
+  );
+  // Start at the constants, which are declared just ABOVE the map: a window
+  // that begins at `const cheapestByToken` misses them and reports them
+  // missing when they are right there.
+  const at = src.indexOf("const ERC721 = 2");
+  assert.ok(at > 0, "found the itemType constants");
+  const loop = src.slice(at, at + 2400);
+
+  assert.ok(
+    /itemType !== ERC721 && itemType !== ERC1155/.test(loop),
+    "a criteria order has no single token id and cannot be a per-token card",
+  );
+  assert.ok(
+    /excludedCriteria \+= 1/.test(loop),
+    "excluded orders must be COUNTED: a short grid needs the number that explains it",
+  );
+  // And the same itemType constants the fulfil path uses, not a second opinion.
+  assert.ok(/const ERC721 = 2/.test(loop) && /const ERC1155 = 3/.test(loop));
+});
+
+test("the criteria count reaches the caller", () => {
+  const src = readFileSync(
+    path.join(process.cwd(), "app/api/market/multichain/listings/route.ts"),
+    "utf8",
+  );
+  assert.ok(
+    /excludedCriteriaOrders:\s*excludedCriteria/.test(src),
+    "counting it internally and not reporting it just moves the blindness",
+  );
+});

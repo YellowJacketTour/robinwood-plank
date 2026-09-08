@@ -750,10 +750,42 @@ export async function GET(req: NextRequest) {
     const pricingChain = chainManifest(chainSlug) ?? { nativeCurrencySymbol: "ETH", offerCurrencyAddress: null, offerCurrencySymbol: "WETH" };
     const pricingOf = (o: (typeof rawOrders)[number]) => priceForeignOrder(o.parameters, pricingChain);
     let excludedNonNative = 0;
+    let excludedCriteria = 0;
+    // Seaport itemType: 2 = ERC721, 3 = ERC1155. 4/5 are the _WITH_CRITERIA
+    // variants, where identifierOrCriteria is a MERKLE ROOT (or 0), not a
+    // token id -- see foreign-fulfill.ts, which already refuses to fulfil
+    // anything that is not 2 or 3.
+    const ERC721 = 2;
+    const ERC1155 = 3;
     const cheapestByToken = new Map<string, (typeof rawOrders)[number]>();
     for (const order of rawOrders) {
-      const tokenId = order.parameters.offer[0]?.identifierOrCriteria;
+      const offerItem = order.parameters.offer[0];
+      const tokenId = offerItem?.identifierOrCriteria;
       if (!tokenId) continue;
+
+      // A CRITERIA ORDER IS NOT A LISTING OF ONE TOKEN.
+      //
+      // The dedup below keys on identifierOrCriteria to keep the cheapest ask
+      // per token. For a criteria order that field is a merkle root shared by
+      // every order in the set, so they all collapse onto ONE key and the
+      // whole book renders as a handful of rows.
+      //
+      // Measured live 2026-09-08 on Milady Maker: 200 orders fetched,
+      // ordersAfterDedup = 2, excludedNonNativeCurrency = 0, against a
+      // listedCount of 117. Two "tokens" out of two hundred orders is not a
+      // market; it is a key collision. (The same page read 35 a few hours
+      // earlier, so the collapse tracks whatever mix of order types OpenSea
+      // happens to return -- which is exactly why it went unnoticed.)
+      //
+      // These are real orders and they are not wrong; they simply are not
+      // per-token asks, so they cannot be shown as cards keyed by token id.
+      // Counted rather than silently dropped, because "the grid is short" must
+      // always have a number attached to it.
+      const itemType = Number(offerItem?.itemType);
+      if (itemType !== ERC721 && itemType !== ERC1155) {
+        excludedCriteria += 1;
+        continue;
+      }
       const pricing = pricingOf(order);
       if (!pricing.nativeEquivalent) {
         excludedNonNative += 1;
@@ -918,6 +950,12 @@ export async function GET(req: NextRequest) {
           pagesWalked: paged.pages,
           ordersFetched: rawOrders.length,
           ordersAfterDedup: orders.length,
+          // Criteria orders (Seaport itemType 4/5) offer ANY token matching a
+          // merkle root, so they have no single token id to be a card. Counted
+          // here because a short grid must always carry the number that
+          // explains it -- without this, "200 fetched, 2 shown" reads as a bug
+          // in the dedup rather than as orders that are not per-token asks.
+          excludedCriteriaOrders: excludedCriteria,
         },
       },
       { headers: { "Cache-Control": "no-store" } }
