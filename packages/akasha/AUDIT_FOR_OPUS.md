@@ -17,7 +17,7 @@ collection, and how does a stranger check that your numbers are right?*
 | Hydrate | `src/hydrate/` | What the archive accepts from a visitor |
 | Claims | `src/claims/` | Numbers that carry the evidence to recompute them |
 
-66 tests pass. `npm test` and `npm run typecheck` are both green.
+73 tests pass. `npm test` and `npm run typecheck` are both green.
 
 ## The four corrections
 
@@ -77,6 +77,24 @@ only from the old tip's own ancestry.
 
 The second is the more dangerous of the two: it fails silently and leaves the
 archive confidently wrong, whereas the first at least crashes.
+
+## A wrong topic hash, which fails silently
+
+`SEAPORT_ORDER_FULFILLED` was
+`0x9d9af8e38d66c62e2c12f0225249fd9d721c70b66e27a8da8c70216359c7d2d4`. The real
+keccak256 of the event signature is
+`...721c54b83f48d9352c97c6cacdcb6f31`. The two share their first 18 hex digits
+and diverge after, which is why reading it never catches it.
+
+This is the worst failure mode in the package. A wrong topic does not error:
+the log filter never matches, so the chain looks quiet, coverage looks
+complete, and the archive reports a healthy empty stream forever. Every
+Seaport `OrderFulfilled` log would have been missed.
+
+Topics are now stored beside the event signature they are the hash of, and a
+test recomputes all four with a keccak-256 written from scratch in the test
+file — deliberately not the library that produced the constants — after first
+proving itself against known vectors.
 
 ## A guard that could never pass
 

@@ -1,6 +1,24 @@
 import type { Hex } from "./hex.ts";
 
 /**
+ * The event signature each topic is the keccak256 of. Kept beside the hash so
+ * a test can recompute it: a topic is not reviewable by eye, and a wrong one
+ * fails SILENTLY -- the filter simply never matches and the archive reports an
+ * empty, healthy-looking stream forever.
+ *
+ * That is not hypothetical. SEAPORT_ORDER_FULFILLED was previously
+ * `...721c70b66e27a8da8c70216359c7d2d4`, which shares only its first 18 hex
+ * digits with the real hash, so every OrderFulfilled log was missed.
+ */
+export const TOPIC_SIGNATURES = {
+  ERC721_TRANSFER: "Transfer(address,address,uint256)",
+  ERC1155_TRANSFER_SINGLE: "TransferSingle(address,address,address,uint256,uint256)",
+  ERC1155_TRANSFER_BATCH: "TransferBatch(address,address,address,uint256[],uint256[])",
+  SEAPORT_ORDER_FULFILLED:
+    "OrderFulfilled(bytes32,address,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[])",
+} as const;
+
+/**
  * Closed protocol surface. Not a collection catalog.
  * Adding a topic is a protocol change and needs a test.
  */
@@ -12,7 +30,7 @@ export const TOPICS = {
   ERC1155_TRANSFER_BATCH:
     "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb" as Hex,
   SEAPORT_ORDER_FULFILLED:
-    "0x9d9af8e38d66c62e2c12f0225249fd9d721c70b66e27a8da8c70216359c7d2d4" as Hex,
+    "0x9d9af8e38d66c62e2c12f0225249fd9d721c54b83f48d9352c97c6cacdcb6f31" as Hex,
 } as const;
 
 export const DISCOVERY_TOPICS: Hex[] = [
