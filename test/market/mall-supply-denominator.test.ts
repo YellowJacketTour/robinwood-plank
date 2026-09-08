@@ -115,3 +115,50 @@ test("the scorer still refuses to invent a percentage when supply is unknown", (
     "an unknown denominator must produce no score at all",
   );
 });
+
+test("the id-inference ratchet is ALSO guarded, not just the chain read", () => {
+  // THE BUG THIS EXISTS FOR, measured live 2026-09-08.
+  //
+  // Migration 106 cleared Friendship Bracelets' known_supply and set
+  // chain_confirmed = FALSE so a better value could be written. That
+  // RE-ENABLED the max-id ratchet, and an Art Blocks token id near 2,038,964
+  // immediately rewrote known_supply to 2,000,343 -- LARGER than the
+  // 2,000,335 the migration had just cleared.
+  //
+  // Guarding only correctKnownSupplyFromChain did not fix the row. It
+  // unlocked the other vector. Art Blocks encodes
+  // tokenId = projectId * 1_000_000 + invocation, so "highest id observed" is
+  // a fact about the whole CORE and never about one project.
+  const at = LEDGER.indexOf("const observedMaxId");
+  assert.ok(at > 0, "found the id-inference ratchet");
+  const block = LEDGER.slice(at, at + 2600);
+
+  assert.ok(
+    /inferenceIsMall/.test(block),
+    "the ratchet must apply the same mall test as the chain read",
+  );
+  assert.ok(
+    /MALL_SUPPLY_RATIO/.test(block),
+    "and must use the same threshold, not a second opinion",
+  );
+  assert.ok(
+    /!inferenceIsMall &&/.test(block),
+    "a mall-shaped inference must not be written",
+  );
+});
+
+test("a row already carrying a mall's number is cleared by the read path", () => {
+  // A migration alone cannot fix this: the ratchet runs on the very next read
+  // and undoes it. The clearing has to live where the ratchet lives.
+  const at = LEDGER.indexOf("const observedMaxId");
+  const block = LEDGER.slice(at, at + 2600);
+  assert.ok(
+    /known_supply = NULL, known_supply_chain_confirmed = FALSE/.test(block),
+    "the read path must clear a poisoned denominator, not only refuse new ones",
+  );
+  // And it must clear to NULL, never to a guess.
+  assert.ok(
+    !/shape\.knownSupply = venueSupplyForRatchet/.test(block),
+    "do not substitute the venue number: absence is honest, a guess is not",
+  );
+});
