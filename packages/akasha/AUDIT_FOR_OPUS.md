@@ -17,7 +17,7 @@ collection, and how does a stranger check that your numbers are right?*
 | Hydrate | `src/hydrate/` | What the archive accepts from a visitor |
 | Claims | `src/claims/` | Numbers that carry the evidence to recompute them |
 
-51 tests pass. `npm test` and `npm run typecheck` are both green.
+58 tests pass. `npm test` and `npm run typecheck` are both green.
 
 ## The four corrections
 
@@ -56,6 +56,28 @@ and one namespace and must not slice.
 **4. Attention schedules work; it never creates identity.** `attentionMayCreateEdge()`
 throws. What a visitor looks at decides what we fetch next and nothing else.
 
+## Two real bugs in the reorg path
+
+`reorg.ts` is the only code here that deletes, and it was untested. Writing
+tests for it found two defects, both of which would have reached production.
+
+**An unguarded walk exhausted memory.** A genesis header is its own parent on
+several chains, so the loop collecting orphaned blocks asked the store for the
+same hash forever and grew its array until `RangeError: Invalid array length`
+— about 22 seconds per call. Any malformed parent link does the same. Both
+walks are now bounded by a seen-set.
+
+**The fork point was found by presence, not ancestry.** The forward walk
+accepted any header already in the store as the common ancestor. But the new
+branch's blocks are stored *before* the rewind runs, so it stopped at the new
+head's own parent and returned a fork point the old tip never descended from.
+Nothing was deleted, and the archive silently kept the orphaned branch while
+its coverage still claimed the discarded heights. The candidate is now drawn
+only from the old tip's own ancestry.
+
+The second is the more dangerous of the two: it fails silently and leaves the
+archive confidently wrong, whereas the first at least crashes.
+
 ## Two fixes made while writing the tests
 
 Both were found by tests failing honestly rather than by review.
@@ -74,7 +96,7 @@ the guard actually fires rather than just passing.
 
 ## The envelope parser, checked against mainnet
 
-The 51 tests use synthetic scripts, so the parser was also run against real
+The tests use synthetic scripts, so the parser was also run against real
 Bitcoin. A witness from block 966018 decoded to inscription
 `457d87c9…i0`, content type `text/plain;charset=utf-8`, with this body:
 
