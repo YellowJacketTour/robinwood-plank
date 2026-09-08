@@ -2,6 +2,12 @@ import { Pool } from 'pg';
 import { chromium } from 'playwright';
 import { createHash, randomBytes } from 'node:crypto';
 
+if (!process.argv.includes('--synthetic')) {
+  console.log('For real wallet testing open http://localhost:3017/profile-editor in your normal browser.');
+  console.log('For an isolated synthetic fixture explicitly run this script with --synthetic.');
+  process.exit(0);
+}
+
 // A real local board and session, never a production authentication bypass.
 const db = new URL(process.env.CHARMVILLE_TEST_DATABASE_URL);
 const base = new URL(process.env.CHARMVILLE_TEST_BASE_URL || 'http://localhost:3017');

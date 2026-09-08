@@ -34,11 +34,24 @@ The script rejects remote hosts, creates a synthetic session/profile, exercises 
 removes its fixture rows. It does not use a real wallet or post to foreign platforms. Screenshots are
 written to `.charmville-isometric-*.png` for inspection, not automatically committed.
 
-## Interactive local playtest
+## Real wallet testing
+
+Run `powershell -File scripts/charmville/configure-local-wallet.ps1` to load only
+`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and `NEXT_PUBLIC_WALLET_UI` from the same
+GitHub repository variables used by master deployment. They stay in ignored
+`.env.local`. This uses your existing gh repository access. No production secrets
+or database settings are imported.
+
+Open `http://localhost:3017/profile-editor` in your normal browser. Connect using
+the shared wallet flow, then verify and load/create your local profile. The local
+database is separate: your production profile is not silently copied. Use your
+own board for owner actions, not a synthetic play handle.
+
+## Synthetic local playtest
 
 With the local application and migrated isolated database running, set
 `CHARMVILLE_TEST_DATABASE_URL` and optionally `CHARMVILLE_TEST_BASE_URL`
-(default `http://localhost:3017`), then run `node scripts/charmville/playtest.mjs`.
+(default `http://localhost:3017`), then run `node scripts/charmville/playtest.mjs --synthetic`.
 It opens a visible Chromium browser with a synthetic local wallet session.
 Use that browser to claim the six plots, gather, replant, move trees and save scenery.
 Reload keeps server state. The fixture and session are removed when the browser closes.

@@ -59,3 +59,16 @@ Stale saves reject and retain the in-memory draft; cancel/reopen loads the saved
 Draft persistence across devices and additional decoration types remain unfinished.
 Expanded lot currently provides more viewing space. The other five face expression sets and later
 phases remain unfinished. This branch is not a claim that the total unified vision is complete.
+
+## Latest integration check
+
+Merged origin/dev, matching active master 17a5ba2, into this feature branch.
+The shared wallet components already matched master; local public build variables
+were missing. Loaded the deployment's two public wallet variables into ignored
+.env.local and verified Reown picker plus a rendered WalletConnect QR. Actual
+wallet approval/login remains an interactive user step. The configuration helper
+in scripts/charmville reproduces this without importing production secrets.
+
+Full suite after upstream merge: 212 contract tests passed; market 1304 passed,
+49 skipped, zero failed. The historical failure above was resolved upstream.
+Targeted PostgreSQL and sprite tests passed; browser save/reload checks passed.

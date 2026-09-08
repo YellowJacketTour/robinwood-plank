@@ -62,3 +62,8 @@ TypeScript passes; scoped lint has the two previously recorded Porch warnings.
 The seven faces remain Stalk, Splinter, Knock, Hum, Pith, Gleam and Knot.
 Grain (post), grain (balance) and stalk (inventory ID) remain distinct.
 Nothing in this workflow reduces that scope or marks those later phases complete.
+
+Crop follow-up: Stalk now uses 11x11 stems (previously 8x8), larger modeled grain
+heads, broader leaves, restrained height variation and stronger green/gold
+material contrast. Editable .blend sources and all frames were rebuilt; this
+still needs a new independent visual verdict.
