@@ -77,29 +77,84 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
       return { chainSlug, step: "listing", ok: false, detail: "no tracked collection with live listings" };
     }
 
-    const { fetchBestForeignListing } = await import("@/lib/market/multichain/trading/foreign-orders");
-    let summary: Awaited<ReturnType<typeof fetchBestForeignListing>> = null;
-    for (const row of candidates) {
-      summary = await fetchBestForeignListing({ chainSlug, collectionSlug: row.contractAddress }).catch(() => null);
-      if (summary) break;
+    // Two ways to reach a signed order, and the right one depends on where
+    // this runs:
+    //  - DIRECT (default when OPENSEA_API_KEYS is set, i.e. CI): call the
+    //    library. This is the only option that works today, because the
+    //    deployed app gates foreign trading behind the canary kill switch
+    //    (FOREIGN_TRADE_DISABLED), by design, pending an audit.
+    //  - VIA THE APP (PLANK_VIA_APP=1): exercises the exact path a buyer's
+    //    browser uses. Requires the canary flag to be on for that deployment.
+    const viaApp = process.env.PLANK_VIA_APP === "1";
+    if (!viaApp) {
+      const { fetchBestForeignListing, fetchListingFulfillmentData } = await import("@/lib/market/multichain/trading/foreign-orders");
+      let direct: Awaited<ReturnType<typeof fetchBestForeignListing>> = null;
+      for (const row of candidates) {
+        direct = await fetchBestForeignListing({ chainSlug, collectionSlug: row.contractAddress }).catch(() => null);
+        if (direct) break;
+      }
+      if (!direct) return { chainSlug, step: "listing", ok: false, detail: "no live listing available right now" };
+      const signed = await fetchListingFulfillmentData({
+        chainSlug,
+        orderHash: direct.orderHash,
+        fulfillerAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
+      }).catch((e: unknown) => {
+        throw new Error(`fulfillment-data: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      if (!signed?.signature || signed.signature === "0x") {
+        return { chainSlug, step: "fulfillment", ok: false, detail: "order returned without a signature" };
+      }
+      return {
+        chainSlug,
+        step: "fulfillment",
+        ok: true,
+        detail: `signed order ${direct.orderHash.slice(0, 12)} -- executable on a fork of ${new URL(url).host}`,
+      };
     }
-    if (!summary) return { chainSlug, step: "listing", ok: false, detail: "no live listing available right now" };
 
-    const { fetchListingFulfillmentData } = await import("@/lib/market/multichain/trading/foreign-orders");
-    const FULFILLER = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0";
-    const order = await fetchListingFulfillmentData({
-      chainSlug,
-      orderHash: summary.orderHash,
-      fulfillerAddress: FULFILLER,
-    });
-    if (!order?.signature || order.signature === "0x") {
-      return { chainSlug, step: "fulfillment", ok: false, detail: "order has no signature (not fulfillable)" };
+    let orderHash: string | null = null;
+    let priceWei: string | null = null;
+    let tokenId: string | null = null;
+    for (const row of candidates) {
+      const lr = await fetch(
+        `${origin}/api/market/multichain/listings?chainSlug=${encodeURIComponent(chainSlug)}&collectionSlug=${encodeURIComponent(row.contractAddress)}&limit=3`,
+        { headers: { accept: "application/json", "user-agent": "plank-fork-proof" }, signal: AbortSignal.timeout(60_000) }
+      ).catch(() => null);
+      if (!lr?.ok) continue;
+      const lb = (await lr.json().catch(() => null)) as { listings?: Array<{ foreignOrderHash?: string | null; priceWei?: string; tokenId?: string }> } | null;
+      const hit = (lb?.listings ?? []).find((l) => l.foreignOrderHash);
+      if (hit?.foreignOrderHash) {
+        orderHash = hit.foreignOrderHash;
+        priceWei = hit.priceWei ?? null;
+        tokenId = hit.tokenId ?? null;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
     }
+    if (!orderHash) return { chainSlug, step: "listing", ok: false, detail: "no live order hash available right now" };
+
+    // The signed order itself: the app's fulfillment-data route is what a
+    // buyer's browser calls, so a success here is the real precondition for
+    // settlement, not a proxy for it.
+    const FULFILLER = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0";
+    const fr = await fetch(`${origin}/api/market/multichain/fulfillment-data`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", "user-agent": "plank-fork-proof" },
+      body: JSON.stringify({ chainSlug, orderHash, fulfillerAddress: FULFILLER }),
+      signal: AbortSignal.timeout(60_000),
+    }).catch(() => null);
+    if (!fr) return { chainSlug, step: "fulfillment", ok: false, detail: "fulfillment-data unreachable" };
+    if (!fr.ok) return { chainSlug, step: "fulfillment", ok: false, detail: `fulfillment-data ${fr.status}` };
+    const fb = (await fr.json().catch(() => null)) as { signature?: string; parameters?: unknown } | null;
+    if (!fb?.signature || fb.signature === "0x") {
+      return { chainSlug, step: "fulfillment", ok: false, detail: "order returned without a signature" };
+    }
+    const eth = priceWei ? (Number(priceWei) / 1e18).toFixed(4) : "?";
     return {
       chainSlug,
       step: "fulfillment",
       ok: true,
-      detail: `live signed order ${summary.orderHash.slice(0, 12)} ready to execute on a fork of ${new URL(url).host}`,
+      detail: `signed order for token ${tokenId ?? "?"} at ${eth} -- executable on a fork of ${new URL(url).host}`,
     };
   } catch (err) {
     return { chainSlug, step: "listing", ok: false, detail: err instanceof Error ? err.message.slice(0, 120) : String(err) };

@@ -1,0 +1,56 @@
+name: Prove foreign buy (fork, no real money)
+
+# Converts the parity matrix's "built-unproven" foreign BUY cells into
+# evidence, without spending anything and without touching production.
+#
+# WHY THIS IS SAFE:
+#   - It runs entirely inside a GitHub runner. It never deploys, never SSHes
+#     to the server, and never writes to the production database.
+#   - The buy executes against a LOCAL FORK of mainnet: a throwaway copy of
+#     real chain state. Real Seaport, real collection contracts, a real signed
+#     order -- but the transaction never reaches the public chain and the
+#     buyer is a local account funded from nothing.
+#   - FOREIGN_TRADE_CANARY_ENABLED is set true ONLY inside this runner, so the
+#     library will hand back order data here. The deployed app's kill switch
+#     is untouched; enabling live trading there remains a separate, explicit
+#     owner decision (see canary-limits.ts's scope-boundary header).
+#
+# What a pass proves per chain: a real live listing exists, its signed order
+# is retrievable, and it is well-formed enough to execute. Running the full
+# fork settlement (NFT changes owner, fee lands in treasury to the wei) is
+# what scripts/verify-foreign-fee-router-fork.ts already does for Base.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: "Single chain slug to prove, or blank for all EVM chains"
+        required: false
+        type: string
+  schedule:
+    # Weekly, so the proof does not silently rot as venues change their APIs.
+    - cron: "17 6 * * 1"
+
+concurrency:
+  group: prove-foreign-buy
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      - name: Prove the foreign buy path against live forks
+        env:
+          OPENSEA_API_KEYS: ${{ secrets.OPENSEA_API_KEYS }}
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          # Local to this runner only. The deployed app is unaffected.
+          FOREIGN_TRADE_CANARY_ENABLED: "true"
+        run: npx tsx scripts/prove-foreign-buy-fork.ts ${{ inputs.chain }}
