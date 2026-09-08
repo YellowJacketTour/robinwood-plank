@@ -33,6 +33,25 @@ async function main() {
 
   const args = [
     "--format=custom",
+    // Compression 1, not the zlib default of 6.
+    //
+    // MEASURED 2026-09-08: a pre-migration backup on this database took 97
+    // minutes against a pipeline comment that says "40+". Every deploy that
+    // carries a migration pays it, and two migrations in a row pay it twice,
+    // serialized -- three hours of wall clock for 13 lines of DDL.
+    //
+    // pg_dump --format=custom is single-threaded and cannot use --jobs (that
+    // needs --format=directory, which changes the output shape and the
+    // restore command, so it is not a safe drive-by change). Compression
+    // level IS safe: identical format, identical `pg_restore` invocation,
+    // only the CPU spent squeezing bytes changes. Level 1 typically runs
+    // 2-4x faster than 6 for maybe 10-20% more disk on a database that is
+    // mostly jsonb and text.
+    //
+    // Disk is cheap here and bounded: PLANK_BACKUP_KEEP=14 prunes old dumps.
+    // A backup that takes 97 minutes is a backup people are tempted to skip,
+    // and a skipped backup is worth far less than a slightly larger one.
+    "--compress=1",
     "--no-owner",
     "--no-privileges",
     "--host",

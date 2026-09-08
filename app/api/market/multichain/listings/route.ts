@@ -897,6 +897,27 @@ export async function GET(req: NextRequest) {
           partial: !pagedComplete,
           sources: { opensea: pagedComplete ? "cursor-exhausted" : "truncated-at-limit" },
           excludedNonNativeCurrency: excludedNonNative,
+          // WHERE the book stopped, not just THAT it stopped.
+          //
+          // Measured on production 2026-09-08: Milady Maker returned ONE
+          // listing against a listedCount of 117, with
+          // sources.opensea = "truncated-at-limit" and
+          // excludedNonNativeCurrency = 0. That combination is unexplainable
+          // from outside -- "truncated" could mean the walk hit its page cap,
+          // or fetched one page and stopped, or fetched plenty of orders that
+          // then collapsed in the per-token dedup. Three very different bugs,
+          // one indistinguishable symptom.
+          //
+          // A partial book that cannot say WHY it is partial is the same
+          // silent shape as coverage advancing over a filter that matched
+          // nothing: it reports a state without the evidence to act on it.
+          // These three numbers separate the cases at a glance:
+          //   pagesWalked 1 + ordersFetched 1  -> upstream returned one order
+          //   pagesWalked 10                   -> hit the page cap, book is big
+          //   ordersFetched 117, listings 1    -> dedup collapsed it (one token)
+          pagesWalked: paged.pages,
+          ordersFetched: rawOrders.length,
+          ordersAfterDedup: orders.length,
         },
       },
       { headers: { "Cache-Control": "no-store" } }
