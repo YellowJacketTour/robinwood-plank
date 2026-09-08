@@ -516,6 +516,17 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] ow-rarity", JSON.stringify(await scaffoldAllTrackedOrdinalsWalletCollections({ limit: 3, delayMs: 0 })).slice(0, 400));
       return;
     }
+    if (source === "ow-catalog") {
+      // The OrdinalsWallet CATALOG (not art): 425,201 collections by its own
+      // `total`, against the 19,577 we track. This scan existed and worked but
+      // lived only in the legacy refresh-market-data script, which the mesh
+      // never runs -- so Bitcoin discovery had no catalog walker at all and
+      // the count sat frozen (owner, 2026-09-07: "there are sources out there
+      // that say there are more than 20,000 ordinals"). 500 per page.
+      const { runOrdinalsWalletCollectionScan } = await import("../lib/market/multichain/discovery/ordinalswallet-collection-scan");
+      console.log("[mesh-lane] ow-catalog", JSON.stringify(await runOrdinalsWalletCollectionScan({ maxPages: 4 })));
+      return;
+    }
     if (source === "ordinals-wallet") {
       const { hydrateBitcoinArt } = await import("../lib/market/multichain/discovery/bitcoin-art-rotator");
       console.log("[mesh-lane] ow", JSON.stringify(await hydrateBitcoinArt(40)));
