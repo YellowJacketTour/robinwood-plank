@@ -42,8 +42,42 @@ import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 const SOURCE = "ordinalswallet-ordinals";
 const API_BASE = "https://turbo.ordinalswallet.com/collections";
 const PAGE_SIZE = 500;
-/** Past this offset the catalog is effectively all BRC-20 token rows (see the wrap logic below). */
-const DEAD_ZONE_OFFSET = 120_000; // real, confirmed unenforced-but-generous page size; kept well under the whole-catalog inscriptions call's own size
+/**
+ * Where the catalog stops holding NFT collections and becomes BRC-20 rows.
+ *
+ * Measured live 2026-09-08 by sampling this endpoint directly: real
+ * non-BRC-20 collections per page of 500 are 499 / 490 / 483 / 363 at offsets
+ * 0 / 500 / 1000 / 1500, then TWO at offset 2000. Re-probed the same day at
+ * offsets 0 / 1500 / 2000 / 3000: 489 / 361 / 6 / 33. Everything past ~2k is
+ * fungible-token rows that this scan correctly rejects.
+ *
+ * The previous 120,000 was wrong by two orders of magnitude, so the lane
+ * spent every turn walking token rows before wrapping.
+ *
+ * READ THIS BEFORE TUNING IT AGAIN. Lowering this number does not grow
+ * Bitcoin. This source offers ~1,837 real collections in total and we already
+ * hold ~19,600 from elsewhere, so the catalog is EXHAUSTED, not stalled, and
+ * no offset makes it produce what it does not have. It is fixed here only so
+ * the lane stops paying for a store with nothing left. Bitcoin growth comes
+ * from parsing envelopes off the chain itself, not from this endpoint.
+ */
+const DEAD_ZONE_OFFSET = 2_500;
+
+/**
+ * Should the walker give up on this page and wrap back to the front?
+ *
+ * Pulled out of the loop so the stop condition is testable without a
+ * database: a walker whose exhaustion rule is only asserted by a constant is
+ * exactly the "guard that never fires" shape that has bitten this codebase
+ * twice. New collections are added at the TOP of this catalog, so wrapping to
+ * offset 0 is where re-walking actually finds them.
+ */
+export function shouldWrapToStart(offset: number, realCollectionsOnPage: number): boolean {
+  return offset > DEAD_ZONE_OFFSET && realCollectionsOnPage === 0;
+}
+
+/** Exported for tests so the measured boundary cannot drift silently. */
+export const ORDINALSWALLET_DEAD_ZONE_OFFSET = DEAD_ZONE_OFFSET;
 const CHAIN_SLUG = "bitcoin-mainnet";
 const CURSOR_KEY = "bitcoin-mainnet:ordinalswallet-collection-list";
 // Not a real throttle -- see source-budget.ts's own DAILY_CEILING comment:
@@ -182,7 +216,7 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
     // nothing, so once we are deep in it and a full page yields nothing, wrap
     // to the start -- new collections are added at the top, and the early
     // region is where re-walking actually finds them.
-    if (offset > DEAD_ZONE_OFFSET && realThisPage === 0) {
+    if (shouldWrapToStart(offset, realThisPage)) {
       offset = 0;
       await writeOffset(offset);
       break;
