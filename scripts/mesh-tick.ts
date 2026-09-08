@@ -377,7 +377,23 @@ async function main(): Promise<void> {
   /** Standing lanes are enqueued as `mesh:<lane id>` (enqueueStandingLanes); the standing slot claims by that identity. */
   const STANDING_JOB_KEY_PREFIX = "mesh:";
   const EXPRESS_IDLE_MS = 2_000;
-  type WorkerRole = "express" | "standing" | "general";
+  type WorkerRole = "express" | "standing" | "discovery" | "general";
+  /**
+   * Lanes that BRING NEW COLLECTIONS IN. The standing slot rotates fairly
+   * across all 154 standing lanes, but only these 26 discover; fair rotation
+   * therefore gave each of them roughly one turn in 154. Measured live
+   * 2026-09-07: ~4 new collections in 3 minutes across every chain combined,
+   * while 3,123 per-collection demand jobs saturated the other two slots.
+   * Discovery gets its own slot so catalog growth is never a residue of
+   * whatever the demand queue leaves over (owner: "every chain, all
+   * collections ... i used to see thousands of collections be added").
+   */
+  const DISCOVERY_SOURCES = [
+    "hypersync-discovery", "hypersync-backfill", "helius-discovery", "magiceden-catalog",
+    "unisat-discovery", "ordiscan-discovery", "robinhood-discovery", "robinhood-backfill",
+    "hunter-evm", "hunter-solana", "hunter-bitcoin", "m2-sweep", "ow-rarity",
+    "unisat-collections", "ordinals-wallet",
+  ];
   async function worker(role: WorkerRole = "general"): Promise<void> {
     const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
     // Worker heartbeat (2026-09-07): diagnostics showed every standing lane
@@ -399,9 +415,14 @@ async function main(): Promise<void> {
       const job =
         role === "express"
           ? await claimDataJob(claimKinds, 300_000, EXPRESS_MIN_PRIORITY)
-          : role === "standing"
-            ? await claimDataJob(claimKinds, 300_000, undefined, undefined, STANDING_JOB_KEY_PREFIX)
-            : await claimDataJob(claimKinds);
+          : role === "discovery"
+            ? // Discovery first; when every discovery lane is cooling down,
+              // fall back to the general queue rather than idling a slot.
+              (await claimDataJob(claimKinds, 300_000, undefined, undefined, STANDING_JOB_KEY_PREFIX, DISCOVERY_SOURCES)) ??
+              (await claimDataJob(claimKinds))
+            : role === "standing"
+              ? await claimDataJob(claimKinds, 300_000, undefined, undefined, STANDING_JOB_KEY_PREFIX)
+              : await claimDataJob(claimKinds);
       if (!job) {
         // AUDIT lens 5 C: general workers used to exit on the first empty
         // claim, leaving only the express slot for the rest of the hour.
@@ -505,11 +526,28 @@ async function main(): Promise<void> {
   // burst mesh-tick's own startup was creating.
   const expressSlots = n >= 2 ? 1 : 0;
   const standingSlots = n >= 3 ? 1 : 0;
+  // With 4+ slots the fourth is discovery-only. At exactly 3 slots (the
+  // production host today) the standing slot alternates: odd-numbered ticks
+  // run discovery-only so catalog growth still gets half the standing turns
+  // instead of 26/154 of them.
+  // Discovery scales with the worker count instead of being a single slot:
+  // catalog growth is a first-class workload, not a leftover. ~25% of slots
+  // (min 1 once there are 4) bring new collections in; the rest stay on
+  // visitor demand and the standing rotation.
+  const discoverySlots = n >= 4 ? Math.max(1, Math.floor(n * 0.25)) : 0;
+  const standingIsDiscovery = discoverySlots === 0 && standingSlots === 1 && Math.floor(Date.now() / 60_000) % 2 === 1;
   if (expressSlots) console.log(`[mesh-tick] express lane reserved for priority >= ${EXPRESS_MIN_PRIORITY}`);
   if (standingSlots) console.log(`[mesh-tick] standing lane reserved for job_key ${STANDING_JOB_KEY_PREFIX}* (discovery/stats/fills never starve; priority bound ${STANDING_MAX_PRIORITY} no longer used for the claim)`);
   const workers = Array.from({ length: n }, (_, i) => {
     const startDelayMs = i * 150;
-    const role: WorkerRole = i === 0 && expressSlots === 1 ? "express" : i === 1 && standingSlots === 1 ? "standing" : "general";
+    const role: WorkerRole =
+      i === 0 && expressSlots === 1
+        ? "express"
+        : i === 1 && standingSlots === 1
+          ? (standingIsDiscovery ? "discovery" : "standing")
+          : i >= 2 && i < 2 + discoverySlots
+            ? "discovery"
+            : "general";
     return (async () => {
       if (startDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, startDelayMs));
       return worker(role);
