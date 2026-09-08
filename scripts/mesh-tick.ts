@@ -6,7 +6,7 @@
  *   npx tsx --env-file=.env.local scripts/mesh-tick.ts --limit=8
  */
 import { spawn } from "node:child_process";
-import { MESH_LANES, type MeshLane } from "../lib/market/multichain/mesh/matrix";
+import { activeMeshLanes, type MeshLane } from "../lib/market/multichain/mesh/matrix";
 import { isSourceJailed } from "../lib/market/multichain/mesh/jail";
 import { claimDataJob, deferDataJob, enqueueDataJob, finishDataJob } from "../lib/market/multichain/control-plane";
 import { configuredOpenSeaKeyCount } from "../lib/market/multichain/discovery/opensea-key-pool";
@@ -326,7 +326,11 @@ async function main(): Promise<void> {
 
   async function enqueueStandingLanes(verbose: boolean): Promise<MeshLane[]> {
   const lanes: MeshLane[] = [];
-  for (const lane of MESH_LANES) {
+  // activeMeshLanes(), not MESH_LANES: while AKASHA_HOSE_OWNS_BITCOIN=1 the
+  // Bitcoin catalog pagers are not scheduled, because the hose owns Bitcoin
+  // existence and two writers discovering the same collections is the failure
+  // this program exists to remove. Every other lane is unaffected.
+  for (const lane of activeMeshLanes()) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;
     if (await isSourceJailed(lane.source, lane.chainSlug)) {
       if (verbose) console.log(`[mesh-tick] skip jailed ${lane.id}`);
