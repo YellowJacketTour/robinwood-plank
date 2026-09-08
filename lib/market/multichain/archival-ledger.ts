@@ -710,11 +710,54 @@ export async function getArchivalStatsForCollection(
   // range -- confirmed live via OpenSea's own "not found" response).
   const chainConfirmed = statsResult.rows[0]?.known_supply_chain_confirmed === true;
   const observedMaxId = maxIdResult.rows[0]?.max_id ?? null;
-  if (!chainConfirmed && observedMaxId != null && observedMaxId + 1 > (shape.knownSupply ?? 0)) {
-    shape.knownSupply = observedMaxId + 1;
+
+  // THE MALL RATCHET.
+  //
+  // This id-inference is the SECOND way a multiplex core poisons a
+  // denominator, and it is the one that actually bit. Migration 106 cleared
+  // Friendship Bracelets' known_supply and set chain_confirmed = FALSE so a
+  // better value could be written -- which RE-ENABLED this branch, and an Art
+  // Blocks token id near 2,038,964 immediately re-inflated known_supply to
+  // 2,000,343. Measured live 2026-09-08: the number came back LARGER than the
+  // 2,000,335 the migration had just cleared.
+  //
+  // Clearing the flag without guarding this path did not fix the row; it
+  // unlocked the other vector. Art Blocks encodes tokenId as
+  // projectId * 1_000_000 + invocation, so "highest id seen" is a statement
+  // about the whole CORE, never about this project.
+  //
+  // Same rule as correctKnownSupplyFromChain: when an inferred supply is more
+  // than MALL_SUPPLY_RATIO times the venue's own project supply, the id space
+  // belongs to more than this collection. Refuse the inference and leave the
+  // denominator alone -- an unknown supply renders honestly as
+  // 'unknown_supply' with no percentage, which is strictly better than a
+  // confident 2%.
+  const venueSupplyForRatchet = await getCollectionSupplyStats(chainSlug, normalized)
+    .then((s) => s?.totalSupply ?? null)
+    .catch(() => null);
+  const inferred = observedMaxId != null ? observedMaxId + 1 : null;
+  const inferenceIsMall =
+    inferred != null &&
+    venueSupplyForRatchet != null &&
+    Number.isFinite(venueSupplyForRatchet) &&
+    venueSupplyForRatchet > 0 &&
+    inferred > venueSupplyForRatchet * MALL_SUPPLY_RATIO;
+
+  if (!chainConfirmed && inferred != null && !inferenceIsMall && inferred > (shape.knownSupply ?? 0)) {
+    shape.knownSupply = inferred;
     await postgresQuery(
       `UPDATE collection_archival_stats SET known_supply = $3 WHERE chain_slug = $1 AND collection_key = $2`,
       [chainSlug, normalized, shape.knownSupply]
+    ).catch(() => {});
+  } else if (inferenceIsMall && shape.knownSupply != null && shape.knownSupply > venueSupplyForRatchet! * MALL_SUPPLY_RATIO) {
+    // The row is already carrying a mall's number from a previous pass. Clear
+    // it here rather than leaving it to a migration that this same ratchet
+    // would immediately undo.
+    shape.knownSupply = null;
+    await postgresQuery(
+      `UPDATE collection_archival_stats SET known_supply = NULL, known_supply_chain_confirmed = FALSE
+        WHERE chain_slug = $1 AND collection_key = $2`,
+      [chainSlug, normalized]
     ).catch(() => {});
   }
   const { archivalScore, scoreMethod } = scoreFromCounts(shape.knownSupply, shape.tokensEverHydrated ?? 0);
