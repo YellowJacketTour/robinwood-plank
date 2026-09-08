@@ -70,3 +70,8 @@ Read [CHARMVILLE-ART-RESEARCH.md](CHARMVILLE-ART-RESEARCH.md) and the [pinned re
 ## Dream-loop and playable progress
 
 Read [CHARMVILLE-VISUAL-LOOP.md](CHARMVILLE-VISUAL-LOOP.md) for the pinned workflow, independent critique and remaining whole-vision work. The upstream README, skill and MIT license are preserved in dream-loop-source/. User art direction overrides its default photoreal target. [CHARMVILLE-PHASE-A.md](CHARMVILLE-PHASE-A.md) records actual implementation separately from specification. Draft implementation PR: https://github.com/YellowJacketTour/robinwood-plank/pull/378. Local playtest instructions are in scripts/charmville/README.md on that branch.
+
+## Expanded creator collaboration
+
+Read [CREATOR-PARTNERSHIP-CONTEXT.md](CREATOR-PARTNERSHIP-CONTEXT.md) and the verbatim [expanded research corpus](CREATOR-RESEARCH-EXPANSION.md). This records the owner's creator-partnership authorization and expands the research queue while preserving the full vision.
+
