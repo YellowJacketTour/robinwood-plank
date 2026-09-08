@@ -17,7 +17,7 @@ collection, and how does a stranger check that your numbers are right?*
 | Hydrate | `src/hydrate/` | What the archive accepts from a visitor |
 | Claims | `src/claims/` | Numbers that carry the evidence to recompute them |
 
-73 tests pass. `npm test` and `npm run typecheck` are both green.
+81 tests pass. Every module in `src/` has direct test coverage. `npm test` and `npm run typecheck` are both green.
 
 ## The four corrections
 
