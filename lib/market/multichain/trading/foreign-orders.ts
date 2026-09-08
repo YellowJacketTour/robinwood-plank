@@ -126,15 +126,46 @@ async function openSeaPost<T>(path: string, body: unknown): Promise<T> {
  * re-resolving the same collection on every listings/offers/activity/
  * my-listings request for it.
  */
-const slugCache = new Map<string, string | null>();
+const slugCache = new Map<string, string>();
+/**
+ * Failures get a SHORT, expiring memory; successes are cached forever.
+ *
+ * Not caching failure at all would let a genuinely slug-less contract retry
+ * OpenSea on every request. Caching it forever was the poison pill this
+ * replaced. A 60-second negative window absorbs a burst of requests during an
+ * outage and then lets the collection heal by itself.
+ */
+const NEGATIVE_SLUG_TTL_MS = 60_000;
+const slugMisses = new Map<string, number>();
 export async function resolveOpenSeaCollectionSlug(openSeaChain: string, contractAddress: string): Promise<string | null> {
   const cacheKey = `${openSeaChain}:${contractAddress.toLowerCase()}`;
-  if (slugCache.has(cacheKey)) return slugCache.get(cacheKey)!;
+  const hit = slugCache.get(cacheKey);
+  if (hit) return hit;
+  const missedAt = slugMisses.get(cacheKey);
+  if (missedAt != null && Date.now() - missedAt < NEGATIVE_SLUG_TTL_MS) return null;
   const data = await openSeaFetch<{ collection?: string }>(
     `/chain/${openSeaChain}/contract/${contractAddress}`
   ).catch(() => null);
   const slug = data?.collection ?? null;
-  slugCache.set(cacheKey, slug);
+  // NEGATIVE RESULTS ARE NOT CACHED.
+  //
+  // This used to `slugCache.set(cacheKey, slug)` unconditionally, and the
+  // cache has no TTL. So ONE transient OpenSea failure (429, a 15s timeout, a
+  // key rotation) poisoned that collection for the entire process lifetime:
+  // every later call took the cached null, fell back to the raw contract
+  // address as the slug, got a 404 from /listings/.../all, and rendered a
+  // collection with a real listed count as an empty book. Measured on
+  // production 2026-09-08: Milady reported 117 listed and returned 1.
+  //
+  // A successful lookup is effectively immutable and worth caching forever.
+  // A failure is a statement about the network right now, not about the
+  // collection, so it must be retried.
+  if (slug) {
+    slugCache.set(cacheKey, slug);
+    slugMisses.delete(cacheKey);
+  } else {
+    slugMisses.set(cacheKey, Date.now());
+  }
   return slug;
 }
 
@@ -375,18 +406,43 @@ export async function fetchForeignAllListingsPaged(input: {
   let pages = 0;
   while (orders.length < target && pages < 10) {
     const pageSize = Math.min(100, target - orders.length);
-    const result: {
+    let result: {
       listings: Array<{ order_hash: string; chain: string; protocol_data: { parameters: SeaportOrderParameters; signature: string | null } }>;
       next?: string | null;
-    } | null = await openSeaFetch(
-      `/listings/collection/${encodeURIComponent(input.collectionSlug)}/all?chain=${chain.openSeaChain}&limit=${pageSize}${cursor ? `&next=${encodeURIComponent(cursor)}` : ""}`
-    );
+    } | null;
+    try {
+      result = await openSeaFetch(
+        `/listings/collection/${encodeURIComponent(input.collectionSlug)}/all?chain=${chain.openSeaChain}&limit=${pageSize}${cursor ? `&next=${encodeURIComponent(cursor)}` : ""}`
+      );
+    } catch {
+      // A TRANSPORT MISS IS NOT AN END OF BOOK.
+      //
+      // openSeaFetch THROWS on 429/500/timeout and returns null only on 404.
+      // An uncaught throw here propagated to the route, which caught it and
+      // rendered a book with no coverage object at all -- measured live as
+      // `bookCoverage: null` with zero listings. Either way the visitor saw
+      // an empty grid. Whatever we have so far is now reported as an
+      // explicitly INCOMPLETE book instead.
+      return { orders, complete: false, pages };
+    }
     pages += 1;
     for (const l of result?.listings ?? []) {
       orders.push({ orderHash: l.order_hash, chain: l.chain, parameters: l.protocol_data.parameters, signature: l.protocol_data.signature });
     }
-    cursor = result?.next ?? null;
-    if (!cursor || (result?.listings ?? []).length === 0) return { orders, complete: true, pages };
+    // A NULL PAGE IS NOT AN EXHAUSTED CURSOR.
+    //
+    // openSeaFetch returns null on 404, and `result?.listings ?? []` turned
+    // that into an empty page, which this line then reported as
+    // `complete: true`. So a collection whose slug failed to resolve -- or
+    // whose page 404'd for any reason -- rendered as an empty book that the
+    // UI was told was COMPLETE. The listed count said 117 and the grid said
+    // zero, with no error anywhere: the silent-failure shape again.
+    //
+    // A null page now ends the walk as INCOMPLETE, so the caller reports a
+    // partial book rather than certifying an empty one.
+    if (result == null) return { orders, complete: false, pages };
+    cursor = result.next ?? null;
+    if (!cursor || result.listings.length === 0) return { orders, complete: true, pages };
   }
   return { orders, complete: cursor == null, pages };
 }
