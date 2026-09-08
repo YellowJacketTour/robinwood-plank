@@ -619,6 +619,56 @@ export const MESH_LANES: MeshLane[] = [
   },
 ];
 
+/**
+ * CUTOVER STEP 3. The Bitcoin catalog pagers, and nothing else.
+ *
+ * These four lanes are the vendor-catalog path for Bitcoin COLLECTION
+ * DISCOVERY: they page third-party registries looking for collections that
+ * exist. When the akasha hose owns Bitcoin, that job belongs to the hose --
+ * two writers discovering the same existence from different sources is the
+ * failure this whole program exists to remove.
+ *
+ * Deliberately NOT in this set:
+ *   - unisat-rarity / ow-rarity / metadata lanes. Rarity and metadata are a
+ *     different question from existence, the hose does not answer them yet,
+ *     and switching them off would blank real cells for no gain.
+ *   - every non-Bitcoin lane. One family at a time is the supported cutover.
+ */
+export const BITCOIN_CATALOG_LANES: readonly MeshSource[] = [
+  "ow-catalog",
+  "unisat-discovery",
+  "ordiscan-discovery",
+  "unisat-collections",
+] as const;
+
+/**
+ * True once the hose owns Bitcoin existence.
+ *
+ * Read at call time, never captured at module load, so a supervisor can flip
+ * it without a rebuild. Default OFF: the pagers keep running until someone
+ * deliberately turns them off, because an accidental cutover leaves Bitcoin
+ * with NO writer at all -- strictly worse than a pager wasting turns.
+ */
+export function bitcoinHoseOwnsExistence(): boolean {
+  return process.env.AKASHA_HOSE_OWNS_BITCOIN === "1";
+}
+
+/**
+ * Lanes the scheduler may run right now.
+ *
+ * The ONLY behaviour change from the flag: while the hose owns Bitcoin
+ * existence, the Bitcoin catalog pagers are not scheduled. Everything else --
+ * every other chain, every rarity and metadata lane, Bitcoin included --
+ * is untouched.
+ */
+export function activeMeshLanes(): MeshLane[] {
+  if (!bitcoinHoseOwnsExistence()) return MESH_LANES;
+  return MESH_LANES.filter(
+    (l) =>
+      !(l.chainSlug === "bitcoin-mainnet" && BITCOIN_CATALOG_LANES.includes(l.source)),
+  );
+}
+
 export function lanesForSource(source: MeshSource): MeshLane[] {
   return MESH_LANES.filter((l) => l.source === source);
 }
