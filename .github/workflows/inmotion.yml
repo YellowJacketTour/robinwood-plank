@@ -1230,11 +1230,16 @@ jobs:
       INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
     steps:
       - uses: actions/checkout@v5
+      # Match the build job exactly: the same pinned Node and npm. A floating
+      # "22" resolved to a newer npm that rejects the repo's existing lock
+      # drift (axios/@emnapi), so deploy-mesh failed at install while the
+      # main build -- which pins both -- installs fine.
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 22.22.3
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build:mesh
       - name: Assert bundles
