@@ -210,8 +210,20 @@ export async function replaceForeignRarity(
       await client.query(`DELETE FROM plank_foreign_rarity WHERE chain_slug = $1 AND collection_slug = $2`, [chainSlug, key]);
       for (const r of snapshot.byTokenId.values()) {
         await client.query(
+          // Idempotent per (chain, collection, token): a re-index is a
+          // SNAPSHOT replace, and two source rows can normalise to the same
+          // token id (case/format variants from a vendor feed), which made
+          // the whole transaction abort on the primary key. Live 2026-09-07:
+          // unisat-rarity:bitcoin-mainnet at 2,410 attempts, every one dying
+          // with "duplicate key value violates unique constraint
+          // plank_foreign_rarity_pkey", so Bitcoin rarity never landed.
+          // Last write wins, which is what a snapshot means.
           `INSERT INTO plank_foreign_rarity (chain_slug, collection_slug, token_id, name, score, rank, percentile, tier, image_url)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (chain_slug, collection_slug, token_id) DO UPDATE SET
+             name = EXCLUDED.name, score = EXCLUDED.score, rank = EXCLUDED.rank,
+             percentile = EXCLUDED.percentile, tier = EXCLUDED.tier,
+             image_url = EXCLUDED.image_url, indexed_at = NOW()`,
           [
             chainSlug,
             key,
