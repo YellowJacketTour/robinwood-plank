@@ -52,6 +52,10 @@ Read CHARMVILLE-ART-RESEARCH.md, CHARMVILLE-SOURCE-CATALOG.json, and scripts/cha
 
 ## Still unfinished
 
-Persistent decoration placement, full first-open/WoodAmp acceptance review and final art approval.
+Full first-open/WoodAmp acceptance review and final art approval.
+The eight starter trees can now be arranged on unoccupied lawn cells and saved to the server.
+Migration 105 stores scenery with its own revision; crop footprints cannot be occupied.
+Stale saves reject and retain the in-memory draft; cancel/reopen loads the saved version.
+Draft persistence across devices and additional decoration types remain unfinished.
 Expanded lot currently provides more viewing space. The other five face expression sets and later
 phases remain unfinished. This branch is not a claim that the total unified vision is complete.

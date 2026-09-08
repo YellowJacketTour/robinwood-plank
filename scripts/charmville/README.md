@@ -33,3 +33,14 @@ node scripts/charmville/verify-browser.mjs
 The script rejects remote hosts, creates a synthetic session/profile, exercises the real board, and
 removes its fixture rows. It does not use a real wallet or post to foreign platforms. Screenshots are
 written to `.charmville-isometric-*.png` for inspection, not automatically committed.
+
+## Interactive local playtest
+
+With the local application and migrated isolated database running, set
+`CHARMVILLE_TEST_DATABASE_URL` and optionally `CHARMVILLE_TEST_BASE_URL`
+(default `http://localhost:3017`), then run `node scripts/charmville/playtest.mjs`.
+It opens a visible Chromium browser with a synthetic local wallet session.
+Use that browser to claim the six plots, gather, replant, move trees and save scenery.
+Reload keeps server state. The fixture and session are removed when the browser closes.
+No real wallet signatures or production authentication bypass are provided.
+The local test session expires after 24 hours.

@@ -12,7 +12,7 @@ let page;
 try{
  await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status,layout_json) VALUES($1,$2,'Charmville art check','approved','[\"feed\",\"friends\"]')",[wallet,handle]);
  await pool.query('INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)',[createHash('sha256').update(token).digest('hex'),wallet,new Date(Date.now()+3600000).toISOString()]);
- page=await browser.newPage({viewport:{width:1280,height:1000}});
+ page=await browser.newPage({viewport:{width:1280,height:1400}});
  const foreign=[];page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/api/x/'))foreign.push(r.url())});
  await page.addInitScript(({wallet,token})=>{localStorage.setItem('plankspace-terms-2026-08-22-v1','accepted');localStorage.setItem('plankspace-session:'+wallet,token);localStorage.setItem('plankspace-last-verified-wallet',wallet);window.ethereum={isMetaMask:true,request:async({method})=>{if(method==='eth_accounts'||method==='eth_requestAccounts')return[wallet];if(method==='eth_chainId')return'0x1237';if(method==='personal_sign')throw Error('Unexpected fresh signature');return null;},on(){},removeListener(){}};},{wallet,token});
  await page.goto(new URL('/u/'+handle,base).href);
@@ -29,6 +29,12 @@ try{
  const state=await frame.evaluate(e=>getComputedStyle(e).animationPlayState);if(state!=='running')throw Error('Visible animation not running');
  await page.emulateMedia({reducedMotion:'reduce'});if(await frame.evaluate(e=>getComputedStyle(e).animationName)!=='none')throw Error('Reduced motion ignored');
  await page.emulateMedia({reducedMotion:'no-preference'});
+ await porch.getByRole('button',{name:'Arrange scenery',exact:true}).click();
+ await page.getByRole('button',{name:'Place tree at 1, 2',exact:true}).click();
+ await porch.getByRole('button',{name:'Save scenery',exact:true}).click();
+ await porch.getByRole('button',{name:'Arrange scenery',exact:true}).waitFor();
+ await page.reload();await porch.getByRole('button',{name:'Arrange scenery',exact:true}).waitFor();
+ await porch.scrollIntoViewIfNeeded();
  await porch.screenshot({path:'.charmville-isometric-desktop.png'});
  await page.setViewportSize({width:390,height:844});
  await porch.getByRole('button',{name:'Choose plot 2',exact:true}).click();
@@ -38,6 +44,7 @@ try{
  await bag.screenshot({path:'.charmville-isometric-satchel.png'});
  if(foreign.length)throw Error('Unexpected foreign API calls');
  const result=await page.request.get(new URL('/api/charmville/'+handle,base).href,{headers:{authorization:'Bearer '+token}});const yard=await result.json();
+ if(yard.decorations.find(item=>item.id===0)?.y!==1)throw Error('Scenery did not persist after reload');
  if(yard.inventory.faces.find(s=>s.face==='stalk')?.qty!=='3')throw Error('Harvest balance incorrect');
  if(yard.inventory.seeds.find(s=>s.face==='stalk')?.qty!=='2')throw Error('Seed return/replant incorrect');
  console.log('PASS: claim, harvest without signature, seed return, replant, animation, reduced motion, 390px sheet, no X API.');

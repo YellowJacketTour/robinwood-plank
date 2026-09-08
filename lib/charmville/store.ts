@@ -1,3 +1,4 @@
+import { STARTER_DECORATIONS, validDecorations, type Decoration } from "./layout";
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
@@ -5,7 +6,8 @@ export class YardError extends Error {
   constructor(message: string, public status = 409) { super(message); }
 }
 export type YardAction = {
-  action: "claim" | "plant" | "resolve" | "stamp" | "tend";
+  action: "claim" | "plant" | "resolve" | "stamp" | "tend" | "layout";
+  decorations?: Decoration[];
   requestId: string;
   plotIndex?: number;
   revision?: string;
@@ -18,7 +20,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function parseYardAction(raw: unknown): YardAction {
   if (!raw || typeof raw !== "object") throw new YardError("Invalid yard action", 400);
   const p = raw as Record<string, unknown>;
-  if (!uuid.test(String(p.requestId)) || !["claim", "plant", "resolve", "stamp", "tend"].includes(String(p.action)))
+  if (!uuid.test(String(p.requestId)) || !["claim", "plant", "resolve", "stamp", "tend", "layout"].includes(String(p.action)))
     throw new YardError("Invalid yard action", 400);
   const action = p.action as YardAction["action"];
   const result: YardAction = { action, requestId: String(p.requestId) };
@@ -26,6 +28,10 @@ export function parseYardAction(raw: unknown): YardAction {
     if (!Number.isInteger(p.plotIndex) || Number(p.plotIndex) < 0 || Number(p.plotIndex) > 5 || !/^\d+$/.test(String(p.revision)))
       throw new YardError("Choose a current plot", 400);
     result.plotIndex = Number(p.plotIndex); result.revision = String(p.revision);
+  }
+  if (action === "layout") {
+    if (!/^\d+$/.test(String(p.revision)) || !validDecorations(p.decorations)) throw new YardError("Choose eight distinct scenery cells outside the crops", 400);
+    result.revision=String(p.revision); result.decorations=p.decorations.map(({id,x,y})=>({id,x,y}));
   }
   if (action === "plant") {
     if (p.face !== "stalk" && p.face !== "splinter") throw new YardError("Choose Stalk or Splinter", 400);
@@ -50,7 +56,7 @@ async function actor(client: PoolClient, token: string) {
 }
 
 async function snapshot(client: PoolClient, profileId: string, owner: boolean) {
-  const yard = await client.query("SELECT revision::text, land_value::text FROM charmville_yards WHERE profile_id=$1", [profileId]);
+  const yard = await client.query("SELECT revision::text, land_value::text, layout_revision::text, decorations FROM charmville_yards WHERE profile_id=$1", [profileId]);
   const plots = await client.query(`SELECT plot_index AS "plotIndex", crop, ripe_at AS "ripeAt",
     compost_after AS "compostAfter", revision::text, tilled,
     EXISTS(SELECT 1 FROM charmville_receipts r WHERE r.cycle_id=charmville_plots.cycle_id AND r.action='tend') AS tended
@@ -65,7 +71,7 @@ async function snapshot(client: PoolClient, profileId: string, owner: boolean) {
     inventory = { seeds: seeds.rows, faces: faces.rows, grain: grain.rows[0].grain };
   }
   const now = await client.query("SELECT clock_timestamp() AS now");
-  return { claimed: !!yard.rowCount, owner, plots: plots.rows.map(plot => ({
+  return { claimed: !!yard.rowCount, owner, layoutRevision: yard.rows[0]?.layout_revision ?? "0", decorations: yard.rows[0]?.decorations ?? STARTER_DECORATIONS, plots: plots.rows.map(plot => ({
     ...plot, ripeAt: plot.ripeAt?.toISOString() ?? null,
     compostAfter: plot.compostAfter?.toISOString() ?? null,
   })), inventory, stamps: stamps.rows, serverNow: now.rows[0].now.toISOString() as string };
@@ -125,7 +131,11 @@ export async function mutateYard(pool: Pool, handle: string, token: string, inpu
     } else {
       const yard = await client.query("SELECT profile_id FROM charmville_yards WHERE profile_id=$1", [profileId]);
       if (!yard.rowCount) throw new YardError("Claim your porch first");
-      if (input.action === "stamp") {
+      if (input.action === "layout") {
+        if (!validDecorations(input.decorations)) throw new YardError("Invalid scenery layout",400);
+        const saved=await client.query("UPDATE charmville_yards SET decorations=$2,layout_revision=layout_revision+1 WHERE profile_id=$1 AND layout_revision=$3 RETURNING profile_id",[profileId,JSON.stringify(input.decorations),input.revision]);
+        if (!saved.rowCount) throw new YardError("The scenery changed on another device. Your draft is kept; reload the saved layout or keep editing.");
+      } else if (input.action === "stamp") {
         const post = await client.query("SELECT id FROM plankspace_posts WHERE id=$1 AND lower(author_wallet)=lower($2) AND moderation_status='approved' FOR SHARE", [input.postId, who.wallet]);
         if (!post.rowCount) throw new YardError("Choose one of your published Grains", 403);
         const debit = await client.query("UPDATE charmville_stacks SET qty=qty-1 WHERE profile_id=$1 AND face_id='stalk' AND qty>=1 RETURNING qty", [profileId]);

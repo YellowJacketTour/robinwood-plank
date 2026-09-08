@@ -16,6 +16,7 @@ args.add_argument("--species", choices=["stalk", "splinter", "all"], default="al
 opts = args.parse_args(sys.argv[sys.argv.index("--")+1:])
 out = Path(opts.output).resolve(); out.mkdir(parents=True, exist_ok=True)
 bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete(use_global=False)
+bpy.context.preferences.filepaths.save_version = 0
 scene = bpy.context.scene
 scene.render.engine = "CYCLES"
 scene.cycles.samples = 12
@@ -38,7 +39,7 @@ def material(name,colour):
     m=bpy.data.materials.new(name);m.diffuse_color=(*colour,1);m.use_nodes=True
     bsdf=m.node_tree.nodes.get("Principled BSDF");bsdf.inputs["Base Color"].default_value=(*colour,1);bsdf.inputs["Roughness"].default_value=.8
     return m
-mats=[material("leaf",(.20,.34,.055)),material("fresh stem",(.36,.48,.10)),material("ripe straw",(.63,.43,.105)),material("ripe grain",(.88,.64,.20)),material("bark",(.24,.11,.035)),material("cut wood",(.68,.44,.17))]
+mats=[material("leaf",(.19,.40,.045)),material("fresh stem",(.31,.52,.07)),material("ripe straw",(.63,.43,.105)),material("ripe grain",(.96,.69,.12)),material("bark",(.24,.11,.035)),material("cut wood",(.68,.44,.17))]
 
 # Direct mesh construction keeps the source small and deterministic, with no external model dependency.
 def build(species,stage):
@@ -52,18 +53,18 @@ def build(species,stage):
         poly(rings[1],5 if species=="splinter" else mat)
     def kernel(x,y,z,angle,mat):
         # Compact pointed grain, lit on six facets.
-        r=.020;h=.047
+        r=.034;h=.058
         ring=[(x+math.cos(i*math.tau/6+angle)*r,y+math.sin(i*math.tau/6+angle)*r,z) for i in range(6)]
         for i in range(6):poly([ring[i],ring[(i+1)%6],(x,y,z+h)],mat)
-    count=8 if species=="stalk" else 4
+    count=11 if species=="stalk" else 4
     for row in range(count):
         for col in range(count):
             x=-.85+col*1.7/(count-1)+rng.uniform(-.03,.03);y=-.85+row*1.7/(count-1)+rng.uniform(-.03,.03)
-            h=rng.uniform(.48,.73)*stage;lean=rng.uniform(-.04,.04)
+            h=rng.uniform(.40,.64)*stage;lean=rng.uniform(-.065,.065)
             if species=="stalk":
                 tube((x,y,0),(x+lean,y,h),.008,2 if stage>.8 else 1)
                 for side in [-1,1]:
-                    z=h*.42;poly([(x,y,z),(x+side*.06,y+.025,z+.06*stage),(x+side*.14*stage,y,z+.13*stage),(x+side*.04,y-.015,z+.025)],0)
+                    z=h*.36;poly([(x,y,z),(x+side*.08,y+.04,z+.06*stage),(x+side*.23*stage,y,z+.13*stage),(x+side*.05,y-.03,z+.025)],0)
                 if stage>.45:
                     for k in range(5):
                         z=h-.015+k*.025*stage

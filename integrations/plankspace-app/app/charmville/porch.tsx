@@ -6,12 +6,13 @@ import { savedWalletProof, walletProof } from "../auth-client";
 import { connectPlankLoveWallet, getPlankLoveWalletState, subscribePlankLoveWalletState } from "../plank-love-wallet";
 import { CropArt, PouchArt } from "./crop-art";
 import styles from "./porch.module.css";
+import type { Decoration } from "../../../../lib/charmville/layout";
 import YardScene, { type SceneEffect } from "./scene";
 
 type Plot = { plotIndex: number; crop: string | null; ripeAt: string | null; compostAfter: string | null; revision: string; tended?: boolean };
 type Stack = { face: string; qty: string };
-type Yard = { stamps: {postId:string;qty:string}[]; owner: boolean; claimed: boolean; serverNow: string; plots: Plot[]; inventory: null | { seeds: Stack[]; faces: Stack[]; grain: string } };
-type Action = { action: string; plotIndex?: number; revision?: string; face?: string; postId?: string };
+type Yard = { decorations: Decoration[]; layoutRevision: string; stamps: {postId:string;qty:string}[]; owner: boolean; claimed: boolean; serverNow: string; plots: Plot[]; inventory: null | { seeds: Stack[]; faces: Stack[]; grain: string } };
+type Action = { action: string; decorations?: Decoration[]; plotIndex?: number; revision?: string; face?: string; postId?: string };
 
 export default function Porch({ handle, posts, onStamps }: { handle: string; posts: { id: number; body: string }[]; onStamps: (stamps:{postId:string;qty:string}[])=>void }) {
   const [effect,setEffect] = useState<SceneEffect | null>(null);
@@ -78,22 +79,22 @@ export default function Porch({ handle, posts, onStamps }: { handle: string; pos
     return ()=>window.removeEventListener("keydown",escape);
   },[bag,closeBag]);
 
-  async function act(action:Action, signIn=false) {
-    if(actionRunning.current)return;
-    if(!navigator.onLine){setNotice("Reconnect to tend your porch. No action has been queued.");return;}
+  async function act(action:Action, signIn=false):Promise<boolean> {
+    if(actionRunning.current)return false;
+    if(!navigator.onLine){setNotice("Reconnect to tend your porch. No action has been queued.");return false;}
     actionRunning.current=true;
     let generation=accountGeneration.current;
     setBusy(true);setNotice("");
     try {
       let token=auth.current;
       if(signIn){const wallet=await connectPlankLoveWallet();const proof=await walletProof(wallet,"charmville","porch",{});token=proof.sessionToken;auth.current=token;generation=accountGeneration.current;}
-      if(generation!==accountGeneration.current)return;
+      if(generation!==accountGeneration.current)return false;
       if(!token)throw new Error("Sign in to use your porch.");
       if(pending.current && JSON.stringify(pending.current.action)!==JSON.stringify(action))throw new Error("Check the pending action before making another change.");
       pending.current ??= {id:crypto.randomUUID(),action};setHasPending(true);
       const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${token}`},body:JSON.stringify({...action,requestId:pending.current.id})});
       const data=await response.json();
-      if(generation!==accountGeneration.current)return;
+      if(generation!==accountGeneration.current)return false;
       if(!response.ok){if(response.status<500){pending.current=null;setHasPending(false);}throw new Error(data.error);}
       const effectId=pending.current?.id??crypto.randomUUID();
       pending.current=null;setHasPending(false);apply(data);
@@ -101,8 +102,8 @@ export default function Porch({ handle, posts, onStamps }: { handle: string; pos
       if(action.action==="resolve"){setBag(true);setNotice(data.action==="compost"?"Seed returned. Your plot is ready for another season.":`${data.qty} faces gathered. One seed returned.`);}
       if(action.action==="stamp")setNotice("Stalk stamped onto your Grain. Your seed stays home.");
       if(action.action==="tend")setNotice("A little care left for your neighbor. You earned 1 grain.");
-      await refresh();
-    } catch(error){if(generation===accountGeneration.current)setNotice(error instanceof Error?error.message:"Please try again");}
+      await refresh();return true;
+    } catch(error){if(generation===accountGeneration.current)setNotice(error instanceof Error?error.message:"Please try again");return false;}
     finally{actionRunning.current=false;setBusy(false);}
   }
   const seedCount=(face:string)=>yard?.inventory?.seeds.find(s=>s.face===face)?.qty??"0";
@@ -117,7 +118,7 @@ export default function Porch({ handle, posts, onStamps }: { handle: string; pos
       <p>{yard.owner?"Your six plots are waiting. Two Stalks are ready to gather.":"A porch can grow here."}</p>
       <button disabled={busy||!online} onClick={()=>yard.owner?void act({action:"claim"}):void act({action:"claim"},true)}>{yard.owner?"Claim your lot":"Connect to claim your lot"}</button>
     </div>:<>
-      <YardScene plots={yard.plots} now={now} expanded={expanded} owner={yard.owner} disabled={busy||!online||!authenticated} effect={effect}
+      <YardScene key={handle+String(yard.owner)} decorations={yard.decorations} layoutRevision={yard.layoutRevision} onLayout={(decorations,revision)=>act({action:"layout",decorations,revision})} plots={yard.plots} now={now} expanded={expanded} owner={yard.owner} disabled={busy||!online||!authenticated} effect={effect}
         onPlot={plot=>void act(yard.owner?{action:plot.crop?"resolve":"plant",plotIndex:plot.plotIndex,revision:plot.revision,...(!plot.crop?{face:planting}:{})}:{action:"tend",plotIndex:plot.plotIndex,revision:plot.revision})}/>
       {yard.owner?<fieldset className={styles.seeds}><legend>Plant your next appointment</legend>{["stalk","splinter"].map(face=><label key={face}><input type="radio" name={`seed-${handle}`} checked={planting===face} onChange={()=>setPlanting(face)}/>{face==="stalk"?"Stalk · 4h · seed only":"Splinter · 16h · seed + 2 grain"}<small>{seedCount(face)} seeds</small></label>)}</fieldset>:<p>Leave a little care on a growing plot. Only the owner can harvest.</p>}
       {!authenticated&&<button disabled={busy} onClick={async()=>{setBusy(true);try{const w=await connectPlankLoveWallet();await walletProof(w,"charmville","porch",{});await refresh();}catch(e){setNotice(e instanceof Error?e.message:"Sign-in failed");}finally{setBusy(false);}}}>Sign in to tend</button>}

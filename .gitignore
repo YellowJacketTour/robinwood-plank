@@ -88,3 +88,7 @@ public/arcade/deploy-addresses.testnet.json
 /blob-report/
 test/e2e/.hardhat-node.pid
 test/e2e/.casino-keeper.pid
+
+# Local visual iteration captures; durable findings live in docs.
+.dream-loop/
+.charmville-*.png

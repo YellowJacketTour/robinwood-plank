@@ -17,6 +17,7 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     await pool.query(await readFile("deploy/inmotion/postgres/migrations/090_plankspace_native.sql", "utf8"));
     const sql = await readFile("deploy/inmotion/postgres/migrations/104_charmville_soil.sql", "utf8");
     await pool.query(sql); await pool.query(sql);
+    await pool.query(await readFile("deploy/inmotion/postgres/migrations/105_charmville_layout.sql","utf8"));
     const token = "a".repeat(64), otherToken = "b".repeat(64);
     const wallet = "0x" + "1".repeat(40), otherWallet = "0x" + "2".repeat(40);
     for (const [handle, key, session] of [["soil_owner",wallet,token],["soil_friend",otherWallet,otherToken]]) {
@@ -54,6 +55,17 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     await assert.rejects(pool.query("UPDATE charmville_seeds SET qty=-1"));
     await assert.rejects(pool.query("UPDATE charmville_plots SET tilled=false WHERE plot_index=0"));
     await assert.rejects(mutateYard(pool,"soil_owner",token,{...claim,action:"stamp",postId:post.rows[0].id}));
+    const beforeLayout=await readYard(pool,"soil_owner",token);
+    const moved=beforeLayout.decorations.map((item:{id:number;x:number;y:number})=>item.id===0?{...item,x:0,y:1}:item);
+    const layout: YardAction={action:"layout",requestId:randomUUID(),revision:beforeLayout.layoutRevision,decorations:moved};
+    const saved=await mutateYard(pool,"soil_owner",token,layout);
+    assert.deepEqual(await mutateYard(pool,"soil_owner",token,layout),saved,"layout retry replays");
+    assert.deepEqual(saved.inventory,beforeLayout.inventory,"scenery never changes balances");
+    assert.deepEqual(saved.plots,beforeLayout.plots,"scenery never moves crops");
+    await assert.rejects(act({action:"layout",revision:beforeLayout.layoutRevision,decorations:moved}),/another device/);
+    await assert.rejects(act({action:"layout",revision:saved.layoutRevision,decorations:moved.map((item:{id:number;x:number;y:number})=>item.id===0?{...item,x:2,y:3}:item)}));
+    await assert.rejects(act({action:"layout",revision:saved.layoutRevision,decorations:moved},"soil_owner",otherToken));
+    assert.deepEqual((await readYard(pool,"soil_owner")).decorations,moved,"saved layout is public");
     await pool.query("UPDATE plankspace_wallet_sessions SET expires_at='2000-01-01T00:00:00Z'");
     await assert.rejects(act({action:"resolve",plotIndex:1,revision:"0"}));
   } finally {

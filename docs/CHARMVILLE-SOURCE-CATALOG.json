@@ -116,5 +116,16 @@
       "README.md",
       "LICENSE.txt"
     ]
+  },
+  {
+    "name": "dream-loop",
+    "url": "https://github.com/achimala/dream-loop.git",
+    "commit": "d113b78bd8143d6c4e2b46840c1a881139bcc084",
+    "evidence": [
+      "README.md",
+      "SKILL.md",
+      "LICENSE"
+    ],
+    "role": "visual iteration workflow, not game engine or artwork library"
   }
 ]
