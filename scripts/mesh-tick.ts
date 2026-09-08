@@ -530,7 +530,11 @@ async function main(): Promise<void> {
   // production host today) the standing slot alternates: odd-numbered ticks
   // run discovery-only so catalog growth still gets half the standing turns
   // instead of 26/154 of them.
-  const discoverySlots = n >= 4 ? 1 : 0;
+  // Discovery scales with the worker count instead of being a single slot:
+  // catalog growth is a first-class workload, not a leftover. ~25% of slots
+  // (min 1 once there are 4) bring new collections in; the rest stay on
+  // visitor demand and the standing rotation.
+  const discoverySlots = n >= 4 ? Math.max(1, Math.floor(n * 0.25)) : 0;
   const standingIsDiscovery = discoverySlots === 0 && standingSlots === 1 && Math.floor(Date.now() / 60_000) % 2 === 1;
   if (expressSlots) console.log(`[mesh-tick] express lane reserved for priority >= ${EXPRESS_MIN_PRIORITY}`);
   if (standingSlots) console.log(`[mesh-tick] standing lane reserved for job_key ${STANDING_JOB_KEY_PREFIX}* (discovery/stats/fills never starve; priority bound ${STANDING_MAX_PRIORITY} no longer used for the claim)`);
@@ -541,7 +545,7 @@ async function main(): Promise<void> {
         ? "express"
         : i === 1 && standingSlots === 1
           ? (standingIsDiscovery ? "discovery" : "standing")
-          : i === 2 && discoverySlots === 1
+          : i >= 2 && i < 2 + discoverySlots
             ? "discovery"
             : "general";
     return (async () => {
