@@ -31,6 +31,7 @@
     "**/*.mts"
   ],
   "exclude": [
+    "packages/akasha",
     "node_modules",
     "_to_delete",
     "test",
