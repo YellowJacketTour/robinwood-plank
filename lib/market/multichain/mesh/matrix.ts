@@ -75,6 +75,7 @@ export type MeshSource =
   | "parity"
   | "creator-identity"
   | "ow-rarity"
+  | "ow-catalog"
   | "m2-sweep";
 
 export type MeshLane = {
@@ -422,6 +423,18 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders"],
     sliceSec: 120,
     notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
+  },
+  {
+    // Bitcoin's actual catalog walker. OrdinalsWallet's own `total` is
+    // 425,201 collections against the 19,577 tracked: this scan existed and
+    // worked but lived ONLY in the legacy refresh-market-data script, which
+    // the mesh never runs, so Bitcoin had no catalog walker scheduled at all.
+    id: "ow-catalog:bitcoin-mainnet",
+    source: "ow-catalog",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["name", "image"],
+    sliceSec: 120,
+    notes: "Keyless turbo.ordinalswallet.com collection catalog, 4 pages x 500 per pass with a durable offset; the source of new Bitcoin collections.",
   },
   {
     // Bitcoin zero-to-full without a key (2026-09-07): OrdinalsWallet's

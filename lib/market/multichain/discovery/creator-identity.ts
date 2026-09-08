@@ -23,7 +23,14 @@ import { chainManifest } from "@/lib/market/multichain/chains/manifest";
  * identity is not re-queried every rotation.
  */
 const ATTEMPT_TTL_SEC = 7 * 24 * 3600;
-const PER_PASS = 10;
+// The CoinGecko pace (one call per 6.5s keyless) is the ceiling, so a pass
+// should use its whole budget rather than stopping at an arbitrary 10.
+// Live 2026-09-07: ~11 handles filled per pass against 25,000 Ethereum rows
+// alone -- the owner sees "tons of verifieds missing" because the lane is
+// simply too slow, not because it fails. On-chain owner() and ENS need no
+// third-party pacing at all, so an EVM row costs a fraction of a CoinGecko
+// call and many rows resolve without touching CoinGecko.
+const PER_PASS = 60;
 
 const attemptKey = (chain: string, key: string) => `plank:creator-attempt:${chain}:${key.toLowerCase()}`;
 
@@ -40,7 +47,13 @@ export function handleFromTwitterUrl(url: string | null | undefined): string | n
   const m = /(?:twitter\.com|x\.com)\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/i.exec(url);
   const h = m?.[1] ?? (/^@?([A-Za-z0-9_]{1,15})$/.exec(url.trim())?.[1] ?? null);
   if (!h) return null;
-  if (["home", "share", "intent", "search", "i", "hashtag"].includes(h.toLowerCase())) return null;
+  const low = h.toLowerCase();
+  if (["home", "share", "intent", "search", "i", "hashtag"].includes(low)) return null;
+  // A marketplace's own account is not the collection's creator. Live
+  // 2026-09-07: Gemesis came back as "openseapro" because CoinGecko lists
+  // the marketplace link for collections with no creator social. A wrong
+  // checkmark is worse than none -- the badge claims "this is who made it".
+  if (["opensea", "openseapro", "opensea_io", "magiceden", "blur_io", "blureth", "looksrare", "x2y2_io", "rarible", "coingecko", "nftgo", "tensor_hq"].includes(low)) return null;
   return h;
 }
 
@@ -107,13 +120,17 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     let handle: string | null = r.creator_handle;
     let address: string | null = r.creator_address;
     let ens: string | null = r.creator_ens;
-    if (!handle && chainSlug === "solana-mainnet" && r.alias_symbol) handle = await readMagicEdenTwitter(r.alias_symbol);
-    if (!handle) handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
+    // Free, unpaced sources first: owner() over the public RPC pool and an
+    // ENS reverse lookup cost nothing against anyone's rate limit, so a row
+    // that resolves this way never spends a CoinGecko slot.
     if (isEvm && !address) address = await readContractOwner(chainSlug, r.contract_address);
     if (isEvm && address && !ens && chainSlug === "eth-mainnet") {
       const { resolveEnsName } = await import("@/lib/market/multichain/ens");
       ens = await resolveEnsName(address).catch(() => null);
     }
+    if (!handle && chainSlug === "solana-mainnet" && r.alias_symbol) handle = await readMagicEdenTwitter(r.alias_symbol);
+    // Only spend the paced vendor call when the free sources produced nothing.
+    if (!handle && !ens) handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
     const changed = (handle && handle !== r.creator_handle) || (address && address !== r.creator_address) || (ens && ens !== r.creator_ens);
     if (changed) {
       await updateCollectionDisplay(chainSlug, r.contract_address, { name: null, imageUrl: null, creatorHandle: handle, creatorAddress: address, creatorEns: ens });
