@@ -212,3 +212,35 @@ test("load() rebuilds the read model and never trusts a persisted liveness bit",
   // every restored row as a fresh durable write.
   eq(store.pendingWrites, 0, "restoring the read model is not a reason to rewrite the tape");
 });
+
+test("protocol_t0 is NEVER stamped from the cursor's lock height", async () => {
+  // The bug this pins, found by running a real restart against mainnet:
+  // putCursor fell back to `c.t0Height` when the pin was not yet installed.
+  // bootBitcoin writes a cursor BEFORE initPins runs, so the CURRENT TIP was
+  // persisted as the protocol origin -- and complete_from_protocol is
+  // `backfill_tail <= protocol_t0`, so a chain holding one block would have
+  // declared itself complete from genesis. A forged completeness certificate,
+  // produced by a convenience default.
+  const sql = fakeSql();
+  const store = new PostgresArchiveStore(sql);
+
+  // Deliberately do NOT call setProtocolT0 first: this is the boot order.
+  store.putCursor({
+    chain: "bitcoin",
+    t0Hash: hx("0xaa"),
+    t0Height: 966_035, // a live tip height
+    tipHash: hx("0xaa"),
+    tipHeight: 966_035,
+    finalizedHash: hx("0xaa"),
+    finalizedHeight: 966_035,
+    streamAlive: false,
+    streamKind: "zmq",
+  });
+  await store.flush();
+
+  const write = sql.ops.find((o) => o.sql.includes("INSERT INTO akasha_cursor"));
+  ok(write, "a cursor write was issued");
+  const persistedT0 = write!.values[1];
+  eq(persistedT0, 767_430, "protocol_t0 must be the reviewed constant, not the lock height");
+  ok(persistedT0 !== 966_035, "stamping the tip as the origin forges completeness");
+});

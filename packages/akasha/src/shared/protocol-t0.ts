@@ -62,13 +62,34 @@ export const PROTOCOL_T0: Record<ChainId, ProtocolOrigin> = {
   solana: {
     height: 0,
     because:
-      "PLACEHOLDER. The true origin is the deploy slot of the sealed program set " +
-      "(Token Metadata / Bubblegum), which must be pinned before Solana is cut over. " +
-      "Zero here would walk the entire slot history, so `assertPinnedForCutover` " +
-      "refuses this chain until a real slot is supplied.",
+      "UNPINNED, deliberately. The origin is the deploy slot of the sealed program " +
+      "set -- Token Metadata (metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s) and, if " +
+      "cNFTs are archived, Bubblegum (BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY) " +
+      "separately. Attempted 2026-09-08 over the public RPC: getAccountInfo returns " +
+      "no deploy slot for a BPFLoaderUpgradeable program, and getSignaturesForAddress " +
+      "pages 1,000 at a time (~22 minutes of history per page) so reaching the deploy " +
+      "would take millions of requests against a rate-limited endpoint. The number " +
+      "must be read once from an explorer or an archival node and stored here as a " +
+      "literal, the way Bitcoin's 767430 is. Zero would mean walking every slot ever " +
+      "produced, so `assertPinnedForCutover` throws for this chain until then. The " +
+      "throw is the feature: a guessed origin yields a completeness claim that is a " +
+      "guess.",
     precision: "conservative",
   },
 };
+
+/**
+ * The programs whose deploy slot would become Solana's origin.
+ *
+ * Kept beside the pin so whoever finishes it does not have to rediscover which
+ * addresses matter. Bubblegum is listed separately because cNFTs are a
+ * different event class: archiving them means the origin is the EARLIER of the
+ * two deploys, not Token Metadata's alone.
+ */
+export const SOLANA_ORIGIN_PROGRAMS = {
+  tokenMetadata: "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
+  bubblegum: "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY",
+} as const;
 
 /**
  * Chains whose pin is a real, defensible origin rather than a placeholder.

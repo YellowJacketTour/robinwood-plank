@@ -26,6 +26,7 @@
  * author cannot be replayed by a stranger.
  */
 import { ArchiveStore } from "./store.ts";
+import { PROTOCOL_T0 } from "../shared/protocol-t0.ts";
 import type {
   Artifact,
   ChainCursor,
@@ -104,7 +105,20 @@ export class PostgresArchiveStore extends ArchiveStore {
 
   override putCursor(c: ChainCursor): void {
     super.putCursor(c);
-    const t0 = this.protocolT0.get(c.chain) ?? c.t0Height;
+    // protocol_t0 comes from the reviewed constant, NEVER from the cursor.
+    //
+    // This used to fall back to `c.t0Height`, which is the block the chain was
+    // locked at. Because bootBitcoin writes a cursor before the pin is
+    // installed, that fallback stamped the CURRENT TIP as the protocol origin
+    // -- and `complete_from_protocol` is `backfill_tail <= protocol_t0`, so a
+    // freshly booted chain would have declared itself complete from genesis
+    // while holding one block. A forged completeness certificate, produced by
+    // a convenience default.
+    //
+    // Falling back to the shipped constant keeps the write honest even if the
+    // caller forgot to set the pin, and `assertPinnedForCutover` still refuses
+    // any chain whose constant is a placeholder.
+    const t0 = this.protocolT0.get(c.chain) ?? PROTOCOL_T0[c.chain].height;
     const tail = this.backfillTail.get(c.chain) ?? c.t0Height;
     this.enqueue(
       `INSERT INTO akasha_cursor
