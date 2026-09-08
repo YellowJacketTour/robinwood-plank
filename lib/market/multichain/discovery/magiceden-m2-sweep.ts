@@ -54,8 +54,15 @@ function base58Encode(bytes: Uint8Array): string {
 
 export const DISCRIMINATOR_BASE58 = base58Encode(Buffer.from(DISC_HEX, "hex"));
 
+/**
+ * Server-side only, so no NEXT_PUBLIC_ variable here: Next inlines those at
+ * build time, which makes them build-frozen rather than a real runtime knob
+ * (test/market/server-feature-flags.test.ts enforces this). The free public
+ * mainnet endpoint is the honest default and is what the shard probe was
+ * measured against.
+ */
 function solanaRpcUrl(): string {
-  return process.env.SOLANA_RPC_URL?.trim() || process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() || "https://api.mainnet-beta.solana.com";
+  return process.env.SOLANA_RPC_URL?.trim() || "https://api.mainnet-beta.solana.com";
 }
 
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {
