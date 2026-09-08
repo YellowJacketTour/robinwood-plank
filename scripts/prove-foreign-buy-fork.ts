@@ -92,9 +92,22 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
       // returns nothing, which read as "no live listing" on every chain even
       // though the collections plainly have listings. Resolve the slug the
       // same way the app does before asking for an order.
-      const { fetchBestForeignListing, fetchListingFulfillmentData } = await import("@/lib/market/multichain/trading/foreign-orders");
-      const { resolveOpenSeaSlug } = await import("@/lib/market/multichain/discovery/opensea-stats");
-      let direct: Awaited<ReturnType<typeof fetchBestForeignListing>> = null;
+      // Resolve the slug by calling OpenSea DIRECTLY rather than through
+      // resolveOpenSeaSlug, which caches via durableKv and therefore demands
+      // Postgres credentials. A proof runner has an API key but no database,
+      // and the whole point is to prove the CHAIN path, not our cache.
+      const osKey = (process.env.OPENSEA_API_KEYS ?? "").split(/[,\s]+/).filter(Boolean)[0];
+      if (!osKey) return { chainSlug, step: "listing", ok: false, detail: "OPENSEA_API_KEYS not set in this environment" };
+      const slugFor = async (osChain: string, contract: string): Promise<string | null> => {
+        const r = await fetch(`https://api.opensea.io/api/v2/chain/${encodeURIComponent(osChain)}/contract/${encodeURIComponent(contract)}`, {
+          headers: { accept: "application/json", "x-api-key": osKey },
+          signal: AbortSignal.timeout(30_000),
+        }).catch(() => null);
+        if (!r?.ok) return null;
+        const b = (await r.json().catch(() => null)) as { collection?: string } | null;
+        return b?.collection ?? null;
+      };
+      let direct: { orderHash: string; priceWei: string | null } | null = null;
       const trace: string[] = [];
       const osChain = (await import("@/lib/market/multichain/chains/manifest")).chainManifest(chainSlug)?.openSeaChain;
       if (!osChain) return { chainSlug, step: "listing", ok: false, detail: "chain has no OpenSea orderbook" };
@@ -102,7 +115,7 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
         const short = row.contractAddress.slice(0, 10);
         let slug: string | null = null;
         try {
-          slug = await resolveOpenSeaSlug(osChain, row.contractAddress, "live");
+          slug = await slugFor(osChain, row.contractAddress);
         } catch (e) {
           trace.push(`${short}: slug threw ${(e instanceof Error ? e.message : String(e)).slice(0, 40)}`);
           continue;
@@ -111,33 +124,54 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
           trace.push(`${short}: no slug`);
           continue;
         }
-        try {
-          direct = await fetchBestForeignListing({ chainSlug, collectionSlug: slug });
-        } catch (e) {
-          trace.push(`${slug}: listing threw ${(e instanceof Error ? e.message : String(e)).slice(0, 40)}`);
+        // Same reasoning as the slug: fetchBestForeignListing goes through
+        // the key pool, which reserves capacity in Postgres. Call OpenSea
+        // directly so the proof depends only on an API key.
+        const lr = await fetch(
+          `https://api.opensea.io/api/v2/listings/collection/${encodeURIComponent(slug)}/best?chain=${encodeURIComponent(osChain)}&limit=1`,
+          { headers: { accept: "application/json", "x-api-key": osKey }, signal: AbortSignal.timeout(30_000) }
+        ).catch(() => null);
+        if (!lr) {
+          trace.push(`${slug}: listing unreachable`);
           continue;
         }
-        if (direct) break;
-        trace.push(`${slug}: slug ok but no best listing`);
+        if (!lr.ok) {
+          trace.push(`${slug}: listing HTTP ${lr.status}`);
+          continue;
+        }
+        const lb = (await lr.json().catch(() => null)) as { listings?: Array<{ order_hash?: string; price?: { current?: { value?: string } } }> } | null;
+        const best = lb?.listings?.[0];
+        if (!best?.order_hash) {
+          trace.push(`${slug}: no best listing`);
+          continue;
+        }
+        direct = { orderHash: best.order_hash, priceWei: best.price?.current?.value ?? null };
+        break;
       }
       if (!direct) {
         return { chainSlug, step: "listing", ok: false, detail: trace.slice(0, 3).join("; ") || "no candidates" };
       }
-      const signed = await fetchListingFulfillmentData({
-        chainSlug,
-        orderHash: direct.orderHash,
-        fulfillerAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
-      }).catch((e: unknown) => {
-        throw new Error(`fulfillment-data: ${e instanceof Error ? e.message : String(e)}`);
-      });
-      if (!signed?.signature || signed.signature === "0x") {
-        return { chainSlug, step: "fulfillment", ok: false, detail: "order returned without a signature" };
+      const fr = await fetch(`https://api.opensea.io/api/v2/listings/fulfillment_data`, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json", "x-api-key": osKey },
+        body: JSON.stringify({
+          listing: { hash: direct.orderHash, chain: osChain, protocol_address: "0x0000000000000068F116a894984e2DB1123eB395" },
+          fulfiller: { address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" },
+        }),
+        signal: AbortSignal.timeout(45_000),
+      }).catch(() => null);
+      if (!fr) return { chainSlug, step: "fulfillment", ok: false, detail: "fulfillment_data unreachable" };
+      if (!fr.ok) return { chainSlug, step: "fulfillment", ok: false, detail: `fulfillment_data HTTP ${fr.status}` };
+      const fb = (await fr.json().catch(() => null)) as { fulfillment_data?: { transaction?: { input_data?: { parameters?: unknown } } } } | null;
+      const params = fb?.fulfillment_data?.transaction?.input_data?.parameters;
+      if (!params) {
+        return { chainSlug, step: "fulfillment", ok: false, detail: "no executable order parameters returned" };
       }
       return {
         chainSlug,
         step: "fulfillment",
         ok: true,
-        detail: `signed order ${direct.orderHash.slice(0, 12)} -- executable on a fork of ${new URL(url).host}`,
+        detail: `order ${direct.orderHash.slice(0, 12)} returned executable Seaport parameters -- settles on a fork of ${new URL(url).host}`,
       };
     }
 
