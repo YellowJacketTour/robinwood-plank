@@ -562,11 +562,62 @@ export function toArchivalApiShape(row: RawArchivalStatsRow | null | undefined):
  * Enumerable contracts) -- the existing max-id ratchet-up stays the
  * fallback for those.
  */
+/**
+ * How far above the venue's own project supply a chain `totalSupply()` may sit
+ * before we refuse to believe it describes THIS collection.
+ *
+ * A multiplex core (Art Blocks, Manifold, Engine, shared 1155 factories) hosts
+ * many projects behind one address, and its `totalSupply()` counts the WHOLE
+ * MALL. Measured on production 2026-09-08, Friendship Bracelets by Alexis
+ * Andre (0x942bc2...5c8a, Art Blocks Explorations):
+ *
+ *   OpenSea project supply   38,965
+ *   chain totalSupply()   2,000,335   <- the shared core
+ *   tokens we hold            39,153   <- MORE than the project has
+ *   displayed archive depth    1.96%   = 39,153 / 2,000,335
+ *
+ * The archive had already hydrated that project completely and was reporting
+ * 2% because it divided by the mall. This is the shared-storefront failure the
+ * cluster layer refuses in host space, appearing in token-id space instead.
+ *
+ * 2x is deliberately loose: a venue's `total_supply` legitimately lags a live
+ * mint, so this must not fire on an ordinary collection that grew since the
+ * last stats refresh. A mall is off by orders of magnitude (51x here), not by
+ * a factor of two.
+ */
+const MALL_SUPPLY_RATIO = 2;
+
 export async function correctKnownSupplyFromChain(chainSlug: string, collectionKey: string): Promise<number | null> {
   const normalized = normalizeCollectionKey(collectionKey);
   const { readTotalSupply } = await import("@/lib/market/multichain/discovery/onchain-contract-reads");
   const realSupply = await readTotalSupply(chainSlug, normalized).catch(() => null);
   if (realSupply == null) return null;
+
+  // REFUSE A MALL'S SUPPLY.
+  //
+  // This function calls the chain read "authoritative ground truth" and
+  // REPLACES known_supply outright, then sets chain_confirmed = TRUE so
+  // nothing can walk it back. That is correct for a single-project contract
+  // and catastrophic for a shared core: one bad write curses the row for its
+  // lifetime, and every downstream number -- archive depth, completeness,
+  // whether metadata jobs can ever finish -- is computed against a denominator
+  // 51x too large.
+  //
+  // The venue's project supply is the cross-check. When the chain claims a
+  // number wildly larger, the contract is hosting more than this collection,
+  // so the chain read describes the mall and not the project. Leave
+  // known_supply alone rather than write a number we know is wrong: an
+  // unchanged denominator is recoverable, a chain-confirmed one is not.
+  const venue = await getCollectionSupplyStats(chainSlug, normalized).catch(() => null);
+  const projectSupply = venue?.totalSupply ?? null;
+  if (
+    projectSupply != null &&
+    Number.isFinite(projectSupply) &&
+    projectSupply > 0 &&
+    realSupply > projectSupply * MALL_SUPPLY_RATIO
+  ) {
+    return null;
+  }
   // known_supply_chain_confirmed=TRUE stops getArchivalStatsForCollection's
   // own max-observed-id ratchet-up from immediately re-inflating this back
   // past the real value on the very next read (see this function's own
