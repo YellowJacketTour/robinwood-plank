@@ -43,7 +43,18 @@ const SOURCE = "ordinalswallet-ordinals";
 const API_BASE = "https://turbo.ordinalswallet.com/collections";
 const PAGE_SIZE = 500;
 /** Past this offset the catalog is effectively all BRC-20 token rows (see the wrap logic below). */
-const DEAD_ZONE_OFFSET = 120_000; // real, confirmed unenforced-but-generous page size; kept well under the whole-catalog inscriptions call's own size
+/**
+ * Where the catalog stops holding NFT collections. Measured 2026-09-08 by
+ * sampling: real non-BRC-20 collections per 500 are 499 / 490 / 483 / 363 at
+ * offsets 0 / 500 / 1000 / 1500, then TWO at offset 2000. Everything beyond
+ * is BRC-20 fungible-token rows the scan correctly rejects.
+ *
+ * The previous 120,000 was wrong by two orders of magnitude, so the lane
+ * spent every turn walking token rows before wrapping. Total real
+ * collections this source offers is ~1,837 -- we already track 19,601 from
+ * other sources, so this catalog is EXHAUSTED, not stalled.
+ */
+const DEAD_ZONE_OFFSET = 2_500;
 const CHAIN_SLUG = "bitcoin-mainnet";
 const CURSOR_KEY = "bitcoin-mainnet:ordinalswallet-collection-list";
 // Not a real throttle -- see source-budget.ts's own DAILY_CEILING comment:
