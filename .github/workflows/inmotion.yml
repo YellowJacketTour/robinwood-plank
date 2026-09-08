@@ -1383,9 +1383,20 @@ jobs:
             printf '%s\n' '# market-mesh (managed by inmotion branch)'
             # Measured live 2026-09-06: 2 lanes per 5-minute burst = 0.13 jobs/min
             # against 800 queued. Same pattern as the stream worker instead:
-            # start every minute under the lock with a 55-minute budget and 3
+            # start every minute under the lock with a 55-minute budget and
             # in-process lanes -- effectively always-on, clean restart hourly.
-            printf '* * * * * cd %s && %s -n %s /usr/bin/env UV_THREADPOOL_SIZE=2 MESH_IN_PROCESS=1 %s --env-file=%s %s --limit=3 --max-seconds=3300 >> %s 2>&1\n' \
+            #
+            # 2026-09-07: raised 3 -> 10 lanes. The 3 dated from the era when
+            # each lane was a SPAWNED PROCESS and the host's process cap
+            # produced spawn EAGAIN; lanes have run in-process since, and a
+            # lane is IO-bound (it waits on RPC/HTTP, it does not burn CPU),
+            # so the real costs are sockets and Postgres connections, not
+            # cores. The provisioning proof run completes with no host limit
+            # hit. PGPOOL_MAX is raised in step below so 10 lanes are not
+            # fighting over 4 connections. Owner, 2026-09-07: "shouldn't our
+            # server be able to handle it all?" -- yes, and 3 was leaving
+            # most of it unused.
+            printf '* * * * * cd %s && %s -n %s /usr/bin/env UV_THREADPOOL_SIZE=4 MESH_IN_PROCESS=1 PGPOOL_MAX=12 %s --env-file=%s %s --limit=10 --max-seconds=3300 >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$node_bin" "$env_file" \
               "$artifact" "$log_file"
             # OpenSea Stream ingest (lib/market/multichain/edge/opensea-stream.ts):

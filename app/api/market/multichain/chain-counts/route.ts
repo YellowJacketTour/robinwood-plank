@@ -30,8 +30,15 @@ export async function GET(req: NextRequest) {
   try {
     const counts = await getChainCounts();
     const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    // `asOf` is when THIS count was measured. useLiveChainCounts already
+    // reads it but the route never sent one, so the hub could not tell a
+    // fresh count from a cached one and every reading looked identical
+    // (owner, 2026-09-07: "i dont see any NEW collections live time
+    // syncing"). The counts are a live GROUP BY with no server-side cache;
+    // only the 10s HTTP cache sits in front, so a moving asOf is the proof
+    // the number is current.
     return NextResponse.json(
-      { counts, total },
+      { counts, total, asOf: new Date().toISOString() },
       { headers: { "Cache-Control": "public, max-age=10, s-maxage=10, stale-while-revalidate=30" } }
     );
   } catch (error) {
