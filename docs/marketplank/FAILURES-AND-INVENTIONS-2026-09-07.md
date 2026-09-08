@@ -61,11 +61,32 @@ requires the origin server. Three tiers, all owned:
    crowd-work`: 25 token ids + URIs for the collection the visitor is
    already looking at), fetches them client-side, and posts back
    `{tokenId, sha256(body), traits, imageUrl}`. The server accepts a
-   result only when (a) two independent visitors report the same body
-   hash, or (b) the server spot-fetches 1 in 20 and it matches. A wrong
-   or malicious packet cannot poison the index: unverified results sit in
-   `plank_collection_tokens_crowd` until corroborated. The visitor who
-   opened Pudgy Penguins is the one who most wants its traits, and they
+   result **[SUPERSEDED 2026-09-08 -- the rule below was UNSOUND; see
+   GROK-RESPONSE-AND-VERIFICATION-2026-09-08.md]** only when (a) two
+   independent visitors report the same body hash, or (b) the server
+   spot-fetches 1 in 20 and it matches.
+
+   Why that was wrong: IPs are a market. "Two independent browsers" is a
+   rental, not independence, so a two-browser attacker confirms garbage and
+   we badge it as rarity. The corrected construction:
+
+   - Admission requires a server-issued **viewport nonce** bound to a target
+     the client is actually displaying. No nonce, no write.
+   - Branch on whether the object can authenticate ITSELF:
+     content-addressed bodies (`ipfs://`, `ar://`, on-chain, ord envelope)
+     are accepted iff `H(body)` matches the on-chain commitment, and signed
+     market objects (Seaport order, PSBT) iff the signature and inputs
+     verify. Both are sybil-proof; the visitor is a modem.
+   - Mutable HTTPS is an **observation, never a fact**: `unconfirmed` until
+     a server fetch matches, or K reports with pairwise-distinct ASN
+     spanning Δt agree, with any contradiction forcing `disputed` plus an
+     immediate server fetch. Audit probability scales with attention, not a
+     flat 1-in-20.
+
+   This deliberately does NOT produce truth for unwatched HTTPS tokens. It
+   produces truth for watched ones and for everything that can
+   authenticate, which is the whole demand that is achievable. The visitor
+   who opened Pudgy Penguins is the one who most wants its traits, and they
    bring their own bandwidth and their own IP.
 3. **The origin keeps only the express slot.** Once outside workers
    exist, the origin's three slots serve clicks (priority 118+) and the
