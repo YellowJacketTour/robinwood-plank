@@ -104,6 +104,11 @@ function providerSource(chainSlug: string, id: RpcProviderId): string {
   return `rpc-pool:${chainSlug}:${id}`;
 }
 
+/** Exported for fork-proof tooling: the keyless public endpoints for a chain. */
+export function publicProvidersFor(chainSlug: string): ProviderEntry[] {
+  return loadProviders(chainSlug).filter((p) => p.id !== "alchemy");
+}
+
 function loadProviders(chainSlug: string): ProviderEntry[] {
   const free = (FREE_PUBLIC_RPC[chainSlug] ?? []).map((p) => ({ ...p, source: providerSource(chainSlug, p.id) }));
   const alchemyUrl = alchemyRpcUrl(chainSlug);
