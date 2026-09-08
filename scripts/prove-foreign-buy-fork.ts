@@ -87,10 +87,21 @@ async function proveChain(chainSlug: string): Promise<ChainResult> {
     //    browser uses. Requires the canary flag to be on for that deployment.
     const viaApp = process.env.PLANK_VIA_APP === "1";
     if (!viaApp) {
+      // OpenSea's best-listing endpoint keys on ITS OWN collection slug
+      // ("boredapeyachtclub"), not a contract address -- passing the address
+      // returns nothing, which read as "no live listing" on every chain even
+      // though the collections plainly have listings. Resolve the slug the
+      // same way the app does before asking for an order.
       const { fetchBestForeignListing, fetchListingFulfillmentData } = await import("@/lib/market/multichain/trading/foreign-orders");
+      const { resolveOpenSeaSlug } = await import("@/lib/market/multichain/discovery/opensea-stats");
       let direct: Awaited<ReturnType<typeof fetchBestForeignListing>> = null;
       for (const row of candidates) {
-        direct = await fetchBestForeignListing({ chainSlug, collectionSlug: row.contractAddress }).catch(() => null);
+        // resolveOpenSeaSlug takes OPENSEA's chain name ("ethereum"), not our slug.
+        const osChain = (await import("@/lib/market/multichain/chains/manifest")).chainManifest(chainSlug)?.openSeaChain;
+        if (!osChain) continue;
+        const slug = await resolveOpenSeaSlug(osChain, row.contractAddress, "live").catch(() => null);
+        if (!slug) continue;
+        direct = await fetchBestForeignListing({ chainSlug, collectionSlug: slug }).catch(() => null);
         if (direct) break;
       }
       if (!direct) return { chainSlug, step: "listing", ok: false, detail: "no live listing available right now" };
