@@ -72,6 +72,25 @@ boundary it claimed to enforce was not enforced. It now reads the module's own
 source and throws on a forbidden import or a writer call, and the test proves
 the guard actually fires rather than just passing.
 
+## The envelope parser, checked against mainnet
+
+The 51 tests use synthetic scripts, so the parser was also run against real
+Bitcoin. A witness from block 966018 decoded to inscription
+`457d87c9…i0`, content type `text/plain;charset=utf-8`, with this body:
+
+```json
+{"p":"brc-20","op":"transfer","amt":"21985295662","tick":"sats"}
+```
+
+Coherent JSON out of raw tapscript is the proof: random bytes do not decode
+into well-formed structure by accident.
+
+This matters because every Bitcoin vendor is now closed. Measured the same day:
+Ordiscan returns 402, UniSat 403, Magic Eden 503, and Hiro 410 Gone with a
+deprecation notice. The Ordinals Wallet catalog is not gated but is exhausted,
+offering roughly 1,837 real collections against the 19,621 already archived.
+Keyless block walking is not an optimisation here. It is the only path left.
+
 ## Where to attack this
 
 - **`committedDigest` only verifies `sha256://`.** IPFS CIDs return null, and
