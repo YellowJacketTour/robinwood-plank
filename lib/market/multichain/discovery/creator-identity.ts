@@ -42,6 +42,16 @@ async function paceCoinGecko(): Promise<void> {
   cgNextAt = Date.now() + gapMs;
 }
 
+/**
+ * Accounts that belong to a marketplace or aggregator, never to a
+ * collection's creator. CoinGecko returns the marketplace link when a
+ * collection has no creator social, which badged Gemesis as "openseapro".
+ */
+export const MARKETPLACE_HANDLES = [
+  "opensea", "openseapro", "opensea_io", "magiceden", "blur_io", "blureth",
+  "looksrare", "x2y2_io", "rarible", "coingecko", "nftgo", "tensor_hq",
+];
+
 export function handleFromTwitterUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = /(?:twitter\.com|x\.com)\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/i.exec(url);
@@ -53,7 +63,7 @@ export function handleFromTwitterUrl(url: string | null | undefined): string | n
   // 2026-09-07: Gemesis came back as "openseapro" because CoinGecko lists
   // the marketplace link for collections with no creator social. A wrong
   // checkmark is worse than none -- the badge claims "this is who made it".
-  if (["opensea", "openseapro", "opensea_io", "magiceden", "blur_io", "blureth", "looksrare", "x2y2_io", "rarible", "coingecko", "nftgo", "tensor_hq"].includes(low)) return null;
+  if (MARKETPLACE_HANDLES.includes(low)) return null;
   return h;
 }
 
@@ -109,6 +119,19 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     [chainSlug, perPass * 4]
   );
   const { updateCollectionDisplay } = await import("@/lib/market/multichain/store");
+
+  // Retract handles stored BEFORE the marketplace filter shipped. The lane
+  // only fills NULL fields, so a wrong value already in the table would never
+  // be revisited -- Gemesis kept showing "openseapro" after the filter landed.
+  // A verified badge asserts authorship; a wrong one has to be withdrawn.
+  const scrubbed = await postgresQuery(
+    `UPDATE plank_multichain_collections
+        SET creator_handle = NULL
+      WHERE chain_slug = $1 AND creator_handle IS NOT NULL
+        AND lower(creator_handle) = ANY($2::text[])`,
+    [chainSlug, MARKETPLACE_HANDLES]
+  ).catch(() => ({ rowCount: 0 }));
+  if ((scrubbed.rowCount ?? 0) > 0) out.skipped += scrubbed.rowCount ?? 0;
   const isEvm = chainSlug !== "solana-mainnet" && chainSlug !== "bitcoin-mainnet";
   for (const r of rows.rows) {
     if (out.considered >= perPass || Date.now() > deadline - 8_000) break;
