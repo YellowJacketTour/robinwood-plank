@@ -524,7 +524,11 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       // the count sat frozen (owner, 2026-09-07: "there are sources out there
       // that say there are more than 20,000 ordinals"). 500 per page.
       const { runOrdinalsWalletCollectionScan } = await import("../lib/market/multichain/discovery/ordinalswallet-collection-scan");
-      console.log("[mesh-lane] ow-catalog", JSON.stringify(await runOrdinalsWalletCollectionScan({ maxPages: 4 })));
+      // ONE page (500 collections, ~1,000 sequential DB writes) per pass:
+      // 4 pages could not finish inside LANE_TIMEOUT_MS and the lane was
+      // killed mid-walk, so it registered nothing and reported "exited 1".
+      // The cursor is durable, so consecutive passes keep walking forward.
+      console.log("[mesh-lane] ow-catalog", JSON.stringify(await runOrdinalsWalletCollectionScan({ maxPages: 1 })));
       return;
     }
     if (source === "ordinals-wallet") {
