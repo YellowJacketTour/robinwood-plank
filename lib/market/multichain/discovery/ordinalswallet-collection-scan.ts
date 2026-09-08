@@ -41,7 +41,9 @@ import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 
 const SOURCE = "ordinalswallet-ordinals";
 const API_BASE = "https://turbo.ordinalswallet.com/collections";
-const PAGE_SIZE = 500; // real, confirmed unenforced-but-generous page size; kept well under the whole-catalog inscriptions call's own size
+const PAGE_SIZE = 500;
+/** Past this offset the catalog is effectively all BRC-20 token rows (see the wrap logic below). */
+const DEAD_ZONE_OFFSET = 120_000; // real, confirmed unenforced-but-generous page size; kept well under the whole-catalog inscriptions call's own size
 const CHAIN_SLUG = "bitcoin-mainnet";
 const CURSOR_KEY = "bitcoin-mainnet:ordinalswallet-collection-list";
 // Not a real throttle -- see source-budget.ts's own DAILY_CEILING comment:
@@ -127,6 +129,13 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
   // ~85 invocations just to reach the end once. Raised 50x.
   const maxPages = input.maxPages ?? 500;
   let offset = await readOffset();
+  // Self-heal a cursor left parked in the dead zone by an earlier run (live
+  // 2026-09-07: it sat deep in the BRC-20 region, so every pass walked 2,000
+  // fungible-token rows and registered zero collections).
+  if (offset > DEAD_ZONE_OFFSET) {
+    offset = 0;
+    await writeOffset(offset);
+  }
   let total = offset;
   let pagesWalked = 0;
   let registered = 0;
@@ -137,12 +146,14 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
     total = page.total;
     if (page.collections.length === 0) break;
 
+    let realThisPage = 0;
     for (const entry of page.collections) {
       const supply = entry.total_supply ?? 0;
       if (!entry.slug || supply <= 0) {
         skippedEmpty += 1;
         continue;
       }
+      realThisPage += 1;
       await upsertTrackedCollection({
         chainSlug: CHAIN_SLUG,
         chainId: null,
@@ -163,6 +174,19 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
     }
 
     offset += page.collections.length;
+    // The catalog is FRONT-LOADED with real NFT collections and then runs to
+    // ~375k BRC-20 token entries (fungible tokens, total_supply 0) that this
+    // scan correctly rejects. Measured live 2026-09-07: offset 0 = 100/100
+    // real, 5,000 = 16/100, 50,000 = 12/100, 150,000 and beyond = 0/100.
+    // Grinding the dead zone burns every turn this lane gets and registers
+    // nothing, so once we are deep in it and a full page yields nothing, wrap
+    // to the start -- new collections are added at the top, and the early
+    // region is where re-walking actually finds them.
+    if (offset > DEAD_ZONE_OFFSET && realThisPage === 0) {
+      offset = 0;
+      await writeOffset(offset);
+      break;
+    }
     if (offset >= total) break;
   }
 
