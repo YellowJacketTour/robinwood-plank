@@ -4,6 +4,42 @@ You are being asked to solve a problem that existing documentation does not
 solve, because every published approach accepts a constraint we refuse to
 accept. Read the measured facts, then invent past them.
 
+## The standard: inventions nobody can afford to compete with
+
+This is not a request for a better configuration of known parts. We want
+**mechanisms that do not currently exist in any published system, and that
+are defensible once built** — meaning a competitor who reads our running
+product still cannot cheaply replicate the result, because the advantage
+lives in a mechanism that is novel, non-obvious, and costly to reach
+independently.
+
+Hold every proposal to this bar:
+
+1. **Novel.** Not present in Reservoir, SimpleHash, Alchemy, Moralis, the
+   Graph, OpenSea's own stack, or the academic indexing literature. If a
+   documented system already does it, it is table stakes, not an invention.
+2. **Non-obvious.** A competent engineer given the same constraints should
+   not arrive at it in an afternoon. If the answer is "poll faster" or
+   "add a cache", it is not the answer.
+3. **Structurally advantaged.** The mechanism should get *better* as we
+   grow — more visitors, more chains, more history — while a competitor
+   starting today must pay the full cost again. Network effects, accumulated
+   corroboration, and compounding provenance all qualify; raw scale does not.
+4. **Specifiable as a claim.** Write each invention so its essential
+   mechanism could be stated as a patent claim: the inputs, the
+   transformation, the property that results, and the specific thing it
+   makes possible that was previously impossible. We are not asking you to
+   draft legal text — we are asking for inventions with enough definite
+   structure that they *could* be claimed, rather than architectural taste.
+5. **Cheap for us, expensive to copy.** Prefer mechanisms whose cost to us
+   is near zero because they ride on something we already have (visitor
+   attention, accumulated history, the chains themselves) and whose cost to
+   a competitor is high because they lack that substrate.
+
+Where a proposal is genuinely a recombination of known parts, say so and
+label it as engineering rather than invention. We would rather have three
+real inventions and honest labelling than twelve dressed-up commonplaces.
+
 ## The demand, in the owner's words
 
 > Every chain, all collections, all marketplace listings, all offers, all
@@ -137,11 +173,35 @@ without trusting us *or* any surviving third party?
 Not a survey of existing indexers. We have read them; they are pull systems
 built on curated lists, and they are why this problem is unsolved.
 
-For each of the four inventions: the mechanism, why it beats the documented
-approach, the specific failure mode that kills the naive version, and the
-measurement that proves it works. Where you believe a demand is
-*impossible* rather than merely unsolved, say so plainly and prove the
-boundary — a real impossibility result is worth more than an optimistic
-design that fails in production.
+For each of the four inventions, deliver:
+
+- **The mechanism**, in enough detail to implement: inputs, transformation,
+  outputs, and the data structures that make it work.
+- **The claim**, stated tightly: what is genuinely new, what property it
+  produces, and what becomes possible that was not before.
+- **Why it beats the documented approach**, naming the specific system it
+  beats and the specific limit it escapes.
+- **The failure mode that kills the naive version** — the thing an
+  inexperienced implementer gets wrong that makes it collapse in production.
+- **The measurement that proves it works**, expressed so it can be run
+  against a live system and either passes or does not.
+- **The moat**: why a competitor who sees the running result still cannot
+  cheaply reproduce it.
+
+Not wanted: a survey of existing indexers. We have read them; they are pull
+systems built on curated lists, which is precisely why this problem is
+unsolved.
+
+Where you believe a demand is *impossible* rather than merely unsolved, say
+so plainly and prove the boundary. A real impossibility result is worth far
+more than an optimistic design that fails in production, and it redirects
+effort to what can actually be won.
+
+Be ambitious without being fictional. Every mechanism must be buildable on
+public chain data, commodity hardware, and browsers that already exist.
+"Kryptonian" means the invention is startling and hard to match — not that
+it requires technology nobody has. The most valuable answer is one that a
+reader finds obvious in hindsight and impossible to have reached on their
+own.
 
 Assume the reader will implement this. Be concrete enough to build from.
