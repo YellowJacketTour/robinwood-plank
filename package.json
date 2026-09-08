@@ -45,7 +45,8 @@
     "abi:arcade": "node scripts/export-arcade-abi.mjs",
     "plankcrash:canary": "tsx scripts/plankcrash-testnet-canary.ts",
     "plankcrash:audit-manifest": "tsx scripts/plankcrash-audit-manifest.ts",
-    "plankcrash:launch-gate": "tsx scripts/plankcrash-launch-gate.ts"
+    "plankcrash:launch-gate": "tsx scripts/plankcrash-launch-gate.ts",
+    "build:akasha-hose": "esbuild --banner:js=\"import { createRequire as __plankCreateRequire } from 'node:module'; const require = __plankCreateRequire(import.meta.url);\" scripts/akasha-hose.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --outfile=.next/standalone/scripts/akasha-hose-standalone.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

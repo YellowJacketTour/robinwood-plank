@@ -1,0 +1,21 @@
+{
+  "name": "akasha",
+  "version": "0.1.0",
+  "description": "Push-first multi-chain NFT archive: firehose, announcement graph, attested hydrate, claim kits.",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "hose": "tsx src/hose/main.ts",
+    "measure": "tsx src/measure/run.ts",
+    "lint:discovery": "tsx scripts/assert-discovery-surface.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
