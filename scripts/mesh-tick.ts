@@ -392,7 +392,7 @@ async function main(): Promise<void> {
     "hypersync-discovery", "hypersync-backfill", "helius-discovery", "magiceden-catalog",
     "unisat-discovery", "ordiscan-discovery", "robinhood-discovery", "robinhood-backfill",
     "hunter-evm", "hunter-solana", "hunter-bitcoin", "m2-sweep", "ow-rarity",
-    "unisat-collections", "ordinals-wallet",
+    "unisat-collections", "ordinals-wallet", "ow-catalog",
   ];
   async function worker(role: WorkerRole = "general"): Promise<void> {
     const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
