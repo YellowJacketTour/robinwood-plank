@@ -42,7 +42,13 @@ export class GapWorker {
   async step(): Promise<boolean> {
     const gap = this.store.popGap();
     if (!gap) return false;
-    assertLegalGap(gap.reason, gap.reason !== "attention_history");
+    // The second argument is whether an artifact genesis exists, so it must be
+    // an actual lookup. It previously read `gap.reason !== "attention_history"`,
+    // which is false for exactly the one reason that requires it: the guard
+    // could never pass, and every attention_history gap threw. Inverting it to
+    // `true` would have been worse -- a check that always passes -- so the gap
+    // now carries the artifact it was opened for.
+    assertLegalGap(gap.reason, !!gap.artifactId && !!this.store.getArtifact(gap.artifactId));
     const family = gap.chain === "solana" ? "solana" : gap.chain === "bitcoin" ? "bitcoin" : "evm";
     const budget = GAP_BUDGET[family] ?? 8;
     const end = Math.min(gap.toHeight, gap.fromHeight + budget - 1);

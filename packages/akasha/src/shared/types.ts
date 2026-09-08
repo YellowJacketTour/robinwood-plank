@@ -127,6 +127,14 @@ export interface Gap {
   reason: GapReason;
   enqueuedAt: number;
   attempts: number;
+  /**
+   * The artifact this gap was opened on behalf of. Required for
+   * `attention_history`, which exists only to backfill an artifact we already
+   * hold: without it, attention could open unbounded history walks for
+   * subjects the archive has never seen, which is exactly the "attention
+   * creates identity" failure the cluster layer refuses.
+   */
+  artifactId?: string;
 }
 
 export type ClaimKind =

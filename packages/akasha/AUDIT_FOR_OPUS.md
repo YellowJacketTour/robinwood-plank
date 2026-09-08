@@ -17,7 +17,7 @@ collection, and how does a stranger check that your numbers are right?*
 | Hydrate | `src/hydrate/` | What the archive accepts from a visitor |
 | Claims | `src/claims/` | Numbers that carry the evidence to recompute them |
 
-58 tests pass. `npm test` and `npm run typecheck` are both green.
+66 tests pass. `npm test` and `npm run typecheck` are both green.
 
 ## The four corrections
 
@@ -77,6 +77,18 @@ only from the old tip's own ancestry.
 
 The second is the more dangerous of the two: it fails silently and leaves the
 archive confidently wrong, whereas the first at least crashes.
+
+## A guard that could never pass
+
+`GapWorker.step()` called `assertLegalGap(gap.reason, gap.reason !== "attention_history")`.
+The second argument means "an artifact genesis exists", but the expression is
+false for exactly the one reason that requires it, so every `attention_history`
+gap threw and that entire class of backfill was silently dead.
+
+Inverting it to `true` would have been worse: a check that always passes. A gap
+now carries the artifact it was opened for and the worker looks it up, so
+attention can schedule a backfill for something the archive already holds and
+cannot invent a subject — the same rule the cluster layer enforces.
 
 ## Two fixes made while writing the tests
 
