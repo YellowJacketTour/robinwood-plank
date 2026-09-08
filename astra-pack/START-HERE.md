@@ -56,3 +56,17 @@ implementation and verification map, and explicit research gaps.
 Not completed: exhaustive mandatory ingest, visual compositions, reference runtime captures,
 application implementation, migration execution, live platform sending, release checks, deployment.
 This status is intentionally explicit so a subsequent agent cannot mistake planning for delivered behavior.
+
+
+## Isometric art correction ? 2026-09-07
+
+The owner rejected the generated painted garden and wheat. Read [ISOMETRIC-ASSET-SPEC.md](ISOMETRIC-ASSET-SPEC.md) and open [the actual repository sprite study](isometric-reference/index.html). SimCity/RCT/FarmVille geometry and asset construction are the target. Wood/gold is window chrome; natural terrain stays green. These references supersede the generic painted-garden interpretation.
+
+
+## Implemented source-based crop pipeline
+
+Read [CHARMVILLE-ART-RESEARCH.md](CHARMVILLE-ART-RESEARCH.md) and the [pinned repository catalog](CHARMVILLE-SOURCE-CATALOG.json). The implementation branch now has original Blender crop models, three stages and eight animation frames per stage, licensed terrain, and a projected inline porch. This is implemented source-based artwork, not the rejected generated garden. Final visual approval and remaining game features are not implied.
+
+## Dream-loop and playable progress
+
+Read [CHARMVILLE-VISUAL-LOOP.md](CHARMVILLE-VISUAL-LOOP.md) for the pinned workflow, independent critique and remaining whole-vision work. The upstream README, skill and MIT license are preserved in dream-loop-source/. User art direction overrides its default photoreal target. [CHARMVILLE-PHASE-A.md](CHARMVILLE-PHASE-A.md) records actual implementation separately from specification. Draft implementation PR: https://github.com/YellowJacketTour/robinwood-plank/pull/378. Local playtest instructions are in scripts/charmville/README.md on that branch.

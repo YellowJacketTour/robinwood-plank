@@ -1,0 +1,86 @@
+[
+  {
+    "file": "freerct/01-64_flowers1.png",
+    "label": "Flower bed: compact 1 x 1 footprint",
+    "repository": "https://github.com/FreeRCT/FreeRCT",
+    "commit": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+    "source": "graphics/sprites/scenery/objects/64_flowers1.png",
+    "sourceUrl": "https://github.com/FreeRCT/FreeRCT/blob/d39154b32c9e0bd6f511da27fe112e50f6034557/graphics/sprites/scenery/objects/64_flowers1.png",
+    "license": "GPL-2.0",
+    "credit": "freerct contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "4c669a4f9c9885dd064cf41607e498816b352e9b9f82ebaaa85e0752c6fa1e79"
+  },
+  {
+    "file": "freerct/02-64_tree1.png",
+    "label": "Tree: tall sprite, small ground footprint",
+    "repository": "https://github.com/FreeRCT/FreeRCT",
+    "commit": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+    "source": "graphics/sprites/scenery/objects/64_tree1.png",
+    "sourceUrl": "https://github.com/FreeRCT/FreeRCT/blob/d39154b32c9e0bd6f511da27fe112e50f6034557/graphics/sprites/scenery/objects/64_tree1.png",
+    "license": "GPL-2.0",
+    "credit": "freerct contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "f30e7f3fe4d9e52b0521be3ed20ad051c3c04063d9a9807dae94c0efc79bbca3"
+  },
+  {
+    "file": "freerct/03-fence_wood8bpp64.png",
+    "label": "Fence: edges and slopes as separate variants",
+    "repository": "https://github.com/FreeRCT/FreeRCT",
+    "commit": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+    "source": "graphics/sprites/scenery/fences/fence_wood8bpp64.png",
+    "sourceUrl": "https://github.com/FreeRCT/FreeRCT/blob/d39154b32c9e0bd6f511da27fe112e50f6034557/graphics/sprites/scenery/fences/fence_wood8bpp64.png",
+    "license": "GPL-2.0",
+    "credit": "freerct contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "aa1e4f744a33fc657183b05078aa2a9d7a24577fe17dc5dbd87f5a583375bbe3"
+  },
+  {
+    "file": "opengfx/04-field-08-temperate.png",
+    "label": "Field terrain: slope variants on one sheet",
+    "repository": "https://github.com/OpenTTD/OpenGFX",
+    "commit": "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+    "source": "sprites/png/terrain/field-08-temperate.png",
+    "sourceUrl": "https://github.com/OpenTTD/OpenGFX/blob/c51c904f4f6e7466ee73f907520ef7ea9a53bcbb/sprites/png/terrain/field-08-temperate.png",
+    "license": "GPL-2.0",
+    "credit": "opengfx contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "dcb4540d9462dbb1613f30a6e335a73bc7b4152c56a1bdd75db4f0aa8c930f2e"
+  },
+  {
+    "file": "opengfx/05-field-58-temperate.png",
+    "label": "Grown field: a distinct crop-state sheet",
+    "repository": "https://github.com/OpenTTD/OpenGFX",
+    "commit": "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+    "source": "sprites/png/terrain/field-58-temperate.png",
+    "sourceUrl": "https://github.com/OpenTTD/OpenGFX/blob/c51c904f4f6e7466ee73f907520ef7ea9a53bcbb/sprites/png/terrain/field-58-temperate.png",
+    "license": "GPL-2.0",
+    "credit": "opengfx contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "737ac8d9db272b6ccbebd2fc21c0a47d430d5a2e586857a14b8e5fe66dee64bd"
+  },
+  {
+    "file": "unknown-horizons/06-0.png",
+    "label": "Crop bed: initial state, fixed camera",
+    "repository": "https://github.com/unknown-horizons/unknown-horizons",
+    "commit": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+    "source": "content/gfx/buildings/pioneers/agricultural/as_potatofield0/idle/45/0.png",
+    "sourceUrl": "https://github.com/unknown-horizons/unknown-horizons/blob/af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615/content/gfx/buildings/pioneers/agricultural/as_potatofield0/idle/45/0.png",
+    "license": "CC-BY-SA-3.0",
+    "credit": "unknown-horizons contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "bb73b792fc8c009708340af0e7508dfcdaddb599bf44473589510d317af12cdc"
+  },
+  {
+    "file": "unknown-horizons/07-0.png",
+    "label": "Crop bed: full state, same anchor",
+    "repository": "https://github.com/unknown-horizons/unknown-horizons",
+    "commit": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+    "source": "content/gfx/buildings/pioneers/agricultural/as_potatofield0/idle_full/45/0.png",
+    "sourceUrl": "https://github.com/unknown-horizons/unknown-horizons/blob/af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615/content/gfx/buildings/pioneers/agricultural/as_potatofield0/idle_full/45/0.png",
+    "license": "CC-BY-SA-3.0",
+    "credit": "unknown-horizons contributors; original attribution retained in linked source repository",
+    "modified": false,
+    "sha256": "339a05ca6007da142747dcc439a5c7498046d9e7bf6c1e9ea6a9bfdda3cd6faf"
+  }
+]
