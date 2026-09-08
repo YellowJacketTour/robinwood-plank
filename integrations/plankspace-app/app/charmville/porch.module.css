@@ -1,0 +1,41 @@
+/* Canonical tokens stay scoped inside personally themed boards. */
+.porch,.windowLayer{--color-gold-500:#E9B43F;--color-gold-400:#EEC164;--color-gold-300:#F8D98A;--color-gold-600:#AF761D;--color-wood-950:#1B120A;--color-wood-900:#2A1A0F;--color-wood-800:#3D2513;--color-wood-700:#5C3A1E;--color-wood-600:#7A4D26;--color-line:rgba(233,180,63,.24);--color-line-strong:rgba(233,180,63,.5)}
+.porch,.windowLayer{font-family:var(--font-body),sans-serif;color:var(--color-cream);font-size:14px;line-height:1.4;text-shadow:none;color-scheme:dark}
+.porch{margin:16px 0;background:var(--color-wood-950);border:1px solid var(--color-line-strong);isolation:isolate}
+.porch h2,.window h2{font-family:var(--font-stencil),serif;font-weight:400;font-size:22px;color:var(--color-gold-300);margin:0}
+.porch button,.window button,.window select{font:inherit;min-height:44px;border:1px solid var(--color-line);background:var(--color-wood-800);color:var(--color-cream);padding:8px 12px;border-radius:6px;cursor:pointer;text-shadow:none}
+.porch button:hover,.window button:hover{border-color:var(--color-gold-500)}
+.porch button:disabled,.window button:disabled{cursor:default;opacity:.55}
+.porch :focus-visible,.window :focus-visible{outline:2px solid var(--color-gold-300);outline-offset:3px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px;gap:8px;border-bottom:1px solid var(--color-line)}
+.header>div{display:flex;gap:6px;align-items:center}
+.header .pouch{display:flex;align-items:center;padding:0 8px 0 0;background:transparent}
+.pouch svg{width:48px;height:48px}
+.welcome{display:grid;justify-items:center;text-align:center;padding:24px;gap:12px}
+.welcome img,.shed img{object-fit:contain}
+.porch p{margin:12px;color:var(--color-cream-muted);font:inherit}
+.seeds{border:0;border-top:1px solid var(--color-line);padding:12px;margin:0;display:flex;gap:12px;flex-wrap:wrap}
+.seeds legend{padding:0 6px;color:var(--color-cream-muted);font-size:12px}
+.seeds label{display:flex;align-items:center;gap:6px;min-height:44px;font-size:12px}
+.seeds small{color:var(--color-gold-300)}
+.seeds input{accent-color:var(--color-gold-500)}
+.notice:empty{display:none}
+.windowLayer{position:fixed;inset:0;z-index:1100;pointer-events:none}
+.window{position:absolute;pointer-events:auto;width:410px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow:auto;border:2px solid var(--color-gold-600);border-radius:8px;background:var(--color-wood-950);box-shadow:4px 12px 32px #0008}
+.windowHeader{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;background:var(--color-wood-800);cursor:move;touch-action:none}
+.windowHeader button{font-size:24px;padding:0;width:44px}
+.inventory{padding:14px;background:var(--color-cream);color:var(--color-wood-950);display:grid;grid-template-columns:1fr 100px;gap:12px}
+.stacks{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;align-content:start}
+.stacks button{position:relative;display:grid;justify-items:center;background:var(--color-gold-300);color:var(--color-wood-950);border-radius:0;font-size:12px;padding:3px}
+.stacks button[aria-pressed=true]{outline:2px solid var(--color-gold-600);outline-offset:-2px}
+.stacks svg{width:60px;height:68px}.stacks b{position:absolute;top:3px;right:5px;font-variant-numeric:tabular-nums}
+.selected{display:grid;justify-items:center;align-content:start;font-size:12px;border-bottom:1px solid var(--color-gold-600)}
+.selected svg{width:90px;height:100px}
+.seedStacks{grid-column:1/-1;display:flex;gap:16px;border-bottom:1px solid var(--color-gold-600);padding-bottom:10px;font-size:12px}
+.seedStacks>span{display:flex;align-items:center;gap:3px}.seedStacks svg{width:32px;height:40px}
+.send{grid-column:1/-1;font-size:12px;display:grid;gap:5px}.send select{width:100%;min-width:0}
+.inventory>button{grid-column:1/-1;background:var(--color-gold-500);color:var(--color-wood-950)}
+.inventory footer{grid-column:1/-1;display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px}
+.inventory footer span{font-weight:400;font-size:10px}
+.window .reset{display:block;border:0;background:none;font-size:11px;margin:auto}
+@media(max-width:600px){.header{flex-wrap:wrap}.header h2{font-size:20px}.header button{font-size:11px}.window{left:0!important;top:auto!important;bottom:0;width:100%;max-width:100%;max-height:85dvh;border-radius:12px 12px 0 0;padding-bottom:env(safe-area-inset-bottom)}.windowHeader{cursor:default}.window .reset{display:none}.seeds{gap:0}.inventory{grid-template-columns:1fr 90px}}

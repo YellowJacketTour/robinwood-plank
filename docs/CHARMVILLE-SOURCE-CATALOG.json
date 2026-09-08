@@ -1,0 +1,120 @@
+[
+  {
+    "name": "lincity-ng",
+    "url": "https://github.com/lincity-ng/lincity-ng.git",
+    "commit": "99939d94483189b5d512732b27555cd3e2e937a1",
+    "evidence": [
+      "CMakeLists.txt",
+      "COPYING-data.txt",
+      "data/models/render/render.py",
+      "data/models/farm2.blend",
+      "data/images/tiles/images.xml"
+    ]
+  },
+  {
+    "name": "freerct",
+    "url": "https://github.com/FreeRCT/FreeRCT.git",
+    "commit": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+    "evidence": [
+      "graphics/sprites/info_and_scripts/readme.txt",
+      "developer_documentation/32bppImages.md",
+      "graphics/rcd/scenery/flowerbeds/flowerbed1.fms"
+    ]
+  },
+  {
+    "name": "openrct2-opengraphics",
+    "url": "https://github.com/OpenRCT2/OpenGraphics.git",
+    "commit": "930b0140685f85db92147af832080e8df12d8d4e",
+    "evidence": [
+      "README.md",
+      "license.txt"
+    ]
+  },
+  {
+    "name": "opengfx",
+    "url": "https://github.com/OpenTTD/OpenGFX.git",
+    "commit": "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+    "evidence": [
+      "README.md",
+      "sprites/base/base-4090-farm-fields.pnml"
+    ]
+  },
+  {
+    "name": "opengfx2",
+    "url": "https://github.com/OpenTTD/OpenGFX2.git",
+    "commit": "7a17fb370440aed7f2586715d606e9fe190b9dd3",
+    "evidence": [
+      "README.md",
+      "credits.md",
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "unknown-horizons",
+    "url": "https://github.com/unknown-horizons/unknown-horizons.git",
+    "commit": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+    "evidence": [
+      "README.md",
+      "doc/LICENSE",
+      "content/gfx/buildings/citizens/as_cornfield0"
+    ]
+  },
+  {
+    "name": "feiok",
+    "url": "https://github.com/dacousb/feiok.git",
+    "commit": "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+    "evidence": [
+      "go.mod",
+      "game/tile.go",
+      "game/assets.go",
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "farmville-clone",
+    "url": "https://github.com/ksc3899/Farmville-Clone.git",
+    "commit": "ad85523aa1ebad95a39dd3f46deba3bef8067aae",
+    "evidence": [
+      "README.md",
+      "Farmville (Clone) Project/ProjectSettings/ProjectVersion.txt"
+    ]
+  },
+  {
+    "name": "bat4blender",
+    "url": "https://github.com/memo33/BAT4Blender.git",
+    "commit": "8f27d8b89ad2db85d40f80538c200b187f213066",
+    "evidence": [
+      "README.md",
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "micropolis-core",
+    "url": "https://github.com/SimHacker/MicropolisCore.git",
+    "commit": "69ccf87ed72d2d2950b70cf16ef1391439bd9d48",
+    "evidence": [
+      "README.md",
+      "LICENSE",
+      "MicropolisGPLLicenseNotice.md"
+    ]
+  },
+  {
+    "name": "simcity-threejs",
+    "url": "https://github.com/dgreenheck/simcity-threejs-clone.git",
+    "commit": "9116cf680f677c3476f8159d5bbc7a4cfda00654",
+    "evidence": [
+      "package.json",
+      "README.md",
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "simutrans-pak128",
+    "url": "https://github.com/simutrans/pak128.git",
+    "commit": "e45d9f08f6aa0a08432b5312cb0d7cb93232fdc6",
+    "evidence": [
+      "README.md",
+      "LICENSE.txt"
+    ]
+  }
+]
