@@ -532,7 +532,17 @@ export const MESH_LANES: MeshLane[] = [
   // settlement-first index. Every run leaves a receipt on its job.
   // Review M4: HyperSync lanes record the same activity tallies; when the
   // token is configured the hunter covers only the chains HyperSync does not.
-  ...(process.env.ENVIO_API_TOKEN?.trim() ? ["robinhood"] : [...HYPERSYNC_EVM, "robinhood"]).map((chainSlug) => ({
+  // Every EVM chain, always. The earlier version scheduled this ONLY on
+  // Robinhood when ENVIO_API_TOKEN was set, to avoid double-counting
+  // activity with the HyperSync lane. Measured 2026-09-08: HyperSync
+  // discovery was in backoff on 5 of 8 chains -- Optimism dark for 9 hours,
+  // Polygon for 8 -- with "timeout exceeded when trying to connect". Those
+  // chains then had NO discovery at all, because the keyless driver that
+  // could have covered them was not scheduled. A vendor's bad hour must not
+  // be a chain's dark hour; recordActivity is idempotent per (chain,
+  // contract, day) so an overlap costs a little double-counting, which is
+  // strictly better than a blind chain.
+  ...[...HYPERSYNC_EVM, "robinhood"].map((chainSlug) => ({
     id: `hunter-evm:${chainSlug}`,
     source: "hunter-evm" as const,
     chainSlug,
