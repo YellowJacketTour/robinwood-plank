@@ -45,10 +45,17 @@ test("claimDataJob executes in every shape: general, express floor, standing pre
     assert.ok(express, "express claim must return the high-priority job");
     await finishDataJob(express);
 
-    await enqueueDataJob({ jobKey, kind, source: `test-source-${suffix}`, chainSlug: "test-chain", subject: null, payload: {}, priority: 20 });
+    // A DIFFERENT job key: enqueueDataJob ratchets priority upward with
+    // GREATEST(), so re-enqueuing the key above at 20 would keep its 120 and
+    // the max-priority-60 claim would correctly refuse it. That ratchet is
+    // deliberate (a click must never be demoted by a later background
+    // enqueue), so the low-priority shape needs its own row.
+    const cappedKey = `mesh:test-capped-${suffix}`;
+    await enqueueDataJob({ jobKey: cappedKey, kind, source: `test-source-${suffix}`, chainSlug: "test-chain", subject: null, payload: {}, priority: 20 });
     const capped = await claimDataJob([kind], 60_000, undefined, 60);
-    assert.ok(capped, "max-priority claim must return the low-priority job");
-    await finishDataJob(capped);
+    assert.equal(capped?.jobKey, cappedKey, "max-priority claim must return the low-priority job");
+    if (capped) await finishDataJob(capped);
+    await postgresQuery(`DELETE FROM plank_data_jobs WHERE job_key = $1`, [cappedKey]).catch(() => undefined);
   } finally {
     await postgresQuery(`DELETE FROM plank_data_jobs WHERE job_key = $1`, [jobKey]).catch(() => undefined);
     await postgresQuery(`DELETE FROM mesh_lane_health WHERE lane_key = $1`, [laneKey]).catch(() => undefined);
