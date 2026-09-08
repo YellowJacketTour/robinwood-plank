@@ -1,0 +1,43 @@
+-- Make the order-book token lookup an actual point lookup.
+--
+-- THE PROBLEM. readProjectedTokensByIds resolves art for the ~30 tokens on a
+-- listings page with:
+--
+--   WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+--     AND token_id = ANY($3::text[])
+--
+-- The primary key is (chain_slug, collection_slug, token_id) -- CASE
+-- SENSITIVE -- so the `lower()` wrapper makes it unusable. The only index
+-- that matches the first two predicates is:
+--
+--   plank_collection_tokens_browse_idx
+--     (chain_slug, lower(collection_slug),
+--      (CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END),
+--      token_id)
+--
+-- token_id is its FOURTH column, behind a computed expression the ANY()
+-- filter does not constrain. Postgres can seek on the first two columns and
+-- must then scan the rest of the collection: ~10,000 rows for Milady to find
+-- 30, and every row is wide (name, image_url, traits jsonb).
+--
+-- That is the difference between "one indexed query" and "a per-collection
+-- scan wearing an index's name". Measured context: /tokens took 34.8s on this
+-- collection and timed out at 60s before that, so the listings path must not
+-- inherit anything of that shape.
+--
+-- THE FIX. An index whose leading columns are exactly the predicate:
+-- (chain_slug, lower(collection_slug), token_id). An `= ANY(array)` on the
+-- third column becomes a bitmap of ~30 index seeks.
+--
+-- Additive and online: CREATE INDEX IF NOT EXISTS, no table rewrite, no
+-- column change, nothing dropped. Existing queries keep their current plans
+-- unless the planner finds this one cheaper, which for the point lookup it
+-- will.
+--
+-- NOT CONCURRENTLY: this runner wraps each migration in a transaction and
+-- CREATE INDEX CONCURRENTLY cannot run inside one. The table is large but
+-- this is a plain btree over three narrow columns; if the lock window is a
+-- concern on the live host, build it by hand with CONCURRENTLY first and this
+-- statement becomes a no-op.
+CREATE INDEX IF NOT EXISTS plank_collection_tokens_point_idx
+  ON plank_collection_tokens (chain_slug, lower(collection_slug), token_id);

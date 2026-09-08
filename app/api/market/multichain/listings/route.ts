@@ -49,6 +49,7 @@ import type { Listing } from "@/lib/market/types";
 import { refreshPulpListings } from "@/lib/market/pulp";
 import { mergeBook } from "@/lib/market/book";
 import { fetchOrdNetListings, isOrdNetConfigured, ordNetSatsToPriceWei } from "@/lib/market/multichain/adapters/ordnet";
+import { readProjectedTokensByIds } from "@/lib/market/multichain/collection-token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -787,6 +788,37 @@ export async function GET(req: NextRequest) {
       ...new Set(orders.map((o) => o.parameters.offer[0]?.identifierOrCriteria).filter(Boolean) as string[]),
     ].slice(0, MAX_ART_LOOKUPS);
 
+    // READ THE ARCHIVE FIRST.
+    //
+    // This route re-fetched from OpenSea what the archive already stores. For
+    // a fully hydrated collection that is up to MAX_ART_LOOKUPS cold per-token
+    // calls, every one awaited before any bytes reach the visitor -- measured
+    // 2026-09-08: 9s typical on Milady, samples past 120s. Meanwhile the same
+    // collection reports metadataCoverage 1 and traitsCoverage 1, i.e. the
+    // archive holds every one of those tokens' name, image and traits.
+    //
+    // `plank_collection_tokens` is keyed (chain_slug, collection_slug,
+    // token_id) with a browse index, so this is ONE indexed query for the
+    // whole page instead of N HTTP round trips. The OpenSea path below now
+    // runs only for tokens the archive genuinely does not have yet, which on
+    // a hydrated collection is none.
+    //
+    // This is not a cache in front of the puller -- a cache there would just
+    // freeze whatever the puller last said. It is the page reading the tape,
+    // which is the point of keeping a tape.
+    const archivedArt = await readProjectedTokensByIds(
+      chainSlug,
+      collectionSlug,
+      distinctTokenIds
+    ).catch(() => new Map<string, { name: string | null; imageUrl: string | null; traits: Array<{ traitType: string; value: string }> }>());
+
+    const missingFromArchive = distinctTokenIds.filter((id) => {
+      const row = archivedArt.get(id);
+      // A row with no image is not a usable answer: fall through and ask, so
+      // an archived-but-empty row cannot silently render a blank card.
+      return !row || (!row.imageUrl && !row.name);
+    });
+
     // Per-token art was fetched live on every page render with no caching --
     // a token's name/image/traits are effectively immutable (metadata
     // doesn't change once minted), so this is a pure loss: every visitor to
@@ -795,7 +827,7 @@ export async function GET(req: NextRequest) {
     // data, not price data.
     type OpenSeaNft = { nft?: { name?: string; image_url?: string; traits?: Array<{ trait_type: string; value: string }> } };
     const artEntries = await Promise.all(
-      distinctTokenIds.map(async (tokenId) => {
+      missingFromArchive.map(async (tokenId) => {
         const nft = await getOrRefresh<OpenSeaNft | null>(
           `opensea-nft-art:${chain.openSeaChain}:${contractAddress.toLowerCase()}:${tokenId}`,
           { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
@@ -815,7 +847,16 @@ export async function GET(req: NextRequest) {
         ] as const;
       })
     );
+    // Archive first, live fetch only fills the gaps it could not answer.
     const artByToken = new Map(artEntries);
+    for (const [tokenId, row] of archivedArt) {
+      if (artByToken.has(tokenId)) continue;
+      artByToken.set(tokenId, {
+        name: row.name ?? null,
+        imageUrl: row.imageUrl ?? null,
+        traits: row.traits ?? [],
+      });
+    }
 
     const listings: Listing[] = orders.map((order) => {
       const item = order.parameters.offer[0];
