@@ -6,6 +6,16 @@ export interface RewindResult {
   common: Header | undefined;
   orphaned: Hex[];
   deletedEvents: number;
+  /**
+   * Header hops taken across both walks (old-chain build + orphan collection).
+   *
+   * Exposed so a test can bound the walk by STEPS rather than only by elapsed
+   * time. A wall-clock assertion is the right way to stop a hang from
+   * wedging CI, but it is machine-dependent: a fast box can hide a walk that
+   * is near-infinite in principle under a 5-second budget. A step cap of
+   * `depth(fixture) + 1` cannot be outrun by hardware.
+   */
+  steps: number;
 }
 
 /**
@@ -30,10 +40,12 @@ export function rewindToCommonAncestor(
    * the old tip never descended from. Nothing is then deleted and the archive
    * silently keeps the orphaned branch.
    */
+  let steps = 0;
   const oldChain = new Map<string, Header>();
   {
     let t: Header | undefined = store.getHeader(chain, cursor.tipHash);
     while (t) {
+      steps++;
       const key = t.hash.toLowerCase();
       if (oldChain.has(key)) break; // cycle or self-parent genesis
       oldChain.set(key, t);
@@ -56,6 +68,7 @@ export function rewindToCommonAncestor(
       const orphaned: Hex[] = [];
       let t: Header | undefined = oldChain.get(cursor.tipHash.toLowerCase());
       while (t && t.hash.toLowerCase() !== n.hash.toLowerCase()) {
+        steps++;
         orphaned.push(t.hash);
         t = oldChain.get(t.parentHash.toLowerCase());
       }
@@ -66,12 +79,13 @@ export function rewindToCommonAncestor(
         tipHash: newHead.hash,
         tipHeight: newHead.height,
       });
-      return { common: n, orphaned, deletedEvents };
+      return { common: n, orphaned, deletedEvents, steps };
     }
+    steps++;
     n = walkParent(n.parentHash);
     if (n && seenNew.has(n.hash.toLowerCase())) break;
   }
-  return { common: undefined, orphaned: [], deletedEvents: 0 };
+  return { common: undefined, orphaned: [], deletedEvents: 0, steps };
 }
 
 function dropCoverageAtOrAbove(store: ArchiveStore, chain: ChainId, height: number): void {

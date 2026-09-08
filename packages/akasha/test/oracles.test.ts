@@ -131,6 +131,11 @@ test("ORACLE 2: a fork of length 3 deletes the orphans and keeps the survivor", 
   const started = Date.now();
   const r = rewindToCommonAncestor(s, CHAIN, newHead);
   ok(Date.now() - started < 2_000, "must terminate, not walk forever");
+  // Wall-clock stops a hang from wedging CI, but it is machine-dependent: a
+  // fast box can hide a near-infinite walk under the budget. The STEP cap
+  // cannot be outrun by hardware. Fixture depth is 4 headers (g,a1,a2,a3)
+  // plus the new branch (b3,b2): a correct walk is a small constant.
+  ok(r.steps <= 12, `walk took ${r.steps} steps over a 6-header fixture`);
 
   eq(r.common?.hash, hx("0xa1"), "fork point is on the OLD tip's ancestry, not merely present");
   eq([...r.orphaned].sort(), [hx("0xa2"), hx("0xa3")]);
@@ -172,6 +177,9 @@ test("ORACLE 2: a self-parent genesis is bounded, and coverage does not outlive 
   const started = Date.now();
   const r = rewindToCommonAncestor(s, CHAIN, newHead);
   ok(Date.now() - started < 2_000, "a self-parent genesis must not grow the orphan array forever");
+  // The hardware-independent bound. Fixture is 2 headers deep (g, a1); a
+  // self-parent loop would run to millions regardless of CPU speed.
+  ok(r.steps <= 8, `self-parent genesis walk took ${r.steps} steps over a 2-header fixture`);
   eq(r.orphaned, [hx("0xa1")]);
 
   const runs = s.coverageFor(CHAIN);
