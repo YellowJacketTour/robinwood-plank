@@ -36,6 +36,7 @@ global script Active
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;
         int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;
+        int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
         char32 line[128];
@@ -83,16 +84,21 @@ global script Active
                 if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && activity<0 && stage!=3 && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
                     activity=stage;activityTick=0;
+                    activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
                     int dx=216-(Hero->X+8);int dy=96-(Hero->Y+8);
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
                 }
+                // Damage, displacement, or a native action takes precedence over farming.
+                if(activity>=0 && (Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
+                {activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 if(activity>=0)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
                     Hero->InputAxisUp=false;Hero->InputAxisDown=false;Hero->InputAxisLeft=false;Hero->InputAxisRight=false;
                     Hero->InputA=false;Hero->InputB=false;Hero->PressA=false;Hero->PressB=false;
                     Hero->Dir=activityDir;
-                    int pose=activity==4?10:(activityTick<14?0:1);
+                    // A treasure hold-up is not a directional lifting/carrying pose.
+                    int pose=activityTick<14?0:1;
                     Hero->ScriptTile=Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod;
                     // Hosted player aborts on GetOriginalFlip; retain the native directional flip.
                     int row=activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7));
@@ -101,7 +107,7 @@ global script Active
                     if(activity==0){hoeBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);hoeFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
                     if(activity==2){waterBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);waterFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
                     Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
-                    if(activity==1 || activity==4)Screen->DrawCombo(6,Hero->X,Hero->Y-(activity==4?12:0),Screen->ComboD[95],1,1,Screen->ComboC[95],activity==4?16:8,activity==4?16:8);
+                    // No held prop until a crop item has its own validated sprite identity.
                     if(activity==2 && activityTick>=18 && activityTick<36)for(int drop=0;drop<4;drop++)Screen->Circle(6,210+drop*4,88+(activityTick+drop*3)%12,1,0x91);
                     if(activityTick==28)
                     {
@@ -129,6 +135,7 @@ global script Active
         }
     }
 }
+
 
 
 
