@@ -27,6 +27,8 @@
  */
 import { test } from "node:test";
 import { eq, ok } from "./_expect.ts";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { ArchiveStore } from "../src/hose/store.ts";
 import { EvmAdapter } from "../src/hose/adapters/evm.ts";
 import { rewindToCommonAncestor } from "../src/hose/reorg.ts";
@@ -320,4 +322,45 @@ test("ORACLE 3: the Bitcoin form -- a witness containing an envelope must not pa
   );
   ok(found.length > 0, "a witness that contains an envelope parsed to nothing");
   eq(found[0]!.contentType, "text/plain");
+});
+
+/**
+ * ORACLE 4 -- ACCOUNTED: every chain adapter that ingests a block must record
+ * a coverage run for it.
+ *
+ * Found on production 2026-09-09: Bitcoin had walked blocks for hours with
+ * `runs=0`. Headers stored, envelopes parsed, artifacts minted -- and no
+ * record that the range was covered, because `extendCoverage()` was called
+ * from the EVM adapter alone. Solana had the same hole.
+ *
+ * The general form: an adapter can write everything a block CONTAINED and
+ * still never write that the block was ACCOUNTED FOR. Nothing crashes; the
+ * log looks healthy; the archive simply cannot report completeness, because
+ * `complete_from_protocol` requires `run_count = 1` and the run never
+ * arrives. A miss indistinguishable from "nothing happened".
+ *
+ * This oracle is structural on purpose: it reads the adapter SOURCES rather
+ * than driving each one, so a NEW adapter added later is covered the day it
+ * lands instead of the day someone remembers to write its test.
+ */
+test("oracle 4: every block-ingesting adapter records coverage", () => {
+  const dir = fileURLToPath(new URL("../src/hose/adapters/", import.meta.url));
+  const adapters = readdirSync(dir).filter((f) => f.endsWith(".ts") && f !== "envelope.ts");
+  ok(adapters.length >= 3, `expected the real adapter set, saw ${adapters.join(",")}`);
+
+  for (const file of adapters) {
+    // Normalise first: this repo checks out CRLF, and an indexOf over the
+    // raw bytes silently finds nothing then blames the wrong file.
+    const src = readFileSync(dir + file, "utf8").replace(/\r\n/g, "\n");
+
+    // An adapter that stores headers is one that walks blocks.
+    if (!/\.putHeader\s*\(/.test(src)) continue;
+
+    ok(
+      /extendCoverage\s*\(/.test(src),
+      `${file} stores headers but never calls extendCoverage -- every block it ` +
+        `ingests would be archived and simultaneously unaccounted for, and the ` +
+        `chain could never report complete_from_protocol`
+    );
+  }
 });

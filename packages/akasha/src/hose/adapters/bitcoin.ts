@@ -22,6 +22,7 @@ import type { ChainEvent, Header, StreamKind } from "../../shared/types.ts";
 import type { Hex } from "../../shared/hex.ts";
 import type { ArchiveStore } from "../store.ts";
 import { parseEnvelopes, type Inscription } from "./envelope.ts";
+import { extendCoverage } from "../coverage.ts";
 
 export interface BitcoinBlock {
   hash: string;
@@ -202,6 +203,20 @@ export class BitcoinAdapter {
         }
       }
     }
+
+    // RECORD THE RUN. Everything above writes what the block CONTAINED
+    // (header, events, artifacts); this writes that the block was COVERED.
+    //
+    // Bitcoin walked blocks for hours on production with `runs=0`, because
+    // `extendCoverage` was called from the EVM adapter only. Real headers,
+    // real parsed envelopes, and no record that the range was accounted for
+    // -- and since `complete_from_protocol` requires `run_count = 1`, a
+    // chain that never records a run can never report completeness at all.
+    //
+    // It goes here, at the END, so a block that threw on the way through is
+    // never claimed as covered. Coverage has to be earned by a completed
+    // ingest, not by the attempt.
+    extendCoverage(this.store, "bitcoin", block.height, header.hash);
 
     return { events, inscriptions: all };
   }

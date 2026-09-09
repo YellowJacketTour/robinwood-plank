@@ -16,6 +16,7 @@
  */
 import type { ChainCursor, ChainEvent, StreamKind } from "../../shared/types.ts";
 import type { ArchiveStore } from "../store.ts";
+import { extendCoverage } from "../coverage.ts";
 
 /**
  * The closed protocol surface. Adding an entry is a deliberate act; this is
@@ -125,6 +126,12 @@ export class SolanaAdapter {
     }
 
     this.seenSlots.add(slot);
+    // RECORD THE RUN, same as every other adapter. `seenSlots` is this
+    // adapter's private in-memory notion of what it walked; it does not
+    // survive a restart and the coverage tape never learns about it. Bitcoin
+    // shipped with exactly this shape and spent hours on production writing
+    // real events with `runs=0`.
+    extendCoverage(this.store, "solana", block.slot, block.blockhash as `0x${string}`);
     return written;
   }
 
