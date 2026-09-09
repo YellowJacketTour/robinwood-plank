@@ -211,7 +211,24 @@ async function main(): Promise<void> {
         chains: chains.join(","),
         version: process.env.GIT_COMMIT ?? "unknown",
       });
-      if (chains.includes("bitcoin")) await phase("bitcoin-tip", () => hose.bitcoinTick());
+      if (chains.includes("bitcoin")) {
+        await phase("bitcoin-tip", () => hose.bitcoinTick());
+        // PER-HOST FAILURE COUNTS, WHERE A ROUTE CAN READ THEM.
+        //
+        // The telemetry said `bitcoin-tip` was failing with "fetch failed",
+        // which is true but not actionable: it does not say whether ONE host
+        // is down or ALL of them are, and that distinction is the difference
+        // between "rotate away from a bad mirror" and "this box's IP is
+        // blocked by the whole vendor family". The counts existed already --
+        // in a health line on stdout that no route can reach, which is the
+        // exact failure this whole telemetry effort exists to end.
+        const health = hose.health() as { bitcoinHostFailures?: Record<string, number> };
+        if (health.bitcoinHostFailures) {
+          hose.durableStore?.recordPhase("bitcoin" as never, "bitcoin-hosts", "attempt", {
+            detail: health.bitcoinHostFailures,
+          });
+        }
+      }
       await phase("repair", () => hose.repairTick());
       // The shattered archive, alongside the serial walk rather than instead
       // of it. The serial tail keeps moving; sharding fills the rest of the
