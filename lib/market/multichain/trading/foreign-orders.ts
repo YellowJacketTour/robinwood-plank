@@ -428,10 +428,35 @@ export async function fetchForeignAllListingsPaged(input: {
   if (!chain.openSeaChain) return { orders: [], complete: true, pages: 0 };
   const target = Math.max(1, Math.min(input.limit ?? 100, 1_000));
   const orders: ForeignSeaportOrder[] = [];
+  // PAGE BY DISTINCT TOKENS, NOT BY RAW ORDER COUNT.
+  //
+  // This walked until it had `target` ORDERS. A collection whose listings are
+  // continuously re-signed returns many rotations of the SAME token, so the
+  // walk filled its quota on one token and stopped -- and the per-token dedup
+  // downstream then correctly collapsed them to a single card.
+  //
+  // Measured live 2026-09-09 on Milady Maker: 50 orders fetched, ONE distinct
+  // token (#7957), whose price and endTime changed on every poll -- a
+  // declining, continuously re-signed listing. The header said "117 listed"
+  // because fetchOpenSeaListedCount walks the same endpoint to CURSOR
+  // EXHAUSTION counting distinct ids, so it saw all 117. Same data, two
+  // stopping rules, and only one of them matched what a grid needs.
+  //
+  // Other collections hid this: BAYC/Pudgy/Azuki returned 31/32/41 distinct
+  // tokens from 50 orders, so the bug looked collection-specific rather than
+  // like the wrong stopping condition.
+  const distinct = new Set<string>();
   let cursor: string | null = null;
   let pages = 0;
-  while (orders.length < target && pages < 10) {
-    const pageSize = Math.min(100, target - orders.length);
+  // Page cap raised with the rule change: rotations mean a page can contribute
+  // ZERO new tokens, so a walk that must reach `target` DISTINCT ids needs more
+  // room than one that just counted rows. Still bounded -- an unbounded walk on
+  // a big collection is its own outage.
+  while (distinct.size < target && pages < 25) {
+    // Always ask for a full page. Asking for `target - orders.length` shrank
+    // the request as rotations accumulated, so the walk got slower exactly
+    // when it needed more data.
+    const pageSize = 100;
     let result: {
       listings: Array<{ order_hash: string; chain: string; protocol_data: { parameters: SeaportOrderParameters; signature: string | null } }>;
       next?: string | null;
@@ -454,6 +479,11 @@ export async function fetchForeignAllListingsPaged(input: {
     pages += 1;
     for (const l of result?.listings ?? []) {
       orders.push({ orderHash: l.order_hash, chain: l.chain, parameters: l.protocol_data.parameters, signature: l.protocol_data.signature });
+      const id = l.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria;
+      // Count the same way the caller's dedup does -- by token id -- so the
+      // stopping rule and the rendering rule agree. Counting anything else
+      // reintroduces the mismatch this fix exists to remove.
+      if (id != null && id !== "") distinct.add(String(id));
     }
     // A NULL PAGE IS NOT AN EXHAUSTED CURSOR.
     //

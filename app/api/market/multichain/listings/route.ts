@@ -488,6 +488,25 @@ export async function GET(req: NextRequest) {
             name: raw[0]?.token?.collectionName ?? null,
           }),
           listings,
+          // SOLANA REPORTED NO COVERAGE AT ALL.
+          //
+          // This path returned `bookCoverage: null`, so a Solana grid could
+          // never say whether it was showing the whole book or a page of it --
+          // the same silence that made the EVM book's "117 listed, 1 shown"
+          // unexplainable for weeks. A short grid must always carry the number
+          // that explains it, on every chain.
+          //
+          // Magic Eden's listings endpoint is a single bounded request rather
+          // than a cursor walk, so "complete" here means exactly "the venue
+          // returned fewer rows than we asked for", which is the honest
+          // reading and nothing stronger.
+          bookCoverage: {
+            complete: raw.length < limit,
+            partial: raw.length >= limit,
+            sources: { magiceden: raw.length >= limit ? "truncated-at-limit" : "venue-exhausted" },
+            ordersFetched: raw.length,
+            ordersAfterDedup: listings.length,
+          },
         },
         { headers: { "Cache-Control": "no-store" } }
       );
