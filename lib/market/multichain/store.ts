@@ -3,11 +3,11 @@
  * See that migration for why this is a separate, current-state cache rather
  * than an extension of lib/market/chain-events.ts's append-only ledger.
  */
-import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { refreshHubRank, HUB_SORT_COLUMN, HUB_DEFAULT_ORDER } from "@/lib/market/multichain/hub-rank";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import type { CollectionSnapshot, TrackedCollection } from "@/lib/market/multichain/types";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { wrappedNativeAddress } from "./native-currency";
 
 export function hasMultichainStore(): boolean {
   return hasPostgresConfig();
@@ -545,7 +545,7 @@ export async function sanitizeUnknownZeros(): Promise<{ floors: number; volumes:
 export async function updateVolumeFromMarketEvents(chainSlug: string, collectionKeys: string[]): Promise<{ updated: number }> {
   const keys = [...new Set(collectionKeys.map((k) => normalizeContractAddress(chainSlug, k)))].slice(0, 200);
   if (keys.length === 0) return { updated: 0 };
-  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const wrappedNative = wrappedNativeAddress(chainSlug);
   const rows = await postgresQuery<{
     collection_key: string; sales_24h: string; sales_7d: string; sales_30d: string;
     wei_24h: string | null; wei_7d: string | null; wei_30d: string | null;
@@ -701,7 +701,7 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
   // with NULL sales_24h at the bottom of the hub. Other ERC-20s (USDC,
   // DAI) are still excluded from the wei sum; they stay in payment_legs
   // for USD aggregation.
-  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const wrappedNative = wrappedNativeAddress(chainSlug);
   const result = await postgresQuery<{ contract_address: string; volume_wei: string; sales: string }>(
     `SELECT LOWER(nft_contract) AS contract_address,
             SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) = $2)::text AS volume_wei,

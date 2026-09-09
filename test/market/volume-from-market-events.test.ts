@@ -93,3 +93,23 @@ test("case-sensitive collection identities remain separate in rolling aggregatio
     await postgresQuery(`DELETE FROM plank_multichain_collections WHERE id = ANY($1::bigint[])`, [ids]);
   }
 });
+
+test("Polygon WETH sales count without being summed as native POL", { skip: !hasPostgresConfig() }, async () => {
+  const chain = "polygon-mainnet";
+  const key = `0xpolygonstats${Date.now()}`;
+  const id = (await postgresQuery<{id: number}>(`INSERT INTO plank_multichain_collections (chain_slug, contract_address, adapter) VALUES ($1,$2,'test') RETURNING id`, [chain, key])).rows[0].id;
+  try {
+    await postgresQuery(`INSERT INTO plank_multichain_snapshots (collection_id) VALUES ($1)`, [id]);
+    for (const [currency, amount] of [["0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", "999"], ["0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", "2"]]) {
+      await seedEvent({chain, key, tx: key + amount, seller: "0xa", buyer: "0xb", wei: amount, currency, usd: null, hoursAgo: 1});
+    }
+    await updateVolumeFromMarketEvents(chain, [key]);
+    const row = (await postgresQuery<{volume: string; sales: number}>(`SELECT volume_24h_wei::text AS volume, sales_24h AS sales FROM plank_multichain_snapshots WHERE collection_id = $1`, [id])).rows[0];
+    assert.equal(row.volume, "2");
+    assert.equal(Number(row.sales), 2);
+  } finally {
+    await postgresQuery(`DELETE FROM plank_market_events WHERE chain_slug = $1 AND collection_key = $2`, [chain, key]);
+    await postgresQuery(`DELETE FROM plank_multichain_snapshots WHERE collection_id = $1`, [id]);
+    await postgresQuery(`DELETE FROM plank_multichain_collections WHERE id = $1`, [id]);
+  }
+});
