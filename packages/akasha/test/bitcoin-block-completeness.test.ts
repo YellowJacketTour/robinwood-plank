@@ -41,7 +41,7 @@ test("a truncated raw response cannot claim coverage", async () => {
 test("one raw request preserves every transaction's original order", async () => {
   const { rpc, block, calls } = fixture(200);
   const read = await rpc.getBlock(block.getId());
-  for (let i = 0; i < 200; i++) eq(read!.tx[i].txid, block.transactions![i].getId());
+  for (let i = 0; i < 200; i++) eq(read!.tx[i]!.txid, block.transactions![i]!.getId());
   eq(calls.filter(url => url.endsWith("/raw")).length, 1);
   eq(calls.filter(url => url.includes("/txs/")).length, 0);
 });
