@@ -8,6 +8,7 @@ export function decodeBitcoinBlock(bytes: Uint8Array, hash: string, height: numb
   if (!block.transactions?.length || !block.checkTxRoots()) throw new Error("Bitcoin transaction/witness commitment mismatch");
   if (block.byteLength() !== bytes.length || block.weight() > 4_000_000) throw new Error("Bitcoin block size/weight mismatch");
   return {
+    complete: true,
     hash: block.getId(),
     previousblockhash: Buffer.from(block.prevHash!).reverse().toString("hex"),
     height,
