@@ -409,10 +409,16 @@ export async function updateCollectionMarketStats(
   if (!id) return;
   const source = stats.source ?? "vendor";
   if (source !== "ledger" && collection.rows[0]?.ledger_owned) {
-    // Only the floor-change hint may still land; volume/sales are the ledger's.
-    if (stats.floorChangePct != null && stats.floorChangePct !== 0) {
-      await postgresQuery(`UPDATE plank_multichain_snapshots SET floor_change_pct = $2, synced_at = NOW() WHERE collection_id = $1`, [id, stats.floorChangePct]);
-    }
+    // A SOURCE BARRED FROM WRITING SALES MAY NOT WRITE THE CHANGE EITHER.
+    //
+    // This used to let the vendor's floor-change "hint" land while volume and
+    // sales stayed the ledger's. That is precisely how a row ended up with a
+    // change and no sales (CryptoPunks: 0 sales, -0.2%): the number came from
+    // a pass that was explicitly not trusted for the trades underneath it.
+    //
+    // The change is now derived from the same trade set as sales_24h, in
+    // updateVolumeFromMarketEvents, so the ledger already owns both halves.
+    // There is nothing left for a vendor to contribute here.
     return;
   }
   await postgresQuery(
@@ -426,7 +432,14 @@ export async function updateCollectionMarketStats(
          sales_7d = CASE WHEN $9 THEN sales_7d ELSE $5 END,
          volume_30d_wei = CASE WHEN $10 THEN volume_30d_wei ELSE $6 END,
          sales_30d = CASE WHEN $10 THEN sales_30d ELSE $7 END,
-         floor_change_pct = COALESCE($8, floor_change_pct),
+         -- NOT COALESCE. A sticky change outlives the window that produced
+         -- it: once written it could never be cleared, so a collection that
+         -- stopped trading kept displaying yesterday's move indefinitely.
+         -- The ledger owns this column, and a ledger pass with no priced
+         -- prior window must be able to say "no change" by writing NULL.
+         -- A vendor pass (which cannot reach here while the ledger is fresh)
+         -- still leaves it alone rather than clearing what it does not know.
+         floor_change_pct = CASE WHEN $11 = 'ledger' THEN $8 ELSE COALESCE($8, floor_change_pct) END,
          volume_24h_usd = CASE WHEN $11 = 'ledger' THEN $12::numeric ELSE volume_24h_usd END,
          volume_7d_usd = CASE WHEN $11 = 'ledger' THEN $13::numeric ELSE volume_7d_usd END,
          volume_30d_usd = CASE WHEN $11 = 'ledger' THEN $14::numeric ELSE volume_30d_usd END,
@@ -532,6 +545,7 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
     collection_key: string; sales_24h: string; sales_7d: string; sales_30d: string;
     wei_24h: string | null; wei_7d: string | null; wei_30d: string | null;
     usd_24h: string | null; usd_7d: string | null; usd_30d: string | null;
+    change_pct: string | null;
   }>(
     `WITH sales AS (
        SELECT lower(e.collection_key) AS collection_key, e.block_timestamp, e.amount_usd,
@@ -551,7 +565,37 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
             SUM(native_wei)::text AS wei_30d,
             SUM(amount_usd) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')::text AS usd_24h,
             SUM(amount_usd) FILTER (WHERE block_timestamp > NOW() - INTERVAL '7 days')::text AS usd_7d,
-            SUM(amount_usd)::text AS usd_30d
+            SUM(amount_usd)::text AS usd_30d,
+            -- THE 24h CHANGE, DERIVED FROM THE SAME TRADES AS sales_24h.
+            --
+            -- Owner rule, and it is a real invariant: if there are sales on
+            -- record there MUST be a change, and a change may never appear
+            -- with zero sales. That could not hold while the two came from
+            -- different places -- sales from this ledger, change from
+            -- whatever vendor happened to answer -- so rows showed 16 sales
+            -- and a blank change (Friendship Bracelets, BAYC) while others
+            -- showed a change against no sales at all (CryptoPunks).
+            --
+            -- Mean traded price in the last 24h vs the 24h before it, both
+            -- over native-currency fills only (mixing currencies would
+            -- compare a WETH mean against an ETH one). NULL unless BOTH
+            -- windows have at least one priced sale: with no prior window
+            -- there is no change to state, and that is a typed hole, not 0.
+            CASE
+              WHEN COUNT(native_wei) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours') > 0
+               AND COUNT(native_wei) FILTER (WHERE block_timestamp <= NOW() - INTERVAL '24 hours'
+                                               AND block_timestamp > NOW() - INTERVAL '48 hours') > 0
+               AND AVG(native_wei) FILTER (WHERE block_timestamp <= NOW() - INTERVAL '24 hours'
+                                             AND block_timestamp > NOW() - INTERVAL '48 hours') > 0
+              THEN (
+                (AVG(native_wei) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')
+                 - AVG(native_wei) FILTER (WHERE block_timestamp <= NOW() - INTERVAL '24 hours'
+                                             AND block_timestamp > NOW() - INTERVAL '48 hours'))
+                / AVG(native_wei) FILTER (WHERE block_timestamp <= NOW() - INTERVAL '24 hours'
+                                            AND block_timestamp > NOW() - INTERVAL '48 hours')
+              ) * 100
+              ELSE NULL
+            END::text AS change_pct
        FROM sales GROUP BY collection_key`,
     [chainSlug, keys, wrappedNative ?? ""]
   );
@@ -566,6 +610,8 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
       volume30dWei: row.wei_30d, sales30d: Number(row.sales_30d),
       volume24hUsd: row.usd_24h, volume7dUsd: row.usd_7d, volume30dUsd: row.usd_30d,
       currentFloorPriceWei: null,
+      // Same trade set as sales_24h above -- see the CASE in the query.
+      floorChangePct: row.change_pct == null ? null : Number(row.change_pct),
     });
     updated += 1;
   }

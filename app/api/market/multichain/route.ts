@@ -376,10 +376,18 @@ async function buildHubIndex(req: Request) {
         // Real, computed from this app's own prior observation (see
         // updateCollectionMarketStats's header) -- OpenSea's stats
         // endpoint has no floor-change field at all.
+        // A CHANGE REQUIRES TRADES. The stored value is now derived from the
+        // same 24h trade set as sales_24h (see updateVolumeFromMarketEvents),
+        // so it already carries that guarantee. The floor-diff fallback below
+        // does NOT: it compares two listing observations and fires happily on
+        // a collection that never traded, which is how a row showed -0.2%
+        // against zero sales. Gate it on real sales so both halves of the
+        // pair always agree about whether anything happened.
         floorChangePct:
           c.floorChangePct != null && Number.isFinite(c.floorChangePct)
             ? c.floorChangePct
-            : c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
+            : c.sales24h != null && c.sales24h > 0 &&
+                c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
               ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
               : null,
         floorChangeEvidence: null,
