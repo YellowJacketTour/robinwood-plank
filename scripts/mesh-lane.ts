@@ -6,6 +6,7 @@
 import { isSourceJailed, jailSource } from "../lib/market/multichain/mesh/jail";
 import type { MeshSource } from "../lib/market/multichain/mesh/matrix";
 
+import { ProviderCapacityDeferredError } from "../lib/market/multichain/control-plane";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const argvSource = (process.argv.find((a) => a.startsWith("--source="))?.slice("--source=".length) ?? "") as MeshSource;
@@ -585,8 +586,12 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       // AUDIT lens 1 #6 (Batch E4): the exhaustive ME catalog walk now runs
       // in the mesh. Bounded pages per tick; `done:false` re-enqueues.
       const { runMagicEdenCatalogScan } = await import("../lib/market/multichain/discovery/magiceden-catalog-scan");
-      const result = await runMagicEdenCatalogScan({ maxPages: 25 });
+      const result = await runMagicEdenCatalogScan({ maxPages: 1 });
       console.log("[mesh-lane] magiceden-catalog", JSON.stringify(result));
+      if (result.retryAt) {
+        markDeferred(Math.max(1, result.retryAt - Date.now()), "Magic Eden catalog pagination boundary; scheduled catalog rescan");
+        return;
+      }
       if (!result.done) markIncomplete();
       return;
     }
@@ -686,6 +691,10 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
     }
     console.log(`[mesh-lane] no runner for source=${source}`);
   } catch (e) {
+    if (e instanceof ProviderCapacityDeferredError) {
+      markDeferred(Math.max(1_000, e.retryAt.getTime() - Date.now()), e.message);
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     if (/429|403|rate limit|quota/i.test(msg)) {
       // Real bug found live 2026-08-27: for OpenSea-pool sources, jailing

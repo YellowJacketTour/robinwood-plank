@@ -18,6 +18,21 @@ export function unisatBackgroundDayWindow(now = new Date()): ProviderWindow {
   return utcDayWindow(UNISAT_BACKGROUND_DAILY_ALLOWANCE, now);
 }
 
+// Ordiscan currently documents 1,000 requests/month on its free plan.
+// 32/day stays within that allowance even in a 31-day month; all Ordiscan
+// consumers share this account/window rather than creating separate buckets.
+export const ORDISCAN_BACKGROUND_DAILY_ALLOWANCE = 32;
+export function ordiscanBackgroundDayWindow(now = new Date()): ProviderWindow {
+  return utcDayWindow(ORDISCAN_BACKGROUND_DAILY_ALLOWANCE, now);
+}
+
+export class ProviderCapacityDeferredError extends Error {
+  constructor(readonly provider: string, readonly retryAt: Date) {
+    super(`${provider}: provider capacity resumes at ${retryAt.toISOString()}`);
+    this.name = "ProviderCapacityDeferredError";
+  }
+}
+
 /** Atomically reserve shared provider capacity. False means defer, never call. */
 export async function reserveProviderCapacity(
   providerAccount: string,
@@ -130,6 +145,8 @@ export type DataJobInput = {
   payload?: Record<string, unknown>;
   priority?: number;
   notBefore?: Date;
+  /** Standing maintenance must not undo a provider deferral or failure cooldown. */
+  preserveNotBefore?: boolean;
 };
 
 /** Deduplicated enqueue. New demand raises priority and may pull work forward. */
@@ -140,7 +157,8 @@ export async function enqueueDataJob(input: DataJobInput): Promise<number> {
      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
      ON CONFLICT (job_key) DO UPDATE SET
        priority = GREATEST(plank_data_jobs.priority, EXCLUDED.priority),
-       not_before = LEAST(plank_data_jobs.not_before, EXCLUDED.not_before),
+       not_before = CASE WHEN $9 AND plank_data_jobs.status = 'queued' THEN plank_data_jobs.not_before
+         ELSE LEAST(plank_data_jobs.not_before, EXCLUDED.not_before) END,
        payload = plank_data_jobs.payload || EXCLUDED.payload,
        status = CASE WHEN plank_data_jobs.status IN ('failed', 'succeeded') THEN 'queued' ELSE plank_data_jobs.status END,
        -- completed_at is kept as "last completion" (2026-09-06): a partial
@@ -149,7 +167,7 @@ export async function enqueueDataJob(input: DataJobInput): Promise<number> {
        updated_at = NOW()
      RETURNING id::text`,
     [input.jobKey, input.kind, input.source, input.chainSlug ?? null, input.subject ?? null,
-      JSON.stringify(input.payload ?? {}), input.priority ?? 0, input.notBefore ?? new Date()]
+      JSON.stringify(input.payload ?? {}), input.priority ?? 0, input.notBefore ?? new Date(), input.preserveNotBefore ?? false]
   );
   return Number(result.rows[0].id);
 }

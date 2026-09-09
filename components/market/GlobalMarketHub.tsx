@@ -13,6 +13,7 @@ import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { useMarketRealtime } from "@/hooks/useMarketRealtime";
+import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -451,15 +452,18 @@ function ChainTabBanner({ chainSlug, meta }: { chainSlug: string; meta: HubChain
     );
   }
   if (meta.laneHealth.down.length === 0) return null;
+  const onlyPaused = meta.laneHealth.down.every(d => d.reason === "paused");
   return (
-    <div role="status" className="mt-2 border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+    <div role="status" className={`mt-2 border px-3 py-2 text-xs ${onlyPaused ? "border-gold-500/40 bg-gold-500/10 text-gold-300" : "border-red-400/40 bg-red-400/10 text-red-200"}`}>
       {meta.laneHealth.down.map((d) => {
         const since = d.since ? new Date(d.since) : null;
         const sinceLabel = since && Number.isFinite(since.getTime()) ? since.toLocaleString() : "an unknown time";
         return (
           <p key={d.source}>
-            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)} down since {sinceLabel}
-            {d.reason === "backoff" ? " (last run failed)" : " (no successful run)"} -- counts and floors on this tab may be stale.
+            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)}
+            {d.reason === "paused"
+              ? " is waiting for provider capacity. Updates from this source will resume after its cooldown."
+              : ` has not refreshed since ${sinceLabel}${d.reason === "backoff" ? " (last run failed)" : " (no recent successful run)"}. Its data may be stale.`}
           </p>
         );
       })}
@@ -1893,10 +1897,10 @@ export default function GlobalMarketHub() {
         { cache: "no-store", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`Live snapshot ${response.status}`);
       const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
-      for (const row of data.collections) updates.set(`${row.chainSlug}:${row.contractAddress}`, row);
+      for (const row of data.collections) updates.set(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`, row);
     }
     setCollections((previous) => previous.map((row) => {
-      const update = updates.get(`${row.chainSlug}:${row.contractAddress}`);
+      const update = updates.get(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`);
       return update ? { ...row, ...update } : row;
     }));
   }, 5_000);

@@ -7,68 +7,18 @@ import {
 } from "@/lib/market/multichain/freshness-budget";
 
 /**
- * Request-coalescing / stale-while-revalidate wrapper around durableKv, for
- * live user-facing routes that call a rate-limited third-party API (Magic
- * Eden, Helius, UniSat, etc.) on every request with no cache at all today
- * -- e.g. app/api/market/multichain/collection/route.ts's Magic Eden stats
- * fetch. Built 2026-08-25 as the concrete answer to two things asked
- * together: the alpha-readiness audit's HIGH finding that rate-limit
- * assumptions are built for a single dev, not concurrent public traffic;
- * and a request for the real distributed-systems theory behind making N
- * concurrent visitors cost close to what 1 costs.
- *
- * The mechanism is not novel -- it's a direct, minimal implementation of
- * two well-established patterns:
- *
- *   1. Singleflight / request coalescing (Facebook's memcache "leases",
- *      Nishtala et al., NSDI 2013; Go's golang.org/x/sync/singleflight):
- *      concurrent callers sharing a cache key collapse into ONE upstream
- *      fetch. Handled here at two layers -- an in-memory per-process
- *      Map<key, Promise> for same-process concurrency, and a Postgres
- *      advisory lock (pg_try_advisory_lock) for cross-process/cross-
- *      instance concurrency, since this app already runs Postgres and
- *      doesn't need a second coordination system (Redis) for it.
- *
- *   2. Stale-while-revalidate (RFC 5861): a soft TTL and a hard TTL.
- *      Within the soft TTL, serve the cached value with zero upstream
- *      call. Between soft and hard TTL, serve the (still fresh enough)
- *      cached value immediately and kick a background refresh gated by
- *      the lock above. Only past the hard TTL does a request actually
- *      wait on a fresh fetch.
- *
- * Lease mechanism: a conditional UPDATE (claim only succeeds if no other
- * process's lease is currently live), not a Postgres session-scoped
- * advisory lock. Deliberate choice: this app's pool is small
- * (PGPOOL_MAX=4 in .env.inmotion.example) and a fetcher call can take up
- * to several seconds (network-bound third-party API); holding a live
- * advisory lock means holding a live pooled connection for that whole
- * span (pg_advisory_unlock only reliably pairs with the SAME connection
- * that acquired it, so it would also need withPostgresTransaction to pin
- * one). A lease row read/write instead is two quick, independent
- * postgresQuery calls that never hold a connection open across the fetch.
- *
- * Split-brain caveat (deliberately accepted, same reasoning Kleppmann's
- * Redlock critique doesn't apply to): a lease can theoretically be claimed
- * by two processes if one's fetch outlives the lease TTL. The worst case
- * is "one extra upstream call," not a correctness bug -- this isn't
- * protecting a write to a bank balance, it's coalescing reads of a public
- * price/floor value.
- *
- * FRESHNESS BUDGET CONTROLLER (added 2026-08-25, docs/marketplank/GROK-
- * FINDINGS-biggest-issues-unified-vision-2026-08-25.md "Issue 2"): an
- * OPTIONAL layer above everything described so far. Pass `provider` in
- * SingleflightCacheOptions to additionally gate refreshes on that
- * provider's shared, cross-key call budget (lib/market/multichain/
- * freshness-budget.ts) -- widening soft/hard TTL as spend approaches a
- * soft ceiling, and refusing new upstream calls once a hard ceiling is
- * hit (serving stale cache labeled "stale_budget", or failing closed only
- * if no cache exists at all). This never changes behavior for callers that
- * omit `provider` -- everything above (coalescing, lease, SWR, "never
- * discard cache on transient failure") is unmodified in that case.
+ * One shared resource fingerprint across visitors and Passenger processes.
+ * Warm values return immediately. Cold followers join the durable refresh;
+ * they never bypass an occupied lease by calling the provider independently.
+ * Numeric leases remain compatible with existing releases. Renewable ownership
+ * fences publication so an expired owner cannot replace a newer snapshot.
+ * No database connection is held while waiting on a provider or another process.
  */
 
 const inFlight = new Map<string, Promise<unknown>>();
-const LEASE_MS = 15_000; // generous vs. the 10s fetch timeout used by callers
+const LEASE_MS = 15_000;
+const MAX_REFRESH_MS = 90_000;
+const MAX_JOIN_MS = 30_000;
 
 // Real production bug found live 2026-09-06 ("still no global"): this
 // predicate used `(value)::bigint`, a direct jsonb->bigint cast that the
@@ -77,7 +27,7 @@ const LEASE_MS = 15_000; // generous vs. the 10s fetch timeout used by callers
 // callers' `.catch(() => null)`, exposed the moment the hub index went
 // through the edge. `#>> '{}'` extracts the scalar as text on every
 // supported major (json and jsonb alike) before the cast.
-async function tryAcquireRefreshLease(key: string): Promise<boolean> {
+async function tryAcquireRefreshLease(key: string): Promise<number | null> {
   const leaseKey = `${key}:lease`;
   const now = Date.now();
   const result = await postgresQuery<{ claimed: boolean }>(
@@ -89,7 +39,7 @@ async function tryAcquireRefreshLease(key: string): Promise<boolean> {
      RETURNING TRUE AS claimed`,
     [leaseKey, now + LEASE_MS, now]
   );
-  return result.rows.length > 0;
+  return result.rows.length > 0 ? now + LEASE_MS : null;
 }
 
 type CachedEnvelope<T> = { value: T; cachedAt: number };
@@ -199,42 +149,99 @@ export async function getOrRefreshWithMeta<T>(
     }
   }
 
-  const refresh = async (): Promise<T> => {
-    const existing = inFlight.get(cacheKey);
-    if (existing) return existing as Promise<T>;
+  const cachedResult = (entry: CachedEnvelope<T>): EnvelopeResult<T> => ({
+    value: entry.value, freshness: "cached", ageMs: Math.max(0, Date.now() - entry.cachedAt),
+  });
 
-    const promise = (async () => {
-      const gotLease = await tryAcquireRefreshLease(cacheKey);
-      if (!gotLease) {
-        // Another process already holds the refresh lease -- if we have any
-        // cached value at all (even past hard TTL), ride on it rather than
-        // adding a second concurrent upstream call; only fetch directly if
-        // there's truly nothing to serve. No explicit release: the lease
-        // expires on its own (LEASE_MS) even if the leaseholder crashes
-        // mid-fetch, so a stuck lease self-heals instead of deadlocking.
-        if (cached) return cached.value;
-        return runFetcherAndRecord();
+  const refresh = async (): Promise<EnvelopeResult<T>> => {
+    const existing = inFlight.get(cacheKey);
+    if (existing) return existing as Promise<EnvelopeResult<T>>;
+
+    const promise = (async (): Promise<EnvelopeResult<T>> => {
+      const joinDeadline = Date.now() + MAX_JOIN_MS;
+      let delayMs = 40;
+      let lease = await tryAcquireRefreshLease(cacheKey);
+      while (lease === null) {
+        const shared = await durableKv.get<CachedEnvelope<T>>(cacheKey);
+        if (shared) return cachedResult(shared);
+        if (Date.now() >= joinDeadline) throw new Error("shared_refresh_pending: another process is hydrating this resource");
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        delayMs = Math.min(500, Math.ceil(delayMs * 1.6));
+        // A crashed owner expires naturally; only one follower can take over.
+        lease = await tryAcquireRefreshLease(cacheKey);
       }
+      // A previous owner may have published between our last read and claim.
+      const shared = await durableKv.get<CachedEnvelope<T>>(cacheKey);
+      if (shared && Date.now() - shared.cachedAt < softTtlMs) {
+        await postgresQuery(`UPDATE plank_kv_values SET value=to_jsonb(0::bigint)
+          WHERE key_name=$1 AND (value #>> '{}')::bigint=$2`, [`${cacheKey}:lease`, lease]);
+        return cachedResult(shared);
+      }
+
+      let stopped = false;
+      let lost = false;
+      let renewal: Promise<void> = Promise.resolve();
+      let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+      const renew = () => {
+        renewalTimer = setTimeout(() => {
+          renewal = (async () => {
+            const next = Date.now() + LEASE_MS;
+            const renewed = await postgresQuery(`UPDATE plank_kv_values SET value=to_jsonb($3::bigint), updated_at=NOW()
+              WHERE key_name=$1 AND (value #>> '{}')::bigint=$2 AND $2 > $4 RETURNING key_name`,
+            [`${cacheKey}:lease`, lease, next, Date.now()]);
+            if (renewed.rowCount !== 1) lost = true;
+            else lease = next;
+          })().catch(() => { lost = true; }).finally(() => { if (!stopped && !lost) renew(); });
+        }, LEASE_MS / 3);
+        renewalTimer.unref?.();
+      };
+      const stopRenewal = async () => {
+        stopped = true;
+        clearTimeout(renewalTimer);
+        await renewal;
+      };
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      renew();
       try {
-        const fresh = await runFetcherAndRecord();
-        await durableKv.set(cacheKey, { value: fresh, cachedAt: Date.now() } satisfies CachedEnvelope<T>);
-        return fresh;
+        const fresh = await Promise.race([
+          runFetcherAndRecord(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error("shared_refresh_timeout")), MAX_REFRESH_MS);
+          }),
+        ]);
+        await stopRenewal();
+        if (!lost) {
+          // Claim consumption and publication are one transaction. Only the
+          // current unexpired owner can publish, even across delayed processes.
+          const published = await postgresQuery(`WITH owner AS (
+            UPDATE plank_kv_values SET value=to_jsonb(0::bigint), updated_at=NOW()
+            WHERE key_name=$1 AND (value #>> '{}')::bigint=$2 AND $2 > $5 RETURNING key_name
+          ) INSERT INTO plank_kv_values(key_name,value,expires_at,updated_at)
+            SELECT $3,$4::jsonb,NULL,NOW() FROM owner
+            ON CONFLICT(key_name) DO UPDATE SET value=EXCLUDED.value,expires_at=NULL,updated_at=NOW()
+            RETURNING key_name`,
+          [`${cacheKey}:lease`, lease, cacheKey, JSON.stringify({value: fresh, cachedAt: Date.now()} satisfies CachedEnvelope<T>), Date.now()]);
+          if (published.rowCount === 1) return {value: fresh, freshness: "live", ageMs: null};
+        }
+        const winner = await durableKv.get<CachedEnvelope<T>>(cacheKey);
+        if (winner) return cachedResult(winner);
+        throw new Error("shared_refresh_lease_lost: newer refresh owns this resource");
       } catch (error) {
-        // Same discipline as this session's earlier CryptoPunks fixes: a
-        // transient upstream failure must not discard/overwrite a real
-        // cached value, however stale. Fall back to it if one exists;
-        // only propagate the error when there's truly nothing to serve.
-        if (cached) return cached.value;
+        const lastGood = await durableKv.get<CachedEnvelope<T>>(cacheKey).catch(() => null) ?? cached;
+        if (lastGood) return cachedResult(lastGood);
         throw error;
+      } finally {
+        clearTimeout(timeout);
+        await stopRenewal();
+        // Compare-and-release cannot unlock somebody else's newer lease.
+        await postgresQuery(`UPDATE plank_kv_values SET value=to_jsonb(0::bigint), updated_at=NOW()
+          WHERE key_name=$1 AND (value #>> '{}')::bigint=$2`, [`${cacheKey}:lease`, lease]).catch(() => {});
       }
     })();
 
     inFlight.set(cacheKey, promise);
-    try {
-      return await promise;
-    } finally {
-      inFlight.delete(cacheKey);
-    }
+    try { return await promise; }
+    finally { if (inFlight.get(cacheKey) === promise) inFlight.delete(cacheKey); }
   };
 
   if (cached && now - cached.cachedAt < hardTtlMs) {
@@ -245,6 +252,5 @@ export async function getOrRefreshWithMeta<T>(
   }
 
   // Past hard TTL (or no cache at all) -- this request actually waits.
-  const fresh = await refresh();
-  return { value: fresh, freshness: "live", ageMs: null };
+  return refresh();
 }
