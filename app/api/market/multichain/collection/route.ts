@@ -43,9 +43,12 @@ export async function GET(req: NextRequest) {
         error instanceof Error ? error.message : error
       );
     }));
+    // A failed database read is not an absent snapshot. Reject the refresh
+    // so the client keeps its last successful response instead of caching
+    // invented empty statistics for any collection or chain.
     const [supply, marketStats] = await Promise.all([
-      getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null),
-      getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null),
+      getCollectionSupplyStats(chainSlug, collectionSlug),
+      getCollectionMarketStats(chainSlug, collectionSlug),
     ]);
     let holderCount = supply?.holderCount ?? null;
     let listedCount = supply?.listedCount ?? null;
@@ -146,7 +149,7 @@ export async function GET(req: NextRequest) {
     // "API exposure" header) -- a single indexed lookup plus a cheap
     // plank_data_jobs 'running' check, both trivial at single-collection
     // scale. Null/omitted (not fabricated) when no ledger row exists yet.
-    const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug).catch(() => null);
+    const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug);
     return NextResponse.json(
       {
         collection: {
