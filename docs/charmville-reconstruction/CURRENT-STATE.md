@@ -17,7 +17,8 @@ The full vision is NOT implemented. The completed work is an existing PlankSpace
 - Initial missing MIDI instruments crash fixed by including `zquest-classic/timidity`.
 - Embedded browser initialization failure reproduced: `/zquest_web.cfg` missing because engine startup raced the data loader. Fixed by ordering data scripts before the engine script. Verified actual in-app browser reaches name entry with `storage=idb`.
 - Hosted upstream editor acquired at http://localhost:3021/create/. Basic boot only, not verified full editing/export. Existing authored quest protection may apply.
-- Hero of Dreams, Lost Isle and Isle of Rebirth quest resource snapshots, manuals/metadata where supplied, have been acquired under `zquest-quest-snapshots` for preservation. The current player still requests the upstream quest manifest/content; offline wiring remains outstanding.
+- Hero of Dreams, Lost Isle and Isle of Rebirth snapshots are under `zquest-quest-snapshots`. After backup completion, the server was adapted to serve these three quests and the local index with external connections blocked. Fresh/repeat browser-storage startup and original quest opening passed with zero external requests/page errors/HTTP failures. WASM and original quest files were not modified.
+- New item reference browser: http://localhost:3017/charmville/catalog — 435 original definitions (377 Emerald table slots, including unused/default entries, plus 58 Solarus DX scripts), 510 preserved source artifacts including original PNGs, palettes and Lua scripts. The catalog connects identity, usage entry points, revisions, hashes and sprite anchors. It does not grant or implement gameplay items. Search/inspection of Master Ball capture behavior and Solarus bow behavior was browser-verified; typecheck/build/scoped lint passed.
 
 ### Critical missing or unverified
 
@@ -40,6 +41,8 @@ The full vision is NOT implemented. The completed work is an existing PlankSpace
 - `scripts/charmville/` — render/source/index/audit/verification/recovery scripts.
 - `public/images/charmville/` — originals, editable Blender models, frames, packed caches, sourced art and credits.
 - `public/charmville/library/` — derived source and memoji indexes. Full large source directories are siblings outside app.
+- `app/charmville/catalog/`, `public/charmville/reference-items/`, `scripts/charmville/index-reference-items.mjs` — new source-aware item inspection pipeline.
+- `scripts/charmville/verify-reference-runtime.mjs` — cold/warm storage and original-quest opening with all external network blocked.
 
 ## Preservation and validation
 

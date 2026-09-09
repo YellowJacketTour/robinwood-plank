@@ -1,0 +1,14 @@
+{
+  "result": "pass",
+  "checks": [
+    "Cold browser-storage startup",
+    "Original authored quest starts",
+    "Warm browser-storage reload",
+    "Cross-origin isolation",
+    "No external network requests, page errors or HTTP failures"
+  ],
+  "limitations": [
+    "Not a full quest/combat playthrough",
+    "Not multiplayer or farming integration"
+  ]
+}

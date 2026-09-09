@@ -1,0 +1,2 @@
+# Preserve reference bytes exactly: their provenance records contain SHA-256 hashes.
+public/charmville/reference-items/** -text

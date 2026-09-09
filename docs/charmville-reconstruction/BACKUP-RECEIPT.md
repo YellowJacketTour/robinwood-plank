@@ -1,6 +1,6 @@
 # Backup receipt
 
-Status: application checkpoint pushed; **all 41 source-collection archives uploaded and verified against GitHub SHA-256 digests** at 2026-09-09 12:22 UTC. Release publication and final handoff commits are part of this checkpoint; consult the remote release for its current visibility.
+Status: application checkpoint pushed; **all 41 source-collection archives uploaded and verified against GitHub SHA-256 digests** at 2026-09-09 12:22 UTC. The private release is published (not draft): https://github.com/YellowJacketTour/charmville-reconstruction-vault/releases/tag/checkpoint-2026-09-09 . Vault documentation checkpoint: `057cd17`; subsequent documentation may advance without changing the immutable archive snapshot.
 
 - Application checkpoint: `28306183a7dfd328761fcf2b9232d36eab29d798` on `feat/charmville-slice-1`, verified against the GitHub remote branch.
 - 699 files in that commit: implementation, editable art, source indexes, research, tests and context-free handoff.
@@ -14,3 +14,5 @@ Status: application checkpoint pushed; **all 41 source-collection archives uploa
 - The original game runtime reaches name entry and story in test browsers. The full integrated game is not complete. Read CURRENT-STATE.md for limitations.
 
 The main branch and living handoff may advance after this receipt. Always inspect their latest state instead of resetting to the application checkpoint hash above.
+
+Development resumed after archive completion: the runtime now serves preserved local quest content, verified with external network blocked; a 435-definition source item catalog now connects original IDs/artwork/usage entry points/palettes/scripts. These app-code changes and derived source assets are preserved by later work-branch commits and the updated living handoff, without rewriting the original release archives.
