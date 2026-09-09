@@ -219,30 +219,48 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
     if (page.collections.length === 0) break;
 
     let realThisPage = 0;
-    for (const entry of page.collections) {
-      const supply = entry.total_supply ?? 0;
-      if (!entry.slug || supply <= 0) {
-        skippedEmpty += 1;
-        continue;
-      }
-      realThisPage += 1;
-      await upsertTrackedCollection({
-        chainSlug: CHAIN_SLUG,
-        chainId: null,
-        contractAddress: entry.slug,
-        adapter: SOURCE,
-        isVaultBacked: false,
-        nameHint: entry.name?.trim() || null,
-      });
-      const creatorHandle = extractHandleFromTwitterUrl(entry.socials?.twitter);
-      if (entry.name || entry.icon || creatorHandle) {
-        await updateCollectionDisplay(CHAIN_SLUG, entry.slug, {
-          name: entry.name?.trim() || null,
-          imageUrl: entry.icon || null,
-          creatorHandle,
-        });
-      }
-      registered += 1;
+    // WRITE CONCURRENTLY, IN BOUNDED GROUPS.
+    //
+    // This loop awaited TWO statements per collection, sequentially -- up to
+    // 1,000 round-trips for a page of 500. That is why the mesh lane was
+    // pinned to maxPages: 1 ("4 pages could not finish inside
+    // LANE_TIMEOUT_MS and the lane was killed mid-walk"), which in turn is
+    // why the catalog needs ~850 lane invocations to traverse once.
+    //
+    // The work per entry is two idempotent upserts keyed by
+    // (chain_slug, contract_address) and independent of every other entry, so
+    // ordering carries no meaning here -- unlike the Bitcoin block walk, where
+    // ingest order is load-bearing for coverage. 16 at a time against a pool
+    // this app already shares with the web tier: enough to collapse the round
+    // trips, small enough that a background archiver never becomes the thing
+    // that exhausts the connection pool (a real incident in this codebase).
+    const writable = page.collections.filter((e) => e.slug && (e.total_supply ?? 0) > 0);
+    skippedEmpty += page.collections.length - writable.length;
+    realThisPage += writable.length;
+    const WRITE_CONCURRENCY = 16;
+    for (let i = 0; i < writable.length; i += WRITE_CONCURRENCY) {
+      const group = writable.slice(i, i + WRITE_CONCURRENCY);
+      await Promise.all(
+        group.map(async (entry) => {
+          await upsertTrackedCollection({
+            chainSlug: CHAIN_SLUG,
+            chainId: null,
+            contractAddress: entry.slug,
+            adapter: SOURCE,
+            isVaultBacked: false,
+            nameHint: entry.name?.trim() || null,
+          });
+          const creatorHandle = extractHandleFromTwitterUrl(entry.socials?.twitter);
+          if (entry.name || entry.icon || creatorHandle) {
+            await updateCollectionDisplay(CHAIN_SLUG, entry.slug, {
+              name: entry.name?.trim() || null,
+              imageUrl: entry.icon || null,
+              creatorHandle,
+            });
+          }
+        }),
+      );
+      registered += group.length;
     }
 
     offset += page.collections.length;
