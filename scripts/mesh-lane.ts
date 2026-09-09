@@ -160,6 +160,11 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
       return;
     }
+    if (source === "rolling-stats") {
+      const { sweepStaleLedgerStats } = await import("../lib/market/multichain/store");
+      console.log("[mesh-lane] rolling-stats", JSON.stringify(await sweepStaleLedgerStats(chain)));
+      return;
+    }
     if (source === "creator-identity") {
       const { runCreatorIdentityLane } = await import("../lib/market/multichain/discovery/creator-identity");
       console.log("[mesh-lane] creator-identity", JSON.stringify(await runCreatorIdentityLane(chain)));

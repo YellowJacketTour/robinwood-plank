@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hasPostgresConfig, postgresQuery } from "../../lib/postgres";
-import { updateVolumeFromMarketEvents, updateCollectionMarketStats, sweepStaleLedgerStats } from "../../lib/market/multichain/store";
+import { updateVolumeFromMarketEvents, updateCollectionMarketStats } from "../../lib/market/multichain/store";
+import { runMeshLaneDetailed } from "../../scripts/mesh-lane";
 
 const chainSlug = "eth-mainnet";
 
@@ -61,7 +62,14 @@ test("one aggregator: sales/volume/USD per window from the ledger; wash and stre
     // No new event arrives: rolling windows still expire and must be revisited.
     await postgresQuery(`UPDATE plank_market_events SET block_timestamp = NOW() - INTERVAL '31 days' WHERE collection_key = $1`, [key]);
     await postgresQuery(`UPDATE plank_multichain_snapshots SET volume_computed_at = NOW() - INTERVAL '10 minutes' WHERE collection_id = $1`, [collectionId]);
-    await sweepStaleLedgerStats(chainSlug);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("rolling statistics must not call providers"); };
+    try {
+      const outcome = await runMeshLaneDetailed("rolling-stats", chainSlug);
+      assert.equal(outcome.code, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
     s = await snap();
     assert.equal(s.sales_24h, null, "an expired observation cannot remain a current count");
     assert.equal(s.volume_24h_wei, null);

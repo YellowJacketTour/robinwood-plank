@@ -557,6 +557,7 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
               CASE WHEN e.currency_address IS NULL OR lower(e.currency_address) IN ($3, '0x0000000000000000000000000000000000000000') THEN e.amount_atomic ELSE NULL END AS native_wei
          FROM plank_market_events e
         WHERE e.chain_slug = $1 AND e.event_type = 'sale' AND (CASE WHEN $4 THEN e.collection_key ELSE lower(e.collection_key) END) = ANY($2::text[])
+          AND lower(e.collection_key) = ANY($5::text[])
           AND e.finality <> 'reverted' AND e.block_timestamp > NOW() - INTERVAL '30 days'
           AND e.block_timestamp <= NOW()
           AND (e.seller IS NULL OR e.buyer IS NULL OR
@@ -606,7 +607,7 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
               ELSE NULL
             END::text AS change_pct
        FROM sales GROUP BY collection_key`,
-    [chainSlug, keys, wrappedNative ?? "", isNonEvmChainSlug(chainSlug)]
+    [chainSlug, keys, wrappedNative ?? "", isNonEvmChainSlug(chainSlug), keys.map(k => k.toLowerCase())]
   );
   let updated = 0;
   const seen = new Set<string>();
@@ -676,6 +677,7 @@ export async function sweepStaleLedgerStats(
         AND ((s.volume_source = 'ledger' AND s.volume_computed_at < NOW() - INTERVAL '5 minutes')
           OR EXISTS (SELECT 1 FROM plank_market_events e
             WHERE e.chain_slug = c.chain_slug
+              AND lower(e.collection_key) = lower(c.contract_address)
               AND (CASE WHEN $3 THEN e.collection_key ELSE lower(e.collection_key) END) = c.contract_address
               AND e.event_type = 'sale' AND e.finality <> 'reverted'
               AND e.block_timestamp > NOW() - INTERVAL '24 hours' AND e.block_timestamp <= NOW()

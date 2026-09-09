@@ -429,6 +429,7 @@ function laneSourceLabel(source: string): string {
     "opensea-bulk": "OpenSea catalog",
     "coingecko-nft": "CoinGecko stats",
     "adapter-sync": "marketplace adapter",
+    "rolling-stats": "rolling statistics",
     "unisat-collections": "UniSat stats",
     "bestinslot-stats": "BestInSlot stats",
     "native-robinwood": "native book",
