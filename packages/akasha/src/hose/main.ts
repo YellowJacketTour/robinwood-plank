@@ -163,8 +163,9 @@ export class Hose {
             let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
             for (const h of heights) {
               const hash = hashes.get(h);
-              if (!hash) continue;
-              await btc.ingestBlock(hash);
+              if (!hash) break;
+              const result = await btc.ingestBlock(hash);
+              if (!result.completed) break;
               // Read the header back from the store rather than trusting the
               // walk: ingestBlock is what actually wrote it, and the backfill
               // verifies the hash-link against exactly that record.
@@ -281,7 +282,7 @@ export class Hose {
       if (lock) {
         const header = await rpc.getBlockHeader(lockHash).catch(() => null);
         const realParent = header?.previousblockhash ?? null;
-        if (realParent && lock.parentHash.toLowerCase() !== realParent.toLowerCase()) {
+          if (realParent && lock.parentHash.toLowerCase() !== asHex(realParent)) {
           this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
           this.pg?.repairParentHash("bitcoin", asHex(lockHash), asHex(realParent));
           console.log(

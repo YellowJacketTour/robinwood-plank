@@ -38,3 +38,14 @@ export function parseChange(raw: string): MarketChange | null {
     return { ...value, scopes };
   } catch { return null; }
 }
+
+export function coalesceChanges(previous: MarketChange, next: MarketChange): MarketChange {
+  const scopes = [...new Map([...previous.scopes, ...next.scopes].map((scope) =>
+    [`${scope.chainSlug}:${normalizeContractAddress(scope.chainSlug, scope.collectionKey)}`, scope])).values()];
+  const overflow = scopes.length > 64;
+  return { ...next, scopes: overflow ? [] : scopes,
+    type: overflow || previous.type === "resync" || next.type === "resync" || previous.family !== next.family ? "resync" : "invalidate",
+    family: previous.family === next.family ? next.family : "all",
+    changedRows: previous.changedRows + next.changedRows,
+    omittedScopes: previous.omittedScopes + next.omittedScopes + (overflow ? scopes.length : 0), reason: "coalesced" };
+}

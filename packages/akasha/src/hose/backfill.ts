@@ -170,11 +170,18 @@ export class BackfillWorker {
     const tailHeader = store
       .headersAtHeight(chain, tail)
       .find((h) => h.height === tail);
-    const linked =
-      !tailHeader ||
-      store.headersAtHeight(chain, to).some(
+    let linked =
+      !!tailHeader && store.headersAtHeight(chain, to).some(
         (h) => h.hash.toLowerCase() === tailHeader.parentHash.toLowerCase(),
       );
+    // Every seam in the newly ingested interval must link, including holes
+    // inside an epoch. Endpoint agreement alone cannot certify the interval.
+    let expectedHash = tailHeader?.parentHash;
+    for (let height = to; linked && height >= lowest.height; height--) {
+      const header = store.headersAtHeight(chain, height).find((h) => h.hash === expectedHash);
+      linked = !!header;
+      expectedHash = header?.parentHash;
+    }
 
     if (!linked) {
       // Refuse to move. An unlinked boundary is a claim we cannot support.

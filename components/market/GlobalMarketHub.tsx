@@ -1153,16 +1153,20 @@ export default function GlobalMarketHub() {
   // stale scroll position deep into a different result set.
   const GRID_PAGE_SIZE = 60;
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
-  const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
-  const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
-  const [relatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
+  const [storedTokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
+  const [storedTokenSearchLoading, setTokenSearchLoading] = useState(false);
+  const [storedRelatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
+  const tokenHits = search.trim().length >= 2 ? storedTokenHits : [];
+  const tokenSearchLoading = search.trim().length >= 2 && storedTokenSearchLoading;
+  const relatedByCreator = search.trim().length >= 2 ? storedRelatedByCreator : [];
   // Real, full-catalog search results (/api/market/multichain/collection-
   // search) -- see that route's own header for the real bug this fixes:
   // the client-side searchIndex below only ever covers whatever rows have
   // scrolled into view via infinite scroll, never the full ~383,000-row
   // catalog, so a real tracked collection could return "no matches" purely
   // for not having been scrolled to yet.
-  const [serverCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
+  const [storedServerCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
+  const serverCollectionHits = search.trim().length >= 2 ? storedServerCollectionHits : [];
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -1190,16 +1194,14 @@ export default function GlobalMarketHub() {
   // (confirmed live: "ARBITRUM 4268" vs the real 17,333+). null until the
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
-  const [chainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  const [initialChainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
   // Per-chain honesty block from the index response (Batch E6): statsCapable + lane health.
   const [chainMeta, setChainMeta] = useState<Record<string, HubChainMeta> | null>(null);
   // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
   // collections increase while I'm on screen"): polled every 15 s; a chain
   // whose count grew pulses its badge for a few seconds.
   const liveCounts = useLiveChainCounts(15_000);
-  useEffect(() => {
-    if (Object.keys(liveCounts.counts).length > 0) setChainCounts(liveCounts.counts);
-  }, [liveCounts.counts]);
+  const chainCounts = Object.keys(liveCounts.counts).length > 0 ? liveCounts.counts : initialChainCounts;
   const countDelta = (slug: string): number => liveCounts.deltas[slug] ?? 0;
   useEffect(() => {
     let cancelled = false;
@@ -1222,6 +1224,8 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("plank:market:watchlist-v1");
+      // This browser-only external state must load after matching SSR hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setWatchlist(new Set(JSON.parse(raw) as string[]));
     } catch {
       // Corrupt/blocked storage -- start empty rather than throw.
@@ -1597,9 +1601,6 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     const query = search.trim();
     if (query.length < 2) {
-      setTokenHits([]);
-      setTokenSearchLoading(false);
-      setRelatedByCreator([]);
       return;
     }
     const controller = new AbortController();
@@ -1626,7 +1627,6 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     const query = search.trim();
     if (query.length < 2) {
-      setServerCollectionHits([]);
       return;
     }
     const controller = new AbortController();
@@ -1644,9 +1644,12 @@ export default function GlobalMarketHub() {
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [search, chainFilter]);
 
-  useEffect(() => {
+  const gridScope = JSON.stringify([[...chainFilter].sort(), search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
+  const [previousGridScope, setPreviousGridScope] = useState(gridScope);
+  if (previousGridScope !== gridScope) {
+    setPreviousGridScope(gridScope);
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
+  }
 
   // Real, genuinely-uncapped reachability -- no manual "load more" wall, no
   // fixed row ceiling. `collections` keeps growing via real server-side
@@ -1880,15 +1883,18 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
-  const liveScopes = rankings.slice(0, 64).map((row) => ({ chainSlug: row.chainSlug, collectionKey: row.contractAddress }))
-    .sort((a, b) => `${a.chainSlug}:${a.collectionKey}`.localeCompare(`${b.chainSlug}:${b.collectionKey}`));
-  useMarketRealtime(liveScopes, async () => {
-    if (!liveScopes.length) return;
-    const response = await fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(liveScopes))}`,
-      { cache: "no-store", signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) return;
-    const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
-    const updates = new Map(data.collections.map((row) => [`${row.chainSlug}:${row.contractAddress}`, row]));
+  // Subscribe to committed changes across the catalog. Reconnect snapshots
+  // cover rendered rows; ordinary messages refresh the changed collections.
+  useMarketRealtime([], async (change) => {
+    const scopes = change.type === "resync" ? rankings.map((row) => ({ chainSlug: row.chainSlug, collectionKey: row.contractAddress })) : change.scopes;
+    const updates = new Map<string, Partial<TrackedCollection>>();
+    for (let offset = 0; offset < scopes.length; offset += 64) {
+      const response = await fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scopes.slice(offset, offset + 64)))}`,
+        { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`Live snapshot ${response.status}`);
+      const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
+      for (const row of data.collections) updates.set(`${row.chainSlug}:${row.contractAddress}`, row);
+    }
     setCollections((previous) => previous.map((row) => {
       const update = updates.get(`${row.chainSlug}:${row.contractAddress}`);
       return update ? { ...row, ...update } : row;

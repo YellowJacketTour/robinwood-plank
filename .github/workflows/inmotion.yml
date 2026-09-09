@@ -756,6 +756,12 @@ jobs:
           mv -Tf "$app_dir/current.next" "$app_dir/current"
           rm -f "$app_dir/incoming/$release_sha.tgz"
           touch "$app_dir/tmp/restart.txt"
+          # Cron uses current/. Restart workers after activation so their code
+          # matches the web release even when no schema migration was pending.
+          pkill -f "mesh-tick-standalone.mjs" || true
+          pkill -f "opensea-stream-standalone.mjs" || true
+          pkill -f "market-realtime.mjs" || true
+          pkill -f "akasha-hose-standalone.mjs" || true
           REMOTE
 
       - name: Verify public health or roll back

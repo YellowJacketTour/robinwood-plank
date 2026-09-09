@@ -26,7 +26,8 @@
     "test:market": "tsx --test test/market/*.test.ts",
     "test:postgres": "tsx scripts/verify-postgres-storage.ts",
     "test:e2e": "playwright test",
-    "test": "npm run test:contracts && npm run test:market",
+    "test": "npm run test:contracts && npm run test:market && npm run test:akasha",
+    "test:akasha": "npm test --prefix packages/akasha",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
@@ -87,7 +88,7 @@
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.28.0",
     "motion": "^13.1.1",
-    "next": "^16.2.12",
+    "next": "^16.3.4",
     "pg": "^8.22.0",
     "postcss-selector-parser": "^7.1.6",
     "qrcode": "^1.5.4",
@@ -128,7 +129,11 @@
     },
     "axios": "^1.18.1",
     "ws": "^8.21.3",
-    "tmp": "^0.2.6"
+    "tmp": "^0.2.6",
+    "bigint-buffer": "npm:@exodus/bigint-buffer@1.1.5-exodus.1",
+    "jayson": {
+      "uuid": "11.1.1"
+    }
   },
   "optionalDependencies": {
     "@envio-dev/hypersync-client-win32-x64-msvc": "^1.0.0"
@@ -154,7 +159,7 @@
     "ecpair": "^3.0.1",
     "esbuild": "^0.28.1",
     "eslint": "^9",
-    "eslint-config-next": "^16.2.12",
+    "eslint-config-next": "^16.3.4",
     "hardhat": "^3.12.0",
     "mocha": "^11.8.0",
     "tailwindcss": "^4",

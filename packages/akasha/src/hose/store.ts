@@ -41,7 +41,9 @@ export class ArchiveStore {
     this.headers.set(this.headerKey(h.chain, h.hash), h);
     const hk = `${h.chain}:${h.height}`;
     const arr = this.headersByHeight.get(hk) ?? [];
-    if (!arr.some((x) => x.hash === h.hash)) arr.push(h);
+    const index = arr.findIndex((x) => x.hash === h.hash);
+    if (index === -1) arr.push(h);
+    else arr[index] = h;
     this.headersByHeight.set(hk, arr);
   }
 

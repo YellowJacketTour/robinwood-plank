@@ -156,9 +156,12 @@ test("a linked epoch moves the tail left", async () => {
   const worker = new BackfillWorker({
     store: s,
     ingestRange: async (chain, from, to) => {
-      const h = hdr(chain, to, "0xparent", "0xgrandparent");
-      s.putHeader(h);
-      return hdr(chain, from, "0xlowest", "0xbelow");
+      let lowest;
+      for (let height = to; height >= from; height--) {
+        lowest = hdr(chain, height, height === to ? "0xparent" : `0x${height}`, `0x${height - 1}`);
+        s.putHeader(lowest);
+      }
+      return lowest;
     },
   });
 

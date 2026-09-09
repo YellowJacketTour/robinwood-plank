@@ -56,12 +56,36 @@ work targets `dev`; the reviewed `dev` -> `master` release deploys production.
 | Listener failure | Retry after 2–3 seconds; generation fence discards stale connection callbacks |
 | Browser hidden | Disconnect; reconnect and resynchronize on return |
 | Collection page | Coalesce notification bursts over one second; one callback runs at a time |
-| Rankings | Refresh up to the first 64 displayed ranking rows through a small stored snapshot endpoint, at a five-second cadence; remaining rows keep the existing 90-second recovery refresh |
+| Rankings | Catalog-wide invalidations; changed scopes are coalesced at five seconds and snapshots are read in batches of 64. Reconnect refreshes rendered rankings. Existing 90-second recovery discovers new catalog rows. |
 
-The rankings bound is an active delivery window, not a catalog or ingestion
-limit. The legacy market-event SSE API remains separate and is not a durable
+The snapshot batch size is not a catalog or ingestion limit. The legacy market-event SSE API remains separate and is not a durable
 replay guarantee. Native RobinWood-only trait tables and native contract order
 tables are not notification sources in this migration.
+
+## Release repair review (2026-09-09)
+
+Next.js 16.3.4 and sharp 0.35.4 resolve the release-blocking advisories. The
+Solana layout library uses the pinned Exodus bigint-buffer fork, whose published
+runtime removes the native binding loader. Account decoding and transfer
+instruction tests retain exact u64 values. The legacy jayson client uses uuid
+11.1.1. Three moderate production audit entries remain: stream-json and its
+jayson/web3.js parents. Its fixed major version is ESM with incompatible import
+paths; forcing it into the CommonJS RPC client would break that client. The
+application uses Jayson's browser JSON-RPC client, not its streaming filters.
+Development-only advisories remain in unused transitive contract packages.
+
+Bitcoin boot repairs now normalize hashes at the Esplora boundary and replace
+the height-index entry as well as the hash-index entry. Complete raw blocks
+replace the former 500-transaction pagination cap. Hash, transaction/witness
+commitments, serialized length, and weight are checked before indexing.
+Backfill verifies each seam and never crosses a missing header. Phase timeout
+terminates the writer process instead of allowing late concurrent writes.
+The public worker verdict uses current timestamps and progress, rather than
+mistaking historical unmatched attempts for live hung jobs.
+
+Run `node scripts/test-release-repair-mutations.mjs` separately from other
+builds/tests to verify the repair guards against applied mutations. The root
+test command now includes the archive package suite.
 
 The relay writes counts every minute: connections, rejected connections,
 invalid subscriptions, timed-out and slow readers, notification delivery,

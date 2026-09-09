@@ -41,12 +41,12 @@ test("the deadline is longer than a tick but shorter than the cron hour", () => 
   assert.ok(floor * mult <= 600_000, "the deadline must be far below the cron hour");
 });
 
-test("a timed-out phase is recorded as a FAILURE, not silently skipped", () => {
+test("a timed-out phase exits nonzero to fence unfinished writes", () => {
   const at = RUNNER.indexOf("const phase = async (");
   const body = RUNNER.slice(at, RUNNER.indexOf("const tick = async ()", at));
   // The catch that records the failure must still be reached by a timeout,
   // which is only true if the race REJECTS rather than resolving.
-  assert.match(body, /reject\(new Error\(`phase \$\{name\} exceeded/, "the timer must reject");
+  assert.match(body, /process\.exit\(75\)/, "the timer must terminate the writer");
   assert.match(body, /"failure"/, "and the rejection must be recorded as a failure");
 });
 

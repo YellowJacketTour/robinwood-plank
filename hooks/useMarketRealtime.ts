@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { parseChange, type MarketChange, type MarketScope } from "@/lib/market/multichain/edge/change-protocol";
+import { coalesceChanges, parseChange, type MarketChange, type MarketScope } from "@/lib/market/multichain/edge/change-protocol";
 
 /** One scoped channel per mounted surface. Commit bursts coalesce; hidden
  * tabs disconnect and resnapshot on return. SSE covers hosts without upgrade. */
@@ -34,9 +34,7 @@ export function useMarketRealtime(scopes: MarketScope[], refresh: (change: Marke
       const change = parseChange(raw);
       if (!change) return;
       // Mixed families require a complete scoped refresh; nothing is dropped.
-      pending = pending ? { ...change,
-        type: pending.type === "resync" || change.type === "resync" || pending.family !== change.family ? "resync" : "invalidate",
-        family: pending.family === change.family ? change.family : "all", reason: "coalesced" } : change;
+      pending = pending ? coalesceChanges(pending, change) : change;
       if (!timer && !busy) timer = setTimeout(() => void drain(), debounceMs);
     };
     const fallback = () => {

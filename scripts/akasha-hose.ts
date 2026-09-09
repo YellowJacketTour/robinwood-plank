@@ -208,17 +208,16 @@ async function main(): Promise<void> {
     const chainKey = (chains.length === 1 ? String(chains[0]) : "all") as never;
     store?.recordPhase(chainKey, name, "attempt");
     try {
-      // The phase keeps running in the background if it ignores the deadline
-      // -- we cannot kill a promise -- but the TICK moves on, so one wedged
-      // phase can no longer stop every later phase forever.
+      // A timed-out promise cannot safely share this writer with the next
+      // phase. Exit the process to fence it; cron restarts from durable work.
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         run(),
-        new Promise((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`phase ${name} exceeded ${PHASE_TIMEOUT_MS}ms`)),
-            PHASE_TIMEOUT_MS,
-          );
+        new Promise(() => {
+          timer = setTimeout(() => {
+            console.error(`[akasha-hose] phase ${name} exceeded ${PHASE_TIMEOUT_MS}ms; exiting to fence unfinished writes`);
+            process.exit(75);
+          }, PHASE_TIMEOUT_MS);
         }),
       ]).finally(() => {
         if (timer) clearTimeout(timer);
