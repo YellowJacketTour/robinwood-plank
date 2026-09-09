@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hasPostgresConfig, postgresQuery } from "../../lib/postgres";
-import { updateVolumeFromMarketEvents, updateCollectionMarketStats } from "../../lib/market/multichain/store";
+import { updateVolumeFromMarketEvents, updateCollectionMarketStats, updateEvmVolumeFromSeaportFills } from "../../lib/market/multichain/store";
 import { runMeshLaneDetailed } from "../../scripts/mesh-lane";
 
 const chainSlug = "eth-mainnet";
@@ -117,6 +117,27 @@ test("Polygon WETH sales count without being summed as native POL", { skip: !has
     assert.equal(Number(row.sales), 2);
   } finally {
     await postgresQuery(`DELETE FROM plank_market_events WHERE chain_slug = $1 AND collection_key = $2`, [chain, key]);
+    await postgresQuery(`DELETE FROM plank_multichain_snapshots WHERE collection_id = $1`, [id]);
+    await postgresQuery(`DELETE FROM plank_multichain_collections WHERE id = $1`, [id]);
+  }
+});
+
+test("Seaport fallback also recognizes zero-address payments and excludes future fills", { skip: !hasPostgresConfig() }, async () => {
+  const chain = "native-stats-test";
+  const key = `0xnativefallback${Date.now()}`;
+  const id = (await postgresQuery<{id: number}>(`INSERT INTO plank_multichain_collections (chain_slug, contract_address, adapter) VALUES ($1,$2,'test') RETURNING id`, [chain, key])).rows[0].id;
+  try {
+    await postgresQuery(`INSERT INTO plank_multichain_snapshots (collection_id) VALUES ($1)`, [id]);
+    for (const [index, hoursAgo] of [1, -1].entries()) {
+      await postgresQuery(`INSERT INTO plank_seaport_fills (chain_slug, tx_hash, log_index, block_number, order_hash, seller, buyer, nft_contract, token_id, price_wei, currency_token, block_timestamp, shape)
+        VALUES ($1,$2,0,1,'oh','0xa','0xb',$3,1,10,'0x0000000000000000000000000000000000000000',NOW() - ($4::text || ' hours')::interval,'basic')`, [chain, key + index, key, hoursAgo]);
+    }
+    await updateEvmVolumeFromSeaportFills(chain);
+    const row = (await postgresQuery<{volume: string; sales: number}>(`SELECT volume_24h_wei::text AS volume, sales_24h AS sales FROM plank_multichain_snapshots WHERE collection_id = $1`, [id])).rows[0];
+    assert.equal(row.volume, "10");
+    assert.equal(Number(row.sales), 1);
+  } finally {
+    await postgresQuery(`DELETE FROM plank_seaport_fills WHERE chain_slug = $1 AND nft_contract = $2`, [chain, key]);
     await postgresQuery(`DELETE FROM plank_multichain_snapshots WHERE collection_id = $1`, [id]);
     await postgresQuery(`DELETE FROM plank_multichain_collections WHERE id = $1`, [id]);
   }

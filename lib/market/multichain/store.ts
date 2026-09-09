@@ -706,13 +706,14 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
   const wrappedNative = wrappedNativeAddress(chainSlug);
   const result = await postgresQuery<{ contract_address: string; volume_wei: string; sales: string }>(
     `SELECT LOWER(nft_contract) AS contract_address,
-            SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) = $2)::text AS volume_wei,
+            SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) IN ($2, '0x0000000000000000000000000000000000000000'))::text AS volume_wei,
             COUNT(*)::text AS sales
      FROM plank_seaport_fills
      WHERE chain_slug = $1
        AND nft_contract IS NOT NULL
        AND price_wei IS NOT NULL
        AND block_timestamp > NOW() - INTERVAL '24 hours'
+       AND block_timestamp <= NOW()
      GROUP BY LOWER(nft_contract)`,
     [chainSlug, wrappedNative ?? ""]
   );
