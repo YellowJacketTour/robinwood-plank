@@ -421,7 +421,7 @@ export default async function PublicProfile({
           <h2>Latest from the Lumberyard</h2>
           <span>Wallet-signed posts</span>
         </div>
-        <Feed />
+        <Feed boardHandle={p.handle} boardWallet={p.wallet} />
       </section>
     ),
     comments: (

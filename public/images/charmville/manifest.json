@@ -1,0 +1,51 @@
+[
+  {
+    "file": "wheat.png",
+    "source": "hjm-crops/extracted/hjm-crops_v2/hjm-wheat.png",
+    "author": "Hansjorg Malthaner",
+    "license": "CC-BY-4.0",
+    "url": "https://opengameart.org/content/isometric-crops-and-farmland",
+    "modified": false,
+    "sha256": "6f98aa01a01841084d0b1ee25f47b8b8422fb5a1c21edd6ed328b2cad3df88a5"
+  },
+  {
+    "file": "grass.png",
+    "source": "lincity-ng/data/images/tiles/green.png",
+    "author": "LinCity-NG contributors",
+    "license": "CC-BY-SA-2.0",
+    "url": "https://github.com/lincity-ng/lincity-ng",
+    "modified": false,
+    "sha256": "3a4c2d9e1b0e1b2c1da89ad941c68a6ccc8009526e2a05a043dd377b5cb57f37",
+    "commit": "99939d94483189b5d512732b27555cd3e2e937a1"
+  },
+  {
+    "file": "tree.png",
+    "source": "lincity-ng/data/images/tiles/tree.png",
+    "author": "LinCity-NG contributors",
+    "license": "CC-BY-SA-2.0",
+    "url": "https://github.com/lincity-ng/lincity-ng",
+    "modified": false,
+    "sha256": "eaf3abcd8fbc033c68b855a481f8bc0af2a9bd8be3c670ba0ee3ca3e958bab94",
+    "commit": "99939d94483189b5d512732b27555cd3e2e937a1"
+  },
+  {
+    "file": "tree2.png",
+    "source": "lincity-ng/data/images/tiles/tree2.png",
+    "author": "LinCity-NG contributors",
+    "license": "CC-BY-SA-2.0",
+    "url": "https://github.com/lincity-ng/lincity-ng",
+    "modified": false,
+    "sha256": "0b507fb95850ddb5522f87b5c4b838dbe4fa3fc749c83469e864861e4e00e79e",
+    "commit": "99939d94483189b5d512732b27555cd3e2e937a1"
+  },
+  {
+    "file": "soil.png",
+    "source": "unknown-horizons/content/gfx/buildings/pioneers/agricultural/as_potatofield0/idle/45/0.png",
+    "author": "Unknown Horizons contributors",
+    "license": "CC-BY-SA-3.0",
+    "url": "https://github.com/unknown-horizons/unknown-horizons",
+    "modified": false,
+    "sha256": "bb73b792fc8c009708340af0e7508dfcdaddb599bf44473589510d317af12cdc",
+    "commit": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615"
+  }
+]

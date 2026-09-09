@@ -1,15 +1,16 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useRef, useState } from "react";
-import { connectPlankLoveWallet, getPlankLoveWalletState, subscribePlankLoveWalletState } from "./plank-love-wallet";
+import { useEffect, useState } from "react";
+import { connectPlankLoveWallet } from "./plank-love-wallet";
 import { walletProof } from "./auth-client";
 import ContentActions from "./content-actions";
 import { MediaAttachment, MediaComposer } from "./post-media-ui";
 import type { PostMedia } from "./post-media";
-import { walletStateConfirmsDisconnect } from "./x-share-state";
+import Porch from "./charmville/porch";
 type Post = {
   id: number;
   author: string;
+  authorWallet?: string;
   body: string;
   likes: number;
   createdAt: string;
@@ -96,31 +97,26 @@ export function MiniGame() {
     </div>
   );
 }
-export function Feed() {
+export function Feed({ boardHandle, boardWallet }: { boardHandle?: string; boardWallet?: string }) {
+  const [stamps,setStamps] = useState<{postId:string;qty:string}[]>([]);
   const emptyMedia: PostMedia = { mediaUrl: "", mediaType: "", mediaAlt: "" },
     [items, setItems] = useState<Post[]>([]),
     [body, setBody] = useState(""),
     [media, setMedia] = useState<PostMedia>(emptyMedia),
     [busy, setBusy] = useState(false),
-    [message, setMessage] = useState(""),
-    [xConnected,setXConnected]=useState(false),
-    [xUsername,setXUsername]=useState(""),
-    [xRetryAfter,setXRetryAfter]=useState(0),
-    [alsoPostToX,setAlsoPostToX]=useState(false);
-  const xStatusRequest = useRef(0);
+    [message, setMessage] = useState("");
   useEffect(() => {
     fetch("/api/posts")
       .then((r) => r.json())
       .then((d) => setItems(d.posts || []))
       .catch(() => setMessage("Feed unavailable"));
   }, []);
-  useEffect(()=>{const refresh=(state:Awaited<ReturnType<typeof getPlankLoveWalletState>>)=>{const request=++xStatusRequest.current;if(walletStateConfirmsDisconnect(state)){setXConnected(false);setXUsername("");setXRetryAfter(0);setAlsoPostToX(false);return}if(!state.address)return;fetch(`/api/x/status?wallet=${state.address}`).then(async r=>{if(!r.ok)throw new Error("X status unavailable");return r.json()}).then(x=>{if(request!==xStatusRequest.current)return;const connected=Boolean(x.connected);setXConnected(connected);setXUsername(connected?String(x.username||""):"");setXRetryAfter(connected&&!x.postCooldown?.allowed?Number(x.postCooldown.retryAfterSeconds||0):0);if(!connected)setAlsoPostToX(false)}).catch(()=>{/* Preserve the last confirmed X state during transient wallet/media refreshes. */})};void getPlankLoveWalletState().then(refresh);return subscribePlankLoveWalletState(refresh)},[]);
   const act = async (kind: "post" | "like", id?: number) => {
     setBusy(true);
     setMessage("");
     try {
       const wallet = await connectPlankLoveWallet(),
-        data = kind === "post" ? { body: body.trim(), ...media, alsoPostToX:xConnected&&alsoPostToX } : { id },
+        data = kind === "post" ? { body: body.trim(), ...media, alsoPostToX:false } : { id },
         proof = await walletProof(
           wallet,
           kind === "post" ? "post:create" : "post:like",
@@ -137,13 +133,6 @@ export function Feed() {
         setItems((v) => [result.post, ...v]);
         setBody("");
         setMedia(emptyMedia);
-        setAlsoPostToX(false);
-        if (result.xShare?.status === "cooldown") {
-          setXRetryAfter(Number(result.xShare.retryAfterSeconds || 300));
-          setMessage(`Posted to PlankSpace. X sharing is available again in about ${Math.ceil(Number(result.xShare.retryAfterSeconds || 300) / 60)} minute(s).`);
-        } else if (result.post?.xPublishStatus === "failed") {
-          setMessage("Posted to PlankSpace, but X sharing failed. Reconnect X and try again.");
-        }
       } else setItems((v) => v.map((p) => (p.id === id ? result.post : p)));
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Action failed");
@@ -154,7 +143,7 @@ export function Feed() {
   return (
     <>
       <div className="composer">
-        <label htmlFor="lumber-post">Post to the Lumberyard</label>
+        <label htmlFor="lumber-post">Pine to the Lumberyard</label>
         <textarea
           id="lumber-post"
           value={body}
@@ -167,24 +156,12 @@ export function Feed() {
           onChange={setMedia}
           idPrefix="profile-lumber"
         />
-        {xConnected&&<label className={`x-share-choice ${alsoPostToX?"is-selected":""} ${xRetryAfter>0?"is-disabled":""}`}>
-          <input type="checkbox" checked={alsoPostToX} disabled={xRetryAfter>0} onChange={e=>setAlsoPostToX(e.target.checked)}/>
-          <span className="x-share-switch" aria-hidden="true"><i /></span>
-          <span className="x-share-copy">
-            <b>Share this post to X</b>
-            <small>{xRetryAfter>0?`Available again in about ${Math.ceil(xRetryAfter/60)} minute(s)`:alsoPostToX?`Will also publish${xUsername?` as @${xUsername}`:""}`:"Optional · off by default"}</small>
-          </span>
-        </label>}
-        {xConnected&&alsoPostToX&&<div className="x-share-preview">
-          <b>X post footer</b>
-          <span>Posted from my PlankSpace on Plank.Love</span>
-          <small>Long PlankSpace posts are shortened only on X.</small>
-        </div>}
         <button disabled={busy || !body.trim()} onClick={() => act("post")}>
-          Connect, Sign & Post
+          Pine
         </button>
       </div>
       {message && <p role="alert">{message}</p>}
+      {boardHandle && <Porch handle={boardHandle} posts={items.filter(item=>item.authorWallet?.toLowerCase()===boardWallet?.toLowerCase())} onStamps={setStamps} />}
       <div
         className="feed profile-feed-scroll"
         tabIndex={0}
@@ -199,6 +176,7 @@ export function Feed() {
                 <time>{new Date(p.createdAt).toLocaleDateString()}</time>
               </div>
               <p>{p.body}</p>
+              {stamps.some(stamp=>stamp.postId===String(p.id)) && <small>Stalk stamps: {stamps.find(stamp=>stamp.postId===String(p.id))?.qty}</small>}
               {p.source==="x"&&<small>Imported from X</small>}{p.xPublishStatus==="published"&&<small>Shared to X</small>}{p.xPublishStatus==="failed"&&<small>X sharing failed; your PlankSpace post is safe.</small>}
               <MediaAttachment
                 mediaUrl={p.mediaUrl}
