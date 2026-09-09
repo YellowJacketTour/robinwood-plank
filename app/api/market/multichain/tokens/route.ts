@@ -87,7 +87,14 @@ export async function GET(req: NextRequest) {
     // A cold projection never performs provider work in this request. It
     // records exact demand so the isolated mesh hydrates this contract ahead
     // of the background round-robin on its next tick.
-    const contractAddress = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug.toLowerCase() : null;
+    // THE DEMAND SIGNAL ITSELF WAS SHAPE-GATED.
+    //
+    // This is the enqueue that tells the mesh "a visitor is looking at this
+    // collection right now". Requiring the slug to BE an address meant a
+    // page opened by name recorded no demand at all -- so visiting and
+    // refreshing genuinely could not cause hydration, no matter how long.
+    const { resolveEvmContractAddress: resolveForDemand } = await import("@/lib/market/multichain/resolve-contract-address");
+    const contractAddress = (await resolveForDemand(chainSlug, collectionSlug))?.toLowerCase() ?? null;
     if (contractAddress && (isRobinhoodChainSlug(chainSlug) || foreignChainByChainSlug(chainSlug)?.openSeaChain)) {
       const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
       const source = isRobinhoodChainSlug(chainSlug) ? "robinhood-membership" : "opensea-membership";
@@ -116,7 +123,14 @@ export async function GET(req: NextRequest) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
       if (indexed.length > 0) {
         const { templatedErc721Image } = await import("@/lib/market/multichain/token-art");
-        const contractHint = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+        // Resolve the address instead of demanding the slug BE one. When the
+        // page addresses a collection by name -- which is how the app links
+        // to it -- this used to be null, which silently disabled the entire
+        // image backfill below: templating skipped, page resolution skipped,
+        // every tile rendered with a null image forever. Nothing was missing
+        // from the archive; the route declined to fill it in.
+        const { resolveEvmContractAddress } = await import("@/lib/market/multichain/resolve-contract-address");
+        const contractHint = await resolveEvmContractAddress(chainSlug, collectionSlug);
         const templated: Array<{ tokenId: string; imageUrl: string }> = [];
         for (const t of indexed) {
           if (t.imageUrl || !contractHint) continue;
@@ -155,7 +169,7 @@ export async function GET(req: NextRequest) {
           const stillMissing = indexed.filter((t) => !t.imageUrl);
           if (stillMissing.length > 0) {
             const chain = foreignChainByChainSlug(chainSlug);
-            const contract = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+            const contract = contractHint;
             const { resolveTokenImagesForPage } = await import("@/lib/market/multichain/token-art");
             const more = await resolveTokenImagesForPage({
               openSeaChain: chain?.openSeaChain ?? null,

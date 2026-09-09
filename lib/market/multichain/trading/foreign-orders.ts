@@ -137,6 +137,32 @@ const slugCache = new Map<string, string>();
  */
 const NEGATIVE_SLUG_TTL_MS = 60_000;
 const slugMisses = new Map<string, number>();
+/**
+ * The INVERSE of resolveOpenSeaCollectionSlug: slug -> contract address.
+ *
+ * The listings route already derives `contractAddress` from this same
+ * `/collections/{slug}` payload; this exposes it so the hydration routes stop
+ * refusing to work when addressed by name (see resolve-contract-address.ts).
+ *
+ * Polygon note, mirrored from the listings route: this endpoint returns
+ * `contracts[].chain === "polygon"` for the chain the path segment calls
+ * "matic", so the alias makes the FIRST match correct rather than silently
+ * falling through to contracts[0].
+ */
+export async function openSeaCollectionContract(
+  openSeaChain: string,
+  collectionSlug: string,
+): Promise<string | null> {
+  const data = await openSeaFetch<{ contracts?: Array<{ address: string; chain: string }> }>(
+    `/collections/${encodeURIComponent(collectionSlug)}`
+  ).catch(() => null);
+  const contracts = data?.contracts ?? [];
+  if (contracts.length === 0) return null;
+  const aliases: Record<string, string[]> = { matic: ["matic", "polygon"] };
+  const acceptable = aliases[openSeaChain] ?? [openSeaChain];
+  return contracts.find((c) => acceptable.includes(c.chain))?.address ?? contracts[0]?.address ?? null;
+}
+
 export async function resolveOpenSeaCollectionSlug(openSeaChain: string, contractAddress: string): Promise<string | null> {
   const cacheKey = `${openSeaChain}:${contractAddress.toLowerCase()}`;
   const hit = slugCache.get(cacheKey);

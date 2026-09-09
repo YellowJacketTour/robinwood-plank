@@ -150,9 +150,17 @@ test("criteria orders are excluded from a per-token grid, and counted", () => {
   // Start at the constants, which are declared just ABOVE the map: a window
   // that begins at `const cheapestByToken` misses them and reports them
   // missing when they are right there.
+  //
+  // Bound on the loop's real END, not a character count. This was `at + 2400`
+  // and broke the moment explanatory comments were added inside the loop --
+  // the assertions failed while the code was correct, which is the same
+  // fixed-offset mistake this codebase has now hit repeatedly. The dedup loop
+  // ends where the sorted `orders` array is built; that is a real terminator.
   const at = src.indexOf("const ERC721 = 2");
   assert.ok(at > 0, "found the itemType constants");
-  const loop = src.slice(at, at + 2400);
+  const loopEnd = src.indexOf("const orders = [...cheapestByToken.values()]", at);
+  assert.ok(loopEnd > at, "found the end of the dedup loop");
+  const loop = src.slice(at, loopEnd);
 
   assert.ok(
     /itemType !== ERC721 && itemType !== ERC1155/.test(loop),
