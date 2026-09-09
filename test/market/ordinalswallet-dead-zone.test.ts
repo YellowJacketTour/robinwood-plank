@@ -84,3 +84,54 @@ test("the legacy two-argument call keeps its old behaviour", () => {
   assert.equal(shouldWrapToStart(ORDINALSWALLET_BRC20_BAND_START + 1, 0), true);
   assert.equal(shouldWrapToStart(ORDINALSWALLET_BRC20_BAND_START - 1, 0), false);
 });
+
+/**
+ * The write path, which is what actually bounded this lane.
+ *
+ * The scan awaited TWO statements per collection, sequentially -- up to 1,000
+ * round-trips for a page of 500. That is why the mesh lane was pinned to one
+ * page per pass, and why traversing the catalog needed ~850 invocations.
+ */
+import { readFileSync } from "node:fs";
+const SCAN = readFileSync(
+  "lib/market/multichain/discovery/ordinalswallet-collection-scan.ts",
+  "utf8",
+).replace(/\r\n/g, "\n");
+const LANE = readFileSync("scripts/mesh-lane.ts", "utf8").replace(/\r\n/g, "\n");
+
+test("collection writes are issued concurrently, not one at a time", () => {
+  assert.match(SCAN, /WRITE_CONCURRENCY = (\d+)/, "the fan-out must be an explicit constant");
+  const c = Number(SCAN.match(/WRITE_CONCURRENCY = (\d+)/)![1]);
+  assert.ok(c > 1, "serial writes are the bottleneck this removes");
+  // A background archiver must never be what exhausts the connection pool --
+  // a real incident in this codebase.
+  assert.ok(c <= 32, `${c} concurrent writes from a background lane is too many`);
+});
+
+test("the skip count still matches what was actually skipped", () => {
+  // Restructuring a loop into filter + batches is exactly where a counter
+  // quietly stops matching reality: `skippedEmpty` must account for every row
+  // that was not written, or a short pass reports a number that explains
+  // nothing.
+  assert.match(
+    SCAN,
+    /skippedEmpty \+= page\.collections\.length - writable\.length/,
+    "every unwritten row must still be counted",
+  );
+  assert.match(
+    SCAN,
+    /const writable = page\.collections\.filter\(\(e\) => e\.slug && \(e\.total_supply \?\? 0\) > 0\)/,
+    "the filter must keep the ORIGINAL admission rule: a slug and a real supply",
+  );
+});
+
+test("the lane's page budget moved by one step, not by assumption", () => {
+  const m = LANE.match(/runOrdinalsWalletCollectionScan\(\{ maxPages: (\d+) \}\)/);
+  assert.ok(m, "the lane must call the scan with an explicit budget");
+  const pages = Number(m![1]);
+  assert.ok(pages > 1, "one page per pass needs ~850 invocations to traverse the catalog");
+  // LANE_TIMEOUT_MS killed this lane before. The fix removes a serialisation,
+  // it does not abolish the timeout, so the budget must not leap to a number
+  // nobody has observed surviving.
+  assert.ok(pages <= 25, `${pages} pages/pass assumes a ceiling that has not been measured`);
+});

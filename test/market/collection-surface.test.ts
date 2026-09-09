@@ -29,7 +29,8 @@ describe("collection surface", () => {
   it("gives Milady a proven extra and unknown EVM none", () => {
     const milady = catalogArtExtras(
       "eth-mainnet",
-      "0x5Af0D9827E0c53E31634944c487d43a2b04f8e38",
+      // The REAL Milady contract; the old value here had no code at all.
+      "0x5af0d9827e0c53e4799bb226655a1de152a425a5",
       "12"
     );
     assert.ok(milady[0]?.includes("miladymaker.net/milady/12.png"));
