@@ -1,0 +1,34 @@
+{
+  "repository": "https://github.com/pret/pokeemerald",
+  "files": [
+    {
+      "sha256": "e0847cd2aa83ee5e18134c32baad348b7c763095cf59efa33da67c4a4e90120c",
+      "path": "src/battle_script_commands.c"
+    },
+    {
+      "sha256": "1aac881bb02361339dc4dd33c7a5804a7127c0367426b77b982ee213a713e0af",
+      "path": "src/data/pokemon/species_info.h"
+    },
+    {
+      "sha256": "f3118ef3597300334ad3fe0809fe9405882348d9f2b3fc4dd54c4b5cf5742e69",
+      "path": "include/battle_controllers.h"
+    },
+    {
+      "sha256": "0609bbe5f989776fbb4aadb80433278502d5d015a1bf34b019ee8db6a79db666",
+      "path": "src/data/graphics/pokeballs.h"
+    },
+    {
+      "sha256": "f57f6692f821aa2e871ea68138157f3a665d3a204b6966b43dc9691448845d8d",
+      "path": "src/pokeball.c"
+    },
+    {
+      "sha256": "796ec9744e1136a7f8931b94d804a1c524de60f330bb1301cca10b17778a0de1",
+      "path": "src/battle_anim_throw.c"
+    },
+    {
+      "sha256": "7e8e78babd958f24d282a647f0ea9dfe41b20b6cd49800c7a7b2cffa8bd01450",
+      "path": "graphics/balls/poke.png"
+    }
+  ],
+  "commit": "5eff78649e7170a877b961ef0b3da13b81a16038"
+}

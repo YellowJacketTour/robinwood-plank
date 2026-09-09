@@ -38,6 +38,8 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
     else if(String(e.controller_id)!==profileId)throw new YardError("Approach this creature first",403);
     if(q.action==="enter-turn"&&e.mode!=="world"||q.action==="return-world"&&e.mode!=="turn")throw new YardError("Encounter mode changed",409);
     e=(await c.query("UPDATE charmville_encounters SET controller_id=CASE WHEN $2='release' THEN NULL ELSE $3::bigint END,lease_until=CASE WHEN $2='release' THEN NULL ELSE clock_timestamp()+interval '90 seconds' END,mode=CASE WHEN $2='enter-turn' THEN 'turn' ELSE 'world' END,revision=revision+1 WHERE id=$1 RETURNING *",[e.id,q.action,profileId])).rows[0];
+    // Preserve compatibility with installations before the additive rest table.
+    if(q.action==="enter-turn"&&(await c.query("SELECT to_regclass('charmville_creature_rest') AS table_name")).rows[0].table_name)await c.query("UPDATE charmville_creature_rest SET status='cancelled' WHERE profile_id=$1 AND status='pending'",[profileId]);
     await c.query("INSERT INTO charmville_encounter_receipts(profile_id,request_id,payload_hash) VALUES($1,$2,$3)",[profileId,q.requestId,hash]);
    }
   }

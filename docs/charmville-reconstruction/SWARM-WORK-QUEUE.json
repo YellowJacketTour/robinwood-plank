@@ -514,7 +514,7 @@
       "section": "Pokémon / companion systems",
       "lane": "creatures",
       "maturity": "██░░░",
-      "evidence": "Idempotent domain capture; DB and live presentation missing",
+      "evidence": "Source formula and atomic capture contract audited in CAPTURE-INTEGRATION-CONTRACT.md; finite ball issuance, DB capture and live presentation remain missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
       "status": "queued",
       "prerequisites": [
@@ -548,7 +548,7 @@
       "section": "Pokémon / companion systems",
       "lane": "creatures",
       "maturity": "██░░░",
-      "evidence": "Six-slot owned roster plus source-backed level/HP and Oran consumption verified; actual capture, clinic and storage gameplay remain missing",
+      "evidence": "Six-slot owned roster plus source-backed level/HP and Oran consumption verified; server-timed home HP/PP recovery verified; full clinic, capture and storage gameplay remain missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
       "status": "queued",
       "prerequisites": [],

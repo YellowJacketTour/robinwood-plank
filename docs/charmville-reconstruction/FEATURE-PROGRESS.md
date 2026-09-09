@@ -51,9 +51,9 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
 | Native-style turn battle | ███░░ | Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
-| Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
+| Capture / ball consumption / ownership | ██░░░ | Source formula and atomic capture contract audited in CAPTURE-INTEGRATION-CONTRACT.md; finite ball issuance, DB capture and live presentation remain missing |
 | Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
-| Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; actual capture, clinic and storage gameplay remain missing |
+| Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; server-timed home HP/PP recovery verified; full clinic, capture and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | 354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
@@ -217,3 +217,7 @@ A nearby Play panel now shows the original Poochyena portrait and server-owned l
 ## Bounded source battle turn evidence
 
 The actual battle service and contextual UI now execute supported starter Pound/Scratch/Tackle turns against wild Tackle. HP/PP persist, and a real lost-response browser test verifies one turn/PP debit with exact receipt replay; Party health refreshes automatically from the authoritative API. Source portraits and readable damage/miss/critical results are present. The turn-battle row advances only to locally connected; native real-time combat, full effects, attack animations, capture, rewards and PvP are not claimed. See [SOURCE-BATTLE-TURNS.md](SOURCE-BATTLE-TURNS.md).
+
+## Companion home recovery
+
+The actual battle-to-home-rest browser loop restores HP and supported move PP after 10 server-timed seconds, preserving IV and maxHP. Explicit Finish/Cancel and retry controls use the real service. Database checks cover interruption and duplicate completion. This is bounded home recovery, not a complete clinic world or storage system; bars remain unchanged. See [COMPANION-REST.md](COMPANION-REST.md).
