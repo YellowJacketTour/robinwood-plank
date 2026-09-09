@@ -92,7 +92,11 @@ export async function GET(req: Request) {
     }
     const maker = searchParams.get("maker");
     const limitParam = searchParams.get("limit");
-    const limit = limitParam ? Number(limitParam) : undefined;
+    // Bounded. This was `Number(limitParam)` with no isFinite guard and no
+  // ceiling, so NaN, Infinity and 1e9 all reached the store -- and the store
+  // query it feeds has no LIMIT of its own.
+  const parsed = limitParam ? Number(limitParam) : NaN;
+  const limit = Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 200) : undefined;
 
     const swaps = maker ? await getSwapListingsByMaker(chainSlug, maker) : await getSwapListings(chainSlug, { limit });
     return publicJson({ swaps: swaps.map(({ ...s }) => s) });

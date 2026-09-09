@@ -102,7 +102,10 @@ export async function getSwapListingsByMaker(chainSlug: string, maker: string): 
     `SELECT id, chain_slug, chain_id, maker, offer_items, consideration_items, consideration_native_wei, payload, expires_at
        FROM market_swap_listings
       WHERE chain_slug = $1 AND maker = $2 AND expires_at > NOW()
-      ORDER BY created_at DESC`,
+      ORDER BY created_at DESC
+      -- Bounded: this is reachable from a public ?maker=/?seller= param and
+      -- had no LIMIT at all, so one request could select every row.
+      LIMIT 500`,
     [chainSlug, maker.toLowerCase()]
   );
   return result.rows.map(rowToListing);
