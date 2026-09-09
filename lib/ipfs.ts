@@ -336,7 +336,17 @@ async function fetchViaProxy(tokenUri: string): Promise<NftMetadata> {
 //     attempt rotates past it.
 // ---------------------------------------------------------------------------
 export const GATEWAY_RATE_PER_SECOND = 8;
-export const GATEWAY_TIMEOUT_MS = 5_000;
+// 5,000 ms was a self-inflicted failure. Measured live 2026-09-09,
+// gateway.pinata.cloud answered a real image in 4,478 ms -- a SUCCESS that
+// this limit converted into a 500 and a blank tile, and the homepage's IPFS
+// calls sat at a 5,651 ms median because they were timing out, not erroring.
+//
+// The limit was tight because the cost was paid on every single request, so a
+// slow gateway hurt every visitor. With the proof cache (lib/proof-cache.ts) a
+// content-addressed body is fetched ONCE, so a generous timeout costs one
+// visitor once and saves everyone after. A slow proof must never be a missing
+// proof.
+export const GATEWAY_TIMEOUT_MS = 15_000;
 const GATEWAY_BURST = 8;
 const GATEWAY_REST_MS = 20_000;
 const MAX_GATEWAY_ATTEMPTS = 4;
