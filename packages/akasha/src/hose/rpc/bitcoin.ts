@@ -69,6 +69,14 @@ const DEFAULT_HOSTS = [
 /** HTTP statuses that mean "ask again later", not "this data does not exist". */
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/** Consecutive failures before a host is benched. Two, not one: a single blip
+ *  must never sideline a healthy host. */
+const HOST_BENCH_AFTER = 2;
+/** First bench length; doubles per additional consecutive failure. */
+const HOST_BENCH_BASE_MS = 60_000;
+/** Ceiling, so a dead host is still retried periodically and can come back. */
+const HOST_BENCH_MAX_MS = 15 * 60_000;
+
 export class EsploraBitcoinRpc implements BitcoinRpc {
   private hosts: string[];
   private fetchImpl: typeof fetch;
@@ -77,6 +85,33 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   disagreementsSeen = 0;
   /** Per-host failure tallies, so a dying source is visible in health. */
   readonly hostFailures = new Map<string, number>();
+  /**
+   * Hosts benched until a timestamp, and their consecutive-failure streak.
+   *
+   * WHY A JAIL, PROVEN NOT GUESSED
+   * ------------------------------
+   * Production host counts on 2026-09-09 were
+   *   space 164 | blockstream 351 | emzy 538 | ninja 712 | va1 852 | tk7 1
+   *
+   * Those are not six health readings. Simulating this exact loop -- rotate
+   * the START index, then walk the remaining hosts in order, stopping at the
+   * first success -- with ONLY tk7 healthy predicts 167/334/501/668/834/0.
+   * Max deviation from production: 0.035 when normalised. The counts are a
+   * POSITION artefact: every call walks the five dead hosts to reach the one
+   * live one.
+   *
+   * The cost is the bug. Five dead hosts at an 8s timeout is 40s per get();
+   * getBestBlockHash is two gets plus walkPath's first header, so one
+   * bitcoinTick needed >=120s against a 60s phase deadline. It could never
+   * finish, and `bitcoin-tip` failed with "exceeded 60000ms" every single
+   * tick.
+   *
+   * Benching a host after repeated CONSECUTIVE failures removes that cost.
+   * The bench is short and the streak resets on any success, so a host that
+   * recovers rejoins on its own -- this is not a permanent removal, and a
+   * fully-benched pool is still tried (see get()) rather than failing shut.
+   */
+  private readonly benched = new Map<string, { until: number; streak: number }>();
 
   constructor(opts: EsploraOpts = {}) {
     this.hosts = opts.hosts ?? DEFAULT_HOSTS;
@@ -112,8 +147,14 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   private async get(path: string, asJson: boolean): Promise<unknown> {
     let last: Error | undefined;
     const start = this.hosts.length > 1 ? this.rr++ % this.hosts.length : 0;
-    const ordered =
+    const rotated =
       start === 0 ? this.hosts : [...this.hosts.slice(start), ...this.hosts.slice(0, start)];
+    // Skip benched hosts -- but NEVER fail shut. If every host is benched the
+    // full list is tried anyway, so a jail can only ever cost latency, never
+    // availability. A pool that refuses to try is worse than a slow one.
+    const now = Date.now();
+    const live = rotated.filter((h) => (this.benched.get(h)?.until ?? 0) <= now);
+    const ordered = live.length > 0 ? live : rotated;
     for (const host of ordered) {
       try {
         const res = await this.fetchImpl(`${host}${path}`, {
@@ -128,9 +169,22 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
           (err as { retryable?: boolean }).retryable = RETRYABLE_STATUS.has(res.status);
           throw err;
         }
+        // A success clears the streak: a host that recovers must rejoin
+        // immediately, not serve out a sentence it no longer deserves.
+        this.benched.delete(host);
         return asJson ? await res.json() : (await res.text()).trim();
       } catch (e) {
         this.hostFailures.set(host, (this.hostFailures.get(host) ?? 0) + 1);
+        const prior = this.benched.get(host)?.streak ?? 0;
+        const streak = prior + 1;
+        // Bench only after CONSECUTIVE failures, so one blip cannot sideline a
+        // healthy host. Back off with the streak, hard-capped, so a genuinely
+        // dead host is retried occasionally rather than never.
+        const until =
+          streak >= HOST_BENCH_AFTER
+            ? Date.now() + Math.min(HOST_BENCH_MAX_MS, HOST_BENCH_BASE_MS * 2 ** (streak - HOST_BENCH_AFTER))
+            : 0;
+        this.benched.set(host, { until, streak });
         last = e instanceof Error ? e : new Error(String(e));
       }
     }
