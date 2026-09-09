@@ -1,0 +1,111 @@
+{
+  "generator": "scripts/charmville/render_workshop.py",
+  "revision": 1,
+  "author": "Charmville original workshop",
+  "license": "Original project-owned models; no third-party art",
+  "blender": "4.5.9 LTS",
+  "projection": "orthographic 2:1",
+  "frameSize": [
+    256,
+    192
+  ],
+  "anchor": [
+    128,
+    132.444
+  ],
+  "assets": {
+    "cottage": {
+      "image": "seed-cottage.png",
+      "image3x": "seed-cottage@3x.png",
+      "source": "seed-cottage.blend",
+      "model": "seed-cottage.glb",
+      "anchor": [
+        128,
+        132.444
+      ],
+      "frameSize": [
+        256,
+        192
+      ],
+      "sha256": {
+        "image": "93f07d273889e8e3b8616da44eed283d0b9fdaee9352b912127bf271ecbdc1dc",
+        "image3x": "18efffd99bdbde679431a6a6d87979d8317b420a12fb1ec669899b672adf2d58",
+        "source": "f4412eac9a68369fcf1aa2867ef2268bcd840fbe3520441fb6888943c2a6b4fb",
+        "model": "fa0dddf055e189290c6ec44fd1f9c3f15d6084324b45fc64bef6164f77442208"
+      }
+    },
+    "orchard": {
+      "image": "orchard-tree.png",
+      "image3x": "orchard-tree@3x.png",
+      "source": "orchard-tree.blend",
+      "model": "orchard-tree.glb",
+      "anchor": [
+        128,
+        132.444
+      ],
+      "frameSize": [
+        256,
+        192
+      ],
+      "sha256": {
+        "image": "3f67adb2f3efc961d4ddd039d1815f3d6c9be2f314d574e5fa5f3f0cf56f0356",
+        "image3x": "d57bcc84cff78a81c0c033120eb6595c8d336092ed4ba20875bf7120e2749126",
+        "source": "9bae10b959aa7c10ca11b2490205837e1cb293407421d0c5d54706ae9baa0701",
+        "model": "350fb33cbc8391e7c04329778585f36a8fd4372fa278231210ce3c386658c537"
+      }
+    },
+    "blossom": {
+      "image": "blossom-tree.png",
+      "image3x": "blossom-tree@3x.png",
+      "source": "blossom-tree.blend",
+      "model": "blossom-tree.glb",
+      "anchor": [
+        128,
+        132.444
+      ],
+      "frameSize": [
+        256,
+        192
+      ],
+      "sha256": {
+        "image": "41072cf35b7cd4046601700833817b9b9b2cf1de402a074d0f0531f2fc11bfe4",
+        "image3x": "a814bc1a51024bc09a23ed0ea44f4971c71f2a32b79d0ee44a175a87f2123ef0",
+        "source": "bdd6ecf730297edfbfd8dd629753e6251c810d2b3678eb140e5bd52724e10d7e",
+        "model": "1b101ffdde24ecfbd716d9941a099350f21a48b79ef775d3f5e331b9dd20cfbd"
+      }
+    },
+    "flowers": {
+      "image": "flower-border.png",
+      "image3x": "flower-border@3x.png",
+      "source": "flower-border.blend",
+      "model": "flower-border.glb",
+      "anchor": [
+        128,
+        132.444
+      ],
+      "frameSize": [
+        256,
+        192
+      ],
+      "sha256": {
+        "image": "e3cec7c33f41f83794e47197a24d1d00bad3841f6afa80e9142ffdad0f9afd9f",
+        "image3x": "e6b3c4a87f39acb28d10193f4066009f197a23060966ff097f69f360b3dd0f07",
+        "source": "62f61e877ceaf2b0782f116823580aeca7ceec5b1a7b89ed953f571c9cb8e09e",
+        "model": "14ffb96d8b4b6d3f5a6bbed0eb0ffb11880391d6ccfc3a5bf80040f287afb5c2"
+      }
+    },
+    "turf": {
+      "image": "clover-turf.png",
+      "source": "clover-turf.blend",
+      "frameSize": [
+        512,
+        512
+      ],
+      "seamless": true,
+      "sha256": {
+        "image": "001239b1b7eca9f4996bf3fe0a181ecff1a871f001144dacd52965fd6e63acbc",
+        "source": "766b760dbb0fc8a2488094cc01a78fd1ce9609790c147bbfa9c1890c0d07ec7e"
+      }
+    }
+  }
+}

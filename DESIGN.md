@@ -232,6 +232,18 @@ components:
 
 ## Overview
 
+### Charmville game surface — September 9 direction
+
+The owner explicitly requested a neo-chibi pastel commercial game presentation.
+Inside the scoped Charmville porch and its satchel only, use these additional
+material tokens: `--charm-paper: #fff1d3`, `--charm-honey: #dcb479`,
+`--charm-sage: #a9c784`, `--charm-leaf: #527747`, `--charm-peach: #edbba1`,
+`--charm-sky: #b8d9e7`. Dark text remains canonical wood-900/wood-700.
+Controls are illustrated enamel badges in carved cream/honey frames, with
+visible pressed depth, 44px targets, and strong keyboard focus. This exception
+does not recolor the surrounding personal PlankSpace board. Rendered model
+materials may use a richer palette; the tokens govern component chrome.
+
 RobinWood is a hand-drawn woodland product world, not a generic crypto template. Every page should feel related through warm wood surfaces, parchment text, gold hardware, character art, and storybook display type while adapting density and hierarchy to the job of that surface.
 
 **This file is the design language, not a catalogue of pages.** It should let you

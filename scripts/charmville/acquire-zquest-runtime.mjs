@@ -1,0 +1,11 @@
+import {mkdir,writeFile,cp} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import path from 'node:path';
+const root=path.resolve('../charmville-references/zquest-web-runtime');
+await mkdir(path.join(root,'play'),{recursive:true});
+await mkdir(path.join(root,'create'),{recursive:true});
+const files=['play/index.html','create/index.html','main.js','zplayer.js','zplayer.wasm','zplayer.data','zplayer.data.js','zeditor.js','zeditor.wasm','zeditor.data','zeditor.data.js','manifest.json','favicon.ico'];
+const manifest=[];
+for(const file of files){const url='https://web.zquestclassic.com/'+file.replace('index.html','');const response=await fetch(url);if(!response.ok)throw Error(`${response.status}: ${url}`);const bytes=Buffer.from(await response.arrayBuffer());await writeFile(path.join(root,file),bytes);manifest.push({file,url,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});if(file.endsWith('.html')){await writeFile(path.join(root,file.replace('index.html','upstream.html')),bytes);const engine=file.startsWith('play/')?'zplayer':'zeditor';let html=bytes.toString().replace("if ('serviceWorker' in navigator)","if (false && 'serviceWorker' in navigator)");html=html.replace(`<script src="../${engine}.js"></script>`,'').replace(`<script src="../${engine}.data.js"></script>`,`<script src="../${engine}.data.js"></script><script src="../${engine}.js"></script>`);html=html.replace(/<script async src="https:\/\/www.googletagmanager.com[^\"]*"><\/script>/g,'');await writeFile(path.join(root,file),html);}console.log(`${file}: ${bytes.length}`);}
+await cp(path.resolve('../charmville-references/zquest-classic/timidity'),path.join(root,'timidity'),{recursive:true});
+await writeFile(path.join(root,'runtime-source.json'),JSON.stringify({description:'Official hosted ZQuest browser runtime snapshot. Not locally compiled; source-to-binary commit equivalence has not been established.',adaptations:['HTML service-worker registration and external analytics script disabled for the local reference server; upstream.html retains original bytes.','Data-loader scripts run before the engine script to prevent fast WASM startup preceding filesystem mount (missing /zquest_web.cfg).','MIDI instruments copied from acquired zquest-classic/timidity source. Engine binaries unmodified.'],files:manifest},null,2));

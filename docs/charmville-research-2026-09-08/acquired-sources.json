@@ -1,0 +1,26 @@
+﻿[
+    {
+        "name":  "fv-replowed",
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\fv-replowed",
+        "origin":  "https://github.com/FV-Replowed/fv-replowed.git",
+        "commit":  "01ece56b75ed578b62396a97705f5333831f41d7",
+        "runtime":  "Not run",
+        "note":  "Shallow source checkout; external assets may be separate"
+    },
+    {
+        "name":  "farmvillage",
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\farmvillage",
+        "origin":  "https://github.com/AcidCaos/farmvillage.git",
+        "commit":  "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+        "runtime":  "Not run",
+        "note":  "Shallow source checkout; external assets may be separate"
+    },
+    {
+        "name":  "isomiddleearth",
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\isomiddleearth",
+        "origin":  "https://github.com/hasanharman/isomiddleearth.git",
+        "commit":  "9e59a127ec87b141d6d767f4ab79ac9b4c38a75c",
+        "runtime":  "Not run",
+        "note":  "Sparse checkout excludes Windows-incompatible Icon? filename"
+    }
+]

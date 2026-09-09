@@ -21,6 +21,24 @@ Every stage uses the same camera, frame canvas and ground anchor. Render files a
 kept; atlases are horizontal eight-frame strips. Do not treat unrelated random source variants as animation.
 Open `public/images/charmville/original/preview.html` to compare stages and pause the animation.
 
+## Expressive charm and scenery sources
+
+`render_charms.py -- --output public/images/charmville/charms` builds all seven
+original portrait models and transparent PNGs. Only Stalk and Splinter are
+currently playable; portraits do not introduce crop recipes or new inventory.
+Each portrait retains its editable `.blend` alongside the render.
+
+After rebuilding crops, run `render_boardwalk.py -- public/images/charmville/original`
+and `render_access_path.py -- public/images/charmville/original` through Blender
+to rebuild broad timber and the worn entrances in the same camera. Their sources
+are retained beside the images. Run `node scripts/charmville/pack-crops.mjs` after
+changing crop frames.
+
+The Quaternius character uses `render_sourced_character.py` with its source Blender
+file and `-- <output-directory> --sheet`, followed by `pack-character.mjs`.
+These 136 frames use a warm woodland palette and source animation, with no
+authority over game actions.
+
 ## Browser check
 
 Run the app on a local database with the normal migrations applied. Set CHARMVILLE_TEST_DATABASE_URL

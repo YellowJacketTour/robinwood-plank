@@ -1,0 +1,13 @@
+[
+  {
+    "label": "black-market",
+    "url": "https://unity-uwu.uwublk-market.pages.dev/",
+    "title": "UwU Black Market",
+    "text": "UwU Black Market\nConnect Wallet\nSwap\nDisplay in 🦄 (1,000,000 🦄 = $5.26)\nTotal Wallet Value: 0.0🦄\nEmoji\nCirculating\nTVL (🦄)\nPrice (🦄)\nMCap (🦄)\nPool Share\nWallet Balance\nWallet Share\nValue (🦄)\nNo Rows To Show\n\nBuilt with\n\nCosmology"
+  },
+  {
+    "label": "terminal",
+    "url": "https://unicornterminal.meme/",
+    "error": "page.goto: net::ERR_NAME_NOT_RESOLVED at https://unicornterminal.meme/\nCall log:\n\u001b[2m  - navigating to \"https://unicornterminal.meme/\", waiting until \"domcontentloaded\"\u001b[22m\n"
+  }
+]

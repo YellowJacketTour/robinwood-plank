@@ -1,0 +1,691 @@
+{
+  "schemaVersion": 1,
+  "definitions": {
+    "url": "/images/charmville/cache/definitions/e777087ea260092d967307def99ccb2f29a0e2a327a327270a1a15f453b85b62.json",
+    "sha256": "e777087ea260092d967307def99ccb2f29a0e2a327a327270a1a15f453b85b62",
+    "bytes": 9364
+  },
+  "assets": {
+    "crop:stalk:seedling": {
+      "url": "/images/charmville/cache/assets/0228c9df430f64086b637981f892e23a4b29916b8c8d00fe8962a7b4bb6afae9.png",
+      "sha256": "0228c9df430f64086b637981f892e23a4b29916b8c8d00fe8962a7b4bb6afae9",
+      "bytes": 72557,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/stalk-seedling.png"
+    },
+    "crop:stalk:growing": {
+      "url": "/images/charmville/cache/assets/397a09be60041138fd252beeb78680eebc861356fb0d5657ac01bbbe591a355e.png",
+      "sha256": "397a09be60041138fd252beeb78680eebc861356fb0d5657ac01bbbe591a355e",
+      "bytes": 243423,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/stalk-growing.png"
+    },
+    "crop:stalk:ripe": {
+      "url": "/images/charmville/cache/assets/5e71e106982fb2d3907af44c2454ffce171116f893d775adbcfed398868602c0.png",
+      "sha256": "5e71e106982fb2d3907af44c2454ffce171116f893d775adbcfed398868602c0",
+      "bytes": 321003,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/stalk-ripe.png"
+    },
+    "crop:splinter:seedling": {
+      "url": "/images/charmville/cache/assets/669c6071281d85dc7de6abb09d253b42795fac22b0c0e0d2ff5333a37571de57.png",
+      "sha256": "669c6071281d85dc7de6abb09d253b42795fac22b0c0e0d2ff5333a37571de57",
+      "bytes": 49461,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/splinter-seedling.png"
+    },
+    "crop:splinter:growing": {
+      "url": "/images/charmville/cache/assets/2768412f9f5f12f6c9b9a5f86e03f69c17177b15f161a09486229bc593cd5c27.png",
+      "sha256": "2768412f9f5f12f6c9b9a5f86e03f69c17177b15f161a09486229bc593cd5c27",
+      "bytes": 98099,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/splinter-growing.png"
+    },
+    "crop:splinter:ripe": {
+      "url": "/images/charmville/cache/assets/a6533d0b377583d14cdc3d9a304d7626ef43a5cbd2baa03ae61ea8a652fcb137.png",
+      "sha256": "a6533d0b377583d14cdc3d9a304d7626ef43a5cbd2baa03ae61ea8a652fcb137",
+      "bytes": 177784,
+      "width": 2048,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/splinter-ripe.png"
+    },
+    "character:idle:0": {
+      "url": "/images/charmville/cache/assets/fd505b27624a598db6e9d0fb62d4187b6be24028e878ed95c1ca078c9db5a9ef.webp",
+      "sha256": "fd505b27624a598db6e9d0fb62d4187b6be24028e878ed95c1ca078c9db5a9ef",
+      "bytes": 6454,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-0.webp"
+    },
+    "character:idle:1": {
+      "url": "/images/charmville/cache/assets/d75b42f1e96975a575b81be15b3673bc7ccd0252a16ee352b500a0d83edceffb.webp",
+      "sha256": "d75b42f1e96975a575b81be15b3673bc7ccd0252a16ee352b500a0d83edceffb",
+      "bytes": 6436,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-1.webp"
+    },
+    "character:idle:2": {
+      "url": "/images/charmville/cache/assets/02ffac9d5558c4811920aa8402c8f0574125d1689a46b83eac39d936c2772a78.webp",
+      "sha256": "02ffac9d5558c4811920aa8402c8f0574125d1689a46b83eac39d936c2772a78",
+      "bytes": 5302,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-2.webp"
+    },
+    "character:idle:3": {
+      "url": "/images/charmville/cache/assets/66db5be244f2fb00830354ff78375c42bdc0fe0041f454fd75e99373cc9b69b7.webp",
+      "sha256": "66db5be244f2fb00830354ff78375c42bdc0fe0041f454fd75e99373cc9b69b7",
+      "bytes": 6490,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-3.webp"
+    },
+    "character:idle:4": {
+      "url": "/images/charmville/cache/assets/196ef734bb199db297d01bd34883a06f13fd044c906ba7829be5c73cdd50b89d.webp",
+      "sha256": "196ef734bb199db297d01bd34883a06f13fd044c906ba7829be5c73cdd50b89d",
+      "bytes": 6204,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-4.webp"
+    },
+    "character:idle:5": {
+      "url": "/images/charmville/cache/assets/5ec5f7b6d5ab6d532c231ccacd0b9a948306162156a814322e7b793aee588dd2.webp",
+      "sha256": "5ec5f7b6d5ab6d532c231ccacd0b9a948306162156a814322e7b793aee588dd2",
+      "bytes": 6202,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-5.webp"
+    },
+    "character:idle:6": {
+      "url": "/images/charmville/cache/assets/1ee456c0ae5b61a086ef2d464457a5d6584b4387867e566d6fcc68c9ff8f1afd.webp",
+      "sha256": "1ee456c0ae5b61a086ef2d464457a5d6584b4387867e566d6fcc68c9ff8f1afd",
+      "bytes": 5178,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-6.webp"
+    },
+    "character:idle:7": {
+      "url": "/images/charmville/cache/assets/4adf63eb6410ce8687c661b78b484d32e1469833862a89b5181c7e7a4d107a03.webp",
+      "sha256": "4adf63eb6410ce8687c661b78b484d32e1469833862a89b5181c7e7a4d107a03",
+      "bytes": 6592,
+      "width": 128,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/idle-7.webp"
+    },
+    "character:walk:0": {
+      "url": "/images/charmville/cache/assets/e70affae8ca8df1a1b478e22c8f204000d0e50ba67bf5f1c308bf5cc53909ee7.webp",
+      "sha256": "e70affae8ca8df1a1b478e22c8f204000d0e50ba67bf5f1c308bf5cc53909ee7",
+      "bytes": 46948,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-0.webp"
+    },
+    "character:walk:1": {
+      "url": "/images/charmville/cache/assets/522a9aa2ba5b858f24a04a2518b8c3e91cd5b88fa70110b959192b9fab0aae8b.webp",
+      "sha256": "522a9aa2ba5b858f24a04a2518b8c3e91cd5b88fa70110b959192b9fab0aae8b",
+      "bytes": 50080,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-1.webp"
+    },
+    "character:walk:2": {
+      "url": "/images/charmville/cache/assets/f3ea5cb07cd7dd5365e82dc006209e794f8e4534781ba344550dd63c008ccf37.webp",
+      "sha256": "f3ea5cb07cd7dd5365e82dc006209e794f8e4534781ba344550dd63c008ccf37",
+      "bytes": 49432,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-2.webp"
+    },
+    "character:walk:3": {
+      "url": "/images/charmville/cache/assets/8eb2fc3b0db585f5f34c196ce618d5cf24acbf59d4550ac21d46bc94dc1b2fdb.webp",
+      "sha256": "8eb2fc3b0db585f5f34c196ce618d5cf24acbf59d4550ac21d46bc94dc1b2fdb",
+      "bytes": 50128,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-3.webp"
+    },
+    "character:walk:4": {
+      "url": "/images/charmville/cache/assets/bb6006a915a6908950c49dc3b1bf515eae953af7b2ad4ae3230abff723a6c2a1.webp",
+      "sha256": "bb6006a915a6908950c49dc3b1bf515eae953af7b2ad4ae3230abff723a6c2a1",
+      "bytes": 44546,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-4.webp"
+    },
+    "character:walk:5": {
+      "url": "/images/charmville/cache/assets/219fbbfa9fcba91a52e1cff02e75e821c6599ff88e85b9d1ab02a7917418f617.webp",
+      "sha256": "219fbbfa9fcba91a52e1cff02e75e821c6599ff88e85b9d1ab02a7917418f617",
+      "bytes": 49184,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-5.webp"
+    },
+    "character:walk:6": {
+      "url": "/images/charmville/cache/assets/4be4ebbc55380214cfd9ef6fad49a6b7cc00b19edf7ba7d494b7f2b17ac89243.webp",
+      "sha256": "4be4ebbc55380214cfd9ef6fad49a6b7cc00b19edf7ba7d494b7f2b17ac89243",
+      "bytes": 48406,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-6.webp"
+    },
+    "character:walk:7": {
+      "url": "/images/charmville/cache/assets/9fc79e9053e0b712ce04ebb63d9235d8e9645bccf13d074fa99b24523e34e754.webp",
+      "sha256": "9fc79e9053e0b712ce04ebb63d9235d8e9645bccf13d074fa99b24523e34e754",
+      "bytes": 50624,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/walk-7.webp"
+    },
+    "character:pickup:0": {
+      "url": "/images/charmville/cache/assets/37719302ce6923dfdce523dbc4fce0082ad7cca1d734e21167f824cd76345208.webp",
+      "sha256": "37719302ce6923dfdce523dbc4fce0082ad7cca1d734e21167f824cd76345208",
+      "bytes": 35170,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-0.webp"
+    },
+    "character:pickup:1": {
+      "url": "/images/charmville/cache/assets/dafe676a2f1f6c4853b4b4c63f174a82b8dbd28663c4ae6915f7464c92d0c570.webp",
+      "sha256": "dafe676a2f1f6c4853b4b4c63f174a82b8dbd28663c4ae6915f7464c92d0c570",
+      "bytes": 43044,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-1.webp"
+    },
+    "character:pickup:2": {
+      "url": "/images/charmville/cache/assets/0f8e37b9f1cdda286f0d5975934bd431c9b2e38f2c29719e7145c5be1a7b129b.webp",
+      "sha256": "0f8e37b9f1cdda286f0d5975934bd431c9b2e38f2c29719e7145c5be1a7b129b",
+      "bytes": 44194,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-2.webp"
+    },
+    "character:pickup:3": {
+      "url": "/images/charmville/cache/assets/febf4928c7b8e1aae6006341df63e97efeedde00f3fc7ec23cceba5d3c04c6a5.webp",
+      "sha256": "febf4928c7b8e1aae6006341df63e97efeedde00f3fc7ec23cceba5d3c04c6a5",
+      "bytes": 46370,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-3.webp"
+    },
+    "character:pickup:4": {
+      "url": "/images/charmville/cache/assets/33dd1366111692491b83d1e3253cce37f99359e53cbd77b1796482d278dea761.webp",
+      "sha256": "33dd1366111692491b83d1e3253cce37f99359e53cbd77b1796482d278dea761",
+      "bytes": 42890,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-4.webp"
+    },
+    "character:pickup:5": {
+      "url": "/images/charmville/cache/assets/7b8e249fab5b00e5ed88b162a33ef89fc1f340161641d63b6cca22017491c4af.webp",
+      "sha256": "7b8e249fab5b00e5ed88b162a33ef89fc1f340161641d63b6cca22017491c4af",
+      "bytes": 46636,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-5.webp"
+    },
+    "character:pickup:6": {
+      "url": "/images/charmville/cache/assets/42082b7e2526cc107a9a01ed680cd0495c7e2a6d43c9e07a1ba70f7092e818e9.webp",
+      "sha256": "42082b7e2526cc107a9a01ed680cd0495c7e2a6d43c9e07a1ba70f7092e818e9",
+      "bytes": 42432,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-6.webp"
+    },
+    "character:pickup:7": {
+      "url": "/images/charmville/cache/assets/480303f908c4e650e083318565fe0f00a0c3750c6f00043dcd0ea6627340109b.webp",
+      "sha256": "480303f908c4e650e083318565fe0f00a0c3750c6f00043dcd0ea6627340109b",
+      "bytes": 41696,
+      "width": 1024,
+      "height": 160,
+      "mime": "image/webp",
+      "source": "/images/charmville/quaternius-farmer/atlases/pickup-7.webp"
+    },
+    "face:stalk": {
+      "url": "/images/charmville/cache/assets/317efcd39a23ad6be2bdd025fd593dbb29915f1d9c01565b703a648182eb6cd9.png",
+      "sha256": "317efcd39a23ad6be2bdd025fd593dbb29915f1d9c01565b703a648182eb6cd9",
+      "bytes": 48773,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/stalk.png"
+    },
+    "face:splinter": {
+      "url": "/images/charmville/cache/assets/10a40491dae2941e3a398aa2da83f28bae3f563fb18a865c295e822d2f4b9345.png",
+      "sha256": "10a40491dae2941e3a398aa2da83f28bae3f563fb18a865c295e822d2f4b9345",
+      "bytes": 38588,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/splinter.png"
+    },
+    "face:knock": {
+      "url": "/images/charmville/cache/assets/e82ac56ad106819bc514f5b33f9f1b4c39e7268b4e8a25135ef323c6d0097594.png",
+      "sha256": "e82ac56ad106819bc514f5b33f9f1b4c39e7268b4e8a25135ef323c6d0097594",
+      "bytes": 38000,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/knock.png"
+    },
+    "face:hum": {
+      "url": "/images/charmville/cache/assets/1e15d964cbd5ce3469f121574e31fcc41384a2432f9aff6e3b96304dfd1a5c15.png",
+      "sha256": "1e15d964cbd5ce3469f121574e31fcc41384a2432f9aff6e3b96304dfd1a5c15",
+      "bytes": 46065,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/hum.png"
+    },
+    "face:pith": {
+      "url": "/images/charmville/cache/assets/381242589b32d0325445c231ffae678507848894c56bf983aa75318ef0bacf97.png",
+      "sha256": "381242589b32d0325445c231ffae678507848894c56bf983aa75318ef0bacf97",
+      "bytes": 43487,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/pith.png"
+    },
+    "face:gleam": {
+      "url": "/images/charmville/cache/assets/6b6b8676ce3edbe72009c2215d65296164d4201b7392f4d1cd265e504254288c.png",
+      "sha256": "6b6b8676ce3edbe72009c2215d65296164d4201b7392f4d1cd265e504254288c",
+      "bytes": 45799,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/gleam.png"
+    },
+    "face:knot": {
+      "url": "/images/charmville/cache/assets/f1770b57a09227ffe7da139ad65b21d2c24fa4a5fd3ee8edc67690f9e423b14b.png",
+      "sha256": "f1770b57a09227ffe7da139ad65b21d2c24fa4a5fd3ee8edc67690f9e423b14b",
+      "bytes": 51610,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/charms/knot.png"
+    },
+    "terrain:soil": {
+      "url": "/images/charmville/cache/assets/4e1fcbf408a50f89eb719e92cf55e1a37595e1419399c5dee24edbab7b4980cc.png",
+      "sha256": "4e1fcbf408a50f89eb719e92cf55e1a37595e1419399c5dee24edbab7b4980cc",
+      "bytes": 27671,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/soil.png"
+    },
+    "terrain:turf": {
+      "url": "/images/charmville/cache/assets/8c707c63becebf2a27555820e62211c69df5ef5f3cbe965ea169fbdded3b1de1.png",
+      "sha256": "8c707c63becebf2a27555820e62211c69df5ef5f3cbe965ea169fbdded3b1de1",
+      "bytes": 71816,
+      "width": 256,
+      "height": 256,
+      "mime": "image/png",
+      "source": "/images/charmville/original/turf.png"
+    },
+    "terrain:boardwalk": {
+      "url": "/images/charmville/cache/assets/486bbc1855da99933b04c98dbfa27d78fc5ce7da5fdca84a4791d4af44782e53.png",
+      "sha256": "486bbc1855da99933b04c98dbfa27d78fc5ce7da5fdca84a4791d4af44782e53",
+      "bytes": 30228,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/boardwalk.png"
+    },
+    "terrain:access-path": {
+      "url": "/images/charmville/cache/assets/f1403301f4d02d3fd165f89d16869620181139fb4d7f4b58e152ec1c593c5a25.png",
+      "sha256": "f1403301f4d02d3fd165f89d16869620181139fb4d7f4b58e152ec1c593c5a25",
+      "bytes": 26870,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/original/access-path.png"
+    },
+    "scenery:cornYoung_N": {
+      "url": "/images/charmville/cache/assets/983ba5796629758f9e035406829517d5799d95858ca7d74bf187c91e69da1cc3.png",
+      "sha256": "983ba5796629758f9e035406829517d5799d95858ca7d74bf187c91e69da1cc3",
+      "bytes": 3579,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/cornYoung_N.png"
+    },
+    "scenery:corn_N": {
+      "url": "/images/charmville/cache/assets/8611d2cdc7b9bbce67efe1fc4d497813aab35d9c734953d3c82fc05068b1a86c.png",
+      "sha256": "8611d2cdc7b9bbce67efe1fc4d497813aab35d9c734953d3c82fc05068b1a86c",
+      "bytes": 10981,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/corn_N.png"
+    },
+    "scenery:dirt_N": {
+      "url": "/images/charmville/cache/assets/eff7f8dc2d76b600abd98c77486bd33bc674832315abd3f94bd42ba30c9a8e00.png",
+      "sha256": "eff7f8dc2d76b600abd98c77486bd33bc674832315abd3f94bd42ba30c9a8e00",
+      "bytes": 20026,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/dirt_N.png"
+    },
+    "scenery:fenceLow_E": {
+      "url": "/images/charmville/cache/assets/8a1623799678d6bcf9753c6a4cde044337feaa89cda76fbb6522d28ba944f12c.png",
+      "sha256": "8a1623799678d6bcf9753c6a4cde044337feaa89cda76fbb6522d28ba944f12c",
+      "bytes": 5892,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/fenceLow_E.png"
+    },
+    "scenery:fenceLow_N": {
+      "url": "/images/charmville/cache/assets/e9f86c61f245bff9ae6e91fe193a8b61bc023f934ee65f01736141fcc224ac97.png",
+      "sha256": "e9f86c61f245bff9ae6e91fe193a8b61bc023f934ee65f01736141fcc224ac97",
+      "bytes": 5776,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/fenceLow_N.png"
+    },
+    "scenery:grass": {
+      "url": "/images/charmville/cache/assets/84138b5865531471c626224939dd0133c0758a7713e97d59e94b187e7831aa70.png",
+      "sha256": "84138b5865531471c626224939dd0133c0758a7713e97d59e94b187e7831aa70",
+      "bytes": 1962,
+      "width": 132,
+      "height": 83,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/grass.png"
+    },
+    "scenery:hayBalesStacked_N": {
+      "url": "/images/charmville/cache/assets/79f44ca26246d7ed678726fd3d06566da6864b4df8cc0cc857de868e9b08f05c.png",
+      "sha256": "79f44ca26246d7ed678726fd3d06566da6864b4df8cc0cc857de868e9b08f05c",
+      "bytes": 15998,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/hayBalesStacked_N.png"
+    },
+    "scenery:hayBales_N": {
+      "url": "/images/charmville/cache/assets/13a3e413953bd3c827b0d5608e97f59e65df0cc40765d79f027c111e987a8bf4.png",
+      "sha256": "13a3e413953bd3c827b0d5608e97f59e65df0cc40765d79f027c111e987a8bf4",
+      "bytes": 8702,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/hayBales_N.png"
+    },
+    "scenery:planks_N": {
+      "url": "/images/charmville/cache/assets/ec2e9c2d36c75b34dd5bcf74f2e79809d7e36eb187a039d63ca3b15d9439bdcd.png",
+      "sha256": "ec2e9c2d36c75b34dd5bcf74f2e79809d7e36eb187a039d63ca3b15d9439bdcd",
+      "bytes": 22514,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/planks_N.png"
+    },
+    "scenery:roofSingleWall_N": {
+      "url": "/images/charmville/cache/assets/ec4c590e5cb441512c98d61be201a28c69b23fdb3cb9a1d26b996cb6aa06bb2e.png",
+      "sha256": "ec4c590e5cb441512c98d61be201a28c69b23fdb3cb9a1d26b996cb6aa06bb2e",
+      "bytes": 28578,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/roofSingleWall_N.png"
+    },
+    "scenery:roof_E": {
+      "url": "/images/charmville/cache/assets/456e7922f3715153e1b5de4ab7e57d83109a10fb1ac6b9aeff3f8a1f7d2bae3f.png",
+      "sha256": "456e7922f3715153e1b5de4ab7e57d83109a10fb1ac6b9aeff3f8a1f7d2bae3f",
+      "bytes": 39154,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/roof_E.png"
+    },
+    "scenery:roof_N": {
+      "url": "/images/charmville/cache/assets/a808c50e850167b71f5a02a5d0c6b05971260b2d1a1ad519e55aae25db1c745c.png",
+      "sha256": "a808c50e850167b71f5a02a5d0c6b05971260b2d1a1ad519e55aae25db1c745c",
+      "bytes": 38985,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/roof_N.png"
+    },
+    "scenery:sack_N": {
+      "url": "/images/charmville/cache/assets/a071e94fb8c0d88d8d306f2c4f3009f347542c3acc1ae51376d9e5ee6c38da11.png",
+      "sha256": "a071e94fb8c0d88d8d306f2c4f3009f347542c3acc1ae51376d9e5ee6c38da11",
+      "bytes": 2629,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/sack_N.png"
+    },
+    "scenery:sacksCrate_N": {
+      "url": "/images/charmville/cache/assets/45a6f8811a73c1bc8f166f5f26aea70c3b5186daea5cafbecb70b6e5755aa576.png",
+      "sha256": "45a6f8811a73c1bc8f166f5f26aea70c3b5186daea5cafbecb70b6e5755aa576",
+      "bytes": 5699,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/sacksCrate_N.png"
+    },
+    "scenery:tree_detailed": {
+      "url": "/images/charmville/cache/assets/5f030d5b2dbb65ebacbd8ab9950bf574c7cdd423df3fc85436f0c584325f6e68.png",
+      "sha256": "5f030d5b2dbb65ebacbd8ab9950bf574c7cdd423df3fc85436f0c584325f6e68",
+      "bytes": 23041,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/tree_detailed.png"
+    },
+    "scenery:tree_fat": {
+      "url": "/images/charmville/cache/assets/7b601dc3fbd3ec1a9bbcf12ec07def31e3ba539e6b017e6526ea22717f0cba9c.png",
+      "sha256": "7b601dc3fbd3ec1a9bbcf12ec07def31e3ba539e6b017e6526ea22717f0cba9c",
+      "bytes": 18390,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/tree_fat.png"
+    },
+    "scenery:tree_oak": {
+      "url": "/images/charmville/cache/assets/4f414a216340e447a59de3085d3fa6a9fc74a045b68bfab08d0a071f82dec004.png",
+      "sha256": "4f414a216340e447a59de3085d3fa6a9fc74a045b68bfab08d0a071f82dec004",
+      "bytes": 21201,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/tree_oak.png"
+    },
+    "scenery:tree_plateau": {
+      "url": "/images/charmville/cache/assets/81c8690b42f375252dbb42f798906176a1cfe81c4046152004f2e825b5ea8b4e.png",
+      "sha256": "81c8690b42f375252dbb42f798906176a1cfe81c4046152004f2e825b5ea8b4e",
+      "bytes": 20280,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/tree_plateau.png"
+    },
+    "scenery:woodWallDoorOpen_N": {
+      "url": "/images/charmville/cache/assets/bfb53960dbd0940f6051e97858d136ca83b7483d41ec45adeb306e32b3c8f3c3.png",
+      "sha256": "bfb53960dbd0940f6051e97858d136ca83b7483d41ec45adeb306e32b3c8f3c3",
+      "bytes": 22019,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/woodWallDoorOpen_N.png"
+    },
+    "scenery:woodWallWindow_N": {
+      "url": "/images/charmville/cache/assets/ecf823fdd6115154f84655ec9d765a92599eed7756f7c12ad4b37a499548f6bd.png",
+      "sha256": "ecf823fdd6115154f84655ec9d765a92599eed7756f7c12ad4b37a499548f6bd",
+      "bytes": 22800,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/woodWallWindow_N.png"
+    },
+    "scenery:woodWall_E": {
+      "url": "/images/charmville/cache/assets/86c0cff19eeb1d77e7fa0f043ca4e9edfcfada3f4d05ddaf26715f0432b115cc.png",
+      "sha256": "86c0cff19eeb1d77e7fa0f043ca4e9edfcfada3f4d05ddaf26715f0432b115cc",
+      "bytes": 23894,
+      "width": 256,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/kenney/woodWall_E.png"
+    },
+    "workshop:blossom:image": {
+      "url": "/images/charmville/cache/assets/f757d5f6bec1d781d0a467bcf77168fd9909faca440062f116d0a1d6e3ccaf1c.png",
+      "sha256": "f757d5f6bec1d781d0a467bcf77168fd9909faca440062f116d0a1d6e3ccaf1c",
+      "bytes": 34512,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/blossom-tree.png",
+      "authoringSource": "workshop:blossom:source"
+    },
+    "workshop:blossom:image3x": {
+      "url": "/images/charmville/cache/assets/8b5fe1c6f612f6b2900088df98b981103aaf497e73a2af20bb0286e397563344.png",
+      "sha256": "8b5fe1c6f612f6b2900088df98b981103aaf497e73a2af20bb0286e397563344",
+      "bytes": 303668,
+      "width": 768,
+      "height": 576,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/blossom-tree@3x.png",
+      "authoringSource": "workshop:blossom:source"
+    },
+    "workshop:blossom:model": {
+      "url": "/images/charmville/cache/assets/1eb89330e11e7a2bfee32d95955b72af64b4ee451bd5be865520b45fbfcbb95c.glb",
+      "sha256": "1eb89330e11e7a2bfee32d95955b72af64b4ee451bd5be865520b45fbfcbb95c",
+      "bytes": 863432,
+      "mime": "model/gltf-binary",
+      "source": "/images/charmville/workshop/blossom-tree.glb",
+      "authoringSource": "workshop:blossom:source"
+    },
+    "workshop:cottage:image": {
+      "url": "/images/charmville/cache/assets/1c9362c8a86091f45c470c7f5cf3c5b046f6d1bc788e2b1dc94893bebea41e16.png",
+      "sha256": "1c9362c8a86091f45c470c7f5cf3c5b046f6d1bc788e2b1dc94893bebea41e16",
+      "bytes": 46787,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/seed-cottage.png",
+      "authoringSource": "workshop:cottage:source"
+    },
+    "workshop:cottage:image3x": {
+      "url": "/images/charmville/cache/assets/7f7a08a9a1e868a895d161d6910b21c5358739f174f0067a12e0c66541721132.png",
+      "sha256": "7f7a08a9a1e868a895d161d6910b21c5358739f174f0067a12e0c66541721132",
+      "bytes": 383888,
+      "width": 768,
+      "height": 576,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/seed-cottage@3x.png",
+      "authoringSource": "workshop:cottage:source"
+    },
+    "workshop:cottage:model": {
+      "url": "/images/charmville/cache/assets/286b1130664992b1e870eaa1ece432a7c5e2dee4902d4d59f457331fdc773aa4.glb",
+      "sha256": "286b1130664992b1e870eaa1ece432a7c5e2dee4902d4d59f457331fdc773aa4",
+      "bytes": 2054076,
+      "mime": "model/gltf-binary",
+      "source": "/images/charmville/workshop/seed-cottage.glb",
+      "authoringSource": "workshop:cottage:source"
+    },
+    "workshop:flowers:image": {
+      "url": "/images/charmville/cache/assets/5c062be5eb821e44f367806fa6895311e556e894e9b3f57dad9f310cf4fd31d3.png",
+      "sha256": "5c062be5eb821e44f367806fa6895311e556e894e9b3f57dad9f310cf4fd31d3",
+      "bytes": 13552,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/flower-border.png",
+      "authoringSource": "workshop:flowers:source"
+    },
+    "workshop:flowers:image3x": {
+      "url": "/images/charmville/cache/assets/5f7a1ff3e6e68132ea1a89b19a4f27f6119c48b3704b19eff72ac4fae828c104.png",
+      "sha256": "5f7a1ff3e6e68132ea1a89b19a4f27f6119c48b3704b19eff72ac4fae828c104",
+      "bytes": 177453,
+      "width": 768,
+      "height": 576,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/flower-border@3x.png",
+      "authoringSource": "workshop:flowers:source"
+    },
+    "workshop:flowers:model": {
+      "url": "/images/charmville/cache/assets/49d35fb6e799889fe17450056bed5715c9413df9b288fbdb689c888e4115360c.glb",
+      "sha256": "49d35fb6e799889fe17450056bed5715c9413df9b288fbdb689c888e4115360c",
+      "bytes": 1193624,
+      "mime": "model/gltf-binary",
+      "source": "/images/charmville/workshop/flower-border.glb",
+      "authoringSource": "workshop:flowers:source"
+    },
+    "workshop:orchard:image": {
+      "url": "/images/charmville/cache/assets/a74211eacfa017e382c910dcf2eee6f410273db172a6ccf83700eb60881a6126.png",
+      "sha256": "a74211eacfa017e382c910dcf2eee6f410273db172a6ccf83700eb60881a6126",
+      "bytes": 37061,
+      "width": 256,
+      "height": 192,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/orchard-tree.png",
+      "authoringSource": "workshop:orchard:source"
+    },
+    "workshop:orchard:image3x": {
+      "url": "/images/charmville/cache/assets/3bc8be6ff296247d60ae17ce5e32f602b9b02d0530c31dbb5cfe6b234815b622.png",
+      "sha256": "3bc8be6ff296247d60ae17ce5e32f602b9b02d0530c31dbb5cfe6b234815b622",
+      "bytes": 322097,
+      "width": 768,
+      "height": 576,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/orchard-tree@3x.png",
+      "authoringSource": "workshop:orchard:source"
+    },
+    "workshop:orchard:model": {
+      "url": "/images/charmville/cache/assets/e006baeb1c0ebaff38a4a21a27304d0039c0b47237d8b70765de40b640ec74f3.glb",
+      "sha256": "e006baeb1c0ebaff38a4a21a27304d0039c0b47237d8b70765de40b640ec74f3",
+      "bytes": 866612,
+      "mime": "model/gltf-binary",
+      "source": "/images/charmville/workshop/orchard-tree.glb",
+      "authoringSource": "workshop:orchard:source"
+    },
+    "workshop:turf:image": {
+      "url": "/images/charmville/cache/assets/da3e399df45966dada0d47fe7b13fd2084fb6c704fe29e2317613cddcb2ffc6a.png",
+      "sha256": "da3e399df45966dada0d47fe7b13fd2084fb6c704fe29e2317613cddcb2ffc6a",
+      "bytes": 285818,
+      "width": 512,
+      "height": 512,
+      "mime": "image/png",
+      "source": "/images/charmville/workshop/clover-turf.png",
+      "authoringSource": "workshop:turf:source"
+    }
+  },
+  "revision": "8e21ff26b25e5d7d739df04f91a653dda2ee0fd128122e07ef65f6e903b80b78"
+}

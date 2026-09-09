@@ -1,0 +1,11 @@
+{
+  "frameWidth": 128,
+  "frameHeight": 160,
+  "directions": 8,
+  "actions": {
+    "idle": 1,
+    "walk": 8,
+    "pickup": 8
+  },
+  "encoding": "lossless WebP"
+}

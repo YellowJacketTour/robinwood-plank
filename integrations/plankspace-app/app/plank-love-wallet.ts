@@ -1,5 +1,7 @@
 "use client";
 
+import { localPlaytestWallet } from "@/lib/charmville/local-playtest-client";
+
 export type PlankLoveWalletState = {
   address: string | null;
   chainId: number | null;
@@ -35,6 +37,8 @@ function request(method: Method, payload?: { address?: string; message?: string;
 }
 
 export async function getPlankLoveWalletState():Promise<PlankLoveWalletState> {
+  const local = localPlaytestWallet();
+  if (local) return {address:local,chainId:null,status:"connected",isConnected:true};
   const result = await request("getState").catch(()=>({} as Result));
   if(result.state?.address){rememberWallet(result.state.address);return result.state}
   const address=cachedWallet();
@@ -42,6 +46,8 @@ export async function getPlankLoveWalletState():Promise<PlankLoveWalletState> {
 }
 
 export async function connectPlankLoveWallet() {
+  const local = localPlaytestWallet();
+  if (local) return local;
   const current=await request("getState").catch(()=>({} as Result)),connected=current.address||current.state?.address;
   if(connected){rememberWallet(connected);return connected.toLowerCase()}
   const remembered=cachedWallet();
@@ -88,11 +94,13 @@ export function subscribePlankLoveWalletState(
   if (typeof window === "undefined") return () => {};
 
   const handleState = (event: Event) => {
+    if (localPlaytestWallet()) return;
     const detail = (event as CustomEvent<PlankLoveWalletState>).detail;
     if (detail){if(detail.address)rememberWallet(detail.address);listener(detail)}
   };
 
   const handleResponse = (event: Event) => {
+    if (localPlaytestWallet()) return;
     const detail = (event as CustomEvent<{
       result?: { state?: PlankLoveWalletState };
     }>).detail;

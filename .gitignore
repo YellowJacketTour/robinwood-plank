@@ -92,3 +92,7 @@ test/e2e/.casino-keeper.pid
 # Local visual iteration captures; durable findings live in docs.
 .dream-loop/
 .charmville-*.png
+
+# Local Charmville diagnostics; durable verification is recorded in the handoff.
+.charmville-*.log
+.charmville-*-lint.json

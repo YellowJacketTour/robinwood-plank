@@ -1,0 +1,623 @@
+{
+  "source": "https://github.com/nocktoshi/memoji-market/blob/e4a2d1440c2a283cea6cedaa1147fca49d187502/src/constants/index.ts",
+  "network": "osmo-test-5; historical/reference registry, not verified live Unicorn mainnet inventory",
+  "count": 77,
+  "entries": [
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ualien",
+      "name": "ualien",
+      "maxSupplyRaw": "510000000000",
+      "glyph": "👽",
+      "listed": true,
+      "poolId": "1175"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ubear",
+      "name": "ubear",
+      "maxSupplyRaw": "400000000000000",
+      "glyph": "🐻",
+      "listed": true,
+      "poolId": "1176"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ubearhearth",
+      "name": "ubearhearth",
+      "maxSupplyRaw": "100000000000",
+      "glyph": "🐻❤️",
+      "listed": true,
+      "poolId": "1177"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ubitjaks",
+      "name": "ubitjaks",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🏳️‍⚧️",
+      "listed": true,
+      "poolId": "1171"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ublackflag",
+      "name": "ublackflag",
+      "maxSupplyRaw": "69000000000000000",
+      "glyph": "🏴",
+      "listed": true,
+      "poolId": "1178"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ublissful",
+      "name": "ublissful",
+      "maxSupplyRaw": "60000000000000",
+      "glyph": "(｡◕‿‿◕｡)",
+      "listed": true,
+      "poolId": "1179"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ublowfish",
+      "name": "ublowfish",
+      "maxSupplyRaw": "210000000000000",
+      "glyph": "🐡",
+      "listed": true,
+      "poolId": "1180"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ubrainlet",
+      "name": "ubrainlet",
+      "maxSupplyRaw": "55085999999982604000",
+      "glyph": "🧠🤏",
+      "listed": true,
+      "poolId": "1181"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ubugjuice",
+      "name": "ubugjuice",
+      "maxSupplyRaw": "8525352329742000",
+      "glyph": "🪲🧃",
+      "listed": true,
+      "poolId": "1182"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucash",
+      "name": "ucash",
+      "maxSupplyRaw": "2330000000000000000",
+      "glyph": "💸",
+      "listed": true,
+      "poolId": "1183"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucat",
+      "name": "ucat",
+      "maxSupplyRaw": "390000000000000000",
+      "glyph": "🐱",
+      "listed": true,
+      "poolId": "1184"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uchains",
+      "name": "uchains",
+      "maxSupplyRaw": "100000000000000",
+      "glyph": "🙍⛓️",
+      "listed": true,
+      "poolId": "1185"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uchick",
+      "name": "uchick",
+      "maxSupplyRaw": "10000000000000",
+      "glyph": "🐤",
+      "listed": true,
+      "poolId": "1186"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uchina",
+      "name": "uchina",
+      "maxSupplyRaw": "1412000000000000",
+      "glyph": "🇨🇳",
+      "listed": true,
+      "poolId": "1187"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uchurchcrown",
+      "name": "uchurchcrown",
+      "maxSupplyRaw": "2002000000",
+      "glyph": "👑",
+      "listed": true,
+      "poolId": "1234"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uclown",
+      "name": "uclown",
+      "maxSupplyRaw": "420000000000000",
+      "glyph": "🤡",
+      "listed": true,
+      "poolId": "1188"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucoconutdoggy",
+      "name": "ucoconutdoggy",
+      "maxSupplyRaw": "316040021801000000",
+      "glyph": "🥥🐶",
+      "listed": true,
+      "poolId": "1238"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucorn",
+      "name": "ucorn",
+      "maxSupplyRaw": "21000000000000",
+      "glyph": "🌽",
+      "listed": true,
+      "poolId": "1189"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucrown",
+      "name": "ucrown",
+      "maxSupplyRaw": "1000000",
+      "glyph": "👑",
+      "listed": true,
+      "poolId": "1174"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ucrystalball",
+      "name": "ucrystalball",
+      "maxSupplyRaw": "100000000000000000",
+      "glyph": "🔮",
+      "listed": true,
+      "poolId": "1190"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/udiamond",
+      "name": "udiamond",
+      "maxSupplyRaw": "1000000000",
+      "glyph": "💎",
+      "listed": true,
+      "poolId": "1191"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/udice",
+      "name": "udice",
+      "maxSupplyRaw": "7777777777777",
+      "glyph": "🎲",
+      "listed": true,
+      "poolId": "1192"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/udog",
+      "name": "udog",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🐶",
+      "listed": true,
+      "poolId": "1193"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/udogwifgun",
+      "name": "udogwifgun",
+      "maxSupplyRaw": "77088999999499000",
+      "glyph": "🐶🔫",
+      "listed": true,
+      "poolId": "1194"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ueggplant",
+      "name": "ueggplant",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🍆",
+      "listed": true,
+      "poolId": "1195"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ueightball",
+      "name": "ueightball",
+      "maxSupplyRaw": "888888888888888",
+      "glyph": "🎱",
+      "listed": true,
+      "poolId": "1196"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uenvelop",
+      "name": "uenvelop",
+      "maxSupplyRaw": "777777777777777",
+      "glyph": "✉️",
+      "listed": true,
+      "poolId": "1197"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ufahrenheit",
+      "name": "ufahrenheit",
+      "maxSupplyRaw": "451000000000000000",
+      "glyph": "🔥",
+      "listed": true,
+      "poolId": "1198"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ufoose",
+      "name": "ufoose",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🐸🙂",
+      "listed": true,
+      "poolId": "1170"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ufrog",
+      "name": "ufrog",
+      "maxSupplyRaw": "69000000000000000",
+      "glyph": "🐸",
+      "listed": true,
+      "poolId": "1199"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ugirl",
+      "name": "ugirl",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🎀",
+      "listed": true,
+      "poolId": "1200"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ugobber",
+      "name": "ugobber",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🍬",
+      "listed": true,
+      "poolId": "1167"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ugun",
+      "name": "ugun",
+      "maxSupplyRaw": "1337000000000000",
+      "glyph": "🔫♡",
+      "listed": true,
+      "poolId": "1201"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uhammer",
+      "name": "uhammer",
+      "maxSupplyRaw": "168554000000",
+      "glyph": "🔨",
+      "listed": true,
+      "poolId": "1202"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uharambe",
+      "name": "uharambe",
+      "maxSupplyRaw": "28052016000000",
+      "glyph": "🦍🍌",
+      "listed": true,
+      "poolId": "1203"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uheart",
+      "name": "uheart",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "❤️❤️❤️❤️❤️",
+      "listed": true,
+      "poolId": "1237"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uinternet",
+      "name": "uinternet",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🛜",
+      "listed": true,
+      "poolId": "1164"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ujeet",
+      "name": "ujeet",
+      "maxSupplyRaw": "650459156998150000",
+      "glyph": "🪯",
+      "listed": true,
+      "poolId": "1204"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ujewnicorn",
+      "name": "ujewnicorn",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🇮🇱🐴",
+      "listed": true,
+      "poolId": "1168"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uknightcore",
+      "name": "uknightcore",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "⚔️",
+      "listed": true,
+      "poolId": "1169"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ulain",
+      "name": "ulain",
+      "maxSupplyRaw": "69000000000000",
+      "glyph": "",
+      "listed": true,
+      "poolId": "1236"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ulawb",
+      "name": "ulawb",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🦞",
+      "listed": true,
+      "poolId": "1173"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/umeat",
+      "name": "umeat",
+      "maxSupplyRaw": "100000000000000",
+      "glyph": "🥩",
+      "listed": true,
+      "poolId": "1205"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/umog",
+      "name": "umog",
+      "maxSupplyRaw": "420690000000000000000",
+      "glyph": "😹",
+      "listed": true,
+      "poolId": "1206"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/umondo",
+      "name": "umondo",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "",
+      "listed": true,
+      "poolId": "1165"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/umoon",
+      "name": "umoon",
+      "maxSupplyRaw": "384400000000",
+      "glyph": "🌕",
+      "listed": true,
+      "poolId": "1207"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uorwell",
+      "name": "uorwell",
+      "maxSupplyRaw": "1984000000000000",
+      "glyph": "🐷",
+      "listed": true,
+      "poolId": "1208"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upaper",
+      "name": "upaper",
+      "maxSupplyRaw": "1000000000000",
+      "glyph": "📄",
+      "listed": true,
+      "poolId": "1209"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upeace",
+      "name": "upeace",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "☮️",
+      "listed": true,
+      "poolId": "1210"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upeach",
+      "name": "upeach",
+      "maxSupplyRaw": "80085000000",
+      "glyph": "🍑",
+      "listed": true,
+      "poolId": "1211"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upi",
+      "name": "upi",
+      "maxSupplyRaw": "314159265358979",
+      "glyph": "🥧",
+      "listed": true,
+      "poolId": "1212"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uplaceholder",
+      "name": "uplaceholder",
+      "maxSupplyRaw": "100000000000000",
+      "glyph": "placeholder",
+      "listed": true,
+      "poolId": "1213"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upoo",
+      "name": "upoo",
+      "maxSupplyRaw": "7000000000000000",
+      "glyph": "💩",
+      "listed": true,
+      "poolId": "1214"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upretzel",
+      "name": "upretzel",
+      "maxSupplyRaw": "30000000000000",
+      "glyph": "🥨",
+      "listed": true,
+      "poolId": "1215"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upurpdildo",
+      "name": "upurpdildo",
+      "maxSupplyRaw": "1000000000",
+      "glyph": "🟣🍆",
+      "listed": true,
+      "poolId": "1235"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upurplephat",
+      "name": "upurplephat",
+      "maxSupplyRaw": "1000000000",
+      "glyph": "💜🎉",
+      "listed": true,
+      "poolId": "1162"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/upurplepill",
+      "name": "upurplepill",
+      "maxSupplyRaw": "150000000000",
+      "glyph": "💜💊",
+      "listed": true,
+      "poolId": "1216"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uretard",
+      "name": "uretard",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "🫵🤡",
+      "listed": true,
+      "poolId": "1217"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/urock",
+      "name": "urock",
+      "maxSupplyRaw": "1000000000000",
+      "glyph": "🪨",
+      "listed": true,
+      "poolId": "1218"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/urocket",
+      "name": "urocket",
+      "maxSupplyRaw": "420000000000000000",
+      "glyph": "🚀",
+      "listed": true,
+      "poolId": "1219"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/usa",
+      "name": "usa",
+      "maxSupplyRaw": "333333333333333",
+      "glyph": "🇺🇸",
+      "listed": true,
+      "poolId": "1220"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uscisors",
+      "name": "uscisors",
+      "maxSupplyRaw": "1000000000000",
+      "glyph": "✂️",
+      "listed": true,
+      "poolId": "1221"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ushot",
+      "name": "ushot",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "💉🧬",
+      "listed": true,
+      "poolId": "1222"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/ushrimp",
+      "name": "ushrimp",
+      "maxSupplyRaw": "210000000000000000",
+      "glyph": "🦐",
+      "listed": true,
+      "poolId": "1223"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uskull",
+      "name": "uskull",
+      "maxSupplyRaw": "10000000000000",
+      "glyph": "💀",
+      "listed": true,
+      "poolId": "1224"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/usparkle",
+      "name": "usparkle",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "✨",
+      "listed": true,
+      "poolId": "1225"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uspx",
+      "name": "uspx",
+      "maxSupplyRaw": "69000000000000",
+      "glyph": "📈",
+      "listed": true,
+      "poolId": "1163"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/usushi",
+      "name": "usushi",
+      "maxSupplyRaw": "50000000000000",
+      "glyph": "🍣",
+      "listed": true,
+      "poolId": "1226"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/usyrupcity",
+      "name": "usyrupcity",
+      "maxSupplyRaw": "42069000000000",
+      "glyph": "🍇🥤",
+      "listed": true,
+      "poolId": "1166"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/utaco",
+      "name": "utaco",
+      "maxSupplyRaw": "300000000000000",
+      "glyph": "🌮",
+      "listed": true,
+      "poolId": "1227"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/utaiwan",
+      "name": "utaiwan",
+      "maxSupplyRaw": "23570000000000",
+      "glyph": "🇹🇼",
+      "listed": true,
+      "poolId": "1228"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/utang",
+      "name": "utang",
+      "maxSupplyRaw": "420000000000",
+      "glyph": "🍊",
+      "listed": true,
+      "poolId": "1229"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/utest",
+      "name": "utest",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "test",
+      "listed": true,
+      "poolId": "1230"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uvril",
+      "name": "uvril",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "ϟ",
+      "listed": true,
+      "poolId": "1233"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uwatermelon",
+      "name": "uwatermelon",
+      "maxSupplyRaw": "3000000000000000",
+      "glyph": "🍉",
+      "listed": true,
+      "poolId": "1231"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uwuxd",
+      "name": "uwuxd",
+      "maxSupplyRaw": "1000000000000000",
+      "glyph": "😆",
+      "listed": true,
+      "poolId": "1232"
+    },
+    {
+      "denomTemplate": "factory/${FACTORY_DEPLOYER}/uzirconia",
+      "name": "uzirconia",
+      "maxSupplyRaw": "1000000000",
+      "glyph": "◈",
+      "listed": true,
+      "poolId": "1172"
+    }
+  ]
+}

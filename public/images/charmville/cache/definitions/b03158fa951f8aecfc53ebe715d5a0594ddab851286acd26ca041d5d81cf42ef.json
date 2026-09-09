@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "authority": "server-receipts-and-yard-snapshots",
+  "faces": [
+    {
+      "id": "stalk",
+      "portrait": "face:stalk",
+      "cropAvailable": true
+    },
+    {
+      "id": "splinter",
+      "portrait": "face:splinter",
+      "cropAvailable": true
+    },
+    {
+      "id": "knock",
+      "portrait": "face:knock",
+      "cropAvailable": false
+    },
+    {
+      "id": "hum",
+      "portrait": "face:hum",
+      "cropAvailable": false
+    },
+    {
+      "id": "pith",
+      "portrait": "face:pith",
+      "cropAvailable": false
+    },
+    {
+      "id": "gleam",
+      "portrait": "face:gleam",
+      "cropAvailable": false
+    },
+    {
+      "id": "knot",
+      "portrait": "face:knot",
+      "cropAvailable": false
+    }
+  ],
+  "crops": [
+    {
+      "id": "stalk",
+      "stages": {
+        "seedling": "crop:stalk:seedling",
+        "growing": "crop:stalk:growing",
+        "ripe": "crop:stalk:ripe"
+      },
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ],
+      "frames": 8,
+      "fps": 8
+    },
+    {
+      "id": "splinter",
+      "stages": {
+        "seedling": "crop:splinter:seedling",
+        "growing": "crop:splinter:growing",
+        "ripe": "crop:splinter:ripe"
+      },
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ],
+      "frames": 8,
+      "fps": 8
+    }
+  ],
+  "geometry": {
+    "projection": "orthographic-2:1",
+    "tileSize": [
+      80,
+      40
+    ],
+    "origin": [
+      360,
+      70
+    ],
+    "sceneryBounds": [
+      0,
+      0,
+      8,
+      8
+    ],
+    "cropFootprint": [
+      2,
+      3,
+      7,
+      6
+    ],
+    "crop": {
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ]
+    },
+    "scenery": {
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ]
+    },
+    "miniature": {
+      "frameSize": [
+        256,
+        512
+      ],
+      "anchor": [
+        128,
+        448
+      ]
+    }
+  },
+  "maps": [
+    {
+      "id": "porch:starter",
+      "plots": [
+        {
+          "id": "plot:0",
+          "plotIndex": 0,
+          "cell": [
+            2.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:1",
+          "plotIndex": 1,
+          "cell": [
+            4.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:2",
+          "plotIndex": 2,
+          "cell": [
+            6.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:3",
+          "plotIndex": 3,
+          "cell": [
+            2.5,
+            5.5
+          ]
+        },
+        {
+          "id": "plot:4",
+          "plotIndex": 4,
+          "cell": [
+            4.5,
+            5.5
+          ]
+        },
+        {
+          "id": "plot:5",
+          "plotIndex": 5,
+          "cell": [
+            6.5,
+            5.5
+          ]
+        }
+      ]
+    }
+  ],
+  "animations": [
+    {
+      "id": "idle",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 1,
+      "fps": 8,
+      "directions": [
+        "character:idle:0",
+        "character:idle:1",
+        "character:idle:2",
+        "character:idle:3",
+        "character:idle:4",
+        "character:idle:5",
+        "character:idle:6",
+        "character:idle:7"
+      ],
+      "loop": true
+    },
+    {
+      "id": "walk",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 8,
+      "fps": 8,
+      "directions": [
+        "character:walk:0",
+        "character:walk:1",
+        "character:walk:2",
+        "character:walk:3",
+        "character:walk:4",
+        "character:walk:5",
+        "character:walk:6",
+        "character:walk:7"
+      ],
+      "loop": true
+    },
+    {
+      "id": "pickup",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 8,
+      "fps": 8,
+      "directions": [
+        "character:pickup:0",
+        "character:pickup:1",
+        "character:pickup:2",
+        "character:pickup:3",
+        "character:pickup:4",
+        "character:pickup:5",
+        "character:pickup:6",
+        "character:pickup:7"
+      ],
+      "loop": false
+    }
+  ],
+  "stamps": {
+    "enabledFaces": [
+      "stalk"
+    ],
+    "accounting": "accepted-server-receipts",
+    "quantities": "server-snapshot"
+  },
+  "landValue": {
+    "status": "not-implemented",
+    "formula": null
+  },
+  "authoring": {
+    "crops": "scripts/charmville/render_crops.py",
+    "character": "scripts/charmville/render_sourced_character.py",
+    "portraits": "scripts/charmville/render_charms.py",
+    "credits": "/images/charmville/CREDITS.html",
+    "gltf": null
+  }
+}

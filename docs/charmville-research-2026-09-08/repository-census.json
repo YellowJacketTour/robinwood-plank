@@ -1,0 +1,197 @@
+{
+  "date": "2026-09-08",
+  "scope": "Selected relevant repositories; counts are filenames, not visual inspection or proof of asset completeness",
+  "repos": [
+    {
+      "repo": "FV-Replowed/fv-replowed",
+      "url": "https://github.com/FV-Replowed/fv-replowed",
+      "commit": "01ece56b75ed578b62396a97705f5333831f41d7",
+      "description": "The definitive FarmVille 1 revival project",
+      "license": null,
+      "truncated": false,
+      "files": 908,
+      "artFiles": 56,
+      "manifests": [
+        "README.md",
+        "composer.json",
+        "package.json",
+        "public/farmville/flashservices/Examples/Php/readme.txt",
+        "public/farmville/flashservices/composer.json",
+        "public/farmville/flashservices/license.txt"
+      ]
+    },
+    {
+      "repo": "AcidCaos/farmvillage",
+      "url": "https://github.com/AcidCaos/farmvillage",
+      "commit": "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+      "description": "The FarmVille 1 preservation project",
+      "license": "GPL-3.0",
+      "truncated": false,
+      "files": 69,
+      "artFiles": 20,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "requirements.txt",
+        "warc_extractor/README.txt"
+      ]
+    },
+    {
+      "repo": "Kristianfriis/FarmVille",
+      "url": "https://github.com/Kristianfriis/FarmVille",
+      "commit": "9293fd7ca9a354f2fef16a1712f0c6678ed34ba4",
+      "description": "FarmVille implemented in Blazor WebAssembly",
+      "license": null,
+      "truncated": false,
+      "files": 167,
+      "artFiles": 49,
+      "manifests": [
+        "FarmVille.Client/FarmVille.Client.csproj",
+        "FarmVille.Client/wwwroot/assets/icons/web/README.txt",
+        "README.md"
+      ]
+    },
+    {
+      "repo": "joeyinbox/world-of-farmcraft",
+      "url": "https://github.com/joeyinbox/world-of-farmcraft",
+      "commit": "c1d7a5728aac47796aa36fef84d5eca907eac3d3",
+      "description": "An online multiplayer 3D isometric farm game built with Node.js",
+      "license": "GPL-2.0",
+      "truncated": false,
+      "files": 240,
+      "artFiles": 192,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "package.json"
+      ]
+    },
+    {
+      "repo": "fariazz/html5-farming-demo",
+      "url": "https://github.com/fariazz/html5-farming-demo",
+      "commit": "2048eed41e78eb0184378b392ecf852dfa66d021",
+      "description": "a simple HTML5 farming game demo",
+      "license": null,
+      "truncated": false,
+      "files": 17,
+      "artFiles": 10,
+      "manifests": [
+        "readme.txt"
+      ]
+    },
+    {
+      "repo": "CodingQuests/FarmVille-Game",
+      "url": "https://github.com/CodingQuests/FarmVille-Game",
+      "commit": "7efca2a2d8223a107a2285c2be99380dd91ee559",
+      "description": "Farming Game for youtube Tutorials",
+      "license": "MIT",
+      "truncated": false,
+      "files": 115,
+      "artFiles": 36,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "UI/Free Inventory/License.txt",
+        "project.godot"
+      ]
+    },
+    {
+      "repo": "gadget-hq/2d-farming-game",
+      "url": "https://github.com/gadget-hq/2d-farming-game",
+      "commit": "13d602e259fde7fdebaefae132121ecf7e5eae2d",
+      "description": "A 2D farming game built with Godot.  Built for video series Building a 2D Farming Game from ZERO",
+      "license": "MIT",
+      "truncated": false,
+      "files": 494,
+      "artFiles": 218,
+      "manifests": [
+        "Assets/Cursors/License.txt",
+        "LICENSE",
+        "README.md",
+        "project.godot"
+      ]
+    },
+    {
+      "repo": "dacousb/feiok",
+      "url": "https://github.com/dacousb/feiok",
+      "commit": "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+      "description": "🌾 A vibrant, isometric, multiplayer-centric farming game written in Go",
+      "license": "MIT",
+      "truncated": false,
+      "files": 26,
+      "artFiles": 11,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "go.mod"
+      ]
+    },
+    {
+      "repo": "AmbientRun/flowerpot",
+      "url": "https://github.com/AmbientRun/flowerpot",
+      "commit": "db9b93f14d76e9df2547231f9db1a255dbaa3197",
+      "description": "A cooperative, multiplayer survival farming game built with Ambient.",
+      "license": null,
+      "truncated": false,
+      "files": 317,
+      "artFiles": 225,
+      "manifests": [
+        "README.md",
+        "core/player/assets/CREDITS.txt"
+      ]
+    },
+    {
+      "repo": "nocktoshi/memoji-market",
+      "url": "https://github.com/nocktoshi/memoji-market",
+      "commit": "e4a2d1440c2a283cea6cedaa1147fca49d187502",
+      "description": "Trade all the memojis.",
+      "license": "GPL-3.0",
+      "truncated": false,
+      "files": 628,
+      "artFiles": 421,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "package.json"
+      ]
+    },
+    {
+      "repo": "OpenRCT2/OpenGraphics",
+      "url": "https://github.com/OpenRCT2/OpenGraphics",
+      "commit": "930b0140685f85db92147af832080e8df12d8d4e",
+      "description": "A project to create free replacements for the graphics in Rollercoaster Tycoon 2",
+      "license": "GPL-3.0",
+      "truncated": false,
+      "files": 91,
+      "artFiles": 41,
+      "manifests": [
+        "README.md",
+        "license.txt",
+        "openrct2/README.md",
+        "rct2/README.md",
+        "rct2/rides/vehicles/BoatHire/Readme.txt",
+        "rct2/rides/vehicles/Corkscrew/Readme.txt",
+        "rct2/rides/vehicles/GoKarts/Readme.txt",
+        "rct2/rides/vehicles/Monorail/Readme.txt"
+      ]
+    },
+    {
+      "repo": "OpenTTD/OpenGFX2",
+      "url": "https://github.com/OpenTTD/OpenGFX2",
+      "commit": "7a17fb370440aed7f2586715d606e9fe190b9dd3",
+      "description": "Base graphics set for OpenTTD",
+      "license": "GPL-2.0",
+      "truncated": false,
+      "files": 2400,
+      "artFiles": 1283,
+      "manifests": [
+        "LICENSE",
+        "README.md",
+        "baseset/README.md",
+        "baseset/nml/readme.md",
+        "credits.md",
+        "graphics/README.md"
+      ]
+    }
+  ]
+}

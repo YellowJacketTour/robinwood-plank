@@ -1,0 +1,482 @@
+[
+  {
+    "description": "Implementation of a survival game inspired by Stardew Valley, in which the player becomes a shipwrecked man on an island and has to provide himself with the means of survival, a game developed using Unity.",
+    "fullName": "wkoziel/2D-Farming-Game",
+    "language": "ASP.NET",
+    "stargazersCount": 125,
+    "updatedAt": "2026-09-02T09:27:41Z",
+    "url": "https://github.com/wkoziel/2D-Farming-Game"
+  },
+  {
+    "description": "Multiplayer ascii-graphics based RPG/farming game",
+    "fullName": "jmdejong/Asciifarm",
+    "language": "Python",
+    "stargazersCount": 83,
+    "updatedAt": "2026-07-04T10:00:07Z",
+    "url": "https://github.com/jmdejong/Asciifarm"
+  },
+  {
+    "description": "A farming game built upon Ethereum platform.",
+    "fullName": "johnhckuo/Block-Farm",
+    "language": "JavaScript",
+    "stargazersCount": 71,
+    "updatedAt": "2026-08-09T01:16:04Z",
+    "url": "https://github.com/johnhckuo/Block-Farm"
+  },
+  {
+    "description": "Keyboard farming game - gamify your typing with crops, animals, and golden variants",
+    "fullName": "t42ji2ji/keyfarm",
+    "language": "TypeScript",
+    "stargazersCount": 71,
+    "updatedAt": "2026-06-24T02:49:55Z",
+    "url": "https://github.com/t42ji2ji/keyfarm"
+  },
+  {
+    "description": "Clayton telegram farming game auto play game and auto farming bot",
+    "fullName": "Widiskel/clayton-bot",
+    "language": "JavaScript",
+    "stargazersCount": 35,
+    "updatedAt": "2026-08-18T08:11:06Z",
+    "url": "https://github.com/Widiskel/clayton-bot"
+  },
+  {
+    "description": "A multiplayer farming game with a strong economy built using emerging Rust tech",
+    "fullName": "hackagotchi/hackagotchi",
+    "language": "Rust",
+    "stargazersCount": 33,
+    "updatedAt": "2026-08-25T23:12:01Z",
+    "url": "https://github.com/hackagotchi/hackagotchi"
+  },
+  {
+    "description": "Farming Game for youtube Tutorials",
+    "fullName": "CodingQuests/FarmVille-Game",
+    "language": "GDScript",
+    "stargazersCount": 32,
+    "updatedAt": "2026-02-13T12:09:48Z",
+    "url": "https://github.com/CodingQuests/FarmVille-Game"
+  },
+  {
+    "description": "Our VR Farming game developed using Unity for the Oculus Quest :) ",
+    "fullName": "CS4240-Group6/ProjectNurture",
+    "language": "C#",
+    "stargazersCount": 27,
+    "updatedAt": "2026-03-21T02:17:23Z",
+    "url": "https://github.com/CS4240-Group6/ProjectNurture"
+  },
+  {
+    "description": "A simple CLI idle farming game written in Rust",
+    "fullName": "indium114/termfarm",
+    "language": "Rust",
+    "stargazersCount": 26,
+    "updatedAt": "2026-09-03T10:36:36Z",
+    "url": "https://github.com/indium114/termfarm"
+  },
+  {
+    "description": "a simple HTML5 farming game demo",
+    "fullName": "fariazz/html5-farming-demo",
+    "language": "JavaScript",
+    "stargazersCount": 23,
+    "updatedAt": "2023-11-09T23:19:43Z",
+    "url": "https://github.com/fariazz/html5-farming-demo"
+  },
+  {
+    "description": "A fully moddable Unity farming game",
+    "fullName": "xentripetal/ProjectVerse",
+    "language": "C#",
+    "stargazersCount": 23,
+    "updatedAt": "2026-08-27T20:50:39Z",
+    "url": "https://github.com/xentripetal/ProjectVerse"
+  },
+  {
+    "description": "AI farm — a text-only, gacha-style farming game built for AIs (source-available noncommercial edition)",
+    "fullName": "tutusagi/aifarm-oss",
+    "language": "TypeScript",
+    "stargazersCount": 23,
+    "updatedAt": "2026-08-25T17:35:19Z",
+    "url": "https://github.com/tutusagi/aifarm-oss"
+  },
+  {
+    "description": "🌾 A vibrant, isometric, multiplayer-centric farming game written in Go",
+    "fullName": "dacousb/feiok",
+    "language": "Go",
+    "stargazersCount": 19,
+    "updatedAt": "2025-10-10T18:13:35Z",
+    "url": "https://github.com/dacousb/feiok"
+  },
+  {
+    "description": "ISSUE TRACKER - RT Farming Game Farmulty",
+    "fullName": "Farmulty/Farmulty",
+    "language": "",
+    "stargazersCount": 18,
+    "updatedAt": "2025-05-12T23:07:02Z",
+    "url": "https://github.com/Farmulty/Farmulty"
+  },
+  {
+    "description": "Top-down pixel art farming game made in Godot 4, with mechanics trying to recreate real-life concepts like nitrogen cycle or crop rotation.",
+    "fullName": "elliotfontaine/untitled-farming-sim",
+    "language": "GDScript",
+    "stargazersCount": 15,
+    "updatedAt": "2026-08-31T05:36:07Z",
+    "url": "https://github.com/elliotfontaine/untitled-farming-sim"
+  },
+  {
+    "description": "Farmer's Market, a top-down competitive farming game",
+    "fullName": "ucsd-cse125-sp22/cse125-sp22-group3",
+    "language": "C++",
+    "stargazersCount": 14,
+    "updatedAt": "2024-09-08T23:23:55Z",
+    "url": "https://github.com/ucsd-cse125-sp22/cse125-sp22-group3"
+  },
+  {
+    "description": "A small farming game made with Love2d.",
+    "fullName": "lukky-nl/Tiny-Farm",
+    "language": "Lua",
+    "stargazersCount": 13,
+    "updatedAt": "2025-12-14T02:13:32Z",
+    "url": "https://github.com/lukky-nl/Tiny-Farm"
+  },
+  {
+    "description": "",
+    "fullName": "dylanebert/FarmingGame",
+    "language": "ShaderLab",
+    "stargazersCount": 11,
+    "updatedAt": "2024-04-02T17:40:28Z",
+    "url": "https://github.com/dylanebert/FarmingGame"
+  },
+  {
+    "description": "A farming game about grass made with Godot",
+    "fullName": "Nokorpo/infinigrass",
+    "language": "GDScript",
+    "stargazersCount": 11,
+    "updatedAt": "2026-05-11T05:57:23Z",
+    "url": "https://github.com/Nokorpo/infinigrass"
+  },
+  {
+    "description": "A cooperative, multiplayer survival farming game built with Ambient.",
+    "fullName": "AmbientRun/flowerpot",
+    "language": "Rust",
+    "stargazersCount": 11,
+    "updatedAt": "2025-04-26T12:47:22Z",
+    "url": "https://github.com/AmbientRun/flowerpot"
+  },
+  {
+    "description": "The most realistic, but least fun farming game (everything is set to real life, so you can wait a year in real time for wheat to grow and harvest, instead of 2 minutes more or less)",
+    "fullName": "seanpm2001/Hyper-realistic-farm-simulator",
+    "language": "Python",
+    "stargazersCount": 11,
+    "updatedAt": "2026-08-30T21:16:20Z",
+    "url": "https://github.com/seanpm2001/Hyper-realistic-farm-simulator"
+  },
+  {
+    "description": "Farming game made in Unity",
+    "fullName": "viskakov/Farm",
+    "language": "C#",
+    "stargazersCount": 8,
+    "updatedAt": "2026-03-11T16:01:34Z",
+    "url": "https://github.com/viskakov/Farm"
+  },
+  {
+    "description": "👩‍🌾 An arcade farming game",
+    "fullName": "cxong/GrowQuickly",
+    "language": "Lua",
+    "stargazersCount": 8,
+    "updatedAt": "2025-10-19T19:39:00Z",
+    "url": "https://github.com/cxong/GrowQuickly"
+  },
+  {
+    "description": "2D game farming game using godot",
+    "fullName": "Besufikad17/DigitalAcheda",
+    "language": "GDScript",
+    "stargazersCount": 8,
+    "updatedAt": "2026-04-05T17:30:12Z",
+    "url": "https://github.com/Besufikad17/DigitalAcheda"
+  },
+  {
+    "description": "Simple farming game based of games like Stardew Valley and Harvest Moon ",
+    "fullName": "gjcarter/Farming-Game",
+    "language": "Java",
+    "stargazersCount": 7,
+    "updatedAt": "2026-06-02T02:40:11Z",
+    "url": "https://github.com/gjcarter/Farming-Game"
+  },
+  {
+    "description": "A framing game made with typscript, phaser and webpack",
+    "fullName": "amcolash/farming-game",
+    "language": "TypeScript",
+    "stargazersCount": 7,
+    "updatedAt": "2024-05-23T05:18:11Z",
+    "url": "https://github.com/amcolash/farming-game"
+  },
+  {
+    "description": "Cozy Farm Game 🌾 A relaxing mobile farming game built with Unity, designed to immerse players in the peaceful life of a farmer.",
+    "fullName": "Le-Lensaki/Lands",
+    "language": "C#",
+    "stargazersCount": 7,
+    "updatedAt": "2025-12-09T11:36:27Z",
+    "url": "https://github.com/Le-Lensaki/Lands"
+  },
+  {
+    "description": "모든걸 농사짓자!",
+    "fullName": "openfarmgame/simple_farming_game",
+    "language": "Java",
+    "stargazersCount": 6,
+    "updatedAt": "2025-12-08T09:15:22Z",
+    "url": "https://github.com/openfarmgame/simple_farming_game"
+  },
+  {
+    "description": "Blockchain Farming Game",
+    "fullName": "droplister/bitcorns.com",
+    "language": "PHP",
+    "stargazersCount": 5,
+    "updatedAt": "2025-09-29T23:31:42Z",
+    "url": "https://github.com/droplister/bitcorns.com"
+  },
+  {
+    "description": "",
+    "fullName": "duydang2002/UnityFarmingGame",
+    "language": "C#",
+    "stargazersCount": 5,
+    "updatedAt": "2025-11-25T08:55:17Z",
+    "url": "https://github.com/duydang2002/UnityFarmingGame"
+  },
+  {
+    "description": "Research game for economic experiment",
+    "fullName": "danilowanner/Cattle-Farming-Game",
+    "language": "JavaScript",
+    "stargazersCount": 5,
+    "updatedAt": "2019-02-07T12:56:05Z",
+    "url": "https://github.com/danilowanner/Cattle-Farming-Game"
+  },
+  {
+    "description": "Prototype of a farming game.",
+    "fullName": "redbluegames/farm-with-friends",
+    "language": "JavaScript",
+    "stargazersCount": 5,
+    "updatedAt": "2022-03-22T08:18:08Z",
+    "url": "https://github.com/redbluegames/farm-with-friends"
+  },
+  {
+    "description": "Web based version of bean farming game",
+    "fullName": "tuchfarber/ThatBeanGame",
+    "language": "Python",
+    "stargazersCount": 5,
+    "updatedAt": "2025-08-21T05:56:28Z",
+    "url": "https://github.com/tuchfarber/ThatBeanGame"
+  },
+  {
+    "description": "A 2D farming game built with Godot.  Built for video series Building a 2D Farming Game from ZERO",
+    "fullName": "gadget-hq/2d-farming-game",
+    "language": "GDScript",
+    "stargazersCount": 5,
+    "updatedAt": "2026-06-22T08:15:18Z",
+    "url": "https://github.com/gadget-hq/2d-farming-game"
+  },
+  {
+    "description": "A farming game made by Unity",
+    "fullName": "Hell-Tractor/Planet-Plant",
+    "language": "C#",
+    "stargazersCount": 5,
+    "updatedAt": "2023-12-23T07:11:05Z",
+    "url": "https://github.com/Hell-Tractor/Planet-Plant"
+  },
+  {
+    "description": "A Discord bot for a farming game with stock market-esque mechanics, built with discord.py",
+    "fullName": "lickorice/shalltear",
+    "language": "Python",
+    "stargazersCount": 4,
+    "updatedAt": "2025-03-19T15:38:52Z",
+    "url": "https://github.com/lickorice/shalltear"
+  },
+  {
+    "description": "A C++ backend prototype for a farming game, built to practice and demonstrate object‑oriented programming (OOP) design.",
+    "fullName": "CakeRemix/farming-game-backend",
+    "language": "C++",
+    "stargazersCount": 4,
+    "updatedAt": "2026-03-12T20:09:04Z",
+    "url": "https://github.com/CakeRemix/farming-game-backend"
+  },
+  {
+    "description": "2D Farming Game made with Unity",
+    "fullName": "giakhanh2711/DreamyG-2D-Game",
+    "language": "C#",
+    "stargazersCount": 4,
+    "updatedAt": "2026-05-26T09:16:00Z",
+    "url": "https://github.com/giakhanh2711/DreamyG-2D-Game"
+  },
+  {
+    "description": "A farming game written entirely in FreakC",
+    "fullName": "FreakC-Foundation/The-Farm-Man",
+    "language": "",
+    "stargazersCount": 4,
+    "updatedAt": "2021-11-24T11:16:08Z",
+    "url": "https://github.com/FreakC-Foundation/The-Farm-Man"
+  },
+  {
+    "description": "A normal farming game, but way, WAY faster",
+    "fullName": "Irbis888/HighSpeedHellFarmer",
+    "language": "",
+    "stargazersCount": 4,
+    "updatedAt": "2026-05-23T21:36:05Z",
+    "url": "https://github.com/Irbis888/HighSpeedHellFarmer"
+  },
+  {
+    "description": "Farming game using NFTs and the ERC1155 token.",
+    "fullName": "Cryptomanben/NFT_game_ERC1155",
+    "language": "JavaScript",
+    "stargazersCount": 4,
+    "updatedAt": "2024-03-22T01:18:48Z",
+    "url": "https://github.com/Cryptomanben/NFT_game_ERC1155"
+  },
+  {
+    "description": "Making a multiplayer farming game in the Roblox game engine",
+    "fullName": "MozarellaMan/RBXFarmGame",
+    "language": "Lua",
+    "stargazersCount": 4,
+    "updatedAt": "2024-11-19T03:35:07Z",
+    "url": "https://github.com/MozarellaMan/RBXFarmGame"
+  },
+  {
+    "description": "A low poly farming game. More like a tech/art demo. Done on a weekend.",
+    "fullName": "PythooonUser/unity-low-poly-farmer",
+    "language": "C#",
+    "stargazersCount": 4,
+    "updatedAt": "2025-09-14T15:47:51Z",
+    "url": "https://github.com/PythooonUser/unity-low-poly-farmer"
+  },
+  {
+    "description": "A fun and relaxing 2d pixel farming game",
+    "fullName": "HuskyDevClub/SundewValley",
+    "language": "JavaScript",
+    "stargazersCount": 3,
+    "updatedAt": "2026-06-08T15:14:55Z",
+    "url": "https://github.com/HuskyDevClub/SundewValley"
+  },
+  {
+    "description": "Farmland is a decentralised yield farming game running on Ethereum",
+    "fullName": "farmland-game/farmland-game.github.io",
+    "language": "HTML",
+    "stargazersCount": 3,
+    "updatedAt": "2024-05-18T11:12:16Z",
+    "url": "https://github.com/farmland-game/farmland-game.github.io"
+  },
+  {
+    "description": "A farming game made with Roblox ",
+    "fullName": "chris-hjelmfelt/RobloxFarmSimulator",
+    "language": "Lua",
+    "stargazersCount": 3,
+    "updatedAt": "2024-07-02T19:58:25Z",
+    "url": "https://github.com/chris-hjelmfelt/RobloxFarmSimulator"
+  },
+  {
+    "description": "Automation tooling for kamigotchi, fully onchain idle farming game. Tools created by Minters Corp. No longer supported.",
+    "fullName": "mintersdev/kamiBot",
+    "language": "JavaScript",
+    "stargazersCount": 3,
+    "updatedAt": "2026-03-09T03:39:15Z",
+    "url": "https://github.com/mintersdev/kamiBot"
+  },
+  {
+    "description": "Farming game using unity",
+    "fullName": "bissha2/FarmingGame",
+    "language": "",
+    "stargazersCount": 3,
+    "updatedAt": "2025-07-03T17:32:43Z",
+    "url": "https://github.com/bissha2/FarmingGame"
+  },
+  {
+    "description": "Farming game demo",
+    "fullName": "zhufree/FarmLite",
+    "language": "GDScript",
+    "stargazersCount": 3,
+    "updatedAt": "2024-11-07T15:51:28Z",
+    "url": "https://github.com/zhufree/FarmLite"
+  },
+  {
+    "description": "Farming Video Game",
+    "fullName": "dvanderzee/farming-game",
+    "language": "JavaScript",
+    "stargazersCount": 3,
+    "updatedAt": "2016-03-03T12:53:29Z",
+    "url": "https://github.com/dvanderzee/farming-game"
+  },
+  {
+    "description": "",
+    "fullName": "tangym27/farming-game",
+    "language": "JavaScript",
+    "stargazersCount": 3,
+    "updatedAt": "2022-12-07T02:35:24Z",
+    "url": "https://github.com/tangym27/farming-game"
+  },
+  {
+    "description": "",
+    "fullName": "DylasCoding/Farming-Game",
+    "language": "ShaderLab",
+    "stargazersCount": 3,
+    "updatedAt": "2025-08-19T13:44:16Z",
+    "url": "https://github.com/DylasCoding/Farming-Game"
+  },
+  {
+    "description": "🌾 Building \"Colheita Feliz\" (Happy Harvest) from scratch in C++ with SDL2 — no engine, no AI. A classic Brazilian farming game (Orkut era) recreated line by line. Full video series on YouTube (in Portuguese): youtube.com/@harlleybastos",
+    "fullName": "davidcreator/colheita-feliz-cpp",
+    "language": "C",
+    "stargazersCount": 3,
+    "updatedAt": "2026-07-04T14:43:24Z",
+    "url": "https://github.com/davidcreator/colheita-feliz-cpp"
+  },
+  {
+    "description": "",
+    "fullName": "Srengsophea/Farming-Game",
+    "language": "TypeScript",
+    "stargazersCount": 3,
+    "updatedAt": "2026-08-23T12:31:30Z",
+    "url": "https://github.com/Srengsophea/Farming-Game"
+  },
+  {
+    "description": "A farming game similar to Stardew Valley!",
+    "fullName": "zackrcarson/MyFarmingGame",
+    "language": "C++",
+    "stargazersCount": 3,
+    "updatedAt": "2022-06-17T03:37:04Z",
+    "url": "https://github.com/zackrcarson/MyFarmingGame"
+  },
+  {
+    "description": "2D Top Down Farming Game",
+    "fullName": "wzqd/Farm",
+    "language": "C#",
+    "stargazersCount": 3,
+    "updatedAt": "2026-02-11T01:24:10Z",
+    "url": "https://github.com/wzqd/Farm"
+  },
+  {
+    "description": "A farming game on IC",
+    "fullName": "wewei/ICFarm",
+    "language": "Motoko",
+    "stargazersCount": 3,
+    "updatedAt": "2022-03-09T16:06:32Z",
+    "url": "https://github.com/wewei/ICFarm"
+  },
+  {
+    "description": "Made in Godot.",
+    "fullName": "rehawild/2D-Topdown-Farming-Game",
+    "language": "GDScript",
+    "stargazersCount": 3,
+    "updatedAt": "2026-05-17T00:06:11Z",
+    "url": "https://github.com/rehawild/2D-Topdown-Farming-Game"
+  },
+  {
+    "description": "A farming game is built based on C programming skills.",
+    "fullName": "AndyTranPro/CSEValley",
+    "language": "C",
+    "stargazersCount": 3,
+    "updatedAt": "2024-08-20T13:57:37Z",
+    "url": "https://github.com/AndyTranPro/CSEValley"
+  },
+  {
+    "description": "Farming game made using Pocket Code, for Google Summer of Code!",
+    "fullName": "judebirch/pocket-moon",
+    "language": "",
+    "stargazersCount": 3,
+    "updatedAt": "2025-03-19T10:10:28Z",
+    "url": "https://github.com/judebirch/pocket-moon"
+  }
+]

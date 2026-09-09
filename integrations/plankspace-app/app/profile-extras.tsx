@@ -106,11 +106,28 @@ export function Feed({ boardHandle, boardWallet }: { boardHandle?: string; board
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/posts")
       .then((r) => r.json())
-      .then((d) => setItems(d.posts || []))
-      .catch(() => setMessage("Feed unavailable"));
+      .then(async (d) => {
+        let loaded: Post[] = d.posts || [];
+        const pineId = /^#pine-([1-9]\d{0,17})$/.exec(window.location.hash)?.[1];
+        if (pineId && !loaded.some(post => String(post.id) === pineId)) {
+          const response = await fetch(`/api/posts?id=${pineId}`);
+          if (!response.ok) throw new Error("Pine unavailable");
+          const target = await response.json();
+          loaded = [...(target.posts || []), ...loaded];
+          if (!target.posts?.length && !cancelled) setMessage("This pine is no longer available.");
+        }
+        if (!cancelled) setItems(loaded);
+      })
+      .catch(() => { if (!cancelled) setMessage("Feed unavailable"); });
+    return () => { cancelled = true; };
   }, []);
+  useEffect(() => {
+    const target = /^#pine-[1-9]\d{0,17}$/.test(window.location.hash) ? document.getElementById(window.location.hash.slice(1)) : null;
+    if (target) target.scrollIntoView({ block: "center" });
+  }, [items]);
   const act = async (kind: "post" | "like", id?: number) => {
     setBusy(true);
     setMessage("");
@@ -169,7 +186,7 @@ export function Feed({ boardHandle, boardWallet }: { boardHandle?: string; board
         aria-label="Latest Lumberyard posts"
       >
         {items.map((p) => (
-          <article className="compact-feed-post" key={p.id}>
+          <article className="compact-feed-post" id={`pine-${p.id}`} key={p.id}>
             <div className="feed-post-copy">
               <div className="feed-post-byline">
                 <b>{p.author}</b>

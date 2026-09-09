@@ -16,6 +16,7 @@ import {
   WOODAMP_PLAYLIST,
   type WoodAmpTrack,
 } from "@/lib/woodamp-playlist";
+import { clampResumePosition, parseWoodAmpResume, resolveWoodAmpResume, WOODAMP_RESUME_KEY, type WoodAmpResume } from "@/lib/woodamp-continuity";
 
 /**
  * WoodAmp — the single global audio system, mounted once in the root layout
@@ -98,6 +99,10 @@ export default function WoodAmpProvider({
   // Play intent survives track changes: when true, a newly selected track
   // starts playing as soon as it can.
   const intentRef = useRef(false);
+  const resumeRef = useRef<WoodAmpResume | null>(null);
+  const pendingPositionRef = useRef<number | null>(null);
+  const interactedRef = useRef(false);
+  const [continuityReady, setContinuityReady] = useState(false);
 
   // Phase 2: seed with the static manifest (identical first paint / no
   // hydration mismatch), then adopt the admin-managed list once fetched.
@@ -178,9 +183,11 @@ export default function WoodAmpProvider({
     void graph.context.close();
   }, []);
 
-  // --- initial state from storage + ambient muted autoplay ---------------
+  // --- initial preferences from storage; playback always starts paused ----
   useEffect(() => {
-    const storedMute = window.localStorage.getItem(MUTE_STORAGE_KEY);
+    const read = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
+    resumeRef.current = parseWoodAmpResume(read(WOODAMP_RESUME_KEY));
+    const storedMute = read(MUTE_STORAGE_KEY);
     // Absent key = first-ever visit = start UNMUTED. Muting by default was
     // correct only while the player autoplayed on load: it kept a visitor from
     // being ambushed by sound. Autoplay is gone, so the only way audio starts
@@ -193,13 +200,17 @@ export default function WoodAmpProvider({
     setMuted(initialMuted);
 
     const storedVolume = Number(
-      window.localStorage.getItem(VOLUME_STORAGE_KEY)
+      read(VOLUME_STORAGE_KEY) ?? "0.8"
     );
     const initialVolume =
-      Number.isFinite(storedVolume) && storedVolume > 0 && storedVolume <= 1
+      Number.isFinite(storedVolume) && storedVolume >= 0 && storedVolume <= 1
         ? storedVolume
         : 0.8;
     setVolumeState(initialVolume);
+    if (resumeRef.current) {
+      setShuffle(resumeRef.current.shuffle);
+      setRepeat(resumeRef.current.repeat);
+    }
 
     const audio = audioRef.current;
     if (!audio) return;
@@ -216,6 +227,7 @@ export default function WoodAmpProvider({
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
+      let available: readonly WoodAmpTrack[] = WOODAMP_PLAYLIST;
       try {
         const res = await fetch("/api/music/playlist", {
           signal: controller.signal,
@@ -224,6 +236,7 @@ export default function WoodAmpProvider({
         const data = (await res.json()) as { tracks?: unknown };
         const parsed = sanitizePlaylist(data.tracks);
         if (!parsed.ok) return;
+        available = parsed.tracks;
         setPlaylist((current) =>
           JSON.stringify(parsed.tracks) === JSON.stringify(current)
             ? current
@@ -234,10 +247,44 @@ export default function WoodAmpProvider({
         setIndex((i) => (i < parsed.tracks.length ? i : 0));
       } catch {
         // Offline or aborted — the static seed keeps playing.
+      } finally {
+        if (!controller.signal.aborted) {
+          const restored = !interactedRef.current && resolveWoodAmpResume(available, resumeRef.current);
+          if (restored) {
+            pendingPositionRef.current = restored.position;
+            setIndex(restored.index);
+            setCurrentTime(restored.position);
+          }
+          setContinuityReady(true);
+        }
       }
     })();
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!continuityReady || !isAudioSource(track.source)) return;
+    const persist = () => {
+      const position = pendingPositionRef.current ?? audioRef.current?.currentTime ?? 0;
+      try {
+        window.localStorage.setItem(WOODAMP_RESUME_KEY, JSON.stringify({
+          version: 1, trackId: track.id, source: track.src, position, shuffle, repeat,
+        } satisfies WoodAmpResume));
+      } catch { /* Storage denial must not interrupt listening. */ }
+    };
+    const onHidden = () => { if (document.visibilityState === "hidden") persist(); };
+    const audio = audioRef.current;
+    const timer = window.setInterval(persist, 5000);
+    audio?.addEventListener("pause", persist);
+    window.addEventListener("pagehide", persist);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.clearInterval(timer);
+      audio?.removeEventListener("pause", persist);
+      window.removeEventListener("pagehide", persist);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [continuityReady, track.id, track.src, track.source, shuffle, repeat]);
 
   // --- cross-tab mute sync (carried over from AudioPlayer.tsx) -----------
   // Sync the mute STATE only — never start playback in this tab because
@@ -255,11 +302,12 @@ export default function WoodAmpProvider({
   }, []);
 
   const persistMute = useCallback((value: boolean) => {
-    window.localStorage.setItem(MUTE_STORAGE_KEY, String(value));
+    try { window.localStorage.setItem(MUTE_STORAGE_KEY, String(value)); } catch { /* Optional device preference. */ }
   }, []);
 
   // --- core transport ----------------------------------------------------
   const playCurrent = useCallback(() => {
+    interactedRef.current = true;
     const audio = audioRef.current;
     if (!audio) return;
     intentRef.current = true;
@@ -321,6 +369,8 @@ export default function WoodAmpProvider({
 
   const selectTrack = useCallback(
     (i: number, autoplay = true) => {
+      interactedRef.current = true;
+      pendingPositionRef.current = null;
       const clamped = ((i % playlist.length) + playlist.length) % playlist.length;
       // External links are not selectable — the Planklist renders them as
       // outbound anchors, and rotation never lands on them.
@@ -436,7 +486,7 @@ export default function WoodAmpProvider({
     setVolumeState(clamped);
     const audio = audioRef.current;
     if (audio) audio.volume = clamped;
-    window.localStorage.setItem(VOLUME_STORAGE_KEY, String(clamped));
+    try { window.localStorage.setItem(VOLUME_STORAGE_KEY, String(clamped)); } catch { /* Optional device preference. */ }
   }, []);
 
   const toggleShuffle = useCallback(() => setShuffle((v) => !v), []);
@@ -553,7 +603,16 @@ export default function WoodAmpProvider({
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onLoadedMetadata={(e) => {
+          const audio = e.currentTarget;
+          setDuration(audio.duration || 0);
+          if (pendingPositionRef.current !== null) {
+            const position = clampResumePosition(pendingPositionRef.current, audio.duration);
+            pendingPositionRef.current = null;
+            audio.currentTime = position;
+            setCurrentTime(position);
+          }
+        }}
         onLoadedData={() => {
           if (intentRef.current) {
             void audioRef.current?.play().catch(() => {});

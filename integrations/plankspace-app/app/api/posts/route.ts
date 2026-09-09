@@ -9,13 +9,17 @@ import { getXProvider } from "../../x/provider";
 import { evaluateXPostCooldown, isDegenXCooldownExempt } from "../../x/policy";
 import { getXPostCooldownMinutes } from "../../x/settings";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const id = new URL(request.url).searchParams.get("id");
+  if (id !== null && !/^[1-9]\d{0,17}$/.test(id)) return Response.json({ error: "Choose a valid pine." }, { status: 400 });
   try {
     return Response.json({
       posts: await getDb()
         .select()
         .from(posts)
-        .where(eq(posts.moderationStatus, "approved"))
+        .where(and(eq(posts.moderationStatus, "approved"),
+          sql`EXISTS (SELECT 1 FROM ${profiles} WHERE lower(${profiles.wallet})=lower(${posts.authorWallet}) AND ${profiles.moderationStatus}='approved')`,
+          id ? sql`${posts.id}::text = ${id}` : undefined))
         .orderBy(desc(posts.id))
         .limit(30),
     });

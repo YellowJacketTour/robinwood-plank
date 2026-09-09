@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import { Pool } from 'pg';
+import { chromium } from 'playwright';
+import { createHash, randomBytes } from 'node:crypto';
+const db=new URL(process.env.CHARMVILLE_TEST_DATABASE_URL);
+const base=new URL(process.env.CHARMVILLE_TEST_BASE_URL||'http://localhost:3017');
+if(!['localhost','127.0.0.1'].includes(db.hostname)||!['localhost','127.0.0.1'].includes(base.hostname))throw Error('Local isolated verification only');
+const pool=new Pool({connectionString:db.href});
+const wallet='0x'+randomBytes(20).toString('hex'),other='0x'+randomBytes(20).toString('hex'),token=randomBytes(32).toString('hex');
+const handle='layout_'+randomBytes(5).toString('hex');
+const key=`charmville-layout-draft:${wallet}:${handle}`;
+const browser=await chromium.launch({headless:true});
+let page;
+try {
+ await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status,layout_json) VALUES($1,$2,'Layout continuity','approved','[\"feed\",\"friends\"]')",[wallet,handle]);
+ await pool.query('INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)',[createHash('sha256').update(token).digest('hex'),wallet,new Date(Date.now()+3600000).toISOString()]);
+ page=await browser.newPage({viewport:{width:1280,height:1100}});
+ await page.addInitScript(({wallet,token})=>{window.testWallet=wallet;window.addEventListener('plank:wallet-request',event=>{if(event.detail.method!=='getState')return;event.stopImmediatePropagation();window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:event.detail.requestId,result:{state:{address:window.testWallet,chainId:4663,status:'connected',isConnected:true}}}}));},true);localStorage.setItem('plankspace-terms-2026-08-22-v1','accepted');localStorage.setItem('plankspace-session:'+wallet,token);localStorage.setItem('plankspace-last-verified-wallet',wallet);window.ethereum={isMetaMask:true,request:async({method})=>{if(method==='eth_accounts'||method==='eth_requestAccounts')return[window.testWallet];if(method==='eth_chainId')return'0x1237';if(method==='personal_sign')throw Error('Unexpected signature');return null;},on(){},removeListener(){}};},{wallet,token});
+ await page.goto(new URL('/u/'+handle,base).href);
+ const porch=page.getByRole('region',{name:'Charmville porch'});
+ await porch.getByRole('button',{name:'Claim your lot',exact:true}).click();
+ await porch.getByRole('button',{name:'Arrange scenery',exact:true}).click();
+ await page.getByRole('button',{name:'Place tree at 1, 2',exact:true}).click();
+ const saved=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);
+ assert.equal(saved.decorations.find(item=>item.id===0).y,1);
+ await page.reload();
+ await porch.getByRole('button',{name:'Save scenery',exact:true}).waitFor();
+ assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).revision,key),saved.revision);
+ const switchWallet=async address=>{await page.evaluate(address=>{window.testWallet=address;window.dispatchEvent(new CustomEvent('plank:wallet-state',{detail:{address,chainId:4663,status:'connected',isConnected:true}}));},address);};
+ await switchWallet(other);
+ await porch.getByRole('button',{name:'Sign in to tend',exact:true}).waitFor();
+ assert.equal(await porch.getByRole('button',{name:'Save scenery',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Place tree at 1, 2',exact:true}).count(),0);
+ await switchWallet(wallet);
+ await porch.getByRole('button',{name:'Save scenery',exact:true}).waitFor();
+ // Another session saved a layout after this draft began. Preserve stale base.
+ await pool.query('UPDATE charmville_yards SET layout_revision=layout_revision+1 WHERE profile_id=(SELECT id FROM plankspace_profiles WHERE wallet=$1)',[wallet]);
+ await porch.getByRole('button',{name:'Save scenery',exact:true}).click();
+ await porch.getByRole('button',{name:'Reload saved scenery',exact:true}).waitFor();
+ assert.equal(await porch.getByRole('button',{name:'Save scenery',exact:true}).isDisabled(),true);
+ await page.reload();
+ await porch.getByRole('button',{name:'Reload saved scenery',exact:true}).waitFor();
+ assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).revision,key),saved.revision);
+ await porch.getByRole('button',{name:'Reload saved scenery',exact:true}).click();
+ assert.equal(await porch.getByRole('button',{name:'Save scenery',exact:true}).isEnabled(),true);
+ assert.notEqual(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).revision,key),saved.revision);
+ await porch.getByRole('button',{name:'Cancel changes',exact:true}).click();
+ assert.equal(await page.evaluate(key=>localStorage.getItem(key),key),null);
+ await page.reload();await porch.getByRole('button',{name:'Arrange scenery',exact:true}).waitFor();
+ await porch.getByRole('button',{name:'Arrange scenery',exact:true}).click();
+ await page.getByRole('button',{name:'Place tree at 1, 2',exact:true}).click();
+ await porch.getByRole('button',{name:'Save scenery',exact:true}).click();
+ await porch.getByRole('button',{name:'Arrange scenery',exact:true}).waitFor();
+ assert.equal(await page.evaluate(key=>localStorage.getItem(key),key),null);
+ console.log('PASS: layout draft reload, wallet isolation, owner restoration, stale-save conflict persistence, explicit reload, cancel and successful-save cleanup.');
+} catch(error){if(page)console.error((await page.locator('body').innerText()).slice(-1800));throw error;}
+finally {
+ await browser.close();
+ await pool.query('DELETE FROM plankspace_wallet_sessions WHERE wallet=$1',[wallet]);
+ for(const table of ['charmville_stamps','charmville_receipts','charmville_plots','charmville_seeds','charmville_stacks','charmville_yards'])await pool.query(`DELETE FROM ${table} WHERE profile_id=(SELECT id FROM plankspace_profiles WHERE wallet=$1)`,[wallet]);
+ await pool.query('DELETE FROM plankspace_profiles WHERE wallet=$1',[wallet]);await pool.end();
+}

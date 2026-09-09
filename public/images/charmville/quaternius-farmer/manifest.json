@@ -1,0 +1,16 @@
+{
+    "creator":  "Quaternius",
+    "source":  "https://quaternius.com/packs/ultimatedanimatedcharacter.html",
+    "license":  "CC0-1.0",
+    "sourceFile":  "Casual_Female.blend",
+    "sourceSha256":  "DF3DAE4A16A7E331C0B7662F768CB4EABE8FB0863E9AB09CBFDF3031CF8D8955",
+    "adaptation":  "Woodland green and warm timber palette; fixed camera and lighting; rig rotation for eight directions",
+    "renderer":  "scripts/charmville/render_sourced_character.py",
+    "frames":  {
+                   "pickup":  8,
+                   "idle":  1,
+                   "walk":  8
+               },
+    "directions":  8,
+    "status":  "Development preview; face and costume refinement outstanding"
+}
