@@ -333,7 +333,7 @@ jobs:
       - run: npm install -g npm@11.6.2
       - run: npm ci
       - run: npm run db:migrate
-      - run: npx tsx --test test/market/market-trigger-compat.test.ts test/market/market-realtime.test.ts test/market/hub-rank-delivery.test.ts
+      - run: npx tsx --test test/market/market-trigger-compat.test.ts test/market/market-realtime.test.ts test/market/hub-rank-delivery.test.ts test/market/collective-cold-hydration.test.ts test/market/bitcoin-source-health.test.ts test/market/market-live-snapshot.test.ts
 
   deploy:
     needs: build

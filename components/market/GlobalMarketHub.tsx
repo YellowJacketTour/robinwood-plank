@@ -13,6 +13,7 @@ import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { useMarketRealtime } from "@/hooks/useMarketRealtime";
+import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -1896,10 +1897,10 @@ export default function GlobalMarketHub() {
         { cache: "no-store", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`Live snapshot ${response.status}`);
       const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
-      for (const row of data.collections) updates.set(`${row.chainSlug}:${row.contractAddress}`, row);
+      for (const row of data.collections) updates.set(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`, row);
     }
     setCollections((previous) => previous.map((row) => {
-      const update = updates.get(`${row.chainSlug}:${row.contractAddress}`);
+      const update = updates.get(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`);
       return update ? { ...row, ...update } : row;
     }));
   }, 5_000);

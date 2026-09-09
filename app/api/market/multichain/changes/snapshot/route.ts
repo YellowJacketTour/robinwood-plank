@@ -17,6 +17,10 @@ export async function GET(req: NextRequest) {
     SELECT c.chain_slug AS "chainSlug", c.contract_address AS "contractAddress",
       c.name, c.image_url AS "imageUrl", s.floor_price_wei::text AS "floorPriceWei",
       s.floor_price_currency AS "floorPriceCurrency", s.listed_count AS "listedCount",
+      s.volume_24h_wei::text AS "volume24hWei", s.sales_24h AS "sales24h",
+      s.volume_7d_wei::text AS "volume7dWei", s.sales_7d AS "sales7d",
+      s.volume_30d_wei::text AS "volume30dWei", s.sales_30d AS "sales30d",
+      s.floor_change_pct AS "floorChangePct", s.floor_observed_at AS "floorObservedAt",
       s.total_supply::float8 AS "totalSupply", s.holder_count AS "holderCount", s.synced_at AS "syncedAt"
     FROM wanted w JOIN plank_multichain_collections c ON c.chain_slug = w.chain AND c.contract_address = w.collection
     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id`,
