@@ -23,6 +23,8 @@
  * to the repo owner directly when this feature was scoped, not a silent
  * decision).
  */
+import { NextResponse } from "next/server";
+import { tradingHalt, HALT_BODY, HALT_STATUS, HALT_HEADERS } from "@/lib/market/trading-halt";
 import { MARKETPLANK_NATIVE_LISTING_FEE_BPS } from "@/lib/constants";
 import { ethCallForeignFree, ethGetCodeForeignFree } from "@/lib/market/fetch-rpc";
 import type { Rpc } from "@/lib/market/signature";
@@ -120,6 +122,15 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // EMERGENCY STOP. Until now MARKET_ENABLED gated pages only -- a signed
+  // order POSTed here was accepted and stored while the operator believed the
+  // market was closed. Reads stay open on purpose: halting trade must not
+  // blank the site.
+  const halt = await tradingHalt();
+  if (halt.halted) {
+    return NextResponse.json(HALT_BODY, { status: HALT_STATUS, headers: HALT_HEADERS });
+  }
+
   try {
     const limited = rateLimit(req, { key: "market-multichain-native-orders-post", limit: 30, windowMs: 60_000 });
     if (limited) return limited;

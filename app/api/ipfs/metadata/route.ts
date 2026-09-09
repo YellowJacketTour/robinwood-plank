@@ -1,4 +1,5 @@
 import { fetchNftMetadata } from "@/lib/ipfs";
+import { readProof, writeProof } from "@/lib/proof-cache";
 import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
@@ -37,9 +38,23 @@ export async function GET(req: Request) {
     return publicJson({ error: "BAD_URI", message: "uri is required." }, 400);
   }
 
+  // THE PROOF CACHE. A CID is the hash of its own bytes, so one fetch is
+  // canonical forever -- for every visitor, every process and every chain that
+  // references it.
+  //
+  // The "immutable" edge header below has always been correct and has never
+  // done anything: measured live 2026-09-09, every response carries
+  // `cf-cache-status: DYNAMIC` because the zone does not cache query-string
+  // URLs. So each visitor paid the full gateway cost, and a burst of ten
+  // tokens from ONE directory returned three 200s and seven 500s -- timeouts,
+  // not errors, at a median of 5,651 ms against a 5,000 ms limit.
+  const cached = await readProof<Awaited<ReturnType<typeof fetchNftMetadata>>>(uri);
+  if (cached) return cachedPublicJson(cached, "immutable");
+
   try {
     const metadata = await fetchNftMetadata(uri);
-    // Content-addressed — safe to cache hard at the edge.
+    // Only self-authenticating URIs are stored; writeProof refuses the rest.
+    await writeProof(uri, metadata);
     return cachedPublicJson(metadata, "immutable");
   } catch (error) {
     return publicError(error, "Could not load NFT metadata right now.");

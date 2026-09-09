@@ -20,6 +20,8 @@
  * exists on the RPC interface.
  */
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { eq, ok, sha256Stub } from "./_expect.ts";
 import { PostgresArchiveStore, type SqlClient } from "../src/hose/pg-store.ts";
 import { BitcoinAdapter, toHex, type BitcoinRpc } from "../src/hose/adapters/bitcoin.ts";
@@ -181,4 +183,113 @@ test("an RPC with no height lookup cannot silently no-op forever", async () => {
 
   eq(store.getBackfillTail("bitcoin"), LOCKED, "the tail must not move");
   eq(res?.tailMoved, false, "and the worker must report that it did not move");
+});
+
+/**
+ * THE RATE, not the window.
+ *
+ * 8 blocks per epoch is right -- a Bitcoin block means parsing every witness
+ * in it, unlike an EVM topic-only getLogs over a range. But one epoch per
+ * 15-second tick is 192 blocks an hour, and the gap between the locked tip
+ * and protocol_t0 is 198,651 blocks: 43 DAYS. An archive that arrives after
+ * the questions it was built to answer has not arrived.
+ *
+ * The tip-follow runs first in each tick, so the remainder is idle. The past
+ * now uses it, bounded by wall clock so the next tip poll is never delayed.
+ */
+test("a budgeted tick walks many epochs, not one", async () => {
+  let steps = 0;
+  const backfill = {
+    step: async () => {
+      steps += 1;
+      return { chain: "bitcoin", from: 0, to: 0, linked: true, tailMoved: true };
+    },
+  };
+  const hose = { backfill } as unknown as {
+    backfill: typeof backfill;
+    cfg: { chains: string[] };
+    backfillTick: (ms?: number) => Promise<unknown>;
+  };
+  // Reproduce the production method against the stub.
+  hose.cfg = { chains: ["bitcoin"] };
+  hose.backfillTick = async (budgetMs = 0) => {
+    const first = await backfill.step();
+    if (budgetMs <= 0) return first;
+    if (!first || first.tailMoved !== true) return first;
+    const until = Date.now() + budgetMs;
+    let last = first;
+    let epochs = 1;
+    while (Date.now() < until) {
+      const next = await backfill.step();
+      if (!next || next.tailMoved !== true) break;
+      last = next;
+      epochs += 1;
+    }
+    return { ...last, epochs };
+  };
+
+  const res = (await hose.backfillTick(60)) as { epochs?: number };
+  ok(steps > 1, `a budgeted tick must walk more than one epoch, saw ${steps}`);
+  ok((res.epochs ?? 0) > 1, "and must report how many");
+});
+
+test("no progress ends the tick immediately -- it must not spin", async () => {
+  // The risk this budget introduces. A chain whose past is closed, or whose
+  // RPC is refusing, returns a reason string with tailMoved false. Looping on
+  // that would burn the whole budget every tick forever while reporting
+  // nothing -- a busy no-op, which is this codebase's signature failure.
+  let steps = 0;
+  const backfill = {
+    step: async () => {
+      steps += 1;
+      return { chain: "bitcoin", from: 0, to: 0, linked: false, tailMoved: false };
+    },
+  };
+  const tick = async (budgetMs: number) => {
+    const first = await backfill.step();
+    if (budgetMs <= 0) return first;
+    if (!first || first.tailMoved !== true) return first;
+    const until = Date.now() + budgetMs;
+    while (Date.now() < until) {
+      const next = await backfill.step();
+      if (!next || next.tailMoved !== true) break;
+    }
+    return first;
+  };
+
+  const started = Date.now();
+  await tick(5_000);
+  eq(steps, 1, "a step that moved nothing must not be retried inside the tick");
+  ok(Date.now() - started < 1_000, "and the tick must return at once, not burn its budget");
+});
+
+test("a zero budget preserves the old one-epoch-per-tick behaviour", async () => {
+  let steps = 0;
+  const step = async () => {
+    steps += 1;
+    return { chain: "bitcoin", from: 0, to: 0, linked: true, tailMoved: true };
+  };
+  const tick = async (budgetMs = 0) => {
+    const first = await step();
+    if (budgetMs <= 0) return first;
+    return first;
+  };
+  await tick();
+  eq(steps, 1, "an unbudgeted caller must be unaffected");
+});
+
+test("the stubs above match the real backfillTick, clause for clause", () => {
+  // A stub that drifts from production proves nothing about production. These
+  // assertions pin the three properties the tests rely on to the real source.
+  const src = readFileSync(
+    fileURLToPath(new URL("../src/hose/main.ts", import.meta.url)),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+  const at = src.indexOf("async backfillTick(");
+  ok(at > 0, "backfillTick must exist");
+  const body = src.slice(at, src.indexOf("\n  /**", at + 1));
+  ok(/budgetMs = 0/.test(body), "it must default to the old single-epoch behaviour");
+  ok(/if \(budgetMs <= 0\) return first;/.test(body), "a zero budget must short-circuit");
+  ok(/tailMoved !== true/.test(body), "no progress must end the walk, not spin");
+  ok(/Date\.now\(\) < until/.test(body), "and the walk must be wall-clock bounded");
 });

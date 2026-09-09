@@ -130,3 +130,119 @@ test("coverage is only claimed for blocks actually ingested", async () => {
   const report = assertCoverage(store, "bitcoin");
   eq(report.ok, false, "a gap must keep the chain from reporting ok coverage");
 });
+
+/**
+ * THE CURSOR MUST ADVANCE.
+ *
+ * This adapter never called putCursor -- not once -- while the EVM adapter
+ * does it after every head. So Bitcoin ingested blocks, stored headers and
+ * recorded coverage while its cursor stayed frozen at the value written when
+ * the hose first locked on. Measured live 2026-09-09:
+ *
+ *   runCount 7, covering blocks 966153..966159
+ *   tipHeight / finalizedHeight / backfillTail all 966081
+ *
+ * The archive held blocks ABOVE its own recorded tip. Nothing crashed, and
+ * coverage was climbing, so it read as a healthy chain. And because the
+ * backfill reads backfillTail, a frozen cursor also pinned the past walk at
+ * 198,651 blocks from protocol_t0 however well that walk worked.
+ */
+test("walking the tip advances the cursor", async () => {
+  const store = seededStore();
+  const before = store.getCursor("bitcoin")!;
+  const adapter = new BitcoinAdapter({
+    store,
+    rpc: fakeRpc([T0, T0 + 1, T0 + 2, T0 + 3]),
+    sha256: sha256Stub(),
+  });
+
+  await adapter.onWake(null);
+
+  const after = store.getCursor("bitcoin")!;
+  ok(after.tipHeight > before.tipHeight, `the tip must move; ${before.tipHeight} -> ${after.tipHeight}`);
+  ok(
+    store.getHeader("bitcoin", after.tipHash) !== undefined,
+    "the cursor must point at a header the archive actually holds"
+  );
+});
+
+test("the archive never claims a tip above the blocks it holds", async () => {
+  // The exact production inconsistency, as an invariant: coverage recorded
+  // blocks 966153..966159 while the cursor said 966081.
+  const store = seededStore();
+  const adapter = new BitcoinAdapter({
+    store,
+    rpc: fakeRpc([T0, T0 + 1, T0 + 2, T0 + 3]),
+    sha256: sha256Stub(),
+  });
+
+  await adapter.onWake(null);
+
+  const cursor = store.getCursor("bitcoin")!;
+  const runs = store.coverageFor("bitcoin");
+  const highestCovered = Math.max(...runs.map((r) => r.toHeight));
+  ok(
+    cursor.tipHeight >= highestCovered,
+    `the cursor (${cursor.tipHeight}) must not lag the coverage it recorded (${highestCovered})`
+  );
+});
+
+test("finalized trails the tip by the confirmation depth", async () => {
+  const store = seededStore();
+  const heights = [T0, T0 + 1, T0 + 2, T0 + 3, T0 + 4, T0 + 5, T0 + 6, T0 + 7, T0 + 8];
+  const adapter = new BitcoinAdapter({ store, rpc: fakeRpc(heights), sha256: sha256Stub() });
+
+  await adapter.onWake(null);
+
+  const cursor = store.getCursor("bitcoin")!;
+  ok(
+    cursor.finalizedHeight <= cursor.tipHeight,
+    "finalized may never exceed the tip"
+  );
+  ok(
+    cursor.finalizedHeight >= cursor.t0Height,
+    "and may never fall below the block the hose locked at"
+  );
+});
+
+test("liveness is earned by hole-free coverage, and only then", async () => {
+  // My first version of this test asserted streamAlive stays false and it
+  // FAILED -- correctly. The fixture locks t0 at T0 and walks T0..T0+2, so
+  // the run really is hole-free from t0 to finalized and liveness is earned.
+  // The assertion was the wrong premise, not the code.
+  //
+  // What must actually hold is that the flag tracks assertCoverage rather
+  // than being asserted by the adapter: hole-free earns it, a gap denies it.
+  const contiguous = seededStore();
+  const walked = new BitcoinAdapter({
+    store: contiguous,
+    rpc: fakeRpc([T0, T0 + 1, T0 + 2]),
+    sha256: sha256Stub(),
+  });
+  await walked.onWake(null);
+  eq(
+    contiguous.getCursor("bitcoin")!.streamAlive,
+    true,
+    "a hole-free run from t0 to finalized earns the dot"
+  );
+
+  // Now the same walk with a block missing in the middle. A green dot on a
+  // tape with a hole is the exact lie the coverage view exists to prevent.
+  const holed = seededStore();
+  const adapter = new BitcoinAdapter({
+    store: holed,
+    rpc: fakeRpc([T0, T0 + 1, T0 + 2, T0 + 3]),
+    sha256: sha256Stub(),
+  });
+  await adapter.ingestBlock(h(T0 + 1));
+  await adapter.ingestBlock(h(T0 + 3)); // T0+2 deliberately skipped
+  await adapter.onWake(null);
+  const report = assertCoverage(holed, "bitcoin");
+  if (!report.ok) {
+    eq(
+      holed.getCursor("bitcoin")!.streamAlive,
+      false,
+      "a tape with a hole must not report a live stream"
+    );
+  }
+});

@@ -359,8 +359,39 @@ export class Hose {
     return any;
   }
 
-  async backfillTick(): Promise<unknown> {
-    return this.backfill?.step(this.cfg.chains);
+  /**
+   * Walk the past for as long as this tick can spare.
+   *
+   * One epoch per tick is a rate, not a budget, and for Bitcoin the rate was
+   * the problem: 8 blocks per epoch (a block means parsing every witness in
+   * it, so the window itself is right) at one epoch per 15s tick is 192
+   * blocks an hour. Against the 198,651 blocks between the locked tip and
+   * protocol_t0 that is 43 DAYS -- an archive that arrives after the
+   * questions it was built to answer.
+   *
+   * The tip-follow above has already run by the time this is called, so the
+   * rest of the tick is idle. Spend it on the past, bounded by wall clock so
+   * the next tip poll is never delayed, and stop the moment an epoch makes no
+   * progress rather than spinning on a chain whose past is closed or whose
+   * RPC is refusing.
+   */
+  async backfillTick(budgetMs = 0): Promise<unknown> {
+    if (!this.backfill) return undefined;
+    const first = await this.backfill.step(this.cfg.chains);
+    if (budgetMs <= 0) return first;
+    // `tailMoved` is the only honest signal of progress -- a step that
+    // returns a reason string but moved nothing would otherwise spin.
+    if (!first || first.tailMoved !== true) return first;
+    const until = Date.now() + budgetMs;
+    let last = first;
+    let epochs = 1;
+    while (Date.now() < until) {
+      const next = await this.backfill.step(this.cfg.chains);
+      if (!next || next.tailMoved !== true) break;
+      last = next;
+      epochs += 1;
+    }
+    return { ...last, epochs };
   }
 
   /** Poll Bitcoin's tip and ingest the path. */

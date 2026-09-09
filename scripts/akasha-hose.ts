@@ -41,6 +41,12 @@ const TICK_MS = Number(process.env.AKASHA_TICK_MS ?? 15_000);
  * budget is known.
  */
 const SHARD_CLAIMS = Math.max(0, Number(process.env.AKASHA_SHARD_CLAIMS ?? 0));
+/**
+ * How much of each tick the past may use. Two thirds leaves the tip-follow a
+ * full third of headroom; the walk also stops early the moment an epoch makes
+ * no progress, so this is a ceiling rather than a target.
+ */
+const BACKFILL_BUDGET_MS = Math.max(0, Math.floor(TICK_MS * 0.66));
 const HEALTH_MS = Number(process.env.AKASHA_HEALTH_MS ?? 60_000);
 
 /**
@@ -157,7 +163,6 @@ async function main(): Promise<void> {
     try {
       if (chains.includes("bitcoin")) await hose.bitcoinTick();
       await hose.repairTick();
-      await hose.backfillTick();
       // The shattered archive, alongside the serial walk rather than instead
       // of it. The serial tail keeps moving; sharding fills the rest of the
       // past in parallel, and the two converge on the same run-list because a
@@ -172,6 +177,10 @@ async function main(): Promise<void> {
           }
         }
       }
+      // Spend most of the tick on the past. The tip-follow above has already
+      // run, so this is otherwise idle time, and at 8 blocks per epoch the
+      // default rate needed 43 days to reach Bitcoin's protocol origin.
+      await hose.backfillTick(BACKFILL_BUDGET_MS);
       await hose.flush();
     } catch (e) {
       // A failing tick must never kill the process: the next tick retries and
