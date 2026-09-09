@@ -161,6 +161,7 @@ async function main(): Promise<void> {
   console.log(`[akasha-hose] owning tip for: ${chains.join(", ")}`);
 
   let stopping = false;
+  let activeTick: Promise<void> | null = null;
   const shutdown = async (sig: string) => {
     if (stopping) return;
     stopping = true;
@@ -197,6 +198,9 @@ async function main(): Promise<void> {
     const EXIT_GRACE_MS = 10_000;
     await Promise.race([
       (async () => {
+        // Never close the writer's pool underneath an unfinished tick. The
+        // grace deadline still fences a slow tick by exiting the process.
+        await activeTick;
         await hose.flush().catch((e) => console.error("[akasha-hose] final flush failed", e));
         await pool.end().catch(() => undefined);
       })(),
@@ -351,8 +355,10 @@ async function main(): Promise<void> {
     if (!ticking) {
       ticking = true;
       try {
-        await tick();
+        activeTick = tick();
+        await activeTick;
       } finally {
+        activeTick = null;
         ticking = false;
         lastTickDone = Date.now();
       }

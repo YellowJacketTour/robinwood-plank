@@ -97,6 +97,22 @@ test("actual worker deadline exits before a late phase can write or a second pha
   assert.match(child.stderr, /fence unfinished writes/);
 });
 
+test("actual worker shutdown drains its active tick before flushing and closing the pool", () => {
+  const source = ts.createSourceFile("worker.ts", readFileSync("scripts/akasha-hose.ts", "utf8"), ts.ScriptTarget.Latest, true);
+  let initializer: ts.Expression | undefined;
+  function visit(node: ts.Node) { if (ts.isVariableDeclaration(node) && node.name.getText(source) === "shutdown") initializer = node.initializer; ts.forEachChild(node, visit); }
+  visit(source); assert.ok(initializer);
+  const code = ts.transpileModule(`let stopping = false;
+    const activeTick = new Promise(resolve => setTimeout(() => { console.log('TICK_DONE'); resolve(); }, 40));
+    const hose = { flush: async () => console.log('FLUSH_DONE') };
+    const pool = { end: async () => console.log('POOL_CLOSED') };
+    const shutdown = ${initializer.getText(source)};
+    void shutdown('test');`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const child = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 5000 });
+  assert.equal(child.status, 0);
+  assert.match(child.stdout, /TICK_DONE[\s\S]*FLUSH_DONE[\s\S]*POOL_CLOSED/);
+});
+
 for (const missing of [767431, 767433]) test(`backfill refuses an epoch with missing header ${missing}`, async () => {
   const store = new PostgresArchiveStore({ query: async () => ({ rows: [] }) });
   const hash = (n: number) => `0x${n.toString(16).padStart(64,"0")}` as const;
