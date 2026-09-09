@@ -53,13 +53,58 @@ function postgresPort(): number {
   return port;
 }
 
+/**
+ * THE CONNECTION BUDGET IS SHARED, AND NOTHING WAS DIVIDING IT.
+ *
+ * Measured on production 2026-09-09: the same query, `limit=40`, returned in
+ * 0.15 s when asked alone and took up to 40.8 s when twelve requests ran
+ * back to back. Latency did NOT scale with rows -- `limit=500` came back in
+ * 0.96 s with 704 KB while `limit=40` took 3.6 s -- so it was never the query.
+ * It was waiting for a connection.
+ *
+ * The arithmetic nobody had done:
+ *
+ *     PGPOOL_MAX = 12, and 12 mesh cron workers each build their own pool
+ *     => up to 144 connections from background work alone
+ *     ... plus the web app's pool, against a Postgres that typically
+ *         allows 100.
+ *
+ * Every process was sized as though it were the only one. Background scans
+ * and a visitor's page request compete for the same scarce thing, and the
+ * visitor loses, because a mesh lane holds its connection for a long scan
+ * while a page request needs one for milliseconds.
+ *
+ * Two changes, and the second matters more than the first.
+ */
 function postgresPoolMax(): number {
   const raw = process.env.PGPOOL_MAX?.trim() || "4";
   const max = Number(raw);
   if (!Number.isInteger(max) || max < 1 || max > 20) {
     throw new Error("PGPOOL_MAX must be an integer between 1 and 20.");
   }
+  // A MESH WORKER TAKES A SMALLER SHARE. There are twelve of them and one
+  // web app; sizing them identically is what oversubscribes the server.
+  // Halved rather than minimised, because a lane starved of connections
+  // simply moves the stall from the visitor to the archive.
+  if (isMeshWorkerProcess()) return Math.max(2, Math.floor(max / 2));
   return max;
+}
+
+/**
+ * How long a caller waits for a connection before giving up.
+ *
+ * A web request that waits ten seconds for a CONNECTION has already failed --
+ * the visitor left. Worse, it holds a slot in Node's queue while it waits, so
+ * a burst turns one slow moment into a pile-up: exactly the 3.6 s / 11.4 s /
+ * 40.8 s tail measured above, where each request queued behind the last.
+ *
+ * Failing fast is not giving up on the request; it is refusing to convert a
+ * connection shortage into a latency avalanche. A background worker, which
+ * nobody is watching and which can retry a whole lane later, keeps the
+ * generous wait.
+ */
+function connectionTimeoutMs(): number {
+  return isMeshWorkerProcess() ? 10_000 : 2_000;
 }
 
 function postgresSsl(): false | { rejectUnauthorized: boolean } {
@@ -87,7 +132,10 @@ export function postgresPool(): Pool {
       password: required("PGPASSWORD"),
       max: postgresPoolMax(),
       idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
+      connectionTimeoutMillis: connectionTimeoutMs(),
+      // Keep a warm connection so the first request after an idle period does
+      // not pay TCP + TLS + auth before it can even ask a question.
+      min: 1,
       // Web requests keep the 15 s guard; mesh workers run bounded but real
       // scans (HyperSync backfill windows, activity tallies) that legitimately
       // exceed it -- 2026-09-07 diagnostics: "canceling statement due to
