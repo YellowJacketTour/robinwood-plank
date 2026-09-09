@@ -19,6 +19,7 @@
  * only, not a progress oracle.
  */
 import { postgresQuery } from "@/lib/postgres";
+import { MESH_LANES } from "./matrix";
 
 export async function recordLaneClaim(laneKey: string): Promise<void> {
   await postgresQuery(
@@ -42,6 +43,12 @@ export async function recordLaneOutcome(laneKey: string, success: boolean): Prom
      WHERE lane_key = $1`,
     [laneKey, success]
   ).catch(() => {});
+}
+
+/** A capacity wait is not a successful provider read. Preserve last success. */
+export async function recordLaneDeferred(laneKey: string): Promise<void> {
+  await postgresQuery(`UPDATE mesh_lane_health SET status = 'jailed', updated_at = now()
+    WHERE lane_key = $1`, [laneKey]).catch(() => {});
 }
 
 export type LaneHealthRow = {
@@ -69,7 +76,7 @@ export async function getLaneHealth(): Promise<LaneHealthRow[]> {
 
 export type ChainLaneHealth = {
   /** Lane keys (`source:chain`) that are down: status 'backoff', or claimed but with no success for longer than `downAfterMs`. */
-  down: Array<{ source: string; since: string | null; reason: "backoff" | "no-success" }>;
+  down: Array<{ source: string; since: string | null; reason: "backoff" | "no-success" | "paused" }>;
   /** Discovery/stats lanes seen for this chain at all. */
   lanes: Array<{ source: string; lastClaimAt: string | null; lastSuccessAt: string | null; status: string }>;
 };
@@ -100,7 +107,10 @@ export function summarizeLaneHealthByChain(
   const now = opts.now ?? Date.now();
   const downAfterMs = opts.downAfterMs ?? 3 * 60 * 60_000;
   const out: Record<string, ChainLaneHealth> = {};
+  const registered = new Set(MESH_LANES.map(lane => `${lane.source}:${lane.chainSlug}`));
   for (const row of rows) {
+    // Historical health rows survive removed/unsupported lanes; they are not live outages.
+    if (!registered.has(row.laneKey)) continue;
     const idx = row.laneKey.indexOf(":");
     if (idx <= 0) continue;
     const source = row.laneKey.slice(0, idx);
@@ -109,6 +119,10 @@ export function summarizeLaneHealthByChain(
     const entry = (out[chainSlug] ??= { down: [], lanes: [] });
     entry.lanes.push({ source, lastClaimAt: row.lastClaimAt, lastSuccessAt: row.lastSuccessAt, status: row.status });
     if (!row.lastClaimAt) continue;
+    if (row.status === "jailed") {
+      entry.down.push({ source, since: row.lastClaimAt, reason: "paused" });
+      continue;
+    }
     if (row.status === "backoff") {
       entry.down.push({ source, since: row.lastSuccessAt ?? row.lastClaimAt, reason: "backoff" });
       continue;
