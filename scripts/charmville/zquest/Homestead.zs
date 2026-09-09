@@ -116,7 +116,7 @@ global script Active
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;int positionSequence=0;int lastCorrection=0;int appliedCorrection=0;
         int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;int contactSequence=0;
-        bool resourceMode=false;bool resourceReady=false;int resourceVersion=0;int resourcePhase[3];int resourceSeeds=0;int resourceProduce=0;char32 resourceText[192];
+        bool resourceMode=false;bool resourceReady=false;int resourceVersion=0;int resourcePhase[3];int resourcePermissions[3];int resourceSeeds=0;int resourceProduce=0;char32 resourceText[192];
         int localActionId=0;int lifecycleSequence=0;bool lifecycleStarted=false;bool contactSent=false;int authorization=-1;int actionStartTick=0;bool pendingReceipt=false;bool alignmentDone=false;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
@@ -133,7 +133,7 @@ global script Active
                     resourceText[0]=0;snapshot->ReadString(resourceText);snapshot->Close();int version=field(resourceText,0);
                     if(version>resourceVersion){
                         resourceMode=true;resourceVersion=version;resourceReady=field(resourceText,1)==1;resourceSeeds=field(resourceText,3);resourceProduce=field(resourceText,4);
-                        for(int bed=0;bed<3;bed++){stages[bed]=field(resourceText,5+bed*2);resourcePhase[bed]=field(resourceText,6+bed*2);fed[bed]=false;}
+                        for(int bed=0;bed<3;bed++){stages[bed]=field(resourceText,5+bed*2);resourcePhase[bed]=field(resourceText,6+bed*2);resourcePermissions[bed]=field(resourceText,11+bed);fed[bed]=false;}
                         if(field(resourceText,2)>=localActionId)pendingReceipt=false;
                         printf("CHARMVILLE_RESOURCE_STATE %d READY %d\n",version,resourceReady?1:0);
                     }
@@ -254,9 +254,11 @@ global script Active
                 int reachX=plotCenterX-(Hero->X+8);int reachY=plotCenterY-(Hero->Y+8);
                 // One-tile tools must contact the selected bed, not work from
                 // two tiles away or diagonally beyond the directional sprite.
+                int requiredPermission=stages[selectedPlot]==4?8:(stages[selectedPlot]==2?4:(stages[selectedPlot]==1?2:1));
+                bool permittedAction=!resourceMode || (resourcePermissions[selectedPlot]&requiredPermission)!=0;
                 bool nearPlot = reachX*reachX+reachY*reachY<=400 && Min(Abs(reachX),Abs(reachY))<=8;
                 if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
-                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (!resourceMode || (resourceReady && !pendingReceipt)) && (stages[selectedPlot]!=3 || (!resourceMode && cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
+                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && permittedAction && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (!resourceMode || (resourceReady && !pendingReceipt)) && (stages[selectedPlot]!=3 || (!resourceMode && cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
                     activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;lastToolFrame=-1;
                     localActionId++;lifecycleStarted=false;contactSent=false;authorization=-1;actionStartTick=ticks;alignmentDone=false;
@@ -362,6 +364,7 @@ global script Active
                 }
                 if (stages[selectedPlot]==4) sprintf(line,"E / D: gather your crop");
                 if(resourceMode && stages[selectedPlot]==3){if(resourcePhase[selectedPlot]==0)sprintf(line,"Sprouting... roots take hold");else if(resourcePhase[selectedPlot]==1)sprintf(line,"Growing... branches unfold");else sprintf(line,"Flowering... berries soon");}
+                if(resourceMode && resourceReady && !permittedAction && stages[selectedPlot]!=3)sprintf(line,"Viewing this bed");
                 if(resourceMode && !resourceReady)sprintf(line,"Join a place to tend these beds");
                 else if(resourceMode && pendingReceipt)sprintf(line,"Waiting for the world...");
                 else if(resourceMode && activity>=0 && authorization<0)sprintf(line,"Preparing your action...");

@@ -9,3 +9,7 @@ Available lifecycle actions are claim, enter-turn, return-world and release. Pla
 Requests use UUID, encounter revision and actor epoch. Ambiguous responses retain the request for retry. Only server-returned legal actions are exposed. The component hides when inactive and resets transient display on activation; the world keys it to the wallet identity. This does not certify live combat, creature world animation, capture ownership, HP/status handoff through actual attacks or multiplayer battle resolution.
 
 Next acceptance is source-backed move behavior under server authority: validated targets, turn/action timing, atomic HP/status changes, interruptions, receipts and source animations. Lifecycle inspection alone does not advance combat maturity.
+
+## Subsequent bounded battle integration
+
+The later [source battle turns](SOURCE-BATTLE-TURNS.md) add a small supported move set with real HP/PP settlement. Earlier inspection-only statements describe the initial lifecycle checkpoint. Full battle-engine and native attack-animation gaps remain explicit in the newer evidence.

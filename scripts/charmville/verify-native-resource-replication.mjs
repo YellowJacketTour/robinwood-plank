@@ -14,7 +14,7 @@ try {
   const api=async(path,data)=>{const r=data===undefined?await page.request.get(base+path,{headers}):await page.request.post(base+path,{headers,data});assert.equal(r.status(),200,`${path}: ${await r.text()}`);return r.json();};
   let presence=await api('/api/charmville/world/presence');await api('/api/charmville/world/presence',{destination:'public',revision:presence.revision});
   await api('/api/charmville/world/actor');await api('/api/charmville/world/resources');
-  await page.addInitScript(({wallet,token})=>{localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});},user);
+  await page.addInitScript(({wallet,token})=>{window.lifecycle=[];window.addEventListener('message',e=>{if(e.data?.type==='charmville:action-lifecycle')window.lifecycle.push(e.data);});localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});},user);
   players.push({page,user,api});
  }
  const [owner,visitor]=players;
@@ -40,9 +40,11 @@ try {
   return states;
  };
  await observe(0,'unworked');
- for(const [stage,label] of [[1,'tilled'],[2,'planted'],[3,'watered']]){await tap(owner);await observe(stage,label);}
+ for(const [stage,label] of [[1,'tilled'],[2,'planted']]){await tap(owner);await observe(stage,label);}
+ const count=await visitor.page.evaluate(()=>window.lifecycle.length);await tap(visitor);assert.equal(await visitor.page.evaluate(()=>window.lifecycle.length),count,'Visit-only action must not begin');
+ const grants=await owner.api('/api/charmville/'+owner.user.handle+'/access');await owner.api('/api/charmville/'+owner.user.handle+'/access',{visitor:visitor.user.handle,revoke:false,rights:['visit','help'],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString(),revision:grants.grants.find(g=>g.visitor===visitor.user.handle).revision});
+ await visitor.page.waitForTimeout(3000);await tap(visitor);await observe(3,'watered');
  await owner.page.waitForTimeout(31000);await observe(4,'ripe');
  await tap(owner);const final=await observe(1,'harvested');assert.equal(final[0].produce,'1');assert.equal(final[0].seeds,'3');
  console.log('Two actual accounts: native owner lifecycle replicated to visitor; visitor balances unchanged.');
 } finally {await writeFile(out+'/diagnostics.json',JSON.stringify(diagnostics,null,2));await browser.close();}
-

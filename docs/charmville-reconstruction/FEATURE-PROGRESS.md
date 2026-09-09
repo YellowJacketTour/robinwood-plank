@@ -18,7 +18,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Friend invitations / revoke / expiry | ███░░ | Invitation API and private resource revoke checks verified; playable native home-to-home visits remain missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
 | Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions |
-| Shared resource replication | ███░░ | Two authenticated native clients in one granted home render Oran stages 0→1→2→3→4→1; owner-only yield and unchanged visitor balances verified. One crop/map; remote tool animations and permission-aware hints remain missing. See NATIVE-RESOURCE-REPLICATION.md. |
+| Shared resource replication | ███░░ | Two authenticated native clients in one granted home render Oran stages 0→1→2→3→4→1; owner-only yield and unchanged visitor balances verified. One crop/map; permission-aware native prompts verified; remote tool animations remain missing. See NATIVE-RESOURCE-REPLICATION.md. |
 | Reconnect / crash recovery | ██░░░ | Native actor reconnect and Oran inventory reload verified; interrupted action/full world crash recovery remains incomplete |
 | Party and region shard routing | █░░░░ | Keep party together, separate region capacity from economic identity |
 | Abuse prevention | ██░░░ | Garden transactions and relay rate limits; movement/automation/encounter authority incomplete |
@@ -49,12 +49,12 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Species and encounter tables | ██░░░ | Source catalogue resolves386 species and184 evolution rules; one persisted Poochyena inspection anchor exists, wider habitats/rates not authored |
 | Creatures visible in adventure world | █░░░░ | Needs world entities, directional art, pathing and spawn budgets |
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
-| Native-style turn battle | ██░░░ | Authenticated encounter claim/inspect/return/release verified; no moves or playable battle integration |
+| Native-style turn battle | ███░░ | Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
 | Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
 | Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; actual capture, clinic and storage gameplay remain missing |
-| Moves / types / status durations | █░░░░ | Definitions and balancing missing; prototype only holds limited status names |
+| Moves / types / status durations | █░░░░ | 354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
 | Collections / discovery journal | █░░░░ | Emoji discovery exists separately; creature discovery not connected |
@@ -213,3 +213,7 @@ The source catalogue covers 386 species. Owned companion health uses source HP a
 ## Authenticated encounter inspection
 
 A nearby Play panel now shows the original Poochyena portrait and server-owned level/HP for one authored regional encounter. Actual browser verification passes claim, Inspect, Return to world and release with persisted controller/mode, keyboard activation and narrow-screen review. Inspect is a lifecycle mode only: no attack, capture, damage, reward or playable battle is claimed. Combat bars remain unchanged. See [ENCOUNTER-LIFECYCLE.md](ENCOUNTER-LIFECYCLE.md).
+
+## Bounded source battle turn evidence
+
+The actual battle service and contextual UI now execute supported starter Pound/Scratch/Tackle turns against wild Tackle. HP/PP persist, and a real lost-response browser test verifies one turn/PP debit with exact receipt replay; Party health refreshes automatically from the authoritative API. Source portraits and readable damage/miss/critical results are present. The turn-battle row advances only to locally connected; native real-time combat, full effects, attack animations, capture, rewards and PvP are not claimed. See [SOURCE-BATTLE-TURNS.md](SOURCE-BATTLE-TURNS.md).

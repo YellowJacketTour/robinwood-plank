@@ -24,14 +24,14 @@ try{
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
  if(process.argv.includes('--resources')){
-  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,beds:[0,1,2].map(id=>({id,stage:0,growthVisualPhase:0})),seeds:3,produce:0},'http://localhost:3021'));
+  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,beds:[0,1,2].map(id=>({id,stage:0,growthVisualPhase:0,allowedActions:['till','plant','water','harvest']})),seeds:3,produce:0},'http://localhost:3021'));
   await page.waitForTimeout(300);await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
   await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='begin'));
   await page.waitForTimeout(650);assert(!(await page.evaluate(()=>window.nativeLifecycle)).some(e=>e.phase==='contact'),'No contact without authorization');
   await page.evaluate(()=>{const e=window.nativeLifecycle[0];document.querySelector('iframe').contentWindow.postMessage({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:true},'http://localhost:3021');});
   await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='contact'));
   assert(!events.some(e=>e.startsWith('CHARMVILLE_CROP_STAGE')),'Authoritative action must not mutate local crop stage');
-  await page.evaluate(()=>{const e=window.nativeLifecycle[0];document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,sessionId:e.sessionId,resolvedLocalActionId:e.localActionId,beds:[0,1,2].map(id=>({id,stage:id===0?1:0,growthVisualPhase:0})),seeds:3,produce:0},'http://localhost:3021');});
+  await page.evaluate(()=>{const e=window.nativeLifecycle[0];document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,sessionId:e.sessionId,resolvedLocalActionId:e.localActionId,beds:[0,1,2].map(id=>({id,stage:id===0?1:0,growthVisualPhase:0,allowedActions:['till','plant','water','harvest']})),seeds:3,produce:0},'http://localhost:3021');});
   await page.waitForTimeout(600);await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
   await page.waitForFunction(()=>window.nativeLifecycle.filter(e=>e.phase==='begin').length===2);
   await page.evaluate(()=>{const e=window.nativeLifecycle.filter(e=>e.phase==='begin').at(-1);document.querySelector('iframe').contentWindow.postMessage({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:false},'http://localhost:3021');});

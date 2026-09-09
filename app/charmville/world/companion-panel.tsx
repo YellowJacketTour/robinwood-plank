@@ -49,6 +49,7 @@ export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onP
   finally{if(!controller.signal.aborted&&current===version.current)setBusy(false);}
  },[wallet,handle,onFollower,onFollowers,onHomeReady]);
  useEffect(()=>{let disposed=false;const versions=version,controllers=abort;void Promise.resolve().then(()=>{if(!disposed)void request();});return()=>{disposed=true;++versions.current;controllers.current?.abort();};},[request]);
+ useEffect(()=>{const refresh=()=>{void request();};window.addEventListener('charmville:companion-health-changed',refresh);return()=>window.removeEventListener('charmville:companion-health-changed',refresh);},[request]);
  const partner=state?.companion;
  const homeReady=state?.homeClaimed===true;
  const slots=roster?.slots??Array.from({length:6},()=>null);

@@ -63,6 +63,12 @@ export async function nativeResources(pool:Pool,token:string,raw?:unknown){
   const beds=(await c.query("SELECT bed_id AS id,CASE WHEN stage=3 AND ready_at<=clock_timestamp() THEN 4 ELSE stage END AS stage,revision::text,ready_at AS \"readyAt\",planter_id::text AS \"planterId\" FROM charmville_native_resources WHERE region_id=$1 ORDER BY bed_id",[region])).rows;
   const balances=(await c.query("SELECT COALESCE((SELECT qty FROM charmville_seeds WHERE profile_id=$1 AND face_id=$2),0)::text AS seeds,COALESCE((SELECT qty FROM charmville_stacks WHERE profile_id=$1 AND face_id=$2),0)::text AS produce",[id,face])).rows[0];
   const serverNow=(await c.query("SELECT clock_timestamp() AS now")).rows[0].now.toISOString();
+  const own=!p.owner||p.owner===id;
+  const canHelp=own||!!(await c.query("SELECT 1 FROM charmville_home_grants WHERE owner_profile_id=$1 AND visitor_profile_id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp() AND 'visit'=ANY(rights) AND 'help'=ANY(rights)",[p.owner,id])).rowCount;
+  for(const bed of beds){
+   // Presentation hints only; begin and contact still revalidate permissions.
+   bed.allowedActions=bed.stage===0&&own?["till"]:bed.stage===1&&own&&Number(balances.seeds)>0?["plant"]:bed.stage===2&&canHelp?["water"]:bed.stage===4&&own&&bed.planterId===id?["harvest"]:[];
+  }
   await c.query("COMMIT");return {regionId:region,beds,seedFace:face,...balances,result,serverNow};
   async function validate(kind:string,bedId:number,bed:{stage:number;ripe:boolean;planter_id:string|null}){
    const dx=Math.abs(actor.x-xs[bedId]),dy=Math.abs(actor.y-11);

@@ -42,8 +42,10 @@ test("native resources conserve seeds and produce across retries, ownership, can
   await finish('till');await finish('plant');
   await homeAccess(pool,'p0',tokens[0],parseHomeGrant({visitor:'p1',revision:'0',revoke:false,rights:['visit','help'],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));
   const visitor=await worldPresence(pool,tokens[1]);await worldPresence(pool,tokens[1],{destination:'home',handle:'p0',revision:visitor.revision});await nativeActor(pool,tokens[1]);
+  assert.deepEqual((await nativeResources(pool,tokens[1])).beds[0].allowedActions,['water']);
   const water=await begin('water',1);await mature();
   await homeAccess(pool,'p0',tokens[0],parseHomeGrant({visitor:'p1',revision:'1',revoke:false,rights:['visit'],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));
+  assert.deepEqual((await nativeResources(pool,tokens[1])).beds[0].allowedActions,[]);
   await assert.rejects(nativeResources(pool,tokens[1],{phase:'commit',requestId:water.requestId}),/permission/);assert.equal((await nativeResources(pool,tokens[0])).beds[0].stage,2);
  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });
