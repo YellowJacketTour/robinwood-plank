@@ -509,7 +509,18 @@ export class Hose {
       reason: first?.reason ?? (first?.tailMoved ? "tail moved" : "no progress, no reason given"),
       detail: first
         ? { chain: first.chain, from: first.from, to: first.to, linked: first.linked, tailMoved: first.tailMoved }
-        : { step: "returned undefined -- every chain's tail is at protocol_t0" },
+        : {
+            // step() returns undefined when pickChain selects nothing, which
+            // has TWO causes: every chain's past is genuinely closed, OR a
+            // chain has no backfill_tail recorded and is skipped silently.
+            // Naming only the first would be the same over-confident reading
+            // that produced three wrong diagnoses here.
+            step: "pickChain selected no chain: either every past is closed, or no backfill_tail is recorded",
+            chainsConfigured: this.cfg.chains,
+            tails: Object.fromEntries(
+              this.cfg.chains.map((c) => [c, this.pg?.getBackfillTail(c) ?? null]),
+            ),
+          },
     });
     if (budgetMs <= 0) return first;
     // `tailMoved` is the only honest signal of progress -- a step that
