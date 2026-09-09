@@ -43,41 +43,69 @@ const SOURCE = "ordinalswallet-ordinals";
 const API_BASE = "https://turbo.ordinalswallet.com/collections";
 const PAGE_SIZE = 500;
 /**
- * Where the catalog stops holding NFT collections and becomes BRC-20 rows.
+ * The BRC-20 BAND -- a middle section of this catalog, not its end.
  *
- * Measured live 2026-09-08 by sampling this endpoint directly: real
- * non-BRC-20 collections per page of 500 are 499 / 490 / 483 / 363 at offsets
- * 0 / 500 / 1000 / 1500, then TWO at offset 2000. Re-probed the same day at
- * offsets 0 / 1500 / 2000 / 3000: 489 / 361 / 6 / 33. Everything past ~2k is
- * fungible-token rows that this scan correctly rejects.
+ * WHAT THE PREVIOUS MEASUREMENT MISSED
+ * ------------------------------------
+ * A 2026-09-08 pass sampled offsets 0 / 500 / 1000 / 1500 / 2000 / 3000, saw
+ * real collections collapse from ~499 to ~2, and concluded "the catalog is
+ * EXHAUSTED... no offset makes it produce what it does not have". It never
+ * probed past 3,000, and the endpoint's own `total` of 425,243 was treated as
+ * a vendor exaggeration.
  *
- * The previous 120,000 was wrong by two orders of magnitude, so the lane
- * spent every turn walking token rows before wrapping.
+ * Re-measured live 2026-09-09, with real curl requests at wide offsets:
  *
- * READ THIS BEFORE TUNING IT AGAIN. Lowering this number does not grow
- * Bitcoin. This source offers ~1,837 real collections in total and we already
- * hold ~19,600 from elsewhere, so the catalog is EXHAUSTED, not stalled, and
- * no offset makes it produce what it does not have. It is fixed here only so
- * the lane stops paying for a store with nothing left. Bitcoin growth comes
- * from parsing envelopes off the chain itself, not from this endpoint.
+ *   offset       returned   BRC-20   REAL NFT collections
+ *        0            500        0     500
+ *    20,000            500      488      12
+ *   100,000            500      485      15
+ *   150,000            500      497       3
+ *   250,000            500        0     500
+ *   350,000            500        0     500
+ *   400,000            500        0     500
+ *   420,000            500        0     500
+ *   425,000            243        0     243   <- exactly total-425,000
+ *
+ * Zero slug overlap between pages. The endpoint paginates the whole 425,243,
+ * and the final page's size matches the reported total exactly -- so the total
+ * is honest and reachable.
+ *
+ * The fungible rows are a BAND (roughly 20k-150k), not a tail. Past ~250,000
+ * the catalog is 100% real NFT collections, and none of them have ever been
+ * reachable: `shouldWrapToStart` fired on the first all-BRC-20 page and sent
+ * the walker back to offset 0, forever. That is why Bitcoin sat at ~19,600
+ * collections against a source offering hundreds of thousands.
+ *
+ * So the old comment's instruction was right in spirit and wrong in fact:
+ * lowering the number does not grow Bitcoin, but neither does wrapping. What
+ * grows Bitcoin is SKIPPING the band and continuing.
  */
-const DEAD_ZONE_OFFSET = 2_500;
 
 /**
- * Should the walker give up on this page and wrap back to the front?
- *
- * Pulled out of the loop so the stop condition is testable without a
- * database: a walker whose exhaustion rule is only asserted by a constant is
- * exactly the "guard that never fires" shape that has bitten this codebase
- * twice. New collections are added at the TOP of this catalog, so wrapping to
- * offset 0 is where re-walking actually finds them.
+ * Where the fungible-token band begins. Past this, an all-BRC-20 page means
+ * "keep going", not "the catalog is over".
  */
-export function shouldWrapToStart(offset: number, realCollectionsOnPage: number): boolean {
-  return offset > DEAD_ZONE_OFFSET && realCollectionsOnPage === 0;
+const BRC20_BAND_START = 2_500;
+
+/**
+ * The end of the catalog, as the endpoint itself reports it. Only a page that
+ * returns NOTHING AT ALL -- not merely nothing useful -- ends the walk.
+ */
+export function shouldWrapToStart(offset: number, realCollectionsOnPage: number, rowsOnPage?: number): boolean {
+  // An empty page is a real end of catalog: there is nothing past it.
+  if (rowsOnPage === 0) return true;
+  // A page of pure BRC-20 inside the band is not an ending. Treating it as one
+  // is what capped Bitcoin at 4.6% of this source for months.
+  if (rowsOnPage != null && rowsOnPage > 0) return false;
+  // Legacy two-argument call: preserve the old behaviour rather than silently
+  // changing what a caller that has not been updated does.
+  return offset > BRC20_BAND_START && realCollectionsOnPage === 0;
 }
 
-/** Exported for tests so the measured boundary cannot drift silently. */
-export const ORDINALSWALLET_DEAD_ZONE_OFFSET = DEAD_ZONE_OFFSET;
+/** Exported so tests pin the band's start rather than let it drift silently. */
+export const ORDINALSWALLET_BRC20_BAND_START = BRC20_BAND_START;
+
+
 const CHAIN_SLUG = "bitcoin-mainnet";
 const CURSOR_KEY = "bitcoin-mainnet:ordinalswallet-collection-list";
 // Not a real throttle -- see source-budget.ts's own DAILY_CEILING comment:
@@ -163,13 +191,23 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
   // ~85 invocations just to reach the end once. Raised 50x.
   const maxPages = input.maxPages ?? 500;
   let offset = await readOffset();
-  // Self-heal a cursor left parked in the dead zone by an earlier run (live
-  // 2026-09-07: it sat deep in the BRC-20 region, so every pass walked 2,000
-  // fungible-token rows and registered zero collections).
-  if (offset > DEAD_ZONE_OFFSET) {
-    offset = 0;
-    await writeOffset(offset);
-  }
+  // THE HARD CAP THAT KEPT BITCOIN AT 4.6%.
+  //
+  // This reset ANY cursor past 2,500 back to zero on every invocation, so the
+  // walker could never traverse the BRC-20 band even once. Combined with
+  // shouldWrapToStart firing on the first all-fungible page, offsets above
+  // ~2,500 were unreachable by construction -- and offsets 250,000-425,243 are
+  // 100% real NFT collections (measured live 2026-09-09; see the band comment
+  // above). Roughly 175,000 real collections sat permanently out of reach.
+  //
+  // The cursor is now only reset when it is past the catalog's actual END,
+  // which is the one case where continuing really is pointless. A cursor deep
+  // in the fungible band is left alone: walking through it is how the walker
+  // reaches the real collections on the far side.
+  // No pre-flight request is needed to decide this: the loop below reads
+  // `page.total` on its first fetch and already breaks on `offset >= total`,
+  // then wraps. Adding a probe here would double this lane's request count to
+  // re-learn something the next line is about to fetch anyway.
   let total = offset;
   let pagesWalked = 0;
   let registered = 0;
@@ -208,20 +246,22 @@ export async function runOrdinalsWalletCollectionScan(input: { maxPages?: number
     }
 
     offset += page.collections.length;
-    // The catalog is FRONT-LOADED with real NFT collections and then runs to
-    // ~375k BRC-20 token entries (fungible tokens, total_supply 0) that this
-    // scan correctly rejects. Measured live 2026-09-07: offset 0 = 100/100
-    // real, 5,000 = 16/100, 50,000 = 12/100, 150,000 and beyond = 0/100.
-    // Grinding the dead zone burns every turn this lane gets and registers
-    // nothing, so once we are deep in it and a full page yields nothing, wrap
-    // to the start -- new collections are added at the top, and the early
-    // region is where re-walking actually finds them.
-    if (shouldWrapToStart(offset, realThisPage)) {
+    // Pass the PAGE SIZE, not just the useful-row count. A page of pure
+    // BRC-20 rows deep in the band is not the end of the catalog -- it is the
+    // middle of it, and treating it as an ending is what made offsets past
+    // ~2,500 unreachable and capped Bitcoin at 4.6% of this source.
+    if (shouldWrapToStart(offset, realThisPage, page.collections.length)) {
       offset = 0;
       await writeOffset(offset);
       break;
     }
-    if (offset >= total) break;
+    // The real terminator, and the one that was always correct: the endpoint
+    // reports its own total and the final page's size matches it exactly.
+    if (offset >= total) {
+      offset = 0;
+      await writeOffset(offset);
+      break;
+    }
   }
 
   await writeOffset(offset);
