@@ -1,0 +1,16 @@
+{
+  "result": "pass",
+  "checks": [
+    "Synthetic standard gamepad sword down/up",
+    "Dead zone rejects stick drift",
+    "Disconnect releases held movement",
+    "Zoom slider",
+    "3840x2160 layout",
+    "Fullscreen enter/exit",
+    "390x844 touch layout"
+  ],
+  "limitations": [
+    "No physical controller tested",
+    "Pinch gesture not yet device-tested"
+  ]
+}

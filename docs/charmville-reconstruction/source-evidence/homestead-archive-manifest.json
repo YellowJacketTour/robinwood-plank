@@ -1,0 +1,18 @@
+{
+  "release": "homestead-2026-09-09",
+  "archives": [
+    {
+      "directory": "zquest-native-212",
+      "archive": "zquest-native-212.tar.gz",
+      "bytes": 80452720,
+      "sha256": "efdbe9d25419a0f8ac5e45220049b4288cb27c59f2813534f36f3fccdbe040fd"
+    },
+    {
+      "directory": "charmville-native-homestead",
+      "archive": "charmville-native-homestead.tar.gz",
+      "bytes": 11277748,
+      "sha256": "6a474f104d734f34adc7bd6453f8f3b1590ec8fa3cc65acedd5ef326a7cac9ba"
+    }
+  ],
+  "restore": "Extract beside existing charmville-references collections; run scripts/charmville/build-homestead.mjs. See HOMESTEAD-PLAYTEST.md."
+}

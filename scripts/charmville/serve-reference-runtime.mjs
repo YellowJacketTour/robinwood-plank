@@ -6,10 +6,19 @@ import {adventureUrl,diagnosticKits} from './adventure-entry.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
 const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
-const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:"};
+const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:3022; worker-src 'self' blob:"};
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
+  if(url.pathname==='/charmville/tutorial/'){
+   const entry=new URL(adventureUrl(),'http://localhost:3021');entry.searchParams.set('test','/quests/charmville/homestead/r01/Homestead.qst');res.writeHead(302,{...headers,Location:entry.pathname+entry.search});res.end();return;
+  }
+  if(url.pathname==='/charmville-display.js'){
+   res.writeHead(200,{...headers,'Content-Type':'text/javascript'});res.end(await readFile(new URL('./display-controls.js',import.meta.url)));return;
+  }
+  if(url.pathname==='/charmville-controller.js'){
+   res.writeHead(200,{...headers,'Content-Type':'text/javascript'});res.end(await readFile(new URL('./controller-controls.js',import.meta.url)));return;
+  }
   // Existing shared links now skip the original title/story sequence too.
   // Append reference=1 to explicitly replay the unchanged source introduction.
   if(url.pathname==='/charmville/' || (url.pathname==='/play/' && url.searchParams.get('open')==='quests/purezc/139' && !url.searchParams.has('reference'))){
@@ -18,6 +27,7 @@ http.createServer(async(req,res)=>{
   if(url.pathname==='/reference-data/manifest.json'){
    const manifest={};
    for(const id of ['139','204','461']){const quest=JSON.parse(await readFile(path.join(contentRoot,`${id}-metadata.json`),'utf8'));manifest[quest.id]={...quest,images:[]};}
+   try{const quest=JSON.parse(await readFile(path.join(contentRoot,'homestead-metadata.json'),'utf8'));manifest[quest.id]=quest;}catch(error){if(error.code!=='ENOENT')throw error;}
    res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(JSON.stringify(manifest));return;
   }
   const content=url.pathname.startsWith('/reference-data/');
@@ -49,13 +59,14 @@ http.createServer(async(req,res)=>{
      const instructions=document.createElement('p');instructions.textContent='Arrows move Â· Z sword (hold then release to spin) Â· X selected item Â· Enter inventory. Bow fires immediately in this quest. These isolated tests reset progress and remove the endgame gear that masks damage and costs.';help.append(instructions);
      for(const [key,label] of ${JSON.stringify([['endgame','Full endgame kit'],...Object.entries(diagnosticKits).map(([key,value])=>[key,value.label])])}){const link=document.createElement('a');link.href='/charmville/?kit='+key;link.textContent=label;link.className='panel-button';help.append(link);}
      document.querySelector('.panel-buttons').after(help);
+     const tutorial=document.createElement('a');tutorial.href='/charmville/tutorial/';tutorial.textContent='Homestead tutorial';tutorial.className='panel-button';help.append(tutorial);
      const start=document.createElement('button');start.textContent='Enter the world';start.className='panel-button';
      document.querySelector('.panel-buttons').prepend(start);
      start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading worldâ€¦';
       try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});start.remove();}
       catch{start.textContent='Loading failed â€” reload to retry';}
      },{once:true});
-    </script></body>`);
+    </script><script type="module" src="/charmville-display.js"></script><script type="module" src="/charmville-controller.js"></script></body>`);
    }
    res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end(html);return;
   }

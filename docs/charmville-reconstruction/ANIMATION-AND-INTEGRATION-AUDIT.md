@@ -1,3 +1,5 @@
+Latest working build (2026-09-09): read [HOMESTEAD-PLAYTEST.md](HOMESTEAD-PLAYTEST.md). Native-212 authored quest now runs a till/plant/water/harvest loop, prototype XP, moving gold aura and two-player guest sprite presence after harvest. Real browser WebSocket traffic is verified. Earlier invalid-quest results included an HTTP compression mistake; native 219 still gives Version not supported after correcting it. Progress remains session-only and unauthenticated; Pokemon, account inventory/economy and full source animation fidelity remain missing. Continue from the working native tutorial and transport.
+
 # Charmville animation and world integration audit
 
 The current playtest preserves a substantial Zelda-style adventure, but it does not yet deliver the combined farming, creature, skill and market game. Its most urgent weaknesses are incomplete action feedback, an endgame preset that hides costs and damage, and a browser/native engine mismatch that prevents the proposed WebSocket script from running. More source material helps only when converted into tested behavior inside the shared world.

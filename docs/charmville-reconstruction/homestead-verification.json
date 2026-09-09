@@ -1,0 +1,26 @@
+[
+  {
+    "errors": [],
+    "sent": 355,
+    "received": 32,
+    "joined": true,
+    "aura": true,
+    "peers": 32,
+    "last": [
+      "world|353|203|72|46822|6|1|4|63|1|1",
+      "world|354|203|72|46822|6|1|4|63|1|1"
+    ]
+  },
+  {
+    "errors": [],
+    "sent": 161,
+    "received": 32,
+    "joined": true,
+    "aura": true,
+    "peers": 32,
+    "last": [
+      "world|159|232|72|46828|6|0|4|63|1|1",
+      "world|160|232|72|46828|6|0|4|63|1|1"
+    ]
+  }
+]
