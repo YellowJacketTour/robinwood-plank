@@ -1,14 +1,15 @@
 # Backup receipt
 
-Status: application checkpoint pushed; reference archive verification in progress. Do not treat the private draft release as complete until this receipt is updated with the final verification results.
+Status: application checkpoint pushed; **all 41 source-collection archives uploaded and verified against GitHub SHA-256 digests** at 2026-09-09 12:22 UTC. Release publication and final handoff commits are part of this checkpoint; consult the remote release for its current visibility.
 
 - Application checkpoint: `28306183a7dfd328761fcf2b9232d36eab29d798` on `feat/charmville-slice-1`, verified against the GitHub remote branch.
 - 699 files in that commit: implementation, editable art, source indexes, research, tests and context-free handoff.
 - Private archive repository: https://github.com/YellowJacketTour/charmville-reconstruction-vault
 - Release tag: `checkpoint-2026-09-09`; release ID `385481318`.
-- Local archive manifest: sibling `charmville-backup-archives/archive-manifest.json`. The committed final manifest and verification receipt will be copied here and into the vault.
+- Archives total **6,139,960,649 bytes** (about 6.14 GB / 5.72 GiB compressed). Every current top-level source collection is represented, including tooling, full acquired Git/LFS bytes, original editable art, quest snapshots and the adapted browser runtime.
+- `archive-manifest.json` records each archive's source, revision/remote where available, byte length and SHA-256. `archive-verification.json` records successful comparison of all 41 uploaded sizes/digests to that manifest. Both are committed here and in the private vault and attached to the release.
 - Main app validation: lint:inmotion passed; TypeScript passed; 212 contract tests passed; 1,326 market tests passed, 50 skipped; production build passed. Scoped new code lint passed after correcting the local-host React subscription.
-- Recovery verification: sample archive restored successfully; nonempty destination and corrupted archive were rejected. Full multi-gigabyte restore not executed; every final uploaded archive will be compared to GitHub's size and SHA-256 digest.
+- Recovery verification: sample archive restored successfully; nonempty destination and corrupted archive were rejected. Full multi-gigabyte restore was not executed; all uploaded archives passed remote size and SHA-256 comparison. This is byte-integrity verification, not proof every archived third-party engine builds.
 - Excluded: environment files, credentials, database contents, browser sessions/saves and rebuildable node/Next/Python caches. This is a source/assets/project continuity backup, not a production database backup.
 - The original game runtime reaches name entry and story in test browsers. The full integrated game is not complete. Read CURRENT-STATE.md for limitations.
 

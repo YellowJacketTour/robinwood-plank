@@ -46,3 +46,13 @@ The user wants a live browser link quickly and meaningful playable improvements 
 ## Account-transition instruction
 
 The user asked to preserve all work on GitHub, annotate it as if the next agent has no chat context, stash all assets/repos/plans, provide a copy-and-paste one-shot prompt, then resume building with remaining capacity. The prompt must be future-proof: it must direct the next agent to fetch/read the latest branch and living handoff, not reset to this date's incomplete snapshot. Do not change or delete their account or subscription; the task is project preservation and continued development.
+
+## Further user specification after playing the source quest
+
+The user praised ZQuest / Hero of Dreams' script writing, dialogue, windows, authored quest sequences and scripted playthrough. These are now explicit reusable-system requirements, not merely art references. Preserve and adapt dialogue presentation, event/cutscene scripting, quest flags, actor choreography, spawn effects (including smoke-like appearances), rewards and conditional progression into the shared multi-title world.
+
+Creatures exist in the live action world as well as dedicated encounter scenes. Players can fight them with Zelda-style abilities, capture them directly when rules allow, or progress that same fight into a Pokémon-style encounter. **Health and status progress must carry into the staged encounter and back; switching mode must not reset the creature.** A captured companion can follow a player like Pikachu in Pokémon Yellow. The creature roster, capture identity, evolution history and equipment/abilities progression remain persistent.
+
+The user explicitly asks for Pokémon sprites and animals across these modes. Catalog battle/front/back sprites separately from overworld/follower/directional/attack animation assets. Do not claim a complete overworld animation set exists for every species just because its battle sprite exists. Fill missing sets through the eventual bespoke authoring pipeline with explicit coverage status.
+
+The entire world continues as a live-time, OSRS-like persistent MMORPG: satchels/inventory, mini-grinds, skills, increasingly capable gear, Zelda's distinctive tools/magic, creature rosters/evolutions and an economy woven through social reactions and every charm manifestation. Players live on their own private property; **every property connects to the world map**, with wild regions, iconic zones, industry, civilization projects and shared exploration. A private home is a connected region with access rules, not an isolated farming page whose contents cannot enter the world.

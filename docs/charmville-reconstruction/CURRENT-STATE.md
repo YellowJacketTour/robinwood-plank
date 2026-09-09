@@ -43,9 +43,9 @@ The full vision is NOT implemented. The completed work is an existing PlankSpace
 
 ## Preservation and validation
 
-The main development checkpoint and private archive verification are recorded in `BACKUP-RECEIPT.md` when complete. Do not infer completion from a draft release or a partially written manifest. Environment files, real credentials, browser saves and database state are intentionally excluded. Source archives are recovery assets, not a database backup.
+The main development checkpoint and private archive verification are recorded in `BACKUP-RECEIPT.md`. All 41 source-collection archives (6,139,960,649 compressed bytes) passed remote size/SHA-256 verification. Environment files, real credentials, browser saves and database state are intentionally excluded. Source archives are recovery assets, not a database backup.
 
-Prior to handoff, the previous frontier checkpoint passed lint:inmotion, TypeScript, 212 contract tests, 1,326 market tests (50 skipped), and build. Current handoff checks are being rerun; their final result belongs in BACKUP-RECEIPT.md. Those tests do not establish source-game fidelity or the full MMO behavior.
+The handoff checkpoint passed lint:inmotion, TypeScript, 212 contract tests, 1,326 market tests (50 skipped), build and scoped new-code lint. Those tests do not establish source-game fidelity or the full MMO behavior. Latest user additions are preserved in CREATURE-AND-QUEST-CONTRACT.md: one creature across action/staged combat, following, status/HP continuity, rich authored event reuse and private properties connected to world regions.
 
 ## Operational details
 

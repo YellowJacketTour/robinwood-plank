@@ -1,0 +1,383 @@
+{
+  "schema": 1,
+  "createdAt": "2026-09-09T12:21:31.028Z",
+  "repository": "YellowJacketTour/charmville-reconstruction-vault",
+  "tag": "checkpoint-2026-09-09",
+  "exclusions": [
+    ".env*",
+    "node_modules",
+    ".next",
+    "__pycache__"
+  ],
+  "archives": [
+    {
+      "source": "bat4blender",
+      "file": "bat4blender.tar.gz",
+      "bytes": 101553,
+      "sha256": "fae742b0d50eb8d0d1f0243945b5a28f04326922723719f04067b8f60753c1a0",
+      "revision": "8f27d8b89ad2db85d40f80538c200b187f213066",
+      "remote": "https://github.com/memo33/BAT4Blender.git",
+      "uploaded": true
+    },
+    {
+      "source": "dream-loop",
+      "file": "dream-loop.tar.gz",
+      "bytes": 13806849,
+      "sha256": "bee7aec5479b23fdc220875be938eca9b326501cf322529ecaa2313798ecf71d",
+      "revision": "d113b78bd8143d6c4e2b46840c1a881139bcc084",
+      "remote": "https://github.com/achimala/dream-loop.git",
+      "uploaded": true
+    },
+    {
+      "source": "farmvillage",
+      "file": "farmvillage.tar.gz",
+      "bytes": 94333957,
+      "sha256": "fd115dd833ad42276b99a7e149ad5e678a4e3fba0cbd8ff1acfb171eda98452e",
+      "revision": "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+      "remote": "https://github.com/AcidCaos/farmvillage.git",
+      "uploaded": true
+    },
+    {
+      "source": "farmville-clone",
+      "file": "farmville-clone.tar.gz",
+      "bytes": 1606487,
+      "sha256": "5856e7b9fb52e6f4fd8f9adeff8c2a808f477982aeaf4835a66727be87a0b006",
+      "revision": "ad85523aa1ebad95a39dd3f46deba3bef8067aae",
+      "remote": "https://github.com/ksc3899/Farmville-Clone.git",
+      "uploaded": true
+    },
+    {
+      "source": "feiok",
+      "file": "feiok.tar.gz",
+      "bytes": 62337,
+      "sha256": "25c89000e962e314e2ab1d47ea0e430f117ff6e938febc7ad49b822bc4dc9979",
+      "revision": "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+      "remote": "https://github.com/dacousb/feiok.git",
+      "uploaded": true
+    },
+    {
+      "source": "freerct",
+      "file": "freerct.tar.gz",
+      "bytes": 248013638,
+      "sha256": "6cc3be7ee93aef785aacbb4f34dc3703f51b921f7b04ba6b19b5c94b2f5705f8",
+      "revision": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+      "remote": "https://github.com/FreeRCT/FreeRCT.git",
+      "uploaded": true
+    },
+    {
+      "source": "fv-replowed",
+      "file": "fv-replowed.tar.gz",
+      "bytes": 139219121,
+      "sha256": "ba9eb98f5b0ea0655119eb8321e77908135905546a29042910388948008d2aa9",
+      "revision": "01ece56b75ed578b62396a97705f5333831f41d7",
+      "remote": "https://github.com/FV-Replowed/fv-replowed.git",
+      "uploaded": true
+    },
+    {
+      "source": "graal-reborn-server",
+      "file": "graal-reborn-server.tar.gz",
+      "bytes": 71197209,
+      "sha256": "4ec164bf0c1f9525af3e380a792785daef37d13f0a2d6fc3a98bd216d7e716f2",
+      "revision": "efb5b901fc780fbc1f2399d0cc51fd4d6c93dbda",
+      "remote": "https://github.com/xtjoeytx/GServer-v2.git",
+      "uploaded": true
+    },
+    {
+      "source": "hjm-crops",
+      "file": "hjm-crops.tar.gz",
+      "bytes": 8413838,
+      "sha256": "806c9fc23ce08d7cb42cdc8dd77cbb7b31ac3db0c69fc9acc525aac011afd202",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "isomiddleearth",
+      "file": "isomiddleearth.tar.gz",
+      "bytes": 38504355,
+      "sha256": "ff97afd61c2cea99bb5d9525e3423c48a8591da13859a4f5f965fda736ef7ab0",
+      "revision": "9e59a127ec87b141d6d767f4ab79ac9b4c38a75c",
+      "remote": "https://github.com/hasanharman/isomiddleearth.git",
+      "uploaded": true
+    },
+    {
+      "source": "kenney-landscape",
+      "file": "kenney-landscape.tar.gz",
+      "bytes": 2228315,
+      "sha256": "5c5d8d90e6c10770af3f56abdc16c9bcfd0f81faeb2bc44407465fd50a54d186",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "kenney-miniature-farm",
+      "file": "kenney-miniature-farm.tar.gz",
+      "bytes": 20060941,
+      "sha256": "2499e60771c2e4baa81a43c2224802e4589ddfce4fd54b6a08f2bb38197f2c33",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "kenney-nature",
+      "file": "kenney-nature.tar.gz",
+      "bytes": 16991409,
+      "sha256": "b67be6bffb913d7b0d3fc91a36109ae02501c2cdbef1a6882b9801f3e6047492",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "lincity-ng",
+      "file": "lincity-ng.tar.gz",
+      "bytes": 227974466,
+      "sha256": "19b3e58bbc444aa0fdfb77d7e4a67673a0b61ffa8c088c64d1dbc4400fe15864",
+      "revision": "99939d94483189b5d512732b27555cd3e2e937a1",
+      "remote": "https://github.com/lincity-ng/lincity-ng.git",
+      "uploaded": true
+    },
+    {
+      "source": "memoji-market",
+      "file": "memoji-market.tar.gz",
+      "bytes": 163603009,
+      "sha256": "d69db93b9ad4016c0f25dbcb7fe7f6a3070e9a8ada851873ccc61e9b4460696b",
+      "revision": "e4a2d1440c2a283cea6cedaa1147fca49d187502",
+      "remote": "https://github.com/nocktoshi/memoji-market.git",
+      "uploaded": true
+    },
+    {
+      "source": "micropolis-core",
+      "file": "micropolis-core.tar.gz",
+      "bytes": 561630,
+      "sha256": "ca584f74adf9a3310a9098f9148122c062fad01b8494e242a9f773c02110c384",
+      "revision": "69ccf87ed72d2d2950b70cf16ef1391439bd9d48",
+      "remote": "https://github.com/SimHacker/MicropolisCore.git",
+      "uploaded": true
+    },
+    {
+      "source": "opengfx",
+      "file": "opengfx.tar.gz",
+      "bytes": 25481711,
+      "sha256": "37ff42e0bc542a8920ed790b7841fc68801a7c9a58f553142c46fc0b8d8c8e2c",
+      "revision": "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+      "remote": "https://github.com/OpenTTD/OpenGFX.git",
+      "uploaded": true
+    },
+    {
+      "source": "opengfx2",
+      "file": "opengfx2.tar.gz",
+      "bytes": 1359073,
+      "sha256": "7d8627714fd21ec983fc04838741fd9fb3d1ae15603d26a4883d394c56ce67df",
+      "revision": "7a17fb370440aed7f2586715d606e9fe190b9dd3",
+      "remote": "https://github.com/OpenTTD/OpenGFX2.git",
+      "uploaded": true
+    },
+    {
+      "source": "openrct2-opengraphics",
+      "file": "openrct2-opengraphics.tar.gz",
+      "bytes": 229427183,
+      "sha256": "687a1bd999d591a91301fa7786937959b18f93369ca0efe7b15a0ba315a53dfb",
+      "revision": "930b0140685f85db92147af832080e8df12d8d4e",
+      "remote": "https://github.com/OpenRCT2/OpenGraphics.git",
+      "uploaded": true
+    },
+    {
+      "source": "pokeemerald",
+      "file": "pokeemerald.tar.gz",
+      "bytes": 27977550,
+      "sha256": "c4429b5dc64b2feeab1f6c129484b5a33acb7509ede9f1a93af0fa0b04e69b40",
+      "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+      "remote": "https://github.com/pret/pokeemerald.git",
+      "uploaded": true
+    },
+    {
+      "source": "quaternius-characters",
+      "file": "quaternius-characters.tar.gz",
+      "bytes": 44143502,
+      "sha256": "b49de27c078c02e785b854815b8f3b1dea2c8b09b6fdec7d9e2d8d4fa96b632a",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "quaternius-crops",
+      "file": "quaternius-crops.tar.gz",
+      "bytes": 9864770,
+      "sha256": "c3e18d1495ef86202d9e04c60af79e5623c30150725a1c83f9b0f11f93ffd2c5",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "research-2026-09-08",
+      "file": "research-2026-09-08.tar.gz",
+      "bytes": 30639,
+      "sha256": "0b91eeb004baeeca7d7852390128692c703ae5d81254505246aae8fe660e7786",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "research-2026-09-09",
+      "file": "research-2026-09-09.tar.gz",
+      "bytes": 4391573,
+      "sha256": "26042b3dfc88043cea59d830b483d089cc286c86a84b3817a6f5283bd2c361c1",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "simcity-threejs",
+      "file": "simcity-threejs.tar.gz",
+      "bytes": 56405,
+      "sha256": "43c4a82015b95cf1325c6e224115b838d46ee62c5ec51c7ad987fbb02db137cc",
+      "revision": "9116cf680f677c3476f8159d5bbc7a4cfda00654",
+      "remote": "https://github.com/dgreenheck/simcity-threejs-clone.git",
+      "uploaded": true
+    },
+    {
+      "source": "simutrans-pak128",
+      "file": "simutrans-pak128.tar.gz",
+      "bytes": 515408,
+      "sha256": "db28b71fa270dcfaf5615c0091d4b8b667b33445f59ec9273b75b0f77366265a",
+      "revision": "e45d9f08f6aa0a08432b5312cb0d7cb93232fdc6",
+      "remote": "https://github.com/simutrans/pak128.git",
+      "uploaded": true
+    },
+    {
+      "source": "solarus-engine",
+      "file": "solarus-engine.tar.gz",
+      "bytes": 152880695,
+      "sha256": "7eeaaa62d64b09030d680a361edea346134518e9e337f8ba02490eebf1700373",
+      "revision": "72d81668d6902b99338bbe1926a7d048ec1d3476",
+      "remote": "https://gitlab.com/solarus-games/solarus.git",
+      "uploaded": true
+    },
+    {
+      "source": "solarus-mit-starter",
+      "file": "solarus-mit-starter.tar.gz",
+      "bytes": 832225,
+      "sha256": "5900089e7215e35dbe17d9fea640588a910bfc9b8251ce929797a7014797db77",
+      "revision": "e92bb2a8289df106bb318cc9f1b06a4d82bbf26f",
+      "remote": "https://gitlab.com/Splyth/solarus-mit-starter-quest.git",
+      "uploaded": true
+    },
+    {
+      "source": "solarus-online",
+      "file": "solarus-online.tar.gz",
+      "bytes": 26858902,
+      "sha256": "e74de76a345a43e4735ab9e32465be1eda6088417a271ec643e856af668d79dc",
+      "revision": "fcf940601a1007e8dc67efc09fd5bad27aea4d51",
+      "remote": "https://github.com/stdgregwar/solarus-online.git",
+      "uploaded": true
+    },
+    {
+      "source": "solarus-trillium",
+      "file": "solarus-trillium.tar.gz",
+      "bytes": 123854178,
+      "sha256": "066f17788a9f11283ee8e4052abe54647f7024bc92bea78738aded0260c88c31",
+      "revision": "9577d8c8a933547688d83db11bb904fb0f19e76e",
+      "remote": "https://gitlab.com/maxmraz/trillium.git",
+      "uploaded": true
+    },
+    {
+      "source": "solarus-zsdx",
+      "file": "solarus-zsdx.tar.gz",
+      "bytes": 51479677,
+      "sha256": "74d85b9ef9501bbc9d1407663cd97b9b85486ca340e44a21dfa0666bda323e72",
+      "revision": "e904d7904d74a97a50992b1340431d5d8f341d69",
+      "remote": "https://gitlab.com/solarus-games/games/zsdx.git",
+      "uploaded": true
+    },
+    {
+      "source": "tooling",
+      "file": "tooling.tar.gz",
+      "bytes": 917111972,
+      "sha256": "38c27e46c89221902350f246919a0957c49042b199722d612c674e064ef07f86",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "tuxemon",
+      "file": "tuxemon.tar.gz",
+      "bytes": 388858451,
+      "sha256": "2626fde5d402937261ebdeb46e4fee4b41b5329ec8a107b0545e15ddb32e560f",
+      "revision": "59a34164f442ddecbaee4c436e3f1a5ba9474e29",
+      "remote": "https://github.com/Tuxemon/Tuxemon.git",
+      "uploaded": true
+    },
+    {
+      "source": "universal-lpc",
+      "file": "universal-lpc.tar.gz",
+      "bytes": 1631413538,
+      "sha256": "cb271370e4da12a5cfd13b5c71620ec1064d42865add696dd84777b11b5a7e76",
+      "revision": "675e21e04aaff8486a3a24e09573b3d5af9d28b9",
+      "remote": "https://github.com/sanderfrenken/Universal-LPC-Spritesheet-Character-Generator.git",
+      "uploaded": true
+    },
+    {
+      "source": "unknown-horizons",
+      "file": "unknown-horizons.tar.gz",
+      "bytes": 66425752,
+      "sha256": "dda691044b3691d32399407afb0d687225d0b00864593cbe2692e82b7629a6a8",
+      "revision": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+      "remote": "https://github.com/unknown-horizons/unknown-horizons.git",
+      "uploaded": true
+    },
+    {
+      "source": "verification-2026-09-07",
+      "file": "verification-2026-09-07.tar.gz",
+      "bytes": 1319494,
+      "sha256": "fb20a9d261fd9f6bfcd49386eea913c2626ee3517b009a4308e2e59c5a5588e1",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "xcaster",
+      "file": "xcaster.tar.gz",
+      "bytes": 11067024,
+      "sha256": "25e923dae0eb3971dda27dad96fed285af41a226d514686a0802fb222018beee",
+      "revision": "eb53c18e8af3f71b6d8cfe4bd9693cc7c82c0215",
+      "remote": "https://github.com/awizardxch/xCaster.git",
+      "uploaded": true
+    },
+    {
+      "source": "zelda3",
+      "file": "zelda3.tar.gz",
+      "bytes": 7585400,
+      "sha256": "973a306c3d8e79de1c6b4cede4d111b49593db8388dabd9947e98fd299baab9a",
+      "revision": "fbbb3f967a51fafe642e6140d0753979e73b4090",
+      "remote": "https://github.com/snesrev/zelda3.git",
+      "uploaded": true
+    },
+    {
+      "source": "zquest-classic",
+      "file": "zquest-classic.tar.gz",
+      "bytes": 1266031017,
+      "sha256": "773b1e245401b8cbba8ebcc4028e61c0e31f457c95014b29f2fcdd056df3faa6",
+      "revision": "b9354acc0f4bbcfda3b390f98ff5032fbf0f6eb0",
+      "remote": "https://github.com/ZQuestClassic/ZQuestClassic.git",
+      "uploaded": true
+    },
+    {
+      "source": "zquest-quest-snapshots",
+      "file": "zquest-quest-snapshots.tar.gz",
+      "bytes": 25414667,
+      "sha256": "2fe9fc671563e22ac7329b61c193b7611ac53a13ce5f0eceff0a2b39ea6447bc",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    },
+    {
+      "source": "zquest-web-runtime",
+      "file": "zquest-web-runtime.tar.gz",
+      "bytes": 78900729,
+      "sha256": "054827f3654a908b35ee03d369238ef041ec00a8e7a11dc07d1c6d66fff92fa3",
+      "revision": null,
+      "remote": null,
+      "uploaded": true
+    }
+  ]
+}

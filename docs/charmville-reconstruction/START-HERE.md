@@ -28,6 +28,7 @@ The main repository is public. Third-party source snapshots and the large editab
 3. `../CHARMVILLE-RECONSTRUCTION-BLUEPRINT-2026-09-09.md` — source fidelity, binding choices, architecture, behavior contracts, staged acceptance.
 4. `../CHARMVILLE-EXISTING-GAME-FOUNDATION-AUDIT-2026-09-09.md` and the research documents copied into `research/`.
 5. `USER-INTENT.md` — direct requirements and precise interpretation.
+   Also read `CREATURE-AND-QUEST-CONTRACT.md`: shared creature HP/status across action/staged battles, following/evolution, reusable authored quests, and properties connected to world regions.
 6. Repo root `AGENTS.md`, `DESIGN.md`, `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`; relevant shipped Next documentation before Next changes.
 7. `source-evidence/source-lock.json`, individual manifests, and vault `archive-manifest.json`.
 

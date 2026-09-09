@@ -1,0 +1,15 @@
+{
+  "verifiedAt": "2026-09-09T12:22:04.444Z",
+  "repository": "YellowJacketTour/charmville-reconstruction-vault",
+  "tag": "checkpoint-2026-09-09",
+  "releaseId": 385481318,
+  "sourceCollections": 41,
+  "totalArchiveBytes": 6139960649,
+  "verification": "Every local source directory represented; all uploaded archive sizes and GitHub SHA-256 digests match manifest.",
+  "exclusions": [
+    ".env*",
+    "node_modules",
+    ".next",
+    "__pycache__"
+  ]
+}
