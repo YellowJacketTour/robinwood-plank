@@ -1,0 +1,15 @@
+import {spawn} from 'node:child_process';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import path from 'node:path';
+const runtime=path.resolve('../charmville-references/zquest-native-tools/runtime');
+const output=path.resolve(process.argv[2]||'../charmville-authoring-check');
+await mkdir(output,{recursive:true});
+const args=['-input',path.resolve('scripts/charmville/zquest/WorldLink.zs'),'-zasm',path.join(output,'WorldLink.zasm'),'-include',`${runtime}/include;${runtime}/headers`,'-unlinked','-json','-metadata'];
+const child=spawn(path.join(runtime,'zscript.exe'),args,{cwd:runtime,windowsHide:true,stdio:'pipe'});
+let log='';child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);
+const code=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});
+await writeFile(path.join(output,'compile-output.json'),log);
+if(code!==0)throw Error(`Source compiler failed (${code}): ${log.slice(-2500)}`);
+const zasm=await readFile(path.join(output,'WorldLink.zasm'),'utf8');
+if(!zasm.includes('WEBSOCKET'))throw Error('Compiler output did not contain the expected transport instructions');
+console.log('PASS: native ZScript compiler accepts WorldLink and emits WebSocket instructions. Not yet attached to a quest.');

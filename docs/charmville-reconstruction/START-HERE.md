@@ -31,6 +31,7 @@ The main repository is public. Third-party source snapshots and the large editab
    Also read `CREATURE-AND-QUEST-CONTRACT.md`: shared creature HP/status across action/staged battles, following/evolution, reusable authored quests, and properties connected to world regions.
 6. Repo root `AGENTS.md`, `DESIGN.md`, `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`; relevant shipped Next documentation before Next changes.
 7. `source-evidence/source-lock.json`, individual manifests, and vault `archive-manifest.json`.
+8. `ENGINE-INTEGRATION.md` for the subsequent native authoring roundtrip and compiled-but-not-attached network probe. Do not repeat that investigation or assume compilation equals runtime integration.
 
 Historical documents describe successive experiments; this directory explicitly records superseded choices. The default target is rich top-down/oblique adventure artwork, not diamond-isometric minimalist 3D scenery.
 

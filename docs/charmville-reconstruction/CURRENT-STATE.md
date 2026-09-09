@@ -31,6 +31,10 @@ The full vision is NOT implemented. The completed work is an existing PlankSpace
 - ZQuest hosted binary equivalence to acquired Git source revision. Solarus source is explicitly pinned v2.1.3, not initial master 2.2 development.
 - Final bespoke art direction, animation parity, community editor workflow and eventual production-scale world.
 
+### Authoring integration investigation after the catalog checkpoint
+
+Read ENGINE-INTEGRATION.md. The original native editor round-tripped 2,065 Hero of Dreams dialogue slots and 42 presentation fields with byte-identical re-export. The original native compiler accepts `WorldLink.zs` and emits WebSocket instructions. **The probe is not attached to a live quest and is not evidence of multiplayer.** The next executable gate is a supported script-assignment/build workflow and actual browser transport, followed by authoritative state validation. Native tools are an additional acquired source collection, preserved separately from the original immutable 41-archive release.
+
 ## Code entry points
 
 - `app/charmville/frontier/{page.tsx,frontier.tsx,world.tsx,frontier.module.css}` — rejected experimental district + atlas/library + local source launch links.

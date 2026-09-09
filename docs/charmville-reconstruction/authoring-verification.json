@@ -1,0 +1,16 @@
+{
+  "engine": "3.0.0-prerelease.219+2026-09-08",
+  "quest": "Hero of Dreams",
+  "checks": [
+    "Native dialogue export",
+    "Import into a separate quest copy",
+    "Re-export byte-identical, including message links/window/sound/portrait fields",
+    "Original quest bytes unchanged"
+  ],
+  "dialogueBytes": 353603,
+  "dialogueSha256": "82f95a69fb17a121b08a680c21d44bb06fa8507124fe942598210994b4719461",
+  "limitations": [
+    "Does not establish whole-quest gameplay parity after resave",
+    "No multiplayer integration implied"
+  ]
+}
