@@ -132,6 +132,7 @@ jobs:
       PGPOOL_MAX: 4
       NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
       NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
+      NEXT_PUBLIC_GLOBAL_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED || 'false' }}
       # As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
       # Variable NEXT_PUBLIC_MARKET_VAULT_ADDRESS points at it. V2/WormWood
       # (0xc4B29D7a…) has a critical LP drain

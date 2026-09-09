@@ -64,6 +64,11 @@ tables are not notification sources in this migration.
 
 ## Release repair review (2026-09-09)
 
+The owner authorized unveiling the global marketplace in this release.
+`NEXT_PUBLIC_GLOBAL_MARKET_ENABLED` is now supplied from the repository variable
+to the release build (default false). Set the variable to true before building
+the release; an environment change alone cannot modify an existing Next bundle.
+
 Next.js 16.3.4 and sharp 0.35.4 resolve the release-blocking advisories. The
 Solana layout library uses the pinned Exodus bigint-buffer fork, whose published
 runtime removes the native binding loader. Account decoding and transfer
