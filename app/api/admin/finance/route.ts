@@ -1,3 +1,6 @@
+import { cookies } from "next/headers";
+import { verifyDoorCookieValue, DOOR_COOKIE_NAME } from "@/lib/market-preview-door";
+import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
 import {
   CONTRACT_ADDRESS,
   MARKET_FEE_RECIPIENT,
@@ -137,6 +140,29 @@ export async function GET(req: Request) {
     windowMs: 60_000,
   });
   if (limited) return limited;
+
+  // PRIVILEGED. Every other route under /api/admin/ that returns more than
+  // static telemetry gates on the admin proof or the preview cookie; this one
+  // had only a rate limit, and was answering in full to anyone. Verified live
+  // 2026-09-09: an unauthenticated GET returned treasury and fee-wallet
+  // addresses with ETH and ERC-20 balances, plus every vault's reserves.
+  //
+  // None of that is SECRET -- addresses and balances are on-chain and readable
+  // by anyone with an RPC, so this is not a confidentiality leak and should
+  // not be dressed up as one. What it is: an unauthenticated endpoint that
+  // spends real RPC and Blockscout budget per call (see fetchWalletTokens
+  // below, one indexer request per wallet plus balanceOf per vault), and that
+  // collates the whole treasury into a single convenient scrape.
+  //
+  // Same gate as mesh-diagnostics, and 404 rather than 401 for the same
+  // reason: an admin surface should not confirm its own existence.
+  const jar = await cookies().catch(() => null);
+  const privileged = jar
+    ? verifyDoorCookieValue(jar.get(DOOR_COOKIE_NAME)?.value) ||
+      verifyPreviewCookieValue(jar.get(MARKET_PREVIEW_COOKIE_NAME)?.value)
+    : false;
+  if (!privileged) return publicJson({ error: "NOT_FOUND" }, 404);
+
   try {
     const wallets = [
       {

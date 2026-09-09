@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+import { tradingHalt, HALT_BODY, HALT_STATUS, HALT_HEADERS } from "@/lib/market/trading-halt";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 import { ethCallFree } from "@/lib/market/fetch-rpc";
@@ -426,6 +428,15 @@ async function recordServed(rawOrder: unknown): Promise<void> {
  * contents don't match the collection it claims to belong to.
  */
 export async function POST(req: Request) {
+  // EMERGENCY STOP. Until now MARKET_ENABLED gated pages only -- a signed
+  // order POSTed here was accepted and stored while the operator believed the
+  // market was closed. Reads stay open on purpose: halting trade must not
+  // blank the site.
+  const halt = await tradingHalt();
+  if (halt.halted) {
+    return NextResponse.json(HALT_BODY, { status: HALT_STATUS, headers: HALT_HEADERS });
+  }
+
   try {
     const limited = rateLimit(req, { key: "market-orders-post", limit: 30, windowMs: 60_000 });
     if (limited) return limited;
