@@ -1,3 +1,4 @@
+import './charmdex.js';
 /* Presentation adapter only. All native controls and their event hooks survive. */
 export function mountRuntimeShell(root = document) {
   const header = root.querySelector('header');

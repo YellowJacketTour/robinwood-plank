@@ -31,11 +31,15 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     assert.equal(claimed.plots.length,6);
     assert.equal(claimed.plots.filter((p: {crop:string})=>p.crop==="stalk").length,2);
     assert.equal((await readYard(pool,"soil_owner")).inventory,null);
+    assert.equal((await readYard(pool,"soil_owner")).compartments,null);
+    assert.equal((await readYard(pool,"soil_owner",otherToken)).compartments,null);
     await assert.rejects(act({action:"resolve",plotIndex:0,revision:"0"},"soil_owner",otherToken));
     const outcomes = await Promise.allSettled([act({action:"resolve",plotIndex:0,revision:"0"}),act({action:"resolve",plotIndex:0,revision:"0"})]);
     assert.equal(outcomes.filter(r=>r.status==="fulfilled").length,1);
     let state = await readYard(pool,"soil_owner",token);
     assert.equal(state.inventory!.faces[0].qty,"3");
+    assert.deepEqual(state.compartments!.satchel.charms, state.inventory!.faces);
+    assert.deepEqual(state.compartments!.gameplay.seeds, state.inventory!.seeds);
     assert.equal(state.inventory!.seeds.find((s:{face:string})=>s.face==="stalk").qty,"3");
     await pool.query("UPDATE charmville_yards SET grain=0");
     await act({action:"plant",plotIndex:0,revision:"1",face:"stalk"});

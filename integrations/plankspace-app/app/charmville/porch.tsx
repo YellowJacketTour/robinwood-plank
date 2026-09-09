@@ -11,6 +11,7 @@ import type { Decoration } from "../../../../lib/charmville/layout";
 import { layoutDraftKey } from "../../../../lib/charmville/layout-draft";
 import YardScene, { type SceneEffect } from "./scene";
 import { FieldGuide } from "./field-guide";
+import { inventoryCompartments } from "../../../../lib/charmville/inventory";
 
 type Plot = { plotIndex: number; crop: string | null; ripeAt: string | null; compostAfter: string | null; revision: string; tended?: boolean };
 type Stack = { face: string; qty: string };
@@ -147,6 +148,7 @@ export default function Porch({ handle, posts, onStamps }: { handle: string; pos
     } catch(error){if(generation===accountGeneration.current)setNotice(error instanceof Error?error.message:"Please try again");return false;}
     finally{actionRunning.current=false;setBusy(false);}
   }
+  const compartments = yard?.inventory ? inventoryCompartments(yard.inventory) : null;
   const seedCount=(face:string)=>yard?.inventory?.seeds.find(s=>s.face===face)?.qty??"0";
   return <section className={`${styles.porch} ${expanded?styles.expanded:""}`} data-market-shell aria-label="Charmville porch">
     <header className={styles.header}><h2>Charmville</h2><div>
@@ -178,14 +180,14 @@ export default function Porch({ handle, posts, onStamps }: { handle: string; pos
       }} onPointerDown={e=>{if((e.target as HTMLElement).closest("button"))return;drag.current={x:e.clientX,y:e.clientY,left:position.x,top:position.y};e.currentTarget.setPointerCapture(e.pointerId);}}
         onPointerMove={e=>{if(!drag.current)return;setPosition({x:Math.max(0,Math.min(window.innerWidth-(dialog.current?.offsetWidth??410),drag.current.left+e.clientX-drag.current.x)),y:Math.max(0,Math.min(window.innerHeight-Math.min(dialog.current?.offsetHeight??100,window.innerHeight),drag.current.top+e.clientY-drag.current.y))});}}
         onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><h2>Satchel</h2><button onClick={closeBag} aria-label="Close satchel">×</button></header>
-      <div className={styles.inventory}>{yard?.inventory?<><div className={styles.stacks}>{["stalk","splinter"].map(face=><button key={face} aria-pressed={selected===face} onClick={()=>setSelected(face)}><CropArt face={face}/><span>{face}</span><b>{yard.inventory!.faces.find(s=>s.face===face)?.qty??"0"}</b></button>)}</div>
+      <div className={styles.inventory}>{yard?.inventory?<><h3>Charm Satchel</h3><div className={styles.stacks}>{["stalk","splinter"].map(face=><button key={face} aria-pressed={selected===face} onClick={()=>setSelected(face)}><CropArt face={face}/><span>{face}</span><b>{yard.inventory!.faces.find(s=>s.face===face)?.qty??"0"}</b></button>)}</div>
         <div className={styles.selected}><CropArt face={selected}/><strong>{selected==="stalk"?"Stalk":"Splinter"}</strong><span>{selected==="stalk"?"Your everyday stamp":"Your overnight timber"}</span><small>{yard.inventory.faces.find(stack=>stack.face===selected)?.qty??"0"} in your bag</small></div>
-        <div className={styles.seedStacks}>{yard.inventory.seeds.map(seed=><span key={seed.face}><CropArt face={seed.face} seed/>{seed.face} seeds <b>{seed.qty}</b></span>)}</div>
+        <h3>Gameplay inventory · seeds</h3><div className={styles.seedStacks}>{compartments!.gameplay.seeds.map(seed=><span key={seed.face}><CropArt face={seed.face} seed/>{seed.face} seeds <b>{seed.qty}</b></span>)}</div>
         <label className={styles.send}>Send a Stalk stamp to your Grain<select value={postId} onChange={e=>setPostId(e.target.value)}><option value="">Choose a Grain</option>{posts.map(p=><option key={p.id} value={p.id}>{p.body.slice(0,60)}</option>)}</select></label>
         <button disabled={busy||!postId||!online||!authenticated||selected!=="stalk"||!yard.inventory.faces.some(stack=>stack.face==="stalk"&&BigInt(stack.qty)>0n)} onClick={()=>void act({action:"stamp",postId})}>SEND · 1 Stalk</button>
         {selected!=="stalk"&&<p className={styles.bagHelp}>Splinter stays in your bag. Choose Stalk to stamp a pine.</p>}
         <button className={styles.returnToGarden} disabled={busy} onClick={()=>{setPlanting(selected);closeBag();}}>Back to garden · plant {selected}</button>
-        <footer>{yard.inventory.grain} grain <span>Seeds return. Faces are yours to spend.</span></footer></>:<p>Sign in on your own board to open your inventory.</p>}</div>
+        <footer>{compartments!.currency.grain} grain <span>Seeds return. Faces are yours to spend.</span></footer></>:<p>Sign in on your own board to open your inventory.</p>}</div>
       <button className={styles.reset} onClick={()=>setPosition({x:24,y:100})}>Reset window position</button>
     </div></div>,document.body)}
   </section>;

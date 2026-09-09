@@ -57,3 +57,17 @@ body.charm-runtime {
 .charm-cinema .charm-cinema-tools { display:flex; justify-content:flex-end; gap:8px; height:44px; }
 .charm-cinema:not(.charm-cinema-menu) header { display:none; }
 .charm-cinema .content { overflow:hidden; }
+
+.charmdex { width:min(960px,92vw); max-height:88dvh; box-sizing:border-box; padding:24px; background:var(--color-wood-950); color:var(--color-cream); border:1px solid var(--color-line-strong); overflow:auto; }
+.charmdex::backdrop { background:rgba(0,0,0,.7); }
+.charmdex form { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.charmdex strong { font-size:24px; color:var(--color-gold-300); }
+.charmdex-filters { display:flex; flex-wrap:wrap; gap:12px; }
+.charmdex-filters :is(input,select) { min-height:44px; min-width:0; max-width:100%; padding:8px; background:var(--color-wood-900); color:var(--color-cream); border:1px solid var(--color-line); }
+.charmdex-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr)); gap:12px; }
+.charmdex article { padding:12px; border:1px solid var(--color-line); }
+.charmdex h3 { margin:0; color:var(--color-gold-300); }
+.charmdex small { color:var(--color-cream-muted); }
+.charmdex-more { margin-top:16px; }
+
+.charmdex [hidden] { display:none!important; }

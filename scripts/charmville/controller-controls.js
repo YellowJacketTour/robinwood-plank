@@ -20,7 +20,7 @@ function release(){for(const key of held)emit(key,false);held.clear();}
 navigator.getGamepads=()=>[];
 function poll(){
  const pad=[...readPads()].find(p=>p?.connected&&p.mapping==='standard');const next=new Set();
- const active=!document.hidden&&document.hasFocus()&&!menu.open&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName);
+ const active=!document.querySelector('dialog[open]')&&!document.hidden&&document.hasFocus()&&!menu.open&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName);
  menu.querySelector('[role=status]').textContent=pad?'Connected: '+pad.id:'Press a controller button to connect.';
  if(pad&&active){const pressed=i=>Boolean(pad.buttons[i]?.pressed);if(pressed(12)||(pad.axes[1]||0)<-deadzone)next.add('ArrowUp');if(pressed(13)||(pad.axes[1]||0)>deadzone)next.add('ArrowDown');if(pressed(14)||(pad.axes[0]||0)<-deadzone)next.add('ArrowLeft');if(pressed(15)||(pad.axes[0]||0)>deadzone)next.add('ArrowRight');for(const [action,key] of Object.entries({Sword:'z',Item:'x',Interact:'d',Aura:'c'}))if(pressed(mapping[action]))next.add(key);if(pressed(9))next.add('Enter');if(pressed(4))next.add('q');if(pressed(5))next.add('w');}
  for(const key of held)if(!next.has(key))emit(key,false);for(const key of next)if(!held.has(key))emit(key,true);held=next;requestAnimationFrame(poll);

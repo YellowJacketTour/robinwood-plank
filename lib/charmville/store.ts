@@ -1,6 +1,7 @@
 import { STARTER_DECORATIONS, validDecorations, type Decoration } from "./layout";
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import { inventoryCompartments } from "./inventory";
 
 export class YardError extends Error {
   constructor(message: string, public status = 409) { super(message); }
@@ -74,7 +75,7 @@ async function snapshot(client: PoolClient, profileId: string, owner: boolean) {
   return { claimed: !!yard.rowCount, owner, layoutRevision: yard.rows[0]?.layout_revision ?? "0", decorations: yard.rows[0]?.decorations ?? STARTER_DECORATIONS, plots: plots.rows.map(plot => ({
     ...plot, ripeAt: plot.ripeAt?.toISOString() ?? null,
     compostAfter: plot.compostAfter?.toISOString() ?? null,
-  })), inventory, stamps: stamps.rows, serverNow: now.rows[0].now.toISOString() as string };
+  })), inventory, compartments: inventory ? inventoryCompartments(inventory) : null, stamps: stamps.rows, serverNow: now.rows[0].now.toISOString() as string };
 }
 
 export async function readYard(pool: Pool, handle: string, token = "") {
