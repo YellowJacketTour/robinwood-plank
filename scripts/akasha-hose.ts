@@ -188,12 +188,41 @@ async function main(): Promise<void> {
   // rest of the tick with it: the backfill runs even when the repair fails,
   // which is both more honest AND more correct -- there was never a reason
   // for one to block the other.
+  /**
+   * A PHASE MUST NOT BE ABLE TO OUTLIVE THE TICK.
+   *
+   * No phase had a deadline, and the arithmetic of a fully-blocked vendor is
+   * brutal: 6 hosts x 8s means getBestBlockHash alone takes 96s, and
+   * walkPath's 200-header ceiling is 160 MINUTES. Measured live 2026-09-09 --
+   * a worker booted, wrote its boot heartbeat, and sat at `ticks 0` for five
+   * minutes because its first tick could not finish.
+   *
+   * That is a hang, and a hang is the one state that looks identical to a
+   * dead process from outside: no progress, no error, no next tick. The
+   * per-phase deadline turns it into a recorded FAILURE with a reason, and
+   * lets the remaining phases run.
+   */
+  const PHASE_TIMEOUT_MS = Math.max(30_000, TICK_MS * 4);
   const phase = async (name: string, run: () => Promise<unknown>): Promise<void> => {
     const store = hose.durableStore;
     const chainKey = (chains.length === 1 ? String(chains[0]) : "all") as never;
     store?.recordPhase(chainKey, name, "attempt");
     try {
-      await run();
+      // The phase keeps running in the background if it ignores the deadline
+      // -- we cannot kill a promise -- but the TICK moves on, so one wedged
+      // phase can no longer stop every later phase forever.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        run(),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`phase ${name} exceeded ${PHASE_TIMEOUT_MS}ms`)),
+            PHASE_TIMEOUT_MS,
+          );
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
       store?.recordPhase(chainKey, name, "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
