@@ -15,7 +15,7 @@ SELECT
   s.volume_30d_wei, s.holder_count, s.listed_count, s.floor_change_pct,
   (s.floor_price_wei IS NOT NULL)
 FROM plank_multichain_collections c
-JOIN rank_changed changed ON c.id = changed.%I
+JOIN %s changed ON c.id = changed.%I
 LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
 ON CONFLICT (collection_id) DO UPDATE SET
   chain_slug       = EXCLUDED.chain_slug,
@@ -32,20 +32,37 @@ ON CONFLICT (collection_id) DO UPDATE SET
   floor_change_pct = EXCLUDED.floor_change_pct,
   has_floor        = EXCLUDED.has_floor,
   refreshed_at     = NOW();
-$query$, CASE WHEN TG_TABLE_NAME = 'plank_multichain_collections' THEN 'id' ELSE 'collection_id' END);
+$query$, CASE WHEN TG_LEVEL = 'ROW' THEN
+  format('(SELECT %L::bigint AS id, %L::bigint AS collection_id)',
+    (CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END)->>'id',
+    (CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END)->>'collection_id')
+  ELSE 'rank_changed' END,
+  CASE WHEN TG_TABLE_NAME = 'plank_multichain_collections' THEN 'id' ELSE 'collection_id' END);
   RETURN NULL;
 END;
 $function$;
-CREATE TRIGGER plank_hub_rank_insert AFTER INSERT ON plank_multichain_collections
-REFERENCING NEW TABLE AS rank_changed FOR EACH STATEMENT EXECUTE FUNCTION plank_sync_hub_rank();
-CREATE TRIGGER plank_hub_rank_update AFTER UPDATE ON plank_multichain_collections
-REFERENCING NEW TABLE AS rank_changed FOR EACH STATEMENT EXECUTE FUNCTION plank_sync_hub_rank();
-CREATE TRIGGER plank_hub_rank_insert AFTER INSERT ON plank_multichain_snapshots
-REFERENCING NEW TABLE AS rank_changed FOR EACH STATEMENT EXECUTE FUNCTION plank_sync_hub_rank();
-CREATE TRIGGER plank_hub_rank_update AFTER UPDATE ON plank_multichain_snapshots
-REFERENCING NEW TABLE AS rank_changed FOR EACH STATEMENT EXECUTE FUNCTION plank_sync_hub_rank();
-CREATE TRIGGER plank_hub_rank_delete AFTER DELETE ON plank_multichain_snapshots
-REFERENCING OLD TABLE AS rank_changed FOR EACH STATEMENT EXECUTE FUNCTION plank_sync_hub_rank();
+DO $triggers$
+DECLARE spec record;
+BEGIN
+  FOR spec IN SELECT * FROM (VALUES
+    ('plank_multichain_collections', 'insert', 'NEW'),
+    ('plank_multichain_collections', 'update', 'NEW'),
+    ('plank_multichain_snapshots', 'insert', 'NEW'),
+    ('plank_multichain_snapshots', 'update', 'NEW'),
+    ('plank_multichain_snapshots', 'delete', 'OLD')
+  ) AS specs(table_name, operation, image) LOOP
+    IF current_setting('server_version_num')::integer >= 100000 THEN
+      EXECUTE format('CREATE TRIGGER %I AFTER %s ON %I REFERENCING %s TABLE AS rank_changed
+        FOR EACH STATEMENT EXECUTE PROCEDURE plank_sync_hub_rank()',
+        'plank_hub_rank_' || spec.operation, spec.operation, spec.table_name, spec.image);
+    ELSE
+      EXECUTE format('CREATE TRIGGER %I AFTER %s ON %I
+        FOR EACH ROW EXECUTE PROCEDURE plank_sync_hub_rank()',
+        'plank_hub_rank_' || spec.operation, spec.operation, spec.table_name);
+    END IF;
+  END LOOP;
+END;
+$triggers$;
 
 -- Recover collections missed since migration 107. Existing rank rows stay intact.
 INSERT INTO plank_market_hub_rank (
