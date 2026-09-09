@@ -6,6 +6,7 @@ const out='work/native-party-projection';await mkdir(out,{recursive:true});
 const browser=await chromium.launch();
 try{
  const page=await browser.newPage({viewport:{width:1100,height:950}}),events=[],errors=[];
+ await page.addInitScript(()=>{window.nativeContacts=[];window.observedContacts=[];window.addEventListener("charmville:local-contact-observed",event=>window.observedContacts.push(event.detail));window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:action-contact')window.nativeContacts.push(event.data);});});
  page.on('console',m=>{if(m.text().startsWith('CHARMVILLE_'))events.push(m.text());});page.on('pageerror',e=>errors.push(e.message));
  // A guest account opens the normal parent UI; the six creatures below are
  // explicitly synthetic presentation data, not six owned account creatures.
@@ -20,6 +21,16 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
+ if(process.argv.includes('--contacts')){
+  for(let i=0;i<3;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(1050);}
+  const contacts=await page.evaluate(()=>window.nativeContacts);
+  assert.deepEqual(contacts.map(c=>c.action),['till','plant','water']);
+  assert.deepEqual(contacts.map(c=>c.sequence),[1,2,3]);
+  const observed=await page.evaluate(()=>window.observedContacts);assert.deepEqual(observed.map(o=>o.contact.eventId),contacts.map(c=>c.eventId));assert(observed.every(o=>o.gap===false));
+  assert(contacts.every(c=>c.plotIndex===0&&c.authority==='local-observation'&&!('reward' in c)));
+  await writeFile(out+'/contacts.json',JSON.stringify({contacts,events,errors},null,2));
+  assert.deepEqual(errors,[]);console.log('Three actual native contact events reached the parent in sequence without reward authority.');
+ }else{
  const species=[277,280,283,277,280,283];
  await page.evaluate(speciesIds=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds},'http://localhost:3021'),species);
  await page.waitForTimeout(800);
@@ -35,4 +46,5 @@ try{
  await page.waitForTimeout(600);assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),'0|0|0|0|0|0');
  assert.deepEqual(errors,[]);await writeFile(out+'/verification.json',JSON.stringify({scope:'Synthetic six-member presentation projection; does not establish account ownership of six creatures.',events,errors},null,2));
  console.log('Six synthetic native projection slots rendered; oversized party rejected; clearing works.');
+ }
 }finally{await browser.close();}

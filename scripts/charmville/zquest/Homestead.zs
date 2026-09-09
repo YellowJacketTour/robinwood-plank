@@ -5,6 +5,31 @@
 // Active is the engine's global per-frame script slot.
 global script Active
 {
+    void resetContactOutbox()
+    {
+        char32 text[32];int run=0;
+        file previous=new file("/charmville/action-run.txt","r");
+        if(previous->isValid()){previous->ReadString(text);previous->Close();run=atoi(text);}
+        file cursor=new file("/charmville/action-sequence.txt","w");
+        if(!cursor->isValid())return;
+        sprintf(text,"0");cursor->WriteString(text);cursor->Close();
+        file generation=new file("/charmville/action-run.txt","w");
+        if(!generation->isValid())return;
+        sprintf(text,"%d",run+1);generation->WriteString(text);generation->Close();
+    }
+    void publishContact(int sequence,int action,int bed)
+    {
+        char32 path[80];char32 message[160];
+        sprintf(path,"/charmville/action-%d.txt",sequence%64);
+        file event=new file(path,"w");
+        if(!event->isValid()){printf("CHARMVILLE_CONTACT_OUTBOX_ERROR %d\n",sequence);return;}
+        sprintf(message,"%d|%d|%d|%d|%d|%d|%d|%d",sequence,action,bed,Game->GetCurDMap(),Game->GetCurScreen(),Hero->X,Hero->Y,Hero->Dir);
+        event->WriteString(message);event->Close();
+        file cursor=new file("/charmville/action-sequence.txt","w");
+        if(!cursor->isValid()){printf("CHARMVILLE_CONTACT_OUTBOX_ERROR %d\n",sequence);return;}
+        sprintf(message,"%d",sequence);cursor->WriteString(message);cursor->Close();
+        printf("CHARMVILLE_CONTACT %d ACTION %d BED %d\n",sequence,action,bed);
+    }
     void drawAura(int x,int y,int tick)
     {
         Screen->Ellipse(1,x+8,y+6,12+(tick/6)%2,20,0x68,1,0,0,0,false);
@@ -64,6 +89,7 @@ global script Active
         treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
         int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
         int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
+        resetContactOutbox();
         // Slot 36's optional costume bank has broken casting frames in this quest.
         // Keep the sword's weapon art, damage and abilities; use the complete hero bank.
         itemdata masterSword=Game->LoadItemData(36);masterSword->TileMod=0;
@@ -77,7 +103,7 @@ global script Active
         bool aura = false;
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;
-        int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;
+        int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;int contactSequence=0;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
@@ -229,6 +255,7 @@ global script Active
                         }
                         else{stages[selectedPlot]=activity+1;if(stages[selectedPlot]==3)wateredTimes[selectedPlot]=ticks;}
                         printf("CHARMVILLE_CROP_STAGE %d BED %d\n",stages[selectedPlot],selectedPlot+1);
+                        contactSequence++;publishContact(contactSequence,activity,selectedPlot);
                     }
                     activityTick++;
                     if(activityTick>=48){activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;printf("CHARMVILLE_ACTION_COMPLETE BED %d\n",selectedPlot+1);}

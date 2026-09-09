@@ -1,0 +1,11 @@
+# Native contact observations
+
+Homestead publishes an observation at action tick28, the existing local crop contact/mutation point. Action codes are0 till,1 plant,2 water,4 harvest,5 fertilize. Native plot indices are0,1,2 at x24,56,88 and y88 on DMap4/screen63. The event records actor position/facing and current map; it does not carry crop yield, balances, account credentials or grants.
+
+ZScript file paths resolve under `FS.cwd()/Files/Homestead/`. The bounded outbox consists of64 `charmville/action-N.txt` slots, `action-sequence.txt` and `action-run.txt`. Native writes and closes the event before publishing the sequence. At script restart it resets the cursor to0 and publishes an incremented run counter. JS drains consecutive sequences; overwritten history emits an explicit gap. A changed run creates a new UUID even when its first sequence equals the prior run's sequence. This is temporary filesystem state, not IDB persistence or durable economic storage.
+
+`action-event-bridge.js` sends only to the two allowed local parent origins. Each message has type `charmville:action-contact`, sessionId, eventId, sequence, action, plotIndex, dmap, screen, x, y, direction, and authority `local-observation`. It receives no acknowledgements or mutation commands. Consumers must validate the real iframe source and origin, deduplicate event IDs and independently authorize any later operation. A client can forge local observations: these are not trusted proof of effort or cheat-free action authority.
+
+Nothing here settles a harvest into account inventory. The native five-second growth cycle and the account economy's growth rules differ. Imported local yields would create an economy exploit; bridging this gap requires a server-owned action state machine, plot mapping and authoritative timing before saved-result UI is appropriate.
+
+Verification: four unit tests cover ordered drain/deduplication, ring overflow reporting, wrong sequence/unsupported action rejection, and equal-sequence restart identity. `verify-native-party-projection.mjs --contacts` performs actual native till/plant/water controls in a normal guest-account parent and verifies three ordered iframe contact messages with no reward fields. It does not assert saved economic effects.

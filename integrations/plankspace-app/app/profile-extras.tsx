@@ -6,7 +6,7 @@ import { walletProof } from "./auth-client";
 import ContentActions from "./content-actions";
 import { MediaAttachment, MediaComposer } from "./post-media-ui";
 import type { PostMedia } from "./post-media";
-import Porch from "./charmville/porch";
+import Link from "next/link";
 type Post = {
   id: number;
   author: string;
@@ -97,8 +97,8 @@ export function MiniGame() {
     </div>
   );
 }
-export function Feed({ boardHandle, boardWallet }: { boardHandle?: string; boardWallet?: string }) {
-  const [stamps,setStamps] = useState<{postId:string;qty:string}[]>([]);
+export function Feed({ boardHandle }: { boardHandle?: string; boardWallet?: string }) {
+  const [stamps] = useState<{postId:string;qty:string}[]>([]);
   const emptyMedia: PostMedia = { mediaUrl: "", mediaType: "", mediaAlt: "" },
     [items, setItems] = useState<Post[]>([]),
     [body, setBody] = useState(""),
@@ -178,7 +178,7 @@ export function Feed({ boardHandle, boardWallet }: { boardHandle?: string; board
         </button>
       </div>
       {message && <p role="alert">{message}</p>}
-      {boardHandle && <Porch handle={boardHandle} posts={items.filter(item=>item.authorWallet?.toLowerCase()===boardWallet?.toLowerCase())} onStamps={setStamps} />}
+      {boardHandle && <Link href="/charmville/world?panel=play">Enter Charmville</Link>}
       <div
         className="feed profile-feed-scroll"
         tabIndex={0}

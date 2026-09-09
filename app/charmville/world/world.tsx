@@ -8,12 +8,12 @@ import { createGameAccountClient, type GameIdentity } from "@/lib/charmville/acc
 import type { YardInventory } from "@/lib/charmville/inventory";
 import ExchangePanel from "./exchange-panel";
 import CompanionPanel from "./companion-panel";
-import GardenPanel from "./garden-panel";
+import {useNativeContactObserver} from "./native-contact-observer";
 
 type Presence = { profileId:string; regionId:string; ownerHandle:string|null; revision:string; expiresAt:string;
   active:boolean; peers:Array<{profileId:string;handle:string}>; reason:string|null };
 type Session = { identity:GameIdentity; token:string };
-const tabs=[['play','Play'],['inventory','Inventory'],['companions','Companions'],['exchange','Exchange'],['friends','Friends'],['garden','Garden']] as const;
+const tabs=[['play','Play'],['inventory','Inventory'],['companions','Companions'],['exchange','Exchange'],['friends','Friends']] as const;
 type WorldTab=typeof tabs[number][0];
 const button = "min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 
@@ -29,6 +29,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const [fullscreen,setFullscreen]=useState(false);
   const [tab,setTab]=useState<WorldTab>('play');
   const frame=useRef<HTMLIFrameElement|null>(null);
+  useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
@@ -112,7 +113,9 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
 
   useEffect(()=>{
     let disposed=false;
-    const panel=new URLSearchParams(window.location.search).get('panel');
+    const url=new URL(window.location.href);
+    let panel=url.searchParams.get('panel');
+    if(panel==='garden'){panel='play';url.searchParams.set('panel','play');window.history.replaceState(window.history.state,'',url);}
     if(tabs.some(([id])=>id===panel))void Promise.resolve().then(()=>{if(!disposed)setTab(panel as WorldTab);});
     return()=>{disposed=true;};
   },[]);
@@ -212,18 +215,18 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     {!identity?<section className="rounded-xl border border-line bg-panel p-5"><h2 className="font-display text-xl">Bring your account into the world</h2><p className="my-3 text-cream-muted">Sign in with your approved PlankSpace profile. Your saved inventory stays with your account.</p><button className={button} disabled={busy} onClick={enter}>{busy?"Signing in…":"Connect and sign in"}</button><Link className="ml-4 text-gold-300" href="/charmville/start">Create or finish your profile</Link></section>:
     <>
     <div className="sticky top-0 z-10 mb-3 rounded-xl border border-line bg-wood-950 p-2">
-      <div role="tablist" aria-label="Game and account" className="grid grid-cols-3 gap-1 sm:grid-cols-6">
+      <div role="tablist" aria-label="Game and account" className="grid grid-cols-3 gap-1 sm:grid-cols-5">
         {tabs.map(([id,label],index)=><button key={id} id={`tab-${id}`} role="tab" aria-selected={tab===id} aria-controls={`panel-${id}`} tabIndex={tab===id?0:-1}
           className={`min-h-12 rounded-lg px-1 py-2 text-[0.6875rem] font-bold focus-visible:outline-2 focus-visible:outline-gold-300 sm:text-sm ${tab===id?'bg-gold-500 text-wood-950':'text-gold-300 hover:bg-panel-soft'}`}
           onClick={()=>setTab(id)} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;event.preventDefault();setTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}>{label}</button>)}
       </div>
       <p className="mt-1 truncate px-1 text-xs text-cream-muted">@{identity.handle} · {presence?.active?(presence.ownerHandle?`Home of @${presence.ownerHandle}`:'Public meadow'):'Choose a location in Friends'}</p>
-      {localRuntime&&<div className="mt-2 flex gap-2"><button className="min-h-10 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Charmdex</button><button className="min-h-10 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
+      {localRuntime&&<div className="mt-2 flex gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Charmdex</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
     </div>
-    <div className={`grid gap-4 ${tab!=='play'&&tab!=='garden'?'xl:grid-cols-[minmax(0,1fr)_22rem]':''}`}>
-      <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab==='garden'?'hidden':tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
+    <div className={`grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(0,1fr)_22rem]':''}`}>
+      <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-xl">Adventure camera</h2><span className="text-sm text-cream-muted">Reference map · separate movement</span></div>
-        <p className="mb-3 text-sm text-cream-muted">Account travel and players appear in the panel. This camera still uses the reference map; movement and harvests here do not change your saved inventory.</p>
+        <p className="mb-3 text-sm text-cream-muted">Account menus save to your profile. Actions in this reference adventure are local and do not yet update your account inventory.</p>
         {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Open adventure camera</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>
@@ -242,7 +245,6 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
         <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
-        <div id="panel-garden" role="tabpanel" aria-labelledby="tab-garden" hidden={tab!=='garden'}>{tab==='garden'&&address&&<GardenPanel key={`garden:${address}:${identity.handle}`} handle={identity.handle} onChanged={load}/>}</div>
         <div id="panel-exchange" role="tabpanel" aria-labelledby="tab-exchange" hidden={tab!=='exchange'}>{address&&<ExchangePanel key={`${address}:${identity.handle}`} wallet={address} handle={identity.handle} onChanged={()=>void load()} />}</div>
       </aside>
     </div></>}

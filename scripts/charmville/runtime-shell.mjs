@@ -1,9 +1,10 @@
 import './voice-notes.js';
 import './charmdex.js';
 import './follower-bridge.js';
+import './action-event-bridge.js';
 let accountOrigin=null;
 async function returnToAccountMenus(panel='inventory'){
-  if(!['inventory','companions','exchange','friends','garden'].includes(panel))return;
+  if(!['inventory','companions','exchange','friends'].includes(panel))return;
   if(window.parent===window){window.open('http://localhost:3017/charmville/world?panel='+panel,'_blank','noopener');return;}
   if(document.fullscreenElement)try{await document.exitFullscreen();}catch{/* The parent also checks its iframe fullscreen state. */}
   if(accountOrigin)window.parent.postMessage({type:'charmville:account-menu',panel},accountOrigin);
@@ -20,7 +21,7 @@ function openUnifiedMenu(){
 function mountUnifiedMenu(root){
   unifiedMenu=root.createElement('dialog');unifiedMenu.className='charm-game-menu';unifiedMenu.setAttribute('aria-label','Game menu');
   Object.assign(unifiedMenu.style,{boxSizing:'border-box',width:'min(92vw,540px)',maxHeight:'85vh',overflow:'auto',padding:'20px',border:'1px solid var(--color-line)',borderRadius:'12px',background:'var(--color-wood-950)',color:'var(--color-cream)'});
-  unifiedMenu.innerHTML='<strong>Game menu</strong><p>Choose where to go. Gear controls the adventure; the other pages use your account or catalogue.</p><div data-menu-choices style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><button type="button" data-destination="companions">Party</button><button type="button" data-destination="gear">Gear</button><button type="button" data-destination="inventory">Inventory</button><button type="button" data-destination="charmdex">Charmdex</button><button type="button" data-destination="exchange">Exchange</button><button type="button" data-destination="friends">Friends</button><button type="button" data-destination="garden">Garden</button><button type="button" data-destination="voice">Voice notes</button></div><p>Enter opens this menu. Arrow keys choose · Enter confirms · Escape returns.</p><button type="button" data-menu-close>Back to game</button>';
+  unifiedMenu.innerHTML='<strong>Game menu</strong><p>Choose where to go. Gear controls the adventure; the other pages use your account or catalogue.</p><div data-menu-choices style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><button type="button" data-destination="companions">Party</button><button type="button" data-destination="gear">Gear</button><button type="button" data-destination="inventory">Inventory</button><button type="button" data-destination="charmdex">Charmdex</button><button type="button" data-destination="exchange">Exchange</button><button type="button" data-destination="friends">Friends</button><button type="button" data-destination="voice">Voice notes</button></div><p>Enter opens this menu. Arrow keys choose · Enter confirms · Escape returns.</p><button type="button" data-menu-close>Back to game</button>';
   root.body.append(unifiedMenu);
   unifiedMenu.querySelector('[data-menu-close]').onclick=()=>unifiedMenu.close();
   unifiedMenu.addEventListener('close',()=>root.querySelector('canvas')?.focus());
