@@ -50,7 +50,14 @@ export type GapReason =
   | "reorg"
   | "bloom_audit"
   | "seq_gap"
-  | "attention_history";
+  | "attention_history"
+  /**
+   * The block was read, but not all of it. Distinct from every reason above:
+   * those describe a range we never reached, this describes one we reached and
+   * could not finish. Recording it as covered would be the archive claiming
+   * history it never read.
+   */
+  | "incomplete_tx_walk";
 
 export type EventKind =
   | "transfer721"
