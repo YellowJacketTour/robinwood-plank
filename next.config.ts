@@ -122,6 +122,15 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
+      ...(process.env.NODE_ENV === "development" ? [{
+        source: "/charmville/world",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          { key: "Permissions-Policy", value: 'camera=(), microphone=(self "http://localhost:3021"), geolocation=(), cross-origin-isolated=(self "http://localhost:3021"), keyboard-map=(self "http://localhost:3021")' },
+          { key: "Content-Security-Policy", value: securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021") },
+        ],
+      }] : []),
       // Marketplank is a live application shell. Never let an edge or hosting
       // proxy carry its HTML across an immutable release switch.
       {

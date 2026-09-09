@@ -3,6 +3,7 @@ import {createReadStream} from 'node:fs';
 import {stat,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {adventureUrl,diagnosticKits} from './adventure-entry.mjs';
+import {midiBankManifest} from './midi-bank.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
 const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
@@ -10,6 +11,10 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
+  if(url.pathname==='/midi-bank.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(JSON.stringify(await midiBankManifest(path.join(root,'timidity'))));return;}
+  // The isolated account shell may embed these public reference documents.
+  // No account routes, credentials or CORS access are introduced here.
+  if(['/charmville/tutorial/','/play/'].includes(url.pathname))res.setHeader('Cross-Origin-Resource-Policy','cross-origin');
   if(['/runtime-shell.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
   if(url.pathname==='/charmdex-catalog.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(await readFile('public/charmville/catalog/emoji-catalog.json'));return;}
   if(url.pathname.startsWith('/action-sprites/')){
@@ -72,6 +77,12 @@ http.createServer(async(req,res)=>{
      document.querySelector('.panel-buttons').prepend(start);
      start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading worldâ€¦';
       try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) {
+       if(src==='../zplayer.js'){
+        const response=await fetch('/midi-bank.json',{signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('MIDI bank unavailable');const bank=await response.json();
+        const loaded=[];let cursor=0;
+        await Promise.all(Array.from({length:6},async()=>{while(cursor<bank.patches.length){const patch=bank.patches[cursor++];const response=await fetch('/timidity/'+patch.name,{signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('MIDI instrument unavailable');const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.byteLength!==patch.bytes)throw Error('Incomplete MIDI instrument');loaded.push({name:patch.name,bytes});start.textContent='Loading instruments '+loaded.length+'/'+bank.patches.length;}}));
+        (Module.preRun??=[]).push(()=>{for(const patch of loaded){const target=bank.virtualRoot+'/'+patch.name;FS.mkdirTree(target.slice(0,target.lastIndexOf('/')));FS.writeFile(target,patch.bytes);}for(const directory of new Set(loaded.map(patch=>patch.name.split('/')[0]))){if(!FS.analyzePath('/'+directory).exists)FS.symlink(bank.virtualRoot+'/'+directory,'/'+directory);}console.log('CHARMVILLE_MIDI_BANK_READY '+loaded.length);});
+       }
        if(src==='../zplayer.js' && new URLSearchParams(location.search).get('test')?.includes('/homestead/')){
         const response=await fetch('/action-sprites/manifest.json');if(!response.ok)throw Error('Sprite manifest unavailable');const assets=await response.json();
         const loaded=await Promise.all(assets.map(async asset=>{const response=await fetch('/action-sprites/'+asset.name);if(!response.ok)throw Error('Sprite unavailable');return {name:asset.name,bytes:new Uint8Array(await response.arrayBuffer())};}));

@@ -111,6 +111,7 @@ export default function Start() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-2xl">Welcome home, @{account.handle}</h2><Link href={`/u/${encodeURIComponent(account.handle)}`} className="text-gold-300">Open your board and stamp a Grain →</Link></div>
       <Porch key={account.profileId ?? `${account.wallet}:${account.handle}`} handle={account.handle} posts={[]} onStamps={noStamps} />
       <HomePermissions key={`${account.wallet}:${account.handle}`} handle={account.handle} wallet={account.wallet} />
+      <Link href="/charmville/world" className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-gold-500 px-5 text-on-gold">Open shared world</Link>
     </section>}
     {error && <p role="alert" className="mb-6 rounded-lg border border-line bg-panel p-4">{error}</p>}
     <section className="rounded-xl border border-line bg-panel p-6">

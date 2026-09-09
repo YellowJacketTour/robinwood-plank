@@ -14,7 +14,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | OAuth and passkeys for same game identity | █░░░░ | Other auth namespace exists; safe linking not implemented |
 | Durable account garden | ████░ | PostgreSQL lifecycle, ownership, retries and races tested; existing small garden only |
 | Native world persistent account progress | █░░░░ | Guest native counters must not be imported as authoritative rewards |
-| Account-owned map instances | ██░░░ | Logical instance routing; authored home maps and durable world host missing |
+| Account-owned map instances | ██░░░ | Durable region admission now exists; native authored home maps still missing |
 | Friend invitations / revoke / expiry | ███░░ | Durable API and account garden controls; private native visits still missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
 | Player movement replication | ███░░ | Local guest relay by scene; no authenticated authoritative movement |
@@ -46,14 +46,14 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
-| Species and encounter tables | █░░░░ | Source reference available; target habitats and rates not authored |
+| Species and encounter tables | ██░░░ | Source catalogue resolves386 species and184 evolution rules; target habitats/rates not authored |
 | Creatures visible in adventure world | █░░░░ | Needs world entities, directional art, pathing and spawn budgets |
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
 | Native-style turn battle | ██░░░ | Encounter domain prototype; no playable native battle integration |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
 | Followers and companion reactions | █░░░░ | Path following, doors, mounts and disconnect behavior required |
-| Party / storage / clinic | █░░░░ | Stable creature IDs and durable assignments required |
+| Party / storage / clinic | ██░░░ | One persistent account-bound starter implemented; party slots, clinic and storage gameplay missing |
 | Moves / types / status durations | █░░░░ | Definitions and balancing missing; prototype only holds limited status names |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
@@ -105,8 +105,8 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Gameplay inventory versus Satchel | ███░░ | Durable garden compartment projection; native unification missing |
 | Finite Grain rewards | ███░░ | Local migration and garden integration; conservation/retry/exhaustion checked in PostgreSQL |
 | Commodity production budgets | █░░░░ | Currency reserve does not make every crop or creature scarce |
-| Player trades / order book / escrow | █░░░░ | Charmville implementation absent; external marketplace is a different product |
-| Exchange prices / volume / supply feed | █░░░░ | Must derive from actual game ledger, no fabricated market activity |
+| Player trades / order book / escrow | ███░░ | Fixed-price offers, escrow, partial fills and cancellation tested; automatic matching absent |
+| Exchange prices / volume / supply feed | ██░░░ | Actual offers and aggregate Grain supply available; charts/volume feed missing |
 | Liquidity pools / fees / slippage | █░░░░ | Simulated funded-reserve design only |
 | Derivatives and trader analytics | █░░░░ | Later separately funded subsystem; no implemented game perps |
 | Cash skins / season passes | █░░░░ | Commerce and entitlements not integrated |
@@ -149,5 +149,9 @@ Implemented this pass: durable access API and owner controls; canonical account 
 Browser verification passed: synthetic approved account restores, claims, harvests and persists after reload; owner saves a seven-day help invitation, visitor sees it, owner revokes it and reload retains revocation. Native crop/fertilizer regression also passes after indexed tool-art compilation. These checks do not demonstrate private native homesteads or creature gameplay. Application suite: 1,337 passed, 48 skipped; additional focused account, permission, travel and asset compiler checks passed. Skipped coverage is not counted as verified.
 
 The next meaningful shared-game gate is two authenticated profiles entering separate homes, authorized visits, an animated server-committed resource action, reconnect persistence and no duplicate reward. The following gate adds one captured follower, a consumed-input recipe and an escrowed trade. Communication overlays must operate on the same profile without leaking tokens or submitting posts automatically.
+
+Further implementation: `/charmville/world` now combines real account region membership, peer lists, inventory and trade controls with an isolated native reference camera. Two-account region visitation and escrow trades pass browser tests, including lost-response retry. This completes account-shell integration, not native map/action integration. Source watering playback no longer uses blank columns; all eight hoe frames are used. Starter companion ownership is implemented; capturing/following is not.
+
+Latest verification: 1,344 application tests passed, 48 skipped. Starter selection with an original Emerald portrait survives reload with the same creature ID. Embedded voice recording/playback/download/discard and modal close cleanup pass using synthetic audio; real user audio was not accessed. Native startup loads191 original MIDI instruments without missing-patch errors, at a35.4MB startup cost. Fullscreen and390px mobile overflow checks pass. These are local checks, not a claim of broad device performance or finished source-fidelity animation.
 
 Evidence roots: `lib/charmville`, `test/market/charmville-*`, `scripts/charmville/*test.mjs`, native verification scripts and `docs/charmville-reconstruction`. Tests for pure modules do not prove live gameplay. Update this document after integration, not on agent assignment or optimistic estimates.

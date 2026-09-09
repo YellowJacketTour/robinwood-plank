@@ -1,0 +1,34 @@
+{
+  "note": "Byte-identical research source assets. Static first frame only; not a native battle animation. Source availability is not a license grant.",
+  "assets": [
+    {
+      "sourcePath": "graphics/pokemon/treecko/anim_front.png",
+      "frameHeight": 64,
+      "speciesId": 277,
+      "file": "treecko-front.png",
+      "sha256": "1dcf39fdf69cf6c063b3a27d445fa838b690b0be37b7c86518f968eaee531f4b",
+      "frameWidth": 64,
+      "displayFrame": 0
+    },
+    {
+      "sourcePath": "graphics/pokemon/torchic/anim_front.png",
+      "frameHeight": 64,
+      "speciesId": 280,
+      "file": "torchic-front.png",
+      "sha256": "4119e747187bee1a8a02096b394cfc1bb676a3c1c6f0d3d68c6786c3f9b31ab1",
+      "frameWidth": 64,
+      "displayFrame": 0
+    },
+    {
+      "sourcePath": "graphics/pokemon/mudkip/anim_front.png",
+      "frameHeight": 64,
+      "speciesId": 283,
+      "file": "mudkip-front.png",
+      "sha256": "91245c5f6078c4af05116ea4c2c3a6bfab1cc7e37015cb52f77e8fffbb3117c2",
+      "frameWidth": 64,
+      "displayFrame": 0
+    }
+  ],
+  "commit": "5eff78649e7170a877b961ef0b3da13b81a16038",
+  "source": "https://github.com/pret/pokeemerald"
+}

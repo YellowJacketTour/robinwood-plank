@@ -151,10 +151,18 @@ global script Active
                     Hero->ScriptTile=Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod;
                     // Hosted player aborts on GetOriginalFlip; retain the native directional flip.
                     int row=activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7));
-                    int frame=Min(Floor(activityTick/8),5);
+                    // LPC source_index.html defines watering as 0-1-4-4-4-4-5;
+                    // columns 2 and 3 are empty. The hoe uses all eight thrust
+                    // frames, with maximum extension aligned to contact tick 28.
+                    int waterFrames[]={0,1,4,4,4,4,5};
+                    int frame=activity==2?waterFrames[Min(Floor(activityTick/7),6)]:
+                        (activityTick<6?0:(activityTick<12?1:(activityTick<18?2:(activityTick<22?3:(activityTick<28?4:(activityTick<36?5:(activityTick<42?6:7)))))));
+                    // LPC foot baseline 60 at half scale aligns with Hero's
+                    // 16px foot baseline: 16 - 30 = -14, plus the 56px HUD.
+                    int toolY=Hero->Y+42;
                     Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                    if(activity==0){hoeBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);hoeFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
-                    if(activity==2){waterBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);waterFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
+                    if(activity==0){hoeBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);hoeFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);}
+                    if(activity==2){waterBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);waterFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);}
                     Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                     // No held prop until a crop item has its own validated sprite identity.
                     if(activity==2 && activityTick>=18 && activityTick<36){

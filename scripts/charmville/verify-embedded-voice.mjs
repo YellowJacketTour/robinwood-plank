@@ -1,0 +1,46 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {mkdir,stat} from 'node:fs/promises';
+const browser=await chromium.launch({args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+try {
+ const page=await browser.newPage();
+ const response=await page.request.post('http://localhost:3017/api/charmville/local-playtest',{headers:{Origin:'http://localhost:3017'}});
+ assert.equal(response.status(),200);
+ const fixture=await response.json();
+ await page.addInitScript(({wallet,token})=>{
+  window.testStreams=[];
+  if(navigator.mediaDevices){const acquire=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async constraints=>{const stream=await acquire(constraints);window.testStreams.push(stream);return stream;};}
+  if(location.origin!=='http://localhost:3017')return;
+  for(const type of ['plank:wallet-state','plank:wallet-response'])window.addEventListener(type,e=>{const state=type==='plank:wallet-state'?e.detail:e.detail?.result?.state;if(state&&state.address!==wallet)e.stopImmediatePropagation();},true);
+  localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);
+  window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});
+ },fixture);
+ await page.goto('http://localhost:3017/charmville/world');
+ await page.getByRole('heading',{name:'@'+fixture.handle,exact:true}).waitFor();
+ await page.getByRole('button',{name:'Open adventure camera'}).click();
+ const frame=page.frameLocator('iframe');
+ await frame.getByRole('button',{name:'Charmdex',exact:true}).click();
+ await frame.getByRole('button',{name:'Close Charmdex',exact:true}).click();
+ assert(await frame.getByRole('button',{name:'Close Charmdex',exact:true}).isHidden());
+ await frame.getByRole('button',{name:'Voice notes',exact:true}).click();
+ const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));
+ assert(runtime);assert.equal(await runtime.evaluate(()=>window.testStreams.length),0);
+ const panel=frame.locator('.voice-notes');
+ await panel.getByRole('button',{name:'Record',exact:true}).click();await page.waitForTimeout(800);
+ await panel.getByRole('button',{name:'Stop',exact:true}).click();
+ await panel.getByRole('button',{name:'Save audio',exact:true}).waitFor({state:'visible'});
+ assert(await runtime.evaluate(()=>window.testStreams.length===1&&window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+ await panel.getByRole('button',{name:'Play draft',exact:true}).click();await page.waitForTimeout(150);
+ assert(await panel.locator('audio').evaluate(audio=>!audio.paused));
+ const downloading=page.waitForEvent('download');
+ await panel.getByRole('button',{name:'Save audio',exact:true}).click();
+ const download=await downloading;assert.match(download.suggestedFilename(),/\.(weba|ogg|m4a)$/);
+ await mkdir('work/embedded-voice',{recursive:true});const file='work/embedded-voice/'+download.suggestedFilename();await download.saveAs(file);
+ assert((await stat(file)).size>0);
+ await panel.getByRole('button',{name:'Discard',exact:true}).click();assert(await panel.locator('audio').isHidden());
+ await panel.getByRole('button',{name:'Record',exact:true}).click();await page.waitForTimeout(400);
+ await panel.getByRole('button',{name:'Close voice note'}).click();await page.waitForTimeout(200);
+ assert(await panel.isHidden());
+ assert(await runtime.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+ console.log('PASS embedded synthetic microphone: no automatic capture; record, stop, playback, download, discard, close cleanup');
+}finally{await browser.close();}

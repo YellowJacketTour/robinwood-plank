@@ -18,6 +18,34 @@ The existing wallet authentication subsystem still owns its pre-existing
 saved-session storage. Wallet changes and unmount invalidate in-flight
 identity results, including transports that ignore abort.
 
+## Shared account window
+
+`/charmville/world` now presents account home admission, authorized friend
+visits, server-reported peers and the canonical saved inventory next to the
+native adventure. It renews active presence every 30 seconds while visible;
+the server owns the 90-second lease and access decisions. It does not transmit
+pose, quest counters or balances from the frame. A region admission updates
+the account panel, not the reference camera's map coordinates.
+
+The local native camera is an explicit opt-in cross-origin iframe at
+localhost:3021. It receives no session or message bridge. Its sandbox allows
+scripts and its own origin for IndexedDB/WASM; the port difference prevents
+access to the authenticated parent. It cannot navigate the top-level page
+or open popups. Development-only headers on `/charmville/world` enable
+cross-origin isolation and that specific iframe origin. Production CSP is
+unchanged, and production does not offer the localhost camera.
+
+The development wrapper delegates microphone access only to itself and that
+native origin. Recording still requires the player to press Record and grant
+browser permission. Camera and geolocation remain denied. Explicit modal
+close buttons work without enabling sandboxed forms; closing a voice draft
+stops all capture tracks. The embedded verification uses Chromium's synthetic
+microphone, never the user's microphone, and checks record/stop/playback,
+discard, microphone cleanup and both modal close buttons.
+The sandbox permits downloads so the explicit Save audio action exports the
+reviewed local draft; synthetic-browser verification saves a nonempty audio
+file. Form submissions, popup creation and top-level navigation stay disabled.
+
 ## Remaining runtime integration
 
 The reference adventure at localhost:3021 remains separate from the account
