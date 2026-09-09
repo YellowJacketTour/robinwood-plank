@@ -124,39 +124,78 @@ The UI says *"complete from block N"*, never *"complete"*.
 
 ---
 
-## 3. Why this is faster, not just more honest
+## 3. The physics: what actually bounds "everything, instantly"
 
-Speed here is a *consequence* of epistemics, which is the non-obvious part.
+The goal is not parity. It is the physical limit. So the honest question is:
+what *is* the limit, and what is merely an artefact?
 
-**You cannot skip work you cannot prove you already did.** A pipeline re-fetches
-because it has no way to know. A proof plane fetches once because content
-addressing makes "already done" a decidable question — across processes, across
-chains, forever.
+### The measured ceiling
 
-**You cannot prioritise work you cannot name.** A blank cell is not schedulable.
-A typed hole is. `unsourced` and `underived` are *removed from the queue
-permanently*, which is throughput you cannot get any other way — every
-competitor is still retrying work that can never succeed.
+```
+12 mesh workers x --limit=10  =  120 concurrent slots
+PGPOOL_MAX=12, UV_THREADPOOL_SIZE=4, one box
+full catalog sweep = 345,000 collections x ~5 facets = ~1.7M jobs
+```
 
-**You cannot parallelise what you model as a stream.** A chain is a hash-linked
-DAG that already exists in its entirety; only the *API* is sequential. Once the
-run-list is an interval set (which `collapseRuns`/`holesIn` already were),
-ingest shards across N workers and wall-clock scales with **worker count rather
-than chain length**. Verified against the real functions: 64 shards in shuffled
-order collapse to exactly one run, zero holes — bit-identical to a serial walk.
+**Throughput = slots x (1 / job duration).** That is the whole equation, and
+everything else is a rounding error:
 
-**Measured, on production:**
-
-| endpoint | before | after |
+| job duration | jobs/hour | full sweep |
 |---|---|---|
-| `/api/market/multichain?limit=40` | **504 @ 60,081 ms** | **0.16 s** |
-| `chain-counts` | 8.6 s | 0.32–0.41 s |
-| homepage | — | 0.19 s |
+| 0.3 s | 1,440,000 | **1.2 h** |
+| 1.0 s | 432,000 | 4.0 h |
+| 3.0 s | 144,000 | 12.0 h |
+| 10 s | 43,200 | **39.9 h** |
 
-`limit=40` is now *faster than* `limit=500` — the correct relationship, and the
-proof the sort finally uses an index.
+**A correction I owe, because I got this wrong first.** I argued that per-job
+claim transactions were the bottleneck and built batch claiming to fix it. The
+arithmetic says coordination is **0.1%–1%** of a job. Batching is worth having
+— it removes a table-wide lease-reaper UPDATE per job — but it is a 1% win, and
+I nearly shipped it wearing a 20x costume.
 
----
+**Job duration is the only lever that matters.** A 10-second job needs 33x more
+hardware than a 0.3-second one to reach the same place.
+
+### So where does duration actually go?
+
+Measured on production, the dominant component is **waiting on a public gateway
+for content-addressed bytes** — a 5,651 ms median with 7 of 10 calls timing out
+at 5,000 ms, while the gateway itself answered in 4,478 ms.
+
+That wait is **not physics**. A CID is the hash of its own bytes. Fetching one
+twice is always waste, and fetching it a third time across a different chain is
+waste squared. The proof plane collapses that class of work to **exactly one
+fetch, ever, globally** — which is the difference between the 1.2-hour row and
+the 39.9-hour row in the table above.
+
+### The three real limits, once the artefacts are gone
+
+1. **Chain tip rate.** Bitcoin produces a block every ~10 minutes; Ethereum
+   every 12 seconds. Forward coverage cannot exceed this and does not need to —
+   the archive can be *ahead* of demand.
+2. **Historical bytes, once.** ~198,651 Bitcoin blocks of Ordinals history is a
+   finite, one-time cost. Sharded across N workers it is `N`-divisible: the
+   run-list is an interval set, and 64 shards completing out of order collapse
+   to one run with zero holes (verified against the real functions).
+3. **Mutable off-chain state.** A venue ask genuinely changes. This is the only
+   irreducible recurring cost, and it is bounded by *attention* — you refresh
+   what someone is looking at, at the rate they look.
+
+Everything else — re-fetching immutable bytes, re-deriving identity 27 times,
+scanning 345k rows to print one integer, retrying work that can never succeed —
+is artefact, and every one of those was found and removed this day.
+
+### Why "unthrottled" has one honest exception
+
+Public gateways throttle, and a prior audit in this repo removed gateway racing
+*on purpose* after 75 simultaneous requests earned a 30-minute cooldown. I
+reintroduced racing this session and CI stopped me.
+
+**The resolution is not to fight the rate limit. It is to stop needing it.** A
+proof fetched once needs no race, no retry budget, and no pacing — the second
+request never leaves the building. Rate limits bound *how fast you may ask
+strangers for things*; they place no bound at all on how fast you serve what
+you already possess and can prove.
 
 ## 4. The disciplines that make it hold
 
@@ -212,25 +251,46 @@ credibly publish where their data ends.
 
 ---
 
-## 6. Honest position versus the industry
+## 6. The target is the limit, not the leaders
 
-**The order layer is at or above parity** with OpenSea and Blur: criteria bids
-against real Seaport Merkle semantics with an independent re-implementation of
-on-chain `_verifyProof`; client-side re-derivation of every order before the
-wallet prompt; native Bitcoin PSBT listings; 11 chains; published coverage
-proofs no competitor exposes.
+"At or above parity" was the wrong frame, and I used it. Parity is a
+settlement. The target is the **physical limit**, and the gap between where
+this stands and that limit is measurable rather than rhetorical.
 
-**What is missing is the retention layer**, and it is not close: no watchlist,
-no alerts, no cross-listing, no launchpad, no rewards, no public API.
+### Where it already exceeds anything shipped
+
+- **Published coverage proofs.** `complete_from_protocol` refuses to claim
+  completeness while a single hole exists, and the gaps are exposed publicly.
+  No competitor publishes where their data ends, because no competitor can.
+- **Client-side re-derivation.** Every swept order is re-validated in the
+  buyer's own browser before the wallet prompt; the criteria layer
+  re-implements Seaport's on-chain `_verifyProof` independently. Marketplaces
+  routinely trust their own relay here. This is the marketplace that *cannot
+  lie to you about price*.
+- **On-chain-fact identity.** Ordinals collection membership derived from
+  envelope tag 3 decoded out of tapscript — a chain fact, not a vendor opinion.
+- **Honest venue registry.** X2Y2 recorded `unavailable` with the HTTP 521 that
+  proved it; Blur recorded `partial` because it has no public orders API.
+
+### The distance still to run, stated as numbers
+
+| dimension | now | the limit |
+|---|---|---|
+| Bitcoin historical coverage | 104 blocks | 198,651 blocks (one-time, shardable) |
+| full-catalog sweep | ~40 h at 10 s/job | **~1.2 h** at 0.3 s/job |
+| ingest parallelism | 1 serial walker | N shards, `N`-divisible |
+| retention layer | **absent** | watchlist, alerts, cross-listing, rewards, public API |
+
+The first three are engineering with a known answer. The fourth is the one
+that decides whether anyone is there to see it:
 
 > A trader could execute a sophisticated trade here today and would have no
 > reason to come back tomorrow.
 
-That is a far better problem than the reverse — and it is the honest statement
-of where this stands. The architecture above is what makes the *data* worth
-returning to. The retention layer is what makes the *person* return.
-
----
+That is not a small caveat. **A superior engine with no retention layer is a
+demo.** The architecture above is what makes the data worth returning to; the
+retention layer is what makes the person return. Both are required, and only
+one of them is built.
 
 ## 7. The build order from here
 
