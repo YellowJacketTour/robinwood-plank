@@ -243,6 +243,30 @@ export class BackfillWorker {
     }
 
     const moved = store.setBackfillTail(chain, lowest.height);
-    return { chain, from, to, linked: true, tailMoved: moved };
+    // A SUCCESSFUL STEP THAT MOVES NOTHING MUST STILL SAY WHY.
+    //
+    // This returned `tailMoved: moved` with NO reason, so a refused tail
+    // update surfaced as the caller's fallback string -- "no progress, no
+    // reason given" -- which is precisely the silent-miss shape the rest of
+    // this file exists to prevent.
+    //
+    // setBackfillTail only moves LEFT, so `moved` is false when the lowest
+    // header we actually persisted sits at or above the current tail. That
+    // happens when the BOTTOM of the epoch failed to ingest: the walk
+    // succeeded, the hash-link held, and the deepest block we hold is still
+    // the one we already had. Measured live 2026-09-09 with backfill
+    // ok 285 / fail 183 -- partial epochs, not a stalled worker.
+    return {
+      chain,
+      from,
+      to,
+      linked: true,
+      tailMoved: moved,
+      reason: moved
+        ? `tail moved ${tail} -> ${lowest.height}`
+        : `epoch linked but the tail did not move: lowest header persisted was ` +
+          `${lowest.height}, which is not below the tail ${tail} -- the bottom of ` +
+          `the epoch (${from}) did not ingest`,
+    };
   }
 }
