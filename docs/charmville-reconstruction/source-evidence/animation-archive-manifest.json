@@ -1,0 +1,60 @@
+{
+  "release": "animation-audit-2026-09-09",
+  "archives": [
+    {
+      "directory": "dragonball-arena",
+      "archive": "dragonball-arena.tar.gz",
+      "bytes": 300998290,
+      "sha256": "8b3c1f0811354122d4b235a276565b8d9f714e4dd9880d4c9db0d6370ea76579"
+    },
+    {
+      "directory": "pokemmo-js",
+      "archive": "pokemmo-js.tar.gz",
+      "bytes": 4144919,
+      "sha256": "a56aef1333ba7d1761cc62aca1ac14b0b4cb143e54d8eaa8a8fc5f99075162f2"
+    },
+    {
+      "directory": "runejs-server",
+      "archive": "runejs-server.tar.gz",
+      "bytes": 47993577,
+      "sha256": "cbe0a133316aa1cf3b91fb0284c6a87af9965fd46f00fe865a623e0b2bbfa13a"
+    },
+    {
+      "directory": "graal-tiles-editor",
+      "archive": "graal-tiles-editor.tar.gz",
+      "bytes": 2349179,
+      "sha256": "8197b317f51de72d895342b910a8d24cef5590bbecba3965914ab3aa67e6b871"
+    },
+    {
+      "directory": "crossfire-server",
+      "archive": "crossfire-server.tar.gz",
+      "bytes": 10830486,
+      "sha256": "6516d9256fb392c544809446ff8dddcc53584c79776cc683ed95a2319055a4bd"
+    },
+    {
+      "directory": "crossfire-arch",
+      "archive": "crossfire-arch.tar.gz",
+      "bytes": 12165741,
+      "sha256": "b82d15caf5dffb8779668b5b8cc69f43e9fe42c3a184488216a76e5a4247bb7d"
+    },
+    {
+      "directory": "crossfire-maps",
+      "archive": "crossfire-maps.tar.gz",
+      "bytes": 90023848,
+      "sha256": "4d85f3c4ffba1a7395f088e98b287d16c1cc2d8d02787f22e76985ff99b3afe7"
+    },
+    {
+      "directory": "animation-season-packs",
+      "archive": "animation-season-packs.tar.gz",
+      "bytes": 16040194,
+      "sha256": "5c8e3edb686e93b135265cdf56df36ca51365f6e5d6813d61d4db8a578bfd22b"
+    },
+    {
+      "directory": "animation-engine-evidence",
+      "archive": "animation-engine-evidence.tar.gz",
+      "bytes": 12464115,
+      "sha256": "8f301a1cab048d0ea70f5ad8cd6f48b3070d7724b4d207e8ff40533cc3d4b829"
+    }
+  ],
+  "restore": "Extract these archives beside the earlier collections in charmville-references. Copy animation-engine-evidence/zscript.mjs and zscript.wasm into zquest-web-runtime for the captured browser compiler. The incompatible quest is failure evidence, not a playable build."
+}

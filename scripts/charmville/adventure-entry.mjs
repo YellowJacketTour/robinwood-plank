@@ -25,10 +25,17 @@ export const adventureEntry = {
   persistent: false,
   initData: equipmentDelta+' flags[1]=1 counter[0]=320 mcounter[0]=320 counter[1]=999 mcounter[1]=999 counter[2]=99 mcounter[2]=99 counter[3]=99 mcounter[3]=99 counter[4]=256 mcounter[4]=256 counter[5]=99 mcounter[5]=99 counter[6]=24',
 };
-export function adventureUrl() {
+export const diagnosticKits = {
+  bow: {label:'Bow timing',delta:'items[13]=1 items[15]=1 counter[1]=100 counter[3]=30 mcounter[3]=30'},
+  bomb: {label:'Bomb fuse',delta:'items[3]=1 counter[2]=8 mcounter[2]=8'},
+  wand: {label:'Wand effect',delta:'items[25]=1 counter[4]=64 mcounter[4]=64'},
+  fire: {label:'Divine fire',delta:'items[64]=1 counter[4]=64 mcounter[4]=64'},
+  sword: {label:'Sword charge timing',delta:'items[5]=1 items[94]=1 items[98]=1 flags[1]=1 counter[4]=128 mcounter[4]=128'},
+};
+export function adventureUrl(kit='endgame') {
   return '/play/?' + new URLSearchParams({
     test: adventureEntry.quest, dmap: String(adventureEntry.dmap),
     screen: String(adventureEntry.screen), storage: 'idb',
-    testInitData: adventureEntry.initData,
+    testInitData: diagnosticKits[kit]?.delta ?? adventureEntry.initData,
   });
 }

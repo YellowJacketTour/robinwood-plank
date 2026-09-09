@@ -2,10 +2,10 @@ import http from 'node:http';
 import {createReadStream} from 'node:fs';
 import {stat,readFile} from 'node:fs/promises';
 import path from 'node:path';
-import {adventureUrl} from './adventure-entry.mjs';
+import {adventureUrl,diagnosticKits} from './adventure-entry.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
-const types={'.html':'text/html','.js':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
+const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
 const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:"};
 http.createServer(async(req,res)=>{
  try{
@@ -13,7 +13,7 @@ http.createServer(async(req,res)=>{
   // Existing shared links now skip the original title/story sequence too.
   // Append reference=1 to explicitly replay the unchanged source introduction.
   if(url.pathname==='/charmville/' || (url.pathname==='/play/' && url.searchParams.get('open')==='quests/purezc/139' && !url.searchParams.has('reference'))){
-   res.writeHead(302,{...headers,Location:adventureUrl()});res.end();return;
+   res.writeHead(302,{...headers,Location:adventureUrl(url.searchParams.get('kit')||'endgame')});res.end();return;
   }
   if(url.pathname==='/reference-data/manifest.json'){
    const manifest={};
@@ -42,11 +42,18 @@ http.createServer(async(req,res)=>{
     // Start the unchanged engine after a real click, in the required loader order.
     for(const script of ['main.js','zplayer.data.js','zplayer.js']) html=html.replace(`<script src="../${script}"></script>`,'');
     html=html.replace('</body>',`<script>
+     const help=document.createElement('details');
+     Object.assign(document.querySelector('header').style,{zIndex:'10001'});
+     Object.assign(help.style,{position:'relative',background:'black',padding:'6px',maxWidth:'560px'});
+     const summary=document.createElement('summary');summary.textContent='Controls and weapon tests';help.append(summary);
+     const instructions=document.createElement('p');instructions.textContent='Arrows move Â· Z sword (hold then release to spin) Â· X selected item Â· Enter inventory. Bow fires immediately in this quest. These isolated tests reset progress and remove the endgame gear that masks damage and costs.';help.append(instructions);
+     for(const [key,label] of ${JSON.stringify([['endgame','Full endgame kit'],...Object.entries(diagnosticKits).map(([key,value])=>[key,value.label])])}){const link=document.createElement('a');link.href='/charmville/?kit='+key;link.textContent=label;link.className='panel-button';help.append(link);}
+     document.querySelector('.panel-buttons').after(help);
      const start=document.createElement('button');start.textContent='Enter the world';start.className='panel-button';
      document.querySelector('.panel-buttons').prepend(start);
-     start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading world…';
+     start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading worldâ€¦';
       try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});start.remove();}
-      catch{start.textContent='Loading failed — reload to retry';}
+      catch{start.textContent='Loading failed â€” reload to retry';}
      },{once:true});
     </script></body>`);
    }
