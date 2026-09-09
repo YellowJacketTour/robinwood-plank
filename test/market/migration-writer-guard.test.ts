@@ -18,12 +18,15 @@ test("migration guard stops owned writers, excludes cron restarts and releases l
     await fs.mkdir(path.join(appDir, "shared"), { recursive: true });
     for (let i = 0; i < scripts.length; i++) {
       const script = path.join(appDir, "current", "scripts", scripts[i]);
-      await fs.writeFile(script, "setTimeout(() => {}, 15000);");
-      children.push(spawn("flock", ["-n", locks[i], process.execPath, script], { stdio: "ignore" }));
+      const ready = path.join(appDir, `ready-${i}`);
+      await fs.writeFile(script, "import {writeFileSync} from 'node:fs'; writeFileSync(process.argv[2], 'ready'); setTimeout(() => {}, 15000);");
+      children.push(spawn("flock", ["-n", locks[i], process.execPath, script, ready], { stdio: "ignore" }));
       let held = false;
       for (let attempt = 0; attempt < 100 && !held; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 20));
-        try { await exec("flock", ["-n", locks[i], "true"]); } catch { held = true; }
+        // Readiness happens inside flock's child, after ownership. Probing
+        // with another flock first could steal the fixture's initial lock.
+        try { await fs.access(ready); held = true; } catch { /* starting */ }
       }
       assert.ok(held, "fixture writer must own the cron lock");
     }
