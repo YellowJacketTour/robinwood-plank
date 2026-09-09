@@ -285,6 +285,123 @@ export async function claimDataJob(kinds?: string[], leaseMs = 300_000, minPrior
 }
 
 /**
+ * Claim up to `count` jobs in ONE transaction.
+ *
+ * THE COORDINATION CEILING
+ * ------------------------
+ * `claimDataJob` claims exactly one job per transaction: BEGIN, a lease-reaper
+ * UPDATE across the whole jobs table, an index scan under FOR UPDATE SKIP
+ * LOCKED, an UPDATE, COMMIT. Correct, fair, and starvation-free -- and it
+ * means every unit of work costs a full round trip before it can even start.
+ *
+ * Measured on production: 12 mesh workers x 10 slots = 120 concurrent jobs,
+ * with app-to-database round trips at ~0.26-0.33 s from outside and low
+ * single-digit milliseconds inside the datacenter. Even at 3 ms per claim the
+ * COORDINATION alone caps the system near 24k-60k jobs/hour.
+ *
+ * A full sweep of the catalog is ~345,000 collections times roughly five
+ * facets each -- metadata, traits, rarity, listings, holders -- so about 1.7
+ * MILLION jobs. At that ceiling the queue itself, not the network and not the
+ * vendors, is what stands between the archive and completeness.
+ *
+ * Batching is the only lever that moves it, and it is a large one: claiming 20
+ * jobs in one transaction does one BEGIN/COMMIT and one lease sweep instead of
+ * twenty, cutting coordination cost by roughly 20x while every property that
+ * makes the single claim correct is preserved.
+ *
+ * WHAT IS PRESERVED, DELIBERATELY
+ * -------------------------------
+ * - SKIP LOCKED, so N workers never collide and never serialise behind each
+ *   other.
+ * - The full ORDER BY, including the attempts-first fairness rule. That rule
+ *   was bought with a real starvation incident (CloneX's anchored-membership
+ *   job sat at max priority with ZERO claims while older failing jobs won the
+ *   id tiebreak forever). A batch claim that reordered would reintroduce it at
+ *   twenty times the rate.
+ * - The lease. Every claimed job is leased to this owner, so a worker that
+ *   dies mid-batch releases all of them on expiry rather than taking them to
+ *   the grave.
+ *
+ * WHY THE BATCH IS BOUNDED
+ * ------------------------
+ * A worker that claims more than it can run holds leases it is not working,
+ * and every one of those is a job no other worker may take until the lease
+ * expires. The cap must stay at or below the caller's real slot count -- this
+ * is a throughput optimisation, not a licence to hoard.
+ */
+export async function claimDataJobs(
+  count: number,
+  kinds?: string[],
+  leaseMs = 300_000,
+  minPriority?: number,
+  maxPriority?: number,
+  jobKeyPrefix?: string,
+  sources?: string[],
+): Promise<ClaimedDataJob[]> {
+  const want = Math.max(1, Math.min(Math.trunc(count), 50));
+  const owner = `${process.pid}:${randomUUID()}`;
+  const pool = postgresPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // The lease reaper runs ONCE per batch rather than once per job. It is a
+    // table-wide UPDATE; paying it per job was pure overhead.
+    await client.query(
+      `UPDATE plank_data_jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+       WHERE status = 'running' AND lease_expires_at < NOW()`
+    );
+    const params: unknown[] = [];
+    const kindClause = kinds?.length ? `AND j.kind = ANY($${params.push(kinds)}::text[])` : "";
+    let priorityClause = "";
+    if (typeof minPriority === "number" && Number.isFinite(minPriority)) {
+      priorityClause += ` AND j.priority >= $${params.push(minPriority)}`;
+    }
+    if (typeof maxPriority === "number" && Number.isFinite(maxPriority)) {
+      priorityClause += ` AND j.priority < $${params.push(maxPriority)}`;
+    }
+    if (jobKeyPrefix) {
+      priorityClause += ` AND j.job_key LIKE $${params.push(`${jobKeyPrefix}%`)}`;
+    }
+    if (sources?.length) {
+      priorityClause += ` AND j.source = ANY($${params.push(sources)}::text[])`;
+    }
+    const countParam = `$${params.push(want)}`;
+    const leaseParam = `$${params.push(leaseMs)}`;
+    const ownerParam = `$${params.push(owner)}`;
+    const result = await client.query<{
+      id: string; job_key: string; kind: string; source: string; chain_slug: string | null;
+      subject: string | null; payload: Record<string, unknown>;
+    }>(
+      // Identical ordering to claimDataJob -- attempts first within a priority
+      // tier, so every job gets a real first try before any job gets a second.
+      // Only the LIMIT differs.
+      `WITH candidate AS (
+         SELECT j.id FROM plank_data_jobs j
+         WHERE j.status = 'queued' AND j.not_before <= NOW() ${kindClause} ${priorityClause}
+         ORDER BY j.priority DESC, j.attempts ASC, j.not_before ASC, j.id ASC
+         FOR UPDATE OF j SKIP LOCKED LIMIT ${countParam}::int
+       )
+       UPDATE plank_data_jobs j SET status = 'running', attempts = attempts + 1,
+         lease_owner = ${ownerParam}, lease_expires_at = NOW() + (${leaseParam}::text || ' milliseconds')::interval,
+         updated_at = NOW()
+       FROM candidate WHERE j.id = candidate.id
+       RETURNING j.id::text, j.job_key, j.kind, j.source, j.chain_slug, j.subject, j.payload`,
+      params
+    );
+    await client.query("COMMIT");
+    return result.rows.map((row) => ({
+      id: Number(row.id), jobKey: row.job_key, kind: row.kind, source: row.source,
+      chainSlug: row.chain_slug, subject: row.subject, payload: row.payload, leaseOwner: owner,
+    }));
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Put a running job back in the queue to be claimed no earlier than
  * `notBefore` (2026-09-06, AUDIT lens 5 E/F). enqueueDataJob's LEAST()
  * ratchet can never push not_before forward, so "retry after the jail
