@@ -79,6 +79,9 @@ export class PostgresArchiveStore extends ArchiveStore {
    * On failure the batch is put back so the next flush retries rather than
    * silently dropping tape.
    */
+  /** Statements that failed for a reason RETRYING CANNOT FIX. */
+  readonly poisoned: Array<{ sql: string; error: string }> = [];
+
   async flush(): Promise<number> {
     if (this.pending.length === 0) return 0;
     const batch = this.pending;
@@ -86,12 +89,45 @@ export class PostgresArchiveStore extends ArchiveStore {
     let done = 0;
     try {
       for (const op of batch) {
-        await this.sql.query(op.sql, op.values);
+        try {
+          await this.sql.query(op.sql, op.values);
+        } catch (e) {
+          // A POISON STATEMENT MUST NOT BLOCK THE TAPE.
+          //
+          // Any failure used to push the remainder back at the FRONT, so a
+          // MALFORMED statement was retried first, forever, and every valid
+          // write queued behind it never landed. Measured live 2026-09-09:
+          // one bad cast in recordPhase ("inconsistent types deduced for
+          // parameter $3") left pendingWrites at 69 and stopped the archive's
+          // writes entirely -- the instrument built to explain a stall caused
+          // one.
+          //
+          // A syntax/type error is not transient: the same bytes will fail the
+          // same way on every retry. It is dropped from the queue and recorded
+          // in `poisoned` so it is loudly visible in health, rather than
+          // silently retried into a permanent block. A CONNECTION error is
+          // transient and still requeues the whole remainder, which is the
+          // behaviour that was always correct.
+          const err = e instanceof Error ? e : new Error(String(e));
+          const code = (e as { code?: string }).code ?? "";
+          const transient =
+            !code ||
+            code.startsWith("08") || // connection exception
+            code.startsWith("57") || // operator intervention / shutdown
+            code === "53300" || // too many connections
+            code === "40001" || // serialization failure
+            code === "40P01"; // deadlock
+          if (transient) {
+            this.pending = [...batch.slice(done), ...this.pending];
+            this.failed = err;
+            throw err;
+          }
+          this.poisoned.push({ sql: op.sql.slice(0, 200), error: err.message });
+          this.failed = err;
+        }
         done++;
       }
     } catch (e) {
-      // Un-drained remainder goes back at the FRONT: the tape is ordered.
-      this.pending = [...batch.slice(done), ...this.pending];
       this.failed = e instanceof Error ? e : new Error(String(e));
       throw this.failed;
     }
@@ -208,10 +244,22 @@ export class PostgresArchiveStore extends ArchiveStore {
          (chain, phase, attempts, completions, failures,
           last_reason, last_error, last_detail,
           last_attempt_at, last_success_at, last_failure_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb,
-               CASE WHEN $3 = 1 THEN NOW() END,
-               CASE WHEN $4 = 1 THEN NOW() END,
-               CASE WHEN $5 = 1 THEN NOW() END)
+       -- EVERY placeholder is cast EXPLICITLY.
+       --
+       -- $3/$4/$5 appear twice each: once as a BIGINT column value and once
+       -- inside a CASE comparison. Postgres could not deduce a single type for
+       -- them and rejected the whole statement with
+       -- "inconsistent types deduced for parameter $3" -- which failed the
+       -- ENTIRE queued write batch, so pendingWrites climbed to 69 and not one
+       -- phase row was ever persisted. The instrument that was supposed to
+       -- explain the stall could not write, and it reported that fact only in
+       -- the stdout nobody could read. Same shape as the bug it was built to
+       -- find.
+       VALUES ($1::text, $2::text, $3::bigint, $4::bigint, $5::bigint,
+               $6::text, $7::text, $8::jsonb,
+               CASE WHEN $3::bigint = 1 THEN NOW() END,
+               CASE WHEN $4::bigint = 1 THEN NOW() END,
+               CASE WHEN $5::bigint = 1 THEN NOW() END)
        ON CONFLICT (chain, phase) DO UPDATE SET
          attempts    = akasha_worker_phase.attempts + EXCLUDED.attempts,
          completions = akasha_worker_phase.completions + EXCLUDED.completions,
@@ -249,14 +297,16 @@ export class PostgresArchiveStore extends ArchiveStore {
   recordHeartbeat(worker: string, info: { pid: number; bootAt: string; chains: string; version: string; boot?: boolean }): void {
     this.enqueue(
       `INSERT INTO akasha_worker_heartbeat (worker, pid, boot_at, last_tick_at, tick_count, chains, version)
-       VALUES ($1, $2, $3::timestamptz, NOW(), 1, $4, $5)
+       -- Cast every placeholder, for the same reason as recordPhase above:
+       -- $6 is compared in three CASE clauses below.
+       VALUES ($1::text, $2::int, $3::timestamptz, NOW(), 1, $4::text, $5::text)
        ON CONFLICT (worker) DO UPDATE SET
          pid = EXCLUDED.pid,
          -- boot_at only moves on a real process start, so its age is the
          -- worker's uptime rather than the age of the last tick.
-         boot_at = CASE WHEN $6 THEN EXCLUDED.boot_at ELSE akasha_worker_heartbeat.boot_at END,
+         boot_at = CASE WHEN $6::boolean THEN EXCLUDED.boot_at ELSE akasha_worker_heartbeat.boot_at END,
          last_tick_at = NOW(),
-         tick_count = CASE WHEN $6 THEN 0 ELSE akasha_worker_heartbeat.tick_count + 1 END,
+         tick_count = CASE WHEN $6::boolean THEN 0 ELSE akasha_worker_heartbeat.tick_count + 1 END,
          chains = EXCLUDED.chains,
          version = EXCLUDED.version`,
       [worker, info.pid, info.bootAt, info.chains, info.version, info.boot === true],
