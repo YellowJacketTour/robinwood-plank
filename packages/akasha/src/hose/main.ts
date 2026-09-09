@@ -267,13 +267,27 @@ export class Hose {
       const lock = this.store
         .headersAtHeight("bitcoin", alreadyLocked.t0Height)
         .find((h) => h.hash.toLowerCase() === lockHash.toLowerCase());
-      if (lock && lock.parentHash.toLowerCase() === lock.hash.toLowerCase()) {
+      // REPAIR ANY WRONG PARENT, NOT ONLY A SELF-PARENT.
+      //
+      // This checked `parentHash === hash` -- the one poisoning shape known at
+      // the time. Measured live 2026-09-09, the backfill was refusing to move
+      // with "epoch did not hash-link to the current tail" while the REAL
+      // chain linked perfectly (966081's previousblockhash IS 966080's hash,
+      // verified against a working host). So the stored parent was wrong in
+      // some other way, and a repair that only recognised self-parents could
+      // never fix it -- a guard that cannot fire, in the repair path itself.
+      //
+      // Now: read the real parent, compare, and correct any disagreement.
+      if (lock) {
         const header = await rpc.getBlockHeader(lockHash).catch(() => null);
         const realParent = header?.previousblockhash ?? null;
-        if (realParent) {
+        if (realParent && lock.parentHash.toLowerCase() !== realParent.toLowerCase()) {
           this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
-          this.pg?.repairSelfParent("bitcoin", asHex(lockHash), asHex(realParent));
-          console.log(`[hose] bitcoin: repaired the self-parented lock block ${alreadyLocked.t0Height}`);
+          this.pg?.repairParentHash("bitcoin", asHex(lockHash), asHex(realParent));
+          console.log(
+            `[hose] bitcoin: repaired lock block ${alreadyLocked.t0Height} parent ` +
+              `${lock.parentHash} -> ${realParent}`,
+          );
         }
       }
       return;

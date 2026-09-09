@@ -178,6 +178,14 @@ export class BackfillWorker {
 
     if (!linked) {
       // Refuse to move. An unlinked boundary is a claim we cannot support.
+      //
+      // BUT SAY WHICH HASHES DISAGREED. "did not hash-link" is true and
+      // useless: it cannot distinguish a genuine reorg from a poisoned
+      // parent_hash in our own row, and those need opposite responses. This
+      // stalled Bitcoin's past for a full day while the reason string looked
+      // like a considered refusal rather than a data defect.
+      const expected = tailHeader?.parentHash ?? null;
+      const found = store.headersAtHeight(chain, to).map((h) => h.hash);
       store.enqueueGap({ chain, fromHeight: from, toHeight: to, reason: "bloom_audit" });
       return {
         chain,
@@ -185,7 +193,9 @@ export class BackfillWorker {
         to,
         linked: false,
         tailMoved: false,
-        reason: "epoch did not hash-link to the current tail; audit enqueued",
+        reason:
+          `epoch did not hash-link: tail ${tail} expects parent ${expected ?? "(none)"}, ` +
+          `but height ${to} holds ${found.length === 0 ? "(no header)" : found.join(",")}`,
       };
     }
 

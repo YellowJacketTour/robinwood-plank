@@ -217,6 +217,28 @@ export class PostgresArchiveStore extends ArchiveStore {
   }
 
   /**
+   * Correct a header's parent_hash to a value read from the chain.
+   *
+   * repairSelfParent only fixes `parent_hash = hash`, the one poisoning shape
+   * that was known at the time. A parent that is merely WRONG -- any other
+   * value -- is the same defect with a different symptom, and it blocks the
+   * backfill's hash-link identically while looking like a considered refusal.
+   *
+   * Deliberately unconditional on the old value: the caller has already read
+   * the real parent from the chain and compared it, so re-asserting the old
+   * value in the WHERE clause would only reintroduce the "repair silently
+   * matched nothing" failure that repairSelfParent's own history warns about.
+   * Scoped to (chain, hash), so it can only ever fix the block it names.
+   */
+  repairParentHash(chain: ChainId, hash: Hex, parentHash: Hex): void {
+    super.putHeader({ chain, hash, parentHash, height: this.getHeader(chain, hash)?.height ?? 0 });
+    this.enqueue(
+      `UPDATE akasha_header SET parent_hash = $3 WHERE chain = $1 AND hash = $2`,
+      [chain, hexToBuf(hash), hexToBuf(parentHash)],
+    );
+  }
+
+  /**
    * Record that a worker phase was ATTEMPTED, COMPLETED, or FAILED.
    *
    * The point is the difference between those three. Bitcoin's backfill has

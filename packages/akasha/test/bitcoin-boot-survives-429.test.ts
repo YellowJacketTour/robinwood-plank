@@ -48,14 +48,25 @@ test("a PINNED t0 still locks, so cutover behaviour is unchanged", () => {
   ok(/!this\.cfg\.t0\?\.bitcoin/.test(body), "an explicit pin must still take the full path");
 });
 
-test("the self-parent repair survives the skip, best-effort", () => {
-  // The early return could silently drop the repair that fixed the poisoned
+test("the parent repair survives the skip, best-effort, and is not self-parent-only", () => {
+  // The early return could silently drop the repair that fixes a poisoned
   // lock row. It still runs -- but a failed repair must not throw, because a
   // poisoned row is recoverable next boot and a dead worker is not.
+  //
+  // It must also repair ANY wrong parent, not only `parentHash === hash`.
+  // Measured live 2026-09-09: the backfill refused to move with "epoch did
+  // not hash-link" while the REAL chain linked perfectly (966081's
+  // previousblockhash IS 966080's hash, checked against a working host). The
+  // stored parent was wrong in some other way, and a self-parent-only repair
+  // could never fix it -- a guard that cannot fire, inside the repair path.
   const at = MAIN.indexOf("const alreadyLocked = this.store.getCursor");
   const body = MAIN.slice(at, MAIN.indexOf("const pinned = this.cfg.t0?.bitcoin;", at));
-  ok(/repairSelfParent/.test(body), "the repair must still run on the skip path");
+  ok(/repairParentHash/.test(body), "a repair must still run on the skip path");
   ok(/\.catch\(\(\) => null\)/.test(body), "and its network read must not throw");
+  ok(
+    /lock\.parentHash\.toLowerCase\(\) !== realParent\.toLowerCase\(\)/.test(body),
+    "the trigger must be 'the stored parent disagrees with the chain', not 'it equals its own hash'",
+  );
 });
 
 test("the host pool is a pool, not one spare", () => {
