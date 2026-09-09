@@ -570,6 +570,7 @@ export class Hose {
    * RPC is refusing.
    */
   async backfillTick(budgetMs = 0): Promise<unknown> {
+    const until = Date.now() + budgetMs;
     // TELEMETRY FIRST, BEFORE ANY EARLY RETURN.
     //
     // `if (!this.backfill) return undefined` is itself one of the states that
@@ -620,7 +621,6 @@ export class Hose {
     // `tailMoved` is the only honest signal of progress -- a step that
     // returns a reason string but moved nothing would otherwise spin.
     if (!first || first.tailMoved !== true) return first;
-    const until = Date.now() + budgetMs;
     let last = first;
     let epochs = 1;
     while (Date.now() < until) {
