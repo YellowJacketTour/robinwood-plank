@@ -92,31 +92,27 @@ export function subscribePlankLoveWalletState(
   listener: (state: PlankLoveWalletState) => void
 ) {
   if (typeof window === "undefined") return () => {};
+  let stateVersion = 0;
+  let disposed = false;
 
   const handleState = (event: Event) => {
     if (localPlaytestWallet()) return;
     const detail = (event as CustomEvent<PlankLoveWalletState>).detail;
-    if (detail){if(detail.address)rememberWallet(detail.address);listener(detail)}
-  };
-
-  const handleResponse = (event: Event) => {
-    if (localPlaytestWallet()) return;
-    const detail = (event as CustomEvent<{
-      result?: { state?: PlankLoveWalletState };
-    }>).detail;
-
-    if (detail?.result?.state) {
-      listener(detail.result.state);
-    }
+    if (detail){++stateVersion;if(detail.address)rememberWallet(detail.address);listener(detail)}
   };
 
   window.addEventListener("plank:wallet-state", handleState);
-  window.addEventListener("plank:wallet-response", handleResponse);
 
-  void getPlankLoveWalletState().then(listener).catch(() => undefined);
+  // Request replies are snapshots, not wallet-change notifications. A delayed
+  // getState reply must not disconnect a session established after that request.
+
+  const initialVersion = stateVersion;
+  void getPlankLoveWalletState().then(state => {
+    if (!disposed && stateVersion === initialVersion) listener(state);
+  }).catch(() => undefined);
 
   return () => {
+    disposed = true;
     window.removeEventListener("plank:wallet-state", handleState);
-    window.removeEventListener("plank:wallet-response", handleResponse);
   };
 }

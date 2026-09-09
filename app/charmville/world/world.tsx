@@ -48,6 +48,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const location=useRef<Presence|null>(null);
   const [accountClient]=useState(()=>createGameAccountClient());
   const mounted=useRef(true);
+  const signingIn=useRef(false);
 
   const clear=useCallback(()=>{
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
@@ -146,8 +147,8 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       if(address===wallet.current)return;
       wallet.current=address;clear();
       const version=generation.current;
-      setIdentity(null);setAddress("");setPresence(null);setInventory(null);setCamera(false);setBusy(false);setMessage("");
-      if(address)void savedWalletProof(address).then(proof=>{
+      setIdentity(null);setAddress("");setPresence(null);setInventory(null);setCamera(false);setBusy(signingIn.current);setMessage(signingIn.current?"Wallet connection changed. Please finish connecting or try again.":"");
+      if(address&&!signingIn.current)void savedWalletProof(address).then(proof=>{
         if(proof.sessionToken&&!disposed)return restore(proof.sessionToken,version);
       }).catch(error=>{if(!disposed&&version===generation.current)setMessage(error instanceof Error?error.message:"Sign in again.");});
     });
@@ -165,6 +166,8 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   },[load]);
 
   async function enter(){
+    if(signingIn.current)return;
+    signingIn.current=true;
     setBusy(true);setMessage("");
     let version=generation.current;
     try {
@@ -175,7 +178,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       const proof=await walletProof(address,"profile:read",address,{wallet:address});
       await restore(proof.sessionToken,version);
     }catch(error){if(version===generation.current)setMessage(error instanceof Error?error.message:"Could not sign in.");}
-    finally{if(version===generation.current)setBusy(false);}
+    finally{signingIn.current=false;if(mounted.current)setBusy(false);}
   }
 
   function visit(){
