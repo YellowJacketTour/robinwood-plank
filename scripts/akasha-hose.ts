@@ -294,12 +294,59 @@ async function main(): Promise<void> {
     }
   };
 
-  setInterval(() => void tick(), TICK_MS).unref?.();
+  // ONE TICK AT A TIME, AND A WATCHDOG OVER THE WHOLE LOOP.
+  //
+  // `setInterval(tick, TICK_MS)` fired every 15s whether or not the previous
+  // tick had finished, so a slow tick did not delay the next one -- it ran
+  // ALONGSIDE it. Against a blocked vendor that piles concurrent ticks onto
+  // the same throttled hosts, each making the others slower.
+  //
+  // Worse, the process holds a `flock -n` that cron uses to decide whether to
+  // start a new one, so a wedged worker BLOCKS ITS OWN REPLACEMENT for the
+  // full --max-seconds budget. Measured live 2026-09-09: pid 3246054, up
+  // 1,134 seconds, `ticks 0` -- holding the lock, while the deploy that would
+  // have fixed it sat unused on disk. The fix could not run because the
+  // breakage was holding the door.
+  //
+  // Self-scheduling means the next tick starts TICK_MS after the previous one
+  // ENDS. The watchdog is the backstop: if no tick has completed in well over
+  // a tick's worth of time, exit non-zero and let cron start a fresh process
+  // -- releasing the lock is the whole point, and a clean restart is always
+  // recoverable where an hour-long wedge is not.
+  let lastTickDone = Date.now();
+  let ticking = false;
+  const loop = async (): Promise<void> => {
+    if (stopping) return;
+    if (!ticking) {
+      ticking = true;
+      try {
+        await tick();
+      } finally {
+        ticking = false;
+        lastTickDone = Date.now();
+      }
+    }
+    if (!stopping) setTimeout(() => void loop(), TICK_MS).unref?.();
+  };
+
+  const WATCHDOG_MS = Math.max(180_000, TICK_MS * 12);
+  setInterval(() => {
+    const stalled = Date.now() - lastTickDone;
+    if (stalled < WATCHDOG_MS) return;
+    console.error(
+      `[akasha-hose] watchdog: no tick completed in ${Math.round(stalled / 1000)}s -- ` +
+        "exiting so cron can start a fresh process and the lock is released",
+    );
+    // Exit rather than shutdown(): shutdown flushes, and a flush that needs
+    // the same wedged resource would hang the exit too.
+    process.exit(75); // EX_TEMPFAIL: retry me, nothing is corrupt
+  }, Math.max(30_000, TICK_MS * 2)).unref?.();
+
   setInterval(() => {
     console.log("[akasha-hose] health", JSON.stringify(hose.health()));
   }, HEALTH_MS).unref?.();
 
-  await tick();
+  await loop();
 
   const budget = argSeconds();
   if (budget != null) {
