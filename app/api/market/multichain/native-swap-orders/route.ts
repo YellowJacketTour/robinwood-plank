@@ -20,6 +20,8 @@
  * on-chain per item below regardless of tracking status, which is the
  * actual security property that matters.
  */
+import { NextResponse } from "next/server";
+import { tradingHalt, HALT_BODY, HALT_STATUS, HALT_HEADERS } from "@/lib/market/trading-halt";
 import { ethCallForeignFree, ethGetCodeForeignFree } from "@/lib/market/fetch-rpc";
 import type { Rpc } from "@/lib/market/signature";
 import { verifyOrderSignature } from "@/lib/market/signature";
@@ -100,6 +102,15 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // EMERGENCY STOP. Until now MARKET_ENABLED gated pages only -- a signed
+  // order POSTed here was accepted and stored while the operator believed the
+  // market was closed. Reads stay open on purpose: halting trade must not
+  // blank the site.
+  const halt = await tradingHalt();
+  if (halt.halted) {
+    return NextResponse.json(HALT_BODY, { status: HALT_STATUS, headers: HALT_HEADERS });
+  }
+
   try {
     const limited = rateLimit(req, { key: "market-multichain-native-swap-orders-post", limit: 15, windowMs: 60_000 });
     if (limited) return limited;
