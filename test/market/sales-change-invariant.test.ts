@@ -134,3 +134,52 @@ test("the pair rule accepts a traded row and a genuinely quiet one", () => {
   // know" instead of inventing a number, which is the whole point.
   assert.equal(pairIsConsistent(16, null), true);
 });
+
+/**
+ * THE SWEEP: the fix above only reaches rows that trade AGAIN.
+ *
+ * updateVolumeFromMarketEvents is incremental -- ledger-sink aggregates
+ * "every collection recorded since the last flush", so a collection is
+ * recomputed only when a NEW sale arrives. Correct for volume, which cannot
+ * change without a trade. WRONG for the 24h change, which is a function of
+ * two moving windows: a collection that traded heavily and then went quiet is
+ * never revisited, so its change stays blank however many sales sit in the
+ * ledger behind it.
+ *
+ * Measured live 2026-09-09, minutes after the one-derivation fix deployed:
+ * 16 of the top 20 Ethereum rows by volume had real sales and a blank change,
+ * including one with 1,501 sales in 24h. Zero rows had the inverse
+ * (change with no sales), so that half was already holding.
+ */
+test("a sweep recomputes collections whose stats lag their trades", () => {
+  const idx = STORE.indexOf("export async function sweepStaleLedgerStats");
+  assert.ok(idx > 0, "the sweep must exist");
+  const body = STORE.slice(idx, STORE.indexOf("\nexport ", idx + 1));
+  assert.match(body, /event_type = 'sale'/, "it must look at real trades");
+  assert.match(
+    body,
+    /volume_computed_at IS NULL OR s\.volume_computed_at < e\.block_timestamp/,
+    "the selector must be 'aggregated before the trades it should cover'"
+  );
+  assert.match(body, /INTERVAL '24 hours'/, "scoped to the window the change describes");
+});
+
+test("the sweep does not derive anything itself", () => {
+  // One derivation of the pair, or the two halves drift apart again. The
+  // sweep decides WHICH keys to recompute and hands them to the same
+  // aggregator every other path uses.
+  const idx = STORE.indexOf("export async function sweepStaleLedgerStats");
+  const body = STORE.slice(idx, STORE.indexOf("\nexport ", idx + 1));
+  assert.match(body, /updateVolumeFromMarketEvents\(/, "it must delegate");
+  assert.ok(
+    !/UPDATE plank_multichain_snapshots/.test(body),
+    "the sweep must not write stats directly"
+  );
+  assert.ok(!/floor_change_pct/.test(body), "and must not touch the change column");
+});
+
+test("the sweep is bounded", () => {
+  const idx = STORE.indexOf("export async function sweepStaleLedgerStats");
+  const body = STORE.slice(idx, STORE.indexOf("\nexport ", idx + 1));
+  assert.match(body, /LIMIT \$2::int/, "an unbounded sweep would starve the lane");
+});
