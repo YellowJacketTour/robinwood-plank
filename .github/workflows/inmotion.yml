@@ -1755,7 +1755,23 @@ jobs:
               tail -n 20 "$log" >&2
               exit 1
             fi
-            if ! tail -n 200 "$log" | grep -q 'owning tip for'; then
+            # Search the whole log for the marker, not a fixed tail.
+            #
+            # `tail -n 200` was used here and it refused a HEALTHY hose. The
+            # worker prints one ~400-char health line every 60 seconds, so a
+            # 59-minute boot emits ~59 of them, and the single "owning tip for"
+            # line per boot gets pushed out of a 200-line window by its own
+            # health output. Measured 2026-09-09: the refusal fired while the
+            # very same log showed `locked at 966127` and `restored tape: 1
+            # cursors, 47 headers, 73 events`.
+            #
+            # The freshness question is already answered by the `find -mmin
+            # -120` check above, which asks whether the FILE was written
+            # recently. This check only needs to answer "has this worker ever
+            # locked a chain", and for that the whole log is the right window.
+            # A guessed line count is not a boundary -- the same mistake as a
+            # fixed-offset slice over source text.
+            if ! grep -q 'owning tip for' "$log"; then
               echo "[cutover] refusing to arm: no recent 'owning tip' line -- the hose is not locking a chain." >&2
               tail -n 20 "$log" >&2
               exit 1
