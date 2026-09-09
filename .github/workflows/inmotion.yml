@@ -1789,7 +1789,22 @@ jobs:
 
           # Rewrite ONLY the mesh line, leaving every other entry byte-identical.
           cron_new="$(mktemp)"
-          trap 'rm -f "$cron_new"' EXIT
+          cron_old="$(mktemp)"
+          trap 'rm -f "$cron_new" "$cron_old"' EXIT
+          # MATERIALISE THE "BEFORE" AS A REAL FILE.
+          #
+          # This block used `diff <(printf ...) "$cron_new"`. Process substitution
+          # needs /dev/fd, and under `ssh ... bash -s` on this host /dev/fd/63
+          # does not resolve: diff exits "No such file or directory", grep counts
+          # 0 matching lines, and `|| true` swallows the error. The guard then
+          # reported "expected exactly 1 changed line, got 0" and refused --
+          # naming the sed, which had rewritten the line correctly every time.
+          #
+          # Three arm attempts were misdiagnosed as bad sed anchors because of
+          # this. A check that cannot RUN must never report as a check that ran
+          # and found nothing. Every other cron job here already uses two real
+          # files; this was the lone outlier.
+          printf '%s\n' "$current" > "$cron_old"
           if [ "$direction" = "arm" ]; then
             # ANCHOR ON /usr/bin/env IN THE MESH LINE, not on a specific env
             # var. The first attempt anchored on `/usr/bin/env
@@ -1803,24 +1818,29 @@ jobs:
             # after the lock path is the stable part of the line, and scoping
             # the substitution to lines containing mesh-tick-standalone.mjs
             # means no other entry can be touched even if it also uses env.
-            printf '%s\n' "$current" \
-              | sed "\#mesh-tick-standalone\.mjs#s#/usr/bin/env #/usr/bin/env $FLAG #" \
-              > "$cron_new"
+            sed "\#mesh-tick-standalone\.mjs#s#/usr/bin/env #/usr/bin/env $FLAG #" \
+              "$cron_old" > "$cron_new"
           else
-            printf '%s\n' "$current" | sed "s#$FLAG ##" > "$cron_new"
+            sed "s#$FLAG ##" "$cron_old" > "$cron_new"
           fi
 
           # The rewrite must change exactly one line and drop none.
-          before_n="$(printf '%s\n' "$current" | wc -l)"
+          before_n="$(wc -l < "$cron_old")"
           after_n="$(wc -l < "$cron_new")"
           if [ "$before_n" -ne "$after_n" ]; then
             echo "[cutover] refusing: crontab line count changed $before_n -> $after_n" >&2
             exit 1
           fi
-          changed="$(diff <(printf '%s\n' "$current") "$cron_new" | grep -c '^<' || true)"
+          # diff exits 1 whenever files differ, so its exit status alone cannot
+          # separate "they differ" from "diff could not run". Prove it can run.
+          if ! diff "$cron_old" "$cron_old" >/dev/null; then
+            echo "[cutover] refusing: diff is not usable in this shell" >&2
+            exit 1
+          fi
+          changed="$(diff "$cron_old" "$cron_new" | grep -c '^<' || true)"
           if [ "$changed" -ne 1 ]; then
             echo "[cutover] refusing: expected exactly 1 changed line, got $changed" >&2
-            diff <(printf '%s\n' "$current") "$cron_new" >&2 || true
+            diff "$cron_old" "$cron_new" >&2 || true
             exit 1
           fi
 
