@@ -12,7 +12,7 @@ try{
  const page=await context.newPage();
  page.on('pageerror',e=>errors.push(e.message));
  page.on('response',r=>{if(r.status()>=400)failures.push({url:r.url(),status:r.status()});});
- await page.goto('http://localhost:3021/play/?open=quests/purezc/139&name=Charmville&storage=idb');
+ await page.goto('http://localhost:3021/play/?open=quests/purezc/139&name=Charmville&storage=idb&reference=1');
  await page.waitForFunction(()=>{const c=document.querySelector('canvas');return c?.width>300&&document.getElementById('status')?.hidden;},{},{timeout:30000});
  assert.equal(await page.evaluate(()=>crossOriginIsolated),true);
  await page.waitForTimeout(2500); // The engine animates name-entry after signaling Ready.

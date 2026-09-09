@@ -2,6 +2,7 @@ import http from 'node:http';
 import {createReadStream} from 'node:fs';
 import {stat,readFile} from 'node:fs/promises';
 import path from 'node:path';
+import {adventureUrl} from './adventure-entry.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
 const types={'.html':'text/html','.js':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
@@ -9,6 +10,11 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
+  // Existing shared links now skip the original title/story sequence too.
+  // Append reference=1 to explicitly replay the unchanged source introduction.
+  if(url.pathname==='/charmville/' || (url.pathname==='/play/' && url.searchParams.get('open')==='quests/purezc/139' && !url.searchParams.has('reference'))){
+   res.writeHead(302,{...headers,Location:adventureUrl()});res.end();return;
+  }
   if(url.pathname==='/reference-data/manifest.json'){
    const manifest={};
    for(const id of ['139','204','461']){const quest=JSON.parse(await readFile(path.join(contentRoot,`${id}-metadata.json`),'utf8'));manifest[quest.id]={...quest,images:[]};}
@@ -30,7 +36,20 @@ http.createServer(async(req,res)=>{
    res.writeHead(200,{...headers,'Content-Type':'text/javascript'});res.end(adapted);return;
   }
   if(path.extname(file)==='.html'){
-   const html=(await readFile(file,'utf8')).replace(/<link[^>]+href="https:\/\/data\.zquestclassic\.com[^>]*>/g,'');
+   let html=(await readFile(file,'utf8')).replace(/<link[^>]+href="https:\/\/data\.zquestclassic\.com[^>]*>/g,'');
+   if(url.pathname==='/play/' && url.searchParams.has('test')){
+    // SDL's suspended-audio fallback fails before a user gesture in this build.
+    // Start the unchanged engine after a real click, in the required loader order.
+    for(const script of ['main.js','zplayer.data.js','zplayer.js']) html=html.replace(`<script src="../${script}"></script>`,'');
+    html=html.replace('</body>',`<script>
+     const start=document.createElement('button');start.textContent='Enter the world';start.className='panel-button';
+     document.querySelector('.panel-buttons').prepend(start);
+     start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading world…';
+      try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});start.remove();}
+      catch{start.textContent='Loading failed — reload to retry';}
+     },{once:true});
+    </script></body>`);
+   }
    res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end(html);return;
   }
   res.writeHead(200,{...headers,'Content-Type':types[path.extname(file)]||'application/octet-stream'});

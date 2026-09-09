@@ -1,0 +1,16 @@
+{
+  "result": "pass",
+  "checks": [
+    "Direct authored map entry",
+    "Delayed gesture audio startup",
+    "Sword and movement inputs exercised; screenshots retained",
+    "Source inventory opened; screenshot retained",
+    "Warm reload",
+    "Cross-origin isolation",
+    "No page errors, failed HTTP responses or external requests"
+  ],
+  "limitations": [
+    "Test mode resets progress",
+    "Farming, creatures, multiplayer and PlankSpace inventory not connected"
+  ]
+}

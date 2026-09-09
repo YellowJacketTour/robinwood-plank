@@ -1,10 +1,12 @@
-# Current state — read before resuming
+Latest gameplay update: see [DIRECT-ADVENTURE.md](DIRECT-ADVENTURE.md). The active playtest now skips the source introduction and starts with equipment in Autumn Town. This is native test mode, not persistent MMO integration.
+
+# Current state â€” read before resuming
 
 Updated 2026-09-09 during account-transition preservation. Check subsequent Git commits and this file's latest version before acting.
 
 ## Product status
 
-The full vision is NOT implemented. The completed work is an existing PlankSpace/market application, experimental garden/social components, a rejected visual frontier, a large acquired research/source collection, source indexing, and an original adventure runtime brought up locally. There is no verified combined Zelda/FarmVille/Pokémon/OSRS multiplayer slice yet.
+The full vision is NOT implemented. The completed work is an existing PlankSpace/market application, experimental garden/social components, a rejected visual frontier, a large acquired research/source collection, source indexing, and an original adventure runtime brought up locally. There is no verified combined Zelda/FarmVille/PokÃ©mon/OSRS multiplayer slice yet.
 
 ### Working or evidenced
 
@@ -18,7 +20,7 @@ The full vision is NOT implemented. The completed work is an existing PlankSpace
 - Embedded browser initialization failure reproduced: `/zquest_web.cfg` missing because engine startup raced the data loader. Fixed by ordering data scripts before the engine script. Verified actual in-app browser reaches name entry with `storage=idb`.
 - Hosted upstream editor acquired at http://localhost:3021/create/. Basic boot only, not verified full editing/export. Existing authored quest protection may apply.
 - Hero of Dreams, Lost Isle and Isle of Rebirth snapshots are under `zquest-quest-snapshots`. After backup completion, the server was adapted to serve these three quests and the local index with external connections blocked. Fresh/repeat browser-storage startup and original quest opening passed with zero external requests/page errors/HTTP failures. WASM and original quest files were not modified.
-- New item reference browser: http://localhost:3017/charmville/catalog — 435 original definitions (377 Emerald table slots, including unused/default entries, plus 58 Solarus DX scripts), 510 preserved source artifacts including original PNGs, palettes and Lua scripts. The catalog connects identity, usage entry points, revisions, hashes and sprite anchors. It does not grant or implement gameplay items. Search/inspection of Master Ball capture behavior and Solarus bow behavior was browser-verified; typecheck/build/scoped lint passed.
+- New item reference browser: http://localhost:3017/charmville/catalog â€” 435 original definitions (377 Emerald table slots, including unused/default entries, plus 58 Solarus DX scripts), 510 preserved source artifacts including original PNGs, palettes and Lua scripts. The catalog connects identity, usage entry points, revisions, hashes and sprite anchors. It does not grant or implement gameplay items. Search/inspection of Master Ball capture behavior and Solarus bow behavior was browser-verified; typecheck/build/scoped lint passed.
 
 ### Critical missing or unverified
 
@@ -37,16 +39,16 @@ Read ENGINE-INTEGRATION.md. The original native editor round-tripped 2,065 Hero 
 
 ## Code entry points
 
-- `app/charmville/frontier/{page.tsx,frontier.tsx,world.tsx,frontier.module.css}` — rejected experimental district + atlas/library + local source launch links.
-- `app/charmville/play/`, `integrations/plankspace-app/app/charmville/` — prior garden and its integration.
-- `lib/charmville/` and `app/api/charmville/` — existing domain, reputation, navigation, content and local playtest code. Read before replacing anything.
-- `integrations/plankspace-app/app/api/posts/route.ts`, profile/search integrations — social/reputation work.
-- `components/woodamp/WoodAmpProvider.tsx`, `lib/woodamp-continuity.ts` — music continuity work preserved from preceding development.
-- `scripts/charmville/` — render/source/index/audit/verification/recovery scripts.
-- `public/images/charmville/` — originals, editable Blender models, frames, packed caches, sourced art and credits.
-- `public/charmville/library/` — derived source and memoji indexes. Full large source directories are siblings outside app.
-- `app/charmville/catalog/`, `public/charmville/reference-items/`, `scripts/charmville/index-reference-items.mjs` — new source-aware item inspection pipeline.
-- `scripts/charmville/verify-reference-runtime.mjs` — cold/warm storage and original-quest opening with all external network blocked.
+- `app/charmville/frontier/{page.tsx,frontier.tsx,world.tsx,frontier.module.css}` â€” rejected experimental district + atlas/library + local source launch links.
+- `app/charmville/play/`, `integrations/plankspace-app/app/charmville/` â€” prior garden and its integration.
+- `lib/charmville/` and `app/api/charmville/` â€” existing domain, reputation, navigation, content and local playtest code. Read before replacing anything.
+- `integrations/plankspace-app/app/api/posts/route.ts`, profile/search integrations â€” social/reputation work.
+- `components/woodamp/WoodAmpProvider.tsx`, `lib/woodamp-continuity.ts` â€” music continuity work preserved from preceding development.
+- `scripts/charmville/` â€” render/source/index/audit/verification/recovery scripts.
+- `public/images/charmville/` â€” originals, editable Blender models, frames, packed caches, sourced art and credits.
+- `public/charmville/library/` â€” derived source and memoji indexes. Full large source directories are siblings outside app.
+- `app/charmville/catalog/`, `public/charmville/reference-items/`, `scripts/charmville/index-reference-items.mjs` â€” new source-aware item inspection pipeline.
+- `scripts/charmville/verify-reference-runtime.mjs` â€” cold/warm storage and original-quest opening with all external network blocked.
 
 ## Preservation and validation
 
