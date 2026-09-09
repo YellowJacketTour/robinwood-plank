@@ -1284,10 +1284,35 @@ export default function GlobalMarketHub() {
       }
     };
     void loadCollections();
-    const id = setInterval(() => void loadCollections(), 20_000);
+    // PAUSE WHILE THE TAB IS HIDDEN, AND POLL FAR LESS OFTEN.
+    //
+    // This refetched the entire index every 20 seconds and called
+    // setCollections(rows), replacing the whole array identity -- which
+    // invalidates searchIndex, ranked, filtered and gradeCtx and remounts
+    // every rendered card, WHILE THE USER IS READING. Measured live: the
+    // payload is 698 KB, so a tab left open spent ~2 MB/minute to re-render
+    // the same rows.
+    //
+    // 90s instead of 20s, and nothing at all while the tab is hidden: a
+    // background tab that keeps refetching is pure waste, and on return the
+    // visibility handler refreshes immediately so the data is never stale to
+    // someone actually looking at it.
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void loadCollections();
+    }, 90_000);
+    const onVisible = () => {
+      if (typeof document !== "undefined" && !document.hidden) void loadCollections();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+    }
     return () => {
       cancelled = true;
       clearInterval(id);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
     };
   }, []);
 

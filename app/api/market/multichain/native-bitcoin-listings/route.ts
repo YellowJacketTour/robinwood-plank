@@ -61,7 +61,11 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const seller = searchParams.get("seller");
     const limitParam = searchParams.get("limit");
-    const limit = limitParam ? Number(limitParam) : undefined;
+    // Bounded. This was `Number(limitParam)` with no isFinite guard and no
+  // ceiling, so NaN, Infinity and 1e9 all reached the store -- and the store
+  // query it feeds has no LIMIT of its own.
+  const parsed = limitParam ? Number(limitParam) : NaN;
+  const limit = Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 200) : undefined;
 
     const listings = seller
       ? await getNativeBitcoinListingsBySeller(seller)
