@@ -15,3 +15,7 @@ The browser cache previously used one global invalidation epoch for every URL: a
 Request ownership now lives independently of cached entries. Each URL has its own generation; an invalidation queues one shared follow-up after the active request. Old callers receive the refreshed generation instead of publishing the stale response. Unrelated invalidations do not discard valid cache writes. Late IndexedDB reads/writes are fenced, and failed background refreshes retain last-good data without unhandled rejection. Tests exercise twenty concurrent cold callers, unrelated commits, and an invalidation arriving during a blocked request.
 
 Collection commit bursts coalesce over two seconds, keeping ordinary single-page token refreshes below the token endpoint's forty-per-minute limit. This controls delivery work; it is not a claim that ingestion or provider discovery completes in two seconds.
+
+## One durable demand identity
+
+The token endpoint used demand:membership keys while visibility, page-open, rarity, and stream demand used demand:<source> keys for the same underlying work. The central enqueue function now canonicalizes all collection mesh demand by source, chain, and subject. Different request producers reinforce one durable job and its maximum priority. Non-EVM case and distinct sources remain separate; standing lanes retain their original identity. Existing legacy rows are not deleted or interrupted and can drain normally. A real PostgreSQL regression checks simultaneous producers receive one job ID.
