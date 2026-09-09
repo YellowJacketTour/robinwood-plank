@@ -32,6 +32,15 @@ import type { ChainId } from "../packages/akasha/src/shared/types";
 import type { Hex } from "../packages/akasha/src/shared/hex";
 
 const TICK_MS = Number(process.env.AKASHA_TICK_MS ?? 15_000);
+/**
+ * Shards claimed per tick per chain. 0 disables the parallel walk entirely.
+ *
+ * Default off: sharding is a second reader against the same public RPC pool
+ * the tip-follow uses, and a host that cannot afford the fan-out should not
+ * discover that by being rate-limited off its own tip. Turn it up once the
+ * budget is known.
+ */
+const SHARD_CLAIMS = Math.max(0, Number(process.env.AKASHA_SHARD_CLAIMS ?? 0));
 const HEALTH_MS = Number(process.env.AKASHA_HEALTH_MS ?? 60_000);
 
 /**
@@ -149,6 +158,20 @@ async function main(): Promise<void> {
       if (chains.includes("bitcoin")) await hose.bitcoinTick();
       await hose.repairTick();
       await hose.backfillTick();
+      // The shattered archive, alongside the serial walk rather than instead
+      // of it. The serial tail keeps moving; sharding fills the rest of the
+      // past in parallel, and the two converge on the same run-list because a
+      // coverage run is keyed (chain, from_height). Off by default: it is a
+      // second reader against the same RPC pool, so the operator turns it on
+      // when the host can afford the fan-out.
+      if (SHARD_CLAIMS > 0) {
+        for (const chain of chains) {
+          const res = await hose.shardTick(chain, SHARD_CLAIMS);
+          if (res && (res.walked > 0 || res.failed > 0)) {
+            console.log(`[akasha-hose] shard ${chain}`, JSON.stringify(res));
+          }
+        }
+      }
       await hose.flush();
     } catch (e) {
       // A failing tick must never kill the process: the next tick retries and

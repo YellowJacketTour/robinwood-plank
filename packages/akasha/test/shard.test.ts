@@ -13,6 +13,8 @@
  * serial walker applies at its tail.
  */
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { eq, ok, throws } from "./_expect.ts";
 import { planShards, outstandingShards, seamLinks, SHARD_SPAN } from "../src/hose/shard.ts";
 import { collapseRuns, holesIn } from "../src/hose/coverage.ts";
@@ -157,4 +159,38 @@ test("planning is bounded in steps, not just in wall clock", () => {
   const span = SHARD_SPAN.bitcoin!;
   const shards = planShards("bitcoin", TIP);
   eq(shards.length, Math.ceil((TIP - T0 + 1) / span));
+});
+
+/**
+ * The wiring. A design that is not reachable from the production entrypoint is
+ * a document, not a system -- and this package has already shipped a complete,
+ * tested backfill whose Bitcoin path was a hard no-op because one branch was
+ * missing. Structural tests, so a future refactor cannot quietly unhook it.
+ */
+test("shardTick exists on the Hose and walks through the owning adapter", () => {
+  const src = readFileSync(
+    fileURLToPath(new URL("../src/hose/main.ts", import.meta.url)),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+  ok(/async shardTick\(/.test(src), "the Hose must expose a shard pass");
+  ok(/planShards\(/.test(src) && /claimShards\(/.test(src), "it must plan and claim");
+  // Retire only on success; release on failure. Retiring a failed shard claims
+  // work that was attempted rather than finished.
+  ok(/retireShard\(/.test(src) && /releaseShard\(/.test(src), "both outcomes must be handled");
+  const at = src.indexOf("async shardTick(");
+  const body = src.slice(at, src.indexOf("\n  /**", at + 1));
+  ok(/catch/.test(body), "a throwing shard must not strand its claim");
+});
+
+test("the production worker actually calls it", () => {
+  const src = readFileSync(
+    fileURLToPath(new URL("../../../scripts/akasha-hose.ts", import.meta.url)),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+  ok(/hose\.shardTick\(/.test(src), "the entrypoint must drive the shard pass");
+  ok(/AKASHA_SHARD_CLAIMS/.test(src), "and it must be operator-controlled");
+  // Default OFF: sharding is a second reader against the same RPC pool, and a
+  // host that cannot afford the fan-out must not discover it by being rate
+  // limited off its own tip.
+  ok(/AKASHA_SHARD_CLAIMS \?\? 0/.test(src), "it must default to off");
 });
