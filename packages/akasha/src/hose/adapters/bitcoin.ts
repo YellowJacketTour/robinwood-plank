@@ -150,9 +150,9 @@ export class BitcoinAdapter {
   }
 
   /** Parse every envelope in a block and write events plus artifacts. */
-  async ingestBlock(hash: string): Promise<{ events: ChainEvent[]; inscriptions: Inscription[] }> {
+  async ingestBlock(hash: string): Promise<{ events: ChainEvent[]; inscriptions: Inscription[]; completed: boolean }> {
     const block = await this.rpc.getBlock(hash);
-    if (!block) return { events: [], inscriptions: [] };
+    if (!block) return { events: [], inscriptions: [], completed: false };
 
     const header: Header = {
       chain: "bitcoin",
@@ -250,7 +250,7 @@ export class BitcoinAdapter {
       extendCoverage(this.store, "bitcoin", block.height, header.hash);
     }
 
-    return { events, inscriptions: all };
+    return { events, inscriptions: all, completed: block.complete !== false };
   }
 
   /**

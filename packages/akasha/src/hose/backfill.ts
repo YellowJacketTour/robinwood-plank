@@ -29,31 +29,18 @@ import { protocolT0 } from "../shared/protocol-t0.ts";
  * Blocks per epoch, by family. Bitcoin is smaller than EVM because one block
  * means parsing every witness in it; EVM is a topic-only getLogs over a range.
  *
- * BITCOIN WAS 8, AND 8 IS AN ARITHMETIC DEAD END.
- * ----------------------------------------------
- * 198,651 blocks separate the lock height from protocol_t0. At 8 blocks per
- * epoch that is 24,832 epochs, and this file's own caller notes the result:
- * "at 8 blocks per epoch the default rate needed 43 days".
- *
- * Measured live 2026-09-09 against real Esplora hosts:
- *   blockstream.info  8/8 serial  148 ms/block
- *   mempool.space     8/8 serial   47 ms/block
- *   mempool.space    32 concurrent  3.6 ms/block effective (32/32 ok)
- *
- * So the whole remaining past is ~2.6 hours serial on the faster host, and
- * ~12 minutes at 32-way. The 43-day figure was never a vendor limit; it was
- * this constant plus a serial walk.
- *
- * 64 keeps each epoch a bounded unit of work (the hash-link is still verified
- * once per epoch, and a crash mid-epoch re-walks at most 64 blocks) while
- * cutting the epoch count 8x. The fetch inside an epoch is parallel; the
- * INGEST stays ordered, because the witness parse is the CPU cost the original
- * 8 was protecting and because coverage must extend contiguously.
+ * The old throughput estimate measured header lookups, not complete blocks.
+ * A verified read of block 966080 fetched 4,008 transactions in 10.6 seconds
+ * including cold provider failover. Four full blocks form a bounded commit
+ * unit; backfillTick repeats epochs within its wall-clock budget. The raw
+ * reader eliminates the former 500-transaction cap and pagination overhead.
  */
 export const EPOCH_WINDOW: Record<string, number> = {
   evm: 2_000,
   solana: 512,
-  bitcoin: 64,
+  // Complete raw blocks can contain thousands of transactions each. Keep a
+  // commit unit below the worker's phase deadline; the budget loop repeats it.
+  bitcoin: 4,
 };
 
 export function familyOf(chain: ChainId): "evm" | "solana" | "bitcoin" {
@@ -180,11 +167,18 @@ export class BackfillWorker {
     const tailHeader = store
       .headersAtHeight(chain, tail)
       .find((h) => h.height === tail);
-    const linked =
-      !tailHeader ||
-      store.headersAtHeight(chain, to).some(
+    let linked =
+      !!tailHeader && store.headersAtHeight(chain, to).some(
         (h) => h.hash.toLowerCase() === tailHeader.parentHash.toLowerCase(),
       );
+    // Every seam in the newly ingested interval must link, including holes
+    // inside an epoch. Endpoint agreement alone cannot certify the interval.
+    let expectedHash = tailHeader?.parentHash;
+    for (let height = to; linked && height >= lowest.height; height--) {
+      const header = store.headersAtHeight(chain, height).find((h) => h.hash === expectedHash);
+      linked = !!header;
+      expectedHash = header?.parentHash;
+    }
 
     if (!linked) {
       // Refuse to move. An unlinked boundary is a claim we cannot support.

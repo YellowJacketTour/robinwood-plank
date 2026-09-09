@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { COLLECTION_MATCH_SQL } from "../../lib/market/multichain/collection-key-sql";
 
 /**
  * The order-book token lookup must be a point lookup, not a collection scan.
@@ -51,7 +52,9 @@ test("the lookup query still has the shape that index serves", () => {
   assert.ok(at > 0, "found the lookup");
   const fn = STORE.slice(at, at + 900);
 
-  assert.ok(/lower\(collection_slug\) = lower\(\$2\)/.test(fn), "predicate is case-insensitive");
+  assert.ok(fn.includes("${COLLECTION_MATCH_SQL}"), "lookup uses the shared chain-aware predicate");
+  assert.ok(/lower\(collection_slug\) = lower\(\$2\)/.test(COLLECTION_MATCH_SQL), "EVM branch retains its expression-index predicate");
+  assert.ok(/AND collection_slug = \$2/.test(COLLECTION_MATCH_SQL), "non-EVM branch uses exact identity and the primary key");
   assert.ok(/token_id = ANY\(\$3::text\[\]\)/.test(fn), "token ids are matched as a set");
   // If someone adds ORDER BY / OFFSET here, this stops being a point lookup
   // and quietly inherits the browse path's cost.

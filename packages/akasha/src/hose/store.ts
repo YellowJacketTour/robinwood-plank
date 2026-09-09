@@ -53,9 +53,9 @@ export class ArchiveStore {
     // while the value the reader sees never changed. Found 2026-09-09 while
     // repairing a self-parented Bitcoin lock block: the repair ran, `headers`
     // updated, and the link check kept failing on the stale copy.
-    const at = arr.findIndex((x) => x.hash === h.hash);
-    if (at >= 0) arr[at] = h;
-    else arr.push(h);
+    const index = arr.findIndex((x) => x.hash === h.hash);
+    if (index === -1) arr.push(h);
+    else arr[index] = h;
     this.headersByHeight.set(hk, arr);
   }
 

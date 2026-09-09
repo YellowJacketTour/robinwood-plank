@@ -112,6 +112,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async rewrites() {
     return [
+      { source: "/api/market/multichain/socket", destination: `http://127.0.0.1:${process.env.MARKET_REALTIME_PORT || "3917"}/api/market/multichain/socket` },
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
     ];

@@ -64,7 +64,7 @@ test("the parent repair survives the skip, best-effort, and is not self-parent-o
   ok(/repairParentHash/.test(body), "a repair must still run on the skip path");
   ok(/\.catch\(\(\) => null\)/.test(body), "and its network read must not throw");
   ok(
-    /lock\.parentHash\.toLowerCase\(\) !== realParent\.toLowerCase\(\)/.test(body),
+    /lock\.parentHash\.toLowerCase\(\) !== asHex\(realParent\)/.test(body),
     "the trigger must be 'the stored parent disagrees with the chain', not 'it equals its own hash'",
   );
 });

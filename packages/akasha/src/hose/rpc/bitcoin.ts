@@ -18,6 +18,8 @@
  * number is evidence about the sources, so it is reported rather than hidden.
  */
 import type { BitcoinBlock, BitcoinRpc } from "../adapters/bitcoin.ts";
+import { fromHex } from "../adapters/bitcoin.ts";
+import { decodeBitcoinBlock, readBitcoinBlockBody } from "./bitcoin-raw.ts";
 
 export interface EsploraOpts {
   /** Ordered by preference. Each must speak the Esplora REST shape. */
@@ -144,7 +146,7 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
    * door exists.
    */
   private rr = 0;
-  private async get(path: string, asJson: boolean): Promise<unknown> {
+  private async get(path: string, asJson: boolean | "block"): Promise<unknown> {
     let last: Error | undefined;
     const start = this.hosts.length > 1 ? this.rr++ % this.hosts.length : 0;
     const rotated =
@@ -172,7 +174,7 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
         // A success clears the streak: a host that recovers must rejoin
         // immediately, not serve out a sentence it no longer deserves.
         this.benched.delete(host);
-        return asJson ? await res.json() : (await res.text()).trim();
+        return asJson === "block" ? await readBitcoinBlockBody(res) : asJson ? await res.json() : (await res.text()).trim();
       } catch (e) {
         this.hostFailures.set(host, (this.hostFailures.get(host) ?? 0) + 1);
         const prior = this.benched.get(host)?.streak ?? 0;
@@ -211,7 +213,7 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
     hash: string,
   ): Promise<{ hash: string; previousblockhash: string | null; height: number } | null> {
     try {
-      const b = (await this.get(`/block/${hash}`, true)) as {
+      const b = (await this.get(`/block/${fromHex(hash)}`, true)) as {
         id?: string;
         previousblockhash?: string;
         height?: number;
@@ -230,102 +232,16 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   /**
    * A full block with witness data.
    *
-   * Esplora pages transactions 25 at a time, so a busy block is dozens of
-   * round trips. The cap is deliberate: an unbounded fetch of a 4,000-tx block
-   * would let one block stall the tip walk, and a bounded read that reports how
-   * far it got is better than an unbounded one that hangs. A partial block is
-   * still honest -- coverage only advances for what was actually persisted.
+   * One raw-block request replaces transaction pagination and its former
+   * 500-transaction truncation. Verify transaction and witness commitments;
+   * an incomplete response must throw before the adapter records coverage.
    */
-  /**
-   * Every transaction in a block, and an honest flag when that was not
-   * achieved.
-   *
-   * TWO DEFECTS, MEASURED 2026-09-09 ON BLOCK 965700 (6,754 transactions):
-   *
-   * 1. SILENT TRUNCATION. `maxTxs = 500` stopped after 20 pages of 25, so
-   *    6,254 of 6,754 transactions -- 92.6% of the block -- were never read.
-   *    Every inscription in them was missed, and the block was STILL recorded
-   *    as covered by extendCoverage. That is the archive claiming history it
-   *    never read, which is the one thing the coverage run-list exists to
-   *    prevent. The caller now receives `complete`, and refuses to record
-   *    coverage when it is false.
-   *
-   * 2. SERIAL PAGING. Each page waited for the previous one: 20 sequential
-   *    round-trips at ~316 ms measured = ~6.3 s per block, ~7 minutes per
-   *    64-block epoch. The pages are independent reads of an immutable block,
-   *    so they are fetched in bounded parallel groups. Order is restored by
-   *    index afterwards, because inscription position within a block is
-   *    meaningful.
-   */
-  async getBlock(
-    hash: string,
-    maxTxs = 20_000,
-  ): Promise<(BitcoinBlock & { complete: boolean }) | null> {
+  async getBlock(hash: string): Promise<BitcoinBlock | null> {
     const header = await this.getBlockHeader(hash);
     if (!header) return null;
 
-    const PAGE = 25;
-    const GROUP = 8; // bounded: this is a shared public endpoint
-    const pages = new Map<number, Array<{ txid: string; vin?: Array<{ witness?: string[] }> }>>();
-    let complete = true;
-    let done = false;
-
-    for (let base = 0; base < maxTxs && !done; base += PAGE * GROUP) {
-      const starts: number[] = [];
-      for (let k = 0; k < GROUP && base + k * PAGE < maxTxs; k++) starts.push(base + k * PAGE);
-      const results = await Promise.all(
-        starts.map(async (start) => {
-          try {
-            const page = (await this.get(`/block/${hash}/txs/${start}`, true)) as Array<{
-              txid: string;
-              vin?: Array<{ witness?: string[] }>;
-            }>;
-            return [start, Array.isArray(page) ? page : null] as const;
-          } catch {
-            // A failed page is NOT an end of block -- it is a hole. Saying so
-            // is the whole point; a swallowed error here is how 92% of a block
-            // went missing while the block was marked covered.
-            return [start, "error"] as const;
-          }
-        }),
-      );
-      for (const [start, page] of results) {
-        if (page === "error") {
-          complete = false;
-          done = true;
-          continue;
-        }
-        if (page === null) {
-          complete = false;
-          done = true;
-          continue;
-        }
-        pages.set(start, page);
-        // A short page is the real end of the block: nothing follows it.
-        if (page.length < PAGE) done = true;
-      }
-    }
-
-    const tx: BitcoinBlock["tx"] = [];
-    for (const start of [...pages.keys()].sort((a, b) => a - b)) {
-      for (const t of pages.get(start)!) {
-        tx.push({
-          txid: t.txid,
-          // Esplora calls it `witness`; the adapter's shape says `txinwitness`.
-          vin: (t.vin ?? []).map((v) => ({ txinwitness: v.witness ?? [] })),
-        });
-      }
-    }
-    // Hitting the ceiling is itself incompleteness, not a clean stop.
-    if (tx.length >= maxTxs) complete = false;
-
-    return {
-      complete,
-      hash: header.hash,
-      previousblockhash: header.previousblockhash,
-      height: header.height,
-      tx,
-    };
+    const bytes = await this.get(`/block/${fromHex(hash)}/raw`, "block") as Uint8Array;
+    return decodeBitcoinBlock(bytes, hash, header.height);
   }
 
   /**
