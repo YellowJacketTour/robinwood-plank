@@ -41,7 +41,8 @@ const PER_PASS = 400;
 /** Rows per pass that may spend a paced CoinGecko call. */
 const CG_PER_PASS = 8;
 
-const attemptKey = (chain: string, key: string) => `plank:creator-attempt:${chain}:${key.toLowerCase()}`;
+// New namespace discards legacy negative entries made without a vendor call.
+const attemptKey = (chain: string, key: string) => `plank:creator-attempt:v2:${chain}:${chain === "solana-mainnet" || chain === "bitcoin-mainnet" ? key : key.toLowerCase()}`;
 
 let cgNextAt = 0;
 async function paceCoinGecko(): Promise<void> {
@@ -78,8 +79,9 @@ export function handleFromTwitterUrl(url: string | null | undefined): string | n
 
 async function getJson<T>(url: string, headers: Record<string, string> = { accept: "application/json" }): Promise<T | null> {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(12_000) }).catch(() => null);
-  if (!res || !res.ok) return null;
-  return (await res.json().catch(() => null)) as T | null;
+  if (res?.status === 404) return null;
+  if (!res || !res.ok) throw new Error("Identity source temporarily unavailable");
+  return (await res.json()) as T;
 }
 
 export async function readCoinGeckoTwitter(chainSlug: string, contractAddress: string, coingeckoId?: string | null): Promise<string | null> {
@@ -92,7 +94,11 @@ export async function readCoinGeckoTwitter(chainSlug: string, contractAddress: s
   if (!url) return null;
   await paceCoinGecko();
   const key = process.env.COINGECKO_API_KEY?.trim();
-  const body = await getJson<{ links?: { twitter?: string | null } }>(url, key ? { accept: "application/json", "x-cg-demo-api-key": key } : { accept: "application/json" });
+  const body = await getJson<{ description?: string; links?: { twitter?: string | null; homepage?: string | null; discord?: string | null } }>(url, key ? { accept: "application/json", "x-cg-demo-api-key": key } : { accept: "application/json" });
+  if (body) {
+    const { recordCollectionProfile } = await import("../collection-profile");
+    await recordCollectionProfile(chainSlug, contractAddress, { website: body.links?.homepage, twitter: body.links?.twitter, discord: body.links?.discord, description: body.description }, "CoinGecko");
+  }
   return handleFromTwitterUrl(body?.links?.twitter);
 }
 
@@ -115,6 +121,10 @@ export async function readContractOwner(chainSlug: string, contractAddress: stri
 
 export type CreatorIdentityResult = { chainSlug: string; considered: number; filledHandle: number; filledAddress: number; filledEns: number; skipped: number };
 
+export function identityAttemptComplete(handle: string | null, ens: string | null, vendorCompleted: boolean): boolean {
+  return handle != null || ens != null || vendorCompleted;
+}
+
 export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PASS, deadline = Date.now() + 80_000): Promise<CreatorIdentityResult> {
   const out: CreatorIdentityResult = { chainSlug, considered: 0, filledHandle: 0, filledAddress: 0, filledEns: 0, skipped: 0 };
   const rows = await postgresQuery<{ contract_address: string; alias_symbol: string | null; creator_handle: string | null; creator_address: string | null; creator_ens: string | null }>(
@@ -129,6 +139,12 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
       -- Ask for what is actually missing.
       WHERE c.chain_slug = $1 AND c.creator_handle IS NULL AND c.creator_ens IS NULL
         AND (s.floor_price_wei IS NOT NULL OR s.volume_24h_wei IS NOT NULL OR s.holder_count IS NOT NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM plank_kv_values attempt
+          WHERE attempt.key_name = 'plank:creator-attempt:v2:' || c.chain_slug || ':' ||
+            CASE WHEN c.chain_slug IN ('solana-mainnet','bitcoin-mainnet') THEN c.contract_address ELSE lower(c.contract_address) END
+            AND (attempt.expires_at IS NULL OR attempt.expires_at > NOW())
+        )
       ORDER BY s.volume_24h_wei DESC NULLS LAST, s.holder_count DESC NULLS LAST
       LIMIT $2`,
     [chainSlug, perPass * 4]
@@ -159,6 +175,7 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     let handle: string | null = r.creator_handle;
     let address: string | null = r.creator_address;
     let ens: string | null = r.creator_ens;
+    let vendorCompleted = false;
     // Free, unpaced sources first: owner() over the public RPC pool and an
     // ENS reverse lookup cost nothing against anyone's rate limit, so a row
     // that resolves this way never spends a CoinGecko slot.
@@ -167,7 +184,9 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
       const { resolveEnsName } = await import("@/lib/market/multichain/ens");
       ens = await resolveEnsName(address).catch(() => null);
     }
-    if (!handle && chainSlug === "solana-mainnet" && r.alias_symbol) handle = await readMagicEdenTwitter(r.alias_symbol);
+    if (!handle && chainSlug === "solana-mainnet" && r.alias_symbol) {
+      try { handle = await readMagicEdenTwitter(r.alias_symbol); vendorCompleted = true; } catch { /* retry on a later pass */ }
+    }
     // Only spend the paced vendor call when the free sources produced nothing.
     // Only spend the paced vendor call when the free sources produced
     // nothing AND the pass still has vendor budget. Without this cap a
@@ -176,7 +195,10 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     // the same shape as the ow-catalog lane that could not finish 4 pages.
     if (!handle && !ens && cgSpent < CG_PER_PASS) {
       cgSpent += 1;
-      handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
+      try {
+        handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
+        vendorCompleted = true;
+      } catch { /* a source failure is not evidence of absent identity */ }
     }
     const changed = (handle && handle !== r.creator_handle) || (address && address !== r.creator_address) || (ens && ens !== r.creator_ens);
     if (changed) {
@@ -189,7 +211,7 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     // remembered as a failed attempt for 7 days -- that would turn a
     // throughput cap into a week-long blackout for exactly the rows the
     // badge is missing on. Only a real, completed attempt is cached.
-    const askedEverything = handle != null || ens != null || cgSpent <= CG_PER_PASS;
+    const askedEverything = identityAttemptComplete(handle, ens, vendorCompleted);
     if (askedEverything) {
       await durableKv.set(attemptKey(chainSlug, r.contract_address), { at: new Date().toISOString(), handle, address, ens }, { ex: ATTEMPT_TTL_SEC });
     }
