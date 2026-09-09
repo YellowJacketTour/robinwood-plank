@@ -66,11 +66,17 @@ test("the new counters actually reach the client", () => {
   // Anchor on the RESPONSE's bookCoverage object, not the first textual
   // occurrence of the word: `bookCoverage` also appears in a type declaration
   // far above, so a greedy match spanned the wrong region entirely.
-  // THREE return paths build a bookCoverage: the Robinhood-native book, the
-  // Bitcoin book, and the OpenSea book. Only the OpenSea one runs the
-  // per-token dedup, so anchor on ITS counters -- indexOf found the native
-  // path first and failed while the code was correct.
-  const at = ROUTE.indexOf("bookCoverage: {", ROUTE.indexOf("ordersAfterDedup"));
+  // FOUR return paths now build a bookCoverage: Robinhood-native, Bitcoin,
+  // Solana and OpenSea. Only the OpenSea one runs the per-token dedup.
+  //
+  // Anchoring on "the first bookCoverage after `ordersAfterDedup`" broke the
+  // moment Solana gained a coverage object containing that same field: the
+  // search found Solana's and reported the OpenSea counters missing while the
+  // code was correct. Anchor on the field that is UNIQUE to this object
+  // instead, then walk BACK to its opening brace -- structure, not order.
+  const marker = ROUTE.indexOf("excludedNoTokenId,");
+  assert.ok(marker > 0, "the OpenSea coverage object must carry excludedNoTokenId");
+  const at = ROUTE.lastIndexOf("bookCoverage: {", marker);
   assert.ok(at > 0, "the OpenSea response must build a bookCoverage object");
   // Bound the object by BALANCING ITS BRACES, not by a character count. My
   // first attempt here used `at + 2000`, which is the same fixed-offset

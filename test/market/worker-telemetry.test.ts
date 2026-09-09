@@ -51,7 +51,11 @@ test("phase() records the attempt BEFORE running, and the outcome after", () => 
   assert.ok(at > 0, "phase() must exist");
   const body = RUNNER.slice(at, RUNNER.indexOf("const tick = async ()", at));
   const attempt = body.indexOf('"attempt"');
-  const run = body.indexOf("await run()");
+  // Match the CALL, not one particular way of awaiting it. This searched for
+  // the literal "await run()", which disappeared the moment the work was
+  // wrapped in a Promise.race for the phase deadline -- the assertion failed
+  // while the ordering it protects was still correct.
+  const run = body.indexOf("run(),") >= 0 ? body.indexOf("run(),") : body.indexOf("run()");
   const success = body.indexOf('"success"');
   const failure = body.indexOf('"failure"');
   assert.ok(attempt > 0 && run > 0 && success > 0 && failure > 0, "all three outcomes must be recorded");
