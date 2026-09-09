@@ -4,6 +4,7 @@ import { Block, Transaction } from "bitcoinjs-lib";
 import { EsploraBitcoinRpc } from "../src/hose/rpc/bitcoin.ts";
 import { BitcoinAdapter, type BitcoinBlock } from "../src/hose/adapters/bitcoin.ts";
 import { ArchiveStore } from "../src/hose/store.ts";
+import { readFileSync } from "node:fs";
 
 // Preserve the upstream regression: block 965700 had 6,754 transactions,
 // while the old pager read just 500. Raw verified bytes now replace paging.
@@ -57,4 +58,38 @@ for (const complete of [false, true, undefined]) test(`adapter coverage respects
   eq(result.completed, complete !== false);
   eq(store.coverageFor("bitcoin").length, complete === false ? 0 : 1);
   if (complete === false) ok(store.gaps.some(gap => gap.reason === "incomplete_tx_walk"));
+});
+
+/**
+ * The epoch walk must claim only what it can PROVE, contiguously.
+ *
+ * `heights` runs downward (to -> from). The loop used to `continue` past a
+ * failed block, so a deeper block still became `lowest` -- and the caller
+ * moves backfill_tail there, claiming a contiguous run across a hole it never
+ * read. The archive's completeness predicate is a run-list; a tail advanced
+ * over an unread block makes it wrong.
+ */
+const MAIN_SRC = readFileSync(new URL("../src/hose/main.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+
+test("the epoch walk STOPS at the first hole instead of skipping it", () => {
+  const at = MAIN_SRC.indexOf("THE LOWEST CONTIGUOUS HEADER, NOT MERELY THE LOWEST ONE");
+  ok(at > 0, "the contiguity rule must be documented where it is enforced");
+  const body = MAIN_SRC.slice(at, MAIN_SRC.indexOf("return lowest;", at));
+
+  ok(/if \(!hash\) break;/.test(body), "a missing hash must END the walk, not be skipped");
+  ok(!/if \(!hash\) continue;/.test(body), "continuing past a hole is what claimed unread blocks");
+  ok(/if \(!header\) break;/.test(body), "a block that did not persist must also end the walk");
+});
+
+test("the header is matched BY HASH, not by array position", () => {
+  // `stored[stored.length - 1]` took the LAST header at that height, which at
+  // a height with competing blocks can be a different block entirely -- and
+  // the hash-link is then verified against the wrong record.
+  const at = MAIN_SRC.indexOf("THE LOWEST CONTIGUOUS HEADER, NOT MERELY THE LOWEST ONE");
+  const body = MAIN_SRC.slice(at, MAIN_SRC.indexOf("return lowest;", at));
+  ok(
+    /stored\.find\(\(x\) => x\.hash\.toLowerCase\(\) === hash\.toLowerCase\(\)\)/.test(body),
+    "the persisted header must be located by hash",
+  );
+  ok(!/stored\[stored\.length - 1\]/.test(body), "array position is not identity");
 });

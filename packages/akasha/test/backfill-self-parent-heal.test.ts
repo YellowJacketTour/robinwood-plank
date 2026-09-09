@@ -146,3 +146,40 @@ test("putHeader REPLACES an existing hash, it does not silently skip", async () 
     "the two maps must never disagree",
   );
 });
+
+/**
+ * A step that succeeds but moves nothing must SAY SO.
+ *
+ * Measured live 2026-09-09 with backfill ok 285 / fail 183: the tail sat at
+ * 965121 for nine minutes while `runs` kept climbing, and the only explanation
+ * available was the caller's fallback string, "no progress, no reason given".
+ * setBackfillTail only moves LEFT, so `moved` is false whenever the lowest
+ * header actually persisted is not below the tail -- which happens when the
+ * BOTTOM of the epoch failed to ingest.
+ */
+test("a linked epoch that cannot move the tail explains itself", async () => {
+  const store = storeWith(hashAt(TAIL - 1), [TAIL - 1]); // already correctly linked
+  const worker = new BackfillWorker({
+    store: store as unknown as BackfillStore,
+    // Return a header AT the tail: nothing below it was persisted.
+    ingestRange: (async () => store.headersAtHeight("bitcoin", TAIL)[0]) as never,
+  });
+  const res = (await worker.step(["bitcoin"] as never))!;
+  eq(res.tailMoved, false, "the tail cannot move to a height at or above itself");
+  ok(res.reason, "and the step must never return without a reason");
+  ok(
+    /did not move/.test(res.reason!) && /lowest header persisted/.test(res.reason!),
+    `the reason must name the cause, got: ${res.reason}`,
+  );
+});
+
+test("a moving epoch reports the movement", async () => {
+  const store = storeWith(hashAt(TAIL - 1), [TAIL - 1]);
+  const worker = new BackfillWorker({
+    store: store as unknown as BackfillStore,
+    ingestRange: (async () => store.headersAtHeight("bitcoin", TAIL - 1)[0]) as never,
+  });
+  const res = (await worker.step(["bitcoin"] as never))!;
+  eq(res.tailMoved, true);
+  ok(/tail moved/.test(res.reason ?? ""), `expected a movement reason, got: ${res.reason}`);
+});
