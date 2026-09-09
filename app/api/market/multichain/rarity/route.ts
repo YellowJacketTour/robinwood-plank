@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
 
   try {
     let map = await getForeignRarity(chainSlug, collectionSlug);
-    if (map.size > 20) {
+    if (map.size > 20 && searchParams.get("projection") !== "1") {
       const tiers = new Set([...map.values()].map((v) => v.tier));
       if (tiers.size === 1) {
         const job = `recompute:${chainSlug}:${collectionSlug.toLowerCase()}`;
@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
     const needsIndex =
       map.size === 0 || (staleFirstPass && map.size < 6_000 && chainSlug !== "bitcoin-mainnet");
     let enqueued = false;
-    if (needsIndex) {
+    if (needsIndex && searchParams.get("projection") !== "1") {
       // F8: demand job on the mesh queue, never a provider walk in-process.
       enqueued = await enqueueRarityDemand(chainSlug, collectionSlug).catch(() => false);
     }

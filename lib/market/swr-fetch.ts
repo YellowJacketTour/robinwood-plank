@@ -15,6 +15,7 @@ type Entry = {
 };
 
 const memory = new Map<string, Entry>();
+let invalidationEpoch = 0;
 
 const DEFAULT_TTL_MS = 12_000;
 const DEFAULT_SWR_MS = 90_000;
@@ -192,6 +193,7 @@ async function fetchAndStore(
   useSession: boolean,
   isGood?: (data: unknown) => boolean
 ): Promise<unknown> {
+  const epoch = invalidationEpoch;
   const res = await fetch(url, {
     // Bypass shared HTTP caches for live inventory — an empty CDN edge
     // response was painting "nothing held" for minutes while the vault had 57.
@@ -217,6 +219,8 @@ async function fetchAndStore(
     if (prev?.data !== undefined && isGood(prev.data)) return prev.data;
     throw new Error(`Unusable response for ${url}`);
   }
+  // A response started before an invalidation must not restore stale storage.
+  if (epoch !== invalidationEpoch) return data;
   memory.set(url, { at: Date.now(), data, inflight: null });
   if (useSession) {
     sessionSet(url, data);
@@ -231,11 +235,12 @@ export function prefetchJson(url: string, opts?: SwrOptions): void {
 }
 
 export function invalidateSwr(urlPrefix?: string): void {
-  if (!urlPrefix) {
-    memory.clear();
-  } else {
-    for (const key of memory.keys()) {
-      if (key.startsWith(urlPrefix)) memory.delete(key);
+  invalidationEpoch++;
+  // Keep an expired entry: deleting it let an asynchronous IndexedDB read
+  // resurrect exactly the snapshot this invalidation was meant to expire.
+  for (const [key, entry] of memory) {
+    if (!urlPrefix || key.startsWith(urlPrefix)) {
+      memory.set(key, { at: -Infinity, data: entry.data, inflight: null });
     }
   }
   if (typeof window === "undefined") return;

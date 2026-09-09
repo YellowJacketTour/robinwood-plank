@@ -1,3 +1,4 @@
+import { COLLECTION_MATCH_SQL } from "@/lib/market/multichain/collection-key-sql";
 /**
  * Storage layer for deploy/inmotion/postgres/migrations/014_foreign_rarity.sql.
  * See that migration for why this is a background-indexed table rather
@@ -27,7 +28,7 @@ export async function getForeignRarity(
   const result = await postgresQuery<RarityRow>(
     `SELECT token_id, name, score, rank, percentile, tier
      FROM plank_foreign_rarity
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`,
     [chainSlug, collectionSlug]
   );
   const map = new Map<string, { name: string; tier: string; rank: number; percentile: number; score: number }>();
@@ -58,7 +59,7 @@ export async function listForeignRarityTokens(
         ? "rank DESC, token_id"
         : "CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END ASC NULLS LAST, token_id";
   const params: unknown[] = [chainSlug, collectionSlug];
-  let where = `chain_slug = $1 AND lower(collection_slug) = lower($2)`;
+  let where = `chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`;
   if (tier) {
     params.push(tier);
     where += ` AND lower(tier) = lower($${params.length})`;
@@ -96,7 +97,7 @@ export async function applyForeignRaritySnapshot(
     await postgresQuery(
       `UPDATE plank_foreign_rarity
        SET name = COALESCE(NULLIF($4, ''), name), score = $5, rank = $6, percentile = $7, tier = $8
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3`,
+       WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL} AND token_id = $3`,
       [chainSlug, collectionSlug, r.tokenId, r.name, r.score, r.rank, r.percentile, r.tier]
     );
   }
@@ -112,7 +113,7 @@ export async function updateForeignRarityImages(
     if (!row.imageUrl) continue;
     const r = await postgresQuery(
       `UPDATE plank_foreign_rarity SET image_url = $4
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3
+       WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL} AND token_id = $3
          AND (image_url IS NULL OR image_url = '')`,
       [chainSlug, collectionSlug, row.tokenId, row.imageUrl]
     );
@@ -149,7 +150,7 @@ export async function getForeignTraitIndex(
   collectionSlug: string
 ): Promise<{ traitIndex: ForeignTraitIndex | null; sampleSize: number; indexedAt: string | null; partial: boolean }> {
   const result = await postgresQuery<{ trait_index: ForeignTraitIndex | null; sample_size: number; indexed_at: string; partial: boolean }>(
-    `SELECT trait_index, sample_size, indexed_at, partial FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+    `SELECT trait_index, sample_size, indexed_at, partial FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`,
     [chainSlug, collectionSlug]
   );
   const row = result.rows[0];

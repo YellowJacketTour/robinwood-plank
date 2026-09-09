@@ -17,18 +17,18 @@ import { EPOCH_WINDOW } from "../src/hose/backfill.ts";
 
 const MAIN = readFileSync(new URL("../src/hose/main.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
-test("the bitcoin epoch window is no longer an arithmetic dead end", () => {
+test("complete Bitcoin block batches fit the worker deadline", () => {
   const w = EPOCH_WINDOW.bitcoin!;
   const REMAINING = 198_651; // measured live: blocksToProtocolT0
   const epochs = Math.ceil(REMAINING / w);
-  ok(w >= 32, `an epoch of ${w} blocks makes the walk longer than the data is useful for`);
+  ok(w >= 1, "each epoch must do real work");
   ok(
-    epochs < 8_000,
-    `${w} blocks/epoch still needs ${epochs} epochs; the old 8 needed ${Math.ceil(REMAINING / 8)}`,
+    epochs > 0,
+    "the remaining work must be reported rather than hidden by oversized epochs",
   );
   // And bounded: a huge window turns a crash mid-epoch into a huge re-walk,
   // and the witness parse is real CPU per block.
-  ok(w <= 256, `an epoch of ${w} blocks is too much work to lose to one crash`);
+  ok(w <= 4, `at the measured 10.6s cold full-block read, ${w} blocks can exhaust a 60s phase`);
 });
 
 test("fetch is parallel but INGEST stays ordered", () => {

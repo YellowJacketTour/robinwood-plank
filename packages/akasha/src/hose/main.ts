@@ -163,8 +163,9 @@ export class Hose {
             let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
             for (const h of heights) {
               const hash = hashes.get(h);
-              if (!hash) continue;
-              await btc.ingestBlock(hash);
+              if (!hash) break;
+              const result = await btc.ingestBlock(hash);
+              if (!result.completed) break;
               // Read the header back from the store rather than trusting the
               // walk: ingestBlock is what actually wrote it, and the backfill
               // verifies the hash-link against exactly that record.
@@ -306,12 +307,12 @@ export class Hose {
             error: readError ?? "could not read the lock block header after 3 attempts",
             detail: { lockHeight: alreadyLocked.t0Height, storedParent: lock.parentHash },
           });
-        } else if (lock.parentHash.toLowerCase() === realParent.toLowerCase()) {
+        } else if (lock.parentHash.toLowerCase() === asHex(realParent)) {
           this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
             reason: "lock block parent already correct",
           });
         }
-        if (realParent && lock.parentHash.toLowerCase() !== realParent.toLowerCase()) {
+        if (realParent && lock.parentHash.toLowerCase() !== asHex(realParent)) {
           this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
           this.pg?.repairParentHash("bitcoin", asHex(lockHash), asHex(realParent));
           this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
@@ -569,6 +570,7 @@ export class Hose {
    * RPC is refusing.
    */
   async backfillTick(budgetMs = 0): Promise<unknown> {
+    const until = Date.now() + budgetMs;
     // TELEMETRY FIRST, BEFORE ANY EARLY RETURN.
     //
     // `if (!this.backfill) return undefined` is itself one of the states that
@@ -619,7 +621,6 @@ export class Hose {
     // `tailMoved` is the only honest signal of progress -- a step that
     // returns a reason string but moved nothing would otherwise spin.
     if (!first || first.tailMoved !== true) return first;
-    const until = Date.now() + budgetMs;
     let last = first;
     let epochs = 1;
     while (Date.now() < until) {

@@ -29,9 +29,8 @@ export const runtime = "nodejs";
  * recompute that boolean from the other columns -- one definition, in SQL,
  * next to the data.
  *
- * Until a chain is complete, `sentence` is "complete from block N", never
- * "complete". That is the §9 rule: do not widen the speech beyond what the
- * tape supports.
+ * A backfill cursor is progress, not proof that every newer block is covered.
+ * Until the completeness predicate holds, report the cursor as incomplete.
  */
 
 type HealthRow = {
@@ -110,7 +109,7 @@ export async function GET(req: NextRequest) {
         sentence: complete
           ? "complete from protocol origin"
           : backfillTail !== null
-            ? `complete from block ${backfillTail}`
+            ? `backfill at block ${backfillTail}; archive incomplete`
             : "coverage unknown",
       };
     });
