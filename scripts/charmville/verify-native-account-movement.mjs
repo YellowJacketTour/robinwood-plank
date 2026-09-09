@@ -13,7 +13,7 @@ try{
  assert.equal((await page.request.post(base+'/api/charmville/world/presence',{headers:bobHeaders,data:{destination:'public',revision:bobPresence.revision}})).status(),200);
  const bobActor=await(await page.request.get(base+'/api/charmville/world/actor',{headers:bobHeaders})).json();
  await page.addInitScript(({wallet,token})=>{localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});window.positions=[];window.addEventListener('message',e=>{if(e.data?.type==='charmville:position-observed')window.positions.push(e.data);});},user);
- await page.goto(base+'/charmville/world?panel=play');await page.getByRole('button',{name:'Open adventure camera',exact:true}).click();await page.frameLocator('iframe').getByRole('button',{name:'Enter the world',exact:true}).click();
+ await page.goto(base+'/charmville/world?panel=play');await page.locator('iframe').waitFor({state:'attached'});await page.frameLocator('iframe').getByRole('button',{name:'Enter the world',exact:true}).click();
  await page.waitForFunction(()=>window.positions.some(p=>p.appliedCorrectionSequence>0),{},{timeout:60000});
  const before=await(await page.request.get(base+'/api/charmville/world/actor',{headers})).json();
  await page.waitForTimeout(12000);

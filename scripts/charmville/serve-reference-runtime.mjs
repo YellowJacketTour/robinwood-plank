@@ -16,7 +16,7 @@ http.createServer(async(req,res)=>{
   // The isolated account shell may embed these public reference documents.
   // No account routes, credentials or CORS access are introduced here.
   if(['/charmville/tutorial/','/play/'].includes(url.pathname))res.setHeader('Cross-Origin-Resource-Policy','cross-origin');
-  if(['/runtime-shell.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js','/follower-bridge.js','/action-event-bridge.js','/position-observer.js','/account-peers.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
+  if(['/runtime-shell.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js','/follower-bridge.js','/action-event-bridge.js','/position-observer.js','/account-peers.js','/resource-bridge.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
   if(url.pathname==='/charmdex-catalog.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(await readFile('public/charmville/catalog/emoji-catalog.json'));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);
@@ -105,5 +105,6 @@ http.createServer(async(req,res)=>{
   const stream=createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);
  }catch(error){res.writeHead(404,{...headers,'Content-Type':'text/plain'});res.end(`Reference resource unavailable: ${error.code||'content adapter error'}`);}
 }).listen(3021,'127.0.0.1',()=>console.log('Local reference runtime: http://localhost:3021/play/?open=quests/purezc/139&storage=idb'));
+
 
 

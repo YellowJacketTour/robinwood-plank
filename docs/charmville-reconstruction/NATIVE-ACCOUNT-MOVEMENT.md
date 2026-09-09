@@ -11,3 +11,7 @@ This is locally connected account movement on the stated authored geometry. It d
 The expanded `verify-native-account-movement.mjs` browser test now verifies two authenticated accounts. Bob's stored actor appears in Alice's native world; the projected file uses mode 1 and the stored coordinates, and the resulting screenshot was inspected. The actor GET returns at most 16 peers filtered to the same geometry and region, with approved active access. This closes a bounded account-to-native peer visibility gap.
 
 Presentation currently polls every two seconds and uses a fixed standing pose. It does not interpolate movement or animate other players, and peers do not provide hit collisions or shared combat. Bars remain locally connected rather than production multiplayer. The next blocking integration is timed authoritative action settlement: action start/contact/cancel, permission recheck, resource revision, atomic input/output receipt, replay recovery and shared committed-resource presentation. Peer visibility alone cannot authorize resource rewards.
+
+## Subsequent resource integration
+
+The later [native Oran economic loop](NATIVE-ECONOMIC-LOOP.md) verifies a bounded server-settled resource action and inventory/exchange path. Earlier statements here about missing settlement describe the movement checkpoint, not the current Oran implementation. Wider resources, weapon/encounter authority and unified equipment remain incomplete.

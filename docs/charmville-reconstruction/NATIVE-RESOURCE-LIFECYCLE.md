@@ -1,0 +1,16 @@
+# Native bed action lifecycle
+
+This integrates the three actual adventure beds (nativeindices0–2, DMap4/screen63), retaining their directional work sprites. It does not map the retired Garden interface into the native world.
+
+An embedded runtime starts locked until its parent supplies `charmville:resource-state` with active:true, ordered beds `{id:0..2,stage:0..4,growthVisualPhase:0..2}`, seeds and produce. State0 is unworked,1 tilled,2 planted,3 growing,4 ripe. The parent derives growth phase from server timing. Native account mode does not run the local five-second growth timer, fertilizer action or local harvest/seed/XP grants. Standalone unembedded reference play retains its local behavior.
+
+After first-frame directional grid alignment, native emits `charmville:action-lifecycle` phase begin, carrying sessionId, localActionId, sequence, action, plotIndex, map, coordinates and facing. It holds the windup until a matching `charmville:action-authorization` reply. An accepted authorization restarts the animation clock at0; contact occurs28 native ticks later, then recovery ends at48. Contact emits the lifecycle event but does not mutate the bed. The parent associates the local action with its durable server intent UUID and commits it independently.
+
+A refreshed state containing matching lifecycle sessionId and resolvedLocalActionId releases the pending action. Polling snapshots without that receipt may refresh artwork but cannot unlock a new action against stale state. The bridge retains the maximum resolved action ID for the current session, so an ordinary poll cannot erase a receipt before the next filesystem flush. Run changes and signout reset that acknowledgment. Denial, ten-second authorization timeout, missing active state, correction, warp, damage, displacement or airborne/native-action interruption cancels work before contact. Cancellation after contact cannot undo an already submitted result; the server must resolve it. The one-time first-frame alignment allowance is not repeatedly applied while waiting for authorization.
+
+Snapshot expiry after15seconds locks the native beds. Embedded mode does not silently fall back to local rewards on signout/network loss. Native HUD counters come from the parent snapshot, with waiting/join/preparing text when appropriate. Fertilizer is unavailable in account mode until a durable economic implementation exists.
+
+FS lifecycle records use a64-entry ring and the existing native run counter. A changed run creates a fresh bridge session ID; authorization checks require that session and action ID. Parent source/origin checks, server actor proximity/revision checks, durable idempotency, reward conservation and ownership remain mandatory: these messages are client observations, not proof that an action was legitimate.
+
+Verification: resource bridge unit tests validate locked startup, snapshot structure, expiry, parent/session authorization and foreign-receipt rejection. The `--resources` native browser fixture verifies that contact cannot happen before authorization, native local stage mutation does not occur, a receipt advances the next action, and denial emits cancellation. This fixture mocks parent authorization; separate server integration testing establishes actual settlement behavior.
+

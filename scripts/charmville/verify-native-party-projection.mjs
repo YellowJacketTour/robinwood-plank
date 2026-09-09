@@ -6,6 +6,7 @@ const out='work/native-party-projection';await mkdir(out,{recursive:true});
 const browser=await chromium.launch();
 try{
  const page=await browser.newPage({viewport:{width:1100,height:950}}),events=[],errors=[];
+ await page.addInitScript(()=>{window.nativeLifecycle=[];window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:action-lifecycle')window.nativeLifecycle.push(event.data);});});
  await page.addInitScript(()=>{window.nativePositions=[];window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:position-observed')window.nativePositions.push({...event.data,receivedAt:performance.now()});});});
  await page.addInitScript(()=>{window.nativeContacts=[];window.observedContacts=[];window.addEventListener("charmville:local-contact-observed",event=>window.observedContacts.push(event.detail));window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:action-contact')window.nativeContacts.push(event.data);});});
  page.on('console',m=>{if(m.text().startsWith('CHARMVILLE_'))events.push(m.text());});page.on('pageerror',e=>errors.push(e.message));
@@ -17,12 +18,32 @@ try{
  await page.addInitScript(({wallet,token})=>{for(const type of ['plank:wallet-state','plank:wallet-response'])window.addEventListener(type,e=>{const state=type==='plank:wallet-state'?e.detail:e.detail?.result?.state;if(state&&state.address!==wallet)e.stopImmediatePropagation();},true);localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});},user);
  await page.goto(base+'/charmville/world');
  await page.getByRole('tab',{name:'Play',exact:true}).click();
- await page.getByRole('button',{name:'Open adventure camera',exact:true}).click();
+ await page.locator('iframe').waitFor({state:'attached'});
  await page.frameLocator('iframe').getByRole('button',{name:'Enter the world',exact:true}).click();
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--peers')){
+ if(process.argv.includes('--resources')){
+  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,beds:[0,1,2].map(id=>({id,stage:0,growthVisualPhase:0})),seeds:3,produce:0},'http://localhost:3021'));
+  await page.waitForTimeout(300);await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
+  await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='begin'));
+  await page.waitForTimeout(650);assert(!(await page.evaluate(()=>window.nativeLifecycle)).some(e=>e.phase==='contact'),'No contact without authorization');
+  await page.evaluate(()=>{const e=window.nativeLifecycle[0];document.querySelector('iframe').contentWindow.postMessage({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:true},'http://localhost:3021');});
+  await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='contact'));
+  assert(!events.some(e=>e.startsWith('CHARMVILLE_CROP_STAGE')),'Authoritative action must not mutate local crop stage');
+  await page.evaluate(()=>{const e=window.nativeLifecycle[0];document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,sessionId:e.sessionId,resolvedLocalActionId:e.localActionId,beds:[0,1,2].map(id=>({id,stage:id===0?1:0,growthVisualPhase:0})),seeds:3,produce:0},'http://localhost:3021');});
+  await page.waitForTimeout(600);await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
+  await page.waitForFunction(()=>window.nativeLifecycle.filter(e=>e.phase==='begin').length===2);
+  await page.evaluate(()=>{const e=window.nativeLifecycle.filter(e=>e.phase==='begin').at(-1);document.querySelector('iframe').contentWindow.postMessage({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:false},'http://localhost:3021');});
+  await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='cancel'));
+  await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
+  await page.waitForFunction(()=>window.nativeLifecycle.filter(e=>e.phase==='begin').length===3);
+  await page.evaluate(()=>{const p=window.nativePositions.at(-1);document.querySelector('iframe').contentWindow.postMessage({type:'charmville:position-correction',sessionId:p.sessionId,sequence:900,dmap:4,screen:63,x:16,y:72,direction:1,reason:'rejected'},'http://localhost:3021');});
+  await page.waitForFunction(()=>window.nativeLifecycle.filter(e=>e.phase==='cancel').length===2);
+  const lifecycle=await page.evaluate(()=>window.nativeLifecycle);assert.deepEqual(lifecycle.map(e=>e.phase),['begin','contact','begin','cancel','begin','cancel']);
+  await writeFile(out+'/resources.json',JSON.stringify({scope:'Synthetic authorization/receipt projection, not server settlement proof.',lifecycle,events,errors},null,2));assert.deepEqual(errors,[]);
+  console.log('Native waits for authorization, emits contact, uses receipt stage and cancels denied work.');
+ }else if(process.argv.includes('--peers')){
   await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[{profileId:'fixture-a',handle:'fixture-a',x:48,y:72},{profileId:'fixture-b',handle:'fixture-b',x:80,y:72}]},'http://localhost:3021'));
   await page.waitForTimeout(800);assert(events.includes('CHARMVILLE_ACCOUNT_PEERS 2'));
   await page.screenshot({path:out+'/peer-projection.png'});

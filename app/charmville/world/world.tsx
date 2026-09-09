@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
 import { connectPlankLoveWallet, subscribePlankLoveWalletState } from "@/integrations/plankspace-app/app/plank-love-wallet";
@@ -8,6 +9,8 @@ import { createGameAccountClient, type GameIdentity } from "@/lib/charmville/acc
 import type { YardInventory } from "@/lib/charmville/inventory";
 import ExchangePanel from "./exchange-panel";
 import CompanionPanel from "./companion-panel";
+import {useNativeResources} from "./native-resources";
+import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
 import {useNativeContactObserver} from "./native-contact-observer";
 
@@ -104,14 +107,17 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     finally{if(!controller.signal.aborted&&version===generation.current){inFlight.current=null;setBusy(false);}}
   },[clear]);
 
+  const resourceStatus=useNativeResources(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,load);
+
   const restore=useCallback(async(token:string,version:number)=>{
     if(version!==generation.current)return;
     const account=await accountClient.connect(token);
     if(version!==generation.current)return;
     session.current={identity:account,token};setIdentity(account);
     setAddress(wallet.current??"");
+    if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);
     await load();
-  },[accountClient,load]);
+  },[accountClient,load,localRuntime]);
 
   useEffect(()=>{
     let disposed=false;
@@ -220,18 +226,18 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       <div role="tablist" aria-label="Game and account" className="grid grid-cols-3 gap-1 sm:grid-cols-5">
         {tabs.map(([id,label],index)=><button key={id} id={`tab-${id}`} role="tab" aria-selected={tab===id} aria-controls={`panel-${id}`} tabIndex={tab===id?0:-1}
           className={`min-h-12 rounded-lg px-1 py-2 text-[0.6875rem] font-bold focus-visible:outline-2 focus-visible:outline-gold-300 sm:text-sm ${tab===id?'bg-gold-500 text-wood-950':'text-gold-300 hover:bg-panel-soft'}`}
-          onClick={()=>setTab(id)} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;event.preventDefault();setTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}>{label}</button>)}
+          onClick={()=>{setTab(id);if(id==='play')requestAnimationFrame(()=>frame.current?.focus());}} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;event.preventDefault();setTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}>{label}</button>)}
       </div>
       <p className="mt-1 truncate px-1 text-xs text-cream-muted">@{identity.handle} · {presence?.active?(presence.ownerHandle?`Home of @${presence.ownerHandle}`:'Public meadow'):'Choose a location in Friends'}</p>
       {localRuntime&&<div className="mt-2 flex gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Charmdex</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
     </div>
     <div className={`grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(0,1fr)_22rem]':''}`}>
       <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-xl">Adventure camera</h2><span className="text-sm text-cream-muted">Native adventure</span></div>
-        <p role="status" className="mb-2 text-sm text-cream-muted">{movementStatus}</p>
-        <p className="mb-3 text-sm text-cream-muted">Join a location in Friends to save movement. Combat and item rewards are not connected to the shared economy yet.</p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-xl">Adventure</h2><span className="text-sm text-cream-muted">Native adventure</span></div>
+        <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
+        <p className="mb-3 text-sm text-cream-muted">Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange. Combat rewards are still local.</p>
         {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
-          <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Open adventure camera</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
+          <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>
       <aside className={tab==='play'?'hidden':'space-y-4'} aria-label="Account world controls">
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
@@ -244,7 +250,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>
         <div id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden={tab!=='inventory'}>
-        <section className="rounded-xl border border-line bg-panel p-4" aria-label="Saved inventory"><h2 className="font-display text-xl">Saved inventory</h2>{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{stack.face} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face}>{stack.face} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<p className="mt-2 text-cream-muted">Claim your saved home to begin.</p>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
+        <section className="rounded-xl border border-line bg-panel p-4" aria-label="Saved inventory"><h2 className="font-display text-xl">Saved inventory</h2>{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{charmName(stack.face)} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face} className="flex items-center gap-2">{stack.face==='oran-berry'&&<Image src="/charmville/items/oran-berry.png" alt="" width={24} height={24} className="[image-rendering:pixelated]"/>}{charmName(stack.face)} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<p className="mt-2 text-cream-muted">Claim your saved home to begin.</p>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
         <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>

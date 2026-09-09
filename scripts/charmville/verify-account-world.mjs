@@ -35,7 +35,7 @@ try {
  assert.equal((await page.request.post(`${base}/api/charmville/${owner.handle}/access`,{headers,data:{visitor:friend.handle,revision:'1',revoke:true}})).status(),200);
  await second.getByRole('button',{name:'Refresh account'}).click();
  await second.getByText('Choose where to join',{exact:true}).waitFor();
- await page.getByRole('tab',{name:'Play',exact:true}).click();await page.getByRole('button',{name:'Open adventure camera'}).click();
+ await page.getByRole('tab',{name:'Play',exact:true}).click();await page.locator('iframe').waitFor({state:'attached'});
  await page.screenshot({path:out+'/before-camera.png',fullPage:true});
  const iframe=page.frameLocator('iframe');
  await iframe.getByRole('button',{name:'Enter the world',exact:true}).click({timeout:60000});

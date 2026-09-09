@@ -4,6 +4,7 @@ import './follower-bridge.js';
 import './action-event-bridge.js';
 import './position-observer.js';
 import './account-peers.js';
+import './resource-bridge.js';
 let accountOrigin=null;
 async function returnToAccountMenus(panel='inventory'){
   if(!['inventory','companions','exchange','friends'].includes(panel))return;
@@ -68,7 +69,9 @@ export function mountRuntimeShell(root = document) {
   mountUnifiedMenu(root);
   const brand = root.createElement('div');
   brand.className = 'charm-runtime-brand';
-  brand.innerHTML = '<strong>Charmville</strong><span>Local adventure · progress is temporary</span>';
+  brand.innerHTML = window.parent===window
+    ? '<strong>Charmville</strong><span>Local adventure · progress is temporary</span>'
+    : '<strong>Charmville</strong><span>Explore, grow and play together</span>';
   header.prepend(brand);
   const accountMenu=root.createElement('button');accountMenu.type='button';accountMenu.textContent='Game menus';accountMenu.title='Account inventory, companions, exchange and friends';
   accountMenu.style.background='var(--color-gold-500)';accountMenu.style.color='var(--color-on-gold)';accountMenu.onclick=openUnifiedMenu;

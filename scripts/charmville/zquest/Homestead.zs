@@ -13,6 +13,8 @@ global script Active
         file cursor=new file("/charmville/action-sequence.txt","w");
         if(!cursor->isValid())return;
         sprintf(text,"0");cursor->WriteString(text);cursor->Close();
+        file lifecycle=new file("/charmville/lifecycle-sequence.txt","w");if(lifecycle->isValid()){lifecycle->WriteString(text);lifecycle->Close();}
+        file auth=new file("/charmville/resource-authorization.txt","w");if(auth->isValid())auth->Close();
         file position=new file("/charmville/position.txt","w");if(position->isValid())position->Close();
         file correction=new file("/charmville/position-correction.txt","w");if(correction->isValid())correction->Close();
         file generation=new file("/charmville/action-run.txt","w");
@@ -31,6 +33,14 @@ global script Active
         if(!cursor->isValid()){printf("CHARMVILLE_CONTACT_OUTBOX_ERROR %d\n",sequence);return;}
         sprintf(message,"%d",sequence);cursor->WriteString(message);cursor->Close();
         printf("CHARMVILLE_CONTACT %d ACTION %d BED %d\n",sequence,action,bed);
+    }
+    void publishLifecycle(int sequence,int id,int phase,int action,int bed)
+    {
+        char32 path[80];char32 text[192];sprintf(path,"/charmville/lifecycle-%d.txt",sequence%64);
+        file event=new file(path,"w");if(!event->isValid())return;
+        sprintf(text,"%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",sequence,id,phase,action,bed,Game->GetCurDMap(),Game->GetCurScreen(),Hero->X,Hero->Y,Hero->Dir);event->WriteString(text);event->Close();
+        file cursor=new file("/charmville/lifecycle-sequence.txt","w");if(!cursor->isValid())return;sprintf(text,"%d",sequence);cursor->WriteString(text);cursor->Close();
+        printf("CHARMVILLE_LIFECYCLE %d ID %d PHASE %d ACTION %d BED %d\n",sequence,id,phase,action,bed);
     }
     void drawAura(int x,int y,int tick)
     {
@@ -106,6 +116,8 @@ global script Active
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;int positionSequence=0;int lastCorrection=0;int appliedCorrection=0;
         int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;int contactSequence=0;
+        bool resourceMode=false;bool resourceReady=false;int resourceVersion=0;int resourcePhase[3];int resourceSeeds=0;int resourceProduce=0;char32 resourceText[192];
+        int localActionId=0;int lifecycleSequence=0;bool lifecycleStarted=false;bool contactSent=false;int authorization=-1;int actionStartTick=0;bool pendingReceipt=false;bool alignmentDone=false;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
@@ -115,6 +127,19 @@ global script Active
         while (true)
         {
             ticks++;
+            if(ticks==1 || ticks%6==0){
+                file snapshot=new file("/charmville/resource-state.txt","r");
+                if(snapshot->isValid()){
+                    resourceText[0]=0;snapshot->ReadString(resourceText);snapshot->Close();int version=field(resourceText,0);
+                    if(version>resourceVersion){
+                        resourceMode=true;resourceVersion=version;resourceReady=field(resourceText,1)==1;resourceSeeds=field(resourceText,3);resourceProduce=field(resourceText,4);
+                        for(int bed=0;bed<3;bed++){stages[bed]=field(resourceText,5+bed*2);resourcePhase[bed]=field(resourceText,6+bed*2);fed[bed]=false;}
+                        if(field(resourceText,2)>=localActionId)pendingReceipt=false;
+                        printf("CHARMVILLE_RESOURCE_STATE %d READY %d\n",version,resourceReady?1:0);
+                    }
+                }
+                if(resourceMode && !resourceReady && activity>=0){if(lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;pendingReceipt=false;}
+            }
             if(ticks==1 || ticks%15==0){
                 file peers=new file("/charmville/account-peers.txt","r");
                 if(peers->isValid()){
@@ -132,6 +157,7 @@ global script Active
                     if(request>lastCorrection){
                         lastCorrection=request;
                         if(map==4 && screen==63 && Game->GetCurDMap()==map && Game->GetCurScreen()==screen && x>=0 && x<=240 && y>=0 && y<=160 && x%8==0 && y%8==0 && facing>=0 && facing<=3 && Hero->Z==0 && Hero->FakeZ==0){
+                            if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}
                             activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;Hero->X=x;Hero->Y=y;Hero->Dir=facing;
                             trailCount=0;trailHead=0;lastHeroX=x;lastHeroY=y;farmSpawned=true;
                             appliedCorrection=request;
@@ -153,6 +179,7 @@ global script Active
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
                 for(int p=0;p<16;p++)life[p]=0;
+                if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}
                 activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;
                 clearingReady=false;trailCount=0;trailHead=0;lastHeroX=Hero->X;lastHeroY=Hero->Y;
                 previousDMap=Game->GetCurDMap();previousScreen=Game->GetCurScreen();
@@ -216,7 +243,7 @@ global script Active
                         sprintf(line,"Start small. Grow together.");Screen->DrawString(6,4,141,0,1,-1,0,line);
                     }else{
                         sprintf(line,"Till, plant, water, harvest.");Screen->DrawString(6,4,130,0,1,-1,0,line);
-                        sprintf(line,"First crop opens guest play.");Screen->DrawString(6,4,141,0,1,-1,0,line);
+                        if(resourceMode)sprintf(line,"Harvest Oran into your satchel.");else sprintf(line,"First crop opens guest play.");Screen->DrawString(6,4,141,0,1,-1,0,line);
                     }
                     sprintf(line,"E / D / Interact: continue");Screen->DrawString(6,4,160,0,1,-1,0,line);
                     if(Input->KeyPress[KEY_E] || Hero->PressEx3)welcome++;
@@ -227,9 +254,10 @@ global script Active
                 // two tiles away or diagonally beyond the directional sprite.
                 bool nearPlot = reachX*reachX+reachY*reachY<=400 && Min(Abs(reachX),Abs(reachY))<=8;
                 if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
-                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stages[selectedPlot]!=3 || (cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
+                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (!resourceMode || (resourceReady && !pendingReceipt)) && (stages[selectedPlot]!=3 || (!resourceMode && cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
                     activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;lastToolFrame=-1;
+                    localActionId++;lifecycleStarted=false;contactSent=false;authorization=-1;actionStartTick=ticks;alignmentDone=false;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
                     int dx=plotCenterX-(Hero->X+8);int dy=plotCenterY-(Hero->Y+8);
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
@@ -238,14 +266,20 @@ global script Active
                 // The classic controller aligns the perpendicular axis to its
                 // 8px movement grid on a direction change. Accept that one
                 // first-frame alignment, not later displacement or knockback.
-                if(activity>=0 && activityTick==1 && Hero->HP==activityLife && Hero->Action==LA_NONE){
+                if(activity>=0 && activityTick==1 && !alignmentDone && Hero->HP==activityLife && Hero->Action==LA_NONE){
+                    alignmentDone=true;
                     bool vertical=activityDir==DIR_UP || activityDir==DIR_DOWN;
                     if((vertical && Hero->Y==activityY && Abs(Hero->X-activityX)<8) || (!vertical && Hero->X==activityX && Abs(Hero->Y-activityY)<8)){
                         activityX=Hero->X;activityY=Hero->Y;
                     }
                 }
                 if(activity>=0 && (Hero->Z!=0 || Hero->FakeZ!=0 || Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
-                {printf("CHARMVILLE_ACTION_CANCEL BED %d X %d/%d Y %d/%d HP %d/%d ACTION %d\n",selectedPlot+1,Hero->X,activityX,Hero->Y,activityY,Hero->HP,activityLife,Hero->Action);activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                {printf("CHARMVILLE_ACTION_CANCEL BED %d X %d/%d Y %d/%d HP %d/%d ACTION %d\n",selectedPlot+1,Hero->X,activityX,Hero->Y,activityY,Hero->HP,activityLife,Hero->Action);if(resourceMode && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                if(resourceMode && activity>=0 && activityTick==1){
+                    if(!lifecycleStarted){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,0,activity,selectedPlot);lifecycleStarted=true;}
+                    file auth=new file("/charmville/resource-authorization.txt","r");if(auth->isValid()){resourceText[0]=0;auth->ReadString(resourceText);auth->Close();if(field(resourceText,0)==localActionId){int decision=field(resourceText,1);if(authorization<0 && decision==1)activityTick=0;authorization=decision;}}
+                    if(authorization==0 || ticks-actionStartTick>600){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                }
                 if(activity>=0)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -284,6 +318,8 @@ global script Active
                     }
                     if(activityTick==28)
                     {
+                        if(resourceMode){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,1,activity,selectedPlot);contactSent=true;pendingReceipt=true;}
+                        else{
                         if(activity==4){
                             int yield=fed[selectedPlot]?2:1;berries+=yield;cuttings++;harvests++;stages[selectedPlot]=1;fed[selectedPlot]=false;
                             printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);
@@ -295,16 +331,17 @@ global script Active
                         else{stages[selectedPlot]=activity+1;if(stages[selectedPlot]==3)wateredTimes[selectedPlot]=ticks;}
                         printf("CHARMVILLE_CROP_STAGE %d BED %d\n",stages[selectedPlot],selectedPlot+1);
                         contactSequence++;publishContact(contactSequence,activity,selectedPlot);
+                        }
                     }
-                    activityTick++;
+                    if(!resourceMode || activityTick!=1 || authorization==1)activityTick++;
                     if(activityTick>=48){activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;printf("CHARMVILLE_ACTION_COMPLETE BED %d\n",selectedPlot+1);}
                 }
                 // Every bed advances independently; selection never owns the growth clock.
                 for(int bed=0;bed<3;bed++){
-                    if(stages[bed]==3 && ticks-wateredTimes[bed]>=300){stages[bed]=4;printf("CHARMVILLE_CROP_READY BED %d\n",bed+1);}
+                    if(!resourceMode && stages[bed]==3 && ticks-wateredTimes[bed]>=300){stages[bed]=4;printf("CHARMVILLE_CROP_READY BED %d\n",bed+1);}
                     int plantLayer=Hero->Y+16<plotFootY?6:2;
                     Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                    if(stages[bed]==3){int age=ticks-wateredTimes[bed];
+                    if(stages[bed]==3){int age=resourceMode?resourcePhase[bed]*100:ticks-wateredTimes[bed];
                         if(age<100)sprout->Blit(2,RT_SCREEN,(Floor(ticks/32)%2)*16,0,16,16,plotXs[bed],plotY+56,16,16);
                         else if(age<200)berry->Blit(plantLayer,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,plotXs[bed],plotY+40,16,32);
                         else berry->Blit(plantLayer,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,plotXs[bed],plotY+40,16,32);
@@ -322,13 +359,19 @@ global script Active
                     else sprintf(line,"Flowering... berries soon");
                 }
                 if (stages[selectedPlot]==4) sprintf(line,"E / D: gather your crop");
+                if(resourceMode && stages[selectedPlot]==3){if(resourcePhase[selectedPlot]==0)sprintf(line,"Sprouting... roots take hold");else if(resourcePhase[selectedPlot]==1)sprintf(line,"Growing... branches unfold");else sprintf(line,"Flowering... berries soon");}
+                if(resourceMode && !resourceReady)sprintf(line,"Join a place to tend these beds");
+                else if(resourceMode && pendingReceipt)sprintf(line,"Waiting for the world...");
+                else if(resourceMode && activity>=0 && authorization<0)sprintf(line,"Preparing your action...");
                 Screen->DrawString(6,4,146,0,0x68,-1,0,line);
                 int guests=0;for(int p=0;p<16;p++)if(life[p]>0)guests++;
                 sprintf(line,"Bed %d  Berry %d  XP %d",selectedPlot+1,berries,harvests*10);
+                if(resourceMode)sprintf(line,"Bed %d  Seeds %d  Oran %d",selectedPlot+1,resourceSeeds,resourceProduce);
                 Screen->DrawString(6,4,157,0,0x01,-1,0,line);
                 if(stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
                 else if(stages[selectedPlot]==3 && fed[selectedPlot])sprintf(line,"Fed soil: next yield is 2");
                 else sprintf(line,"Cuttings %d Guests %d",cuttings,guests);
+                if(resourceMode)sprintf(line,"Players nearby %d",accountCount);
                 Screen->DrawString(6,4,168,0,0x01,-1,0,line);
             }
             // Parent supplies only a visual selection, never inventory authority.

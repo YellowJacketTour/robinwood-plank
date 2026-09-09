@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { YardError } from './errors';
 
 // Current durable Satchel definitions. Catalogue discovery is not spendable supply.
-export const EXCHANGE_FACES = ['stalk','splinter','knock','hum','pith','gleam','knot'] as const;
+export const EXCHANGE_FACES = ['stalk','splinter','knock','hum','pith','gleam','knot','oran-berry'] as const;
 type Command = { kind:'create'|'fill'|'cancel'; requestId:string; offerId?:string; side?:'buy'|'sell'; face?:string; quantity?:string; price?:string };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hash = (s:string) => createHash('sha256').update(s).digest('hex');

@@ -13,7 +13,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Multiple wallets per profile | █░░░░ | Must add explicit proof-based account linking; not equivalent to wallet switching |
 | OAuth and passkeys for same game identity | █░░░░ | Other auth namespace exists; safe linking not implemented |
 | Preserved legacy garden storage (retired UI) | ████░ | Legacy PostgreSQL lifecycle, ownership, retries and races tested; standalone UI retired, not unified gameplay |
-| Native world persistent account progress | ███░░ | Authenticated native movement persisted locally; no resource rewards, combat or warps; bounded standing peer projection verified. See NATIVE-ACCOUNT-MOVEMENT.md |
+| Native world persistent account progress | ███░░ | Authenticated movement, bounded peers and Oran till/plant/water/harvest saved locally; combat and warps missing. See NATIVE-ECONOMIC-LOOP.md |
 | Account-owned map instances | ██░░░ | Durable region admission now exists; native authored home maps still missing |
 | Friend invitations / revoke / expiry | ███░░ | Durable permission API; legacy garden controls retired; private native visits still missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
@@ -64,8 +64,8 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
-| Till / sow / water | ███░░ | Local native sequence and direction logic; server integration absent |
-| Visible crop growth stages | ███░░ | Indexed source berry art; growth and harvest tested locally |
+| Till / sow / water | ███░░ | Three native private beds now settle Oran till/plant/water/harvest through server authority; broader crop/tool matrix missing |
+| Visible crop growth stages | ███░░ | Indexed source berry art; Oran 30-second server growth and harvested inventory/reload verified; full visual matrix missing |
 | Fertilizer / bonus harvest | ███░░ | Local one-use fertilizer loop verified; durable balancing absent |
 | Orchards / seasons / weather | █░░░░ | Crop definitions, environmental clock and art sets required |
 | Soil / irrigation / compost | ██░░░ | Limited garden compost exists; rich soil system not built |
@@ -102,7 +102,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Full Unicode discovery catalogue | ████░ | 3,953 entries, searchable native overlay; discovery only |
 | Custom memoji registry | ██░░░ | Historical registry reference; live completeness not verified |
 | Family/species/quality/instance taxonomy | █░░░░ | Master specification; content definitions not exhaustively authored |
-| Gameplay inventory versus Satchel | ███░░ | Durable garden compartment projection; native unification missing |
+| Gameplay inventory versus Satchel | ███░░ | Oran native produce and returned seed reach account inventory; unified equipment and wider items missing |
 | Finite Grain rewards | ███░░ | Local migration and garden integration; conservation/retry/exhaustion checked in PostgreSQL |
 | Commodity production budgets | █░░░░ | Currency reserve does not make every crop or creature scarce |
 | Player trades / order book / escrow | ███░░ | Fixed-price offers, escrow, partial fills and cancellation tested; automatic matching absent |
@@ -137,7 +137,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Community content contract | ██░░░ | Pack validation prototype; editor and publishing pipeline absent |
 | Collaborative map/art editor | █░░░░ | Versioned assets, review, rollback and bounded scripting required |
 | Animated action conformance suite | ██░░░ | Several local regression scripts; full directional/action matrix absent |
-| Economy concurrency testing | ███░░ | Durable garden tested; future trades/encounters require their own races |
+| Economy concurrency testing | ███░░ | Oran harvest, duplicate commits, permission revocation and exchange escrow/cancel tested; combat/capture races absent |
 | Performance budgets / low-end fallback | █░░░░ | Proposed targets only; benchmark device set not measured |
 | Remote friends-playable release | █░░░░ | Current links are localhost; no authenticated MMO deployment |
 | Full source-to-bespoke replacement coverage | █░░░░ | Provenance exists for subsets; replacement catalogue incomplete |
@@ -194,8 +194,14 @@ Follower feet now use the preserved source ground markers rather than generic sp
 
 ## Authenticated native movement evidence
 
-The native-to-account movement browser test now passes: seven 8px steps persisted for the same profile, with one initial spawn placement and zero rejection corrections. Actor tests cover two identities, replay, reconnect, expiry and travel invalidation; bounded 20ms jitter checks pass. This advances persistent native movement to locally connected scope only. Resource actions, combat, rewards and native warps remain unimplemented; the subsequent peer projection check is scoped below. See [NATIVE-ACCOUNT-MOVEMENT.md](NATIVE-ACCOUNT-MOVEMENT.md) for exact geometry and evidence paths.
+The native-to-account movement browser test now passes: seven 8px steps persisted for the same profile, with one initial spawn placement and zero rejection corrections. Actor tests cover two identities, replay, reconnect, expiry and travel invalidation; bounded 20ms jitter checks pass. This advances persistent native movement to locally connected scope only. At this movement checkpoint resource settlement was not yet connected; the later Oran loop below supersedes that gap. Combat and native warps remain missing. See [NATIVE-ACCOUNT-MOVEMENT.md](NATIVE-ACCOUNT-MOVEMENT.md) for exact geometry and evidence paths.
 
 ## Two-account peer visibility evidence
 
-The expanded native account movement browser check verifies Bob's persisted actor in Alice's native view, including mode 1 and matching coordinates; screenshot review passed. Peers are limited to 16 approved active same-region/same-geometry actors. This is fixed-standing-pose projection on a two-second poll, without interpolation, movement animation or hit collisions. Maturity remains locally connected. Timed authoritative action settlement and shared resource receipts remain the next blocking gate; movement/peer presence never imply an earned reward.
+The expanded native account movement browser check verifies Bob's persisted actor in Alice's native view, including mode 1 and matching coordinates; screenshot review passed. Peers are limited to 16 approved active same-region/same-geometry actors. This is fixed-standing-pose projection on a two-second poll, without interpolation, movement animation or hit collisions. Maturity remains locally connected. Subsequent Oran resource settlement is documented below; movement/peer presence alone never implies an earned reward.
+
+## Native Oran economic loop evidence
+
+Actual browser verification now completes private-account till, plant, water, 30-second server growth and harvest across the three-bed native resource surface. One Oran produce and a returned seed appear in the same account inventory and survive reload (checked balance: three seeds, one produce). PostgreSQL tests cover harvest-to-exchange escrow, cancel return, private permission revocation and duplicate commit. Four resource-client and four bridge tests pass. See [NATIVE-ECONOMIC-LOOP.md](NATIVE-ECONOMIC-LOOP.md).
+
+Farming bars remain locally connected: the full animation/facing/interruption matrix and broad resource content are not complete. Next blockers are authoritative weapons/encounters, additional resource definitions and supply policies, and unified owned equipment UI. No combat, capture, PvP or global crop catalogue is claimed.

@@ -24,13 +24,13 @@ export function createNativeMovementClient(options:{request:(body?:object,signal
   const run=session;
   busy=true;
   try {
-   if(!actor){actor=await options.request(undefined,abort.signal);if(disposed||run!==session)return;correct(position,'spawn');options.status('Your position is connected. Items and combat are still local.');return;}
+   if(!actor){actor=await options.request(undefined,abort.signal);if(disposed||run!==session)return;correct(position,'spawn');options.status('Your position is connected. Combat remains local.');return;}
    const x=Math.floor(position.x/actor.tilePixels),y=Math.floor(position.y/actor.tilePixels);
    if(x===actor.cell.x&&y===actor.cell.y)return;
    if(Math.abs(x-actor.cell.x)>1||Math.abs(y-actor.cell.y)>1){correct(position,'rejected');return;}
    actor=await options.request({x,y,sequence:actor.sequence+1,regionEpoch:actor.regionEpoch,presenceRevision:actor.presenceRevision,geometryId:actor.geometryId},abort.signal);
    if(disposed||run!==session)return;
-   options.status('Your position is connected. Items and combat are still local.');
+   options.status('Your position is connected. Combat remains local.');
   }catch(error){
    if(disposed)return;
    options.status(error instanceof Error?error.message:'Position sync interrupted.');
