@@ -102,8 +102,9 @@ global script Active
                     if(Input->KeyPress[KEY_E] || Hero->PressEx3)welcome++;
                     Waitframe();continue;
                 }
-                bool nearPlot = Abs(Hero->X-208)<32 && Abs(Hero->Y-80)<32;
-                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && activity<0 && stage!=3 && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
+                int reachX=216-(Hero->X+8);int reachY=96-(Hero->Y+8);
+                bool nearPlot = reachX*reachX+reachY*reachY<=1024;
+                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && stage!=3 && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
                     activity=stage;activityTick=0;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
@@ -111,7 +112,7 @@ global script Active
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
                 }
                 // Damage, displacement, or a native action takes precedence over farming.
-                if(activity>=0 && (Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
+                if(activity>=0 && (Hero->Z!=0 || Hero->FakeZ!=0 || Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
                 {activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 if(activity>=0)
                 {
@@ -120,7 +121,7 @@ global script Active
                     Hero->InputA=false;Hero->InputB=false;Hero->PressA=false;Hero->PressB=false;
                     Hero->Dir=activityDir;
                     // A treasure hold-up is not a directional lifting/carrying pose.
-                    int pose=activityTick<14?0:1;
+                    int pose=(activityTick<14 || activityTick>=36)?0:1;
                     Hero->ScriptTile=Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod;
                     // Hosted player aborts on GetOriginalFlip; retain the native directional flip.
                     int row=activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7));
@@ -130,7 +131,14 @@ global script Active
                     if(activity==2){waterBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);waterFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
                     Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                     // No held prop until a crop item has its own validated sprite identity.
-                    if(activity==2 && activityTick>=18 && activityTick<36)for(int drop=0;drop<4;drop++)Screen->Circle(6,210+drop*4,88+(activityTick+drop*3)%12,1,0x91);
+                    if(activity==2 && activityTick>=18 && activityTick<36){
+                        int spoutX=activityX+8+(activityDir==DIR_LEFT?-8:(activityDir==DIR_RIGHT?8:0));
+                        int spoutY=activityY+8+(activityDir==DIR_UP?-8:(activityDir==DIR_DOWN?8:0));
+                        for(int drop=0;drop<4;drop++){
+                            int phase=(activityTick+drop*4)%18;
+                            Screen->Circle(6,spoutX+(216-spoutX)*phase/18,spoutY+(96-spoutY)*phase/18,1,0x91);
+                        }
+                    }
                     if(activityTick==28)
                     {
                         if(activity==4){harvests++;stage=1;printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);}
