@@ -159,3 +159,7 @@ Evidence roots: `lib/charmville`, `test/market/charmville-*`, `scripts/charmvill
 ## 2026-09-09 menu visibility update
 
 The world shell now keeps Play, Inventory, Companions, Exchange and Friends above the camera, with direct Charmdex and Voice shortcuts. Browser checks cover 600px and 390px layouts, keyboard tab navigation, retained form state and a delayed-frame shortcut race. Native equipment remains separate; a complete rotating unified equipment menu is not yet implemented. Soil and menu source findings and the target integration contract are in `SOIL-AND-INVENTORY-RESEARCH.md`.
+
+## 2026-09-09 in-game menu access
+
+A prominent Game menus button now appears inside the native player and its fullscreen toolbar. It returns to account Inventory and focuses the navigation; direct `?panel=companions` and other allowlisted panel links work. Browser verification covers embedded fullscreen, a narrow viewport, standalone navigation and rejection of messages from the wrong origin or window. This fixes access to the existing panels, not the still-unbuilt unified equipment system.

@@ -67,7 +67,7 @@ global script Active
         bool aura = false;
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;
-        int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;
+        int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
@@ -152,7 +152,7 @@ global script Active
                 if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
                 if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stages[selectedPlot]!=3 || (cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
-                    activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;
+                    activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;lastToolFrame=-1;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
                     int dx=plotCenterX-(Hero->X+8);int dy=plotCenterY-(Hero->Y+8);
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
@@ -176,7 +176,9 @@ global script Active
                     Hero->InputA=false;Hero->InputB=false;Hero->PressA=false;Hero->PressB=false;
                     Hero->Dir=activityDir;
                     // A treasure hold-up is not a directional lifting/carrying pose.
-                    int pose=(activityTick<14 || activityTick>=36)?0:1;
+                    // Native hammer uses the pound bank for the raised-tool windup.
+                    // Reuse that complete directional body pose, then native stab for contact.
+                    int pose=activity==0 && activityTick<14?6:((activityTick<14 || activityTick>=36)?0:1);
                     Hero->ScriptTile=Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod;
                     // Hosted player aborts on GetOriginalFlip; retain the native directional flip.
                     int row=activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7));
@@ -188,6 +190,7 @@ global script Active
                         (activityTick<6?0:(activityTick<12?1:(activityTick<18?2:(activityTick<22?3:(activityTick<28?4:(activityTick<36?5:(activityTick<42?6:7)))))));
                     // LPC foot baseline 60 at half scale aligns with Hero's
                     // 16px foot baseline: 16 - 30 = -14, plus the 56px HUD.
+                    if((activity==0 || activity==2) && frame!=lastToolFrame){printf("CHARMVILLE_TOOL %d DIR %d FRAME %d\n",activity,activityDir,frame);lastToolFrame=frame;}
                     int toolY=Hero->Y+42;
                     Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
                     if(activity==0){hoeBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);hoeFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,toolY,32,32);}

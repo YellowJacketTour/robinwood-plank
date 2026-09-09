@@ -69,7 +69,9 @@ try {
  await page.goto('http://localhost:3017/charmville/world?panel=companions');
  await page.getByRole('tabpanel',{name:'Companions',exact:true}).waitFor({state:'visible'});
  const standalone=await browser.newPage();await standalone.goto('http://localhost:3021/charmville/tutorial/');
+ const originalUrl=standalone.url();const opening=standalone.context().waitForEvent('page');
  await standalone.getByRole('button',{name:'Game menus',exact:true}).click();
- await standalone.waitForURL('http://localhost:3017/charmville/world?panel=inventory');
+ const accountPage=await opening;await accountPage.waitForURL('http://localhost:3017/charmville/world?panel=inventory');
+ assert.equal(standalone.url(),originalUrl);assert.equal(await accountPage.evaluate(()=>window.opener),null);
  console.log('PASS embedded synthetic microphone: no automatic capture; record, stop, playback, download, discard, close cleanup');
 }finally{await browser.close();}

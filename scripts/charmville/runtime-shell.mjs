@@ -2,7 +2,7 @@ import './voice-notes.js';
 import './charmdex.js';
 let accountOrigin=null;
 async function returnToAccountMenus(){
-  if(window.parent===window){window.location.assign('http://localhost:3017/charmville/world?panel=inventory');return;}
+  if(window.parent===window){window.open('http://localhost:3017/charmville/world?panel=inventory','_blank','noopener');return;}
   if(document.fullscreenElement)try{await document.exitFullscreen();}catch{/* The parent also checks its iframe fullscreen state. */}
   if(accountOrigin)window.parent.postMessage({type:'charmville:account-menu',panel:'inventory'},accountOrigin);
 }
