@@ -127,7 +127,7 @@
       "serialize-javascript": "7.0.5"
     },
     "axios": "^1.18.1",
-    "ws": "^8.21.0",
+    "ws": "^8.21.3",
     "tmp": "^0.2.6"
   },
   "optionalDependencies": {
