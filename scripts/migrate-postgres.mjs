@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import { withMarketMigrationDrain } from "./market-migration-drain.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.resolve(
@@ -110,7 +111,12 @@ try {
     const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
     await client.query("BEGIN");
     try {
-      await client.query(sql);
+      if (process.env.PLANK_MIGRATION_WRITERS_QUIESCED === "1" && serverVersion >= 90600
+        && /^(110|111)_/.test(file)) {
+        await withMarketMigrationDrain(client, pool.options, () => client.query(sql));
+      } else {
+        await client.query(sql);
+      }
       await client.query(
         "INSERT INTO plank_schema_migrations (version) VALUES ($1)",
         [file]

@@ -98,13 +98,6 @@ test("a short page IS the last page -- no total required", () => {
   assert.equal(isLastPage(40, 40), false, "a full page may have more behind it");
 });
 
-test("the count query and the page query share the same predicate", () => {
-  // If they drift, the label disagrees with the rows and every number on the
-  // page becomes untrustworthy -- worse than a slow page.
-  const at = STORE.indexOf("const totalCount = await countMatchingCollections");
-  assert.ok(at > 0, "the ranked window must call the counter");
-  const call = STORE.slice(at, STORE.indexOf(";", at));
-  assert.match(call, /whereClauses/, "the same WHERE clauses");
-  assert.match(call, /params\.slice\(0, params\.length - 2\)/,
-    "and the same params minus the LIMIT/OFFSET pair the count does not use");
-});
+// Predicate parity is exercised against real PostgreSQL for every manifest
+// chain in hub-chain-filter.test.ts. Reusing the literal rank-table predicate
+// here was the bug: the count query has a different table alias.

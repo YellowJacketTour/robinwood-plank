@@ -41,6 +41,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { applyProjectionFields } from "@/lib/market/multichain/edge/projection-patch";
 import { useMarketRealtime } from "@/hooks/useMarketRealtime";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { useDemandIntent } from "@/hooks/useDemandIntent";
@@ -948,9 +949,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         if (!response.ok) return;
         const data = await response.json();
         const row = data.collections?.[0];
-        if (row) setSupplyStats((previous) => previous ? { ...previous, listedCount: row.listedCount,
-          totalSupply: row.totalSupply, holderCount: row.holderCount, floorPriceWei: row.floorPriceWei,
-          floorPriceCurrency: row.floorPriceCurrency } : previous);
+        if (row) {
+          setSupplyStats((previous) => previous ? applyProjectionFields(previous, row,
+            ["listedCount", "totalSupply", "holderCount", "floorPriceWei", "floorPriceCurrency"]) : previous);
+          setMarketStats((previous) => previous ? applyProjectionFields(previous, row,
+            ["sales24h", "volume24hWei", "sales7d", "volume7dWei", "sales30d", "volume30dWei"]) : previous);
+        }
       })];
     if (metadata) { work.push(fetchCatalogTokens(true)); setLiveMetadataRevision((n) => n + 1); }
     if (all || change.family === "orders" || change.family === "activity") {
@@ -2005,7 +2009,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       </div>
     );
   }
-  if (loadError || !collection) {
+  if (!collection) {
     return <p className="p-6 text-center text-red-300">{loadError ?? "Collection not found."}</p>;
   }
 
@@ -2091,6 +2095,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   return (
     <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
+      {loadError && <p role="status" className="text-sm text-foreground/60">Refresh delayed. Showing the last received collection data.</p>}
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
