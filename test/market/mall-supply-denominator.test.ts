@@ -38,10 +38,34 @@ const LEDGER = readFileSync(
 );
 const MIGRATIONS = path.join(ROOT, "deploy/inmotion/postgres/migrations");
 
+/**
+ * The source from `from` to a REAL boundary, never a fixed offset.
+ *
+ * These reads used `slice(at, at + 2200)` and `slice(at, at + 2600)`. Adding
+ * a comment to the guarded function pushed MALL_SUPPLY_RATIO from character
+ * 1,563 to 2,360 -- past the window -- and the test reported "no mall guard"
+ * about a guard that was present, correct, and running before the write.
+ *
+ * A character count is not a boundary. It encodes today's comment density as
+ * if it were a fact about the code, so any edit to the prose can fail the
+ * test while the behaviour is untouched -- and, far worse, a window that runs
+ * LONG silently reads a neighbouring function and can pass on the wrong
+ * code's text.
+ */
+function sourceFrom(from: number, ...stops: string[]): string {
+  assert.ok(from > 0, "the anchor must exist");
+  let end = LEDGER.length;
+  for (const stop of stops) {
+    const at = LEDGER.indexOf(stop, from + 1);
+    if (at > from && at < end) end = at;
+  }
+  return LEDGER.slice(from, end);
+}
+
 test("a chain totalSupply far above the venue's project supply is REFUSED", () => {
   const at = LEDGER.indexOf("export async function correctKnownSupplyFromChain");
   assert.ok(at > 0, "found the chain-confirmed writer");
-  const fn = LEDGER.slice(at, at + 2200);
+  const fn = sourceFrom(at, "\nexport ");
 
   // The cross-check must happen BEFORE the write, or the row is already cursed.
   const guardAt = fn.indexOf("MALL_SUPPLY_RATIO");
@@ -131,7 +155,7 @@ test("the id-inference ratchet is ALSO guarded, not just the chain read", () => 
   // a fact about the whole CORE and never about one project.
   const at = LEDGER.indexOf("const observedMaxId");
   assert.ok(at > 0, "found the id-inference ratchet");
-  const block = LEDGER.slice(at, at + 2600);
+  const block = sourceFrom(at, "\nexport ", "\nfunction ");
 
   assert.ok(
     /inferenceIsMall/.test(block),
@@ -151,7 +175,7 @@ test("a row already carrying a mall's number is cleared by the read path", () =>
   // A migration alone cannot fix this: the ratchet runs on the very next read
   // and undoes it. The clearing has to live where the ratchet lives.
   const at = LEDGER.indexOf("const observedMaxId");
-  const block = LEDGER.slice(at, at + 2600);
+  const block = sourceFrom(at, "\nexport ", "\nfunction ");
   assert.ok(
     /known_supply = NULL, known_supply_chain_confirmed = FALSE/.test(block),
     "the read path must clear a poisoned denominator, not only refuse new ones",
