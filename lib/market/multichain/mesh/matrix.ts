@@ -76,6 +76,7 @@ export type MeshSource =
   | "creator-identity"
   | "ow-rarity"
   | "ow-catalog"
+  | "akasha-bridge"
   | "m2-sweep";
 
 export type MeshLane = {
@@ -425,6 +426,21 @@ export const MESH_LANES: MeshLane[] = [
     notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
   },
   {
+    // THE TAPE -> CATALOG BRIDGE. The replacement for the four vendor catalog
+    // pagers, and the reason the cutover is a hand-off rather than a switch-off.
+    //
+    // Mints one collection per Ordinals parent declaration (envelope tag 3),
+    // which is a chain fact rather than a vendor opinion. Runs whether or not
+    // the cutover is armed: while the pagers are alive it adds what the chain
+    // knows and they do not, and when they retire it is already the writer.
+    id: "akasha-bridge:bitcoin-mainnet",
+    source: "akasha-bridge",
+    chainSlug: "bitcoin-mainnet",
+    cells: ["name"],
+    sliceSec: 60,
+    notes: "Reads akasha_event parent declarations and mints a catalog row per parent; existence only, no floors or traits.",
+  },
+  {
     // Bitcoin's actual catalog walker. OrdinalsWallet's own `total` is
     // 425,201 collections against the 19,577 tracked: this scan existed and
     // worked but lived ONLY in the legacy refresh-market-data script, which
@@ -663,6 +679,21 @@ export function bitcoinHoseOwnsExistence(): boolean {
  */
 export function activeMeshLanes(): MeshLane[] {
   if (!bitcoinHoseOwnsExistence()) return MESH_LANES;
+  // A HAND-OFF REQUIRES A RECEIVER.
+  //
+  // This used to be purely subtractive: the flag removed four vendor pagers
+  // and put nothing in their place, because the hose could not write a
+  // catalog row at all. Arming it therefore left Bitcoin existence with NO
+  // writer -- the exact outcome the comment above warns about, reachable by
+  // setting the flag it describes. It was armed on production 2026-09-09 and
+  // disarmed once measured.
+  //
+  // Refuse the subtraction unless the bridge that replaces them is scheduled.
+  // A cutover that cannot name its receiver is not a cutover.
+  const hasBridge = MESH_LANES.some(
+    (l) => l.chainSlug === "bitcoin-mainnet" && l.source === "akasha-bridge",
+  );
+  if (!hasBridge) return MESH_LANES;
   return MESH_LANES.filter(
     (l) =>
       !(l.chainSlug === "bitcoin-mainnet" && BITCOIN_CATALOG_LANES.includes(l.source)),

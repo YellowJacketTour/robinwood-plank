@@ -516,6 +516,20 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] ow-rarity", JSON.stringify(await scaffoldAllTrackedOrdinalsWalletCollections({ limit: 3, delayMs: 0 })).slice(0, 400));
       return;
     }
+    if (source === "akasha-bridge") {
+      // THE TAPE -> CATALOG BRIDGE. Until this lane existed the archive and
+      // the catalog were sealed rooms: the hose wrote six akasha_* tables,
+      // the UI read plank_multichain_collections, and nothing carried one to
+      // the other -- so the hose could walk real Bitcoin blocks and parse
+      // real inscriptions while the catalog count sat frozen at 19,621.
+      //
+      // Mints one collection per Ordinals PARENT declaration (envelope tag
+      // 3), which is a chain fact rather than a vendor opinion. Existence
+      // only: no floors, no listings, no traits.
+      const { bridgeAkashaBitcoinCollections } = await import("../lib/market/multichain/discovery/akasha-bridge");
+      console.log("[mesh-lane] akasha-bridge", JSON.stringify(await bridgeAkashaBitcoinCollections(500)));
+      return;
+    }
     if (source === "ow-catalog") {
       // The OrdinalsWallet CATALOG (not art): 425,201 collections by its own
       // `total`, against the 19,577 we track. This scan existed and worked but
