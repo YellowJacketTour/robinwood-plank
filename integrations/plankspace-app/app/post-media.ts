@@ -1,6 +1,6 @@
 export type PostMedia = {
   mediaUrl: string;
-  mediaType: "" | "image" | "video" | "link" | "gift";
+  mediaType: "" | "audio" | "image" | "video" | "link" | "gift";
   mediaAlt: string;
 };
 
@@ -14,7 +14,7 @@ export function normalizePostMedia(value: {
   mediaAlt?: unknown;
 }): PostMedia {
   const raw = typeof value.mediaUrl === "string" ? value.mediaUrl.trim() : "";
-  const requestedType = value.mediaType === "video" ? "video" : value.mediaType === "link" ? "link" : value.mediaType === "gift" ? "gift" : "image";
+  const requestedType = value.mediaType === "audio" ? "audio" : value.mediaType === "video" ? "video" : value.mediaType === "link" ? "link" : value.mediaType === "gift" ? "gift" : "image";
   const mediaAlt = typeof value.mediaAlt === "string" ? value.mediaAlt.trim().slice(0, 180) : "";
   if (!raw) return { mediaUrl: "", mediaType: "", mediaAlt: "" };
 

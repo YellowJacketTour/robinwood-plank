@@ -10,7 +10,7 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
-  if(['/runtime-shell.css','/runtime-shell.mjs','/charmdex.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
+  if(['/runtime-shell.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
   if(url.pathname==='/charmdex-catalog.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(await readFile('public/charmville/catalog/emoji-catalog.json'));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);

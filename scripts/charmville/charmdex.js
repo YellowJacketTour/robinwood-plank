@@ -1,9 +1,10 @@
 // Discovery only. This UI never creates balances or sends economic commands.
-const trigger=document.createElement('button');trigger.type='button';trigger.textContent='Charmdex';
+const trigger=document.createElement('button');trigger.type='button';trigger.dataset.charmdexOpen='';trigger.textContent='Charmdex';
 document.querySelector('header').append(trigger);
 const dialog=document.createElement('dialog');dialog.className='charmdex';
 dialog.innerHTML='<form method="dialog"><strong>Charmdex</strong><button aria-label="Close Charmdex">Close</button></form><p>Discover the Charm universe. Catalogue entries are design references, not owned items.</p><div class="charmdex-filters"><input type="search" aria-label="Search Charmdex" placeholder="Search cow, berries, tools…"><select aria-label="Charm category"><option value="">All categories</option></select></div><p role="status">Loading catalogue…</p><div class="charmdex-grid"></div><button type="button" class="charmdex-more">Show more</button>';
 document.body.append(dialog);
+const voice=document.createElement('button');voice.type='button';voice.textContent='Voice note';voice.onclick=()=>{dialog.close();document.querySelector('[data-voice-notes-open]').click();};dialog.querySelector('form').after(voice);
 let entries=[],limit=48,loaded=false;
 const search=dialog.querySelector('input'),category=dialog.querySelector('select'),status=dialog.querySelector('[role=status]'),grid=dialog.querySelector('.charmdex-grid'),more=dialog.querySelector('.charmdex-more');
 function render(){

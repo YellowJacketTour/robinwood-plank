@@ -1,3 +1,4 @@
+import './voice-notes.js';
 import './charmdex.js';
 /* Presentation adapter only. All native controls and their event hooks survive. */
 export function mountRuntimeShell(root = document) {

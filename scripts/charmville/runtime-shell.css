@@ -71,3 +71,8 @@ body.charm-runtime {
 .charmdex-more { margin-top:16px; }
 
 .charmdex [hidden] { display:none!important; }
+
+.voice-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.voice-notes audio { display:block; width:100%; margin:16px 0; }
+.voice-notes label { display:block; }
+.voice-notes textarea { display:block; box-sizing:border-box; width:100%; padding:12px; background:var(--color-wood-900); color:var(--color-cream); border:1px solid var(--color-line); }
