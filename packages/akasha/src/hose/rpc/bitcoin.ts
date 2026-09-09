@@ -43,10 +43,32 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
     this.timeoutMs = opts.timeoutMs ?? 20_000;
   }
 
-  /** Try each host in order; only a total failure throws. */
+  /**
+   * Round-robin start, then try every host; only a total failure throws.
+   *
+   * WHY ROUND-ROBIN AND NOT FIRST-WINS
+   * ----------------------------------
+   * This walked `this.hosts` in fixed order, so every request went to host[0]
+   * and the others were pure failover. That was harmless while the backfill
+   * fetched one block at a time -- and became a real hazard the moment the
+   * epoch walk started fetching 16 heights concurrently, because all 16 land
+   * on the same host. Racing a single free endpoint is exactly how this
+   * archive earned a 30-minute cooldown once already.
+   *
+   * Rotating the STARTING index spreads a concurrent burst across the pool
+   * while preserving failover: every host is still tried before the call
+   * fails, and a dead host costs one extra hop rather than breaking the walk.
+   * This is per-provider politeness, not a way around anyone's rate limit --
+   * each host keeps its own budget, and we simply stop pretending only one
+   * door exists.
+   */
+  private rr = 0;
   private async get(path: string, asJson: boolean): Promise<unknown> {
     let last: Error | undefined;
-    for (const host of this.hosts) {
+    const start = this.hosts.length > 1 ? this.rr++ % this.hosts.length : 0;
+    const ordered =
+      start === 0 ? this.hosts : [...this.hosts.slice(start), ...this.hosts.slice(0, start)];
+    for (const host of ordered) {
       try {
         const res = await this.fetchImpl(`${host}${path}`, {
           signal: AbortSignal.timeout(this.timeoutMs),
