@@ -618,6 +618,56 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
   return { updated };
 }
 
+/**
+ * Recompute stats for collections that TRADED recently but whose snapshot is
+ * older than those trades.
+ *
+ * updateVolumeFromMarketEvents is purely incremental -- ledger-sink only
+ * aggregates "every collection recorded since the last flush", so a
+ * collection is recomputed only when a NEW sale arrives for it. That is the
+ * right default for volume, which does not change without a trade.
+ *
+ * It is the wrong default for the 24h CHANGE, which is a function of two
+ * moving time windows. A collection that traded heavily yesterday and has
+ * been quiet since is never revisited, so its change stays blank (or stale)
+ * no matter how many sales sit in the ledger behind it. Measured live
+ * 2026-09-09, minutes after the one-derivation fix deployed: 16 of the top
+ * 20 Ethereum rows by volume showed real sales and no change, including one
+ * with 1,501 sales in 24h.
+ *
+ * So this sweep asks the ledger the only question that matters: which
+ * collections have sales in the window that their snapshot has not accounted
+ * for? It writes nothing itself -- it hands those keys to the same aggregator
+ * every other path uses, so there is exactly one derivation of the pair.
+ */
+export async function sweepStaleLedgerStats(
+  chainSlug: string,
+  limit = 200
+): Promise<{ considered: number; updated: number }> {
+  const rows = await postgresQuery<{ collection_key: string }>(
+    `SELECT DISTINCT lower(e.collection_key) AS collection_key
+       FROM plank_market_events e
+       JOIN plank_multichain_collections c
+         ON c.chain_slug = e.chain_slug
+        AND lower(c.contract_address) = lower(e.collection_key)
+       LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+      WHERE e.chain_slug = $1
+        AND e.event_type = 'sale'
+        AND e.finality <> 'reverted'
+        AND e.block_timestamp > NOW() - INTERVAL '24 hours'
+        -- Never aggregated, or aggregated BEFORE the trades it should cover.
+        AND (s.volume_computed_at IS NULL OR s.volume_computed_at < e.block_timestamp)
+      LIMIT $2::int`,
+    [chainSlug, limit]
+  );
+  if (rows.rows.length === 0) return { considered: 0, updated: 0 };
+  const { updated } = await updateVolumeFromMarketEvents(
+    chainSlug,
+    rows.rows.map((r) => r.collection_key)
+  );
+  return { considered: rows.rows.length, updated };
+}
+
 export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promise<{ updated: number }> {
   // AUDIT lens 6 #3 / lens 1 #5 (2026-09-06): a sale is a sale whatever it
   // was paid in, so the COUNT covers every fill. The native-denominated

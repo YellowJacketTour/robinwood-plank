@@ -580,13 +580,21 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
         const { scanChainForFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-seaport-scan");
         const scan = await scanChainForFillsViaHypersync(chain);
         if (scan.error) throw new Error(scan.error);
-        const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+        const { updateEvmVolumeFromSeaportFills, sweepStaleLedgerStats } = await import("../lib/market/multichain/store");
         const updated = await updateEvmVolumeFromSeaportFills(chain);
-        console.log("[mesh-lane] fills-live", JSON.stringify({ scan, updated }));
+        // Catch collections that traded but were never re-aggregated. The
+        // ledger path is incremental (only keys touched since the last
+        // flush), which leaves the 24h CHANGE blank on any collection that
+        // has gone quiet since its trades -- 16 of the top 20 Ethereum rows,
+        // measured live.
+        const swept = await sweepStaleLedgerStats(chain).catch(() => ({ considered: 0, updated: 0 }));
+        console.log("[mesh-lane] fills-live", JSON.stringify({ scan, updated, swept }));
         return;
       }
-      const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
-      console.log("[mesh-lane] fills", JSON.stringify(await updateEvmVolumeFromSeaportFills(chain)));
+      const { updateEvmVolumeFromSeaportFills, sweepStaleLedgerStats } = await import("../lib/market/multichain/store");
+      const fills = await updateEvmVolumeFromSeaportFills(chain);
+      const swept = await sweepStaleLedgerStats(chain).catch(() => ({ considered: 0, updated: 0 }));
+      console.log("[mesh-lane] fills", JSON.stringify({ fills, swept }));
       return;
     }
     if (source === "seaport-fills-genesis") {
