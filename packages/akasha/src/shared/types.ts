@@ -51,6 +51,9 @@ export type GapReason =
   | "bloom_audit"
   | "seq_gap"
   | "attention_history"
+  /** Present in migration 104's CHECK constraint since the tape was created,
+   *  but never in this union -- the two allowlists drifted apart silently. */
+  | "epoch_backfill"
   /**
    * The block was read, but not all of it. Distinct from every reason above:
    * those describe a range we never reached, this describes one we reached and

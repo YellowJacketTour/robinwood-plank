@@ -87,9 +87,28 @@ test("the header is matched BY HASH, not by array position", () => {
   // the hash-link is then verified against the wrong record.
   const at = MAIN_SRC.indexOf("THE LOWEST CONTIGUOUS HEADER, NOT MERELY THE LOWEST ONE");
   const body = MAIN_SRC.slice(at, MAIN_SRC.indexOf("return lowest;", at));
-  ok(
-    /stored\.find\(\(x\) => x\.hash\.toLowerCase\(\) === hash\.toLowerCase\(\)\)/.test(body),
-    "the persisted header must be located by hash",
-  );
+  // Assert the PROPERTY -- located by hash -- not one particular spelling of
+  // the comparison. This pinned the exact expression and broke the moment the
+  // shapes had to be normalised, while the property it protects still held.
+  ok(/stored\.find\(/.test(body), "the persisted header must be located by a search");
+  ok(/x\.hash/.test(body), "and that search must be over the HASH");
   ok(!/stored\[stored\.length - 1\]/.test(body), "array position is not identity");
+});
+
+test("the persisted-header lookup normalises hash SHAPE before comparing", () => {
+  // getBlockHashAtHeight returns a BARE 64-hex string; the store keeps headers
+  // 0x-prefixed via toHex. Comparing them raw never matches, so the contiguity
+  // break fired on every block and the epoch walk advanced nothing.
+  //
+  // The unit tests all passed -- they built stores by hand with consistent
+  // shapes. Only the wired test that drives the real hose caught it, which is
+  // the argument for keeping such a test even when it is slow.
+  const at = MAIN_SRC.indexOf("COMPARE THE SAME SHAPE");
+  ok(at > 0, "the shape normalisation must be documented where it happens");
+  const body = MAIN_SRC.slice(at, MAIN_SRC.indexOf("if (!header) break;", at));
+  ok(/replace\(\/\^0x\/, ""\)/.test(body), "both sides must be stripped of the 0x prefix");
+  ok(
+    !/x\.hash\.toLowerCase\(\) === hash\.toLowerCase\(\)/.test(body),
+    "a raw comparison of differently-shaped hashes can never match",
+  );
 });

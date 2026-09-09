@@ -186,7 +186,13 @@ export class Hose {
               // walk: ingestBlock is what actually wrote it, and the backfill
               // verifies the hash-link against exactly that record.
               const stored = this.store.headersAtHeight("bitcoin", h);
-              const header = stored.find((x) => x.hash.toLowerCase() === hash.toLowerCase());
+              // COMPARE THE SAME SHAPE. getBlockHashAtHeight returns a BARE
+              // 64-hex string; the store keeps headers 0x-prefixed via toHex.
+              // Comparing them raw never matches, so the contiguity break below
+              // fired on every block and the walk advanced nothing -- caught by
+              // the wired boot-repair test, which drives the real hose.
+              const want = hash.toLowerCase().replace(/^0x/, "");
+              const header = stored.find((x) => x.hash.toLowerCase().replace(/^0x/, "") === want);
               if (!header) break; // ingest did not persist it -- do not claim it
               lowest = header;
             }
