@@ -87,6 +87,18 @@ on:
         description: Relay-disable confirmation, when required.
         required: false
         type: string
+      recovery_backup_name:
+        description: Optional exact completed predeploy backup basename from a failed migration run; must be under two hours old.
+        required: false
+        type: string
+      recovery_backup_bytes:
+        description: Exact byte count reported by that successful backup.
+        required: false
+        type: string
+      recovery_base_release:
+        description: Exact active release SHA from that failed migration attempt; a changed release refuses reuse.
+        required: false
+        type: string
       admin_addresses:
         description: >-
           set-admin-allowlist only — comma-separated 0x wallets allowed to sign
@@ -228,6 +240,8 @@ jobs:
           cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
           cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
+          cp scripts/verify-recovery-backup.mjs .next/standalone/scripts/verify-recovery-backup.mjs
+          cp scripts/guard-market-migration.sh .next/standalone/scripts/guard-market-migration.sh
           cp scripts/snapshot-vault-state.mjs .next/standalone/scripts/snapshot-vault-state.mjs
           # Bundled by build:market-refresh / build:reindex — the standalone
           # tree has no tsx, so both run the esbuild output, same as the
@@ -360,6 +374,9 @@ jobs:
       INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
       INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL || 'https://plank.tanggang.life' }}
       RELEASE_SHA: ${{ github.sha }}
+      RECOVERY_BACKUP_NAME: ${{ inputs.recovery_backup_name || '-' }}
+      RECOVERY_BACKUP_BYTES: ${{ inputs.recovery_backup_bytes || '-' }}
+      RECOVERY_BASE_RELEASE: ${{ inputs.recovery_base_release || '-' }}
     steps:
       - name: Download release artifact
         id: download-release-artifact
@@ -587,18 +604,29 @@ jobs:
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
+          if [ "$RECOVERY_BACKUP_NAME" != '-' ]; then
+            [[ "$RECOVERY_BACKUP_NAME" =~ ^predeploy-[0-9TZ.-]+\.dump$ ]]
+            [[ "$RECOVERY_BACKUP_BYTES" =~ ^[1-9][0-9]*$ ]]
+            [[ "$RECOVERY_BASE_RELEASE" =~ ^[a-f0-9]{40}$ ]]
+          else
+            test "$RECOVERY_BACKUP_BYTES" = '-'
+            test "$RECOVERY_BASE_RELEASE" = '-'
+          fi
           # pg_dump can be silent for several minutes. Keep transport traffic
           # flowing so the hosting edge cannot reap a healthy backup/migration
           # session as idle (the prior failure repeated at ~4m25s).
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" "$RECOVERY_BACKUP_NAME" "$RECOVERY_BACKUP_BYTES" "$RECOVERY_BASE_RELEASE" <<'REMOTE'
           set -euo pipefail
           trap 'status=$?; echo "Remote activation failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
           app_dir="$1"
           release_sha="$2"
           node_bin="$3"
+          recovery_backup="$4"
+          recovery_bytes="$5"
+          recovery_base="$6"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected INMOTION_APP_DIR: $app_dir" >&2; exit 1 ;;
@@ -752,6 +780,11 @@ jobs:
             check_status=$?
           fi
           if [ "$check_status" -eq 3 ]; then
+            if [ "$recovery_backup" != '-' ]; then
+              "$node_bin" --env-file="$app_dir/shared/.env.production" \
+                "$release_dir/scripts/verify-recovery-backup.mjs" \
+                "$app_dir" "$recovery_backup" "$recovery_bytes" "$recovery_base"
+            else
             echo "[deploy] migrations pending - taking the pre-migration backup"
             INMOTION_APP_DIR="$app_dir" \
             PLANK_BACKUP_DIR="$app_dir/shared/backups" \
@@ -760,6 +793,7 @@ jobs:
               "$node_bin" \
                 --env-file="$app_dir/shared/.env.production" \
                 "$release_dir/scripts/backup-postgres.mjs"
+            fi
           elif [ "$check_status" -eq 0 ]; then
             echo "[deploy] schema is current - skipping the pre-migration backup (nothing to roll back)"
           else
@@ -767,20 +801,17 @@ jobs:
             exit 1
           fi
 
-          # 2026-09-07: the always-on scheduler and stream worker hold locks on
-          # the tables a migration alters; the first migration-carrying deploy
-          # was cancelled by Postgres (ProcessInterrupts) while waiting. Stop
-          # both before migrating; cron restarts them within a minute after
-          # activation. Only when a migration is actually pending.
+          # Stop every managed writer and hold cron's actual locks throughout
+          # migration. This includes the Bitcoin hose that blocked CREATE
+          # TRIGGER on plank_market_events in the failed 2026-09-09 rollout.
           if [ "$check_status" -eq 3 ]; then
-            pkill -f "mesh-tick-standalone.mjs" || true
-            pkill -f "opensea-stream-standalone.mjs" || true
-            pkill -f "market-realtime.mjs" || true
-            sleep 5
+            bash "$release_dir/scripts/guard-market-migration.sh" "$app_dir" \
+              "$node_bin" --env-file="$app_dir/shared/.env.production" \
+              "$release_dir/scripts/migrate-postgres.mjs"
+          else
+            "$node_bin" --env-file="$app_dir/shared/.env.production" \
+              "$release_dir/scripts/migrate-postgres.mjs"
           fi
-          "$node_bin" \
-            --env-file="$app_dir/shared/.env.production" \
-            "$release_dir/scripts/migrate-postgres.mjs"
 
           if [ -L "$app_dir/current" ]; then
             readlink "$app_dir/current" > "$app_dir/.previous-release"
