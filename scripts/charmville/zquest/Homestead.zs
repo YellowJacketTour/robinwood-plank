@@ -121,7 +121,7 @@ global script Active
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
-        bool accountMode=false;int accountCount=0;int accountX[16];int accountY[16];char32 accountText[512];
+        bool accountMode=false;int accountCount=0;int accountX[16];int accountY[16];int accountDirection[16];char32 accountText[512];
         char32 line[128];
         printf("CHARMVILLE_HOMESTEAD_ACTIVE\n");
         while (true)
@@ -145,7 +145,7 @@ global script Active
                 if(peers->isValid()){
                     accountText[0]=0;peers->ReadString(accountText);peers->Close();
                     if(field(accountText,0)==1){int count=Min(16,Max(0,field(accountText,1)));if(!accountMode || count!=accountCount)printf("CHARMVILLE_ACCOUNT_PEERS %d\n",count);accountMode=true;accountCount=count;for(int p=0;p<16;p++)life[p]=0;
-                        for(int p=0;p<accountCount;p++){accountX[p]=field(accountText,2+p*2);accountY[p]=field(accountText,3+p*2);}
+                        for(int p=0;p<accountCount;p++){accountX[p]=field(accountText,2+p*2);accountY[p]=field(accountText,3+p*2);int dir=field(accountText,2+accountCount*2+p);if(dir<0 || dir>3)dir=DIR_DOWN;if(dir!=accountDirection[p])printf("CHARMVILLE_PEER_FACING %d DIR %d\n",p,dir);accountDirection[p]=dir;}
                     }
                 }
             }
@@ -198,7 +198,9 @@ global script Active
             }
             if(!accountMode)for(int p=0;p<16;p++)if(life[p]>0){life[p]--;if(pa[p])drawAura(px[p],py[p],ticks);Screen->DrawTile(2,px[p],py[p],pt[p],1,1,pc[p],-1,-1,0,0,0,pf[p]);}
             if(accountMode && Game->GetCurDMap()==4 && Game->GetCurScreen()==63)for(int p=0;p<accountCount;p++){
-                Screen->DrawTile(accountY[p]<Hero->Y?2:6,accountX[p],accountY[p],Hero->GetOriginalTile(0,DIR_DOWN)+Hero->TileMod,1,1,Hero->CSet,-1,-1,0,0,0,0);
+                // Pinned offline quest probe: left/right share tile20; left flips1.
+                // Do not query unsupported GetOriginalFlip or reuse local facing.
+                Screen->DrawTile(accountY[p]<Hero->Y?2:6,accountX[p],accountY[p],Hero->GetOriginalTile(0,accountDirection[p])+Hero->TileMod,1,1,Hero->CSet,-1,-1,0,0,0,accountDirection[p]==DIR_LEFT?1:0);
             }
             if (Input->KeyPress[KEY_T] || Hero->PressEx4)
             {

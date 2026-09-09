@@ -1,0 +1,28 @@
+{
+  "banks": [
+    {
+      "direction": 0,
+      "tile": 28,
+      "flip": 0
+    },
+    {
+      "direction": 1,
+      "tile": 23,
+      "flip": 0
+    },
+    {
+      "direction": 2,
+      "tile": 20,
+      "flip": 1
+    },
+    {
+      "direction": 3,
+      "tile": 20,
+      "flip": 0
+    }
+  ],
+  "templateSha256": "01f9d100468bdba275e0b64d9a3184d7c4b9aeecf2a061f10cc2d3d891cdc8c2",
+  "playerSha256": "279512bee98bbf4defd2db18f5809a538c38c0cd9e97d0996d3a82dd82357f5c",
+  "probeSha256": "3df0b8174c44011ecd04f4ebba28161405b74861d7f698a6f9735a381b68125a",
+  "method": "Pinned offline quest rendering, forced cardinal facing; no live client tile data."
+}

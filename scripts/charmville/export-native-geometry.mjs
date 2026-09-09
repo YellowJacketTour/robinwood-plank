@@ -3,10 +3,13 @@ import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 const runtime=path.resolve('../charmville-references/zquest-native-212/runtime');
-const out=path.resolve('work/native-geometry');await mkdir(out,{recursive:true});
+const heroOnly=process.argv.includes('--hero');
+const out=path.resolve(heroOnly?'work/native-hero':'work/native-geometry');await mkdir(out,{recursive:true});
 const include=path.join(runtime,'include/CharmvilleHomestead.zh'),original=await readFile(include);
 const template=path.resolve('../charmville-references/charmville-native-homestead/template.qst'),quest=path.join(out,'GeometryProbe.qst');
-const probe=`#include "std.zh"
+const probe=heroOnly?`#include "std.zh"
+global script Active {void run(){for(int t=0;t<60;t++)Waitframe();for(int dir=0;dir<4;dir++){Hero->Dir=dir;Hero->Action=LA_NONE;Waitframe();Waitframe();printf("HERO_BANK %d %d %d\\n",dir,Hero->GetOriginalTile(0,dir),Hero->Flip);}printf("GEOMETRY_DONE\\n");while(true)Waitframe();}}
+`:`#include "std.zh"
 global script Active {
  void run(){
   for(int t=0;t<60;t++)Waitframe();
@@ -36,6 +39,7 @@ function run(exe,args,stopMarker){return new Promise((resolve,reject)=>{
 try{await writeFile(include,probe);await writeFile(path.join(out,'compile.log'),await run('zeditor.exe',['-smart-assign',quest]));}finally{await writeFile(include,original);}
 await copyFile(path.join(runtime,'allegro.log'),path.join(out,'previous-allegro.log'));await writeFile(path.join(runtime,'allegro.log'),'');
 const log=await run('zplayer.exe',['-headless','-test',quest,'4','63'],'GEOMETRY_DONE');await writeFile(path.join(out,'native.log'),log);
+if(heroOnly){const banks=[...log.matchAll(/HERO_BANK (\d+) (\d+) (\d+)/g)].map(m=>({direction:+m[1],tile:+m[2],flip:+m[3]}));if(banks.length!==4)throw Error('Incomplete hero bank export');const digest=b=>createHash('sha256').update(b).digest('hex');const evidence={banks,templateSha256:digest(await readFile(template)),playerSha256:digest(await readFile(path.join(runtime,'zplayer.exe'))),probeSha256:digest(Buffer.from(probe)),method:'Pinned offline quest rendering, forced cardinal facing; no live client tile data.'};await writeFile(path.join(out,'hero.json'),JSON.stringify(evidence,null,2));await writeFile('public/charmville/catalog/native-hero-banks.json',JSON.stringify(evidence,null,2));console.log(banks);process.exit(0);}
 const rows=[...log.matchAll(/GEOMETRY_CELL (\d+) (\d+) (\d+) (\d+) (\d+)/g)].map(m=>({layer:+m[1],cell:+m[2],combo:+m[3],solidity:+m[4],type:+m[5]}));
 if(rows.filter(r=>r.layer===0).length!==176)throw Error('Incomplete native map export');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');

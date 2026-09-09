@@ -4,7 +4,7 @@ let peers=[],expires=0,last=null;
 function flush(){
  if(parent===window||typeof FS==='undefined')return;
  if(Date.now()>expires)peers=[];
- const text=[1,peers.length,...peers.flatMap(p=>[p.x,p.y])].join('|');
+ const text=[1,peers.length,...peers.flatMap(p=>[p.x,p.y]),...peers.map(p=>p.direction)].join('|');
  if(text===last)return;
  try{const root=FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville';FS.mkdirTree(root);FS.writeFile(root+'/account-peers.txt',text);last=text;}catch{}
 }
@@ -16,6 +16,11 @@ window.addEventListener('message',event=>{
   if(!p||typeof p.profileId!=='string'||p.profileId.length<1||p.profileId.length>128||ids.has(p.profileId)||typeof p.handle!=='string'||p.handle.length>128)return;
   if(!Number.isInteger(p.x)||!Number.isInteger(p.y)||p.x<0||p.x>240||p.y<0||p.y>160||p.x%8||p.y%8)return;ids.add(p.profileId);
  }
- peers=data.active?data.peers:[];expires=Date.now()+6500;flush();
+ const previous=new Map(peers.map(p=>[p.profileId,p]));
+ peers=data.active?data.peers.map(p=>{
+  const old=previous.get(p.profileId);let direction=old?.direction??1;
+  if(old){const dx=p.x-old.x,dy=p.y-old.y;if(Math.abs(dx)>Math.abs(dy))direction=dx<0?2:3;else if(dy!==0)direction=dy<0?0:1;}
+  return {...p,direction};
+ }):[];expires=Date.now()+6500;flush();
 });
 const timer=setInterval(flush,250);window.addEventListener('pagehide',()=>clearInterval(timer),{once:true});

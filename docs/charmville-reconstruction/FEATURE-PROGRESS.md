@@ -14,12 +14,12 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | OAuth and passkeys for same game identity | █░░░░ | Other auth namespace exists; safe linking not implemented |
 | Preserved legacy garden storage (retired UI) | ████░ | Legacy PostgreSQL lifecycle, ownership, retries and races tested; standalone UI retired, not unified gameplay |
 | Native world persistent account progress | ███░░ | Authenticated movement, bounded peers and Oran till/plant/water/harvest saved locally; combat and warps missing. See NATIVE-ECONOMIC-LOOP.md |
-| Account-owned map instances | ██░░░ | Durable region admission now exists; native authored home maps still missing |
-| Friend invitations / revoke / expiry | ███░░ | Durable permission API; legacy garden controls retired; private native visits still missing |
+| Account-owned map instances | ██░░░ | Private account region and three-bed resource authority exist; distinct authored home geography and native routing remain missing |
+| Friend invitations / revoke / expiry | ███░░ | Invitation API and private resource revoke checks verified; playable native home-to-home visits remain missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
 | Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions |
-| Shared resource replication | █░░░░ | Requires versioned entities and server action commits |
-| Reconnect / crash recovery | ██░░░ | Legacy ledger recovery tested; native world recovery missing |
+| Shared resource replication | █░░░░ | Oran versioned resource commits exist; two-client live resource visual replication is not verified |
+| Reconnect / crash recovery | ██░░░ | Native actor reconnect and Oran inventory reload verified; interrupted action/full world crash recovery remains incomplete |
 | Party and region shard routing | █░░░░ | Keep party together, separate region capacity from economic identity |
 | Abuse prevention | ██░░░ | Garden transactions and relay rate limits; movement/automation/encounter authority incomplete |
 
@@ -53,7 +53,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
 | Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
-| Party / storage / clinic | ██░░░ | Normalized six-slot owned roster and UI verified; actual capture acquisition, clinic and storage gameplay remain missing |
+| Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; actual capture, clinic and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | Definitions and balancing missing; prototype only holds limited status names |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
@@ -85,7 +85,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
 | Connected world geography | █░░░░ | Master specification; twelve proposed regions are not authored maps |
-| Private/public border transitions | ██░░░ | Travel domain tests; native map bindings and authoritative host missing |
+| Private/public border transitions | ██░░░ | Admission/travel invalidation tests exist; playable private/public native border warps remain missing |
 | Mounts / boats / warp towers | █░░░░ | Logical requirements only; boarding and travel gameplay absent |
 | Guild settlements / businesses | █░░░░ | Ownership roles, contribution escrow and public contracts |
 | Roads / harbors / industry | █░░░░ | Shared construction, maintenance and logistics graph |
@@ -205,3 +205,7 @@ The expanded native account movement browser check verifies Bob's persisted acto
 Actual browser verification now completes private-account till, plant, water, 30-second server growth and harvest across the three-bed native resource surface. One Oran produce and a returned seed appear in the same account inventory and survive reload (checked balance: three seeds, one produce). PostgreSQL tests cover harvest-to-exchange escrow, cancel return, private permission revocation and duplicate commit. Four resource-client and four bridge tests pass. See [NATIVE-ECONOMIC-LOOP.md](NATIVE-ECONOMIC-LOOP.md).
 
 Farming bars remain locally connected: the full animation/facing/interruption matrix and broad resource content are not complete. Next blockers are authoritative weapons/encounters, additional resource definitions and supply policies, and unified owned equipment UI. No combat, capture, PvP or global crop catalogue is claimed.
+
+## Companion health and Oran evidence
+
+The source catalogue covers 386 species. Owned companion health uses source HP at level 5 with a server-generated persisted HP IV and HP EV 0. Oran consumes one item to restore up to 10 HP; new companions begin at full health. Real healthy-account UI, synthetic injured/lost-response presentation, and PostgreSQL transaction tests are distinguished in [COMPANION-HEALTH-AND-ORAN.md](COMPANION-HEALTH-AND-ORAN.md). No damage or combat API, fake user injury, clinic or capture is claimed. Existing maturity bars remain unchanged because the broader party/storage/clinic scope is incomplete. Native peer-facing fixes are not included in this evidence.

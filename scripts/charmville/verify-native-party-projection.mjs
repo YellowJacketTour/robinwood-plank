@@ -15,9 +15,9 @@ try{
  const base='http://localhost:3017';
  const response=await page.request.post(base+'/api/charmville/local-playtest',{headers:{Origin:base}});assert.equal(response.status(),200);const user=await response.json();
  assert.equal((await page.request.post(`${base}/api/charmville/${user.handle}`,{headers:{Origin:base,authorization:`Bearer ${user.token}`},data:{action:'claim',requestId:randomUUID()}})).status(),200);
- await page.addInitScript(({wallet,token})=>{for(const type of ['plank:wallet-state','plank:wallet-response'])window.addEventListener(type,e=>{const state=type==='plank:wallet-state'?e.detail:e.detail?.result?.state;if(state&&state.address!==wallet)e.stopImmediatePropagation();},true);localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});},user);
- await page.goto(base+'/charmville/world');
- await page.getByRole('tab',{name:'Play',exact:true}).click();
+ await page.addInitScript(({wallet,token})=>{localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});},user);
+ await page.goto(base+'/charmville/world?panel=play');
+
  await page.locator('iframe').waitFor({state:'attached'});
  await page.frameLocator('iframe').getByRole('button',{name:'Enter the world',exact:true}).click();
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
@@ -47,6 +47,10 @@ try{
   await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[{profileId:'fixture-a',handle:'fixture-a',x:48,y:72},{profileId:'fixture-b',handle:'fixture-b',x:80,y:72}]},'http://localhost:3021'));
   await page.waitForTimeout(800);assert(events.includes('CHARMVILLE_ACCOUNT_PEERS 2'));
   await page.screenshot({path:out+'/peer-projection.png'});
+  for(const [direction,x,y] of [[3,56,72],[0,56,64],[2,48,64],[1,48,72]]){
+   await page.evaluate(({x,y})=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[{profileId:'fixture-a',handle:'fixture-a',x,y},{profileId:'fixture-b',handle:'fixture-b',x:80,y:72}]},'http://localhost:3021'),{x,y});
+   await page.waitForTimeout(400);assert(events.includes(`CHARMVILLE_PEER_FACING 0 DIR ${direction}`));await page.screenshot({path:out+`/peer-direction-${direction}.png`});
+  }
   await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021'));
   await page.waitForTimeout(500);assert.equal(await runtime.evaluate(()=>FS.readFile('/Files/Homestead/charmville/account-peers.txt',{encoding:'utf8'})),'1|0');
   assert.deepEqual(errors,[]);console.log('Synthetic bounded peer projection and clearing verified; account ownership is tested separately.');
