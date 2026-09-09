@@ -2,6 +2,8 @@ import { postgresQuery } from "@/lib/postgres";
 import { durableKv } from "@/lib/market/durable-kv";
 import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
+import { MARKETPLACE_HANDLES } from "../collection-profile-url";
+export { MARKETPLACE_HANDLES } from "../collection-profile-url";
 
 /**
  * Creator identity as its own cell with its own lane (2026-09-07, owner:
@@ -57,11 +59,6 @@ async function paceCoinGecko(): Promise<void> {
  * collection's creator. CoinGecko returns the marketplace link when a
  * collection has no creator social, which badged Gemesis as "openseapro".
  */
-export const MARKETPLACE_HANDLES = [
-  "opensea", "openseapro", "opensea_io", "magiceden", "blur_io", "blureth",
-  "looksrare", "x2y2_io", "rarible", "coingecko", "nftgo", "tensor_hq",
-];
-
 export function handleFromTwitterUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = /(?:twitter\.com|x\.com)\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/i.exec(url);

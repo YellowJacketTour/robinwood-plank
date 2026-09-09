@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { profileUrl, recordCollectionProfile, readCollectionProfile } from "../../lib/market/multichain/collection-profile";
 import { closePostgres, hasPostgresConfig, postgresQuery } from "../../lib/postgres";
+import { profileLink } from "../../lib/market/multichain/collection-profile-url";
 
 test("collection profile rejects executable and credential-bearing links", () => {
   for (const value of ["javascript:alert(1)", "data:text/html,hello", "https://user:secret@example.com", "bad url", null]) assert.equal(profileUrl(value), null);
   assert.equal(profileUrl("https://x.com/pudgypenguins"), "https://x.com/pudgypenguins");
+  assert.equal(profileLink("twitter", "https://evil.example/x.com/pudgypenguins"), null);
+  assert.equal(profileLink("twitter", "https://x.com/opensea"), null);
+  assert.equal(profileLink("discord", "https://discord.gg/pudgypenguins"), "https://discord.gg/pudgypenguins");
+  assert.equal(profileLink("discord", "https://discord.gg.evil.example/pudgypenguins"), null);
 });
 
 test("concurrent profile sources preserve independent fields and omitted links", { skip: !hasPostgresConfig() }, async () => {

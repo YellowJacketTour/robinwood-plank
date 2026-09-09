@@ -1,18 +1,11 @@
 import { durableKv } from "@/lib/market/durable-kv";
 import { normalizeContractAddress } from "./collection-key";
+import { profileLink } from "./collection-profile-url";
+export { profileUrl } from "./collection-profile-url";
 
 export type CollectionProfileField = { value: string; source: string; observedAt: string };
 export type CollectionProfile = Partial<Record<"website" | "twitter" | "discord" | "description", CollectionProfileField>>;
 const key = (chain: string, address: string) => `plank:collection-profile:${chain}:${normalizeContractAddress(chain, address)}`;
-
-export function profileUrl(raw: unknown): string | null {
-  if (typeof raw !== "string" || raw.length > 2048) return null;
-  try {
-    const url = new URL(raw);
-    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return null;
-    return url.href;
-  } catch { return null; }
-}
 
 /** Persist independently sourced fields without erasing earlier evidence when
  * another provider omits them. No crawling or provider calls on page reads. */
@@ -20,7 +13,7 @@ export async function recordCollectionProfile(chain: string, address: string, in
   const fields: CollectionProfile = {};
   const observedAt = new Date().toISOString();
   for (const field of ["website", "twitter", "discord"] as const) {
-    const value = profileUrl(input[field]);
+    const value = profileLink(field, input[field]);
     if (value) fields[field] = { value, source, observedAt };
   }
   if (typeof input.description === "string" && input.description.trim()) {
