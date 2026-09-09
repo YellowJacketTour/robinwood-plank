@@ -2005,7 +2005,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       </div>
     );
   }
-  if (loadError || !collection) {
+  if (!collection) {
     return <p className="p-6 text-center text-red-300">{loadError ?? "Collection not found."}</p>;
   }
 
@@ -2091,6 +2091,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   return (
     <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
+      {loadError && <p role="status" className="text-sm text-foreground/60">Refresh delayed. Showing the last received collection data.</p>}
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">

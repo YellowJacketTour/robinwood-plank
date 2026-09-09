@@ -31,3 +31,26 @@ test("live snapshot delivers exact multi-window statistics and preserves chain i
     await closePostgres();
   }
 });
+
+
+test("native ledger projection cannot be erased by a generic discovery snapshot", {skip: !hasPostgresConfig()}, async () => {
+  const { NFT_CONTRACT_ADDRESS } = await import("../../lib/mint-contract");
+  const { salesStatsFromLedger } = await import("../../lib/market/chain-events");
+  let inserted: string | undefined;
+  try {
+    inserted = (await postgresQuery<{id: string}>(`INSERT INTO plank_multichain_collections(chain_slug,contract_address,adapter)
+      VALUES ('robinhood',$1,'test') ON CONFLICT (chain_slug,contract_address) DO NOTHING RETURNING id::text`, [NFT_CONTRACT_ADDRESS.toLowerCase()])).rows[0]?.id;
+    const expected = await salesStatsFromLedger();
+    const scopes = [{chainSlug: "robinhood", collectionKey: NFT_CONTRACT_ADDRESS}];
+    const response = await GET(new NextRequest(`http://localhost/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scopes))}`));
+    const row = (await response.json()).collections[0];
+    assert.equal(row.sales24h, expected.sales24h);
+    assert.equal(row.volume24hWei, expected.volume24hWei);
+    for (const field of ["floorPriceWei", "listedCount", "holderCount", "totalSupply", "floorChangePct", "name", "imageUrl"]) {
+      assert.equal(Object.hasOwn(row, field), false, `generic projection does not own ${field}`);
+    }
+  } finally {
+    if (inserted) await postgresQuery("DELETE FROM plank_multichain_collections WHERE id=$1", [inserted]);
+    await closePostgres();
+  }
+});
