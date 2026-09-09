@@ -33,6 +33,15 @@ import type { Hex } from "../packages/akasha/src/shared/hex";
 
 const TICK_MS = Number(process.env.AKASHA_TICK_MS ?? 15_000);
 /**
+ * Shards claimed per tick per chain. 0 disables the parallel walk entirely.
+ *
+ * Default off: sharding is a second reader against the same public RPC pool
+ * the tip-follow uses, and a host that cannot afford the fan-out should not
+ * discover that by being rate-limited off its own tip. Turn it up once the
+ * budget is known.
+ */
+const SHARD_CLAIMS = Math.max(0, Number(process.env.AKASHA_SHARD_CLAIMS ?? 0));
+/**
  * How much of each tick the past may use. Two thirds leaves the tip-follow a
  * full third of headroom; the walk also stops early the moment an epoch makes
  * no progress, so this is a ceiling rather than a target.
@@ -154,6 +163,20 @@ async function main(): Promise<void> {
     try {
       if (chains.includes("bitcoin")) await hose.bitcoinTick();
       await hose.repairTick();
+      // The shattered archive, alongside the serial walk rather than instead
+      // of it. The serial tail keeps moving; sharding fills the rest of the
+      // past in parallel, and the two converge on the same run-list because a
+      // coverage run is keyed (chain, from_height). Off by default: it is a
+      // second reader against the same RPC pool, so the operator turns it on
+      // when the host can afford the fan-out.
+      if (SHARD_CLAIMS > 0) {
+        for (const chain of chains) {
+          const res = await hose.shardTick(chain, SHARD_CLAIMS);
+          if (res && (res.walked > 0 || res.failed > 0)) {
+            console.log(`[akasha-hose] shard ${chain}`, JSON.stringify(res));
+          }
+        }
+      }
       // Spend most of the tick on the past. The tip-follow above has already
       // run, so this is otherwise idle time, and at 8 blocks per epoch the
       // default rate needed 43 days to reach Bitcoin's protocol origin.

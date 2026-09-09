@@ -28,6 +28,8 @@ import { HttpTickStream, JsonRpcEvm } from "./rpc/evm.ts";
 import { EsploraBitcoinRpc } from "./rpc/bitcoin.ts";
 import { GapWorker } from "./gap.ts";
 import { BackfillWorker } from "./backfill.ts";
+import { planShards, outstandingShards, type Shard } from "./shard.ts";
+import { claimShards, enqueueShards, releaseShard, retireShard } from "./claim.ts";
 import { EVM_CHAINS, FINALITY_LAG, type ChainId } from "../shared/types.ts";
 import { asHex, type Hex } from "../shared/hex.ts";
 import { assertPinnedForCutover, protocolT0, PROTOCOL_T0 } from "../shared/protocol-t0.ts";
@@ -268,6 +270,95 @@ export class Hose {
   }
 
   /** One epoch of the past. */
+  /**
+   * The shattered archive, one pass.
+   *
+   * Plans the chain's past into shards, enqueues what is still outstanding,
+   * claims a bounded slice of it, and walks each claimed shard through the
+   * SAME adapter that owns the tip -- so the past and the present cannot
+   * decode differently, exactly as the serial backfill guarantees.
+   *
+   * This runs ALONGSIDE the serial backfill rather than replacing it. The
+   * serial walk is the proven path and keeps the tail moving; sharding fills
+   * the rest of the past in parallel and the two converge on the same
+   * run-list, because a coverage run is keyed (chain, from_height) and a
+   * rewrite replaces rather than duplicates. Nothing has to be switched off
+   * for this to start helping, and nothing breaks if it is switched off.
+   *
+   * A shard is retired ONLY after its coverage is durable. A shard that threw
+   * is released immediately rather than left to time out, so the next attempt
+   * does not wait out a lease for a failure we already know about.
+   */
+  async shardTick(chain: ChainId, claims = 4): Promise<{
+    planned: number;
+    queued: number;
+    claimed: number;
+    walked: number;
+    failed: number;
+  } | undefined> {
+    const sql = this.cfg.sql;
+    const pg = this.pg;
+    if (!sql || !pg) return undefined;
+    const cursor = pg.getCursor(chain);
+    if (!cursor) return undefined;
+
+    const shards = planShards(chain, cursor.finalizedHeight);
+    const outstanding = outstandingShards(shards, pg.coverageFor(chain));
+    const queued = await enqueueShards(sql, outstanding.slice(0, 64));
+    const claimed = await claimShards(sql, chain, claims);
+
+    let walked = 0;
+    let failed = 0;
+    for (const shard of claimed) {
+      try {
+        const lowest = await this.ingestShard(shard);
+        if (lowest) {
+          await retireShard(sql, shard);
+          walked += 1;
+        } else {
+          // No header came back: the range produced nothing we can stand
+          // behind. Release rather than retire -- retiring would claim work
+          // that was ATTEMPTED, not finished.
+          await releaseShard(sql, shard);
+          failed += 1;
+        }
+      } catch {
+        await releaseShard(sql, shard);
+        failed += 1;
+      }
+    }
+    return { planned: shards.length, queued, claimed: claimed.length, walked, failed };
+  }
+
+  /** Walk one shard through the adapter that owns the chain's tip. */
+  private async ingestShard(shard: Shard): Promise<boolean> {
+    if (shard.chain === "bitcoin") {
+      const btc = this.bitcoin;
+      const rpc = this.bitcoinRpc;
+      if (!btc || !rpc?.getBlockHashAtHeight) return false;
+      let any = false;
+      for (let h = shard.to; h >= shard.from; h--) {
+        const hash = await rpc.getBlockHashAtHeight(h);
+        if (!hash) continue;
+        await btc.ingestBlock(hash);
+        any = true;
+      }
+      return any;
+    }
+    const adapter = this.evm.get(shard.chain);
+    const url = this.cfg.endpoints[shard.chain];
+    if (!adapter || !url) return false;
+    const rpc = new JsonRpcEvm(url, shard.chain);
+    let any = false;
+    for (let h = shard.to; h >= shard.from; h--) {
+      const header = await rpc.getBlockByNumber(h);
+      if (!header) continue;
+      await adapter.onHead(header);
+      any = true;
+    }
+    return any;
+  }
+
   /**
    * Walk the past for as long as this tick can spare.
    *
