@@ -586,8 +586,12 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       // AUDIT lens 1 #6 (Batch E4): the exhaustive ME catalog walk now runs
       // in the mesh. Bounded pages per tick; `done:false` re-enqueues.
       const { runMagicEdenCatalogScan } = await import("../lib/market/multichain/discovery/magiceden-catalog-scan");
-      const result = await runMagicEdenCatalogScan({ maxPages: 25 });
+      const result = await runMagicEdenCatalogScan({ maxPages: 1 });
       console.log("[mesh-lane] magiceden-catalog", JSON.stringify(result));
+      if (result.retryAt) {
+        markDeferred(Math.max(1, result.retryAt - Date.now()), "Magic Eden catalog pagination boundary; scheduled catalog rescan");
+        return;
+      }
       if (!result.done) markIncomplete();
       return;
     }
