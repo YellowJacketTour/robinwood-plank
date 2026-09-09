@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
@@ -38,12 +39,17 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const frameReady=useRef(false);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
+  const followerFormation=useRef<'close'|'relaxed'>('close');
+  const updateFormation=useCallback((formation:'close'|'relaxed')=>{
+    followerFormation.current=formation;
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower-formation',formation},'http://localhost:3021');
+  },[]);
   const updateFollowers=useCallback((speciesIds:number[])=>{
-    partySpecies.current=speciesIds.filter(id=>[277,280,283].includes(id)).slice(0,6);
+    partySpecies.current=speciesIds.filter(id=>[277,280,283,25,133,286].includes(id)).slice(0,6);
     if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current},'http://localhost:3021');
   },[]);
   const updateFollower=useCallback((speciesId:number)=>{
-    followerSpecies.current=[277,280,283].includes(speciesId)?speciesId:0;
+    followerSpecies.current=[277,280,283,25,133,286].includes(speciesId)?speciesId:0;
     if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower',speciesId:followerSpecies.current},'http://localhost:3021');
   },[]);
   const pendingPanel=useRef<'charmdex'|'voice'|null>(null);
@@ -108,6 +114,17 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     finally{if(!controller.signal.aborted&&version===generation.current){inFlight.current=null;setBusy(false);}}
   },[clear]);
 
+  const openTestProfile=useCallback(async(test:{wallet:string;token:string})=>{
+    if(!localRuntime||!['localhost','127.0.0.1'].includes(window.location.hostname)||!/^0x[a-f0-9]{40}$/.test(test.wallet)||! /^[a-f0-9]{64}$/.test(test.token))throw Error('Local test profile unavailable');
+    const verified=await accountClient.connect(test.token);
+    clear();
+    localStorage.setItem(`plankspace-session:${test.wallet}`,test.token);
+    localStorage.setItem('plankspace-last-verified-wallet',test.wallet);
+    attachLocalPlaytestWallet(test.wallet);
+    wallet.current=test.wallet;session.current={identity:verified,token:test.token};
+    setAddress(test.wallet);setIdentity(verified);setPresence(null);setInventory(null);setCamera(true);setTab('companions');
+    await load();
+  },[localRuntime,accountClient,clear,load]);
   const resourceStatus=useNativeResources(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,load);
 
   const restore=useCallback(async(token:string,version:number)=>{
@@ -132,7 +149,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   useEffect(()=>{
     const returnToMenus=(event:MessageEvent)=>{
       if(event.origin!=='http://localhost:3021'||event.source!==frame.current?.contentWindow)return;
-      if(event.data?.type==='charmville:follower-ready'){updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);return;}
+      if(event.data?.type==='charmville:follower-ready'){updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);updateFormation(followerFormation.current);return;}
       if(event.data?.type!=='charmville:account-menu')return;
       const panel=event.data.panel;
       if(!tabs.some(([id])=>id===panel)||panel==='play')return;
@@ -142,7 +159,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     };
     window.addEventListener('message',returnToMenus);
     return()=>window.removeEventListener('message',returnToMenus);
-  },[updateFollower,updateFollowers]);
+  },[updateFollower,updateFollowers,updateFormation]);
 
   useEffect(()=>{
     const changed=()=>setFullscreen(Boolean(document.fullscreenElement));
@@ -238,7 +255,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
         <p className="mb-3 text-sm text-cream-muted">{presence?.active?'Your movement and Oran harvests save to your account. Combat rewards are still local.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p>
         {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'}/>}
-        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
+        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);updateFormation(followerFormation.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>
       <aside className={tab==='play'?'hidden':'space-y-4'} aria-label="Account world controls">
@@ -255,7 +272,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <section className="rounded-xl border border-line bg-panel p-4" aria-label="Saved inventory"><h2 className="font-display text-xl">Saved inventory</h2>{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{charmName(stack.face)} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face} className="flex items-center gap-2">{stack.face==='oran-berry'&&<Image src="/charmville/items/oran-berry.png" alt="" width={24} height={24} className="[image-rendering:pixelated]"/>}{charmName(stack.face)} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<p className="mt-2 text-cream-muted">Claim your saved home to begin.</p>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
-        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
+        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
         <div id="panel-exchange" role="tabpanel" aria-labelledby="tab-exchange" hidden={tab!=='exchange'}>{address&&<ExchangePanel key={`${address}:${identity.handle}`} wallet={address} handle={identity.handle} onChanged={()=>void load()} />}</div>
       </aside>
     </div></>}

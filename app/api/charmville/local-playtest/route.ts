@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       VALUES($1,$2,'Your Charmville board','approved','["feed","friends"]')`, [wallet,handle]);
     await client.query(`INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)`,
       [createHash("sha256").update(token).digest("hex"),wallet,expiresAt]);
+    await client.query("INSERT INTO charmville_local_playtest_accounts(profile_id) SELECT id FROM plankspace_profiles WHERE wallet=$1",[wallet]);
     const post = await client.query(`INSERT INTO plankspace_posts(author,author_wallet,body)
       VALUES('Your Charmville board',$1,'My first harvest. A little Stalk from my corner of the Lumberyard.') RETURNING id,body`, [wallet]);
     await client.query("COMMIT");

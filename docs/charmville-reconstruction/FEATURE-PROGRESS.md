@@ -52,7 +52,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Native-style turn battle | ███░░ | Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Source formula and atomic capture contract audited in CAPTURE-INTEGRATION-CONTRACT.md; finite ball issuance, DB capture and live presentation remain missing |
-| Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
+| Followers and companion reactions | ███░░ | Six distinct authenticated local-test species project to native trail;18/26px presets verified. Reversals overlap; reactions, obstacle avoidance and shared creature replication missing |
 | Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; server-timed home HP/PP recovery verified; full clinic, capture and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | 354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
@@ -221,3 +221,7 @@ The actual battle service and contextual UI now execute supported starter Pound/
 ## Companion home recovery
 
 The actual battle-to-home-rest browser loop restores HP and supported move PP after 10 server-timed seconds, preserving IV and maxHP. Explicit Finish/Cancel and retry controls use the real service. Database checks cover interruption and duplicate completion. This is bounded home recovery, not a complete clinic world or storage system; bars remain unchanged. See [COMPANION-REST.md](COMPANION-REST.md).
+
+## Accessible six-member test party
+
+The local interface loads six distinct persistent companions through a trusted-marker server action. Unmarked accounts open a separate test profile; actual browser checks verify the switch, reload and unchanged original account. All six account IDs reach native follow projection with Close/Relaxed trail spacing, and selected Pikachu battle switching is verified. This is a local test entitlement, not capture/XP/raid rewards or production issuance. Close/reversal overlap remains; maturity bars do not advance. See [SIX-MEMBER-TEST-PARTY.md](SIX-MEMBER-TEST-PARTY.md).

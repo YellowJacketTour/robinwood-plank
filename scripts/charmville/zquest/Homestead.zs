@@ -1,5 +1,6 @@
 #include "std.zh"
 #include "ActionPalettes.zh"
+#include "ExtraFollowerFrames.zh"
 
 // Native, local tutorial prototype. No shared-account inventory authority.
 // Active is the engine's global per-frame script slot.
@@ -94,12 +95,14 @@ global script Active
         hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");
         waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");
         hair->Read(0,"/charmville/gold-hair.png");
+        bitmap pikachu=new bitmap();bitmap eevee=new bitmap();bitmap poochyena=new bitmap();
         bitmap treecko=new bitmap();bitmap torchic=new bitmap();bitmap mudkip=new bitmap();
         // Exact white ground-origin markers from PMD Walk-Shadow.png, row-major.
         int mudkipAnchorX[]={16,16,16,16,16,16,16,16,18,19,20,18,16,16,18,19,19,18,16,16,18,19,20,18,16,16,16,16,16,16,16,16,14,13,12,14,16,16,14,13,13,14,16,16,14,13,12,14};
         int mudkipAnchorY[]={24,25,26,27,27,26,24,24,25,26,27,26,24,24,24,24,24,24,24,24,23,22,21,22,24,24,23,22,21,22,24,24,23,22,21,22,24,24,24,24,24,24,24,24,25,26,27,26};
+        pikachu->Read(0,"/charmville/follower-pikachu.png");eevee->Read(0,"/charmville/follower-eevee.png");poochyena->Read(0,"/charmville/follower-poochyena.png");
         treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
-        int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
+        int followerSpacing=18;int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
         int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
         resetContactOutbox();
         // Slot 36's optional costume bank has broken casting frames in this quest.
@@ -174,7 +177,7 @@ global script Active
                     position->WriteString(line);position->Close();
                 }
             }
-            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);}
+            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);matchPalette(pikachu,follower_pikachu_colors);matchPalette(eevee,follower_eevee_colors);matchPalette(poochyena,follower_poochyena_colors);}
             if(!accountMode && channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
@@ -383,9 +386,9 @@ global script Active
             if(ticks%30==0){
                 file preference=new file("/charmville/party-followers.txt","r");
                 if(preference->isValid()){
-                    followerText[0]=0;preference->ReadString(followerText);preference->Close();
+                    followerText[0]=0;preference->ReadString(followerText);preference->Close();followerSpacing=field(followerText,6)==26?26:18;
                     for(int member=0;member<6;member++){
-                        int next=field(followerText,member);if(next!=277 && next!=280 && next!=283)next=0;
+                        int next=field(followerText,member);if(next!=277 && next!=280 && next!=283 && next!=25 && next!=133 && next!=286)next=0;
                         if(next!=partyFollowers[member]){partyFollowers[member]=next;lastFollowerDraw[member]=0;if(member==0)printf("CHARMVILLE_FOLLOWER %d\n",next);}
                     }
                 }
@@ -401,7 +404,7 @@ global script Active
             follower=partyFollowers[member];if(follower==0)continue;
             // Follow eighteen world pixels along the visited path, independent
             // of movement speed. Interpolate only inside a recorded segment.
-            int followerGap=18*(member+1);int walked=0;int fx=Hero->X;int fy=Hero->Y;int direction=Hero->Dir;bool trailReady=false;
+            int followerGap=followerSpacing*(member+1);int walked=0;int fx=Hero->X;int fy=Hero->Y;int direction=Hero->Dir;bool trailReady=false;
             for(int age=0;age<trailCount;age++){
                 int trail=(trailHead+511-age)%512;
                 int dx=trailX[trail]-fx;int dy=trailY[trail]-fy;
@@ -419,6 +422,9 @@ global script Active
                 int layer=fy+16<Hero->Y+16?2:6;
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
                 // The recorded foot point is (fx+8,fy+16), plus the56px HUD.
+                if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;pikachu->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-pikachuAnchorX[anchor],fy+72-pikachuAnchorY[anchor],32,40);}
+if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;eevee->Blit(layer,RT_SCREEN,frame*40,row*48,40,48,fx+8-eeveeAnchorX[anchor],fy+72-eeveeAnchorY[anchor],40,48);}
+if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;poochyena->Blit(layer,RT_SCREEN,frame*32,row*48,32,48,fx+8-poochyenaAnchorX[anchor],fy+72-poochyenaAnchorY[anchor],32,48);}
                 if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));treecko->Blit(layer,RT_SCREEN,frame*32,row*32,32,32,fx+8-16,fy+72-20,32,32);}
                 if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx+8-12,fy+72-20,24,32);}
                 if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));int anchor=row*6+frame;mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-mudkipAnchorX[anchor],fy+72-mudkipAnchorY[anchor],32,40);}

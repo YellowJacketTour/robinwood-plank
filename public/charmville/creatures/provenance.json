@@ -36,6 +36,24 @@
       "sha256": "23b51cc3494c60dc9d34b5dd4e508e0c2007fa6a468c19d7650c389946788efa",
       "frameWidth": 64,
       "displayFrame": 0
+    },
+    {
+      "sourcePath": "graphics/pokemon/pikachu/front.png",
+      "frameHeight": 64,
+      "speciesId": 25,
+      "file": "pikachu-front.png",
+      "sha256": "49e9816a16c0c886233e25d9b91f7ee86ac5083c93aa973a9b210528555f72ec",
+      "frameWidth": 64,
+      "displayFrame": 0
+    },
+    {
+      "sourcePath": "graphics/pokemon/eevee/front.png",
+      "frameHeight": 64,
+      "speciesId": 133,
+      "file": "eevee-front.png",
+      "sha256": "75082274772ded87333416a40c1883072c1117e8ac86dc5a6aaa435d4077f707",
+      "frameWidth": 64,
+      "displayFrame": 0
     }
   ],
   "commit": "5eff78649e7170a877b961ef0b3da13b81a16038",

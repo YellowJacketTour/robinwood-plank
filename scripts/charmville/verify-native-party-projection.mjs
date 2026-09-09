@@ -71,19 +71,21 @@ try{
   await writeFile(out+'/contacts.json',JSON.stringify({contacts,events,errors},null,2));
   assert.deepEqual(errors,[]);console.log('Three actual native contact events reached the parent in sequence without reward authority.');
  }else{
- const species=[277,280,283,277,280,283];
+ const species=[277,280,283,25,133,286];
  await page.evaluate(speciesIds=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds},'http://localhost:3021'),species);
  await page.waitForTimeout(800);
  async function move(key,ms){await page.keyboard.down(key);await page.waitForTimeout(ms);await page.keyboard.up(key);await page.waitForTimeout(200);}
  await move('ArrowDown',500);await move('ArrowRight',1500);await move('ArrowUp',450);await move('ArrowLeft',350);
  for(let i=0;i<6;i++)assert(events.includes(`CHARMVILLE_PARTY_DRAW ${i} ${species[i]}`),`Slot ${i} must draw`);
- await page.screenshot({path:out+'/six-followers.png'});
+ await page.screenshot({fullPage:true,path:out+'/six-followers.png'});
  const path='/Files/Homestead/charmville/party-followers.txt';
- assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),species.join('|'));
+ assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),[...species,18].join('|'));
  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds:[277,280,283,277,280,283,277]},'http://localhost:3021'));
- await page.waitForTimeout(500);assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),species.join('|'));
+ await page.waitForTimeout(500);assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),[...species,18].join('|'));
+ await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:follower-formation',formation:'relaxed'},'http://localhost:3021'));
+ await move('ArrowLeft',900);await page.screenshot({fullPage:true,path:out+'/six-followers-relaxed.png'});assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),[...species,26].join('|'));
  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds:[]},'http://localhost:3021'));
- await page.waitForTimeout(600);assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),'0|0|0|0|0|0');
+ await page.waitForTimeout(600);assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),'0|0|0|0|0|0|26');
  assert.deepEqual(errors,[]);await writeFile(out+'/verification.json',JSON.stringify({scope:'Synthetic six-member presentation projection; does not establish account ownership of six creatures.',events,errors},null,2));
  console.log('Six synthetic native projection slots rendered; oversized party rejected; clearing works.');
  }

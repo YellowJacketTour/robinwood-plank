@@ -19,7 +19,7 @@ export async function creatureRest(pool:Pool,token:string,raw?:unknown){const c=
   if(r){if(r.creature_id!==q.creatureId)throw new YardError("Request ID already used",409);}
   else{
    if(reason)throw new YardError(reason,409);
-   const v=(await c.query("SELECT v.hp,v.max_hp,b.pp,b.move_id FROM charmville_creature_entities e JOIN charmville_creature_vitals v ON v.creature_id=e.id LEFT JOIN charmville_creature_combat b ON b.creature_id=e.id WHERE e.id=$1 AND e.owner_profile_id=$2 AND e.acquisition_kind='starter' FOR UPDATE OF v",[q.creatureId,id])).rows[0];
+   const v=(await c.query("SELECT v.hp,v.max_hp,b.pp,b.move_id FROM charmville_creature_entities e JOIN charmville_creature_vitals v ON v.creature_id=e.id LEFT JOIN charmville_creature_combat b ON b.creature_id=e.id WHERE e.id=$1 AND e.owner_profile_id=$2 AND e.acquisition_kind IN ('starter','local-playtest') FOR UPDATE OF v",[q.creatureId,id])).rows[0];
    if(!v)throw new YardError("Choose an owned starter with health",403);const maxPp=v.move_id?moveStats(v.move_id)?.pp:undefined;
    if(v.hp===v.max_hp&&(maxPp===undefined||v.pp===maxPp))throw new YardError("This companion is already fully rested",409);
    if((await c.query("SELECT 1 FROM charmville_creature_rest WHERE profile_id=$1 AND status='pending'",[id])).rowCount)throw new YardError("Finish or cancel the current rest",409);
@@ -32,7 +32,7 @@ export async function creatureRest(pool:Pool,token:string,raw?:unknown){const c=
    else{
     if(reason||r.region_epoch!==a.region_epoch||r.sequence!==a.sequence)throw new YardError(reason??"Movement interrupted rest. Cancel and try again",409);
     if(!(await c.query("SELECT clock_timestamp()>=$1 AS ready",[r.ready_at])).rows[0].ready)throw new YardError("Rest is not finished yet",409);
-    const owned=await c.query("SELECT 1 FROM charmville_creature_entities WHERE id=$1 AND owner_profile_id=$2 AND acquisition_kind='starter' FOR SHARE",[r.creature_id,id]);if(!owned.rowCount)throw new YardError("Companion ownership changed",403);
+    const owned=await c.query("SELECT 1 FROM charmville_creature_entities WHERE id=$1 AND owner_profile_id=$2 AND acquisition_kind IN ('starter','local-playtest') FOR SHARE",[r.creature_id,id]);if(!owned.rowCount)throw new YardError("Companion ownership changed",403);
     await c.query("UPDATE charmville_creature_vitals SET hp=max_hp,revision=revision+1 WHERE creature_id=$1",[r.creature_id]);const combat=(await c.query("SELECT move_id FROM charmville_creature_combat WHERE creature_id=$1 FOR UPDATE",[r.creature_id])).rows[0];if(combat){const pp=moveStats(combat.move_id)?.pp;if(pp===undefined)throw new YardError("Unsupported move",409);await c.query("UPDATE charmville_creature_combat SET pp=$2 WHERE creature_id=$1",[r.creature_id,pp]);}
     await c.query("UPDATE charmville_creature_rest SET status='committed' WHERE profile_id=$1 AND request_id=$2",[id,q.requestId]);r.status="committed";
    }
@@ -41,7 +41,7 @@ export async function creatureRest(pool:Pool,token:string,raw?:unknown){const c=
  result={requestId:q.requestId,creatureId:r.creature_id,status:r.status};
  }
  const current=(await c.query("SELECT request_id AS \"requestId\",creature_id AS \"creatureId\",ready_at AS \"readyAt\",expires_at AS \"expiresAt\" FROM charmville_creature_rest WHERE profile_id=$1 AND status='pending'",[id])).rows[0]??null;const now=(await c.query("SELECT clock_timestamp() AS now")).rows[0].now;
- const candidates=(await c.query("SELECT e.id,v.hp,v.max_hp,b.move_id,b.pp FROM charmville_creature_entities e JOIN charmville_creature_vitals v ON v.creature_id=e.id LEFT JOIN charmville_creature_combat b ON b.creature_id=e.id WHERE e.owner_profile_id=$1 AND e.acquisition_kind='starter'",[id])).rows;
+ const candidates=(await c.query("SELECT e.id,v.hp,v.max_hp,b.move_id,b.pp FROM charmville_creature_entities e JOIN charmville_creature_vitals v ON v.creature_id=e.id LEFT JOIN charmville_creature_combat b ON b.creature_id=e.id WHERE e.owner_profile_id=$1 AND e.acquisition_kind IN ('starter','local-playtest')",[id])).rows;
  const eligibleCreatureIds=reason?[]:candidates.filter(v=>v.hp<v.max_hp||(v.move_id&&v.pp<(moveStats(v.move_id)?.pp??0))).map(v=>v.id);
  await c.query("COMMIT");return {eligible:reason===null,eligibleCreatureIds,reason,pending:current,serverNow:now.toISOString(),result};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}}

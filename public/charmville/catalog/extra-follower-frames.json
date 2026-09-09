@@ -1,0 +1,51 @@
+[
+  {
+    "id": "0025",
+    "name": "pikachu",
+    "species": 25,
+    "w": 32,
+    "h": 40,
+    "frames": 4,
+    "durations": [
+      8,
+      10,
+      8,
+      10
+    ],
+    "draw": "if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;pikachu->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-pikachuAnchorX[anchor],fy+72-pikachuAnchorY[anchor],32,40);}"
+  },
+  {
+    "id": "0133",
+    "name": "eevee",
+    "species": 133,
+    "w": 40,
+    "h": 48,
+    "frames": 7,
+    "durations": [
+      4,
+      4,
+      4,
+      4,
+      6,
+      2,
+      2
+    ],
+    "draw": "if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;eevee->Blit(layer,RT_SCREEN,frame*40,row*48,40,48,fx+8-eeveeAnchorX[anchor],fy+72-eeveeAnchorY[anchor],40,48);}"
+  },
+  {
+    "id": "0261",
+    "name": "poochyena",
+    "species": 286,
+    "w": 32,
+    "h": 48,
+    "frames": 5,
+    "durations": [
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "draw": "if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;poochyena->Blit(layer,RT_SCREEN,frame*32,row*48,32,48,fx+8-poochyenaAnchorX[anchor],fy+72-poochyenaAnchorY[anchor],32,48);}"
+  }
+]

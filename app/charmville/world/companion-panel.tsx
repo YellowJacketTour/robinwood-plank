@@ -1,5 +1,6 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
+import TestPartyPanel,{type TestProfile} from "./test-party-panel";
 import RestPanel from "./rest-panel";
 import {savedWalletProof} from "@/integrations/plankspace-app/app/auth-client";
 type Choice={speciesId:number;sourceName:string;sprite:string};
@@ -13,9 +14,10 @@ type Command=Feed|{speciesId:number}|{action:"following";companionId:string;foll
 const button="min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 const primary="min-h-11 rounded-lg border border-line-strong bg-gold-500 px-4 py-2 font-bold text-wood-950 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 function Sprite({choice}:{choice:Choice}) {return <div role="img" aria-label={choice.sourceName} className="mx-auto h-16 w-16 overflow-hidden" style={{backgroundImage:`url(${choice.sprite})`,backgroundPosition:"0 0",backgroundRepeat:"no-repeat",imageRendering:"pixelated"}}/>;}
-export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onPlay,onHomeReady}:{wallet:string;handle:string;onFollower?:(speciesId:number)=>void;onFollowers?:(speciesIds:number[])=>void;onPlay?:()=>void;onHomeReady?:()=>void}) {
+export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onFormation,onTestProfile,onPlay,onHomeReady}:{wallet:string;handle:string;onFollower?:(speciesId:number)=>void;onFollowers?:(speciesIds:number[])=>void;onFormation?:(formation:'close'|'relaxed')=>void;onTestProfile?:(profile:TestProfile)=>void|Promise<void>;onPlay?:()=>void;onHomeReady?:()=>void}) {
  const [state,setState]=useState<State|null>(null),[selection,setSelection]=useState<Choice|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [roster,setRoster]=useState<Roster|null>(null),[selectedSlot,setSelectedSlot]=useState(0);
+ const [formation,setFormation]=useState<'close'|'relaxed'>('close');
  const [vitals,setVitals]=useState<Vitals|null>(null);
  const pendingFeed=useRef<Feed|null>(null);
  const [pendingFeedId,setPendingFeedId]=useState<string|null>(null);
@@ -44,20 +46,23 @@ export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onP
    const rosterResponse=await fetch('/api/charmville/creature-roster',options);
    const nextRoster=await rosterResponse.json();if(controller.signal.aborted||current!==version.current)return;
    if(!rosterResponse.ok){setRoster(null);onFollowers?.([]);throw new Error(nextRoster.error??'Your party could not be loaded. Refresh to retry.');}
-   setRoster(nextRoster);onFollowers?.(data.companion?.following?nextRoster.slots.filter((entry:Creature|null)=>entry&&[277,280,283].includes(entry.speciesId)).map((entry:Creature)=>entry.speciesId):[]);
+   setRoster(nextRoster);onFollowers?.(data.companion?.following?nextRoster.slots.filter((entry:Creature|null)=>entry&&[277,280,283,25,133,286].includes(entry.speciesId)).map((entry:Creature)=>entry.speciesId):[]);
    const health=await fetch('/api/charmville/companions/vitals',options);const healthData=await health.json();if(controller.signal.aborted||current!==version.current)return;if(!health.ok){setVitals(null);throw new Error(healthData.error??'Companion health unavailable.');}setVitals(healthData);
   }catch(error){if(!controller.signal.aborted&&current===version.current)setMessage(error instanceof Error?error.message:"Party could not be saved. Refresh to check its state.");}
   finally{if(!controller.signal.aborted&&current===version.current)setBusy(false);}
  },[wallet,handle,onFollower,onFollowers,onHomeReady]);
  useEffect(()=>{let disposed=false;const versions=version,controllers=abort;void Promise.resolve().then(()=>{if(!disposed)void request();});return()=>{disposed=true;++versions.current;controllers.current?.abort();};},[request]);
  useEffect(()=>{const refresh=()=>{void request();};window.addEventListener('charmville:companion-health-changed',refresh);return()=>window.removeEventListener('charmville:companion-health-changed',refresh);},[request]);
+ const refresh=useCallback(()=>{void request();},[request]);
  const partner=state?.companion;
  const homeReady=state?.homeClaimed===true;
  const slots=roster?.slots??Array.from({length:6},()=>null);
  const selectedCreature=slots[selectedSlot];
  const selectedVitals=vitals?.creatures.find(creature=>creature.id===selectedCreature?.id);
  const feedReason=!selectedVitals?"Loading health…":selectedVitals.hp===0?"A fainted companion needs revival.":selectedVitals.hp>=selectedVitals.maxHp?"Already at full health.":!vitals||vitals.oranQuantity==="0"?"Gather an Oran Berry first.":"Uses one Oran Berry to restore up to 10 HP.";
- const selectedArt=state?.choices.find(choice=>choice.speciesId===selectedCreature?.speciesId);
+ const portraitNames:Record<number,string>={277:'treecko',280:'torchic',283:'mudkip',25:'pikachu',133:'eevee',286:'poochyena'};
+ const portrait=selectedCreature?portraitNames[selectedCreature.speciesId]:null;
+ const selectedArt=selectedCreature&&portrait?{speciesId:selectedCreature.speciesId,sourceName:portrait.toUpperCase(),sprite:`/charmville/creatures/${portrait}-front.png`}:null;
  return <section aria-label="Your companion" className="rounded-2xl border-2 border-line-strong bg-wood-900 p-4 text-cream shadow-lg">
   <p className="mb-1 text-[0.6875rem] font-bold uppercase tracking-widest text-gold-300">Charmdex</p>
   <div className="flex items-center justify-between gap-2 border-b border-line pb-2"><h2 className="font-display text-xl">Your party</h2><span className="text-sm text-cream-muted">{roster?`${slots.filter(Boolean).length} / 6`:'Loading…'}</span></div>
@@ -68,11 +73,13 @@ export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onP
    {selectedCreature&&<RestPanel key={`rest:${wallet}`} wallet={wallet} creatureId={selectedCreature.id}/>}
    <label className="mt-2 block text-sm">Slot {selectedSlot+1}<select aria-label={`Assign party slot ${selectedSlot+1}`} className="mt-1 min-h-11 w-full rounded-lg border border-line bg-wood-900 px-2 text-cream" disabled={busy} value={selectedCreature?.id??''} onChange={event=>{const next=slots.map(entry=>entry?.id??null);const chosen=event.target.value||null;for(let i=0;i<next.length;i++)if(chosen&&next[i]===chosen)next[i]=null;next[selectedSlot]=chosen;void request({action:'roster',revision:roster.revision,slots:next});}}><option value="">Empty</option>{roster.owned.map(entry=><option key={entry.id} value={entry.id}>{entry.nickname}</option>)}</select></label>
    {partner&&<div className="mt-3 border-t border-line pt-3"><p className="mb-3 text-sm text-cream-muted">{partner.following?"Your party is walking with you.":"Bring your party along."} Applies to all supported occupied slots.</p><div className="flex flex-wrap justify-center gap-2"><button type="button" className={partner.following?button:primary} disabled={busy} aria-pressed={partner.following} onClick={()=>void request({action:"following",companionId:partner.id,following:!partner.following,revision:partner.revision})}>{partner.following?"Return to party":"Walk with me"}</button>{onPlay&&<button type="button" className={button} disabled={busy} onClick={onPlay}>Return to play</button>}</div></div>}
+   {partner&&onFormation&&<div role="group" aria-label="Follower trail" className="mt-3 flex flex-wrap justify-center gap-2">{(['close','relaxed'] as const).map(mode=><button key={mode} type="button" className={button} aria-pressed={formation===mode} onClick={()=>{setFormation(mode);onFormation(mode);}}>{mode==='close'?'Close trail':'Relaxed trail'}</button>)}</div>}
   </div>}
 
   {state&&!homeReady&&!partner&&<div className="mb-3 rounded-lg border border-line bg-forest-900 p-3"><p className="mb-2 text-sm">Set up your saved home, then choose your first partner.</p><button type="button" className={primary} disabled={busy} onClick={()=>{homeRequestId.current??=crypto.randomUUID();void request({action:"claim-home",requestId:homeRequestId.current});}}>Set up home</button></div>}
   {partner?<p className="mt-3 text-sm text-cream-muted">Following uses the adventure camera. Battles and capture are not connected yet.</p>:<><p className="my-2 text-sm text-cream-muted">Choose one partner to begin.</p><div className="grid grid-cols-3 gap-2">{state?.choices.map(choice=><button key={choice.speciesId} aria-label={choice.sourceName} aria-pressed={selection?.speciesId===choice.speciesId} type="button" disabled={busy||!homeReady} className={`min-h-24 min-w-0 rounded-lg border px-1 py-2 text-[0.6875rem] font-bold text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50 ${selection?.speciesId===choice.speciesId?"border-line-strong bg-wood-800":"border-line bg-panel-soft"}`} onClick={()=>setSelection(choice)}><Sprite choice={choice}/><span className="block">{choice.sourceName}</span></button>)}</div></>}
   {selection&&!partner&&<div role="group" aria-label="Confirm companion" className="mt-3 rounded-lg border border-line p-3"><p className="mb-3 text-sm">Choose {selection.sourceName}? Your starter choice is permanent.</p><div className="flex flex-wrap gap-2"><button className={primary} type="button" disabled={busy} onClick={()=>void request({speciesId:selection.speciesId})}>Confirm companion</button><button className={button} type="button" disabled={busy} onClick={()=>setSelection(null)}>Back</button></div></div>}
+  <TestPartyPanel wallet={wallet} onChanged={refresh} onCreate={onTestProfile}/>
   {(busy||message)&&<p role="status" className="mt-3 text-sm text-cream-muted">{busy?"Loading your party…":message}</p>}<div className="mt-1 flex justify-end"><button type="button" className="min-h-11 text-xs text-cream-muted underline underline-offset-4 disabled:opacity-50" disabled={busy} onClick={()=>void request()}>Refresh companion</button></div>
  </section>;
 }
