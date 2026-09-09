@@ -91,3 +91,7 @@ test/e2e/.casino-keeper.pid
 
 # Session scratch -- never belongs in the repo
 *.tmp.sh
+
+# Scratch probe captures from live-API diagnosis. Evidence, not source.
+.w*.json
+.probe/
