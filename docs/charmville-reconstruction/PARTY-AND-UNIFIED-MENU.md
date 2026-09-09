@@ -29,3 +29,13 @@ Construction, felling, fishing and the connected skill system in this table are 
 ## Verified party checkpoint
 
 All three starter selections passed the actual account-to-native follow/return test. The party preference survives reload and uses owned UUID/revision checks. Enter opens the unified menu and Gear opens the native equipment screen. The three-bed planting/watering/harvest regression passed after the indexed PNG correction. Follower sprites use separate credited walking sources; Emerald battle portraits remain in the party panel. Native followers are local visual entities, not replicated shared combat entities.
+
+## New-account party acceptance (2026-09-09)
+
+A user screenshot exposed a missing prerequisite: starter selection failed because the account had no homestead, with no way to resolve it in the party screen. Previous browser checks preclaimed homes and therefore missed this experience.
+
+The party API now reports `homeClaimed`. Home setup must remain an explicit player action through the existing idempotent yard claim endpoint; opening the menu must never allocate resources. The party screen must expose this action before starter confirmation, preserve retry identity, show the selected partner and saved follow state, and provide a direct return to play. A fresh-account browser check must reach the native follower without preclaiming through a test API.
+
+This closes an onboarding gap, not the remaining shared-world integration gap: native movement and farm rewards still do not authoritatively mutate the account economy. Additional party slots, capture, battles and shared companion entities remain unfinished. Do not portray empty slots as implemented party capacity or a local follower as a networked creature.
+
+Verified: a fresh synthetic account now completes inline home setup, starter confirmation, persisted follow, Return to play, native follower drawing and return to party. The 390px layout also passed a lost-response home-claim retry using the same request ID. Home setup refreshes the enclosing account inventory. Existing accounts and user choices were not altered by these checks.
