@@ -5,6 +5,11 @@ Migration 110 adds commit notifications for multichain collections, snapshots,
 live orders, activity, tokens, token projection state, foreign rarity, and trait
 indexes stored in foreign rarity collection rows.
 
+Migration 111 maintains the browsing rank index in the source transaction,
+including newly discovered collections without snapshots. Statement triggers
+cover collection insertion/update and snapshot insertion/update/deletion;
+rollback also rolls back the derived rank. It repairs existing missing rows.
+
 One dedicated PostgreSQL LISTEN connection fans committed invalidations out to
 WebSocket subscribers. A separate SSE route supports hosts where Passenger or
 an upstream proxy does not forward WebSocket upgrades. Next's external rewrite
@@ -85,6 +90,8 @@ replace the former 500-transaction pagination cap. Hash, transaction/witness
 commitments, serialized length, and weight are checked before indexing.
 Backfill verifies each seam and never crosses a missing header. Phase timeout
 terminates the writer process instead of allowing late concurrent writes.
+Shutdown waits for the active tick before closing PostgreSQL, within the
+existing bounded exit grace.
 The public worker verdict uses current timestamps and progress, rather than
 mistaking historical unmatched attempts for live hung jobs.
 
@@ -145,3 +152,8 @@ requires rollback, drop only the `plank_changes_insert`,
 `plank_changes_update`, and `plank_changes_delete` triggers on the nine tables
 listed in migration 110, then drop `plank_notify_market_changes()`. Do not
 delete market tables or their data.
+
+Migration 111 is also compatible with the previous application. Its
+`plank_hub_rank_insert/update` triggers on collections and
+`plank_hub_rank_insert/update/delete` triggers on snapshots can be dropped to
+restore previous index maintenance, at the cost of delayed catalog visibility.
