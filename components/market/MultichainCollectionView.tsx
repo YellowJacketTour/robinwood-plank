@@ -963,7 +963,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (all || change.family === "orders") work.push(loadOffers());
     if (all || change.family === "activity") work.push(loadActivity());
     await Promise.allSettled(work);
-  });
+  }, 2_000);
 
   useEffect(() => {
     let cancelled = false;
