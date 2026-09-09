@@ -29,9 +29,22 @@ const WORKFLOW = readFileSync(
 );
 
 function job(): string {
-  const at = WORKFLOW.indexOf("cutover-bitcoin-existence:\n");
+  // Normalise line endings FIRST. This repo checks out with CRLF on Windows,
+  // so matching on "...:\n" silently finds nothing and every assertion below
+  // fails with "the job exists" -- blaming the workflow when the bug is in the
+  // lookup. Same species as a fixed-offset window: an assumption about text
+  // layout instead of a check.
+  const src = WORKFLOW.replace(/\r\n/g, "\n");
+  const at = src.indexOf("\n  cutover-bitcoin-existence:\n");
   assert.ok(at > 0, "the job exists");
-  return WORKFLOW.slice(at, at + 9000);
+  const rest = src.slice(at + 1);
+  // Bound by the next job's comment banner or key, never a guessed length --
+  // a fixed slice ran past the boundary and read a neighbour's prose once
+  // already tonight.
+  const banner = rest.indexOf("\n  # ---");
+  const key = rest.slice(1).search(/\n {2}[a-z][a-z0-9-]*:\n/);
+  const ends = [banner, key > 0 ? key + 1 : -1].filter((n) => n > 0);
+  return ends.length ? rest.slice(0, Math.min(...ends)) : rest;
 }
 
 test("the switch flips the MESH entry, not the hose's own", () => {
@@ -132,4 +145,29 @@ test("the hose's own cron line is NOT touched by either pattern", () => {
     "/usr/bin/env AKASHA_CHAINS=bitcoin PGPOOL_MAX=2 UV_THREADPOOL_SIZE=2 /node --env-file=/env /app/akasha-hose-standalone.mjs";
   const after = hose.replace("/usr/bin/env UV_THREADPOOL_SIZE=4", "MATCHED");
   assert.equal(after, hose, "the mesh anchor must not match the hose line");
+});
+
+test("the liveness check does not use a fixed tail window", () => {
+  // MEASURED 2026-09-09: `tail -n 200 | grep 'owning tip for'` REFUSED a
+  // healthy hose. The worker prints one ~400-char health line every 60s, so a
+  // 59-minute boot emits ~59 of them and the single "owning tip" line per boot
+  // is pushed out of a 200-line window by its own output. The refusal fired
+  // while the same log showed `locked at 966127` and `restored tape: 1
+  // cursors, 47 headers, 73 events`.
+  //
+  // Freshness is already answered by the `find -mmin -120` check on the FILE.
+  // This check only asks "has this worker ever locked a chain", so the whole
+  // log is the right window. A guessed line count is not a boundary.
+  const j = job();
+  assert.ok(
+    !/tail -n \d+ "\$log" \| grep -q 'owning tip for'/.test(j),
+    "a fixed tail can be outrun by the worker's own health output",
+  );
+  assert.ok(
+    /grep -q 'owning tip for' "\$log"/.test(j),
+    "search the whole log for the marker",
+  );
+  // And the freshness check must still be there -- searching the whole log
+  // without it would accept a hose that locked a chain days ago and died.
+  assert.ok(/find "\$log" -mmin -120/.test(j), "file freshness is still checked separately");
 });
