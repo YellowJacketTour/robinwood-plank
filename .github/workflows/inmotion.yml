@@ -1713,6 +1713,14 @@ jobs:
           armed=false
           if printf '%s' "$mesh_line" | grep -q "$FLAG"; then armed=true; fi
           echo "[cutover] current state: armed=$armed"
+          # PRINT THE LINE WE ARE ABOUT TO EDIT.
+          #
+          # An arm attempt failed with "expected exactly 1 changed line, got 0"
+          # and there was no way to see WHY from the outside: the sed anchor
+          # did not match, but the log never showed what it was matching
+          # against. A refusal that cannot name the text it failed on is the
+          # same blindness as a partial book that cannot say where it stopped.
+          echo "[cutover] mesh entry: $mesh_line"
 
           if [ "$direction" = "status" ]; then
             echo "CUTOVER_STATE={\"armed\":$armed}"
@@ -1783,8 +1791,20 @@ jobs:
           cron_new="$(mktemp)"
           trap 'rm -f "$cron_new"' EXIT
           if [ "$direction" = "arm" ]; then
+            # ANCHOR ON /usr/bin/env IN THE MESH LINE, not on a specific env
+            # var. The first attempt anchored on `/usr/bin/env
+            # UV_THREADPOOL_SIZE=4`, which is what the CURRENT workflow writes
+            # -- but the live crontab was installed by an earlier provisioning
+            # run whose variable list differed, so the sed matched nothing and
+            # the job refused with "expected exactly 1 changed line, got 0".
+            #
+            # A pattern that assumes today's exact variable order is a pattern
+            # that breaks whenever that list is edited. `/usr/bin/env` right
+            # after the lock path is the stable part of the line, and scoping
+            # the substitution to lines containing mesh-tick-standalone.mjs
+            # means no other entry can be touched even if it also uses env.
             printf '%s\n' "$current" \
-              | sed "s#/usr/bin/env UV_THREADPOOL_SIZE=4#/usr/bin/env $FLAG UV_THREADPOOL_SIZE=4#" \
+              | sed "\#mesh-tick-standalone\.mjs#s#/usr/bin/env #/usr/bin/env $FLAG #" \
               > "$cron_new"
           else
             printf '%s\n' "$current" | sed "s#$FLAG ##" > "$cron_new"
