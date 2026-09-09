@@ -39,6 +39,12 @@ export interface BitcoinRpc {
   getBestBlockHash(): Promise<string>;
   getBlock(hash: string): Promise<BitcoinBlock | null>;
   getBlockHeader(hash: string): Promise<{ hash: string; previousblockhash: string | null; height: number } | null>;
+  /**
+   * The hash at a HEIGHT. The forward walk never needs this -- it follows
+   * parent links from the tip -- but a backfill walks left through a range
+   * of heights and has no parent to follow until it has the block.
+   */
+  getBlockHashAtHeight?(height: number): Promise<string | null>;
 }
 
 export interface BitcoinAdapterOpts {

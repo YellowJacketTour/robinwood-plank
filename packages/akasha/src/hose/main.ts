@@ -96,6 +96,39 @@ export class Hose {
       this.backfill = new BackfillWorker({
         store: pg,
         ingestRange: async (chain, from, to) => {
+          // BITCOIN WALKS LEFT TOO.
+          //
+          // This function used to look only in the EVM adapter map. Bitcoin
+          // is booted into `this.bitcoin` and has no `endpoints` entry, so
+          // every call returned undefined and the worker reported "epoch
+          // produced no header" -- every 15 seconds, forever. `backfill_tail`
+          // was structurally pinned at the block the hose locked at, and
+          // `blocksToProtocolT0` could never fall below 198,651.
+          //
+          // Nothing crashed and the reason string read like a quiet chain,
+          // which is why it survived: a miss indistinguishable from "nothing
+          // happened". It replays through the SAME adapter that owns the tip,
+          // exactly as the EVM branch does, so the past and the present
+          // cannot decode differently.
+          if (chain === "bitcoin") {
+            const btc = this.bitcoin;
+            const rpc = this.bitcoinRpc;
+            if (!btc || !rpc?.getBlockHashAtHeight) return undefined;
+            let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
+            for (let h = to; h >= from; h--) {
+              const hash = await rpc.getBlockHashAtHeight(h);
+              if (!hash) continue;
+              await btc.ingestBlock(hash);
+              // Read the header back from the store rather than trusting the
+              // walk: ingestBlock is what actually wrote it, and the backfill
+              // verifies the hash-link against exactly that record.
+              const stored = this.store.headersAtHeight("bitcoin", h);
+              const header = stored[stored.length - 1];
+              if (header) lowest = header;
+            }
+            return lowest;
+          }
+
           // EVM epochs replay through the same adapter that owns the tip, so
           // the past and the present cannot decode differently.
           const adapter = this.evm.get(chain);

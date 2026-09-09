@@ -67,6 +67,16 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
     return String(await this.get(`/block-height/${height}`, false));
   }
 
+  /** Esplora's /block-height/{n}; the same endpoint getBestBlockHash uses. */
+  async getBlockHashAtHeight(height: number): Promise<string | null> {
+    try {
+      const hash = String(await this.get(`/block-height/${height}`, false));
+      return /^[0-9a-f]{64}$/i.test(hash) ? hash : null;
+    } catch {
+      return null;
+    }
+  }
+
   async getBlockHeader(
     hash: string,
   ): Promise<{ hash: string; previousblockhash: string | null; height: number } | null> {
