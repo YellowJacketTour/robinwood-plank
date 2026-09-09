@@ -175,3 +175,11 @@ Six distinct database fixture creatures now pass through the authenticated roste
 The source pipeline preserves107 animation entries (102 physical sets,314 source files including existing metadata) for Treecko, Torchic and Mudkip. These are animation assets, not107 implemented moves. Pure command-policy tests cover ownership, target validity and bounded livestock intent; live combat AI remains unconnected.
 
 `SWARM-WORK-QUEUE.md` and its JSON sibling map every progress-table row plus explicit subsequent requirements into106 work items across8 lanes. Three workers run concurrently with a coordinator; queued items are not active work or completion evidence.
+
+## 2026-09-09 saved garden access and source grounding
+
+The world shell now exposes the existing saved Porch garden through a Garden tab and the native Enter menu. Browser checks verify keyboard harvest, authoritative inventory quantity shown automatically in Inventory, replanting and growth state after tab return, and390/600px layout. This is remote home management using existing crop definitions; it does not assert that native reference-camera farming is authoritative or that a full agriculture catalogue is complete.
+
+Follower feet now use the preserved source ground markers rather than generic sprite-center offsets. All112 marker checks and a six-follower runtime check pass. Route reversals can still overlap, and shared creature collision/AI is not implemented.
+
+`PERF-BASELINE.md` records a reproducible desktop-Chromium baseline at two viewport sizes and its limits. Browser rAF cadence is not engineFPS and a narrow viewport is not a physical mobile device.

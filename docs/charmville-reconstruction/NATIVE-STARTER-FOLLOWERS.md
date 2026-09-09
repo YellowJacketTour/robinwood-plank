@@ -12,7 +12,7 @@ Emerald's local source has battle sprites and icons for these starters, not suit
 | 280 Torchic | sprite/0255 | 24 × 32 | 8,8,8,8 |
 | 283 Mudkip | sprite/0258 | 32 × 40 | 4,6,4,6,6,4 |
 
-These source rows are S, SE, E, NE, N, NW, W, SW. Native four-direction movement selects rows 0,2,4,6. Sprites retain original dimensions; no battle front sprite is passed off as walking art. Source offset/shadow sheets are preserved but are not yet rendered separately.
+These source rows are S, SE, E, NE, N, NW, W, SW. Native four-direction movement selects rows 0,2,4,6. Sprites retain original dimensions; no battle front sprite is passed off as walking art. Source offset/shadow sheets are preserved. White markers in Walk-Shadow define the per-frame ground origin; the colored diagnostic shadow sheet itself is not rendered. Treecko and Torchic use fixed source origins, while Mudkip uses all48 per-direction/frame origins. This corrects a four-pixel elevated baseline and Mudkip frame-dependent drift. verify-follower-anchors.mjs checks all112 source frame markers against native anchors.
 
 ## Bridge and movement
 

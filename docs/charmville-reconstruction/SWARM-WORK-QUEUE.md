@@ -6,9 +6,9 @@ Capacity: one integration coordinator and three concurrent workers. Every progre
 
 ## Current assignments
 
-- Native worker: six-follower rendering, path continuity and visual verification.
-- State worker: normalized ownership and six-slot roster; migrations and isolation tests.
-- Experience worker: actual roster controls, group-follow bridge and device checks.
+- Native worker: source-ground anchors and path/warp visual verification.
+- State worker: saved action intent verification and desktop/mobile performance baseline.
+- Experience worker: saved garden access inside the game shell and fullscreen menu.
 - Coordinator: cross-system test, evidence reconciliation, source preservation and next work dispatch.
 
 ## Dispatch order and integration gates

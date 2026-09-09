@@ -58,6 +58,9 @@ global script Active
         waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");
         hair->Read(0,"/charmville/gold-hair.png");
         bitmap treecko=new bitmap();bitmap torchic=new bitmap();bitmap mudkip=new bitmap();
+        // Exact white ground-origin markers from PMD Walk-Shadow.png, row-major.
+        int mudkipAnchorX[]={16,16,16,16,16,16,16,16,18,19,20,18,16,16,18,19,19,18,16,16,18,19,20,18,16,16,16,16,16,16,16,16,14,13,12,14,16,16,14,13,13,14,16,16,14,13,12,14};
+        int mudkipAnchorY[]={24,25,26,27,27,26,24,24,25,26,27,26,24,24,24,24,24,24,24,24,23,22,21,22,24,24,23,22,21,22,24,24,23,22,21,22,24,24,24,24,24,24,24,24,25,26,27,26};
         treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
         int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
         int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
@@ -301,9 +304,10 @@ global script Active
                 int row=direction==DIR_UP?4:(direction==DIR_LEFT?6:(direction==DIR_DOWN?0:2));
                 int layer=fy+16<Hero->Y+16?2:6;
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));treecko->Blit(layer,RT_SCREEN,frame*32,row*32,32,32,fx-8,fy+48,32,32);}
-                if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx-4,fy+48,24,32);}
-                if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx-8,fy+44,32,40);}
+                // The recorded foot point is (fx+8,fy+16), plus the56px HUD.
+                if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));treecko->Blit(layer,RT_SCREEN,frame*32,row*32,32,32,fx+8-16,fy+72-20,32,32);}
+                if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx+8-12,fy+72-20,24,32);}
+                if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));int anchor=row*6+frame;mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-mudkipAnchorX[anchor],fy+72-mudkipAnchorY[anchor],32,40);}
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
             }
             }

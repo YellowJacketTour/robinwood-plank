@@ -30,5 +30,6 @@ try {
  const opening=page.context().waitForEvent('page');await menu.getByRole('button',{name:'Party',exact:true}).click();
  const party=await opening;await party.waitForURL('http://localhost:3017/charmville/world?panel=companions');
  assert(page.url().startsWith('http://localhost:3021/play/'));
+ await page.locator('canvas').click();await page.keyboard.press('Enter');await menu.waitFor({state:'visible'});const gardenOpening=page.context().waitForEvent('page');await menu.getByRole('button',{name:'Garden',exact:true}).click();const garden=await gardenOpening;await garden.waitForURL('http://localhost:3017/charmville/world?panel=garden');
  console.log('PASS Enter unified menu, native Gear forwarding, no native pause leakage, catalogue typing, Party destination');
 }finally{await browser.close();}

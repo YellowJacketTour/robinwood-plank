@@ -4,6 +4,7 @@ import {stat,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {adventureUrl,diagnosticKits} from './adventure-entry.mjs';
 import {midiBankManifest} from './midi-bank.mjs';
+import {encodedStatic} from './static-encoding.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
 const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
@@ -96,7 +97,11 @@ http.createServer(async(req,res)=>{
    }
    res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end(html);return;
   }
-  res.writeHead(200,{...headers,'Content-Type':types[path.extname(file)]||'application/octet-stream'});
+  const fileInfo=await stat(file);
+  const compressed=await encodedStatic(file,fileInfo,req.headers);
+  res.writeHead(200,{...headers,'Content-Type':types[path.extname(file)]||'application/octet-stream',Vary:'Accept-Encoding','Content-Length':compressed?.length??fileInfo.size,...(compressed?{'Content-Encoding':'gzip'}:{})});
+  if(req.method==='HEAD'){res.end();return;}
+  if(compressed){res.end(compressed);return;}
   const stream=createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);
  }catch(error){res.writeHead(404,{...headers,'Content-Type':'text/plain'});res.end(`Reference resource unavailable: ${error.code||'content adapter error'}`);}
 }).listen(3021,'127.0.0.1',()=>console.log('Local reference runtime: http://localhost:3021/play/?open=quests/purezc/139&storage=idb'));
