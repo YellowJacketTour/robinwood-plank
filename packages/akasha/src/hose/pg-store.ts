@@ -36,6 +36,7 @@ import type {
   Gap,
   Header,
 } from "../shared/types.ts";
+import type { Hex } from "../shared/hex.ts";
 
 /** Minimal driver surface, so this file does not depend on a pg build. */
 export interface SqlClient {
@@ -152,6 +153,30 @@ export class PostgresArchiveStore extends ArchiveStore {
         h.logsBloom ? hexToBuf(h.logsBloom) : null,
         h.receiptsRoot ? hexToBuf(h.receiptsRoot) : null,
       ],
+    );
+  }
+
+  /**
+   * Correct a header's parent hash in place.
+   *
+   * putHeader is deliberately ON CONFLICT DO NOTHING -- a header is immutable
+   * once seen, and re-writing one on every re-walk would be pure churn. That
+   * is right for the normal path and WRONG for a repair: the lock block was
+   * written at boot with `parentHash = its own hash`, a placeholder, and
+   * DO NOTHING means no amount of re-writing the correct value would ever
+   * replace it. The repair would have looked like it worked (the in-memory
+   * store updates) while the durable row stayed poisoned.
+   *
+   * Narrow on purpose: it only ever replaces a SELF-PARENT, which no real
+   * non-genesis block has. A general "update any parent hash" would be a way
+   * to rewrite history.
+   */
+  repairSelfParent(chain: ChainId, hash: Hex, parentHash: Hex): void {
+    super.putHeader({ chain, hash, parentHash, height: this.getHeader(chain, hash)?.height ?? 0 });
+    this.enqueue(
+      `UPDATE akasha_header SET parent_hash = $3
+        WHERE chain = $1 AND hash = $2 AND parent_hash = $2`,
+      [chain, hexToBuf(hash), hexToBuf(parentHash)],
     );
   }
 

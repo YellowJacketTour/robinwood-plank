@@ -293,3 +293,102 @@ test("the stubs above match the real backfillTick, clause for clause", () => {
   ok(/tailMoved !== true/.test(body), "no progress must end the walk, not spin");
   ok(/Date\.now\(\) < until/.test(body), "and the walk must be wall-clock bounded");
 });
+
+/**
+ * THE SELF-PARENT LOCK HEADER: why Bitcoin's past never opened.
+ *
+ * bootBitcoin wrote the lock block as `parentHash: asHex(hash)` -- the block
+ * naming ITSELF as its own parent. A placeholder, and the reason 198,651
+ * blocks of Ordinals history stayed unreachable.
+ *
+ * The backfill's hash-link guard is correct and load-bearing: before moving
+ * the tail it checks that the block just below is the parent of the block it
+ * already holds. Against a self-parent it compared block N-1's REAL hash to
+ * block N's FAKE parent, never matched, refused to move, and enqueued a
+ * bloom_audit gap -- every 15 seconds, forever.
+ *
+ * Measured live 2026-09-09: tail pinned at 966081, blocksToProtocolT0 stuck at
+ * 198,651, while the tip advanced past 966176 and runs climbed to 32. The
+ * forward walk worked perfectly; the backward walk could not take its first
+ * step. Bitcoin's catalog sat at 19,628 because essentially every Ordinals
+ * collection was minted in blocks the archive could not reach.
+ *
+ * A genesis block IS its own parent. No other block is, and a lock block is
+ * not genesis.
+ */
+test("a self-parent lock header blocks the backfill's first step", () => {
+  const store = newStore();
+  const LOCK = 966_081;
+  // Exactly what bootBitcoin used to write.
+  store.putHeader({
+    chain: "bitcoin",
+    height: LOCK,
+    hash: toHex(h(LOCK)),
+    parentHash: toHex(h(LOCK)), // <- the placeholder
+  });
+  const below = store.headersAtHeight("bitcoin", LOCK - 1);
+  const lock = store.headersAtHeight("bitcoin", LOCK).find((x) => x.height === LOCK)!;
+  // The guard's own rule, reproduced: can the block below be the parent?
+  const linked = below.some((x) => x.hash.toLowerCase() === lock.parentHash.toLowerCase());
+  eq(linked, false, "a self-parent can never hash-link to the block below it");
+  eq(
+    lock.parentHash.toLowerCase(),
+    lock.hash.toLowerCase(),
+    "precondition: this is the poisoned shape"
+  );
+});
+
+test("a real parent lets the backfill link across the lock block", () => {
+  const store = newStore();
+  const LOCK = 966_081;
+  store.putHeader({
+    chain: "bitcoin",
+    height: LOCK,
+    hash: toHex(h(LOCK)),
+    parentHash: toHex(h(LOCK - 1)), // the RPC's previousblockhash
+  });
+  store.putHeader({
+    chain: "bitcoin",
+    height: LOCK - 1,
+    hash: toHex(h(LOCK - 1)),
+    parentHash: toHex(h(LOCK - 2)),
+  });
+  const below = store.headersAtHeight("bitcoin", LOCK - 1);
+  const lock = store.headersAtHeight("bitcoin", LOCK).find((x) => x.height === LOCK)!;
+  const linked = below.some((x) => x.hash.toLowerCase() === lock.parentHash.toLowerCase());
+  ok(linked, "with the real parent the guard links and the tail may move");
+});
+
+test("boot reads the real previousblockhash, and repairs a poisoned row", () => {
+  // The fix has to do BOTH. Writing the real parent only helps a hose booting
+  // for the first time; production already has the placeholder, and
+  // `if (!existing)` skips straight past it. A fix that only helps new
+  // installs is not a fix for the system that has the problem.
+  const src = readFileSync(
+    fileURLToPath(new URL("../src/hose/main.ts", import.meta.url)),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+  ok(/parentHash = header\?\.previousblockhash/.test(src) ||
+     /parentHash = header\.previousblockhash/.test(src),
+    "boot must read the RPC's real parent");
+  ok(!/parentHash: asHex\(hash\),/.test(src), "and must never write a self-parent again");
+  ok(/repairSelfParent/.test(src), "and must repair a row already written with one");
+});
+
+test("the repair cannot be a silent no-op", () => {
+  // putHeader is ON CONFLICT DO NOTHING -- correct for immutable headers, and
+  // fatal for a repair: the in-memory store would update while the durable row
+  // kept the placeholder, so the fix would report success and change nothing.
+  const src = readFileSync(
+    fileURLToPath(new URL("../src/hose/pg-store.ts", import.meta.url)),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+  const at = src.indexOf("repairSelfParent");
+  ok(at > 0, "an explicit repair path must exist");
+  const body = src.slice(at, src.indexOf("\n  }", at));
+  ok(/UPDATE akasha_header SET parent_hash/.test(body), "it must UPDATE, not INSERT");
+  // Narrow on purpose: only ever replaces a self-parent, which no real
+  // non-genesis block has. A general parent rewrite would be a way to rewrite
+  // history.
+  ok(/parent_hash = \$2/.test(body), "and only where the parent IS the hash");
+});

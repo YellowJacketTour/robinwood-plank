@@ -193,14 +193,19 @@ export class Hose {
     const pinned = this.cfg.t0?.bitcoin;
     let height: number;
     let hash: string;
+    // The lock block's REAL parent, so the backfill can hash-link across it.
+    let parentHash: string | null = null;
     if (pinned) {
       height = pinned.height;
       hash = pinned.hash;
+      const header = await rpc.getBlockHeader(hash).catch(() => null);
+      parentHash = header?.previousblockhash ?? null;
     } else {
       hash = await rpc.getBestBlockHash();
       const header = await rpc.getBlockHeader(hash);
       if (!header) throw new Error("bitcoin: could not read the tip header to lock at");
       height = header.height;
+      parentHash = header.previousblockhash ?? null;
     }
 
     const existing = this.store.getCursor("bitcoin");
@@ -216,13 +221,64 @@ export class Hose {
         streamAlive: false,
         streamKind: "zmq",
       });
+      // THE LOCK BLOCK'S REAL PARENT, NOT A SELF-REFERENCE.
+      //
+      // This wrote `parentHash: asHex(hash)` -- the block naming ITSELF as its
+      // own parent. That placeholder is why Bitcoin's past never opened.
+      //
+      // The backfill's hash-link guard is correct and load-bearing: before it
+      // moves the tail it checks that the block just below is the parent of
+      // the block already held. With a self-parent it compared block N-1's
+      // REAL hash against block N's FAKE parent, never matched, refused to
+      // move, and enqueued a bloom_audit gap -- every 15 seconds, forever.
+      //
+      // Measured live 2026-09-09: tail pinned at 966081 with
+      // blocksToProtocolT0 stuck at 198,651 while the tip advanced past
+      // 966176. The forward walk worked; the backward walk could not take its
+      // first step, so 198,651 blocks of Ordinals history -- which is where
+      // essentially every Bitcoin collection was minted -- stayed unreachable
+      // and the catalog sat at 19,628.
+      //
+      // Same species as every other bug in this package: nothing crashed, the
+      // guard reported a reason, and a placeholder was mistaken for evidence.
+      // A genesis block IS its own parent; no other block is, and the lock
+      // block is not genesis.
       this.store.putHeader({
         chain: "bitcoin",
         height,
         hash: asHex(hash),
-        parentHash: asHex(hash),
+        // Fall back to the self-parent only when the RPC could not tell us --
+        // that at least keeps the archive internally consistent, and the guard
+        // will simply decline to move rather than link to something wrong.
+        parentHash: asHex(parentHash ?? hash),
       });
     }
+    // REPAIR AN ALREADY-POISONED LOCK HEADER.
+    //
+    // The fix above only helps a hose booting for the FIRST time. Production
+    // has been running with the self-parent placeholder since the cutover, so
+    // the row already exists and `if (!existing)` skips right past it -- the
+    // backfill would stay stuck forever on a database that has already seen
+    // this bug. A fix that only helps new installs is not a fix for the
+    // system that has the problem.
+    const lock = this.store.headersAtHeight("bitcoin", height).find((h) => h.height === height);
+    if (lock && parentHash && lock.parentHash.toLowerCase() === lock.hash.toLowerCase()) {
+      console.log(
+        `[hose] bitcoin: repairing self-parent lock header at ${height} ` +
+          `(${lock.hash.slice(0, 10)} -> parent ${parentHash.slice(0, 10)})`,
+      );
+      // NOT putHeader: it is ON CONFLICT DO NOTHING, so the durable row would
+      // keep the placeholder while the in-memory store looked repaired -- a
+      // fix that reports success and changes nothing.
+      this.pg?.repairSelfParent("bitcoin", asHex(hash), asHex(parentHash));
+      this.store.putHeader({
+        chain: "bitcoin",
+        height,
+        hash: asHex(hash),
+        parentHash: asHex(parentHash),
+      });
+    }
+
     this.initPins("bitcoin", height);
     console.log(
       `[hose] bitcoin: locked at ${height}, protocol_t0 ${protocolT0("bitcoin")} ` +
