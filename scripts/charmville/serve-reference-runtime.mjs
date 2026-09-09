@@ -10,6 +10,11 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
+  if(url.pathname.startsWith('/action-sprites/')){
+   const name=url.pathname.slice('/action-sprites/'.length);
+   if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
+   res.writeHead(200,{...headers,'Content-Type':name.endsWith('.json')?'application/json':'image/png'});res.end(await readFile(path.resolve('../charmville-references/charmville-native-homestead/action-sprites',name)));return;
+  }
   if(url.pathname==='/charmville/tutorial/'){
    const entry=new URL(adventureUrl(),'http://localhost:3021');entry.searchParams.set('test','/quests/charmville/homestead/r01/Homestead.qst');res.writeHead(302,{...headers,Location:entry.pathname+entry.search});res.end();return;
   }
@@ -63,7 +68,14 @@ http.createServer(async(req,res)=>{
      const start=document.createElement('button');start.textContent='Enter the world';start.className='panel-button';
      document.querySelector('.panel-buttons').prepend(start);
      start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading worldâ€¦';
-      try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});start.remove();}
+      try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) {
+       if(src==='../zplayer.js' && new URLSearchParams(location.search).get('test')?.includes('/homestead/')){
+        const response=await fetch('/action-sprites/manifest.json');if(!response.ok)throw Error('Sprite manifest unavailable');const assets=await response.json();
+        const loaded=await Promise.all(assets.map(async asset=>{const response=await fetch('/action-sprites/'+asset.name);if(!response.ok)throw Error('Sprite unavailable');return {name:asset.name,bytes:new Uint8Array(await response.arrayBuffer())};}));
+        (Module.preRun??=[]).push(()=>{FS.mkdirTree('/charmville');for(const asset of loaded)FS.writeFile('/charmville/'+asset.name,asset.bytes);});
+       }
+       await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});
+      }start.remove();}
       catch{start.textContent='Loading failed â€” reload to retry';}
      },{once:true});
     </script><script type="module" src="/charmville-display.js"></script><script type="module" src="/charmville-controller.js"></script></body>`);
