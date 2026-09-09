@@ -171,3 +171,34 @@ test("the liveness check does not use a fixed tail window", () => {
   // without it would accept a hose that locked a chain days ago and died.
   assert.ok(/find "\$log" -mmin -120/.test(j), "file freshness is still checked separately");
 });
+
+test("the arm anchor does not assume today's env-var list", () => {
+  // MEASURED 2026-09-09: the first arm attempt passed every liveness check and
+  // then refused with "expected exactly 1 changed line, got 0". The anchor was
+  // `/usr/bin/env UV_THREADPOOL_SIZE=4` -- what the CURRENT workflow writes --
+  // but the live crontab came from an earlier provisioning run whose variable
+  // list differed, so the sed matched nothing.
+  //
+  // A pattern that encodes today's exact variable order breaks whenever that
+  // list is edited, and the failure looks like a broken switch rather than a
+  // stale pattern. `/usr/bin/env` is the stable part; scoping the substitution
+  // to lines containing mesh-tick-standalone.mjs is what keeps it targeted.
+  const j = job();
+  assert.ok(
+    !/s#\/usr\/bin\/env UV_THREADPOOL_SIZE=4#/.test(j),
+    "anchoring on one env var makes the switch stale the moment that list changes",
+  );
+  assert.ok(
+    /mesh-tick-standalone\\.mjs#s#\/usr\/bin\/env /.test(j),
+    "the substitution must be address-scoped to the mesh line",
+  );
+});
+
+test("the switch prints the line it is about to edit", () => {
+  // The failed arm gave no way to see WHY the anchor missed: it never showed
+  // the text it was matching against. A refusal that cannot name the line it
+  // failed on is the same blindness as a partial book that cannot say where
+  // it stopped.
+  const j = job();
+  assert.ok(/mesh entry: \$mesh_line/.test(j), "the mesh entry must be logged before any edit");
+});
