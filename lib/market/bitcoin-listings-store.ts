@@ -132,7 +132,10 @@ export async function getActiveNativeBitcoinListings(limit = 200): Promise<Nativ
 
 export async function getNativeBitcoinListingsBySeller(sellerAddress: string): Promise<NativeBitcoinListing[]> {
   const result = await postgresQuery<ListingRow>(
-    `SELECT * FROM market_native_bitcoin_listings WHERE seller_address = $1 ORDER BY created_at DESC`,
+    `SELECT * FROM market_native_bitcoin_listings WHERE seller_address = $1 ORDER BY created_at DESC
+      -- Bounded: this is reachable from a public ?maker=/?seller= param and
+      -- had no LIMIT at all, so one request could select every row.
+      LIMIT 500`,
     [sellerAddress]
   );
   return result.rows.map(rowToListing);
