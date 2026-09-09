@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { hasPostgresConfig, postgresQuery } from "../../lib/postgres";
 import { metadataCountersToShape, metadataIsFinal, RARITY_PROVISIONAL_THRESHOLD } from "../../lib/market/multichain/archival-ledger";
-import { provisionalTraitsLabel, PROVISIONAL_TRAITS_THRESHOLD } from "../../components/market/hydration/MetadataCoverageBar";
+import { MetadataCoverageBar, provisionalTraitsLabel, PROVISIONAL_TRAITS_THRESHOLD } from "../../components/market/hydration/MetadataCoverageBar";
 import { rarityDemandJob, rarityDemandSource, RARITY_DEMAND_PRIORITY } from "../../lib/market/multichain/rarity-index-runner";
 
 /**
@@ -141,4 +143,20 @@ test("finished is finished: all-terminal with every trait-less token confirmed e
   // Still fetching: not final regardless of the empty count.
   const fetching = metadataCountersToShape({ expected: 1_000, terminal: 500, empty: 40, withTraits: 460, withImage: 460 });
   assert.equal(fetching.provisional, true);
+});
+
+
+test("metadata progress remains visible until terminal verification proves completion", () => {
+  const render = (terminal: number) => renderToStaticMarkup(createElement(MetadataCoverageBar, {
+    metadataCoverage: 1, metadataTokens: 10_000, knownTokens: 10_000,
+    traitsCoverage: 0.9995,
+    metadataCounters: { expected: 10_000, terminal, withTraits: 9_995, withImage: 10_000, empty: 5 },
+  }));
+  assert.match(render(5_727), /metadata verification incomplete/);
+  assert.equal(render(10_000), "");
+  const unknown = renderToStaticMarkup(createElement(MetadataCoverageBar, {
+    metadataCoverage: null, metadataTokens: null, knownTokens: null,
+  }));
+  assert.match(unknown, /Not yet measured/);
+  assert.doesNotMatch(unknown, /null%/);
 });

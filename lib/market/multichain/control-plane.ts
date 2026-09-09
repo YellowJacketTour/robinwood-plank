@@ -149,6 +149,14 @@ export type DataJobInput = {
   preserveNotBefore?: boolean;
 };
 
+/** Resource identity, independent of which UI/request producer asked for it. */
+export function canonicalDataJobKey(input: DataJobInput): string {
+  if (!input.jobKey.startsWith("demand:") || !input.chainSlug || !input.subject
+    || input.kind !== `mesh-lane:${input.chainSlug}`) return input.jobKey;
+  const subject = /^0x[0-9a-f]{40}$/i.test(input.subject) ? input.subject.toLowerCase() : input.subject;
+  return `demand:${input.source}:${input.chainSlug}:${subject}`;
+}
+
 /** Deduplicated enqueue. New demand raises priority and may pull work forward. */
 export async function enqueueDataJob(input: DataJobInput): Promise<number> {
   const result = await postgresQuery<{ id: string }>(
@@ -166,7 +174,7 @@ export async function enqueueDataJob(input: DataJobInput): Promise<number> {
        -- throughput telemetry counts completions in a window, not statuses.
        updated_at = NOW()
      RETURNING id::text`,
-    [input.jobKey, input.kind, input.source, input.chainSlug ?? null, input.subject ?? null,
+    [canonicalDataJobKey(input), input.kind, input.source, input.chainSlug ?? null, input.subject ?? null,
       JSON.stringify(input.payload ?? {}), input.priority ?? 0, input.notBefore ?? new Date(), input.preserveNotBefore ?? false]
   );
   return Number(result.rows[0].id);
