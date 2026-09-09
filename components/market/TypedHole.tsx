@@ -5,25 +5,26 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * Measured on production 2026-09-09, signed in through the backstage door:
- * 80 % of Global Market rows had no holder count, 85 % no listed count, 68 %
- * no creator badge, 68 % had real sales and a blank 24 h change. Every one of
- * them rendered as the same character: an em-dash.
+ * Measured on production 2026-09-09, signed in through the backstage door so
+ * the Global Market Hub actually renders: 80 % of rows had no holder count,
+ * 85 % no listed count, 68 % no creator badge, and 68 % had real sales with a
+ * blank 24 h change. Every one of them rendered as the same character: an
+ * em-dash.
  *
- * That dash is the most expensive character on the site. It cannot be
- * distinguished from zero, from "not fetched yet", from "this chain has no
- * source for it", or from "we tried and failed -- and because it cannot be
- * distinguished, nobody can act on it. Not the visitor, not the scheduler, not
- * the person reading a bug report.
+ * That dash is the most expensive character on the site. It cannot be told
+ * apart from zero, from "not fetched yet", from "this chain has no source for
+ * it", or from "we tried and failed" -- and because it cannot be told apart,
+ * nobody can act on it. Not the visitor, not the scheduler, not the person
+ * reading a bug report.
  *
- * The reasoning already existed and was already good: `emptyCellReason` in
+ * The reasoning already existed and was already good. `emptyCellReason` in
  * GlobalMarketHub.tsx explains, per chain and per field, exactly why a value
- * is absent, and its own comment records that these strings were rewritten
- * once already to stop promising data the pipeline could not deliver. The
- * whole of that truth was then hidden behind a `title` attribute -- invisible
- * until hover, and on a touch device invisible entirely.
+ * is absent, and its own comment records that those strings were rewritten
+ * once already to stop promising data the pipeline could not deliver. All of
+ * that truth was then delivered through a `title` attribute -- invisible until
+ * a ~1 s hover, absent entirely on touch, and unreliable to a screen reader.
  *
- * So this component changes no data and invents no value. It makes an
+ * So this component invents no value and changes no data. It makes an
  * explanation that was always there legible, and gives it a shape the rest of
  * the system can use.
  *
@@ -38,17 +39,17 @@
  *                                                 correct, not broken
  *   none       the chain says there are zero   -> a FACT, and it renders as 0
  *
- * Collapsing these four into one dash is what made 80 % missing look like a
+ * Collapsing these four into one dash is what made "80 % missing" look like a
  * defect rather than a work queue. `none` in particular is not a hole at all:
- * a collection with genuinely zero listings should show 0, and showing a dash
- * there is a lie of omission.
+ * a collection with genuinely zero listings should show 0, and a dash there is
+ * a lie of omission.
  *
  * WHAT THIS IS NOT
  * ----------------
  * Not a loading spinner, and not a guess. A hole never becomes a plausible
- * number while nobody is looking. The archive's own rule -- say what you can
- * prove, render a typed hole for the rest -- applied to every cell in the UI
- * rather than only to chain coverage.
+ * number while nobody is looking. This is the archive's own rule -- say what
+ * you can prove, render a typed hole for the rest -- applied to every cell in
+ * the UI rather than only to chain coverage.
  */
 
 export type HoleKind = "unfetched" | "unsourced" | "underived" | "none";
@@ -67,8 +68,8 @@ export interface TypedHoleProps {
  * The short text each kind shows inline.
  *
  * Deliberately lowercase and quiet: a hole must not shout louder than a real
- * value, or a table of mostly-holes becomes unreadable and the real numbers
- * stop standing out. The colour and the tooltip carry the detail.
+ * value, or a table that is mostly holes becomes unreadable and the real
+ * numbers stop standing out. Colour and tooltip carry the detail.
  */
 const SHORT: Record<HoleKind, string> = {
   unfetched: "not yet",
@@ -79,7 +80,7 @@ const SHORT: Record<HoleKind, string> = {
 
 /**
  * Tone per kind. `none` is a real value and must read like one; the other
- * three are muted so a row of holes recedes behind the rows that have data.
+ * three are muted so a row of holes recedes behind rows that have data.
  */
 const TONE: Record<HoleKind, string> = {
   unfetched: "text-amber-300/45",
@@ -107,14 +108,14 @@ export function TypedHole({ kind, reason, label, field }: TypedHoleProps) {
 /**
  * Classify an absent value from what the row already tells us.
  *
- * Pure and side-effect free so it can be unit tested without a DOM, and so the
- * SAME classification can be reused by the scheduler: `unfetched` is the only
- * kind worth queueing, which is exactly the signal the attention beam needs.
+ * Pure and side-effect free, so it can be tested without a DOM and so the SAME
+ * classification can be reused by the scheduler: `unfetched` is the only kind
+ * worth queueing, which is exactly the signal the attention beam needs.
  *
- * `sales` is passed for the change case because a 24 h change is only
+ * `hasSales` is passed for the change case because a 24 h change is only
  * derivable from two priced windows -- a collection with sales but no prior
- * window is `underived`, not `unfetched`, and asking for it again will never
- * produce a number.
+ * window is `underived`, not `unfetched`, and asking again will never produce
+ * a number.
  */
 export function classifyHole(input: {
   field: "change" | "volume" | "sales" | "listed" | "holders";
@@ -139,10 +140,27 @@ export function classifyHole(input: {
  * Is this hole worth scheduling?
  *
  * The bridge between the UI and the attention beam. A rendered hole is a work
- * order ONLY when fetching could actually fill it: `unsourced` cannot be
- * fixed by trying harder, `underived` needs time rather than a request, and
- * `none` is already the answer.
+ * order ONLY when fetching could actually fill it: `unsourced` cannot be fixed
+ * by trying harder, `underived` needs time rather than a request, and `none`
+ * is already the answer.
  */
 export function isSchedulable(kind: HoleKind): boolean {
   return kind === "unfetched";
+}
+
+/**
+ * Which chains have no source for which field.
+ *
+ * Derived from `emptyCellReason`'s own per-chain reasoning, so the two cannot
+ * drift: holder counts have no clean single-call endpoint on Helius DAS or
+ * UniSat/Ordiscan, which is a fact about those APIs rather than a gap in our
+ * scheduling. Encoding it here is what stops the beam from queueing work that
+ * can never succeed.
+ */
+export function chainHasNoSource(
+  chainSlug: string,
+  field: "change" | "volume" | "sales" | "listed" | "holders",
+): boolean {
+  if (field !== "holders") return false;
+  return chainSlug === "solana-mainnet" || chainSlug === "bitcoin-mainnet";
 }
