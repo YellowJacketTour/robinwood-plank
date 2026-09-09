@@ -41,6 +41,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { useMarketRealtime } from "@/hooks/useMarketRealtime";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { useDemandIntent } from "@/hooks/useDemandIntent";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
@@ -509,7 +510,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
-  const fetchCatalogTokens = useCallback(async () => {
+  const fetchCatalogTokens = useCallback(async (projectionOnly = false) => {
     const sort =
       listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
     const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
@@ -527,6 +528,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         const qs = new URLSearchParams({ chainSlug, collectionSlug,
           limit: String(Math.min(surface.catalogPageSize, tokenLimit - accumulated.length)), art: "2", sort });
         if (tierFilter) qs.set("tier", tierFilter);
+        if (projectionOnly) qs.set("projection", "1");
         if (cursor) qs.set("cursor", cursor);
         last = await swrJson<TokenPage>(`/api/market/multichain/tokens?${qs.toString()}`,
           { ttlMs: 8_000, swrMs: 45_000, session: true });
@@ -713,7 +715,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     // screen just because the viewer never re-navigated. swrJson's own ttl
     // (8s) means most of these calls are cheap no-op cache hits; this timer
     // just guarantees the check happens even on a long-idle tab.
-    const id = setInterval(() => void load(), 20_000);
+    const id = setInterval(() => { if (!document.hidden) void load(); }, 20_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -731,7 +733,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   useEffect(() => {
     if (!catalogBuilding) return;
-    const id = setInterval(() => void fetchCatalogTokens(), 10_000);
+    const id = setInterval(() => { if (!document.hidden) void fetchCatalogTokens(); }, 10_000);
     return () => clearInterval(id);
   }, [catalogBuilding, fetchCatalogTokens]);
 
@@ -924,6 +926,42 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     void loadMyListings();
   }, [loadMyListings]);
 
+  const [liveMetadataRevision, setLiveMetadataRevision] = useState(0);
+  useMarketRealtime([
+    { chainSlug, collectionKey: collectionSlug },
+    ...(collection?.contractAddress ? [{ chainSlug, collectionKey: collection.contractAddress }] : []),
+  ], async (change) => {
+    const all = change.type === "resync";
+    const metadata = all || change.family === "hydration" || change.family === "tokens" || change.family === "rarity";
+    const roots = ["collection", ...(metadata ? ["tokens", "rarity", "trait-index"] : []),
+      ...(all || change.family === "orders" ? ["listings", "offers"] : []),
+      ...(all || change.family === "activity" ? ["activity"] : [])];
+    for (const root of roots) invalidateSwr(`/api/market/multichain/${root}?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`);
+    // Do not call load(): that path publishes fresh demand and may write
+    // holder stats, feeding the same notification back into another hydrate.
+    const scope = [{ chainSlug, collectionKey: collection?.contractAddress ?? collectionSlug }];
+    const work: Promise<unknown>[] = [fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scope))}`,
+      { cache: "no-store", signal: AbortSignal.timeout(10_000) }).then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json();
+        const row = data.collections?.[0];
+        if (row) setSupplyStats((previous) => previous ? { ...previous, listedCount: row.listedCount,
+          totalSupply: row.totalSupply, holderCount: row.holderCount, floorPriceWei: row.floorPriceWei,
+          floorPriceCurrency: row.floorPriceCurrency } : previous);
+      })];
+    if (metadata) { work.push(fetchCatalogTokens(true)); setLiveMetadataRevision((n) => n + 1); }
+    if (all || change.family === "orders" || change.family === "activity") {
+      const url = `/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`;
+      invalidateSwr(url);
+      work.push(swrJson<{ listings?: Listing[]; bookCoverage?: { partial?: boolean } }>(url).then((book) => {
+        setListings((previous) => book.listings?.length ? book.listings : book.bookCoverage?.partial ? previous : []);
+      }));
+    }
+    if (all || change.family === "orders") work.push(loadOffers());
+    if (all || change.family === "activity") work.push(loadActivity());
+    await Promise.allSettled(work);
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -935,7 +973,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         // one-off background job (scripts/index-foreign-rarity.ts), so a
         // collection can go from unindexed to indexed between two page
         // loads within the same swr window.
-        const rarityUrl = `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`;
+        const rarityUrl = `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}${liveMetadataRevision ? "&projection=1" : ""}`;
         const apply = (data: {
           byTokenId?: Record<string, { name: string; tier: string; rank: number; percentile: number; score?: number }>;
           sampleSize?: number;
@@ -959,7 +997,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         }>(rarityUrl, { ttlMs: 15_000, swrMs: 120_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) });
         if (cancelled) return;
         const ready = apply(data);
-        if (!ready) {
+        if (!ready && !liveMetadataRevision) {
           for (const wait of [4_000, 8_000, 16_000]) {
             await new Promise((r) => setTimeout(r, wait));
             if (cancelled) return;
@@ -975,7 +1013,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => {
       cancelled = true;
     };
-  }, [chainSlug, collectionSlug]);
+  }, [chainSlug, collectionSlug, liveMetadataRevision]);
 
   useEffect(() => {
     if (rarityFromIndex) return;
@@ -1094,7 +1132,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               derived[type] = {};
               for (const [value, ids] of Object.entries(values)) derived[type][value] = ids.length;
             }
-            setTraitCounts((prev) => (prev && Object.keys(prev).length > 0 ? prev : derived));
+            setTraitCounts((prev) => liveMetadataRevision && idx.complete ? derived : (prev && Object.keys(prev).length > 0 ? prev : derived));
             if (idx.complete) setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
           }
         }
@@ -1105,7 +1143,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => {
       cancelled = true;
     };
-  }, [collectionSlug, chainSlug, isSolana, isBitcoin]);
+  }, [collectionSlug, chainSlug, isSolana, isBitcoin, liveMetadataRevision]);
 
   const browseAsListing = useCallback(
     (tokenId: string, imageUrl?: string | null, name?: string | null,

@@ -12,6 +12,7 @@ import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { useMarketRealtime } from "@/hooks/useMarketRealtime";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -1879,6 +1880,20 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
+  const liveScopes = rankings.slice(0, 64).map((row) => ({ chainSlug: row.chainSlug, collectionKey: row.contractAddress }))
+    .sort((a, b) => `${a.chainSlug}:${a.collectionKey}`.localeCompare(`${b.chainSlug}:${b.collectionKey}`));
+  useMarketRealtime(liveScopes, async () => {
+    if (!liveScopes.length) return;
+    const response = await fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(liveScopes))}`,
+      { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return;
+    const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
+    const updates = new Map(data.collections.map((row) => [`${row.chainSlug}:${row.contractAddress}`, row]));
+    setCollections((previous) => previous.map((row) => {
+      const update = updates.get(`${row.chainSlug}:${row.contractAddress}`);
+      return update ? { ...row, ...update } : row;
+    }));
+  }, 5_000);
 
   // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
   // viewport-predictive-hydration-2026-08-25.md): whatever the visitor is

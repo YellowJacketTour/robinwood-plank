@@ -35,6 +35,8 @@
     "db:maintenance": "node scripts/postgres-maintenance.mjs",
     "market:refresh": "tsx scripts/refresh-market-data.ts",
     "market:spokes": "tsx scripts/spoke-backfill.ts",
+    "market:realtime": "tsx scripts/market-realtime.ts",
+    "build:market-realtime": "esbuild scripts/market-realtime.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --external:ws --outfile=.next/standalone/scripts/market-realtime.mjs",
     "market:mesh": "tsx --env-file=.env.local scripts/mesh-tick.ts",
     "market:fabric:tick": "tsx --env-file=.env.local scripts/mesh-tick.ts",
     "market:fabric:bitcoin-rarity": "tsx --env-file=.env.local scripts/mesh-lane.ts --source=unisat-rarity --chain=bitcoin-mainnet",
@@ -96,7 +98,8 @@
     "sigma": "^3.0.3",
     "solana-web3js-v2": "npm:@solana/web3.js@^2.0.0",
     "three": "^0.185.1",
-    "viem": "^2.56.3"
+    "viem": "^2.56.3",
+    "ws": "^8.21.3"
   },
   "overrides": {
     "postcss": "^8.5.20",
@@ -145,6 +148,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "chai": "^5.1.2",
     "cross-env": "^10.1.0",
     "ecpair": "^3.0.1",

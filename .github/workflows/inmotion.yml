@@ -199,6 +199,7 @@ jobs:
       - run: npm run build:reindex
       - run: npm run build:plank-koth-watch
       - run: npm run build:mesh
+      - run: npm run build:market-realtime
       # The akasha hose. packages/akasha is not copied into the release tree,
       # so like every other always-on worker here it ships as a pre-built
       # bundle or it cannot run in production at all. Inert until someone sets
@@ -235,6 +236,7 @@ jobs:
           test -s .next/standalone/scripts/plank-koth-watch-standalone.mjs
           test -s .next/standalone/scripts/mesh-tick-standalone.mjs
           test -s .next/standalone/scripts/mesh-lane-standalone.mjs
+          test -s .next/standalone/scripts/market-realtime.mjs
           test -s .next/standalone/scripts/opensea-stream-standalone.mjs
           test -s .next/standalone/scripts/akasha-hose-standalone.mjs
           # `ws` is a runtime dependency of the stream worker; the standalone
@@ -735,6 +737,7 @@ jobs:
           if [ "$check_status" -eq 3 ]; then
             pkill -f "mesh-tick-standalone.mjs" || true
             pkill -f "opensea-stream-standalone.mjs" || true
+            pkill -f "market-realtime.mjs" || true
             sleep 5
           fi
           "$node_bin" \
@@ -1266,11 +1269,12 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build:mesh
+      - run: npm run build:market-realtime
       - name: Assert bundles
         shell: bash
         run: |
           set -euo pipefail
-          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs market-realtime.mjs; do
             test -s ".next/standalone/scripts/$f"
           done
       - name: Configure trusted SSH host
@@ -1291,7 +1295,7 @@ jobs:
           target="${INMOTION_USER}@${INMOTION_HOST}"
           sha="${GITHUB_SHA}"
           retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" "test -d '$INMOTION_APP_DIR/current/scripts' && mkdir -p '$INMOTION_APP_DIR/incoming/mesh-$sha'"
-          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs market-realtime.mjs; do
             retry scp -i "$HOME/.ssh/inmotion" -P "$port" ".next/standalone/scripts/$f" "$target:$INMOTION_APP_DIR/incoming/mesh-$sha/$f"
           done
           retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" bash -s <<REMOTE
@@ -1299,7 +1303,7 @@ jobs:
           app_dir='$INMOTION_APP_DIR'
           src="\$app_dir/incoming/mesh-$sha"
           dst="\$(readlink -f "\$app_dir/current")/scripts"
-          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs; do
+          for f in mesh-tick-standalone.mjs mesh-lane-standalone.mjs opensea-stream-standalone.mjs market-realtime.mjs; do
             test -s "\$src/\$f"
             mv -f "\$src/\$f" "\$dst/\$f.new"
             mv -f "\$dst/\$f.new" "\$dst/\$f"
@@ -1308,6 +1312,7 @@ jobs:
           # Stop the running mesh + stream so the every-minute cron starts the new bundles.
           pkill -f "mesh-tick-standalone.mjs" || true
           pkill -f "opensea-stream-standalone.mjs" || true
+          pkill -f "market-realtime.mjs" || true
           echo "mesh bundles swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
           REMOTE
 
@@ -1377,6 +1382,9 @@ jobs:
           artifact="$app_dir/current/scripts/mesh-tick-standalone.mjs"
           test -s "$artifact"
           test -s "$app_dir/current/scripts/mesh-lane-standalone.mjs"
+          test -s "$app_dir/current/scripts/market-realtime.mjs"
+          mkdir -p "$app_dir/logs"
+          touch "$app_dir/logs/market-realtime.log" && chmod 600 "$app_dir/logs/market-realtime.log"
           test -s "$app_dir/current/scripts/opensea-stream-standalone.mjs"
           mkdir -p "$app_dir/logs" && touch "$app_dir/logs/opensea-stream.log" && chmod 600 "$app_dir/logs/opensea-stream.log"
 
@@ -1435,6 +1443,10 @@ jobs:
             printf '* * * * * cd %s && %s -n %s %s --env-file=%s %s --max-seconds=3540 >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$app_dir/shared/opensea-stream.lock" "$node_bin" "$env_file" \
               "$app_dir/current/scripts/opensea-stream-standalone.mjs" "$logs_dir/opensea-stream.log"
+            printf '%s\n' '# market-mesh realtime (managed by release)'
+            printf '* * * * * cd %s && %s -n %s %s --env-file=%s %s >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$app_dir/shared/market-realtime.lock" "$node_bin" "$env_file" \
+              "$app_dir/current/scripts/market-realtime.mjs" "$logs_dir/market-realtime.log"
           } >> "$cron_after"
           crontab "$cron_after"
           # Count only the tag comment line, not the substring match against
@@ -1446,7 +1458,7 @@ jobs:
           # real managed entry as two. Confirmed live 2026-08-26:
           # managed_count=2 for a single real entry with the bare grep.
           managed_count="$(crontab -l | grep -c '^# market-mesh' || true)"
-          test "$managed_count" -eq 2
+          test "$managed_count" -eq 3
 
           # Confirm the cron actually fires on its own before declaring
           # success -- same real "don't trust the schedule until it's been
