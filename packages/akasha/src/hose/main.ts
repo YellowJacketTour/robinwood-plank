@@ -600,6 +600,12 @@ export class Hose {
       durable: !!this.pg,
       pendingWrites: this.pg?.pendingWrites ?? 0,
       lastWriteError: this.pg?.lastError()?.message ?? null,
+      // Statements dropped because retrying cannot fix them. A non-empty list
+      // is always a bug in this codebase, never a vendor problem, and it must
+      // be visible rather than inferred from a pendingWrites count that stops
+      // falling.
+      poisonedWrites: this.pg?.poisoned.length ?? 0,
+      poisonedSample: this.pg?.poisoned.slice(-3) ?? [],
       bitcoinHostFailures: this.bitcoinRpc
         ? Object.fromEntries(this.bitcoinRpc.hostFailures)
         : undefined,
