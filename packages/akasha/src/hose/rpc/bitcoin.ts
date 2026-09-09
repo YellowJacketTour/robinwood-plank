@@ -236,30 +236,91 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
    * far it got is better than an unbounded one that hangs. A partial block is
    * still honest -- coverage only advances for what was actually persisted.
    */
-  async getBlock(hash: string, maxTxs = 500): Promise<BitcoinBlock | null> {
+  /**
+   * Every transaction in a block, and an honest flag when that was not
+   * achieved.
+   *
+   * TWO DEFECTS, MEASURED 2026-09-09 ON BLOCK 965700 (6,754 transactions):
+   *
+   * 1. SILENT TRUNCATION. `maxTxs = 500` stopped after 20 pages of 25, so
+   *    6,254 of 6,754 transactions -- 92.6% of the block -- were never read.
+   *    Every inscription in them was missed, and the block was STILL recorded
+   *    as covered by extendCoverage. That is the archive claiming history it
+   *    never read, which is the one thing the coverage run-list exists to
+   *    prevent. The caller now receives `complete`, and refuses to record
+   *    coverage when it is false.
+   *
+   * 2. SERIAL PAGING. Each page waited for the previous one: 20 sequential
+   *    round-trips at ~316 ms measured = ~6.3 s per block, ~7 minutes per
+   *    64-block epoch. The pages are independent reads of an immutable block,
+   *    so they are fetched in bounded parallel groups. Order is restored by
+   *    index afterwards, because inscription position within a block is
+   *    meaningful.
+   */
+  async getBlock(
+    hash: string,
+    maxTxs = 20_000,
+  ): Promise<(BitcoinBlock & { complete: boolean }) | null> {
     const header = await this.getBlockHeader(hash);
     if (!header) return null;
 
-    const tx: BitcoinBlock["tx"] = [];
-    for (let start = 0; start < maxTxs; start += 25) {
-      let page: Array<{ txid: string; vin?: Array<{ witness?: string[] }> }>;
-      try {
-        page = (await this.get(`/block/${hash}/txs/${start}`, true)) as typeof page;
-      } catch {
-        break; // ran past the end, or both hosts refused: keep what we have
+    const PAGE = 25;
+    const GROUP = 8; // bounded: this is a shared public endpoint
+    const pages = new Map<number, Array<{ txid: string; vin?: Array<{ witness?: string[] }> }>>();
+    let complete = true;
+    let done = false;
+
+    for (let base = 0; base < maxTxs && !done; base += PAGE * GROUP) {
+      const starts: number[] = [];
+      for (let k = 0; k < GROUP && base + k * PAGE < maxTxs; k++) starts.push(base + k * PAGE);
+      const results = await Promise.all(
+        starts.map(async (start) => {
+          try {
+            const page = (await this.get(`/block/${hash}/txs/${start}`, true)) as Array<{
+              txid: string;
+              vin?: Array<{ witness?: string[] }>;
+            }>;
+            return [start, Array.isArray(page) ? page : null] as const;
+          } catch {
+            // A failed page is NOT an end of block -- it is a hole. Saying so
+            // is the whole point; a swallowed error here is how 92% of a block
+            // went missing while the block was marked covered.
+            return [start, "error"] as const;
+          }
+        }),
+      );
+      for (const [start, page] of results) {
+        if (page === "error") {
+          complete = false;
+          done = true;
+          continue;
+        }
+        if (page === null) {
+          complete = false;
+          done = true;
+          continue;
+        }
+        pages.set(start, page);
+        // A short page is the real end of the block: nothing follows it.
+        if (page.length < PAGE) done = true;
       }
-      if (!Array.isArray(page) || page.length === 0) break;
-      for (const t of page) {
+    }
+
+    const tx: BitcoinBlock["tx"] = [];
+    for (const start of [...pages.keys()].sort((a, b) => a - b)) {
+      for (const t of pages.get(start)!) {
         tx.push({
           txid: t.txid,
           // Esplora calls it `witness`; the adapter's shape says `txinwitness`.
           vin: (t.vin ?? []).map((v) => ({ txinwitness: v.witness ?? [] })),
         });
       }
-      if (page.length < 25) break;
     }
+    // Hitting the ceiling is itself incompleteness, not a clean stop.
+    if (tx.length >= maxTxs) complete = false;
 
     return {
+      complete,
       hash: header.hash,
       previousblockhash: header.previousblockhash,
       height: header.height,
