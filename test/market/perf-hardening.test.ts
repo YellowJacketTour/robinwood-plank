@@ -5,10 +5,12 @@ import { readFileSync } from "node:fs";
 /**
  * Four optimisations found by a six-way parallel audit, each measured.
  *
- *   1. the IPFS gateway walk was serial: 4 attempts x 5 s = 20 s worst case
- *   2. the hub refetched its entire 698 KB index every 20 s, forever
- *   3. two public `limit` params reached the store unparsed and uncapped
- *   4. two store queries had no LIMIT at all
+ *   1. the hub refetched its entire 698 KB index every 20 s, forever
+ *   2. two public `limit` params reached the store unparsed and uncapped
+ *   3. two store queries had no LIMIT at all
+ *
+ * A fourth -- racing the IPFS gateways -- was written and then reverted; see
+ * the note below the imports for why that was the right call.
  *
  * Together these are the difference between "fast when warm" and "fast".
  */
@@ -23,44 +25,29 @@ const BTC_ROUTE = readFileSync(
 ).replace(/\r\n/g, "\n");
 
 // ------------------------------------------------------------------ gateways
-
-test("the gateway attempt races rather than walking", () => {
-  // Measured live: 5,651 ms median with 7/10 returning 500, while the same
-  // gateway answered directly in 4,478 ms. Those were timeouts behind a
-  // serial queue, not failures.
-  assert.match(IPFS, /Promise\.any\(/, "the first hosts must be raced");
-  assert.ok(
-    IPFS.includes("resolves on the first SUCCESS"),
-    "the choice of any-over-race must be explained: one 404 must not abandon the other"
-  );
-});
-
-test("the race is narrow, so pacing is not defeated", () => {
-  // The token bucket exists because hammering every public gateway at once is
-  // what gets an IP throttled -- the header records 75 simultaneous hits as
-  // the original sin. A race over ALL candidates would recreate exactly that.
-  assert.match(IPFS, /fresh\.slice\(0, 2\)/, "at most two hosts may be raced");
-  assert.match(IPFS, /acquireGatewayToken\(host\)/, "and each still takes a token");
-});
-
-test("a raced host still rests after a 429", () => {
-  // Back-pressure must survive the refactor, or the race turns one throttle
-  // into a permanent one.
-  const at = IPFS.indexOf("const attempt = async");
-  const body = IPFS.slice(at, IPFS.indexOf("};", at));
-  assert.match(body, /HTTP \(429\|503\)/, "the rest window must still trigger");
-  assert.match(body, /restedUntil\.set\(host/, "and still be recorded per host");
-});
-
-test("the total attempt budget is still bounded", () => {
-  // A race plus a fallback loop must not exceed what the serial walk allowed,
-  // or one slow token becomes a wider burst than before.
-  assert.match(
-    IPFS,
-    /fresh\.slice\(raced\.length, MAX_GATEWAY_ATTEMPTS\)/,
-    "the fallback must respect the same ceiling"
-  );
-});
+//
+// A gateway RACE was written here and then REVERTED, deliberately.
+//
+// Racing the first two hosts is a real latency win on paper: measured live
+// 2026-09-09 the homepage showed a 5,651 ms median with 7 of 10 calls
+// returning 500, while gateway.pinata.cloud answered the same bytes in
+// 4,478 ms directly. Those were timeouts behind a serial queue.
+//
+// But test/market/ipfs-gateway-discipline.test.ts asserts maxInFlight === 1,
+// under a header that reads "AUDIT Batch F7 -- one gateway per attempt (never
+// a 3-way race)". A prior audit removed racing ON PURPOSE, because parallel
+// hits on public gateways are what got this app throttled -- lib/ipfs.ts's own
+// header records 75 simultaneous requests as the original sin, and a 429 cost
+// a 30-minute cooldown.
+//
+// So the race was not a missing optimisation; it was a decision already made
+// against, by someone with production evidence I did not have. The right fix
+// for gateway latency is the proof cache (lib/proof-cache.ts): a
+// content-addressed body fetched ONCE, ever, needs no race at all, because
+// the second request never leaves the building.
+//
+// Left as a comment rather than deleted, so the next person does not
+// rediscover the idea and re-break the same invariant.
 
 // ------------------------------------------------------------------ the poll
 

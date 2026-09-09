@@ -336,7 +336,17 @@ async function fetchViaProxy(tokenUri: string): Promise<NftMetadata> {
 //     attempt rotates past it.
 // ---------------------------------------------------------------------------
 export const GATEWAY_RATE_PER_SECOND = 8;
-export const GATEWAY_TIMEOUT_MS = 5_000;
+// 5,000 ms was a self-inflicted failure. Measured live 2026-09-09,
+// gateway.pinata.cloud answered a real image in 4,478 ms -- a SUCCESS that
+// this limit converted into a 500 and a blank tile, and the homepage's IPFS
+// calls sat at a 5,651 ms median because they were timing out, not erroring.
+//
+// The limit was tight because the cost was paid on every single request, so a
+// slow gateway hurt every visitor. With the proof cache (lib/proof-cache.ts) a
+// content-addressed body is fetched ONCE, so a generous timeout costs one
+// visitor once and saves everyone after. A slow proof must never be a missing
+// proof.
+export const GATEWAY_TIMEOUT_MS = 15_000;
 const GATEWAY_BURST = 8;
 const GATEWAY_REST_MS = 20_000;
 const MAX_GATEWAY_ATTEMPTS = 4;
@@ -428,71 +438,24 @@ export async function fetchNftMetadata(
   const candidates = rotateGatewayCandidates(ipfsGatewayCandidates(tokenUri));
   let lastError: unknown;
   const triedHosts = new Set<string>();
-
-  /** One attempt against one host, with its pacing and its rest-on-429. */
-  const attempt = async (url: string): Promise<NftMetadata> => {
+  let attempts = 0;
+  for (const url of candidates) {
+    if (attempts >= MAX_GATEWAY_ATTEMPTS) break;
     const host = hostOf(url);
+    // Retry on a DIFFERENT host: a host that just failed is not retried in
+    // this call (a single-candidate http(s) URI gets exactly one attempt).
+    if (triedHosts.has(host)) continue;
+    triedHosts.add(host);
+    attempts += 1;
     await acquireGatewayToken(host);
     try {
-      return await fetchJsonFromUrl(url, GATEWAY_TIMEOUT_MS);
+      const data = await fetchJsonFromUrl(url, GATEWAY_TIMEOUT_MS);
+      setCachedMetadata(tokenUri, data);
+      return data;
     } catch (error) {
+      lastError = error;
       const message = error instanceof Error ? error.message : String(error);
       if (/HTTP (429|503)/.test(message)) restedUntil.set(host, Date.now() + GATEWAY_REST_MS);
-      throw error;
-    }
-  };
-
-  // RACE THE FIRST PAIR, THEN FALL BACK SERIALLY.
-  //
-  // The old walk was strictly serial: up to MAX_GATEWAY_ATTEMPTS attempts of
-  // GATEWAY_TIMEOUT_MS each, so a slow first gateway spent the whole budget
-  // before a healthy one was ever tried. Measured live 2026-09-09 on the
-  // homepage: a 5,651 ms median with seven of ten calls returning 500 -- and
-  // gateway.pinata.cloud answering the same bytes in 4,478 ms when asked
-  // directly. Those were timeouts behind a queue, not failures.
-  //
-  // Racing two hosts makes latency the FASTEST gateway rather than the sum of
-  // the slowest. Two, not all: the token bucket exists because hammering every
-  // public gateway at once is what gets an IP throttled, and a wide race would
-  // recreate exactly the 75-simultaneous-hits pattern the pacing was added to
-  // stop. Two is enough to escape one slow host without becoming that.
-  const fresh = candidates.filter((url) => {
-    const host = hostOf(url);
-    if (triedHosts.has(host)) return false;
-    triedHosts.add(host);
-    return true;
-  });
-
-  const raced = fresh.slice(0, 2);
-  if (raced.length > 1) {
-    try {
-      // Promise.any resolves on the first SUCCESS, not the first settle -- so
-      // one gateway 404ing does not abandon the other.
-      const data = await Promise.any(raced.map(attempt));
-      setCachedMetadata(tokenUri, data);
-      return data;
-    } catch (error) {
-      lastError = error instanceof AggregateError ? error.errors[0] : error;
-    }
-  } else if (raced.length === 1) {
-    try {
-      const data = await attempt(raced[0]!);
-      setCachedMetadata(tokenUri, data);
-      return data;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  // Whatever the race did not cover, one host at a time, still bounded by
-  // MAX_GATEWAY_ATTEMPTS in total.
-  for (const url of fresh.slice(raced.length, MAX_GATEWAY_ATTEMPTS)) {
-    try {
-      const data = await attempt(url);
-      setCachedMetadata(tokenUri, data);
-      return data;
-    } catch (error) {
-      lastError = error;
     }
   }
 
