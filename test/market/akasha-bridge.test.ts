@@ -176,3 +176,41 @@ test("the bridge lane runs even while the cutover is disarmed", async () => {
     else process.env.AKASHA_HOSE_OWNS_BITCOIN = prev;
   }
 });
+
+/**
+ * BATCH REVEALS. A parent declaration is the strongest edge but not the most
+ * common one: most Ordinals collections are minted by revealing many
+ * inscriptions in one transaction and declaring no parent at all. That is the
+ * cluster layer's SAME_REVEAL edge and is equally a chain fact -- one
+ * witness, one reveal, one minter.
+ *
+ * Restricting the bridge to parents alone would have been correct and nearly
+ * empty, which is its own kind of wrong.
+ */
+test("batch reveals also mint collections, from the same tape", () => {
+  assert.match(BRIDGE, /GROUP BY e\.tx_hash/, "a reveal is grouped by its transaction");
+  assert.match(BRIDGE, /raw->>'parent' IS NULL/,
+    "the batch path must cover exactly the inscriptions the parent path does not");
+  assert.match(BRIDGE, /fromBatchReveals/, "the two sources must be reported separately");
+  assert.match(BRIDGE, /fromParentDeclarations/,
+    "so a reader can tell which edge produced which rows");
+});
+
+test("a pair sharing a reveal is NOT a collection", () => {
+  // The inverse of minting per inscription: minting per multi-inscription
+  // transaction would flood the catalog and inflate the count on noise.
+  const min = BRIDGE.match(/const MIN_BATCH = (\d+);/);
+  assert.ok(min, "the batch threshold must exist");
+  assert.ok(Number(min[1]) >= 10, `a real batch mint is dozens (saw ${min?.[1]})`);
+  assert.match(BRIDGE, /HAVING COUNT\(DISTINCT e\.token_or_inscription\) >= \$1/,
+    "the threshold must be enforced in SQL, not after the fact");
+});
+
+test("both paths write the same id shape into the same column", () => {
+  // A second, incompatible id format in contract_address would split the
+  // catalog's own identity: one collection could then exist under two keys.
+  const txid = "b".repeat(64);
+  assert.ok(INSCRIPTION_ID.test(`${txid}i0`), "the batch key is an inscription id too");
+  assert.match(BRIDGE, /\$\{txid\}i0/, "the reveal is keyed by its first inscription");
+  assert.match(BRIDGE, /\^\[0-9a-f\]\{64\}\$/, "and the txid is validated before use");
+});

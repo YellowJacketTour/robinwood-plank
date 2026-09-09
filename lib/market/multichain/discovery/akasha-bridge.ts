@@ -44,11 +44,24 @@ import { upsertTrackedCollection } from "@/lib/market/multichain/store";
 /** Ordinals inscription ids look like <64-hex txid>i<index>. */
 const INSCRIPTION_ID = /^[0-9a-f]{64}i\d+$/i;
 
+/**
+ * Inscriptions in one reveal before it counts as a collection.
+ *
+ * Two inscriptions sharing a transaction are a pair, not a collection. A real
+ * batch mint is dozens at once, so this is the line between a chain fact and
+ * catalog noise -- set it too low and the count rises on nothing.
+ */
+const MIN_BATCH = 25;
+
 export interface AkashaBridgeResult {
   /** Parent inscriptions that children declared, seen this pass. */
   parentsSeen: number;
   /** Catalog rows created or re-confirmed. */
   upserted: number;
+  /** Of those, how many came from an explicit parent declaration. */
+  fromParentDeclarations?: number;
+  /** Of those, how many came from a batch reveal (SAME_REVEAL). */
+  fromBatchReveals?: number;
   /** Children whose declared parent was not a well-formed inscription id. */
   malformedParents: number;
   /** True when the tape holds no parent declarations at all yet. */
@@ -128,9 +141,59 @@ export async function bridgeAkashaBitcoinCollections(
     upserted += 1;
   }
 
+  // BATCH REVEALS. A parent declaration is the strongest edge but not the
+  // most COMMON one: most Ordinals collections are minted by revealing many
+  // inscriptions in a single transaction, declaring no parent at all. That
+  // is the cluster layer's SAME_REVEAL edge, and it is just as much a chain
+  // fact -- one witness, one reveal, one minter.
+  //
+  // Restricting the bridge to parents alone would have been correct and
+  // nearly empty, which is its own kind of wrong.
+  //
+  // MIN_BATCH guards the inverse error. Two inscriptions sharing a reveal
+  // are a pair, not a collection; minting a row for every multi-inscription
+  // transaction would flood the catalog with noise and inflate the count
+  // exactly the way per-inscription minting would. A real batch mint is
+  // dozens at once.
+  const batches = await postgresQuery<{ tx_hash: string; children: string }>(
+    `SELECT encode(e.tx_hash, 'hex') AS tx_hash,
+            COUNT(DISTINCT e.token_or_inscription)::text AS children
+       FROM akasha_event e
+      WHERE e.chain = 'bitcoin'
+        AND e.kind = 'envelope'
+        AND e.raw->>'parent' IS NULL
+      GROUP BY e.tx_hash
+     HAVING COUNT(DISTINCT e.token_or_inscription) >= $1
+      ORDER BY COUNT(DISTINCT e.token_or_inscription) DESC, encode(e.tx_hash, 'hex') ASC
+      LIMIT $2`,
+    [MIN_BATCH, limit]
+  );
+
+  let batchUpserts = 0;
+  for (const row of batches.rows) {
+    const txid = row.tx_hash?.trim().toLowerCase();
+    if (!txid || !/^[0-9a-f]{64}$/.test(txid)) {
+      malformed += 1;
+      continue;
+    }
+    // Keyed by the reveal's first inscription id, so the key is an
+    // inscription id in the same shape as the parent case rather than a
+    // second, incompatible id format in the same column.
+    await upsertTrackedCollection({
+      chainSlug: "bitcoin-mainnet",
+      chainId: null,
+      contractAddress: `${txid}i0`,
+      adapter: "akasha-hose",
+      nameHint: null,
+    });
+    batchUpserts += 1;
+  }
+
   return {
     parentsSeen: rows.rows.length,
-    upserted,
+    upserted: upserted + batchUpserts,
+    fromParentDeclarations: upserted,
+    fromBatchReveals: batchUpserts,
     malformedParents: malformed,
     tapeEmpty: false,
   };
