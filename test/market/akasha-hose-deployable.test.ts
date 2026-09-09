@@ -83,14 +83,41 @@ test("the worker writes akasha_* and never plank_*", () => {
   );
 });
 
+/**
+ * The provisioning job's OWN text, bounded by where the job actually ends.
+ *
+ * A fixed `slice(at, at + 7000)` was used here and it broke the moment a new
+ * job was added after this one: the window ran past the job boundary into
+ * `cutover-bitcoin-existence`, which legitimately contains
+ * AKASHA_HOSE_OWNS_BITCOIN=1, and the "provisioning must not arm the flag"
+ * test failed on code that was not provisioning's.
+ *
+ * A guessed length is not a boundary. Jobs are top-level YAML keys at two
+ * spaces of indent, so the next one of those is the real end.
+ */
+function provisioningJob(): string {
+  const at = WORKFLOW.indexOf("provision-akasha-hose:");
+  assert.ok(at > 0, "the provisioning job exists");
+  // Stop at the next job's COMMENT BANNER, not at its YAML key. Every job here
+  // is preceded by a `# ---` banner documenting it, and that banner is already
+  // past this job -- the cutover job's own banner mentions
+  // AKASHA_HOSE_OWNS_BITCOIN=1 while explaining what arming does, which is
+  // exactly the string this file asserts provisioning must not contain.
+  // Bounding on the key alone still swallows the neighbour's prose.
+  const rest = WORKFLOW.slice(at);
+  const banner = rest.indexOf("\n  # ---");
+  const key = rest.search(/\n {2}[a-z][a-z0-9-]*:\n/);
+  const ends = [banner, key].filter((n) => n > 0);
+  const next = ends.length ? Math.min(...ends) : -1;
+  return next > 0 ? WORKFLOW.slice(at, at + next) : WORKFLOW.slice(at);
+}
+
 test("a provisioning operation exists and proves the worker before scheduling it", () => {
   assert.ok(
     /- provision-akasha-hose/.test(WORKFLOW),
     "no operation to install the hose -- a bundle nothing schedules never runs",
   );
-  const at = WORKFLOW.indexOf("provision-akasha-hose:");
-  assert.ok(at > 0, "the job itself exists");
-  const job = WORKFLOW.slice(at, at + 7000);
+  const job = provisioningJob();
 
   // Prove-then-schedule. A worker that cannot complete one bounded pass must
   // never be installed to fail silently every minute with nobody watching --
@@ -112,8 +139,7 @@ test("a provisioning operation exists and proves the worker before scheduling it
 });
 
 test("the scheduled entry is Bitcoin-only and connection-frugal", () => {
-  const at = WORKFLOW.indexOf("provision-akasha-hose:");
-  const job = WORKFLOW.slice(at, at + 7000);
+  const job = provisioningJob();
   assert.ok(/AKASHA_CHAINS=bitcoin/.test(job), "one family at a time is the supported cutover");
   assert.ok(!/AKASHA_CHAINS=[a-z,]*solana/.test(job), "Solana is unpinned and must not be scheduled");
   // A background archiver on a shared box must never be what exhausts the pool.
@@ -129,8 +155,7 @@ test("the scheduled entry is Bitcoin-only and connection-frugal", () => {
 });
 
 test("provisioning does NOT arm the cutover flag", () => {
-  const at = WORKFLOW.indexOf("provision-akasha-hose:");
-  const job = WORKFLOW.slice(at, at + 7000);
+  const job = provisioningJob();
   // Installing the writer and retiring the old pager are separate acts. If
   // provisioning armed the flag, Bitcoin would lose its catalog pager at the
   // same moment the hose first started -- before anyone had seen it hold a

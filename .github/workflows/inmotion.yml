@@ -37,8 +37,25 @@ on:
           - provision-plank-koth-gap-finder
           - provision-market-mesh
           - provision-akasha-hose
+          - cutover-bitcoin-existence
           - deploy-mesh
           - configure-plankspace-x
+      cutover_direction:
+        description: >-
+          For cutover-bitcoin-existence only. `arm` hands Bitcoin EXISTENCE to
+          the akasha hose by adding AKASHA_HOSE_OWNS_BITCOIN=1 to the mesh cron
+          entry, stopping the four Bitcoin catalog pagers. `disarm` removes it
+          and hands discovery back. `status` reports without changing anything.
+          Arming REFUSES unless the hose has a cron entry and a log written in
+          the last 2 hours -- retiring the pagers while the hose is dead would
+          leave Bitcoin with no discovery at all.
+        required: false
+        default: status
+        type: choice
+        options:
+          - status
+          - arm
+          - disarm
       repair_from_block:
         description: >-
           repair-activity only — first block to re-derive. Defaults to
@@ -1608,6 +1625,184 @@ jobs:
           test "$cron_observed" = "true"
           echo "AKASHA_HOSE_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 8 "$log_file"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # Cutover switch: hand Bitcoin EXISTENCE to the akasha hose, or hand it back.
+  #
+  # This is step 3 of the cutover, and the only irreversible-feeling one -- so it
+  # is built as a switch with both directions, not a one-way door. `arm` adds
+  # AKASHA_HOSE_OWNS_BITCOIN=1 to the mesh cron entry; `disarm` removes it. Both
+  # are one dispatch, and the state is printed either way.
+  #
+  # WHY THE MESH ENTRY AND NOT THE HOSE'S. matrix.ts reads the flag, and matrix
+  # runs inside mesh-tick. Setting it on the hose's own cron line would change
+  # nothing at all while looking exactly like success -- the failure shape this
+  # whole program exists to remove.
+  #
+  # WHAT ARMING ACTUALLY STOPS. Four Bitcoin CATALOG pagers: ow-catalog,
+  # unisat-discovery, ordiscan-discovery, unisat-collections. Ten other Bitcoin
+  # lanes keep running (rarity, floor, stats, membership, hunter-bitcoin), so
+  # Bitcoin never goes dark -- only EXISTENCE moves to the hose.
+  #
+  # REFUSES TO ARM unless the hose is genuinely alive: its cron entry must exist
+  # AND its log must show a recent successful boot. Arming while the hose is not
+  # writing would leave Bitcoin with no discovery at all, which is the one
+  # outcome worse than a pager that finds nothing.
+  # ---------------------------------------------------------------------------
+  cutover-bitcoin-existence:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'cutover-bitcoin-existence'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      CUTOVER_DIRECTION: ${{ inputs.cutover_direction }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          case "${CUTOVER_DIRECTION:-}" in
+            arm|disarm|status) : ;;
+            *) echo "cutover_direction must be arm, disarm, or status (got '${CUTOVER_DIRECTION:-}')" >&2; exit 1 ;;
+          esac
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Flip the switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-22}" \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$INMOTION_USER@$INMOTION_HOST" \
+            APP_DIR="$INMOTION_APP_DIR" DIRECTION="$CUTOVER_DIRECTION" bash -s <<'REMOTE'
+          set -euo pipefail
+          app_dir="$APP_DIR"
+          direction="$DIRECTION"
+          FLAG="AKASHA_HOSE_OWNS_BITCOIN=1"
+
+          current="$(crontab -l 2>/dev/null || true)"
+          mesh_line="$(printf '%s\n' "$current" | grep 'mesh-tick-standalone.mjs' | head -1 || true)"
+          if [ -z "$mesh_line" ]; then
+            echo "[cutover] no mesh cron entry found -- run provision-market-mesh first." >&2
+            exit 1
+          fi
+
+          armed=false
+          if printf '%s' "$mesh_line" | grep -q "$FLAG"; then armed=true; fi
+          echo "[cutover] current state: armed=$armed"
+
+          if [ "$direction" = "status" ]; then
+            echo "CUTOVER_STATE={\"armed\":$armed}"
+            exit 0
+          fi
+
+          if [ "$direction" = "arm" ] && [ "$armed" = "true" ]; then
+            echo "[cutover] already armed, nothing to do"
+            echo "CUTOVER_STATE={\"armed\":true}"
+            exit 0
+          fi
+          if [ "$direction" = "disarm" ] && [ "$armed" = "false" ]; then
+            echo "[cutover] already disarmed, nothing to do"
+            echo "CUTOVER_STATE={\"armed\":false}"
+            exit 0
+          fi
+
+          # ARMING REQUIRES A LIVE HOSE.
+          #
+          # Retiring the catalog pagers while the hose is not writing would
+          # leave Bitcoin with no discovery at all -- worse than a pager that
+          # finds nothing. Two independent checks, because either alone can lie:
+          # a cron entry proves it is SCHEDULED, a recent log line proves it
+          # actually RAN.
+          if [ "$direction" = "arm" ]; then
+            if ! printf '%s\n' "$current" | grep -q 'akasha-hose-standalone.mjs'; then
+              echo "[cutover] refusing to arm: the hose has no cron entry. Run provision-akasha-hose first." >&2
+              exit 1
+            fi
+            log="$app_dir/logs/akasha-hose.log"
+            if [ ! -s "$log" ]; then
+              echo "[cutover] refusing to arm: $log is empty -- the hose has never run." >&2
+              exit 1
+            fi
+            # A boot line within the last 2 hours. The hose restarts hourly, so
+            # a healthy one always has a recent one; a stale log means it is
+            # scheduled but failing.
+            if ! find "$log" -mmin -120 | grep -q .; then
+              echo "[cutover] refusing to arm: $log has not been written in 2 hours -- the hose is scheduled but not running." >&2
+              tail -n 20 "$log" >&2
+              exit 1
+            fi
+            if ! tail -n 200 "$log" | grep -q 'owning tip for'; then
+              echo "[cutover] refusing to arm: no recent 'owning tip' line -- the hose is not locking a chain." >&2
+              tail -n 20 "$log" >&2
+              exit 1
+            fi
+            echo "[cutover] hose liveness checks passed"
+          fi
+
+          # Rewrite ONLY the mesh line, leaving every other entry byte-identical.
+          cron_new="$(mktemp)"
+          trap 'rm -f "$cron_new"' EXIT
+          if [ "$direction" = "arm" ]; then
+            printf '%s\n' "$current" \
+              | sed "s#/usr/bin/env UV_THREADPOOL_SIZE=4#/usr/bin/env $FLAG UV_THREADPOOL_SIZE=4#" \
+              > "$cron_new"
+          else
+            printf '%s\n' "$current" | sed "s#$FLAG ##" > "$cron_new"
+          fi
+
+          # The rewrite must change exactly one line and drop none.
+          before_n="$(printf '%s\n' "$current" | wc -l)"
+          after_n="$(wc -l < "$cron_new")"
+          if [ "$before_n" -ne "$after_n" ]; then
+            echo "[cutover] refusing: crontab line count changed $before_n -> $after_n" >&2
+            exit 1
+          fi
+          changed="$(diff <(printf '%s\n' "$current") "$cron_new" | grep -c '^<' || true)"
+          if [ "$changed" -ne 1 ]; then
+            echo "[cutover] refusing: expected exactly 1 changed line, got $changed" >&2
+            diff <(printf '%s\n' "$current") "$cron_new" >&2 || true
+            exit 1
+          fi
+
+          crontab "$cron_new"
+
+          # Read it back rather than trusting the write.
+          verify="$(crontab -l | grep 'mesh-tick-standalone.mjs' | head -1)"
+          now_armed=false
+          if printf '%s' "$verify" | grep -q "$FLAG"; then now_armed=true; fi
+          if [ "$direction" = "arm" ] && [ "$now_armed" != "true" ]; then
+            echo "[cutover] arm did not take effect" >&2; exit 1
+          fi
+          if [ "$direction" = "disarm" ] && [ "$now_armed" != "false" ]; then
+            echo "[cutover] disarm did not take effect" >&2; exit 1
+          fi
+
+          echo "[cutover] $direction complete"
+          echo "CUTOVER_STATE={\"armed\":$now_armed}"
           REMOTE
 
   # ---------------------------------------------------------------------------
