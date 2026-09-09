@@ -87,7 +87,7 @@ const BANNER_SOURCES = new Set([
   // native-robinwood is a heal step (sanitizeUnknownZeros), not the native
   // book -- the RobinWood book is read live per request. Listing it here
   // produced a "native book down" banner on the Robinhood tab (2026-09-07).
-  "opensea-stats", "opensea-bulk", "coingecko-nft", "adapter-sync", "unisat-collections", "bestinslot-stats", "cryptopunks-native",
+  "opensea-stats", "opensea-bulk", "coingecko-nft", "adapter-sync", "unisat-collections", "bestinslot-stats", "cryptopunks-native", "rolling-stats",
 ]);
 
 /**

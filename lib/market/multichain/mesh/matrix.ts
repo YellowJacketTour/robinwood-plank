@@ -6,7 +6,7 @@
  * that lane is allowed to write. exactMatchOnly is always true.
  */
 
-import { coingeckoSlugs, hypersyncEvmSlugs, openSeaEvmSlugs } from "@/lib/market/multichain/chains/manifest";
+import { CHAIN_MANIFESTS, coingeckoSlugs, hypersyncEvmSlugs, openSeaEvmSlugs } from "@/lib/market/multichain/chains/manifest";
 
 export type MeshCell =
   | "name"
@@ -19,6 +19,7 @@ export type MeshCell =
   | "rarity";
 
 export type MeshSource =
+  | "rolling-stats"
   | "opensea-stats"
   | "opensea-bulk"
   | "coingecko-nft"
@@ -97,6 +98,14 @@ const CG_CHAINS = coingeckoSlugs();
 const HYPERSYNC_EVM = hypersyncEvmSlugs();
 
 export const MESH_LANES: MeshLane[] = [
+  ...CHAIN_MANIFESTS.map((chain) => ({
+    id: `rolling-stats:${chain.chainSlug}`,
+    source: "rolling-stats" as const,
+    chainSlug: chain.chainSlug,
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 90,
+    notes: "Expire and recompute stored rolling windows independently of provider availability.",
+  })),
   {
     id: "cryptopunks-native:eth-mainnet",
     source: "cryptopunks-native",

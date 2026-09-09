@@ -17,6 +17,7 @@ import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import { getMultiAssetUsdPrices, normalizeAssetSymbol } from "@/lib/multi-asset-price";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { STABLECOINS_BY_CHAIN } from "@/lib/market/multichain/trading/stablecoins";
+import { wrappedNativeAddress } from "@/lib/market/multichain/native-currency";
 
 export type HourlyUsd = { usd: number; source: string; hour: string };
 
@@ -86,9 +87,13 @@ export function pricingAssetForCurrency(chainSlug: string, currencyAddress: stri
   const m = chainManifest(chainSlug);
   if (!m) return null;
   const nativeDecimals = m.kind === "solana" ? 9 : m.kind === "ordinals" ? 8 : 18;
-  if (!currencyAddress) return { asset: m.nativeCurrencySymbol, decimals: nativeDecimals };
+  if (!currencyAddress || /^0x0{40}$/i.test(currencyAddress)) return { asset: m.nativeCurrencySymbol, decimals: nativeDecimals };
   const lower = currencyAddress.toLowerCase();
-  if (m.offerCurrencyAddress && m.offerCurrencyAddress.toLowerCase() === lower) return { asset: m.nativeCurrencySymbol, decimals: 18 };
+  if (lower === wrappedNativeAddress(chainSlug)) return { asset: m.nativeCurrencySymbol, decimals: nativeDecimals };
+  if (m.offerCurrencyAddress?.toLowerCase() === lower) {
+    const asset = normalizeAssetSymbol(m.offerCurrencySymbol);
+    if (asset) return { asset, decimals: 18 };
+  }
   if (m.chainId != null) {
     const stable = STABLECOINS_BY_CHAIN[m.chainId]?.find((s) => s.address.toLowerCase() === lower);
     if (stable) return { asset: stable.symbol, decimals: stable.decimals };

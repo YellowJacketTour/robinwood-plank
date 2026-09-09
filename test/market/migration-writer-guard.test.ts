@@ -20,7 +20,9 @@ test("migration guard stops owned writers, excludes cron restarts and releases l
       const script = path.join(appDir, "current", "scripts", scripts[i]);
       const ready = path.join(appDir, `ready-${i}`);
       await fs.writeFile(script, "import {writeFileSync} from 'node:fs'; writeFileSync(process.argv[2], 'ready'); setTimeout(() => {}, 15000);");
-      children.push(spawn("flock", ["-n", locks[i], process.execPath, script, ready], { stdio: "ignore" }));
+      // A managed worker may use a cwd-relative path. Its identity remains
+      // this deployment even when ps display output is narrow.
+      children.push(spawn("flock", ["-n", locks[i], process.execPath, i === 0 ? `scripts/${scripts[i]}` : script, ready], { stdio: "ignore", cwd: path.join(appDir, "current") }));
       let held = false;
       for (let attempt = 0; attempt < 100 && !held; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 20));
