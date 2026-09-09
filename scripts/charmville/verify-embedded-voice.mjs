@@ -51,5 +51,25 @@ try {
  await panel.getByRole('button',{name:'Close voice note'}).click();await page.waitForTimeout(200);
  assert(await panel.isHidden());
  assert(await runtime.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+ await page.setViewportSize({width:600,height:900});
+ await page.evaluate(()=>{
+  window.dispatchEvent(new MessageEvent('message',{origin:'http://localhost:3021',source:window,data:{type:'charmville:account-menu',panel:'exchange'}}));
+  window.dispatchEvent(new MessageEvent('message',{origin:'https://invalid.example',source:document.querySelector('iframe').contentWindow,data:{type:'charmville:account-menu',panel:'exchange'}}));
+ });
+ assert.equal(await page.getByRole('tab',{name:'Play',exact:true}).getAttribute('aria-selected'),'true');
+ await frame.getByRole('button',{name:'Game menus',exact:true}).click();
+ await page.getByRole('tabpanel',{name:'Inventory',exact:true}).waitFor({state:'visible'});
+ await page.getByRole('tab',{name:'Play',exact:true}).click();
+ await frame.getByText('Display',{exact:true}).click();
+ await frame.getByRole('button',{name:'Fullscreen',exact:true}).click();
+ await runtime.waitForFunction(()=>Boolean(document.fullscreenElement));
+ await frame.getByRole('button',{name:'Game menus',exact:true}).click();
+ await page.getByRole('tabpanel',{name:'Inventory',exact:true}).waitFor({state:'visible'});
+ await page.waitForFunction(()=>!document.fullscreenElement);
+ await page.goto('http://localhost:3017/charmville/world?panel=companions');
+ await page.getByRole('tabpanel',{name:'Companions',exact:true}).waitFor({state:'visible'});
+ const standalone=await browser.newPage();await standalone.goto('http://localhost:3021/charmville/tutorial/');
+ await standalone.getByRole('button',{name:'Game menus',exact:true}).click();
+ await standalone.waitForURL('http://localhost:3017/charmville/world?panel=inventory');
  console.log('PASS embedded synthetic microphone: no automatic capture; record, stop, playback, download, discard, close cleanup');
 }finally{await browser.close();}

@@ -54,6 +54,14 @@ Charmdex and Voice note shortcuts send only an exact panel-opening command
 to the native origin; the runtime checks parent source and the local account
 origin. This bridge cannot fetch account data or execute game/economy actions.
 
+The native header and fullscreen toolbar both expose **Game menus**. In the
+embedded player it returns to the account Inventory tab, exits the native
+iframe's fullscreen view and focuses the account tabs. A standalone player
+opens the account Inventory page. Direct links such as
+`/charmville/world?panel=companions` select only known tab IDs. Tests cover
+the 600px iframe-focused and native fullscreen paths, standalone navigation,
+and rejected return messages from the wrong origin or source window.
+
 ## Remaining runtime integration
 
 The reference adventure at localhost:3021 remains separate from the account

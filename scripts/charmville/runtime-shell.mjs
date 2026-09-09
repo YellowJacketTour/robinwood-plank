@@ -1,5 +1,11 @@
 import './voice-notes.js';
 import './charmdex.js';
+let accountOrigin=null;
+async function returnToAccountMenus(){
+  if(window.parent===window){window.location.assign('http://localhost:3017/charmville/world?panel=inventory');return;}
+  if(document.fullscreenElement)try{await document.exitFullscreen();}catch{/* The parent also checks its iframe fullscreen state. */}
+  if(accountOrigin)window.parent.postMessage({type:'charmville:account-menu',panel:'inventory'},accountOrigin);
+}
 /* Presentation adapter only. All native controls and their event hooks survive. */
 export function mountRuntimeShell(root = document) {
   const header = root.querySelector('header');
@@ -11,6 +17,10 @@ export function mountRuntimeShell(root = document) {
   brand.className = 'charm-runtime-brand';
   brand.innerHTML = '<strong>Charmville</strong><span>Local adventure · progress is temporary</span>';
   header.prepend(brand);
+  const accountMenu=root.createElement('button');accountMenu.type='button';accountMenu.textContent='Game menus';accountMenu.title='Account inventory, companions, exchange and friends';
+  accountMenu.style.background='var(--color-gold-500)';accountMenu.style.color='var(--color-on-gold)';accountMenu.onclick=returnToAccountMenus;
+  brand.after(accountMenu);
+  const fullscreenMenu=accountMenu.cloneNode(true);fullscreenMenu.onclick=returnToAccountMenus;root.querySelector('.charm-cinema-tools')?.prepend(fullscreenMenu);
   const more = root.createElement('details');
   more.className = 'charm-runtime-more';
   more.innerHTML = '<summary>More options</summary><div class="charm-runtime-options"></div>';
@@ -56,7 +66,10 @@ if (typeof document !== 'undefined') mountRuntimeShell();
 if (typeof window !== 'undefined') window.addEventListener('message', event => {
   if (event.source !== window.parent || !['http://localhost:3017', 'http://127.0.0.1:3017'].includes(event.origin)) return;
   const request = event.data;
-  if (!request || request.type !== 'charmville:open-panel') return;
+  if (!request) return;
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;return;}
+  if(request.type !== 'charmville:open-panel') return;
+  accountOrigin=event.origin;
   if (!['charmdex', 'voice'].includes(request.panel)) return;
   const selected = request.panel === 'voice' ? 'dialog.voice-notes' : 'dialog.charmdex:not(.voice-notes)';
   for (const dialog of document.querySelectorAll('dialog.charmdex[open]')) {
