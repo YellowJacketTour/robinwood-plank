@@ -245,7 +245,31 @@ same `Match` event** is deployed elsewhere. Verified today from
 | **zksync** | `0x5E0BbEd68e1b47C94a396226D8AC10DDe242e77c` |
 
 Three new chains, *zero new decoding logic* — the existing decoder already
-handles this exact event. Rarible deploys to dozens of chains (apechain,
+handles this exact event.
+
+**Verified independently, 2026-09-09** (not taken on the research agent's
+word): all three addresses return real deployed bytecode via `eth_getCode`,
+and **Arbitrum's is 2,141 bytes — byte-for-byte the same size as the
+known-good Ethereum ExchangeV2**, which is strong evidence of the same
+contract.
+
+**But deployed is not the same as live, and this changes the recommendation.**
+Scanning Arbitrum's ExchangeV2 for the `Match` topic
+(`0x956cd63e…`, derived not copied) over **1.2M blocks (~3.5 days)** returned
+**zero** fills; zkSync returned zero over 600k blocks. I could not obtain a
+working Ethereum control within the public endpoints' 10k-block cap, so I will
+not upgrade "no fills observed" to "dormant" — an uncontrolled negative is not
+a finding. What is established:
+
+- the contracts are real and deployed (proven)
+- no recent fills observed on Arbitrum/zkSync in the windows scanned (proven)
+- whether that means dormant or merely quiet is **UNVERIFIED**
+
+The practical consequence: **do not wire these three first.** Un-hardcoding
+the chain slug is still right, but the ordering argument in §5 rested on
+"three new chains of data for free", and the data has not been shown to exist.
+Confirm live fills against an archive-capable endpoint (HyperSync, which the
+repo already uses) before spending scan budget on them. Rarible deploys to dozens of chains (apechain,
 berachain, celo, astar, abstract, aleph_zero…), so this list extends as far as
 we add chains. Polygon/base/optimism/avalanche files were empty or differently
 shaped and are **UNVERIFIED** — not asserted here.
