@@ -140,19 +140,23 @@ global script Active
                 if(stage>0)Screen->DrawCombo(1,208,88,Screen->ComboD[108],1,1,Screen->ComboC[108]);
                 if(stage>=2){int size=stage==4?16:8;Screen->DrawCombo(2,208+(16-size)/2,88+(16-size)/2,Screen->ComboD[95],1,1,Screen->ComboC[95],size,size);}
                 Screen->Rectangle(6,0,144,255,175,0x00);
-                if (stage==0) sprintf(line,"Welcome! E / D: till nearby.");
-                if (stage==1) sprintf(line,"E / D: plant. T / C: aura.");
-                if (stage==2) sprintf(line,"E: water your seedling.");
-                if (stage==3) sprintf(line,"Growing... Explore nearby.");
-                if (stage==4) sprintf(line,"Ready! E / D: harvest.");
-                Screen->DrawString(6,4,146,0,0x01,-1,0,line);
-                sprintf(line,"Crop %d XP %d %s",harvests,harvests*10,harvests>0?(channel->State==WEBSOCKET_STATE_OPEN?"Guest meadow":"Meadow offline"):"Solo tutorial");
+                if (stage==0) sprintf(line,"E / D: prepare the soil");
+                if (stage==1) sprintf(line,"E / D: plant a seed");
+                if (stage==2) sprintf(line,"E / D: water the seed");
+                if (stage==3) sprintf(line,"Growing... ready in 5 seconds");
+                if (stage==4) sprintf(line,"E / D: gather your crop");
+                Screen->DrawString(6,4,146,0,0x68,-1,0,line);
+                int guests=0;for(int p=0;p<16;p++)if(life[p]>0)guests++;
+                sprintf(line,"Crops %d  XP %d  Guests %d",harvests,harvests*10,guests);
                 Screen->DrawString(6,4,157,0,0x01,-1,0,line);
+                sprintf(line,harvests==0?"First harvest unlocks guests":(channel->State==WEBSOCKET_STATE_OPEN?"Guest link online | C: aura":"Guest link offline"));
+                Screen->DrawString(6,4,168,0,0x01,-1,0,line);
             }
             Waitframe();
         }
     }
 }
+
 
 
 

@@ -10,6 +10,7 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
 http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost:3021');
+  if(['/runtime-shell.css','/runtime-shell.mjs'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);
    if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
@@ -56,6 +57,7 @@ http.createServer(async(req,res)=>{
     // SDL's suspended-audio fallback fails before a user gesture in this build.
     // Start the unchanged engine after a real click, in the required loader order.
     for(const script of ['main.js','zplayer.data.js','zplayer.js']) html=html.replace(`<script src="../${script}"></script>`,'');
+    html=html.replace('</head>','<link rel="stylesheet" href="/runtime-shell.css"></head>');
     html=html.replace('</body>',`<script>
      const help=document.createElement('details');
      Object.assign(document.querySelector('header').style,{zIndex:'10001'});
@@ -78,7 +80,7 @@ http.createServer(async(req,res)=>{
       }start.remove();}
       catch{start.textContent='Loading failed â€” reload to retry';}
      },{once:true});
-    </script><script type="module" src="/charmville-display.js"></script><script type="module" src="/charmville-controller.js"></script></body>`);
+    </script><script type="module" src="/charmville-display.js"></script><script type="module" src="/charmville-controller.js"></script><script type="module" src="/runtime-shell.mjs"></script></body>`);
    }
    res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end(html);return;
   }

@@ -1,0 +1,54 @@
+/* DESIGN.md token values, scoped to the native player's HTML chrome. */
+body.charm-runtime {
+  --color-gold-500:#E9B43F; --color-gold-400:#EEC164; --color-gold-300:#F8D98A;
+  --color-wood-950:#1B120A; --color-wood-900:#2A1A0F; --color-wood-700:#5C3A1E;
+  --color-forest-700:#1A4A30; --color-cream:#FFF2CF; --color-cream-muted:#C9B58A;
+  --color-line:rgba(233,180,63,.24); --color-line-strong:rgba(233,180,63,.5);
+  --color-panel:rgba(28,16,8,.94); --color-on-gold:#261105;
+  background:#14100B; color:var(--color-cream); font-family:'Nunito Sans',system-ui,sans-serif; font-size:16px; line-height:1.5;
+}
+.charm-runtime header { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:8px; padding:12px max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left)); background:var(--color-wood-950); border-bottom:1px solid var(--color-line); position:relative; }
+.charm-runtime-brand { display:flex; flex-direction:column; margin-right:auto; min-width:180px; }
+.charm-runtime-brand strong { color:var(--color-gold-300); font-size:20px; letter-spacing:-.02em; }
+.charm-runtime-brand span { color:var(--color-cream-muted); font-size:12px; }
+.charm-runtime .panel-buttons { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.charm-runtime header details { position:relative!important; background:var(--color-wood-900)!important; padding:0!important; border:1px solid var(--color-line); border-radius:8px; max-width:100%!important; }
+.charm-runtime header summary { display:flex; align-items:center; gap:8px; cursor:pointer; padding:0 14px; min-height:44px; box-sizing:border-box; font-size:14px; font-weight:700; list-style:none; }
+.charm-runtime header summary::after { content:'⌄'; margin-left:auto; color:var(--color-gold-300); }
+.charm-runtime header summary::-webkit-details-marker { display:none; }
+.charm-runtime header details[open] { flex-basis:100%; }
+.charm-runtime header details[open] > summary { border-bottom:1px solid var(--color-line); color:var(--color-gold-300); }
+.charm-runtime header details > :not(summary) { margin:12px 16px; }
+.charm-runtime header p { max-width:70ch; font-size:14px; color:var(--color-cream-muted); }
+.charm-runtime :is(button,.panel-button,select,input) { font:inherit; }
+.charm-runtime :is(button,.panel-button) { display:inline-flex; align-items:center; justify-content:center; min-height:44px; box-sizing:border-box; padding:8px 14px; border:1px solid var(--color-line); border-radius:8px; background:var(--color-wood-900); color:var(--color-cream); font-size:14px; font-weight:700; line-height:1.4; text-decoration:none; white-space:normal; }
+.charm-runtime .charm-runtime-enter { background:var(--color-gold-500); color:var(--color-on-gold); border-color:var(--color-gold-500); }
+.charm-runtime :is(button,.panel-button,summary):hover { border-color:var(--color-line-strong); color:var(--color-gold-300); }
+.charm-runtime .charm-runtime-enter:hover { background:var(--color-gold-400); color:var(--color-on-gold); }
+.charm-runtime :is(button,a,summary,input,select):focus-visible { outline:3px solid var(--color-gold-500); outline-offset:3px; }
+.charm-runtime button:disabled { opacity:.65; cursor:wait; }
+.charm-runtime .charm-runtime-options { display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; }
+.charm-runtime .charm-runtime-options > details { flex-basis:100%; }
+.charm-runtime .charm-runtime-controls dl { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:16px 0; }
+.charm-runtime .charm-runtime-controls dl > div { padding:12px; border-left:4px solid var(--color-line-strong); background:var(--color-wood-950); }
+.charm-runtime .charm-runtime-controls dt { font-weight:800; color:var(--color-gold-300); margin-bottom:8px; }
+.charm-runtime .charm-runtime-controls dd { margin:0; line-height:2; font-size:14px; }
+.charm-runtime .charm-runtime-controls [data-kind=grow] { border-left-color:var(--color-forest-700); }
+.charm-runtime .charm-runtime-controls [data-kind=combat] { border-left-color:var(--color-gold-500); }
+.charm-runtime kbd { display:inline-block; padding:0 6px; border:1px solid var(--color-line-strong); border-radius:4px; font-size:12px; color:var(--color-cream); }
+.charm-runtime header label { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:44px; }
+.charm-runtime select { max-width:100%; min-height:44px; background:var(--color-wood-950); color:var(--color-cream); border:1px solid var(--color-line-strong); border-radius:6px; padding:8px; }
+.charm-runtime input[type=range] { accent-color:var(--color-gold-500); min-height:44px; }
+.charm-runtime .panel { background:var(--color-panel); color:var(--color-cream); padding:20px; line-height:1.6; box-sizing:border-box; }
+.charm-runtime .panel a { color:var(--color-gold-300); text-underline-offset:3px; }
+.charm-runtime .panel h3 { font-size:18px; margin:24px 0 8px; }
+.charm-runtime .touch-input { border-radius:8px; border-color:var(--color-line-strong); color:var(--color-cream); font-family:inherit; }
+@media(max-width:600px) {
+ .charm-runtime header { gap:8px; padding:8px; }
+ .charm-runtime-brand { width:100%; }
+ .charm-runtime .panel-buttons { flex:1 1 100%; }
+ .charm-runtime header > details { flex:1 1 auto; }
+ .charm-runtime .charm-runtime-controls dl { grid-template-columns:1fr; }
+ .charm-runtime .charm-runtime-options > button { flex:1 1 130px; }
+ .charm-runtime .panel { padding:16px; }
+}
