@@ -4,6 +4,7 @@
  * than an extension of lib/market/chain-events.ts's append-only ledger.
  */
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
+import { refreshHubRank, HUB_SORT_COLUMN, HUB_DEFAULT_ORDER } from "@/lib/market/multichain/hub-rank";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import type { CollectionSnapshot, TrackedCollection } from "@/lib/market/multichain/types";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -464,6 +465,10 @@ export async function updateCollectionMarketStats(
       stats.volume30dUsd ?? null,
     ]
   );
+  // Keep the hub's rank row in step with the snapshot it derives from.
+  // Never throws (see refreshHubRank's header): an accelerator must not be
+  // able to fail the write of the real observation that triggered it.
+  await refreshHubRank(id);
 }
 
 function nonzeroWei(v: string | null | undefined): string | null {
@@ -1205,15 +1210,6 @@ async function countMatchingCollections(
  * default ordering the unsorted page has always used (vault-backed first,
  * sales-desc) rather than silently mis-sorting or throwing.
  */
-const SORT_COLUMN_SQL: Record<string, string> = {
-  name: "c.name",
-  floor: "NULLIF(s.floor_price_wei, '')::numeric",
-  volume: "NULLIF(s.volume_24h_wei, '')::numeric",
-  sales: "s.sales_24h",
-  listed: "s.listed_count",
-  holders: "s.holder_count",
-  change: "s.floor_change_pct",
-};
 
 export async function listCollectionsWithSnapshotsPage(input: {
   limit?: number;
@@ -1223,7 +1219,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
    * "4260") becomes fully reachable by paging, not just visible as a number
    * with no path to it. Empty/omitted = the whole catalog, unchanged. */
   chainSlugs?: string[] | null;
-  /** Real DB-level ORDER BY column -- see SORT_COLUMN_SQL. Falls back to the
+  /** Real DB-level ORDER BY column -- see HUB_SORT_COLUMN. Falls back to the
    * default order for grade/demand/unrecognized values. */
   sortColumn?: string | null;
   sortDir?: "asc" | "desc" | null;
@@ -1235,10 +1231,12 @@ export async function listCollectionsWithSnapshotsPage(input: {
   const chainSlugs = (input.chainSlugs ?? []).filter(Boolean);
   if (chainSlugs.length > 0) {
     params.push(chainSlugs);
-    whereClauses.push(`c.chain_slug = ANY($${params.length}::text[])`);
+    // Filter on the RANK table, not the catalog: chain_slug leads every
+    // index on plank_market_hub_rank, so the filter and the ordering are
+    // served by one index scan instead of a scan-then-sort.
+    whereClauses.push(`r.chain_slug = ANY($${params.length}::text[])`);
   }
   const dir = input.sortDir === "asc" ? "ASC" : "DESC";
-  const sortSql = input.sortColumn ? SORT_COLUMN_SQL[input.sortColumn] : null;
   // NULLS LAST regardless of direction -- a collection with no real value for
   // the chosen column is genuinely absent data, not a "lowest" one; matches
   // compareNullable()'s own always-sorts-to-the-end convention client-side.
@@ -1246,10 +1244,23 @@ export async function listCollectionsWithSnapshotsPage(input: {
   // was chain_slug then contract, so "arb-mainnet" shells (alphabetically
   // first) filled the hub's whole window ahead of real collections on other
   // chains. Rows with a floor, then holders, now outrank empty shells.
-  const shellTieBreak = `(s.floor_price_wei IS NOT NULL) DESC, s.holder_count DESC NULLS LAST, s.volume_30d_wei DESC NULLS LAST, c.chain_slug, c.contract_address`;
-  const orderBy = sortSql
-    ? `${sortSql} ${dir} NULLS LAST, (c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, ${shellTieBreak}`
-    : `(c.is_vault_backed IS TRUE) DESC, s.sales_24h DESC NULLS LAST, s.sales_7d DESC NULLS LAST, ${shellTieBreak}`;
+  // ORDER BY THE RANK TABLE. Every term below is a plain column on
+  // plank_market_hub_rank, so the sort can use an index -- which the previous
+  // ordering could not, because it spanned `collections` and `snapshots` and
+  // Postgres cannot index a sort across two tables.
+  //
+  // `has_floor` replaces the expression `(s.floor_price_wei IS NOT NULL)`:
+  // as an expression it was unindexable; stored, it is a plain boolean.
+  //
+  // The default branch matches plank_market_hub_rank_default_idx term for
+  // term. That is a CONTRACT, not a preference -- a composite index only
+  // serves a sort whose leading columns match in sequence, and reordering one
+  // term silently reverts to a full sort while results stay correct.
+  const rankSort = input.sortColumn ? HUB_SORT_COLUMN[input.sortColumn] : null;
+  const shellTieBreak = `r.has_floor DESC, r.holder_count DESC NULLS LAST, r.volume_30d_wei DESC NULLS LAST, r.chain_slug, r.contract_address`;
+  const orderBy = rankSort
+    ? `${rankSort} ${dir} NULLS LAST, r.is_vault_backed DESC, r.sales_24h DESC NULLS LAST, ${shellTieBreak}`
+    : HUB_DEFAULT_ORDER;
   params.push(limit, offset);
   const result = await postgresQuery<
     CollectionRow & {
@@ -1277,7 +1288,8 @@ export async function listCollectionsWithSnapshotsPage(input: {
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
             s.holder_count, s.floor_change_pct, s.floor_observed_at
-     FROM plank_multichain_collections c
+     FROM plank_market_hub_rank r
+     JOIN plank_multichain_collections c ON c.id = r.collection_id
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      ${whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""}
      ORDER BY ${orderBy}
