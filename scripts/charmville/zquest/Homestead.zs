@@ -28,8 +28,12 @@ global script Active
         hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");
         waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");
         hair->Read(0,"/charmville/gold-hair.png");Waitframe();
+        // Slot 36's optional costume bank has broken casting frames in this quest.
+        // Keep the sword's weapon art, damage and abilities; use the complete hero bank.
+        itemdata masterSword=Game->LoadItemData(36);masterSword->TileMod=0;
         int stage = 0;
         int welcome = 0;
+
         int wateredAt = 0;
         int ticks = 0;
         int harvests = 0;
@@ -156,6 +160,8 @@ global script Active
         }
     }
 }
+
+
 
 
 
