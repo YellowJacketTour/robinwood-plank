@@ -97,3 +97,4 @@ test/e2e/.casino-keeper.pid
 .probe/
 w[a-z].json
 c[a-z].json
+.p[0-9]
