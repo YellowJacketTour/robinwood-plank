@@ -63,7 +63,7 @@ export default async function MultichainCollectionPage({
       >
         <div className={marketEnabled ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
           {marketEnabled ? (
-            <MultichainCollectionView chainSlug={chainSlug} collectionSlug={collectionSlug} />
+            <MultichainCollectionView key={`${chainSlug}:${collectionSlug}`} chainSlug={chainSlug} collectionSlug={collectionSlug} />
           ) : (
             <ComingSoonGate />
           )}
