@@ -29,6 +29,7 @@ global script Active
         waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");
         hair->Read(0,"/charmville/gold-hair.png");Waitframe();
         int stage = 0;
+        int welcome = 0;
         int wateredAt = 0;
         int ticks = 0;
         int harvests = 0;
@@ -80,6 +81,23 @@ global script Active
             }
             if (Game->GetCurDMap()==4 && Game->GetCurScreen()==63)
             {
+                if(welcome<2)
+                {
+                    Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
+                    Hero->InputAxisUp=false;Hero->InputAxisDown=false;Hero->InputAxisLeft=false;Hero->InputAxisRight=false;
+                    Hero->InputA=false;Hero->InputB=false;Hero->PressA=false;Hero->PressB=false;
+                    Screen->Rectangle(6,0,128,255,175,0);
+                    if(welcome==0){
+                        sprintf(line,"Welcome to the meadow!");Screen->DrawString(6,4,130,0,1,-1,0,line);
+                        sprintf(line,"Start small. Grow together.");Screen->DrawString(6,4,141,0,1,-1,0,line);
+                    }else{
+                        sprintf(line,"Till, plant, water, harvest.");Screen->DrawString(6,4,130,0,1,-1,0,line);
+                        sprintf(line,"First crop opens guest play.");Screen->DrawString(6,4,141,0,1,-1,0,line);
+                    }
+                    sprintf(line,"E / D / Interact: continue");Screen->DrawString(6,4,160,0,1,-1,0,line);
+                    if(Input->KeyPress[KEY_E] || Hero->PressEx3)welcome++;
+                    Waitframe();continue;
+                }
                 bool nearPlot = Abs(Hero->X-208)<32 && Abs(Hero->Y-80)<32;
                 if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && activity<0 && stage!=3 && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
@@ -135,6 +153,7 @@ global script Active
         }
     }
 }
+
 
 
 
