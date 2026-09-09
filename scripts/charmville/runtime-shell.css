@@ -52,3 +52,8 @@ body.charm-runtime {
  .charm-runtime .charm-runtime-options > button { flex:1 1 130px; }
  .charm-runtime .panel { padding:16px; }
 }
+
+.charm-cinema-tools { display:none; }
+.charm-cinema .charm-cinema-tools { display:flex; justify-content:flex-end; gap:8px; height:44px; }
+.charm-cinema:not(.charm-cinema-menu) header { display:none; }
+.charm-cinema .content { overflow:hidden; }

@@ -14,6 +14,11 @@ try {
  await tap();await capture('sprout');await page.waitForTimeout(1400);await capture('taller');
  await page.waitForTimeout(1600);await capture('flowering');await page.waitForTimeout(2000);await capture('ripe');
  await tap();await capture('harvested');
+ await tap();await tap();await tap();await capture('fertilized');
+ await tap(); // Repeated interaction must not consume another cutting.
+ await page.waitForTimeout(4200);await tap();await capture('second-harvest');
+ assert.equal(events.filter(e=>e.includes('CHARMVILLE_FERTILIZED')).length,1);
+ assert(events.some(e=>e.includes('CHARMVILLE_SATCHEL BERRIES 3 CUTTINGS 1')));
  assert.deepEqual(errors,[]);for(const stage of [1,2,3])assert(events.some(e=>e.includes('CHARMVILLE_CROP_STAGE '+stage)));
  assert(events.some(e=>e.includes('CHARMVILLE_CROP_READY')));assert(events.some(e=>e.includes('CHARMVILLE_HARVEST 1')));
  await writeFile(out+'/verification.json',JSON.stringify({errors,events},null,2));console.log('Crop growth and harvest verified. Screenshots: '+out);

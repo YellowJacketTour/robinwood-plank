@@ -15,7 +15,7 @@ All paths below are relative to the sibling charmville-references directory.
 | Ripe | oran.png | Frames 4–5 | Harvest available |
 | Harvested | Quest soil combo | Existing 16 × 16 | Fruit removed, soil reusable |
 
-Ground anchor stays at (216,104); taller frames grow upward. Source pair cadences are 32, 48, 64, and 96 ticks respectively. Source tables: src/data/object_events/berry_tree_graphics_tables.h; object_event_anims.h; src/event_object_movement.c. Embedded palettes correspond to npc_2, npc_3, and npc_1. Source Oran growth takes three hours per stage and yields 2–3; the tutorial intentionally accelerates growth and retains its existing one-crop reward.
+Ground anchor stays at (216,104); taller frames grow upward. Source pair cadences are 32, 48, 64, and 96 ticks respectively. Source tables: src/data/object_events/berry_tree_graphics_tables.h; object_event_anims.h; src/event_object_movement.c. Embedded palettes correspond to npc_2, npc_3, and npc_1. Source Oran growth takes three hours per stage and yields 2–3; the tutorial intentionally accelerates growth and uses one berry per unfertilized harvest or two when one cutting has been consumed as fertilizer; see PLAYER-EXPERIENCE-CHECKPOINT.md.
 
 ## Zelda environment catalogue and intended material effects
 Solarus ZSDX data/sprites/entities definitions refer to the active data/tilesets/<id>.entities.png, not one universal sprite sheet. Resolve the tileset before selecting art.

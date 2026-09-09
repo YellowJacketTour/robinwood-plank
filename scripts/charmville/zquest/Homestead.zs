@@ -61,7 +61,7 @@ global script Active
 
         int wateredAt = 0;
         int ticks = 0;
-        int harvests = 0;
+        int harvests = 0;int berries=0;int cuttings=0;bool fertilized=false;
         bool aura = false;
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;
@@ -129,9 +129,9 @@ global script Active
                 }
                 int reachX=216-(Hero->X+8);int reachY=96-(Hero->Y+8);
                 bool nearPlot = reachX*reachX+reachY*reachY<=1024;
-                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && stage!=3 && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
+                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stage!=3 || (cuttings>0 && !fertilized)) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
-                    activity=stage;activityTick=0;
+                    activity=stage==3?5:stage;activityTick=0;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
                     int dx=216-(Hero->X+8);int dy=96-(Hero->Y+8);
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
@@ -166,7 +166,14 @@ global script Active
                     }
                     if(activityTick==28)
                     {
-                        if(activity==4){harvests++;stage=1;printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);}
+                        if(activity==4){
+                            int yield=fertilized?2:1;berries+=yield;cuttings++;harvests++;stage=1;fertilized=false;
+                            printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);
+                            printf("CHARMVILLE_SATCHEL BERRIES %d CUTTINGS %d\n",berries,cuttings);
+                        }
+                        else if(activity==5){
+                            if(stage==3 && cuttings>0 && !fertilized){cuttings--;fertilized=true;printf("CHARMVILLE_FERTILIZED CUTTINGS %d\n",cuttings);}
+                        }
                         else{stage=activity+1;if(stage==3)wateredAt=ticks;}
                         printf("CHARMVILLE_CROP_STAGE %d\n",stage);
                     }
@@ -178,12 +185,13 @@ global script Active
                 if(stage>0)Screen->DrawCombo(1,208,88,Screen->ComboD[108],1,1,Screen->ComboC[108]);
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
                 if(stage==2)dirt->Blit(2,RT_SCREEN,0,0,16,16,208,144,16,16);
+                int plantLayer=Hero->Y+16<104?6:2;
                 if(stage==3){int age=ticks-wateredAt;
                     if(age<100)sprout->Blit(2,RT_SCREEN,(Floor(ticks/32)%2)*16,0,16,16,208,144,16,16);
-                    else if(age<200)berry->Blit(2,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,208,128,16,32);
-                    else berry->Blit(2,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,208,128,16,32);
+                    else if(age<200)berry->Blit(plantLayer,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,208,128,16,32);
+                    else berry->Blit(plantLayer,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,208,128,16,32);
                 }
-                if(stage==4)berry->Blit(2,RT_SCREEN,64+(Floor(ticks/96)%2)*16,0,16,32,208,128,16,32);
+                if(stage==4)berry->Blit(plantLayer,RT_SCREEN,64+(Floor(ticks/96)%2)*16,0,16,32,208,128,16,32);
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 Screen->Rectangle(6,0,144,255,175,0x00);
                 if (stage==0) sprintf(line,"E / D: prepare the soil");
@@ -197,9 +205,11 @@ global script Active
                 if (stage==4) sprintf(line,"E / D: gather your crop");
                 Screen->DrawString(6,4,146,0,0x68,-1,0,line);
                 int guests=0;for(int p=0;p<16;p++)if(life[p]>0)guests++;
-                sprintf(line,"Crops %d  XP %d  Guests %d",harvests,harvests*10,guests);
+                sprintf(line,"Berry %d Farm %d XP %d",berries,1+Floor(harvests/3),harvests*10);
                 Screen->DrawString(6,4,157,0,0x01,-1,0,line);
-                sprintf(line,harvests==0?"First harvest unlocks guests":(channel->State==WEBSOCKET_STATE_OPEN?"Guest link online | C: aura":"Guest link offline"));
+                if(stage==3 && !fertilized && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
+                else if(stage==3 && fertilized)sprintf(line,"Fed soil: next yield is 2");
+                else sprintf(line,"Cuttings %d Guests %d",cuttings,guests);
                 Screen->DrawString(6,4,168,0,0x01,-1,0,line);
             }
             Waitframe();
