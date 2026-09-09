@@ -1,5 +1,6 @@
 "use client";
 
+import { TypedHole, classifyHole, chainHasNoSource } from "@/components/market/TypedHole";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -500,6 +501,32 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
   }
   if (field === "change") return "Change needs two real floor observations about a day apart -- not yet available.";
   return "No OpenSea stats observed for this collection yet -- OpenSea may not know it, or its turn in the stats pass hasn't come; a dash is unknown, never a fake zero.";
+}
+
+/**
+ * The rendered form of a missing cell.
+ *
+ * `emptyCellReason` above already says WHY a value is absent, per chain and
+ * per field, and says it well. It was delivered only through a `title`
+ * attribute -- invisible until a ~1s hover, absent on touch, unreliable to a
+ * screen reader -- so five columns of bare em-dashes read as "broken" while
+ * the explanation sat one hover away.
+ *
+ * This pairs that reason with a KIND, so the cell says which of the four
+ * kinds of missing it is, and so the scheduler can tell an absent value that
+ * is worth fetching from one that never will be.
+ */
+function holeFor(
+  c: TrackedCollection,
+  field: "change" | "volume" | "sales" | "listed" | "holders",
+) {
+  const kind = classifyHole({
+    field,
+    chainSlug: c.chainSlug,
+    chainHasNoSource: chainHasNoSource(c.chainSlug, field),
+    hasSales: (c.sales24h ?? 0) > 0,
+  });
+  return <TypedHole kind={kind} reason={emptyCellReason(c, field)} field={field} />;
 }
 
 function isHomeRow(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): boolean {
@@ -2563,27 +2590,41 @@ export default function GlobalMarketHub() {
                             )}
                           </span>
                         ) : (
-                          <span className="text-foreground/40">—</span>
+                          // The sixth dash cell, and the only one that never
+                          // had a reason at all -- a floor is absent because
+                          // no venue has been observed for this collection
+                          // yet, which is fetchable and therefore schedulable.
+                          <TypedHole
+                            kind="unfetched"
+                            field="floor"
+                            reason="No floor observed yet -- no venue has reported an ask for this collection, so a dash here is unknown, never a fake zero."
+                          />
                         )}
                       </td>
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? (
                           `${changeArrow}${Math.abs(change).toFixed(1)}%`
                         ) : c.floorChangeStatus === "collecting-baseline" ? (
-                          <span
-                            className="text-foreground/40"
-                            title="No complete, comparable 24-hour floor observation exists yet. Tracking is active; no change is shown until both endpoints are evidenced."
-                          >
-                            —
-                          </span>
+                          // The seventh dash cell -- multi-line, which is why
+                          // single-line greps missed it. Its reason was already
+                          // honest and specific; it is UNDERIVED rather than
+                          // unfetched, because tracking is active and what is
+                          // missing is a second endpoint in time, not a
+                          // request. Re-fetching cannot produce it.
+                          <TypedHole
+                            kind="underived"
+                            field="change"
+                            label="collecting baseline"
+                            reason="No complete, comparable 24-hour floor observation exists yet. Tracking is active; no change is shown until both endpoints are evidenced."
+                          />
                         ) : (
-                          <span title={emptyCellReason(c, "change")}>—</span>
+                          holeFor(c, "change")
                         )}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
                         {(() => {
                           const vol = windowVolumeWei(c, rankingsWindow);
-                          if (!vol || vol === "0") return <span title={emptyCellReason(c, "volume")}>—</span>;
+                          if (!vol || vol === "0") return holeFor(c, "volume");
                           const usd = toUsd(vol, chainNativeAsset(c.chainSlug));
                           return (
                             <span className="inline-flex items-center justify-end gap-1">
@@ -2594,7 +2635,7 @@ export default function GlobalMarketHub() {
                         })()}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
-                        {displaySales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
+                        {displaySales(c, rankingsWindow) ?? holeFor(c, "sales")}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
                         {c.listedCount != null ? (
@@ -2612,7 +2653,7 @@ export default function GlobalMarketHub() {
                             </span>
                           </span>
                         ) : (
-                          <span title={emptyCellReason(c, "listed")}>—</span>
+                          holeFor(c, "listed")
                         )}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/80 md:table-cell">
@@ -2622,7 +2663,7 @@ export default function GlobalMarketHub() {
                             <span className="text-[0.58rem] font-sans text-foreground/40">wallets</span>
                           </span>
                         ) : (
-                          <span title={emptyCellReason(c, "holders")}>—</span>
+                          holeFor(c, "holders")
                         )}
                       </td>
                       <td className="px-2 py-2 text-right">

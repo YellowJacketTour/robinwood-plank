@@ -143,3 +143,70 @@ test("a hole never outshouts a real value", () => {
     "a hole is not an error and must not be styled as one"
   );
 });
+
+/**
+ * The wiring. A component nobody renders is a document, not a feature -- and
+ * this repo has already shipped a complete, tested module whose production
+ * path was a no-op because one branch was missing.
+ */
+test("every dash cell in the hub is now a typed hole", () => {
+  // The five columns measured as mostly-empty on production: change, volume,
+  // sales, listed, holders.
+  for (const field of ["change", "volume", "sales", "listed", "holders"]) {
+    assert.ok(
+      HUB.includes(`holeFor(c, "${field}")`),
+      `${field} must render a typed hole, not a dash`
+    );
+  }
+});
+
+test("no bare em-dash survives in a rankings cell", () => {
+  // The regression this whole change exists to prevent.
+  //
+  // TWO earlier versions of this test were mirrors. The first matched the
+  // exact original formatting, so reverting a cell with different whitespace
+  // passed. The second counted emptyCellReason callers, which a mutation that
+  // swaps holeFor for a direct call leaves unchanged -- one removed, one
+  // added, net zero.
+  //
+  // The real invariant is not a count. It is that emptyCellReason has exactly
+  // ONE caller and that caller is holeFor, so every reason reaches the screen
+  // through a typed hole. Asserted structurally rather than numerically.
+  const decl = HUB.indexOf("function emptyCellReason");
+  assert.ok(decl > 0, "emptyCellReason must exist");
+
+  // Every call site, excluding the declaration itself.
+  const callSites: string[] = [];
+  const re = /emptyCellReason\(c,\s*(?:field|"[a-z]+")\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(HUB)) !== null) {
+    if (m.index === HUB.indexOf("emptyCellReason", decl) && m.index < decl + 40) continue;
+    callSites.push(HUB.slice(Math.max(0, m.index - 120), m.index + m[0].length));
+  }
+  assert.ok(callSites.length > 0, "the reason must be used somewhere");
+  for (const site of callSites) {
+    assert.ok(
+      /reason=\{emptyCellReason/.test(site),
+      `emptyCellReason must only be read as a TypedHole's reason prop, saw:
+${site.trim().slice(-100)}`
+    );
+  }
+
+  // And no span anywhere may render a bare em-dash. This assertion found a
+  // SIXTH dash cell (the floor column, which never carried a reason) and a
+  // SEVENTH (a multi-line one that single-line greps missed).
+  assert.ok(!/>\s*—\s*<\/span>/.test(HUB), "and no span may render a bare em-dash");
+});
+test("the hub classifies rather than hardcoding a kind", () => {
+  // If the hub picked a kind itself, it would drift from classifyHole and the
+  // scheduler would queue work the UI called impossible.
+  assert.match(HUB, /classifyHole\(\{/, "the hub must classify, not assume");
+  assert.match(HUB, /chainHasNoSource\(c\.chainSlug, field\)/, "and pass the real chain");
+  assert.match(HUB, /hasSales: \(c\.sales24h \?\? 0\) > 0/, "and the real sales signal");
+});
+
+test("emptyCellReason is still the source of the explanation", () => {
+  // The prose was already right. This change makes it visible; it must not
+  // replace it with something new and worse.
+  assert.match(HUB, /reason=\{emptyCellReason\(c, field\)\}/, "the existing reason must be used");
+});
