@@ -164,12 +164,44 @@ async function main(): Promise<void> {
   const shutdown = async (sig: string) => {
     if (stopping) return;
     stopping = true;
+    // THE WATCHDOG CANNOT SEE A HUNG SHUTDOWN. It measures time since the last
+    // completed TICK, and `stopping = true` stops ticks by design -- so a
+    // shutdown that wedges is invisible to it, which is exactly how a process
+    // outlived its own --max-seconds budget while holding the cron lock.
+    //
+    // This timer is its own backstop, and is deliberately NOT unref'd: it must
+    // be able to hold the loop open long enough to fire.
+    setTimeout(() => {
+      console.error(`[akasha-hose] ${sig}: shutdown did not complete -- exiting hard`);
+      process.exit(75); // EX_TEMPFAIL: retry me, nothing is corrupt
+    }, 20_000);
     // Flush before exit. Un-flushed writes are not lost data in the dangerous
     // sense -- coverage is a run-list, so a dropped write reopens a hole the
     // gap worker absorbs -- but flushing is free here and a hole is work.
     console.log(`[akasha-hose] ${sig}: flushing tape before exit`);
-    await hose.flush().catch((e) => console.error("[akasha-hose] final flush failed", e));
-    await pool.end().catch(() => undefined);
+    // AN EXIT THAT CAN HANG IS NOT AN EXIT.
+    //
+    // This awaited an UNBOUNDED flush. If the flush was slow or wedged, the
+    // process sat with `stopping = true` -- which makes every tick return
+    // immediately -- awaiting a promise that never settled, holding the
+    // `flock -n` that cron uses to decide whether to start a replacement.
+    //
+    // Measured live 2026-09-09: pid 4184666 reached uptime 3,568s against a
+    // --max-seconds=3540 budget. The budget timer HAD fired; the shutdown it
+    // triggered could not finish, so the worker outlived its own deadline and
+    // blocked the newer build from taking over.
+    //
+    // The flush is a courtesy, not a correctness requirement: coverage is a
+    // run-list, so a dropped write reopens a hole the gap worker absorbs.
+    // Losing that courtesy is cheap; losing the exit is not.
+    const EXIT_GRACE_MS = 10_000;
+    await Promise.race([
+      (async () => {
+        await hose.flush().catch((e) => console.error("[akasha-hose] final flush failed", e));
+        await pool.end().catch(() => undefined);
+      })(),
+      new Promise<void>((resolve) => setTimeout(resolve, EXIT_GRACE_MS).unref?.()),
+    ]);
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

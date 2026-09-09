@@ -137,3 +137,35 @@ test("one blocked host costs a hop, not the tick", () => {
   ok(ms <= 10_000, `${ms}ms per host x 6 hosts is longer than the tick itself`);
   ok(ms >= 3_000, `${ms}ms is too tight for a healthy-but-slow mirror`);
 });
+
+test("the lock-parent repair cannot skip SILENTLY", () => {
+  // `.catch(() => null)` is right -- a failed repair must never kill the
+  // worker -- but it made the failure INVISIBLE. Measured live 2026-09-09: a
+  // worker booted at 14:46 on a build containing the repair, and block 966081
+  // was STILL self-parented afterwards, with no record anywhere of the repair
+  // having been attempted or having failed.
+  //
+  // Boot is precisely when the host pool has not yet learned which endpoints
+  // work, so this read is MORE likely to fail here than anywhere else --
+  // which makes silence here maximally misleading.
+  const at = MAIN.indexOf("THE REPAIR MUST NOT BE ABLE TO SKIP SILENTLY");
+  ok(at > 0, "the repair must document why it reports");
+  const body = MAIN.slice(at, MAIN.indexOf("const pinned = this.cfg.t0?.bitcoin;", at));
+
+  ok(/"lock-parent-repair", "failure"/.test(body), "an unreadable header must be RECORDED");
+  ok(/"lock-parent-repair", "success"/.test(body), "and a completed repair must be too");
+  ok(/attempt < 3/.test(body), "a boot-time read must retry before giving up");
+  ok(/\.catch\(/.test(body), "and must still never throw out of boot");
+});
+
+test("the repair distinguishes 'already correct' from 'could not check'", () => {
+  // Collapsing those two is how a repair that never ran looks like a repair
+  // that had nothing to do.
+  const at = MAIN.indexOf("THE REPAIR MUST NOT BE ABLE TO SKIP SILENTLY");
+  const body = MAIN.slice(at, MAIN.indexOf("const pinned = this.cfg.t0?.bitcoin;", at));
+  ok(/already correct/.test(body), "a no-op repair must say so explicitly");
+  ok(
+    /could not read the lock block header/.test(body),
+    "and a failed read must say THAT, not nothing",
+  );
+});

@@ -95,3 +95,6 @@ test/e2e/.casino-keeper.pid
 # Scratch probe captures from live-API diagnosis. Evidence, not source.
 .w*.json
 .probe/
+w[a-z].json
+c[a-z].json
+.p[0-9]

@@ -280,11 +280,45 @@ export class Hose {
       //
       // Now: read the real parent, compare, and correct any disagreement.
       if (lock) {
-        const header = await rpc.getBlockHeader(lockHash).catch(() => null);
+        // THE REPAIR MUST NOT BE ABLE TO SKIP SILENTLY.
+        //
+        // `.catch(() => null)` is right -- a failed repair must never kill the
+        // worker -- but it made the failure INVISIBLE. Measured live
+        // 2026-09-09: the worker booted at 14:46 on a build containing this
+        // repair, and block 966081 was STILL self-parented afterwards, with no
+        // record anywhere of the repair having been attempted or having
+        // failed. Boot is exactly when the host pool has not yet learned which
+        // endpoints work, so this read is MORE likely to fail here than
+        // anywhere else.
+        //
+        // Every outcome is now recorded, so "the repair ran and could not read
+        // the header" is distinguishable from "the repair never ran".
+        let header: Awaited<ReturnType<typeof rpc.getBlockHeader>> | null = null;
+        let readError: string | null = null;
+        for (let attempt = 0; attempt < 3 && !header; attempt++) {
+          header = await rpc.getBlockHeader(lockHash).catch((e: unknown) => {
+            readError = e instanceof Error ? e.message : String(e);
+            return null;
+          });
+        }
         const realParent = header?.previousblockhash ?? null;
-          if (realParent && lock.parentHash.toLowerCase() !== asHex(realParent)) {
+        if (!realParent) {
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "failure", {
+            error: readError ?? "could not read the lock block header after 3 attempts",
+            detail: { lockHeight: alreadyLocked.t0Height, storedParent: lock.parentHash },
+          });
+        } else if (lock.parentHash.toLowerCase() === asHex(realParent)) {
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
+            reason: "lock block parent already correct",
+          });
+        }
+        if (realParent && lock.parentHash.toLowerCase() !== asHex(realParent)) {
           this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
           this.pg?.repairParentHash("bitcoin", asHex(lockHash), asHex(realParent));
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
+            reason: `repaired ${lock.parentHash} -> ${realParent}`,
+            detail: { lockHeight: alreadyLocked.t0Height },
+          });
           console.log(
             `[hose] bitcoin: repaired lock block ${alreadyLocked.t0Height} parent ` +
               `${lock.parentHash} -> ${realParent}`,
