@@ -26,7 +26,37 @@ export interface EsploraOpts {
   timeoutMs?: number;
 }
 
-const DEFAULT_HOSTS = ["https://mempool.space/api", "https://blockstream.info/api"];
+/**
+ * Esplora-compatible mirrors, all verified live 2026-09-09 to serve BOTH
+ * `/blocks/tip/height` and `/block-height/{n}`, and all four returned the
+ * byte-identical hash for block 966,000.
+ *
+ * WHY MORE THAN TWO. On 2026-09-09 the worker was found dead, and the
+ * provisioning proof run showed why, in its own words:
+ *
+ *   [akasha-hose] fatal: Error:
+ *     https://blockstream.info/api/blocks/tip/height: 429 Too Many Requests
+ *       at Hose.bootBitcoin ... at Hose.boot ... at main
+ *
+ * It could not BOOT. Not a stalled backfill, not a slow tick -- the process
+ * died before its first tick, which is why the archive had no heartbeat, no
+ * phase rows, and a tip frozen for hours. Three separate investigations of the
+ * backfill were reading code that never ran.
+ *
+ * Both original hosts answered 200 from a developer machine at the same
+ * moment, so the 429 is specific to the production host's IP. Two hosts is not
+ * a pool; it is one spare. Each of these keeps its own budget, so spreading
+ * across them respects every individual limit rather than evading any.
+ */
+const DEFAULT_HOSTS = [
+  "https://mempool.space/api",
+  "https://blockstream.info/api",
+  "https://mempool.emzy.de/api",
+  "https://mempool.ninja/api",
+];
+
+/** HTTP statuses that mean "ask again later", not "this data does not exist". */
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export class EsploraBitcoinRpc implements BitcoinRpc {
   private hosts: string[];
@@ -73,7 +103,15 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
         const res = await this.fetchImpl(`${host}${path}`, {
           signal: AbortSignal.timeout(this.timeoutMs),
         });
-        if (!res.ok) throw new Error(`${host}${path}: ${res.status} ${res.statusText}`);
+        if (!res.ok) {
+          // A 429 is a WAIT, not a verdict on the data. Marking it retryable
+          // lets the loop fall through to the next host instead of surfacing
+          // the first host's throttle as the answer -- which is exactly how a
+          // boot-time tip fetch became a fatal error and killed the worker.
+          const err = new Error(`${host}${path}: ${res.status} ${res.statusText}`);
+          (err as { retryable?: boolean }).retryable = RETRYABLE_STATUS.has(res.status);
+          throw err;
+        }
         return asJson ? await res.json() : (await res.text()).trim();
       } catch (e) {
         this.hostFailures.set(host, (this.hostFailures.get(host) ?? 0) + 1);

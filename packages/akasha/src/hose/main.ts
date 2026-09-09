@@ -234,6 +234,51 @@ export class Hose {
     this.bitcoinRpc = rpc;
     this.bitcoin = new BitcoinAdapter({ store: this.store, rpc, sha256: this.cfg.sha256 });
 
+    // AN ALREADY-LOCKED CHAIN NEEDS NO TIP FETCH TO BOOT.
+    //
+    // This is the line that killed the worker. `getBestBlockHash()` below is
+    // needed only to CHOOSE a lock block for a chain that has never been
+    // locked; once `akasha_cursor` holds one, the lock is a settled fact in
+    // the database. But it ran unconditionally, so a single 429 from one
+    // vendor -- at boot, before any tick -- threw out of bootBitcoin, out of
+    // boot, out of main, and the process died:
+    //
+    //   [akasha-hose] fatal: Error:
+    //     https://blockstream.info/api/blocks/tip/height: 429 Too Many Requests
+    //
+    // No heartbeat, no phase rows, a tip frozen for hours, and three
+    // investigations spent reading a backfill that never ran. A transient
+    // vendor throttle must never be able to prevent an archive that already
+    // knows where it starts from starting.
+    //
+    // The tip is fetched every tick anyway (bitcoinTick), so a booted worker
+    // catches up the moment the throttle lifts.
+    const alreadyLocked = this.store.getCursor("bitcoin");
+    if (alreadyLocked && !this.cfg.t0?.bitcoin) {
+      console.log(
+        `[hose] bitcoin: already locked at ${alreadyLocked.t0Height}, skipping the boot tip fetch`,
+      );
+      // The self-parent repair still runs, but BEST-EFFORT: it needs one
+      // network read for the real parent hash, and this whole branch exists
+      // because that network may be throttled. A failed repair is a row that
+      // stays poisoned until the next boot, which is recoverable; a thrown
+      // repair is a dead worker, which is not.
+      const lockHash = alreadyLocked.t0Hash;
+      const lock = this.store
+        .headersAtHeight("bitcoin", alreadyLocked.t0Height)
+        .find((h) => h.hash.toLowerCase() === lockHash.toLowerCase());
+      if (lock && lock.parentHash.toLowerCase() === lock.hash.toLowerCase()) {
+        const header = await rpc.getBlockHeader(lockHash).catch(() => null);
+        const realParent = header?.previousblockhash ?? null;
+        if (realParent) {
+          this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
+          this.pg?.repairSelfParent("bitcoin", asHex(lockHash), asHex(realParent));
+          console.log(`[hose] bitcoin: repaired the self-parented lock block ${alreadyLocked.t0Height}`);
+        }
+      }
+      return;
+    }
+
     const pinned = this.cfg.t0?.bitcoin;
     let height: number;
     let hash: string;
