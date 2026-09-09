@@ -60,6 +60,16 @@ export class Hose {
     this.store = cfg.sql ? new PostgresArchiveStore(cfg.sql) : new ArchiveStore();
   }
 
+  /**
+   * The durable store, when there is one. Exposed so the process runner can
+   * record per-phase telemetry through the same write queue as the tape --
+   * previously the runner could only log to stdout, which no HTTP route can
+   * read, which is the whole reason a frozen backfill was undiagnosable.
+   */
+  get durableStore(): PostgresArchiveStore | undefined {
+    return this.pg;
+  }
+
   private get pg(): PostgresArchiveStore | undefined {
     return this.store instanceof PostgresArchiveStore ? this.store : undefined;
   }
@@ -432,8 +442,41 @@ export class Hose {
    * RPC is refusing.
    */
   async backfillTick(budgetMs = 0): Promise<unknown> {
-    if (!this.backfill) return undefined;
-    const first = await this.backfill.step(this.cfg.chains);
+    // TELEMETRY FIRST, BEFORE ANY EARLY RETURN.
+    //
+    // `if (!this.backfill) return undefined` is itself one of the states that
+    // has been indistinguishable from outside: a worker with no durable store
+    // has no backfill at all, and reports exactly what a working-but-stalled
+    // one reports -- nothing. Recording the attempt before that branch is what
+    // makes "the lane never ran" provable rather than inferred.
+    const chainsForPhase = this.cfg.chains.length === 1 ? String(this.cfg.chains[0]) : "all";
+    this.pg?.recordPhase(chainsForPhase as ChainId, "backfill", "attempt");
+    if (!this.backfill) {
+      this.pg?.recordPhase(chainsForPhase as ChainId, "backfill", "failure", {
+        error: "no backfill worker: the hose has no durable store",
+      });
+      return undefined;
+    }
+    const first = await this.backfill.step(this.cfg.chains).catch((e: unknown) => {
+      // A THROW HERE USED TO VANISH.
+      //
+      // step() rejecting propagated to the caller's shared try/catch, which
+      // logs to stdout no route can read. The tail then never moved and the
+      // reason was invisible. Recorded durably, then rethrown so behaviour is
+      // unchanged.
+      this.pg?.recordPhase(chainsForPhase as ChainId, "backfill", "failure", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+      throw e;
+    });
+    // The reason string the backfill already produces, which was being
+    // discarded. This is the field that turns a frozen number into a sentence.
+    this.pg?.recordPhase(chainsForPhase as ChainId, "backfill", "success", {
+      reason: first?.reason ?? (first?.tailMoved ? "tail moved" : "no progress, no reason given"),
+      detail: first
+        ? { chain: first.chain, from: first.from, to: first.to, linked: first.linked, tailMoved: first.tailMoved }
+        : { step: "returned undefined -- every chain's tail is at protocol_t0" },
+    });
     if (budgetMs <= 0) return first;
     // `tailMoved` is the only honest signal of progress -- a step that
     // returns a reason string but moved nothing would otherwise spin.

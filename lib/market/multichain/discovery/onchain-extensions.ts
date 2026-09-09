@@ -282,12 +282,60 @@ const DELEGATE_REGISTRY_IFACE = new Interface([
   `function getIncomingDelegations(address to) view returns (${DELEGATION_TUPLE}[])`,
 ]);
 
+/**
+ * delegate.cash's DelegationType enum, verbatim from IDelegateRegistry.sol.
+ * The ORDER is the contract's, not ours -- the uint8 on the wire indexes into
+ * exactly this list.
+ */
+export const DELEGATION_TYPES = ["NONE", "ALL", "CONTRACT", "ERC721", "ERC20", "ERC1155"] as const;
+export type DelegationScope = (typeof DELEGATION_TYPES)[number];
+
 export type DelegateCashDelegation = {
   vault: string;
   delegate: string;
+  /**
+   * The registry's own scope, carried rather than inferred.
+   *
+   * WHY THIS FIELD EXISTS: this type used to reconstruct scope by testing
+   * `tokenId != 0`, which silently mislabels a real per-token delegation of
+   * TOKEN #0 -- the first mint of most collections -- as a collection-wide
+   * one. Scope is data the registry already returns; inferring it from a
+   * sentinel value was a guess that happened to be wrong exactly at the most
+   * common token id.
+   */
+  scope: DelegationScope;
+  /** bytes32(0) means ALL RIGHTS; a non-zero value is a scoped subdelegation. */
+  rights: string;
   contract: string | null;
   tokenId: string | null;
 };
+
+/**
+ * Does this delegation actually cover this specific token?
+ *
+ * THE FALSE NEGATIVE THIS PREVENTS: most real delegations in the wild are
+ * wallet-wide (`ALL`), not per-token. Code that checks only for an ERC721-type
+ * row finds nothing and reports a fully-delegated token as uncommitted. Scope
+ * must be checked in WIDENING order -- exact token, then whole collection,
+ * then whole wallet.
+ */
+export function delegationCoversToken(
+  d: DelegateCashDelegation,
+  contract: string,
+  tokenId: string,
+): boolean {
+  const sameContract = d.contract != null && d.contract.toLowerCase() === contract.toLowerCase();
+  switch (d.scope) {
+    case "ALL":
+      return true; // wallet-wide: covers every token the vault holds
+    case "CONTRACT":
+      return sameContract;
+    case "ERC721":
+      return sameContract && d.tokenId === tokenId;
+    default:
+      return false; // NONE, or a fungible-token scope: not an NFT commitment
+  }
+}
 
 /**
  * Reads real delegations from delegate.cash's canonical DelegateRegistry.
@@ -308,14 +356,39 @@ export async function resolveDelegateCashDelegations(
     const { result } = await rpcCall<string>(chainSlug, "eth_call", [{ to: DELEGATE_REGISTRY_ADDRESS, data }, "latest"]);
     if (!result || result === "0x") return [];
     const [decoded] = DELEGATE_REGISTRY_IFACE.decodeFunctionResult(fn, result);
-    const rows = decoded as Array<{ to: string; from: string; contract_: string; tokenId: bigint }>;
-    return Array.from(rows).map((row) => ({
-      vault: row.from,
-      delegate: row.to,
-      contract: row.contract_ && BigInt(row.contract_) !== 0n ? row.contract_ : null,
-      tokenId: row.tokenId && row.tokenId !== 0n ? row.tokenId.toString() : null,
-    }));
+    return decodeDelegationRows(decoded);
   } catch {
     return [];
   }
+}
+
+/**
+ * The pure decode step, exported so the row mapping can be tested WITHOUT a
+ * live RPC. The token-#0 bug lived here, not in the coverage predicate -- a
+ * test that only exercised the predicate passed while this was wrong.
+ */
+export function decodeDelegationRows(decoded: unknown): DelegateCashDelegation[] {
+    const rows = decoded as Array<{
+      type_: bigint;
+      to: string;
+      from: string;
+      rights: string;
+      contract_: string;
+      tokenId: bigint;
+    }>;
+    return Array.from(rows).map((row) => {
+      const scope = DELEGATION_TYPES[Number(row.type_)] ?? "NONE";
+      // tokenId is meaningful ONLY at token-level scope. At ALL/CONTRACT scope
+      // the field is zero-filled padding, so reporting "token 0" there would
+      // invent a claim the registry never made.
+      const tokenScoped = scope === "ERC721" || scope === "ERC1155";
+      return {
+        vault: row.from,
+        delegate: row.to,
+        scope,
+        rights: row.rights,
+        contract: row.contract_ && BigInt(row.contract_) !== 0n ? row.contract_ : null,
+        tokenId: tokenScoped ? row.tokenId.toString() : null,
+      };
+    });
 }

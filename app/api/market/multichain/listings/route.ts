@@ -758,10 +758,39 @@ export async function GET(req: NextRequest) {
     const ERC721 = 2;
     const ERC1155 = 3;
     const cheapestByToken = new Map<string, (typeof rawOrders)[number]>();
+    let excludedNoTokenId = 0;
+    let excludedMultiOffer = 0;
     for (const order of rawOrders) {
+      // A BUNDLE IS NOT A LISTING OF ONE TOKEN.
+      //
+      // Reading offer[0] and ignoring offer.length silently represents a
+      // multi-item bundle as a single-token ask at the WHOLE BUNDLE's price:
+      // the buyer sees one token priced for many. Counted and excluded rather
+      // than mispriced.
+      if ((order.parameters.offer?.length ?? 0) > 1) {
+        excludedMultiOffer += 1;
+        continue;
+      }
       const offerItem = order.parameters.offer[0];
       const tokenId = offerItem?.identifierOrCriteria;
-      if (!tokenId) continue;
+      // TOKEN "0" IS A REAL TOKEN.
+      //
+      // `!tokenId` is falsy for the string "0", so a listing of token #0 --
+      // the first mint of most collections -- was dropped here. Compare
+      // against absence explicitly.
+      if (tokenId == null || tokenId === "") {
+        // THE UNCOUNTED EXIT.
+        //
+        // Every other way out of this loop increments a counter that reaches
+        // bookCoverage, so a short grid always carries the number explaining
+        // it. This one did not, which is why "200 fetched, 1 shown" was
+        // unexplainable from outside: the three documented cases (page cap,
+        // upstream returned one, dedup collapse) did not cover "the token id
+        // was missing", so the evidence pointed at a dedup bug that was not
+        // there. An unexplained drop must never be silent.
+        excludedNoTokenId += 1;
+        continue;
+      }
 
       // A CRITERIA ORDER IS NOT A LISTING OF ONE TOKEN.
       //
@@ -956,6 +985,10 @@ export async function GET(req: NextRequest) {
           // explains it -- without this, "200 fetched, 2 shown" reads as a bug
           // in the dedup rather than as orders that are not per-token asks.
           excludedCriteriaOrders: excludedCriteria,
+          // The two exits that used to be silent. If ordersFetched is large
+          // and listings is small, exactly one of these numbers now says why.
+          excludedNoTokenId,
+          excludedMultiOffer,
         },
       },
       { headers: { "Cache-Control": "no-store" } }

@@ -44,7 +44,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, recordActivity, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { ROBINHOOD_RPC_URLS, ROBINHOOD_CHAIN_ID } from "@/lib/mint-contract";
-import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC, isNotRealCollectibleArt, rpcCall, readCursor, writeCursor } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC, NFT_OWNERSHIP_TOPICS, isNotRealCollectibleArt, rpcCall, readCursor, writeCursor } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { writeCollectionCell, writeChainCoverage } from "@/lib/market/multichain/control-plane";
 
 const CHAIN_SLUG = "robinhood";
@@ -197,7 +197,7 @@ async function runRobinhoodChainDiscoveryScanInternal(
     {
       fromBlock: `0x${fromBlock.toString(16)}`,
       toBlock: `0x${toBlock.toString(16)}`,
-      topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]],
+      topics: [[...NFT_OWNERSHIP_TOPICS]],
     },
   ]);
 
@@ -205,7 +205,7 @@ async function runRobinhoodChainDiscoveryScanInternal(
   for (const log of logs) {
     const topic0 = log.topics[0]?.toLowerCase();
     if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
-    if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+    if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
     const addr = log.address.toLowerCase();
     transferCounts.set(addr, (transferCounts.get(addr) ?? 0) + 1);
   }

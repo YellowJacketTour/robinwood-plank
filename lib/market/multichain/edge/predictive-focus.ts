@@ -48,11 +48,20 @@ async function pendingTokenIds(chainSlug: string, collectionSlug: string, tokenI
 export async function focusTokens(chainSlug: string, collectionSlug: string, tokenIds: string[]): Promise<TokenFocusResult> {
   const ids = [...new Set(tokenIds.map((t) => String(t).trim()).filter(Boolean))].slice(0, MAX_TOKENS);
   const result: TokenFocusResult = { requested: ids.length, pending: 0, hydrated: 0, skipped: 0 };
-  if (ids.length === 0 || !/^0x[0-9a-fA-F]{40}$/.test(collectionSlug)) {
+  if (ids.length === 0) {
     result.skipped = ids.length;
     return result;
   }
-  const pending = await pendingTokenIds(chainSlug, collectionSlug, ids);
+  // Resolve rather than shape-test: a collection addressed by name used to
+  // skip every token here and report them all as `skipped`, so the attention
+  // beam reported work it had declined to do.
+  const { resolveEvmContractAddress } = await import("@/lib/market/multichain/resolve-contract-address");
+  const contractAddress = await resolveEvmContractAddress(chainSlug, collectionSlug);
+  if (!contractAddress) {
+    result.skipped = ids.length;
+    return result;
+  }
+  const pending = await pendingTokenIds(chainSlug, contractAddress, ids);
   result.pending = pending.length;
   result.skipped = ids.length - pending.length;
   if (pending.length === 0) return result;
@@ -63,7 +72,7 @@ export async function focusTokens(chainSlug: string, collectionSlug: string, tok
       while (cursor < pending.length) {
         const tokenId = pending[cursor++];
         try {
-          const r = await hydrateSpecificToken(chainSlug, collectionSlug, tokenId);
+          const r = await hydrateSpecificToken(chainSlug, contractAddress, tokenId);
           if (r.resolved) result.hydrated += 1;
         } catch {
           // one token's failure never stops the rest

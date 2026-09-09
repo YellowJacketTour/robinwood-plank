@@ -11,7 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { hydrateSpecificToken } from "@/lib/market/multichain/rarity-index-runner";
 import { hydrateSpecificSolanaToken } from "@/lib/market/multichain/discovery/solana-token-hydrate";
-import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { resolveEvmContractAddress } from "@/lib/market/multichain/resolve-contract-address";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,12 +44,34 @@ export async function GET(req: NextRequest) {
       const result = await hydrateSpecificSolanaToken(chainSlug, collectionSlug, tokenId);
       return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(collectionSlug)) {
-      // Bitcoin collectionSlug (an ordinal collection id, never 0x-shaped)
-      // -- honestly out of scope for this route rather than a fabricated 200.
+    // A SHAPE TEST IS NOT AN IDENTITY TEST.
+    //
+    // This used to require collectionSlug to be 0x-shaped, intending to keep
+    // Bitcoin's ordinal ids (never 0x-shaped) out of scope. It also caught
+    // every EVM collection addressed by its NAME, which is how the app
+    // actually links to them. Measured live on Milady Maker:
+    //
+    //   ?collectionSlug=milady   -> {"resolved": false}
+    //   ?collectionSlug=0x5af0…  -> full metadata, image and traits
+    //
+    // Same token, same route, same archive. Nothing was missing upstream --
+    // the route refused to look. And because the refusal is deterministic,
+    // waiting and refreshing could never fix it, which is exactly what "it
+    // isn't hydrating anything no matter how long I visit" looks like from
+    // the outside.
+    //
+    // Bitcoin is still excluded, but by CHAIN (what it is) rather than by the
+    // shape of a string (what it looks like).
+    if (isBitcoinChainSlug(chainSlug)) {
       return NextResponse.json({ resolved: false });
     }
-    const result = await hydrateSpecificToken(chainSlug, collectionSlug, tokenId);
+    const contractAddress = await resolveEvmContractAddress(chainSlug, collectionSlug);
+    if (!contractAddress) {
+      // A real "the archive does not know this collection", which is
+      // different from "we declined to try".
+      return NextResponse.json({ resolved: false, reason: "collection-unknown" });
+    }
+    const result = await hydrateSpecificToken(chainSlug, contractAddress, tokenId);
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Could not hydrate this token right now.");

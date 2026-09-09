@@ -48,6 +48,8 @@ import {
   TRANSFER_TOPIC,
   TRANSFER_SINGLE_TOPIC,
   TRANSFER_BATCH_TOPIC,
+  CONSECUTIVE_TRANSFER_TOPIC,
+  NFT_OWNERSHIP_TOPICS,
   isNotRealCollectibleArt,
   readCursor,
   writeCursor,
@@ -267,6 +269,53 @@ async function writeTransfersFromHypersyncLogs(
   await writeTransferLedgerEvents(decoded);
 }
 
+/**
+ * The largest ERC-2309 range we will expand into individual token ids.
+ *
+ * ERC-2309 encodes (fromTokenId, toTokenId) as two uint256. Nothing in the
+ * spec bounds the width, so a buggy -- or hostile -- contract can emit a range
+ * of 2^256 and a naive expander would allocate until the process dies. This is
+ * a real denial-of-service surface on a scanner that reads every log on chain
+ * by design.
+ *
+ * 100k is far above any real collection (the largest are ~10k-30k) and far
+ * below anything that threatens the heap. A range wider than this is recorded
+ * as a DISCOVERY (the collection is real and worth knowing about) while its
+ * token ids are left to the metadata lane, which fetches on demand rather than
+ * enumerating. Silently truncating to a prefix would be worse than refusing:
+ * it would claim a complete token set that is not complete.
+ */
+const MAX_CONSECUTIVE_RANGE = 100_000;
+
+/**
+ * Expand an ERC-2309 (fromTokenId, toTokenId) topic pair into token ids.
+ *
+ * Returns EMPTY for a malformed or over-wide range rather than throwing or
+ * guessing: the caller treats "no ids" as "the collection exists, its tokens
+ * are unenumerated", which is a typed hole the metadata lane can fill. The
+ * range is INCLUSIVE at both ends per the spec.
+ */
+export function expandConsecutiveRange(
+  fromTopic: string | null | undefined,
+  toTopic: string | null | undefined,
+): string[] {
+  if (!fromTopic || !toTopic) return [];
+  let from: bigint;
+  let to: bigint;
+  try {
+    from = BigInt(fromTopic);
+    to = BigInt(toTopic);
+  } catch {
+    return [];
+  }
+  if (to < from) return []; // inverted range: not a claim we can support
+  const width = to - from + 1n;
+  if (width > BigInt(MAX_CONSECUTIVE_RANGE)) return [];
+  const out: string[] = [];
+  for (let id = from; id <= to; id += 1n) out.push(id.toString());
+  return out;
+}
+
 function requireApiToken(): string {
   const token = process.env.ENVIO_API_TOKEN?.trim();
   if (!token) {
@@ -336,7 +385,7 @@ export async function findEarliestTransferBlock(
   const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
   const query: Query = {
     fromBlock: 0,
-    logs: [{ address: [contractAddress], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    logs: [{ address: [contractAddress], topics: [[...NFT_OWNERSHIP_TOPICS]] }],
     fieldSelection: { log: ["BlockNumber"] },
     maxNumLogs: 1,
   };
@@ -415,7 +464,7 @@ export async function runAddressScopedMembershipScan(input: {
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: input.toBlockCeiling,
-    logs: [{ address: [address], topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    logs: [{ address: [address], topics: [[...NFT_OWNERSHIP_TOPICS]] }],
     fieldSelection: {
       log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
       block: ["Number", "Timestamp"],
@@ -449,13 +498,17 @@ export async function runAddressScopedMembershipScan(input: {
         if (!log.address) continue;
         const topic0 = log.topics[0]?.toLowerCase();
         if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
-        if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+        if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
         rawTransferLogs.push(log);
         if (topic0 === TRANSFER_TOPIC && log.topics[3]) {
           const tokenId = BigInt(log.topics[3]).toString();
           const ids = observedErc721.get(address) ?? new Set<string>();
           ids.add(tokenId);
           observedErc721.set(address, ids);
+        } else if (topic0 === CONSECUTIVE_TRANSFER_TOPIC) {
+          const ids = observedErc721.get(address) ?? new Set<string>();
+          for (const id of expandConsecutiveRange(log.topics[1], log.topics[2])) ids.add(id);
+          if (ids.size > 0) observedErc721.set(address, ids);
         }
         logsScanned += 1;
       }
@@ -539,7 +592,7 @@ export async function runHypersyncDiscoveryScan(input: {
   let query: Query = {
     fromBlock,
     toBlock,
-    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    logs: [{ topics: [[...NFT_OWNERSHIP_TOPICS]] }],
     fieldSelection: {
       log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
       block: ["Number", "Timestamp"],
@@ -555,7 +608,7 @@ export async function runHypersyncDiscoveryScan(input: {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
       if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
-      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+      if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       pageLogs.push(log);
@@ -564,6 +617,14 @@ export async function runHypersyncDiscoveryScan(input: {
         const ids = observedErc721.get(key) ?? new Set<string>();
         ids.add(tokenId);
         observedErc721.set(key, ids);
+      } else if (topic0 === CONSECUTIVE_TRANSFER_TOPIC) {
+        // ERC-2309 carries a RANGE, not one id: topics[1]=fromTokenId,
+        // topics[2]=toTokenId (both indexed). Expanding it is what turns
+        // "this collection exists" into "these tokens exist" -- without it a
+        // batch-minted collection registers with zero tokens.
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        for (const id of expandConsecutiveRange(log.topics[1], log.topics[2])) ids.add(id);
+        if (ids.size > 0) observedErc721.set(key, ids);
       }
       logsScanned += 1;
     }
@@ -678,7 +739,7 @@ export async function runHypersyncBackfillScan(input: {
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: ceiling,
-    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    logs: [{ topics: [[...NFT_OWNERSHIP_TOPICS]] }],
     fieldSelection: {
       log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
       block: ["Number", "Timestamp"],
@@ -694,7 +755,7 @@ export async function runHypersyncBackfillScan(input: {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
       if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
-      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+      if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       rawTransferLogs.push(log);
@@ -703,6 +764,14 @@ export async function runHypersyncBackfillScan(input: {
         const ids = observedErc721.get(key) ?? new Set<string>();
         ids.add(tokenId);
         observedErc721.set(key, ids);
+      } else if (topic0 === CONSECUTIVE_TRANSFER_TOPIC) {
+        // ERC-2309 carries a RANGE, not one id: topics[1]=fromTokenId,
+        // topics[2]=toTokenId (both indexed). Expanding it is what turns
+        // "this collection exists" into "these tokens exist" -- without it a
+        // batch-minted collection registers with zero tokens.
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        for (const id of expandConsecutiveRange(log.topics[1], log.topics[2])) ids.add(id);
+        if (ids.size > 0) observedErc721.set(key, ids);
       }
       logsScanned += 1;
     }
@@ -834,7 +903,7 @@ export async function runHypersyncPriorityWindowScan(input: {
   let query: Query = {
     fromBlock: scannedUpTo,
     toBlock: input.toBlockCeiling,
-    logs: [{ topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] }],
+    logs: [{ topics: [[...NFT_OWNERSHIP_TOPICS]] }],
     fieldSelection: {
       log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "TransactionHash", "LogIndex", "BlockNumber"],
       block: ["Number", "Timestamp"],
@@ -850,7 +919,7 @@ export async function runHypersyncPriorityWindowScan(input: {
       if (!log.address) continue;
       const topic0 = log.topics[0]?.toLowerCase();
       if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue;
-      if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+      if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
       const key = log.address.toLowerCase();
       tally.set(key, (tally.get(key) ?? 0) + 1);
       rawTransferLogs.push(log);
@@ -859,6 +928,14 @@ export async function runHypersyncPriorityWindowScan(input: {
         const ids = observedErc721.get(key) ?? new Set<string>();
         ids.add(tokenId);
         observedErc721.set(key, ids);
+      } else if (topic0 === CONSECUTIVE_TRANSFER_TOPIC) {
+        // ERC-2309 carries a RANGE, not one id: topics[1]=fromTokenId,
+        // topics[2]=toTokenId (both indexed). Expanding it is what turns
+        // "this collection exists" into "these tokens exist" -- without it a
+        // batch-minted collection registers with zero tokens.
+        const ids = observedErc721.get(key) ?? new Set<string>();
+        for (const id of expandConsecutiveRange(log.topics[1], log.topics[2])) ids.add(id);
+        if (ids.size > 0) observedErc721.set(key, ids);
       }
       logsScanned += 1;
     }

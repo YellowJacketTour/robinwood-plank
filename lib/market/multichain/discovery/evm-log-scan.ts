@@ -72,6 +72,43 @@ export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11
  * which only watches ERC-721 Transfer is structurally incomplete. */
 export const TRANSFER_SINGLE_TOPIC = "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
 export const TRANSFER_BATCH_TOPIC = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
+/**
+ * ERC-2309 `ConsecutiveTransfer(uint256,uint256,address,address)`.
+ *
+ * THE HOLE THIS CLOSES
+ * --------------------
+ * The three topics above assume every ownership assignment emits a per-token
+ * event. ERC-2309 exists precisely to avoid that: it compresses an entire
+ * batch mint -- often a whole collection -- into ONE log carrying a
+ * (fromTokenId, toTokenId) range. ERC721A and other batch-mint contracts use
+ * it at deploy time.
+ *
+ * So a collection that batch-mints its full supply and has not yet traded
+ * emits NONE of the three topics above and is invisible to discovery --
+ * permanently, not just until the next scan. The comment on
+ * TRANSFER_SINGLE_TOPIC states the right principle ("a collection registry
+ * which only watches ERC-721 Transfer is structurally incomplete"); this
+ * constant applies it one event further.
+ *
+ * Topic0 recomputed independently with keccak256 rather than copied, and the
+ * three constants above were recomputed in the same pass and matched.
+ *
+ * SHAPE, which is why it needs its own decode path: the token ids are the two
+ * INDEXED topics (topics[1], topics[2]) and the addresses are indexed too
+ * (topics[3] is `from`; `to` is also indexed) -- unlike ERC-721 Transfer this
+ * log has 4 topics but its topics[3] is an ADDRESS, not a tokenId. Anything
+ * that reads topics[3] as a token id must exclude this topic explicitly.
+ */
+export const CONSECUTIVE_TRANSFER_TOPIC =
+  "0xdeaa91b6123d068f5821d0fb0678463d1a8a6079fe8af5de3ce5e896dcf9133d";
+
+/** Every topic that signals "an NFT changed hands or came into existence". */
+export const NFT_OWNERSHIP_TOPICS = [
+  TRANSFER_TOPIC,
+  TRANSFER_SINGLE_TOPIC,
+  TRANSFER_BATCH_TOPIC,
+  CONSECUTIVE_TRANSFER_TOPIC,
+] as const;
 
 /** Mirrors alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN chainSlug set. */
 // DERIVED from lib/market/multichain/chains/manifest.ts -- see that file. The
@@ -215,7 +252,7 @@ export async function runEvmDiscoveryScan(input: {
     {
       fromBlock: "0x" + fromBlock.toString(16),
       toBlock: "0x" + toBlock.toString(16),
-      topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]],
+      topics: [[...NFT_OWNERSHIP_TOPICS]],
     },
   ]);
 
@@ -224,7 +261,7 @@ export async function runEvmDiscoveryScan(input: {
   for (const log of logs) {
     const topic0 = log.topics[0]?.toLowerCase();
     if (topic0 === TRANSFER_TOPIC && log.topics.length !== 4) continue; // ERC-20
-    if (topic0 !== TRANSFER_TOPIC && topic0 !== TRANSFER_SINGLE_TOPIC && topic0 !== TRANSFER_BATCH_TOPIC) continue;
+    if (!(NFT_OWNERSHIP_TOPICS as readonly string[]).includes(topic0 ?? "")) continue;
     const key = log.address.toLowerCase();
     tally.set(key, (tally.get(key) ?? 0) + 1);
     rawTransferLogs.push({

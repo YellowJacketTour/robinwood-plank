@@ -1,5 +1,5 @@
 import { rpcCall } from "@/lib/market/multichain/discovery/rpc-provider-pool";
-import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC, NFT_OWNERSHIP_TOPICS } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { initialChunk, onChunkSuccess, onChunkTooLarge, isRangeTooLargeError, suggestedRangeFromError, type ChunkState } from "../chunk";
 import { readChunkMemory, writeChunkMemory } from "../cursor";
 import type { HunterDriver, HunterFinding } from "../types";
@@ -65,7 +65,7 @@ export function createEvmHunter(opts: { confirmations?: number; maxBlocksPerRun?
         let logs: RawLog[];
         try {
           const r = await rpcCall<RawLog[]>(ctx.chainSlug, "eth_getLogs", [
-            { fromBlock: `0x${position.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics: [[TRANSFER_TOPIC, TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]] },
+            { fromBlock: `0x${position.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics: [[...NFT_OWNERSHIP_TOPICS]] },
           ]);
           calls += 1;
           logs = r.result;
