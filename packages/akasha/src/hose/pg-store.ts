@@ -180,6 +180,89 @@ export class PostgresArchiveStore extends ArchiveStore {
     );
   }
 
+  /**
+   * Record that a worker phase was ATTEMPTED, COMPLETED, or FAILED.
+   *
+   * The point is the difference between those three. Bitcoin's backfill has
+   * now survived three wrong diagnoses because "never ran", "ran and threw",
+   * and "ran and could not advance" are indistinguishable from outside the
+   * process. Attempts that climb without completions mean throwing;
+   * completions that climb without the tail moving mean the third case, and
+   * `reason` -- which the backfill already produces and which was being
+   * discarded -- then says why in words.
+   *
+   * Written through the same queue as every other durable write, so it costs
+   * one more statement per flush and cannot fail independently of the tape.
+   */
+  recordPhase(
+    chain: ChainId,
+    phase: string,
+    outcome: "attempt" | "success" | "failure",
+    info?: { reason?: string | null; error?: string | null; detail?: unknown },
+  ): void {
+    const reason = info?.reason ?? null;
+    const error = info?.error ?? null;
+    const detail = info?.detail === undefined ? null : JSON.stringify(info.detail);
+    this.enqueue(
+      `INSERT INTO akasha_worker_phase
+         (chain, phase, attempts, completions, failures,
+          last_reason, last_error, last_detail,
+          last_attempt_at, last_success_at, last_failure_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb,
+               CASE WHEN $3 = 1 THEN NOW() END,
+               CASE WHEN $4 = 1 THEN NOW() END,
+               CASE WHEN $5 = 1 THEN NOW() END)
+       ON CONFLICT (chain, phase) DO UPDATE SET
+         attempts    = akasha_worker_phase.attempts + EXCLUDED.attempts,
+         completions = akasha_worker_phase.completions + EXCLUDED.completions,
+         failures    = akasha_worker_phase.failures + EXCLUDED.failures,
+         -- COALESCE so a later attempt does not erase the reason or error that
+         -- explains the stall; each field is only overwritten by a row that
+         -- actually carries one.
+         last_reason = COALESCE(EXCLUDED.last_reason, akasha_worker_phase.last_reason),
+         last_error  = COALESCE(EXCLUDED.last_error, akasha_worker_phase.last_error),
+         last_detail = COALESCE(EXCLUDED.last_detail, akasha_worker_phase.last_detail),
+         last_attempt_at = COALESCE(EXCLUDED.last_attempt_at, akasha_worker_phase.last_attempt_at),
+         last_success_at = COALESCE(EXCLUDED.last_success_at, akasha_worker_phase.last_success_at),
+         last_failure_at = COALESCE(EXCLUDED.last_failure_at, akasha_worker_phase.last_failure_at)`,
+      [
+        chain,
+        phase,
+        outcome === "attempt" ? 1 : 0,
+        outcome === "success" ? 1 : 0,
+        outcome === "failure" ? 1 : 0,
+        reason,
+        error,
+        detail,
+      ],
+    );
+  }
+
+  /**
+   * "Is the worker alive at all?" -- answerable without reading a log.
+   *
+   * A boot row is written once per process start and last_tick_at moves every
+   * tick, so a stale heartbeat against a live site proves the worker is dead
+   * and nothing restarted it. That is the one case no amount of code reading
+   * can rule out from outside.
+   */
+  recordHeartbeat(worker: string, info: { pid: number; bootAt: string; chains: string; version: string; boot?: boolean }): void {
+    this.enqueue(
+      `INSERT INTO akasha_worker_heartbeat (worker, pid, boot_at, last_tick_at, tick_count, chains, version)
+       VALUES ($1, $2, $3::timestamptz, NOW(), 1, $4, $5)
+       ON CONFLICT (worker) DO UPDATE SET
+         pid = EXCLUDED.pid,
+         -- boot_at only moves on a real process start, so its age is the
+         -- worker's uptime rather than the age of the last tick.
+         boot_at = CASE WHEN $6 THEN EXCLUDED.boot_at ELSE akasha_worker_heartbeat.boot_at END,
+         last_tick_at = NOW(),
+         tick_count = CASE WHEN $6 THEN 0 ELSE akasha_worker_heartbeat.tick_count + 1 END,
+         chains = EXCLUDED.chains,
+         version = EXCLUDED.version`,
+      [worker, info.pid, info.bootAt, info.chains, info.version, info.boot === true],
+    );
+  }
+
   override putEvent(e: ChainEvent): boolean {
     const inserted = super.putEvent(e);
     if (!inserted) return false; // already on the tape: do not double-write

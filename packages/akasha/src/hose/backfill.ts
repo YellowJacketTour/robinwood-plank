@@ -48,8 +48,23 @@ export interface BackfillProgress {
   reason?: string;
 }
 
+/**
+ * What the backfill actually needs from a store: a durable tail it can move,
+ * and the headers to prove the hash link.
+ *
+ * Declaring the full PostgresArchiveStore here demanded far more than this
+ * worker uses, and it is what broke bitcoin-backfill.test.ts the moment the
+ * concrete class grew telemetry methods -- a test that drives the real logic
+ * against an in-memory store could no longer typecheck, for a reason having
+ * nothing to do with the backfill. Depend on the capability, not the class.
+ */
+export type BackfillStore = Pick<
+  PostgresArchiveStore,
+  "getBackfillTail" | "setBackfillTail" | "headersAtHeight" | "getCursor" | "enqueueGap"
+>;
+
 export interface BackfillDeps {
-  store: PostgresArchiveStore;
+  store: BackfillStore;
   /** Ingest one epoch. Returns the LOWEST header it actually persisted. */
   ingestRange: (chain: ChainId, from: number, to: number) => Promise<Header | undefined>;
   /** Gaze pressure per chain, 0..1. Absent means no attention. */
@@ -62,7 +77,7 @@ export interface BackfillDeps {
  * 1.0 means nothing before the archive origin has been walked; 0 means the
  * tail has reached the protocol origin and that chain's past is closed.
  */
-export function needPast(store: ArchiveStore, chain: ChainId, tail: number): number {
+export function needPast(store: Pick<ArchiveStore, "getCursor">, chain: ChainId, tail: number): number {
   const cursor = store.getCursor(chain);
   if (!cursor) return 0;
   const t0 = protocolT0(chain);
@@ -83,7 +98,7 @@ export const FAIRNESS_FLOOR = 0.15;
  * failure applied to history.
  */
 export function pickChain(
-  store: PostgresArchiveStore,
+  store: BackfillStore,
   chains: ChainId[],
   gaze?: (c: ChainId) => number,
 ): ChainId | undefined {

@@ -47,6 +47,8 @@ const SHARD_CLAIMS = Math.max(0, Number(process.env.AKASHA_SHARD_CLAIMS ?? 0));
  * no progress, so this is a ceiling rather than a target.
  */
 const BACKFILL_BUDGET_MS = Math.max(0, Math.floor(TICK_MS * 0.66));
+/** Process start, so heartbeat age is UPTIME rather than time-since-last-tick. */
+const BOOT_AT = new Date().toISOString();
 const HEALTH_MS = Number(process.env.AKASHA_HEALTH_MS ?? 60_000);
 
 /**
@@ -141,6 +143,21 @@ async function main(): Promise<void> {
   });
 
   await hose.boot();
+  // A BOOT ROW, WRITTEN ONCE.
+  //
+  // This is the single fact that separates "the worker is dead" from every
+  // other explanation of a frozen tail, and it was previously unavailable at
+  // any HTTP surface. `boot: true` resets tick_count and moves boot_at, so a
+  // restart loop is visible as a boot_at that keeps advancing with a
+  // tick_count that never grows.
+  hose.durableStore?.recordHeartbeat("akasha-hose", {
+    pid: process.pid,
+    bootAt: BOOT_AT,
+    chains: chains.join(","),
+    version: process.env.GIT_COMMIT ?? "unknown",
+    boot: true,
+  });
+  await hose.flush().catch(() => undefined);
   console.log(`[akasha-hose] owning tip for: ${chains.join(", ")}`);
 
   let stopping = false;
@@ -158,11 +175,44 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
+  // EVERY PHASE REPORTS SEPARATELY.
+  //
+  // These phases used to share ONE try/catch, so a throw in an early phase
+  // silently skipped every later one -- including the backfill -- for that
+  // tick, forever, while the process stayed up and healthy-looking. The only
+  // evidence was a stdout line no HTTP route can read, which is why Bitcoin's
+  // frozen tail survived three separate investigations.
+  //
+  // Each phase now records that it started, that it finished, and what it
+  // threw, into akasha_worker_phase. A phase that throws no longer takes the
+  // rest of the tick with it: the backfill runs even when the repair fails,
+  // which is both more honest AND more correct -- there was never a reason
+  // for one to block the other.
+  const phase = async (name: string, run: () => Promise<unknown>): Promise<void> => {
+    const store = hose.durableStore;
+    const chainKey = (chains.length === 1 ? String(chains[0]) : "all") as never;
+    store?.recordPhase(chainKey, name, "attempt");
+    try {
+      await run();
+      store?.recordPhase(chainKey, name, "success");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      store?.recordPhase(chainKey, name, "failure", { error: message });
+      console.error(`[akasha-hose] phase ${name} failed:`, message);
+    }
+  };
+
   const tick = async (): Promise<void> => {
     if (stopping) return;
     try {
-      if (chains.includes("bitcoin")) await hose.bitcoinTick();
-      await hose.repairTick();
+      hose.durableStore?.recordHeartbeat("akasha-hose", {
+        pid: process.pid,
+        bootAt: BOOT_AT,
+        chains: chains.join(","),
+        version: process.env.GIT_COMMIT ?? "unknown",
+      });
+      if (chains.includes("bitcoin")) await phase("bitcoin-tip", () => hose.bitcoinTick());
+      await phase("repair", () => hose.repairTick());
       // The shattered archive, alongside the serial walk rather than instead
       // of it. The serial tail keeps moving; sharding fills the rest of the
       // past in parallel, and the two converge on the same run-list because a
@@ -171,7 +221,12 @@ async function main(): Promise<void> {
       // when the host can afford the fan-out.
       if (SHARD_CLAIMS > 0) {
         for (const chain of chains) {
-          const res = await hose.shardTick(chain, SHARD_CLAIMS);
+          const res = await hose.shardTick(chain, SHARD_CLAIMS).catch((e) => {
+            hose.durableStore?.recordPhase(chain as never, "shard", "failure", {
+              error: e instanceof Error ? e.message : String(e),
+            });
+            return undefined;
+          });
           if (res && (res.walked > 0 || res.failed > 0)) {
             console.log(`[akasha-hose] shard ${chain}`, JSON.stringify(res));
           }
@@ -180,7 +235,10 @@ async function main(): Promise<void> {
       // Spend most of the tick on the past. The tip-follow above has already
       // run, so this is otherwise idle time, and at 8 blocks per epoch the
       // default rate needed 43 days to reach Bitcoin's protocol origin.
-      await hose.backfillTick(BACKFILL_BUDGET_MS);
+      await phase("backfill", () => hose.backfillTick(BACKFILL_BUDGET_MS));
+      // The flush is what makes every recordPhase above durable, so it must
+      // run even if a phase failed -- phase() already swallows, so reaching
+      // here is guaranteed.
       await hose.flush();
     } catch (e) {
       // A failing tick must never kill the process: the next tick retries and
