@@ -160,18 +160,41 @@ export class Hose {
               for (const [h, hash] of settled) if (hash) hashes.set(h, hash);
             }
 
+            // THE LOWEST CONTIGUOUS HEADER, NOT MERELY THE LOWEST ONE.
+            //
+            // `heights` runs DOWNWARD (to -> from), and this loop used to keep
+            // overwriting `lowest` on every success. A block that failed in
+            // the middle was skipped with `continue`, so a deeper block still
+            // became `lowest` -- and the caller moves backfill_tail there,
+            // claiming a contiguous run across a hole it never read.
+            //
+            // Stopping at the first miss keeps the tail honest: the archive
+            // advances exactly as far as it can prove, and the unread portion
+            // stays in front of the next epoch rather than being skipped over
+            // permanently.
             let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
             for (const h of heights) {
               const hash = hashes.get(h);
-              if (!hash) break;
+              if (!hash) break; // a hole: everything below it is unproven this epoch
+              // And a block whose transaction walk was TRUNCATED is not proven
+              // either -- upstream's guard, kept: claiming a tail past a block
+              // we only partly read is the same lie as claiming one past a
+              // block we never read.
               const result = await btc.ingestBlock(hash);
               if (!result.completed) break;
               // Read the header back from the store rather than trusting the
               // walk: ingestBlock is what actually wrote it, and the backfill
               // verifies the hash-link against exactly that record.
               const stored = this.store.headersAtHeight("bitcoin", h);
-              const header = stored[stored.length - 1];
-              if (header) lowest = header;
+              // COMPARE THE SAME SHAPE. getBlockHashAtHeight returns a BARE
+              // 64-hex string; the store keeps headers 0x-prefixed via toHex.
+              // Comparing them raw never matches, so the contiguity break below
+              // fired on every block and the walk advanced nothing -- caught by
+              // the wired boot-repair test, which drives the real hose.
+              const want = hash.toLowerCase().replace(/^0x/, "");
+              const header = stored.find((x) => x.hash.toLowerCase().replace(/^0x/, "") === want);
+              if (!header) break; // ingest did not persist it -- do not claim it
+              lowest = header;
             }
             return lowest;
           }

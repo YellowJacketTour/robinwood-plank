@@ -66,6 +66,14 @@ const checkOnly = process.argv.includes("--check");
 
 const client = await pool.connect();
 try {
+  const version = await client.query("SHOW server_version_num");
+  const serverVersion = Number(version.rows[0].server_version_num);
+  console.log(`[postgres-migrate] server_version_num=${serverVersion}`);
+  if (serverVersion < 90500) throw new Error("Market migrations require PostgreSQL 9.5 or newer.");
+  if (serverVersion < 100000) {
+    const temporary = await client.query("SELECT has_database_privilege(current_user, current_database(), 'TEMP') AS allowed");
+    if (!temporary.rows[0].allowed) throw new Error("Legacy market notifications require database TEMP privilege.");
+  }
   await client.query(`
     CREATE TABLE IF NOT EXISTS plank_schema_migrations (
       version TEXT PRIMARY KEY,
