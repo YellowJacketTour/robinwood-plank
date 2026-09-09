@@ -71,11 +71,37 @@ export async function resolveTokenImagesForPage(input: {
   const remote = still.slice(0, input.maxRemote ?? 24);
   if (!input.openSeaChain || !contract) return filled;
   const addr = input.contractAddress!;
-  for (const t of remote) {
-    const img = await fetchOpenSeaTokenImage(input.openSeaChain, addr, t.tokenId);
-    if (!img) continue;
-    t.imageUrl = img;
-    filled.push({ tokenId: t.tokenId, imageUrl: img });
+  // FETCH IN BOUNDED GROUPS, NOT ONE AT A TIME.
+  //
+  // A collection WITH an image template (see token-art-templates.ts) fills its
+  // whole page for free above. A collection without one reaches this loop, and
+  // the caller's budget is 16 against a grid of 400 tiles -- so the page fills
+  // slowly, and it used to fill 16 SEQUENTIAL round-trips slowly. Every call
+  // here is independent and already competes for a key slot via
+  // reserveOpenSeaKey, which is the real rate limiter; serialising on top of
+  // that just made a page load as slow as the sum of its parts.
+  //
+  // 8 at a time: the key reservation still gates actual concurrency, so this
+  // is about not idling between reservations rather than about pushing harder.
+  const GROUP = 8;
+  for (let i = 0; i < remote.length; i += GROUP) {
+    const group = remote.slice(i, i + GROUP);
+    const results = await Promise.all(
+      group.map(async (t) => {
+        try {
+          return [t, await fetchOpenSeaTokenImage(input.openSeaChain!, addr, t.tokenId)] as const;
+        } catch {
+          // One token's failure must not lose the other seven; a missing image
+          // is a typed hole the next page load retries.
+          return [t, null] as const;
+        }
+      }),
+    );
+    for (const [t, img] of results) {
+      if (!img) continue;
+      t.imageUrl = img;
+      filled.push({ tokenId: t.tokenId, imageUrl: img });
+    }
   }
   return filled;
 }
