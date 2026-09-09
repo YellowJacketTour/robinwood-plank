@@ -30,7 +30,16 @@ const ATTEMPT_TTL_SEC = 7 * 24 * 3600;
 // simply too slow, not because it fails. On-chain owner() and ENS need no
 // third-party pacing at all, so an EVM row costs a fraction of a CoinGecko
 // call and many rows resolve without touching CoinGecko.
-const PER_PASS = 60;
+// A row that resolves from on-chain owner() + ENS costs nothing against any
+// third-party limit, so the old flat 60 throttled the FREE path to the pace
+// of the paid one. Two budgets: how many rows a pass may look at, and how
+// many of them may spend the 6.5s CoinGecko slot. Measured 2026-09-07 the
+// lane filled ~11 handles per pass against 25,000 Ethereum rows -- that is
+// ~6 years to cover Ethereum alone, which is why the owner sees the badges
+// as broken rather than merely slow.
+const PER_PASS = 400;
+/** Rows per pass that may spend a paced CoinGecko call. */
+const CG_PER_PASS = 8;
 
 const attemptKey = (chain: string, key: string) => `plank:creator-attempt:${chain}:${key.toLowerCase()}`;
 
@@ -112,7 +121,13 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     `SELECT c.contract_address, c.alias_symbol, c.creator_handle, c.creator_address, c.creator_ens
        FROM plank_multichain_collections c
        JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-      WHERE c.chain_slug = $1 AND (c.creator_handle IS NULL OR c.creator_ens IS NULL)
+      -- THE BADGE IS (handle OR ens). A row holding a good handle but no ENS
+      -- already shows its checkmark, yet handle IS NULL OR ens IS NULL
+      -- re-selected it on every single pass -- so those rows consumed the
+      -- 60-row budget forever while the rows with NO identity at all, the
+      -- ones actually rendering a missing badge, queued behind them.
+      -- Ask for what is actually missing.
+      WHERE c.chain_slug = $1 AND c.creator_handle IS NULL AND c.creator_ens IS NULL
         AND (s.floor_price_wei IS NOT NULL OR s.volume_24h_wei IS NOT NULL OR s.holder_count IS NOT NULL)
       ORDER BY s.volume_24h_wei DESC NULLS LAST, s.holder_count DESC NULLS LAST
       LIMIT $2`,
@@ -133,6 +148,7 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
   ).catch(() => ({ rowCount: 0 }));
   if ((scrubbed.rowCount ?? 0) > 0) out.skipped += scrubbed.rowCount ?? 0;
   const isEvm = chainSlug !== "solana-mainnet" && chainSlug !== "bitcoin-mainnet";
+  let cgSpent = 0;
   for (const r of rows.rows) {
     if (out.considered >= perPass || Date.now() > deadline - 8_000) break;
     if (await durableKv.get(attemptKey(chainSlug, r.contract_address))) {
@@ -153,7 +169,15 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
     }
     if (!handle && chainSlug === "solana-mainnet" && r.alias_symbol) handle = await readMagicEdenTwitter(r.alias_symbol);
     // Only spend the paced vendor call when the free sources produced nothing.
-    if (!handle && !ens) handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
+    // Only spend the paced vendor call when the free sources produced
+    // nothing AND the pass still has vendor budget. Without this cap a
+    // single pass of 400 rows would sit in CoinGecko's 6.5s pacer for 43
+    // minutes and be killed by the lane timeout, registering nothing --
+    // the same shape as the ow-catalog lane that could not finish 4 pages.
+    if (!handle && !ens && cgSpent < CG_PER_PASS) {
+      cgSpent += 1;
+      handle = await readCoinGeckoTwitter(chainSlug, r.contract_address, isEvm ? null : r.alias_symbol ?? r.contract_address);
+    }
     const changed = (handle && handle !== r.creator_handle) || (address && address !== r.creator_address) || (ens && ens !== r.creator_ens);
     if (changed) {
       await updateCollectionDisplay(chainSlug, r.contract_address, { name: null, imageUrl: null, creatorHandle: handle, creatorAddress: address, creatorEns: ens });
@@ -161,7 +185,14 @@ export async function runCreatorIdentityLane(chainSlug: string, perPass = PER_PA
       if (address && address !== r.creator_address) out.filledAddress += 1;
       if (ens && ens !== r.creator_ens) out.filledEns += 1;
     }
-    await durableKv.set(attemptKey(chainSlug, r.contract_address), { at: new Date().toISOString(), handle, address, ens }, { ex: ATTEMPT_TTL_SEC });
+    // A row we never actually ASKED about (vendor budget spent) must not be
+    // remembered as a failed attempt for 7 days -- that would turn a
+    // throughput cap into a week-long blackout for exactly the rows the
+    // badge is missing on. Only a real, completed attempt is cached.
+    const askedEverything = handle != null || ens != null || cgSpent <= CG_PER_PASS;
+    if (askedEverything) {
+      await durableKv.set(attemptKey(chainSlug, r.contract_address), { at: new Date().toISOString(), handle, address, ens }, { ex: ATTEMPT_TTL_SEC });
+    }
   }
   return out;
 }
