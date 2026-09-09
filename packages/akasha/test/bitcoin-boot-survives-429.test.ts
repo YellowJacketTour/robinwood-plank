@@ -100,3 +100,29 @@ test("BEHAVIOUR: a throttled first host falls through to a healthy one", async (
   ok(hash, "a 429 on one host must not fail the read");
   ok(calls.some((c) => c.includes("healthy")), "the healthy host must actually be tried");
 });
+
+test("the pool has regional mirrors, not just four names on one reputation", () => {
+  // Telemetry, live 2026-09-09: all four hosts failing from the production box
+  // (~5,705 failures EACH) while every one answered 200 from a developer
+  // machine at the same moment -- and while that same box successfully queried
+  // UniSat and OrdinalsWallet, so egress was fine. The block is
+  // Esplora-reputation-specific to that IP, so more NAMES on the same
+  // reputation would not have helped; different IPs do.
+  const hosts = (RPC.match(/https:\/\/[a-z0-9.-]+\/api/g) ?? []).filter((h, i, a) => a.indexOf(h) === i);
+  ok(hosts.length >= 6, `a throttled IP needs real breadth (saw ${hosts.length})`);
+  ok(
+    hosts.some((h) => /va1|tk7/.test(h)),
+    "regional mirrors carry separate rate budgets and must be in the pool",
+  );
+});
+
+test("one blocked host costs a hop, not the tick", () => {
+  // 20s x 6 hosts is a two-minute worst case for ONE height lookup on a 15s
+  // tick: the timeout itself becomes the stall.
+  const m = RPC.match(/opts\.timeoutMs \?\? ([0-9_]+)/);
+  const digits = m?.[1];
+  ok(digits, "the timeout must be an explicit numeric default");
+  const ms = Number(digits!.replace(/_/g, ""));
+  ok(ms <= 10_000, `${ms}ms per host x 6 hosts is longer than the tick itself`);
+  ok(ms >= 3_000, `${ms}ms is too tight for a healthy-but-slow mirror`);
+});
