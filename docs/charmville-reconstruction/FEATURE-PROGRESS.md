@@ -8,18 +8,18 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
-| Approved PlankSpace account entrance | ███░░ | Existing session validation and saved garden; real wallet/device matrix still needed |
+| Approved PlankSpace account entrance | ███░░ | Existing session validation and account shell; real wallet/device matrix still needed |
 | One stable profile across game/social | ███░░ | Account entrance now resolves canonical profile ID; native runtime still separate |
 | Multiple wallets per profile | █░░░░ | Must add explicit proof-based account linking; not equivalent to wallet switching |
 | OAuth and passkeys for same game identity | █░░░░ | Other auth namespace exists; safe linking not implemented |
-| Durable account garden | ████░ | PostgreSQL lifecycle, ownership, retries and races tested; existing small garden only |
-| Native world persistent account progress | █░░░░ | Guest native counters must not be imported as authoritative rewards |
+| Preserved legacy garden storage (retired UI) | ████░ | Legacy PostgreSQL lifecycle, ownership, retries and races tested; standalone UI retired, not unified gameplay |
+| Native world persistent account progress | ███░░ | Authenticated native movement persisted locally; no resource rewards, combat or warps; bounded standing peer projection verified. See NATIVE-ACCOUNT-MOVEMENT.md |
 | Account-owned map instances | ██░░░ | Durable region admission now exists; native authored home maps still missing |
-| Friend invitations / revoke / expiry | ███░░ | Durable API and account garden controls; private native visits still missing |
+| Friend invitations / revoke / expiry | ███░░ | Durable permission API; legacy garden controls retired; private native visits still missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
-| Player movement replication | ███░░ | Local guest relay by scene; no authenticated authoritative movement |
+| Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions |
 | Shared resource replication | █░░░░ | Requires versioned entities and server action commits |
-| Reconnect / crash recovery | ██░░░ | Garden durable; native world recovery missing |
+| Reconnect / crash recovery | ██░░░ | Legacy ledger recovery tested; native world recovery missing |
 | Party and region shard routing | █░░░░ | Keep party together, separate region capacity from economic identity |
 | Abuse prevention | ██░░░ | Garden transactions and relay rate limits; movement/automation/encounter authority incomplete |
 
@@ -150,7 +150,7 @@ Browser verification passed: synthetic approved account restores, claims, harves
 
 The next meaningful shared-game gate is two authenticated profiles entering separate homes, authorized visits, an animated server-committed resource action, reconnect persistence and no duplicate reward. The following gate adds one captured follower, a consumed-input recipe and an escrowed trade. Communication overlays must operate on the same profile without leaking tokens or submitting posts automatically.
 
-Further implementation: `/charmville/world` now combines real account region membership, peer lists, inventory and trade controls with an isolated native reference camera. Two-account region visitation and escrow trades pass browser tests, including lost-response retry. This completes account-shell integration, not native map/action integration. Source watering playback no longer uses blank columns; all eight hoe frames are used. Starter companion ownership is implemented; capturing/following is not.
+Further implementation: `/charmville/world` now combines real account region membership, peer lists, inventory and trade controls with an isolated native reference camera. Two-account region visitation and escrow trades pass browser tests, including lost-response retry. This completes account-shell integration, not native map/action integration. Source watering playback no longer uses blank columns; all eight hoe frames are used. Starter companion ownership and local following are implemented; capture and shared creature simulation are not.
 
 Latest verification: 1,344 application tests passed, 48 skipped. Starter selection with an original Emerald portrait survives reload with the same creature ID. Embedded voice recording/playback/download/discard and modal close cleanup pass using synthetic audio; real user audio was not accessed. Native startup loads191 original MIDI instruments without missing-patch errors, at a35.4MB startup cost. Fullscreen and390px mobile overflow checks pass. These are local checks, not a claim of broad device performance or finished source-fidelity animation.
 
@@ -174,12 +174,28 @@ Six distinct database fixture creatures now pass through the authenticated roste
 
 The source pipeline preserves107 animation entries (102 physical sets,314 source files including existing metadata) for Treecko, Torchic and Mudkip. These are animation assets, not107 implemented moves. Pure command-policy tests cover ownership, target validity and bounded livestock intent; live combat AI remains unconnected.
 
-`SWARM-WORK-QUEUE.md` and its JSON sibling map every progress-table row plus explicit subsequent requirements into106 work items across8 lanes. Three workers run concurrently with a coordinator; queued items are not active work or completion evidence.
+`SWARM-WORK-QUEUE.md` and its JSON sibling map every progress-table row plus explicit subsequent requirements into generated work items across eight lanes. Three workers run concurrently with a coordinator; queued items are not active work or completion evidence.
 
-## 2026-09-09 saved garden access and source grounding
+## Retired standalone garden UI and current integration boundary
 
-The world shell now exposes the existing saved Porch garden through a Garden tab and the native Enter menu. Browser checks verify keyboard harvest, authoritative inventory quantity shown automatically in Inventory, replanting and growth state after tab return, and390/600px layout. This is remote home management using existing crop definitions; it does not assert that native reference-camera farming is authoritative or that a full agriculture catalogue is complete.
+The temporary Garden/Home management tab and native menu destination have been removed at the user's direction. Old `?panel=garden` links return to Play. The saved Porch's separate page/gameplay presentation is retired; its PostgreSQL records and conservation/retry tests remain preserved infrastructure. Earlier garden browser checks demonstrate that legacy subsystem only and must not be counted as the unified MMORPG experience. Do not restore it as a player-facing workaround for native authority.
+
+The primary experience is the native adventure with account Party, Inventory, Exchange, Friends, Charmdex and voice access. Native tool contacts are observable through a bounded outbox, but an observation is not a server-authorized action or saved reward. Client counters, native five-second growth and local contact messages must never be imported as earned account goods.
+
+The next dependency sequence is trusted authored geometry, authenticated server-owned movement, authorized timed actions with atomic receipts, shared world event replication, then durable item production and exchange consumption. Private homes and border travel require authored map identities and admission that agree with server coordinates. Reconnect must reconcile committed receipts and cannot replay rewards. Companion following currently projects owned roster entries locally; capture, battle transitions and shared AI remain separate missing gates.
+
+Required acceptance: two isolated accounts observe the same resource change; a revoked visitor cannot commit; interruption and stale geometry/revision fail safely; dropped responses return the original receipt; inventory and exchange show the exact conserved result; native action animation and world appearance follow the authoritative result. No standalone garden is an acceptable substitute.
+
+## Source grounding and measured performance
 
 Follower feet now use the preserved source ground markers rather than generic sprite-center offsets. All112 marker checks and a six-follower runtime check pass. Route reversals can still overlap, and shared creature collision/AI is not implemented.
 
 `PERF-BASELINE.md` records a reproducible desktop-Chromium baseline at two viewport sizes and its limits. Browser rAF cadence is not engineFPS and a narrow viewport is not a physical mobile device.
+
+## Authenticated native movement evidence
+
+The native-to-account movement browser test now passes: seven 8px steps persisted for the same profile, with one initial spawn placement and zero rejection corrections. Actor tests cover two identities, replay, reconnect, expiry and travel invalidation; bounded 20ms jitter checks pass. This advances persistent native movement to locally connected scope only. Resource actions, combat, rewards and native warps remain unimplemented; the subsequent peer projection check is scoped below. See [NATIVE-ACCOUNT-MOVEMENT.md](NATIVE-ACCOUNT-MOVEMENT.md) for exact geometry and evidence paths.
+
+## Two-account peer visibility evidence
+
+The expanded native account movement browser check verifies Bob's persisted actor in Alice's native view, including mode 1 and matching coordinates; screenshot review passed. Peers are limited to 16 approved active same-region/same-geometry actors. This is fixed-standing-pose projection on a two-second poll, without interpolation, movement animation or hit collisions. Maturity remains locally connected. Timed authoritative action settlement and shared resource receipts remain the next blocking gate; movement/peer presence never imply an earned reward.

@@ -4,7 +4,7 @@ export type Cell={x:number;y:number};
 export type Geometry={width:number;height:number;blocked:ReadonlySet<string>};
 export type Action={id:string;kind:string;target:Cell;contactAt:number;contacted:boolean};
 export type ActorState={cell:Cell;sequence:number;regionEpoch:number;lastMoveAt:number;lastCheckedAt:number;action:Action|null};
-export type Policy={stepMs:number;windupMs:number;range:number;actions:readonly string[]};
+export type Policy={stepMs:number;windupMs:number;range:number;actions:readonly string[];jitterMs?:number};
 const cell=(p:Cell)=>p&&Number.isSafeInteger(p.x)&&Number.isSafeInteger(p.y);
 const time=(n:number)=>Number.isSafeInteger(n)&&n>=0;
 const distance=(a:Cell,b:Cell)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
@@ -20,8 +20,14 @@ export function stepActor(state:ActorState,raw:unknown,g:Geometry,nowMs:number,p
  const to={x:p.x as number,y:p.y as number};if(!valid(g,to))throw new Error("Blocked destination");const dx=to.x-state.cell.x,dy=to.y-state.cell.y;
  if(Math.abs(dx)>1||Math.abs(dy)>1||(!dx&&!dy))throw new Error("Move one neighboring cell");
  if(dx&&dy&&(!valid(g,{x:state.cell.x+dx,y:state.cell.y})||!valid(g,{x:state.cell.x,y:state.cell.y+dy})))throw new Error("Blocked corner");
- const required=policy.stepMs*(dx&&dy?Math.SQRT2:1);if(nowMs-state.lastMoveAt<required)throw new Error("Movement too fast");
- return {state:{...state,cell:to,sequence:p.sequence as number,lastMoveAt:nowMs,lastCheckedAt:nowMs,action:null},cancelledActionId:state.action&&!state.action.contacted?state.action.id:null};
+ const jitter=policy.jitterMs??0;
+ if(!Number.isSafeInteger(jitter)||jitter<0||jitter>policy.stepMs)throw new Error("Invalid jitter policy");
+ const required=Math.ceil(policy.stepMs*(dx&&dy?Math.SQRT2:1));
+ // Virtual schedule carries early-arrival debt forward. Idle time never banks
+ // steps, and at most one step of bounded credit can be configured.
+ const scheduled=Math.max(nowMs,state.lastMoveAt+required);
+ if(scheduled>nowMs+jitter)throw new Error("Movement too fast");
+ return {state:{...state,cell:to,sequence:p.sequence as number,lastMoveAt:scheduled,lastCheckedAt:nowMs,action:null},cancelledActionId:state.action&&!state.action.contacted?state.action.id:null};
 }
 export function beginAction(state:ActorState,raw:unknown,nowMs:number,policy:Policy):ActorState{
  context(state,nowMs,policy);const p=raw as Record<string,unknown>|null;

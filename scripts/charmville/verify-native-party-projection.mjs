@@ -6,6 +6,7 @@ const out='work/native-party-projection';await mkdir(out,{recursive:true});
 const browser=await chromium.launch();
 try{
  const page=await browser.newPage({viewport:{width:1100,height:950}}),events=[],errors=[];
+ await page.addInitScript(()=>{window.nativePositions=[];window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:position-observed')window.nativePositions.push({...event.data,receivedAt:performance.now()});});});
  await page.addInitScript(()=>{window.nativeContacts=[];window.observedContacts=[];window.addEventListener("charmville:local-contact-observed",event=>window.observedContacts.push(event.detail));window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:action-contact')window.nativeContacts.push(event.data);});});
  page.on('console',m=>{if(m.text().startsWith('CHARMVILLE_'))events.push(m.text());});page.on('pageerror',e=>errors.push(e.message));
  // A guest account opens the normal parent UI; the six creatures below are
@@ -21,7 +22,21 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--contacts')){
+ if(process.argv.includes('--peers')){
+  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[{profileId:'fixture-a',handle:'fixture-a',x:48,y:72},{profileId:'fixture-b',handle:'fixture-b',x:80,y:72}]},'http://localhost:3021'));
+  await page.waitForTimeout(800);assert(events.includes('CHARMVILLE_ACCOUNT_PEERS 2'));
+  await page.screenshot({path:out+'/peer-projection.png'});
+  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021'));
+  await page.waitForTimeout(500);assert.equal(await runtime.evaluate(()=>FS.readFile('/Files/Homestead/charmville/account-peers.txt',{encoding:'utf8'})),'1|0');
+  assert.deepEqual(errors,[]);console.log('Synthetic bounded peer projection and clearing verified; account ownership is tested separately.');
+ }else if(process.argv.includes('--positions')){
+  await page.keyboard.down('ArrowRight');await page.waitForTimeout(600);await page.keyboard.up('ArrowRight');await page.waitForTimeout(300);
+  const observations=await page.evaluate(()=>window.nativePositions);assert(observations.length>2);assert(observations.some(p=>p.x>24));
+  await page.evaluate(()=>{const latest=window.nativePositions.at(-1);document.querySelector('iframe').contentWindow.postMessage({type:'charmville:position-correction',sessionId:latest.sessionId,sequence:900,dmap:4,screen:63,x:16,y:72,direction:1,reason:'rejected'},'http://localhost:3021');});
+  await page.waitForFunction(()=>window.nativePositions.some(p=>p.appliedCorrectionSequence===900&&p.x===16&&p.y===72));
+  await writeFile(out+'/positions.json',JSON.stringify({scope:'Native observation and guarded correction projection; not server-authorized movement evidence.',observations:await page.evaluate(()=>window.nativePositions),errors},null,2));
+  assert.deepEqual(errors,[]);console.log('Native movement observations and correction acknowledgment verified.');
+ }else if(process.argv.includes('--contacts')){
   for(let i=0;i<3;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(1050);}
   const contacts=await page.evaluate(()=>window.nativeContacts);
   assert.deepEqual(contacts.map(c=>c.action),['till','plant','water']);

@@ -13,9 +13,14 @@
       "section": "Shared foundation",
       "lane": "authority",
       "maturity": "███░░",
-      "evidence": "Existing session validation and saved garden; real wallet/device matrix still needed",
+      "evidence": "Existing session validation and account shell; real wallet/device matrix still needed",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-002",
@@ -25,7 +30,12 @@
       "maturity": "███░░",
       "evidence": "Account entrance now resolves canonical profile ID; native runtime still separate",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-003",
@@ -35,7 +45,12 @@
       "maturity": "█░░░░",
       "evidence": "Must add explicit proof-based account linking; not equivalent to wallet switching",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-004",
@@ -45,27 +60,40 @@
       "maturity": "█░░░░",
       "evidence": "Other auth namespace exists; safe linking not implemented",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-005",
-      "feature": "Durable account garden",
+      "feature": "Preserved legacy garden storage (retired UI)",
       "section": "Shared foundation",
       "lane": "authority",
       "maturity": "████░",
-      "evidence": "PostgreSQL lifecycle, ownership, retries and races tested; existing small garden only",
+      "evidence": "Legacy PostgreSQL lifecycle, ownership, retries and races tested; standalone UI retired, not unified gameplay",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "preserved infrastructure; product UI retired",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "archive"
     },
     {
       "id": "CV-006",
       "feature": "Native world persistent account progress",
       "section": "Shared foundation",
       "lane": "authority",
-      "maturity": "█░░░░",
-      "evidence": "Guest native counters must not be imported as authoritative rewards",
+      "maturity": "███░░",
+      "evidence": "Authenticated native movement persisted locally; no resource rewards, combat or warps; bounded standing peer projection verified. See NATIVE-ACCOUNT-MOVEMENT.md",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-007",
@@ -75,7 +103,12 @@
       "maturity": "██░░░",
       "evidence": "Durable region admission now exists; native authored home maps still missing",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-008",
@@ -83,9 +116,14 @@
       "section": "Shared foundation",
       "lane": "authority",
       "maturity": "███░░",
-      "evidence": "Durable API and account garden controls; private native visits still missing",
+      "evidence": "Durable permission API; legacy garden controls retired; private native visits still missing",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-009",
@@ -95,7 +133,12 @@
       "maturity": "███░░",
       "evidence": "Durable garden tending checks grants transactionally; other native actions not connected",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-010",
@@ -103,9 +146,14 @@
       "section": "Shared foundation",
       "lane": "authority",
       "maturity": "███░░",
-      "evidence": "Local guest relay by scene; no authenticated authoritative movement",
+      "evidence": "Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-011",
@@ -115,7 +163,12 @@
       "maturity": "█░░░░",
       "evidence": "Requires versioned entities and server action commits",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-012",
@@ -123,9 +176,14 @@
       "section": "Shared foundation",
       "lane": "authority",
       "maturity": "██░░░",
-      "evidence": "Garden durable; native world recovery missing",
+      "evidence": "Legacy ledger recovery tested; native world recovery missing",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-013",
@@ -135,7 +193,12 @@
       "maturity": "█░░░░",
       "evidence": "Keep party together, separate region capacity from economic identity",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-014",
@@ -145,7 +208,12 @@
       "maturity": "██░░░",
       "evidence": "Garden transactions and relay rate limits; movement/automation/encounter authority incomplete",
       "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-015",
@@ -155,7 +223,12 @@
       "maturity": "███░░",
       "evidence": "Native quest playable; source-specific animation audit remains",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-016",
@@ -165,7 +238,12 @@
       "maturity": "██░░░",
       "evidence": "Native source behavior available; directional visual acceptance incomplete",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-017",
@@ -175,7 +253,12 @@
       "maturity": "███░░",
       "evidence": "Source quest equipment initialization; interruption and device verification needed",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-018",
@@ -185,7 +268,12 @@
       "maturity": "███░░",
       "evidence": "Native bow fires; draw behavior varies by source and needs explicit binding",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-019",
@@ -195,7 +283,12 @@
       "maturity": "██░░░",
       "evidence": "Native source behavior; interaction/collision matrix not fully verified",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-020",
@@ -205,7 +298,12 @@
       "maturity": "██░░░",
       "evidence": "Source systems; unified combat authority not wired",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-021",
@@ -215,7 +313,12 @@
       "maturity": "█░░░░",
       "evidence": "Native lifting source located; correct held art and world identity integration missing",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-022",
@@ -225,7 +328,12 @@
       "maturity": "██░░░",
       "evidence": "Native reference; authenticated yield and respawn policy missing",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-023",
@@ -235,7 +343,12 @@
       "maturity": "███░░",
       "evidence": "Sword tile-bank fix for broken casting implemented; full spell matrix incomplete",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-024",
@@ -245,7 +358,12 @@
       "maturity": "██░░░",
       "evidence": "Procedural aura exists; character transformation and wave not finished",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-025",
@@ -255,7 +373,12 @@
       "maturity": "██░░░",
       "evidence": "Source quest functionality; original shared-world content not authored",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-026",
@@ -265,7 +388,12 @@
       "maturity": "███░░",
       "evidence": "Small native farming intro; complete account-to-village storyline missing",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-027",
@@ -275,7 +403,12 @@
       "maturity": "██░░░",
       "evidence": "Local crop depth handling; general entity layering and collision incomplete",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-028",
@@ -285,7 +418,12 @@
       "maturity": "██░░░",
       "evidence": "Source vault/catalogue and validation prototypes; complete licensed distribution/replacement mapping missing",
       "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-029",
@@ -295,7 +433,13 @@
       "maturity": "██░░░",
       "evidence": "Source catalogue resolves386 species and184 evolution rules; target habitats/rates not authored",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-030",
@@ -305,7 +449,13 @@
       "maturity": "█░░░░",
       "evidence": "Needs world entities, directional art, pathing and spawn budgets",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-031",
@@ -315,7 +465,16 @@
       "maturity": "█░░░░",
       "evidence": "Shared damage/ownership authority and source animation adapters missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [
+        "CV-101",
+        "CV-102"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
     },
     {
       "id": "CV-032",
@@ -325,7 +484,13 @@
       "maturity": "██░░░",
       "evidence": "Encounter domain prototype; no playable native battle integration",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-033",
@@ -335,7 +500,13 @@
       "maturity": "██░░░",
       "evidence": "Domain transition tests; live world/turn handoff missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-034",
@@ -345,7 +516,15 @@
       "maturity": "██░░░",
       "evidence": "Idempotent domain capture; DB and live presentation missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [
+        "CV-031"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
     },
     {
       "id": "CV-035",
@@ -355,7 +534,13 @@
       "maturity": "███░░",
       "evidence": "Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "in progress"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-036",
@@ -365,7 +550,13 @@
       "maturity": "██░░░",
       "evidence": "Normalized six-slot owned roster and UI verified; actual capture acquisition, clinic and storage gameplay remain missing",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "in progress"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-037",
@@ -375,7 +566,13 @@
       "maturity": "█░░░░",
       "evidence": "Definitions and balancing missing; prototype only holds limited status names",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-038",
@@ -385,7 +582,13 @@
       "maturity": "█░░░░",
       "evidence": "Time, food, habitat capacity and offspring issuance specified conceptually",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-039",
@@ -395,7 +598,13 @@
       "maturity": "█░░░░",
       "evidence": "Rod, line, bobber, bite, reel and catch required",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-040",
@@ -405,7 +614,13 @@
       "maturity": "█░░░░",
       "evidence": "Emoji discovery exists separately; creature discovery not connected",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-041",
@@ -415,7 +630,13 @@
       "maturity": "█░░░░",
       "evidence": "Separate amusement budget; game implementation and reward model absent",
       "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-042",
@@ -425,7 +646,12 @@
       "maturity": "███░░",
       "evidence": "Local native sequence and direction logic; server integration absent",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-043",
@@ -435,7 +661,12 @@
       "maturity": "███░░",
       "evidence": "Indexed source berry art; growth and harvest tested locally",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-044",
@@ -445,7 +676,12 @@
       "maturity": "███░░",
       "evidence": "Local one-use fertilizer loop verified; durable balancing absent",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-045",
@@ -455,7 +691,12 @@
       "maturity": "█░░░░",
       "evidence": "Crop definitions, environmental clock and art sets required",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-046",
@@ -465,7 +706,12 @@
       "maturity": "██░░░",
       "evidence": "Limited garden compost exists; rich soil system not built",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-047",
@@ -475,7 +721,12 @@
       "maturity": "█░░░░",
       "evidence": "Species, care, habitat and limited production chains specified",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-048",
@@ -485,7 +736,12 @@
       "maturity": "█░░░░",
       "evidence": "Tool loops, deposits, depletion and authority required",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-049",
@@ -495,7 +751,12 @@
       "maturity": "█░░░░",
       "evidence": "Recipe graph, station permissions, input escrow and outputs required",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-050",
@@ -505,7 +766,12 @@
       "maturity": "█░░░░",
       "evidence": "Bounded energy/material throughput, no offline infinite production",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-051",
@@ -515,7 +781,12 @@
       "maturity": "██░░░",
       "evidence": "Local farm counter; persistent multi-profession system absent",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-052",
@@ -525,7 +796,12 @@
       "maturity": "█░░░░",
       "evidence": "Separate material, quality, traits and unique-instance identity",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-053",
@@ -535,7 +811,12 @@
       "maturity": "██░░░",
       "evidence": "Durable small scenery layout; native home building missing",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-054",
@@ -545,7 +826,12 @@
       "maturity": "█░░░░",
       "evidence": "Authored content and persistent progression required",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-055",
@@ -555,7 +841,12 @@
       "maturity": "█░░░░",
       "evidence": "Limited tasks and resource budgets; avoid currency generation by unattended loops",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-056",
@@ -565,7 +856,12 @@
       "maturity": "█░░░░",
       "evidence": "Input/output conservation, discoverable recipes and variant compatibility",
       "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-057",
@@ -575,7 +871,12 @@
       "maturity": "█░░░░",
       "evidence": "Master specification; twelve proposed regions are not authored maps",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-058",
@@ -585,7 +886,15 @@
       "maturity": "██░░░",
       "evidence": "Travel domain tests; native map bindings and authoritative host missing",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [
+        "CV-101",
+        "CV-007"
+      ],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P1"
     },
     {
       "id": "CV-059",
@@ -595,7 +904,12 @@
       "maturity": "█░░░░",
       "evidence": "Logical requirements only; boarding and travel gameplay absent",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-060",
@@ -605,7 +919,12 @@
       "maturity": "█░░░░",
       "evidence": "Ownership roles, contribution escrow and public contracts",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-061",
@@ -615,7 +934,12 @@
       "maturity": "█░░░░",
       "evidence": "Shared construction, maintenance and logistics graph",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-062",
@@ -625,7 +949,12 @@
       "maturity": "█░░░░",
       "evidence": "Cargo identity, routes, delivery receipts and supply demand",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-063",
@@ -635,7 +964,12 @@
       "maturity": "█░░░░",
       "evidence": "Bounded reversible events and persistent consequences; no unannounced home destruction",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-064",
@@ -645,7 +979,12 @@
       "maturity": "█░░░░",
       "evidence": "Planned expansion; renderer and streaming decision not proven",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-065",
@@ -655,7 +994,12 @@
       "maturity": "█░░░░",
       "evidence": "Requires renderer prototype benchmarks and asset compatibility; not native current camera",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-066",
@@ -665,7 +1009,12 @@
       "maturity": "█░░░░",
       "evidence": "Horizontal mastery, collections, public projects and authored expansions",
       "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-067",
@@ -675,7 +1024,12 @@
       "maturity": "████░",
       "evidence": "3,953 entries, searchable native overlay; discovery only",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-068",
@@ -685,7 +1039,12 @@
       "maturity": "██░░░",
       "evidence": "Historical registry reference; live completeness not verified",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-069",
@@ -695,7 +1054,12 @@
       "maturity": "█░░░░",
       "evidence": "Master specification; content definitions not exhaustively authored",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-070",
@@ -705,7 +1069,12 @@
       "maturity": "███░░",
       "evidence": "Durable garden compartment projection; native unification missing",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-071",
@@ -715,7 +1084,12 @@
       "maturity": "███░░",
       "evidence": "Local migration and garden integration; conservation/retry/exhaustion checked in PostgreSQL",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-072",
@@ -725,7 +1099,12 @@
       "maturity": "█░░░░",
       "evidence": "Currency reserve does not make every crop or creature scarce",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-073",
@@ -735,7 +1114,12 @@
       "maturity": "███░░",
       "evidence": "Fixed-price offers, escrow, partial fills and cancellation tested; automatic matching absent",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-074",
@@ -745,7 +1129,12 @@
       "maturity": "██░░░",
       "evidence": "Actual offers and aggregate Grain supply available; charts/volume feed missing",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-075",
@@ -755,7 +1144,12 @@
       "maturity": "█░░░░",
       "evidence": "Simulated funded-reserve design only",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-076",
@@ -765,7 +1159,12 @@
       "maturity": "█░░░░",
       "evidence": "Later separately funded subsystem; no implemented game perps",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-077",
@@ -775,7 +1174,12 @@
       "maturity": "█░░░░",
       "evidence": "Commerce and entitlements not integrated",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-078",
@@ -785,7 +1189,12 @@
       "maturity": "█░░░░",
       "evidence": "Existing-supply transfer requirement; no cash purchase flow",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-079",
@@ -795,7 +1204,12 @@
       "maturity": "██░░░",
       "evidence": "Existing stamp consumes charm; broad sinks not implemented",
       "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-080",
@@ -805,7 +1219,12 @@
       "maturity": "███░░",
       "evidence": "Existing account garden/social routes; native feed not embedded",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-081",
@@ -815,7 +1234,12 @@
       "maturity": "█░░░░",
       "evidence": "Same-origin account shell and input-isolated overlay required",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-082",
@@ -825,7 +1249,12 @@
       "maturity": "█░░░░",
       "evidence": "Needs existing authenticated APIs and explicit publication UX",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-083",
@@ -835,7 +1264,12 @@
       "maturity": "████░",
       "evidence": "Local draft flow tested with synthetic mic; no actual user audio recorded",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-084",
@@ -845,7 +1279,12 @@
       "maturity": "███░░",
       "evidence": "Existing composer upload/playback code; native publication not connected",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-085",
@@ -855,7 +1294,12 @@
       "maturity": "██░░░",
       "evidence": "Optional browser recognition; browser/provider support varies",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-086",
@@ -865,7 +1309,14 @@
       "maturity": "█░░░░",
       "evidence": "Server-authorized room membership and transport not built",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [
+        "CV-013"
+      ],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P1"
     },
     {
       "id": "CV-087",
@@ -875,7 +1326,12 @@
       "maturity": "██░░░",
       "evidence": "Existing social moderation; native comms policy integration absent",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-088",
@@ -885,7 +1341,12 @@
       "maturity": "███░░",
       "evidence": "Synthetic gamepad tests; physical-controller matrix pending",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-089",
@@ -895,7 +1356,12 @@
       "maturity": "███░░",
       "evidence": "Local browser verification; broad hardware coverage pending",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-090",
@@ -905,7 +1371,12 @@
       "maturity": "█░░░░",
       "evidence": "Current native viewport fixed; fullscreen is scaling, not a larger world view",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-091",
@@ -915,7 +1386,12 @@
       "maturity": "██░░░",
       "evidence": "Partial controls and labels; full accessibility testing absent",
       "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-092",
@@ -925,7 +1401,12 @@
       "maturity": "██░░░",
       "evidence": "Pack validation prototype; editor and publishing pipeline absent",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-093",
@@ -935,7 +1416,12 @@
       "maturity": "█░░░░",
       "evidence": "Versioned assets, review, rollback and bounded scripting required",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-094",
@@ -945,7 +1431,12 @@
       "maturity": "██░░░",
       "evidence": "Several local regression scripts; full directional/action matrix absent",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-095",
@@ -955,7 +1446,12 @@
       "maturity": "███░░",
       "evidence": "Durable garden tested; future trades/encounters require their own races",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-096",
@@ -965,7 +1461,12 @@
       "maturity": "█░░░░",
       "evidence": "Proposed targets only; benchmark device set not measured",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-097",
@@ -975,7 +1476,12 @@
       "maturity": "█░░░░",
       "evidence": "Current links are localhost; no authenticated MMO deployment",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-098",
@@ -985,87 +1491,244 @@
       "maturity": "█░░░░",
       "evidence": "Provenance exists for subsets; replacement catalogue incomplete",
       "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
       "id": "CV-099",
+      "feature": "Retire standalone garden entry points",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Old garden routes return to the adventure; no Porch gameplay surfaces or parallel Garden menu; preserve stored accounts and receipts.",
+      "status": "verified bounded removal",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-100",
+      "feature": "Trusted authored collision geometry",
+      "section": "Additional explicit player requirements",
+      "lane": "world-actions",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Pinned map identity and collision export; server validates traversable cells independently of client coordinates.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-101",
+      "feature": "Server-owned native movement",
+      "section": "Additional explicit player requirements",
+      "lane": "authority",
+      "maturity": "not scored",
+      "evidence": "Seven native 8px steps persisted; actor identity/replay/reconnect/expiry/travel and20ms jitter tests passed. Two-account standing peer projection verified, capped16 and polled2s; no interpolation/hit collisions, combat, rewards or native warps. Timed action settlement remains blocking. See NATIVE-ACCOUNT-MOVEMENT.md.",
+      "acceptance": "Authenticated input sequence, speed/collision/range validation, stale epoch rejection and reconnect; two accounts cannot impersonate movement.",
+      "status": "connected locally; broader acceptance pending",
+      "prerequisites": [
+        "CV-100"
+      ],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-102",
+      "feature": "Timed native action settlement",
+      "section": "Additional explicit player requirements",
+      "lane": "authority",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Server action start/contact/cancel; atomic input debit and resource update; revoke-at-contact, replay and lost-response receipt tests.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-101",
+        "CV-009"
+      ],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-103",
+      "feature": "Shared native resource presentation",
+      "section": "Additional explicit player requirements",
+      "lane": "world-actions",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Two clients render one authoritative resource lifecycle; rejected/cancelled actions cannot show saved yield or mutate account balances.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-102"
+      ],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-104",
+      "feature": "Native resource to exchange continuity",
+      "section": "Additional explicit player requirements",
+      "lane": "economy",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "One server-authorized native harvest reaches inventory, crafting input consumption and escrow trade with conserved quantities.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-103",
+        "CV-073"
+      ],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-105",
+      "feature": "Native account action feedback",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Distinguish local observation, accepted start, committed receipt and rejected action; never label an animation as saved success.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-102"
+      ],
+      "laneBlockers": [],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-106",
       "feature": "Six-member follower train and formations",
       "section": "Additional explicit player requirements",
       "lane": "creatures",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Distinct owned UUIDs; six visible followers; corners/warps; spacing and ordering.",
-      "status": "in progress"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-100",
+      "id": "CV-107",
       "feature": "Attack, defend, hold and free-roam commands",
       "section": "Additional explicit player requirements",
       "lane": "creatures",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Acknowledged server commands, valid target selection, no neutral aggression, recall and leash.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-101",
+      "id": "CV-108",
       "feature": "Species-specific move animation and effects",
       "section": "Additional explicit player requirements",
       "lane": "creatures",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Source markers and anchors bound to defined move events; projectile/effect ownership and single hit.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [
+        "CV-031"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
     },
     {
-      "id": "CV-102",
+      "id": "CV-109",
       "feature": "Livestock intelligence and habitat assignment",
       "section": "Additional explicit player requirements",
       "lane": "professions",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Care and grazing permissions, species capabilities, bounded produce and breeding receipts.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-103",
+      "id": "CV-110",
       "feature": "Nintendo-quality Charmdex interaction pass",
       "section": "Additional explicit player requirements",
       "lane": "experience",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Consistent hierarchy, belt selection, meaningful feedback, input parity and visual review of every state.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-104",
+      "id": "CV-111",
       "feature": "All-source art replacement and provenance completeness",
       "section": "Additional explicit player requirements",
       "lane": "delivery",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Each used asset has source, hash, attribution, runtime role, replacement status and verified dimensions.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-105",
+      "id": "CV-112",
       "feature": "Browser desktop/mobile GPU and memory budgets",
       "section": "Additional explicit player requirements",
       "lane": "delivery",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Measure startup, frame time, memory and input latency; record device/browser and fallback.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     },
     {
-      "id": "CV-106",
+      "id": "CV-113",
       "feature": "Account-transition recovery and GitHub handoff",
       "section": "Additional explicit player requirements",
       "lane": "delivery",
       "maturity": "not scored",
       "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
       "acceptance": "Committed sources, reproducible setup and zero-context handoff with current blockers.",
-      "status": "queued"
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
     }
   ]
 }

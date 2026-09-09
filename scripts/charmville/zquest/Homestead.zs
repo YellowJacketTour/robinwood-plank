@@ -13,6 +13,8 @@ global script Active
         file cursor=new file("/charmville/action-sequence.txt","w");
         if(!cursor->isValid())return;
         sprintf(text,"0");cursor->WriteString(text);cursor->Close();
+        file position=new file("/charmville/position.txt","w");if(position->isValid())position->Close();
+        file correction=new file("/charmville/position-correction.txt","w");if(correction->isValid())correction->Close();
         file generation=new file("/charmville/action-run.txt","w");
         if(!generation->isValid())return;
         sprintf(text,"%d",run+1);generation->WriteString(text);generation->Close();
@@ -102,18 +104,52 @@ global script Active
         int harvests = 0;int berries=0;int cuttings=0;bool fed[3];
         bool aura = false;
         websocket channel = new websocket("ws://localhost:3022");
-        int sequence = 0;
+        int sequence = 0;int positionSequence=0;int lastCorrection=0;int appliedCorrection=0;
         int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;int contactSequence=0;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
         int px[16]; int py[16]; int pt[16]; int pc[16]; int pf[16]; int pa[16]; int life[16];
+        bool accountMode=false;int accountCount=0;int accountX[16];int accountY[16];char32 accountText[512];
         char32 line[128];
         printf("CHARMVILLE_HOMESTEAD_ACTIVE\n");
         while (true)
         {
             ticks++;
+            if(ticks==1 || ticks%15==0){
+                file peers=new file("/charmville/account-peers.txt","r");
+                if(peers->isValid()){
+                    accountText[0]=0;peers->ReadString(accountText);peers->Close();
+                    if(field(accountText,0)==1){int count=Min(16,Max(0,field(accountText,1)));if(!accountMode || count!=accountCount)printf("CHARMVILLE_ACCOUNT_PEERS %d\n",count);accountMode=true;accountCount=count;for(int p=0;p<16;p++)life[p]=0;
+                        for(int p=0;p<accountCount;p++){accountX[p]=field(accountText,2+p*2);accountY[p]=field(accountText,3+p*2);}
+                    }
+                }
+            }
+            if(ticks%6==0){
+                file correction=new file("/charmville/position-correction.txt","r");
+                if(correction->isValid()){
+                    line[0]=0;correction->ReadString(line);correction->Close();
+                    int request=field(line,0);int map=field(line,1);int screen=field(line,2);int x=field(line,3);int y=field(line,4);int facing=field(line,5);
+                    if(request>lastCorrection){
+                        lastCorrection=request;
+                        if(map==4 && screen==63 && Game->GetCurDMap()==map && Game->GetCurScreen()==screen && x>=0 && x<=240 && y>=0 && y<=160 && x%8==0 && y%8==0 && facing>=0 && facing<=3 && Hero->Z==0 && Hero->FakeZ==0){
+                            activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;Hero->X=x;Hero->Y=y;Hero->Dir=facing;
+                            trailCount=0;trailHead=0;lastHeroX=x;lastHeroY=y;farmSpawned=true;
+                            appliedCorrection=request;
+                            printf("CHARMVILLE_POSITION_CORRECTED %d X %d Y %d\n",request,x,y);
+                        }
+                    }
+                }
+            }
+            if(ticks%6==0){
+                file position=new file("/charmville/position.txt","w");
+                if(position->isValid()){
+                    positionSequence++;
+                    sprintf(line,"%d|%d|%d|%f|%f|%d|%f|%f|%d",positionSequence,Game->GetCurDMap(),Game->GetCurScreen(),Hero->X,Hero->Y,Hero->Dir,Hero->Z,Hero->FakeZ,appliedCorrection);
+                    position->WriteString(line);position->Close();
+                }
+            }
             if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);}
-            if(channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
+            if(!accountMode && channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
                 for(int p=0;p<16;p++)life[p]=0;
@@ -121,7 +157,7 @@ global script Active
                 clearingReady=false;trailCount=0;trailHead=0;lastHeroX=Hero->X;lastHeroY=Hero->Y;
                 previousDMap=Game->GetCurDMap();previousScreen=Game->GetCurScreen();
             }
-            if(channel->State == WEBSOCKET_STATE_OPEN && ticks%6==0)
+            if(!accountMode && channel->State == WEBSOCKET_STATE_OPEN && ticks%6==0)
             {
                 sprintf(line,"world|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",sequence,Hero->X,Hero->Y,Hero->Tile,Hero->CSet,Hero->Flip,Game->GetCurDMap(),Game->GetCurScreen(),harvests>0?1:0,aura?1:0);
                 channel->Send(line);
@@ -133,7 +169,10 @@ global script Active
                     if(id>=0 && id<16 && field(reply,8)==Game->GetCurDMap() && field(reply,9)==Game->GetCurScreen()){px[id]=field(reply,2);py[id]=field(reply,3);pt[id]=field(reply,4);pc[id]=field(reply,5);pf[id]=field(reply,6);pa[id]=field(reply,7);life[id]=120;}
                 }
             }
-            for(int p=0;p<16;p++)if(life[p]>0){life[p]--;if(pa[p])drawAura(px[p],py[p],ticks);Screen->DrawTile(2,px[p],py[p],pt[p],1,1,pc[p],-1,-1,0,0,0,pf[p]);}
+            if(!accountMode)for(int p=0;p<16;p++)if(life[p]>0){life[p]--;if(pa[p])drawAura(px[p],py[p],ticks);Screen->DrawTile(2,px[p],py[p],pt[p],1,1,pc[p],-1,-1,0,0,0,pf[p]);}
+            if(accountMode && Game->GetCurDMap()==4 && Game->GetCurScreen()==63)for(int p=0;p<accountCount;p++){
+                Screen->DrawTile(accountY[p]<Hero->Y?2:6,accountX[p],accountY[p],Hero->GetOriginalTile(0,DIR_DOWN)+Hero->TileMod,1,1,Hero->CSet,-1,-1,0,0,0,0);
+            }
             if (Input->KeyPress[KEY_T] || Hero->PressEx4)
             {
                 aura = !aura;
