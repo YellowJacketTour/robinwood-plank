@@ -76,4 +76,4 @@ quiesce akasha-hose-standalone.mjs 204
 
 # File descriptors close on success, failure or disconnect; cron resumes
 # naturally without editing or reconstructing the user's crontab.
-"$@"
+PLANK_MIGRATION_WRITERS_QUIESCED=1 "$@"

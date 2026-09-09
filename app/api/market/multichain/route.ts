@@ -170,7 +170,12 @@ async function buildHubIndex(req: Request) {
           [NFT_CONTRACT_ADDRESS]
         ).then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0)
       : 0;
-    const nativeSales = await salesStatsFromLedger().catch(() => null);
+    // A failed read is not an empty ledger. Let the shared edge retain its
+    // last-good index rather than caching fabricated missing statistics.
+    const nativeSales = await salesStatsFromLedger().catch((error) => {
+      if (offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"))) throw error;
+      return null;
+    });
     let canonical: Awaited<
       ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
     > = null;

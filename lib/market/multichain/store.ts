@@ -1338,7 +1338,9 @@ export async function listCollectionsWithSnapshotsPage(input: {
   // cached because a total that is a few seconds stale has never mattered to
   // anyone. Pagination end-detection does not need it at all: a page that
   // returns fewer rows than it asked for IS the last page.
-  const totalCount = await countMatchingCollections(whereClauses, params.slice(0, params.length - 2));
+  // The count reads the catalog as c; rank-page aliases do not exist there.
+  const totalCount = await countMatchingCollections(
+    chainSlugs.length ? ["c.chain_slug = ANY($1::text[])"] : [], chainSlugs.length ? [chainSlugs] : []);
   const collections = result.rows.map((row) => ({
     ...rowToCollection(row),
     floorPriceWei: row.floor_price_wei,

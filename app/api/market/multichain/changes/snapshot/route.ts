@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { postgresQuery } from "@/lib/postgres";
 import { rateLimit } from "@/lib/security";
 import { parseScopes } from "@/lib/market/multichain/edge/change-protocol";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
+import { salesStatsFromLedger } from "@/lib/market/chain-events";
 import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,17 @@ export async function GET(req: NextRequest) {
     FROM wanted w JOIN plank_multichain_collections c ON c.chain_slug = w.chain AND c.contract_address = w.collection
     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id`,
   [scopes.map((s) => s.chainSlug), scopes.map((s) => normalizeContractAddress(s.chainSlug, s.collectionKey))]);
-  return Response.json({ collections: result.rows, requested: scopes.length, returned: result.rows.length },
+  // The native book owns its floor, inventory, supply and owner projection.
+  // A generic discovery snapshot must never erase that independent source.
+  // Its rolling sales come from the same permanent ledger as the native page.
+  const collections = await Promise.all(result.rows.map(async (row) => {
+    if (row.chainSlug !== "robinhood" || row.contractAddress !== NFT_CONTRACT_ADDRESS.toLowerCase()) return row;
+    const stats = await salesStatsFromLedger();
+    return { chainSlug: row.chainSlug, contractAddress: row.contractAddress,
+      sales24h: stats.sales24h, volume24hWei: stats.volume24hWei,
+      sales7d: stats.sales7d, volume7dWei: stats.volume7dWei,
+      sales30d: stats.sales30d, volume30dWei: stats.volume30dWei };
+  }));
+  return Response.json({ collections, requested: scopes.length, returned: collections.length },
     { headers: { "Cache-Control": "no-store" } });
 }
