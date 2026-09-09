@@ -1092,10 +1092,10 @@ export default function GlobalMarketHub() {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [onlyTradeable, setOnlyTradeable] = useState(() => searchParams.get("tradeable") === "1");
-  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") !== "0");
+  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") === "1");
   const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(() => searchParams.get("creator") === "1");
   const [onlyListed, setOnlyListed] = useState(() => searchParams.get("listed") === "1");
-  const [showShells, setShowShells] = useState(() => searchParams.get("shells") === "1");
+  const [showShells, setShowShells] = useState(() => searchParams.get("shells") !== "0");
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
   const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -1471,7 +1471,7 @@ export default function GlobalMarketHub() {
     const rows = collections.filter((c) => {
       if (onlyWatched && !watchlist.has(key(c))) return false;
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (isSpamCollectionTitle(c.name)) return false;
+      if (!showShells && isSpamCollectionTitle(c.name)) return false;
       if (!showShells && isTitleJunkWithoutData(c)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
@@ -1829,11 +1829,11 @@ export default function GlobalMarketHub() {
     if (sortColumn !== "grade") params.set("sort", sortColumn);
     if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
     if (onlyTradeable) params.set("tradeable", "1");
-    if (!onlyArt) params.set("art", "0");
+    if (onlyArt) params.set("art", "1");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
     if (onlyWatched) params.set("starred", "1");
-    if (showShells) params.set("shells", "1");
+    if (!showShells) params.set("shells", "0");
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
@@ -2031,6 +2031,7 @@ export default function GlobalMarketHub() {
     (onlyVerifiedCreator ? 1 : 0) +
     (onlyListed ? 1 : 0) +
     (onlyWatched ? 1 : 0) +
+    (!showShells ? 1 : 0) +
     (priceMin.trim() ? 1 : 0) +
     (priceMax.trim() ? 1 : 0);
 
@@ -2125,6 +2126,7 @@ export default function GlobalMarketHub() {
             setChainFilter(new Set());
             setOnlyTradeable(false);
             setOnlyArt(false);
+            setShowShells(true);
             setOnlyVerifiedCreator(false);
             setOnlyListed(false);
             setOnlyWatched(false);
