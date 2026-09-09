@@ -1,4 +1,5 @@
 #include "std.zh"
+#include "ActionPalettes.zh"
 
 // Native, local tutorial prototype. No shared-account inventory authority.
 // Active is the engine's global per-frame script slot.
@@ -24,7 +25,7 @@ global script Active
         bitmap mask=new bitmap(art->Width,art->Height);
         art->Blit(0,mask,0,0,art->Width,art->Height,0,0,art->Width,art->Height,0,0,0,0,0,false);
         Waitframe();
-        for(int i=1;i<16;i++){
+        for(int i=1;i<SizeOfArray(colors)/3;i++){
             int best=1;int score=100000;
             for(int j=1;j<256;j++){
                 int dr=world->R[j]-Floor(colors[i*3]/4);
@@ -74,7 +75,7 @@ global script Active
         while (true)
         {
             ticks++;
-            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");hair->Read(0,"/charmville/gold-hair.png");}
+            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);}
             if(channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {

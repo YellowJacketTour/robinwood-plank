@@ -2,10 +2,10 @@ import { STARTER_DECORATIONS, validDecorations, type Decoration } from "./layout
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { inventoryCompartments } from "./inventory";
+import { requireHomeRight } from "./home-access-store";
+import { YardError } from "./errors";
+export { YardError } from "./errors";
 
-export class YardError extends Error {
-  constructor(message: string, public status = 409) { super(message); }
-}
 export type YardAction = {
   action: "claim" | "plant" | "resolve" | "stamp" | "tend" | "layout";
   decorations?: Decoration[];
@@ -114,6 +114,7 @@ export async function mutateYard(pool: Pool, handle: string, token: string, inpu
       if (prior.rows[0].payload_hash !== payloadHash) throw new YardError("Request id already used for a different action");
       await client.query("COMMIT"); return prior.rows[0].result;
     }
+    if (input.action === "tend") await requireHomeRight(client, profileId, who.id, "help");
     const receiptId = randomUUID();
     let receiptAction: string = input.action;
     let face: string | null = input.face ?? null;
@@ -176,6 +177,14 @@ export async function mutateYard(pool: Pool, handle: string, token: string, inpu
         }
       }
       await client.query("UPDATE charmville_yards SET revision=revision+1 WHERE profile_id=$1", [profileId]);
+    }
+    // Every Grain reward is a transfer from the finite reserve; planting fees
+    // return there. This transaction also contains the player balance and receipt,
+    // so a retry or exhausted reserve cannot create money or lose a seed.
+    if (grainDelta !== 0) {
+      const reserve = await client.query(`UPDATE charmville_grain_reserve
+        SET grain=grain-$1 WHERE id=1 AND grain-$1>=0 RETURNING id`, [grainDelta]);
+      if (!reserve.rowCount) throw new YardError("The community reward reserve is empty. Your action was not spent; try again later.");
     }
     const result = { action: receiptAction, receiptId, qty, ...(await snapshot(client, profileId, who.id === profileId)) };
     await client.query(`INSERT INTO charmville_receipts(id,profile_id,action,request_id,payload_hash,actor_profile_id,

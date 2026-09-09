@@ -5,8 +5,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Porch from "@/integrations/plankspace-app/app/charmville/porch";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
 import { connectPlankLoveWallet, subscribePlankLoveWalletState } from "@/integrations/plankspace-app/app/plank-love-wallet";
+import { createGameAccountClient } from "@/lib/charmville/account-client";
+import HomePermissions from "./home-permissions";
 
-type Account = { wallet: string; handle: string; approved: boolean };
+type Account = { wallet: string; handle: string; approved: boolean; profileId?: string };
 const noStamps = () => {};
 const noSubscription = () => () => {};
 const localBrowser = () => ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
@@ -18,7 +20,8 @@ export default function Start() {
   const generation = useRef(0);
   const currentWallet = useRef<string | null | undefined>(undefined);
   const mounted = useRef(true);
-  const invalidate = useCallback(() => { ++generation.current; }, []);
+  const [gameAccount] = useState(() => createGameAccountClient());
+  const invalidate = useCallback(() => { ++generation.current; gameAccount.disconnect(); }, [gameAccount]);
   const local = useSyncExternalStore(noSubscription, localBrowser, () => false);
 
   const resolve = useCallback(async (wallet: string, token: string, version: number) => {
@@ -35,8 +38,11 @@ export default function Start() {
       if (profile.status !== 404 && !profile.ok) throw new Error("Your profile could not be loaded. Please try again.");
       approved = profile.ok;
     }
-    if (mounted.current && version === generation.current) setAccount({ wallet, handle, approved });
-  }, []);
+    if (!mounted.current || version !== generation.current) return;
+    const identity = approved ? await gameAccount.connect(token) : undefined;
+    if (identity && identity.handle !== handle) throw new Error("Your account changed. Please sign in again.");
+    if (mounted.current && version === generation.current) setAccount({ wallet, handle, approved, profileId: identity?.profileId });
+  }, [gameAccount]);
 
   useEffect(() => {
     let disposed = false;
@@ -47,6 +53,7 @@ export default function Start() {
       const wallet = state.address?.toLowerCase() ?? null;
       if (wallet === currentWallet.current) return;
       currentWallet.current = wallet;
+      gameAccount.disconnect();
       const version = ++generation.current;
       setAccount(null); setError(""); setBusy(false);
       if (!wallet) return;
@@ -57,7 +64,7 @@ export default function Start() {
       });
     });
     return () => { disposed = true; mounted.current = false; invalidate(); unsubscribe(); };
-  }, [resolve, invalidate]);
+  }, [resolve, invalidate, gameAccount]);
 
   async function enter() {
     if (busy) return;
@@ -102,7 +109,8 @@ export default function Start() {
       <Link href="/profile-editor" className="text-gold-300">Review your profile →</Link>
     </section> : <section aria-label="Your saved garden" className="mb-8">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-2xl">Welcome home, @{account.handle}</h2><Link href={`/u/${encodeURIComponent(account.handle)}`} className="text-gold-300">Open your board and stamp a Grain →</Link></div>
-      <Porch key={`${account.wallet}:${account.handle}`} handle={account.handle} posts={[]} onStamps={noStamps} />
+      <Porch key={account.profileId ?? `${account.wallet}:${account.handle}`} handle={account.handle} posts={[]} onStamps={noStamps} />
+      <HomePermissions key={`${account.wallet}:${account.handle}`} handle={account.handle} wallet={account.wallet} />
     </section>}
     {error && <p role="alert" className="mb-6 rounded-lg border border-line bg-panel p-4">{error}</p>}
     <section className="rounded-xl border border-line bg-panel p-6">
@@ -110,7 +118,7 @@ export default function Start() {
       <ol className="mt-4 grid gap-4 md:grid-cols-3">
         <li><strong className="text-gold-300">1. Claim your porch</strong><p className="mt-2 text-cream-muted">Your starter garden includes six plots and two ripe Stalk crops. Claim it once; it stays with your profile.</p></li>
         <li><strong className="text-gold-300">2. Gather and replant</strong><p className="mt-2 text-cream-muted">Harvest a ripe crop, check your satchel, then plant Stalk in an empty plot. Stalk grows in four hours, including while you are away.</p></li>
-        <li><strong className="text-gold-300">3. Make it social</strong><p className="mt-2 text-cream-muted">Visit a neighbour’s growing crop to tend it. Open your own board to spend a harvested Stalk stamping one of your published Grains.</p></li>
+        <li><strong className="text-gold-300">3. Make it social</strong><p className="mt-2 text-cream-muted">With their invitation, tend a neighbour’s growing crop. Open your own board to spend a harvested Stalk stamping one of your published Grains.</p></li>
       </ol>
     </section>
     {local && <section className="mt-6 rounded-xl border border-line bg-panel-soft p-6">

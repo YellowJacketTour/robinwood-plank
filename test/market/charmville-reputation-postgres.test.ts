@@ -15,7 +15,7 @@ test("reputation reads real accepted receipts, deduplicates concurrent retries a
   const pool = new Pool({ connectionString, options: `-c search_path=${schema}` });
   await admin.query(`CREATE SCHEMA ${schema}`);
   try {
-    for (const name of ["090_plankspace_native.sql", "104_charmville_soil.sql", "105_charmville_layout.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${name}`, "utf8"));
+    for (const name of ["090_plankspace_native.sql", "104_charmville_soil.sql", "105_charmville_layout.sql", "107_charmville_grain_reserve.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${name}`, "utf8"));
     const token = "c".repeat(64), wallet = "0x" + "3".repeat(40);
     await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,'reputation_owner','Owner','approved')", [wallet]);
     await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)", [createHash("sha256").update(token).digest("hex"), wallet, new Date(Date.now() + 3600000).toISOString()]);

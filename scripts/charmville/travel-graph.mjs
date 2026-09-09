@@ -1,4 +1,5 @@
 /** Logical travel contract; native maps must be bound before runtime use. */
+import { canAccessHome } from './home-access.mjs';
 const freeze = value => {
   if (value && typeof value === 'object') {
     Object.values(value).forEach(freeze);
@@ -52,7 +53,8 @@ const instanceFor = (regionId, region, actorId) => region.privacy === 'owner' ? 
  * This returns a proposal, not a mutation. The host must atomically apply it and
  * cancel/release any in-progress action before accepting input in the next map.
  */
-export function resolveTravel({ actorId, current, portalId, ownedCapabilities = [], activeAction = null }, graph = TRAVEL_GRAPH) {
+export function resolveTravel({ actorId, current, portalId, ownedCapabilities = [], activeAction = null,
+  destinationOwnerId = actorId, grants = [], now }, graph = TRAVEL_GRAPH) {
   validateTravelGraph(graph);
   const denied = reason => ({ ok: false, reason });
   if (!actorKey(actorId)) return denied('invalid-actor');
@@ -60,7 +62,10 @@ export function resolveTravel({ actorId, current, portalId, ownedCapabilities = 
   if (!portal) return denied('unknown-portal');
   if (!current || current.region !== portal.from) return denied('wrong-region');
   const source = graph.regions[portal.from];
-  if (current.instance !== instanceFor(portal.from, source, actorId)) return denied('instance-access-denied');
+  const sourceOwner = source.privacy === 'owner' && typeof current.instance === 'string'
+    && current.instance.startsWith(`${portal.from}:`) ? current.instance.slice(portal.from.length + 1) : actorId;
+  if (current.instance !== instanceFor(portal.from, source, sourceOwner)
+    || (source.privacy === 'owner' && !canAccessHome({ actorId, ownerId: sourceOwner, grants, now: sourceOwner === actorId ? 0 : now }))) return denied('instance-access-denied');
   if (!source.playable) return denied('source-unavailable');
   if (!validPoint(current, source)) return denied('invalid-position');
   if (Math.hypot(current.x - portal.trigger.x, current.y - portal.trigger.y) > portal.trigger.radius) return denied('outside-portal');
@@ -69,9 +74,10 @@ export function resolveTravel({ actorId, current, portalId, ownedCapabilities = 
   if (missing.length) return { ok: false, reason: 'requirements-missing', missing };
   const destination = graph.regions[portal.to];
   if (!destination.playable) return denied('destination-unavailable');
+  if (destination.privacy === 'owner' && !canAccessHome({ actorId, ownerId: destinationOwnerId, grants, now: destinationOwnerId === actorId ? 0 : now })) return denied('destination-access-denied');
   return {
     ok: true,
-    destination: { region: portal.to, instance: instanceFor(portal.to, destination, actorId), ...portal.spawn },
+    destination: { region: portal.to, instance: instanceFor(portal.to, destination, destinationOwnerId), ...portal.spawn },
     cancelActiveAction: activeAction !== null,
     resetPresentation: ['tool', 'projectile-preview', 'pose-override'],
   };

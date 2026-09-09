@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { mutateYard, readYard, type YardAction } from "../../lib/charmville/store";
+import { homeAccess } from "../../lib/charmville/home-access-store";
 
 test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip: !process.env.CHARMVILLE_TEST_DATABASE_URL }, async () => {
   const connectionString = process.env.CHARMVILLE_TEST_DATABASE_URL!;
@@ -18,6 +19,10 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     const sql = await readFile("deploy/inmotion/postgres/migrations/104_charmville_soil.sql", "utf8");
     await pool.query(sql); await pool.query(sql);
     await pool.query(await readFile("deploy/inmotion/postgres/migrations/105_charmville_layout.sql","utf8"));
+    await pool.query(await readFile("deploy/inmotion/postgres/migrations/106_charmville_home_access.sql","utf8"));
+    const reserveSql = await readFile("deploy/inmotion/postgres/migrations/107_charmville_grain_reserve.sql", "utf8");
+    await pool.query(reserveSql);
+    const supply = async () => (await pool.query("SELECT (r.grain + COALESCE((SELECT SUM(grain) FROM charmville_yards),0))::text AS total FROM charmville_grain_reserve r WHERE id=1")).rows[0].total;
     const token = "a".repeat(64), otherToken = "b".repeat(64);
     const wallet = "0x" + "1".repeat(40), otherWallet = "0x" + "2".repeat(40);
     for (const [handle, key, session] of [["soil_owner",wallet,token],["soil_friend",otherWallet,otherToken]]) {
@@ -27,7 +32,11 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     const act = (a: Omit<YardAction,"requestId">, handle="soil_owner", session=token) => mutateYard(pool,handle,session,{...a,requestId:randomUUID()});
     const claim: YardAction = {action:"claim",requestId:randomUUID()};
     const claimed = await mutateYard(pool,"soil_owner",token,claim);
+    assert.equal(await supply(), "1000000", "claim transfers existing Grain");
     assert.deepEqual(await mutateYard(pool,"soil_owner",token,claim), claimed);
+    assert.equal(await supply(), "1000000", "retry does not spend twice");
+    await pool.query(reserveSql);
+    assert.equal(await supply(), "1000000", "migration retry cannot refill rewards");
     assert.equal(claimed.plots.length,6);
     assert.equal(claimed.plots.filter((p: {crop:string})=>p.crop==="stalk").length,2);
     assert.equal((await readYard(pool,"soil_owner")).inventory,null);
@@ -36,6 +45,7 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     await assert.rejects(act({action:"resolve",plotIndex:0,revision:"0"},"soil_owner",otherToken));
     const outcomes = await Promise.allSettled([act({action:"resolve",plotIndex:0,revision:"0"}),act({action:"resolve",plotIndex:0,revision:"0"})]);
     assert.equal(outcomes.filter(r=>r.status==="fulfilled").length,1);
+    assert.equal(await supply(), "1000000", "concurrent harvest conserves Grain");
     let state = await readYard(pool,"soil_owner",token);
     assert.equal(state.inventory!.faces[0].qty,"3");
     assert.deepEqual(state.compartments!.satchel.charms, state.inventory!.faces);
@@ -50,8 +60,24 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
     const compost = await act({action:"resolve",plotIndex:0,revision:"2"});
     assert.equal(compost.action,"compost"); assert.equal(compost.qty,0);
     await act({action:"plant",plotIndex:0,revision:"3",face:"stalk"});
+    const reserveBefore = (await pool.query("SELECT grain::text FROM charmville_grain_reserve WHERE id=1")).rows[0].grain;
+    await pool.query("UPDATE charmville_grain_reserve SET grain=0 WHERE id=1");
+    const beforeUnfundedHarvest = await readYard(pool,"soil_owner",token);
+    await assert.rejects(act({action:"resolve",plotIndex:1,revision:"0"}), /reserve is empty/);
+    const afterUnfundedHarvest = await readYard(pool,"soil_owner",token);
+    assert.deepEqual(afterUnfundedHarvest.inventory, beforeUnfundedHarvest.inventory, "unfunded harvest cannot credit seeds or charms");
+    assert.deepEqual(afterUnfundedHarvest.plots, beforeUnfundedHarvest.plots, "unfunded harvest preserves ripe crop");
+    await assert.rejects(act({action:"claim"},"soil_friend",otherToken), /reserve is empty/);
+    assert.equal((await readYard(pool,"soil_friend",otherToken)).claimed, false, "unfunded claim rolls all starter state back");
+    await pool.query("UPDATE charmville_grain_reserve SET grain=$1 WHERE id=1", [reserveBefore]);
     await act({action:"claim"},"soil_friend",otherToken);
+    const beforeTendSupply = await supply();
+    await assert.rejects(act({action:"tend",plotIndex:0,revision:"4"},"soil_owner",otherToken), /permission/);
+    await homeAccess(pool,"soil_owner",token,{visitor:"soil_friend",revoke:false,revision:"0",rights:["visit","help"],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()});
     await act({action:"tend",plotIndex:0,revision:"4"},"soil_owner",otherToken);
+    assert.equal(await supply(), beforeTendSupply, "help reward is funded");
+    await homeAccess(pool,"soil_owner",token,{visitor:"soil_friend",revoke:true,revision:"1",rights:[],containers:[]});
+    await assert.rejects(act({action:"tend",plotIndex:0,revision:"5"},"soil_owner",otherToken), /permission/);
     await assert.rejects(act({action:"tend",plotIndex:0,revision:"4"},"soil_owner",otherToken));
     const post = await pool.query("INSERT INTO plankspace_posts(author_wallet,body) VALUES($1,'A pine from home') RETURNING id::text",[wallet]);
     await act({action:"stamp",postId:post.rows[0].id});
