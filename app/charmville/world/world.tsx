@@ -9,6 +9,7 @@ import { createGameAccountClient, type GameIdentity } from "@/lib/charmville/acc
 import type { YardInventory } from "@/lib/charmville/inventory";
 import ExchangePanel from "./exchange-panel";
 import CompanionPanel from "./companion-panel";
+import EncounterPanel from "./encounter-panel";
 import {useNativeResources} from "./native-resources";
 import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
@@ -235,7 +236,8 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-xl">Adventure</h2><span className="text-sm text-cream-muted">Native adventure</span></div>
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
-        <p className="mb-3 text-sm text-cream-muted">Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange. Combat rewards are still local.</p>
+        <p className="mb-3 text-sm text-cream-muted">{presence?.active?'Your movement and Oran harvests save to your account. Combat rewards are still local.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p>
+        {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'}/>}
         {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>

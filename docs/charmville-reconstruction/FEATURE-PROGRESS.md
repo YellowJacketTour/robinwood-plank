@@ -18,7 +18,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Friend invitations / revoke / expiry | ███░░ | Invitation API and private resource revoke checks verified; playable native home-to-home visits remain missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
 | Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions |
-| Shared resource replication | █░░░░ | Oran versioned resource commits exist; two-client live resource visual replication is not verified |
+| Shared resource replication | ███░░ | Two authenticated native clients in one granted home render Oran stages 0→1→2→3→4→1; owner-only yield and unchanged visitor balances verified. One crop/map; remote tool animations and permission-aware hints remain missing. See NATIVE-RESOURCE-REPLICATION.md. |
 | Reconnect / crash recovery | ██░░░ | Native actor reconnect and Oran inventory reload verified; interrupted action/full world crash recovery remains incomplete |
 | Party and region shard routing | █░░░░ | Keep party together, separate region capacity from economic identity |
 | Abuse prevention | ██░░░ | Garden transactions and relay rate limits; movement/automation/encounter authority incomplete |
@@ -46,10 +46,10 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
-| Species and encounter tables | ██░░░ | Source catalogue resolves386 species and184 evolution rules; target habitats/rates not authored |
+| Species and encounter tables | ██░░░ | Source catalogue resolves386 species and184 evolution rules; one persisted Poochyena inspection anchor exists, wider habitats/rates not authored |
 | Creatures visible in adventure world | █░░░░ | Needs world entities, directional art, pathing and spawn budgets |
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
-| Native-style turn battle | ██░░░ | Encounter domain prototype; no playable native battle integration |
+| Native-style turn battle | ██░░░ | Authenticated encounter claim/inspect/return/release verified; no moves or playable battle integration |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
 | Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
@@ -209,3 +209,7 @@ Farming bars remain locally connected: the full animation/facing/interruption ma
 ## Companion health and Oran evidence
 
 The source catalogue covers 386 species. Owned companion health uses source HP at level 5 with a server-generated persisted HP IV and HP EV 0. Oran consumes one item to restore up to 10 HP; new companions begin at full health. Real healthy-account UI, synthetic injured/lost-response presentation, and PostgreSQL transaction tests are distinguished in [COMPANION-HEALTH-AND-ORAN.md](COMPANION-HEALTH-AND-ORAN.md). No damage or combat API, fake user injury, clinic or capture is claimed. Existing maturity bars remain unchanged because the broader party/storage/clinic scope is incomplete. Native peer-facing fixes are not included in this evidence.
+
+## Authenticated encounter inspection
+
+A nearby Play panel now shows the original Poochyena portrait and server-owned level/HP for one authored regional encounter. Actual browser verification passes claim, Inspect, Return to world and release with persisted controller/mode, keyboard activation and narrow-screen review. Inspect is a lifecycle mode only: no attack, capture, damage, reward or playable battle is claimed. Combat bars remain unchanged. See [ENCOUNTER-LIFECYCLE.md](ENCOUNTER-LIFECYCLE.md).

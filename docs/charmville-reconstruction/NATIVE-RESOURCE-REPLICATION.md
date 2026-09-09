@@ -1,0 +1,9 @@
+# Two-account native resource replication
+
+Verified locally on 2026-09-09 with `node scripts/charmville/verify-native-resource-replication.mjs`. Two isolated Chromium contexts create separate authenticated local-playtest accounts. The owner grants visit-only access to a fresh home, and both accounts enter that same home through the presence API and load the actual native adventure.
+
+The owner presses the native action button to till, plant, water and harvest bed 0. Both accounts independently fetch the server resource state through their normal parent polling and project it into their own native runtime. Assertions cover stages 0, 1, 2, 3, 4 after real 30-second growth, and 1 after harvest. Both report the same region. Visitor balances remain three seeds and zero Oran; the owner spends one seed when planting and finishes with three seeds and one Oran.
+
+Evidence is written to `work/native-resource-replication/result.json`, diagnostics, and twelve full-page screenshots (six stages times two players). Final ripe and harvested visitor captures were visually inspected: the source berry tree appears and then returns to soil, while the visitor HUD remains Seeds 3 / Oran 0. No synthetic resource-state postMessages, database mutations or authorization replies are used. One earlier run was interrupted by a concurrent UI reload; the stable rerun passed.
+
+This verifies one crop on one native map and a granted private home. It does not establish all resource types, public contention, disconnect/reconnect, revocation during action, or latency/performance guarantees. Those require separate tests. The visitor sees resource state changes, not the owner's tool animation. The native HUD still offers generic harvest wording to a visit-only player; server permissions remain authoritative, but permission-aware hints are a presentation gap. No runtime changes were needed for this verification.

@@ -27,6 +27,15 @@
       "sha256": "91245c5f6078c4af05116ea4c2c3a6bfab1cc7e37015cb52f77e8fffbb3117c2",
       "frameWidth": 64,
       "displayFrame": 0
+    },
+    {
+      "sourcePath": "graphics/pokemon/poochyena/front.png",
+      "frameHeight": 64,
+      "speciesId": 286,
+      "file": "poochyena-front.png",
+      "sha256": "23b51cc3494c60dc9d34b5dd4e508e0c2007fa6a468c19d7650c389946788efa",
+      "frameWidth": 64,
+      "displayFrame": 0
     }
   ],
   "commit": "5eff78649e7170a877b961ef0b3da13b81a16038",
