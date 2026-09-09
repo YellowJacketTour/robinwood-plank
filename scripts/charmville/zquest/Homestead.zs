@@ -57,12 +57,13 @@ global script Active
         // Slot 36's optional costume bank has broken casting frames in this quest.
         // Keep the sword's weapon art, damage and abilities; use the complete hero bank.
         itemdata masterSword=Game->LoadItemData(36);masterSword->TileMod=0;
-        int stage = 0;
+        int stages[3];int selectedPlot=0;
+        int plotXs[]={24,56,88};int plotY=88;int plotX=plotXs[0];int plotCenterX=plotX+8;int plotCenterY=plotY+8;int plotFootY=plotY+16;bool farmSpawned=false;bool clearingReady=false;
         int welcome = 0;
 
-        int wateredAt = 0;
+        int wateredTimes[3];
         int ticks = 0;
-        int harvests = 0;int berries=0;int cuttings=0;bool fertilized=false;
+        int harvests = 0;int berries=0;int cuttings=0;bool fed[3];
         bool aura = false;
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;
@@ -81,6 +82,7 @@ global script Active
             {
                 for(int p=0;p<16;p++)life[p]=0;
                 activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;
+                clearingReady=false;
                 previousDMap=Game->GetCurDMap();previousScreen=Game->GetCurScreen();
             }
             if(channel->State == WEBSOCKET_STATE_OPEN && ticks%6==0)
@@ -111,6 +113,23 @@ global script Active
             }
             if (Game->GetCurDMap()==4 && Game->GetCurScreen()==63)
             {
+                if(!clearingReady){
+                    // Copy a verified clear native ground column, including every active overlay.
+                    // Bounds avoid the boulder at x112 and all tree canopies.
+                    for(int layer=0;layer<=6;layer++){
+                        if(layer>0 && Screen->LayerMap[layer]<=0)continue;
+                        int ground=GetLayerComboD(layer,105);int cset=GetLayerComboC(layer,105);
+                        for(int row=4;row<=6;row++)for(int col=1;col<=6;col++){int cell=row*16+col;SetLayerComboD(layer,cell,ground);SetLayerComboC(layer,cell,cset);SetLayerComboF(layer,cell,0);}
+                    }
+                    int solid=0;for(int cell=65;cell<=102;cell++){if(cell%16>=1 && cell%16<=6)solid+=Screen->ComboS[cell];}clearingReady=true;printf("CHARMVILLE_FARM_CLEARING READY SOLID %d\n",solid);
+                }
+                if(!farmSpawned){Hero->X=16;Hero->Y=72;Hero->Dir=DIR_DOWN;farmSpawned=true;}
+                if(activity<0){
+                    int nearest=100000;for(int bed=0;bed<3;bed++){int dx=plotXs[bed]+8-(Hero->X+8);int dy=plotY+8-(Hero->Y+8);int distance=dx*dx+dy*dy;if(distance<nearest){nearest=distance;selectedPlot=bed;}}
+                }
+                plotX=plotXs[selectedPlot];plotCenterX=plotX+8;
+                for(int bed=0;bed<3;bed++){Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;dirt->Blit(2,RT_SCREEN,0,0,16,16,plotXs[bed],plotY+56,16,16);Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;}
+
                 if(welcome<2)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -128,18 +147,28 @@ global script Active
                     if(Input->KeyPress[KEY_E] || Hero->PressEx3)welcome++;
                     Waitframe();continue;
                 }
-                int reachX=216-(Hero->X+8);int reachY=96-(Hero->Y+8);
+                int reachX=plotCenterX-(Hero->X+8);int reachY=plotCenterY-(Hero->Y+8);
                 bool nearPlot = reachX*reachX+reachY*reachY<=1024;
-                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stage!=3 || (cuttings>0 && !fertilized)) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
+                if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
+                if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stages[selectedPlot]!=3 || (cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
-                    activity=stage==3?5:stage;activityTick=0;
+                    activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
-                    int dx=216-(Hero->X+8);int dy=96-(Hero->Y+8);
+                    int dx=plotCenterX-(Hero->X+8);int dy=plotCenterY-(Hero->Y+8);
                     activityDir=Abs(dx)>Abs(dy)?(dx<0?DIR_LEFT:DIR_RIGHT):(dy<0?DIR_UP:DIR_DOWN);
                 }
                 // Damage, displacement, or a native action takes precedence over farming.
+                // The classic controller aligns the perpendicular axis to its
+                // 8px movement grid on a direction change. Accept that one
+                // first-frame alignment, not later displacement or knockback.
+                if(activity>=0 && activityTick==1 && Hero->HP==activityLife && Hero->Action==LA_NONE){
+                    bool vertical=activityDir==DIR_UP || activityDir==DIR_DOWN;
+                    if((vertical && Hero->Y==activityY && Abs(Hero->X-activityX)<8) || (!vertical && Hero->X==activityX && Abs(Hero->Y-activityY)<8)){
+                        activityX=Hero->X;activityY=Hero->Y;
+                    }
+                }
                 if(activity>=0 && (Hero->Z!=0 || Hero->FakeZ!=0 || Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
-                {activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                {printf("CHARMVILLE_ACTION_CANCEL BED %d X %d/%d Y %d/%d HP %d/%d ACTION %d\n",selectedPlot+1,Hero->X,activityX,Hero->Y,activityY,Hero->HP,activityLife,Hero->Action);activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 if(activity>=0)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -170,54 +199,54 @@ global script Active
                         int spoutY=activityY+8+(activityDir==DIR_UP?-8:(activityDir==DIR_DOWN?8:0));
                         for(int drop=0;drop<4;drop++){
                             int phase=(activityTick+drop*4)%18;
-                            Screen->Circle(6,spoutX+(216-spoutX)*phase/18,spoutY+(96-spoutY)*phase/18,1,0x91);
+                            Screen->Circle(6,spoutX+(plotCenterX-spoutX)*phase/18,spoutY+(plotCenterY-spoutY)*phase/18,1,0x91);
                         }
                     }
                     if(activityTick==28)
                     {
                         if(activity==4){
-                            int yield=fertilized?2:1;berries+=yield;cuttings++;harvests++;stage=1;fertilized=false;
+                            int yield=fed[selectedPlot]?2:1;berries+=yield;cuttings++;harvests++;stages[selectedPlot]=1;fed[selectedPlot]=false;
                             printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);
                             printf("CHARMVILLE_SATCHEL BERRIES %d CUTTINGS %d\n",berries,cuttings);
                         }
                         else if(activity==5){
-                            if(stage==3 && cuttings>0 && !fertilized){cuttings--;fertilized=true;printf("CHARMVILLE_FERTILIZED CUTTINGS %d\n",cuttings);}
+                            if(stages[selectedPlot]==3 && cuttings>0 && !fed[selectedPlot]){cuttings--;fed[selectedPlot]=true;printf("CHARMVILLE_FERTILIZED CUTTINGS %d\n",cuttings);}
                         }
-                        else{stage=activity+1;if(stage==3)wateredAt=ticks;}
-                        printf("CHARMVILLE_CROP_STAGE %d\n",stage);
+                        else{stages[selectedPlot]=activity+1;if(stages[selectedPlot]==3)wateredTimes[selectedPlot]=ticks;}
+                        printf("CHARMVILLE_CROP_STAGE %d BED %d\n",stages[selectedPlot],selectedPlot+1);
                     }
                     activityTick++;
-                    if(activityTick>=48){activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                    if(activityTick>=48){activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;printf("CHARMVILLE_ACTION_COMPLETE BED %d\n",selectedPlot+1);}
                 }
-                if (stage==3 && ticks-wateredAt>=300){stage=4;printf("CHARMVILLE_CROP_READY\n");}
-                // Source growth frames share a fixed ground anchor; never scale a flower into a crop.
-                if(stage>0)Screen->DrawCombo(1,208,88,Screen->ComboD[108],1,1,Screen->ComboC[108]);
-                Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                if(stage==2)dirt->Blit(2,RT_SCREEN,0,0,16,16,208,144,16,16);
-                int plantLayer=Hero->Y+16<104?6:2;
-                if(stage==3){int age=ticks-wateredAt;
-                    if(age<100)sprout->Blit(2,RT_SCREEN,(Floor(ticks/32)%2)*16,0,16,16,208,144,16,16);
-                    else if(age<200)berry->Blit(plantLayer,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,208,128,16,32);
-                    else berry->Blit(plantLayer,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,208,128,16,32);
+                // Every bed advances independently; selection never owns the growth clock.
+                for(int bed=0;bed<3;bed++){
+                    if(stages[bed]==3 && ticks-wateredTimes[bed]>=300){stages[bed]=4;printf("CHARMVILLE_CROP_READY BED %d\n",bed+1);}
+                    int plantLayer=Hero->Y+16<plotFootY?6:2;
+                    Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
+                    if(stages[bed]==3){int age=ticks-wateredTimes[bed];
+                        if(age<100)sprout->Blit(2,RT_SCREEN,(Floor(ticks/32)%2)*16,0,16,16,plotXs[bed],plotY+56,16,16);
+                        else if(age<200)berry->Blit(plantLayer,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,plotXs[bed],plotY+40,16,32);
+                        else berry->Blit(plantLayer,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,plotXs[bed],plotY+40,16,32);
+                    }
+                    if(stages[bed]==4)berry->Blit(plantLayer,RT_SCREEN,64+(Floor(ticks/96)%2)*16,0,16,32,plotXs[bed],plotY+40,16,32);
+                    Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 }
-                if(stage==4)berry->Blit(plantLayer,RT_SCREEN,64+(Floor(ticks/96)%2)*16,0,16,32,208,128,16,32);
-                Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 Screen->Rectangle(6,0,144,255,175,0x00);
-                if (stage==0) sprintf(line,"E / D: prepare the soil");
-                if (stage==1) sprintf(line,"E / D: plant a seed");
-                if (stage==2) sprintf(line,"E / D: water the seed");
-                if (stage==3){
-                    if(ticks-wateredAt<100)sprintf(line,"Sprouting... roots take hold");
-                    else if(ticks-wateredAt<200)sprintf(line,"Growing... branches unfold");
+                if (stages[selectedPlot]==0) sprintf(line,"E / D: prepare the soil");
+                if (stages[selectedPlot]==1) sprintf(line,"E / D: plant a seed");
+                if (stages[selectedPlot]==2) sprintf(line,"E / D: water the seed");
+                if (stages[selectedPlot]==3){
+                    if(ticks-wateredTimes[selectedPlot]<100)sprintf(line,"Sprouting... roots take hold");
+                    else if(ticks-wateredTimes[selectedPlot]<200)sprintf(line,"Growing... branches unfold");
                     else sprintf(line,"Flowering... berries soon");
                 }
-                if (stage==4) sprintf(line,"E / D: gather your crop");
+                if (stages[selectedPlot]==4) sprintf(line,"E / D: gather your crop");
                 Screen->DrawString(6,4,146,0,0x68,-1,0,line);
                 int guests=0;for(int p=0;p<16;p++)if(life[p]>0)guests++;
-                sprintf(line,"Berry %d Farm %d XP %d",berries,1+Floor(harvests/3),harvests*10);
+                sprintf(line,"Bed %d  Berry %d  XP %d",selectedPlot+1,berries,harvests*10);
                 Screen->DrawString(6,4,157,0,0x01,-1,0,line);
-                if(stage==3 && !fertilized && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
-                else if(stage==3 && fertilized)sprintf(line,"Fed soil: next yield is 2");
+                if(stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
+                else if(stages[selectedPlot]==3 && fed[selectedPlot])sprintf(line,"Fed soil: next yield is 2");
                 else sprintf(line,"Cuttings %d Guests %d",cuttings,guests);
                 Screen->DrawString(6,4,168,0,0x01,-1,0,line);
             }

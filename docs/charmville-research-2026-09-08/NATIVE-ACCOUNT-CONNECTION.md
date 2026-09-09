@@ -28,7 +28,7 @@ pose, quest counters or balances from the frame. A region admission updates
 the account panel, not the reference camera's map coordinates.
 
 The local native camera is an explicit opt-in cross-origin iframe at
-localhost:3021. It receives no session or message bridge. Its sandbox allows
+localhost:3021. It receives no session or economic commands. Its sandbox allows
 scripts and its own origin for IndexedDB/WASM; the port difference prevents
 access to the authenticated parent. It cannot navigate the top-level page
 or open popups. Development-only headers on `/charmville/world` enable
@@ -45,6 +45,14 @@ discard, microphone cleanup and both modal close buttons.
 The sandbox permits downloads so the explicit Save audio action exports the
 reviewed local draft; synthetic-browser verification saves a nonempty audio
 file. Form submissions, popup creation and top-level navigation stay disabled.
+
+Play, Inventory, Companions, Exchange and Friends are immediately accessible
+tabs above the camera. On narrow screens, account panels replace the visible
+camera without unloading it. Hidden panels retain form state and are removed
+from keyboard navigation. Arrow keys, Home and End navigate the tab list.
+Charmdex and Voice note shortcuts send only an exact panel-opening command
+to the native origin; the runtime checks parent source and the local account
+origin. This bridge cannot fetch account data or execute game/economy actions.
 
 ## Remaining runtime integration
 

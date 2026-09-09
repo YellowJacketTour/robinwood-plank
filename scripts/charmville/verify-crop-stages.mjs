@@ -10,7 +10,7 @@ try {
  await page.getByRole('button',{name:'Enter the world',exact:true}).click();await page.waitForTimeout(11000);
  async function tap(){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(850);}
  async function capture(name){await page.screenshot({path:out+'/'+name+'.png'});}
- await tap();await tap();await tap();await capture('soil');await tap();await capture('seed');
+ await capture('arrival');await tap();await tap();await capture('unworked-soil');await tap();await capture('soil');await tap();await capture('seed');
  await tap();await capture('sprout');await page.waitForTimeout(1400);await capture('taller');
  await page.waitForTimeout(1600);await capture('flowering');await page.waitForTimeout(2000);await capture('ripe');
  await tap();await capture('harvested');
@@ -18,6 +18,7 @@ try {
  await tap(); // Repeated interaction must not consume another cutting.
  await page.waitForTimeout(4200);await tap();await capture('second-harvest');
  assert.equal(events.filter(e=>e.includes('CHARMVILLE_FERTILIZED')).length,1);
+ assert(events.some(e=>e.includes('CHARMVILLE_FARM_CLEARING READY SOLID 0')),'Farm ground and initial standing tile must be walkable');
  assert(events.some(e=>e.includes('CHARMVILLE_SATCHEL BERRIES 3 CUTTINGS 1')));
  assert.deepEqual(errors,[]);for(const stage of [1,2,3])assert(events.some(e=>e.includes('CHARMVILLE_CROP_STAGE '+stage)));
  assert(events.some(e=>e.includes('CHARMVILLE_CROP_READY')));assert(events.some(e=>e.includes('CHARMVILLE_HARVEST 1')));

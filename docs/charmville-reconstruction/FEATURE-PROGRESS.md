@@ -155,3 +155,7 @@ Further implementation: `/charmville/world` now combines real account region mem
 Latest verification: 1,344 application tests passed, 48 skipped. Starter selection with an original Emerald portrait survives reload with the same creature ID. Embedded voice recording/playback/download/discard and modal close cleanup pass using synthetic audio; real user audio was not accessed. Native startup loads191 original MIDI instruments without missing-patch errors, at a35.4MB startup cost. Fullscreen and390px mobile overflow checks pass. These are local checks, not a claim of broad device performance or finished source-fidelity animation.
 
 Evidence roots: `lib/charmville`, `test/market/charmville-*`, `scripts/charmville/*test.mjs`, native verification scripts and `docs/charmville-reconstruction`. Tests for pure modules do not prove live gameplay. Update this document after integration, not on agent assignment or optimistic estimates.
+
+## 2026-09-09 menu visibility update
+
+The world shell now keeps Play, Inventory, Companions, Exchange and Friends above the camera, with direct Charmdex and Voice shortcuts. Browser checks cover 600px and 390px layouts, keyboard tab navigation, retained form state and a delayed-frame shortcut race. Native equipment remains separate; a complete rotating unified equipment menu is not yet implemented. Soil and menu source findings and the target integration contract are in `SOIL-AND-INVENTORY-RESEARCH.md`.

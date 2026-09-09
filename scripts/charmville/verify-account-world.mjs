@@ -22,7 +22,7 @@ try {
    localStorage.setItem('plankspace-last-verified-wallet',wallet);localStorage.setItem('plankspace-session:'+wallet,token);
    window.addEventListener('plank:wallet-request',e=>{if(e.detail.method==='getState')window.dispatchEvent(new CustomEvent('plank:wallet-response',{detail:{requestId:e.detail.requestId,result:{state:{address:wallet,status:'connected',isConnected:true,chainId:null}}}}));});
   },fixture);
-  await target.goto(base+'/charmville/world');await target.getByRole('heading',{name:'@'+fixture.handle,exact:true}).waitFor({timeout:60000});
+  await target.goto(base+'/charmville/world');await target.getByRole('tab',{name:'Friends',exact:true}).click();await target.getByRole('heading',{name:'@'+fixture.handle,exact:true}).waitFor({timeout:60000});
  }
  await authenticate(page,owner);await authenticate(second,friend);
  await page.getByRole('button',{name:'Go home',exact:true}).click();
@@ -31,11 +31,11 @@ try {
  await second.getByText(`At @${owner.handle}’s home`,{exact:true}).waitFor();
  await page.getByRole('button',{name:'Refresh account'}).click();
  await page.getByRole('region',{name:'Players here'}).getByText('@'+friend.handle,{exact:true}).waitFor();
- await page.getByRole('region',{name:'Saved inventory'}).getByText('Gameplay supplies',{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'Inventory',exact:true}).click();await page.getByRole('region',{name:'Saved inventory'}).getByText('Gameplay supplies',{exact:true}).waitFor();
  assert.equal((await page.request.post(`${base}/api/charmville/${owner.handle}/access`,{headers,data:{visitor:friend.handle,revision:'1',revoke:true}})).status(),200);
  await second.getByRole('button',{name:'Refresh account'}).click();
  await second.getByText('Choose where to join',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Open adventure camera'}).click();
+ await page.getByRole('tab',{name:'Play',exact:true}).click();await page.getByRole('button',{name:'Open adventure camera'}).click();
  await page.screenshot({path:out+'/before-camera.png',fullPage:true});
  const iframe=page.frameLocator('iframe');
  await iframe.getByRole('button',{name:'Enter the world',exact:true}).click({timeout:60000});
@@ -47,10 +47,29 @@ try {
  assert(!native.url().includes(owner.token));
  await page.screenshot({path:out+'/account-world.png',fullPage:true});
  await page.getByRole('button',{name:'Toggle fullscreen'}).click();
- assert.equal(await page.evaluate(()=>Boolean(document.fullscreenElement)),true);
+ await page.waitForFunction(()=>Boolean(document.fullscreenElement));
  await page.getByRole('button',{name:'Toggle fullscreen'}).click();
- await page.setViewportSize({width:390,height:844});await page.waitForTimeout(500);
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.waitForFunction(()=>!document.fullscreenElement);
+ for(const [width,height] of [[600,900],[390,844]]){
+  await page.setViewportSize({width,height});
+  for(const name of ['Inventory','Companions','Exchange','Friends']){
+   await page.getByRole('tab',{name,exact:true}).click();
+   const selected=page.getByRole('tabpanel',{name,exact:true});
+   await selected.waitFor({state:'visible'});
+   assert((await selected.boundingBox()).y<450,`${name} immediately accessible at ${width}px`);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  }
+  await page.getByRole('tab',{name:'Exchange',exact:true}).click();
+  await page.getByLabel('Quantity',{exact:true}).fill('2');
+  await page.getByRole('tab',{name:'Inventory',exact:true}).click();
+  await page.getByRole('tab',{name:'Exchange',exact:true}).click();
+  assert.equal(await page.getByLabel('Quantity',{exact:true}).inputValue(),'2');
+  await page.screenshot({path:out+`/account-world-${width}.png`,fullPage:true});
+ }
+ await page.getByRole('tab',{name:'Inventory',exact:true}).focus();await page.keyboard.press('ArrowRight');
+ assert.equal(await page.getByRole('tab',{name:'Companions',exact:true}).getAttribute('aria-selected'),'true');
+ await page.keyboard.press('End');assert.equal(await page.getByRole('tab',{name:'Friends',exact:true}).getAttribute('aria-selected'),'true');
+ await page.keyboard.press('Home');assert.equal(await page.getByRole('tab',{name:'Play',exact:true}).getAttribute('aria-selected'),'true');
  await page.screenshot({path:out+'/account-world-mobile.png',fullPage:true});
  await writeFile(out+'/verification.json',JSON.stringify({accountHome:true,friendVisit:true,revokedVisitCleared:true,sharedPresence:true,canonicalInventory:true,nativeFrameIsolated:true,fullscreen:true,mobileNoOverflow:true,errors},null,2));
  assert.deepEqual(errors,[]);console.log('Account home, authorized friend visit, shared presence, inventory and isolated native camera verified');

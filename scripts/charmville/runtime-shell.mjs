@@ -51,4 +51,18 @@ export function mountRuntimeShell(root = document) {
   });
 }
 if (typeof document !== 'undefined') mountRuntimeShell();
+// UI-only bridge from the local account shell. No account credentials, inventory
+// mutations, arbitrary selectors or gameplay input are accepted by the quest.
+if (typeof window !== 'undefined') window.addEventListener('message', event => {
+  if (event.source !== window.parent || !['http://localhost:3017', 'http://127.0.0.1:3017'].includes(event.origin)) return;
+  const request = event.data;
+  if (!request || request.type !== 'charmville:open-panel') return;
+  if (!['charmdex', 'voice'].includes(request.panel)) return;
+  const selected = request.panel === 'voice' ? 'dialog.voice-notes' : 'dialog.charmdex:not(.voice-notes)';
+  for (const dialog of document.querySelectorAll('dialog.charmdex[open]')) {
+    if (!dialog.matches(selected)) dialog.close();
+  }
+  if (request.panel === 'charmdex') document.querySelector('[data-charmdex-open]')?.click();
+  else document.querySelector('[data-voice-notes-open]')?.click();
+});
 
