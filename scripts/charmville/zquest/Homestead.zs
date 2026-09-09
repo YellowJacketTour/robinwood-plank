@@ -15,6 +15,29 @@ global script Active
             Screen->Line(2,ax,ay,ax+(i%2==0?2:-2),ay-4-(tick+i)%4,0x68);
         }
     }
+    // Remap source palette indices without changing the original PNG or world palette.
+    void matchPalette(bitmap art, int[] colors)
+    {
+        Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
+        // This quest uses legacy 6-bit palette channel values.
+        paldata world=new paldata();world->LoadMainPalette();
+        bitmap mask=new bitmap(art->Width,art->Height);
+        art->Blit(0,mask,0,0,art->Width,art->Height,0,0,art->Width,art->Height,0,0,0,0,0,false);
+        Waitframe();
+        for(int i=1;i<16;i++){
+            int best=1;int score=100000;
+            for(int j=1;j<256;j++){
+                int dr=world->R[j]-Floor(colors[i*3]/4);
+                int dg=world->G[j]-Floor(colors[i*3+1]/4);
+                int db=world->B[j]-Floor(colors[i*3+2]/4);
+                int distance=dr*dr+dg*dg+db*db;
+                if(distance<score){score=distance;best=j;}
+            }
+            art->MaskedDraw(0,mask,best,i);
+        }
+        Waitframe();
+        Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
+    }
     int field(char32[] text, int number)
     {
         int pos=0;
@@ -23,6 +46,8 @@ global script Active
     }
     void run()
     {
+        bitmap dirt=new bitmap();bitmap sprout=new bitmap();bitmap berry=new bitmap();
+        dirt->Read(0,"/charmville/berry-dirt.png");sprout->Read(0,"/charmville/berry-sprout.png");berry->Read(0,"/charmville/berry-oran.png");
         bitmap hoeFG=new bitmap(); bitmap hoeBG=new bitmap();
         bitmap waterFG=new bitmap(); bitmap waterBG=new bitmap(); bitmap hair=new bitmap();
         hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");
@@ -49,7 +74,7 @@ global script Active
         while (true)
         {
             ticks++;
-            if(ticks==60){hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");hair->Read(0,"/charmville/gold-hair.png");}
+            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");hair->Read(0,"/charmville/gold-hair.png");}
             if(channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
@@ -80,7 +105,7 @@ global script Active
                 // Native prototype effect; not imported DBZ animation frames.
                 drawAura(Hero->X,Hero->Y,ticks);
                 int hairRow=Hero->Dir==DIR_UP?8:(Hero->Dir==DIR_LEFT?9:(Hero->Dir==DIR_DOWN?10:11));
-                int hairFrame=Hero->Action==LA_WALKING?(ticks/8)%8:0;
+                int hairFrame=Hero->Action==LA_WALKING?Floor(ticks/8)%8:0;
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN; hair->Blit(6,RT_SCREEN,hairFrame*64,hairRow*64,64,64,Hero->X-8,Hero->Y+47,32,32); Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
             }
             if (Game->GetCurDMap()==4 && Game->GetCurScreen()==63)
@@ -125,7 +150,7 @@ global script Active
                     Hero->ScriptTile=Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod;
                     // Hosted player aborts on GetOriginalFlip; retain the native directional flip.
                     int row=activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7));
-                    int frame=Min(activityTick/8,5);
+                    int frame=Min(Floor(activityTick/8),5);
                     Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
                     if(activity==0){hoeBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);hoeFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
                     if(activity==2){waterBG->Blit(1,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);waterFG->Blit(6,RT_SCREEN,frame*64,row*64,64,64,Hero->X-8,Hero->Y+48,32,32);}
@@ -143,19 +168,32 @@ global script Active
                     {
                         if(activity==4){harvests++;stage=1;printf("CHARMVILLE_HARVEST %d XP %d\n",harvests,harvests*10);}
                         else{stage=activity+1;if(stage==3)wateredAt=ticks;}
+                        printf("CHARMVILLE_CROP_STAGE %d\n",stage);
                     }
                     activityTick++;
                     if(activityTick>=48){activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 }
-                if (stage==3 && ticks-wateredAt>=300) stage=4;
-                // Plot states are visibly distinct; source crop-art adapter follows.
+                if (stage==3 && ticks-wateredAt>=300){stage=4;printf("CHARMVILLE_CROP_READY\n");}
+                // Source growth frames share a fixed ground anchor; never scale a flower into a crop.
                 if(stage>0)Screen->DrawCombo(1,208,88,Screen->ComboD[108],1,1,Screen->ComboC[108]);
-                if(stage>=2){int size=stage==4?16:8;Screen->DrawCombo(2,208+(16-size)/2,88+(16-size)/2,Screen->ComboD[95],1,1,Screen->ComboC[95],size,size);}
+                Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
+                if(stage==2)dirt->Blit(2,RT_SCREEN,0,0,16,16,208,144,16,16);
+                if(stage==3){int age=ticks-wateredAt;
+                    if(age<100)sprout->Blit(2,RT_SCREEN,(Floor(ticks/32)%2)*16,0,16,16,208,144,16,16);
+                    else if(age<200)berry->Blit(2,RT_SCREEN,(Floor(ticks/48)%2)*16,0,16,32,208,128,16,32);
+                    else berry->Blit(2,RT_SCREEN,32+(Floor(ticks/64)%2)*16,0,16,32,208,128,16,32);
+                }
+                if(stage==4)berry->Blit(2,RT_SCREEN,64+(Floor(ticks/96)%2)*16,0,16,32,208,128,16,32);
+                Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 Screen->Rectangle(6,0,144,255,175,0x00);
                 if (stage==0) sprintf(line,"E / D: prepare the soil");
                 if (stage==1) sprintf(line,"E / D: plant a seed");
                 if (stage==2) sprintf(line,"E / D: water the seed");
-                if (stage==3) sprintf(line,"Growing... ready in 5 seconds");
+                if (stage==3){
+                    if(ticks-wateredAt<100)sprintf(line,"Sprouting... roots take hold");
+                    else if(ticks-wateredAt<200)sprintf(line,"Growing... branches unfold");
+                    else sprintf(line,"Flowering... berries soon");
+                }
                 if (stage==4) sprintf(line,"E / D: gather your crop");
                 Screen->DrawString(6,4,146,0,0x68,-1,0,line);
                 int guests=0;for(int p=0;p<16;p++)if(life[p]>0)guests++;
@@ -166,6 +204,7 @@ global script Active
             }
             Waitframe();
         }
+        Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
     }
 }
 

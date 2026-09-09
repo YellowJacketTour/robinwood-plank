@@ -13,7 +13,7 @@ http.createServer(async(req,res)=>{
   if(['/runtime-shell.css','/runtime-shell.mjs'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);
-   if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
+   if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png','berry-dirt.png','berry-sprout.png','berry-oran.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
    res.writeHead(200,{...headers,'Content-Type':name.endsWith('.json')?'application/json':'image/png'});res.end(await readFile(path.resolve('../charmville-references/charmville-native-homestead/action-sprites',name)));return;
   }
   if(url.pathname==='/charmville/tutorial/'){
