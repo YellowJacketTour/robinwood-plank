@@ -14,7 +14,9 @@ try{
  await p.waitForFunction(()=>document.getElementById('status')?.hidden,{},{timeout:30000});await p.waitForTimeout(2500);
  assert.equal(await p.evaluate(()=>crossOriginIsolated),true);await p.screenshot({path:path.join(out,'start.png')});
  async function hold(key,ms=120){await p.keyboard.down(key);await p.waitForTimeout(ms);await p.keyboard.up(key);}
- await hold('ArrowLeft',400);await p.keyboard.down('z');await p.waitForTimeout(120);await p.screenshot({path:path.join(out,'sword.png')});await p.keyboard.up('z');
+ await hold('ArrowLeft',400);await p.keyboard.down('z');await p.waitForTimeout(120);await p.screenshot({path:path.join(out,'sword.png')});
+ await p.waitForTimeout(3500);await p.screenshot({path:path.join(out,'charged.png')});
+ await p.keyboard.up('z');await p.waitForTimeout(150);await p.screenshot({path:path.join(out,'spin-release.png')});await p.waitForTimeout(1200);
  await hold('Enter');await p.waitForTimeout(1000);await p.screenshot({path:path.join(out,'inventory.png')});
  await p.reload();await p.getByRole('button',{name:'Enter the world',exact:true}).click();await p.waitForFunction(()=>document.getElementById('status')?.hidden,{},{timeout:30000});await p.waitForTimeout(2500);
  assert.deepEqual(errors,[]);assert.deepEqual(failures,[]);assert.deepEqual(external,[]);

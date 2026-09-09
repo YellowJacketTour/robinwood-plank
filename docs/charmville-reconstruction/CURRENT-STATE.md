@@ -59,3 +59,5 @@ The handoff checkpoint passed lint:inmotion, TypeScript, 212 contract tests, 1,3
 ## Operational details
 
 Local reference server binds 127.0.0.1:3021 and needs COOP/COEP headers for SharedArrayBuffer. Do not remove them. Development app 3017 is a preexisting process: do not kill unrelated servers. Runtime acquisition redownloads upstream current bytes; use archived snapshot for exact recovery. Main app live reload covers application edits; standalone upstream runtime edits require refreshing that page. No production deployment has been performed as part of this account-transition checkpoint.
+
+Latest correction: enabled native sword slashing and spin/super-spin scrolls, then expanded the test kit to high-tier gear. See ENDGAME-AND-CROSSOVER-ABILITIES.md. Custom crossover powers remain planned, not implemented.
