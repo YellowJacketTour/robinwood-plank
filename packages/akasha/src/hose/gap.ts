@@ -8,12 +8,32 @@ export const GAP_BUDGET: Record<string, number> = {
   bitcoin: 1,
 };
 
+/**
+ * MUST MATCH THE DATABASE'S CHECK CONSTRAINT, BOTH WAYS.
+ *
+ * There are three allowlists for a gap reason -- the GapReason union, this
+ * runtime list, and the SQL CHECK in migration 104 -- and nothing forced them
+ * to agree. They did not: SQL permitted `epoch_backfill`, which this list has
+ * never contained, and `incomplete_tx_walk` was added to the TYPE and to SQL
+ * without being added here.
+ *
+ * The failure is silent in the worst way: the gap is REJECTED at runtime, so a
+ * block we know we only partly read produces no gap at all. Measured live
+ * 2026-09-09: `repair fail 23, "illegal gap reason incomplete_tx_walk"` -- 23
+ * truncated blocks whose shortfall was thrown away, leaving the archive with
+ * neither coverage nor a gap for them.
+ *
+ * A test asserts this list against the migration's CHECK, so drift fails CI
+ * rather than production.
+ */
 const LEGAL_REASONS: GapReason[] = [
   "reconnect",
   "reorg",
   "bloom_audit",
   "seq_gap",
   "attention_history",
+  "epoch_backfill",
+  "incomplete_tx_walk",
 ];
 
 export function assertLegalGap(reason: GapReason, hasArtifact: boolean): void {
