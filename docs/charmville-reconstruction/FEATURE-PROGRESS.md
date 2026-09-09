@@ -225,3 +225,7 @@ The actual battle-to-home-rest browser loop restores HP and supported move PP af
 ## Accessible six-member test party
 
 The local interface loads six distinct persistent companions through a trusted-marker server action. Unmarked accounts open a separate test profile; actual browser checks verify the switch, reload and unchanged original account. All six account IDs reach native follow projection with Close/Relaxed trail spacing, and selected Pikachu battle switching is verified. This is a local test entitlement, not capture/XP/raid rewards or production issuance. Close/reversal overlap remains; maturity bars do not advance. See [SIX-MEMBER-TEST-PARTY.md](SIX-MEMBER-TEST-PARTY.md).
+
+## Shared battle scene evidence
+
+Two actual authorized accounts now observe identical encounter HP and committed events with real nearby Fighting/Watching labels and source portraits. Spectators receive no battle controls. Hit feedback is tied to new committed target events; it is not source attack animation. The watcher native adapter consumes matching HP/effect state and displays Poochyena while the viewport remains mounted. See [SHARED-BATTLE-SCENE.md](SHARED-BATTLE-SCENE.md). Full moves/AI/capture/rewards and broad spectator performance remain incomplete; bars are unchanged.

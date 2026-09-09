@@ -1,3 +1,4 @@
+import {encounterProjection} from "./encounter-projection";
 import {createHash,randomInt,randomUUID} from "node:crypto";
 import type {Pool} from "pg";
 import {homeActor,requireHomeRight} from "./home-access-store";
@@ -45,7 +46,7 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
   }
   const owned=String(e.controller_id)===profileId;
   const legalActions=!inRange?[]:!e.controller_id?["claim"]:owned?[e.mode==="world"?"enter-turn":"return-world","release"]:[];
-  await c.query("COMMIT");return {profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
+  const projection=await encounterProjection(c,e.id,region,manifest.revision,presence.owner);
+  await c.query("COMMIT");return {...projection,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}
 }
-

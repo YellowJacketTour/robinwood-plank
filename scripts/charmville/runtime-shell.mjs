@@ -4,6 +4,7 @@ import './follower-bridge.js';
 import './action-event-bridge.js';
 import './position-observer.js';
 import './account-peers.js';
+import './world-encounter.js';
 import './resource-bridge.js';
 let accountOrigin=null;
 async function returnToAccountMenus(panel='inventory'){

@@ -102,6 +102,7 @@ global script Active
         int mudkipAnchorY[]={24,25,26,27,27,26,24,24,25,26,27,26,24,24,24,24,24,24,24,24,23,22,21,22,24,24,23,22,21,22,24,24,23,22,21,22,24,24,24,24,24,24,24,24,25,26,27,26};
         pikachu->Read(0,"/charmville/follower-pikachu.png");eevee->Read(0,"/charmville/follower-eevee.png");poochyena->Read(0,"/charmville/follower-poochyena.png");
         treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
+        int encounterVersion=0;int encounterVisible=0;int encounterX=0;int encounterY=0;int encounterHP=0;int encounterMaxHP=1;int encounterEffect=0;int encounterDamage=0;int encounterFlash=0;char32 encounterText[160];
         int followerSpacing=18;int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
         int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
         resetContactOutbox();
@@ -431,6 +432,26 @@ if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
             }
             }
+            if(ticks%6==0){
+                file encounterFile=new file("/charmville/world-encounter.txt","r");
+                if(encounterFile->isValid()){
+                    encounterText[0]=0;encounterFile->ReadString(encounterText);encounterFile->Close();
+                    int version=field(encounterText,0);
+                    if(version!=encounterVersion){bool established=encounterVersion>0;encounterVersion=version;encounterVisible=field(encounterText,1);encounterX=field(encounterText,2)*8;encounterY=field(encounterText,3)*8;encounterHP=field(encounterText,4);encounterMaxHP=Max(1,field(encounterText,5));
+                        int effect=field(encounterText,6);if(established && effect>encounterEffect){encounterFlash=30;encounterDamage=field(encounterText,7);printf("CHARMVILLE_ENCOUNTER_EFFECT %d DAMAGE %d\n",effect,encounterDamage);}encounterEffect=effect;
+                        printf("CHARMVILLE_ENCOUNTER_STATE %d HP %d/%d\n",encounterVisible,encounterHP,encounterMaxHP);
+                    }
+                }
+            }
+            if(encounterVisible==1 && Game->GetCurDMap()==4 && Game->GetCurScreen()==63){
+                Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
+                poochyena->Blit(encounterY<Hero->Y?2:6,RT_SCREEN,0,0,32,48,encounterX+8-poochyenaAnchorX[0],encounterY+72-poochyenaAnchorY[0],32,48);
+                Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
+                Screen->Rectangle(6,encounterX-2,encounterY-12,encounterX+18,encounterY-9,0x00);
+                if(encounterHP>0)Screen->Rectangle(6,encounterX-1,encounterY-11,encounterX-1+18*encounterHP/encounterMaxHP,encounterY-10,0x91);
+                if(encounterFlash>0){sprintf(encounterText,"-%d",encounterDamage);Screen->DrawString(6,encounterX,encounterY-24-(30-encounterFlash)/3,0,0x01,-1,0,encounterText);}
+            }
+            if(encounterFlash>0)encounterFlash--;
             Waitframe();
         }
         Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;

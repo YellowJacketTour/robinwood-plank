@@ -1,0 +1,7 @@
+# Native encounter presentation
+
+`world-encounter.js` accepts only the actual parent at the supported local origins. The parent projects `{type:'charmville:world-encounter',active:true,encounter:{id,speciesId:286,cell:{x,y},hp,maxHp,revision},damageEvent?:{eventId,damage}}` from its authenticated server response. `active:false` clears. Coordinates, species, HP and revisions are bounded; stale revisions are ignored. Missing refresh for 6.5 seconds clears the view.
+
+Native rendering uses the preserved Poochyena PMD walking sheet's idle frame and exact source ground marker, anchored at the authored server cell, only on DMap4/screen63. It draws a proportional health bar from projected HP. A new committed event at a newer revision can show one brief damage number; initial historical events, stale revisions and repeated event IDs cannot replay that effect. This is event feedback, not a native attack animation or hit calculation. No creature or inventory mutation originates from this bridge.
+
+The bridge unit test verifies baseline suppression, duplicate/stale/foreign rejection and expiry clearing. Native compilation passes. End-to-end visual verification is recorded separately when the parent projection is exercised; compilation alone does not prove the server event route. Dynamic encounter roaming, body collisions, party attack animations and multiplayer combat effects beyond this bounded feedback remain unimplemented.
