@@ -610,12 +610,22 @@ export async function correctKnownSupplyFromChain(chainSlug: string, collectionK
   // unchanged denominator is recoverable, a chain-confirmed one is not.
   const venue = await getCollectionSupplyStats(chainSlug, normalized).catch(() => null);
   const projectSupply = venue?.totalSupply ?? null;
-  if (
-    projectSupply != null &&
-    Number.isFinite(projectSupply) &&
-    projectSupply > 0 &&
-    realSupply > projectSupply * MALL_SUPPLY_RATIO
-  ) {
+  const haveVenue = projectSupply != null && Number.isFinite(projectSupply) && projectSupply > 0;
+  // NO CROSS-CHECK MEANS NO CONFIRMATION.
+  //
+  // This guard used to require `projectSupply != null` before it could fire,
+  // so a collection with NO venue snapshot skipped the mall check entirely
+  // and had the chain's number written as chain-confirmed -- the strongest
+  // possible claim, made from the weakest possible evidence. The guard could
+  // not fire in exactly the case it exists for.
+  //
+  // A shared core with no venue row is the likeliest mall of all: it is the
+  // shape a factory contract has before any single project on it is indexed.
+  // Writing 2,000,335 there is unrecoverable (chain-confirmed stops the
+  // ratchet from ever correcting it), while leaving it unknown renders
+  // honestly as 'unknown_supply' with no percentage.
+  if (!haveVenue) return null;
+  if (realSupply > projectSupply! * MALL_SUPPLY_RATIO) {
     return null;
   }
   // known_supply_chain_confirmed=TRUE stops getArchivalStatsForCollection's
@@ -736,14 +746,28 @@ export async function getArchivalStatsForCollection(
     .then((s) => s?.totalSupply ?? null)
     .catch(() => null);
   const inferred = observedMaxId != null ? observedMaxId + 1 : null;
-  const inferenceIsMall =
-    inferred != null &&
+  const haveVenueForRatchet =
     venueSupplyForRatchet != null &&
     Number.isFinite(venueSupplyForRatchet) &&
-    venueSupplyForRatchet > 0 &&
-    inferred > venueSupplyForRatchet * MALL_SUPPLY_RATIO;
+    venueSupplyForRatchet > 0;
+  // Same hole as correctKnownSupplyFromChain above: `venueSupplyForRatchet
+  // != null` was a precondition of the mall verdict, so a row with no venue
+  // supply was judged NOT a mall and the ratchet wrote max-observed-id + 1 --
+  // which for a shared core is the mall's id space, not this project's.
+  //
+  // An unverifiable inference is not a safe inference. Without the
+  // cross-check the ratchet declines to move rather than guessing upward.
+  const inferenceIsMall =
+    inferred != null && haveVenueForRatchet && inferred > venueSupplyForRatchet! * MALL_SUPPLY_RATIO;
+  const inferenceIsUnverifiable = inferred != null && !haveVenueForRatchet;
 
-  if (!chainConfirmed && inferred != null && !inferenceIsMall && inferred > (shape.knownSupply ?? 0)) {
+  if (
+    !chainConfirmed &&
+    inferred != null &&
+    !inferenceIsMall &&
+    !inferenceIsUnverifiable &&
+    inferred > (shape.knownSupply ?? 0)
+  ) {
     shape.knownSupply = inferred;
     await postgresQuery(
       `UPDATE collection_archival_stats SET known_supply = $3 WHERE chain_slug = $1 AND collection_key = $2`,
