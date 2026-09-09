@@ -103,7 +103,7 @@ export async function bridgeAkashaBitcoinCollections(
           AND e.raw->>'parent' IS NOT NULL
         GROUP BY e.raw->>'parent'
         ORDER BY COUNT(DISTINCT e.token_or_inscription) DESC, e.raw->>'parent' ASC
-        LIMIT $1`,
+        LIMIT $1::int`,
       [limit]
     );
   } catch (err) {
@@ -163,9 +163,9 @@ export async function bridgeAkashaBitcoinCollections(
         AND e.kind = 'envelope'
         AND e.raw->>'parent' IS NULL
       GROUP BY e.tx_hash
-     HAVING COUNT(DISTINCT e.token_or_inscription) >= $1
+     HAVING COUNT(DISTINCT e.token_or_inscription) >= $1::bigint
       ORDER BY COUNT(DISTINCT e.token_or_inscription) DESC, encode(e.tx_hash, 'hex') ASC
-      LIMIT $2`,
+      LIMIT $2::int`,
     [MIN_BATCH, limit]
   );
 
