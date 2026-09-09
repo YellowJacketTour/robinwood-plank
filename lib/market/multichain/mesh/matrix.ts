@@ -77,6 +77,7 @@ export type MeshSource =
   | "ow-rarity"
   | "ow-catalog"
   | "akasha-bridge"
+  | "retention"
   | "m2-sweep";
 
 export type MeshLane = {
@@ -424,6 +425,22 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["floor", "listedCount", "holders"],
     sliceSec: 120,
     notes: "Helius rows only. Alias resolved once (7-day negative cache); stats by alias; two consecutive ME misses null the floor.",
+  },
+  {
+    // RETENTION. The only table here that grows without bound:
+    // plank_collection_floor_observations admits one row per collection per
+    // marketplace per MINUTE, carries three B-trees per insert, and across
+    // 107 prior migrations nothing ever deleted from it.
+    //
+    // Cross-chain, not per-chain: the prune is a single bounded DELETE by
+    // observed_at, and running it eleven times over would just contend with
+    // itself for the same rows.
+    id: "retention:cross-chain",
+    source: "retention",
+    chainSlug: "cross-chain",
+    cells: [],
+    sliceSec: 30,
+    notes: "Prunes floor observations older than 30 days in bounded passes; the only reader needs the newest row and one >=24h old.",
   },
   {
     // THE TAPE -> CATALOG BRIDGE. The replacement for the four vendor catalog

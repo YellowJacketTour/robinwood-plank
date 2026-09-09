@@ -516,6 +516,25 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] ow-rarity", JSON.stringify(await scaffoldAllTrackedOrdinalsWalletCollections({ limit: 3, delayMs: 0 })).slice(0, 400));
       return;
     }
+    if (source === "retention") {
+      // Drain in bounded passes until a pass removes nothing. Bounded by BOTH
+      // a pass count and an empty result, per the house rule that a fast
+      // machine hides an infinite loop -- a prune that never terminates would
+      // hold a slot forever while looking like productive work.
+      const { postgresQuery } = await import("../lib/postgres");
+      let total = 0;
+      let passes = 0;
+      for (; passes < 20; passes++) {
+        const res = await postgresQuery<{ n: number }>(
+          `SELECT plank_prune_floor_observations(30, 50000) AS n`,
+        );
+        const n = Number(res.rows[0]?.n ?? 0);
+        total += n;
+        if (n === 0) break;
+      }
+      console.log("[mesh-lane] retention", JSON.stringify({ removed: total, passes }));
+      return;
+    }
     if (source === "akasha-bridge") {
       // THE TAPE -> CATALOG BRIDGE. Until this lane existed the archive and
       // the catalog were sealed rooms: the hose wrote six akasha_* tables,
