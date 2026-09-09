@@ -18,8 +18,10 @@ const cases = [
   ["case-sensitive projection", "lib/market/multichain/collection-key-sql.ts", "AND collection_slug = $2)", "AND lower(collection_slug) = lower($2))"],
   ["live token read cannot enqueue", "app/api/market/multichain/tokens/route.ts", 'searchParams.get("projection") === "1"', 'searchParams.get("projection") === "disabled"'],
   ["live rarity read cannot enqueue", "app/api/market/multichain/rarity/route.ts", 'needsIndex && searchParams.get("projection") !== "1"', 'needsIndex'],
+  ["unbuilt live catalog preserves view", "components/market/MultichainCollectionView.tsx", "if (projectionOnly && last?.building && accumulated.length === 0) return;", "/* mutation: apply unknown empty snapshot */"],
+  ["failed live catalog preserves view", "components/market/MultichainCollectionView.tsx", "if (!projectionOnly) {\n        setTokens(accumulated);", "if (true) {\n        setTokens(accumulated);"],
 ];
-const testFiles = ["test/market/market-realtime.test.ts", "test/market/swr-invalidation.test.ts", "test/market/live-projection.test.ts"];
+const testFiles = ["test/market/market-realtime.test.ts", "test/market/swr-invalidation.test.ts", "test/market/live-projection.test.ts", "test/market/live-catalog-callback.test.ts"];
 const results = [];
 function run(name, applied) {
   if (!applied) throw new Error(`Mutation did not apply: ${name}`);

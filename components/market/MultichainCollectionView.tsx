@@ -536,6 +536,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         cursor = last.nextCursor ?? null;
         if (!cursor || !last.tokens?.length) break;
       }
+      if (projectionOnly && last?.building && accumulated.length === 0) return;
       setTokens(accumulated);
       setCatalogBuilding(Boolean(last?.building));
       setCatalogMeta(typeof last?.projectedCount === "number" ? {
@@ -545,8 +546,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         projectedAt: last.projectedAt ?? null,
       } : null);
     } catch {
-      setTokens(accumulated);
-      setCatalogBuilding(false);
+      if (!projectionOnly) {
+        setTokens(accumulated);
+        setCatalogBuilding(false);
+      }
     } finally {
       setCatalogInitialLoading(false);
     }
