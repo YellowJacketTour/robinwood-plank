@@ -18,11 +18,12 @@
  * witness data is the only path to Bitcoin existence that no vendor can
  * revoke.
  */
+import { FINALITY_LAG } from "../../shared/types.ts";
 import type { ChainEvent, Header, StreamKind } from "../../shared/types.ts";
 import type { Hex } from "../../shared/hex.ts";
 import type { ArchiveStore } from "../store.ts";
 import { parseEnvelopes, type Inscription } from "./envelope.ts";
-import { extendCoverage } from "../coverage.ts";
+import { extendCoverage, canMarkStreamAlive } from "../coverage.ts";
 
 export interface BitcoinBlock {
   hash: string;
@@ -246,6 +247,53 @@ export class BitcoinAdapter {
       await this.ingestBlock(h);
       ingested.push(h);
     }
+
+    // ADVANCE THE CURSOR.
+    //
+    // This adapter never called putCursor -- not once, while the EVM adapter
+    // does it after every head. So Bitcoin ingested blocks, stored headers and
+    // recorded coverage while its cursor stayed frozen at the value written
+    // when the hose first locked on. Measured live 2026-09-09:
+    //
+    //   runCount 7, covering blocks 966153..966159
+    //   tipHeight / finalizedHeight / backfillTail all 966081
+    //
+    // The archive held blocks ABOVE its own recorded tip. Nothing crashed and
+    // coverage climbed, so it read as a healthy chain -- and because the
+    // backfill reads backfillTail, a frozen cursor also pinned the past walk
+    // at 198,651 blocks from protocol_t0 no matter how well it worked.
+    //
+    // Same species as this adapter's missing extendCoverage: the work happens,
+    // the bookkeeping does not.
+    const cursor = this.store.getCursor("bitcoin");
+    if (cursor && ingested.length > 0) {
+      // The highest header we actually hold, not the highest hash we walked:
+      // a block that failed to ingest must not advance the tip past itself.
+      let tip: Header | undefined;
+      for (const hash of ingested) {
+        const header = this.store.getHeader("bitcoin", toHex(hash));
+        if (header && (!tip || header.height > tip.height)) tip = header;
+      }
+      if (tip) {
+        const lag = FINALITY_LAG.bitcoin;
+        const finHeight = Math.max(cursor.t0Height, tip.height - lag);
+        const finHeaders = this.store.headersAtHeight("bitcoin", finHeight);
+        const fin = finHeaders[finHeaders.length - 1];
+        this.store.putCursor({
+          ...cursor,
+          tipHash: tip.hash,
+          tipHeight: tip.height,
+          finalizedHeight: fin?.height ?? cursor.finalizedHeight,
+          finalizedHash: fin?.hash ?? cursor.finalizedHash,
+          streamKind: this.streamKind(),
+          // Liveness is EARNED: assertCoverage requires a hole-free run from
+          // t0 to finalized. A chain still walking its past stays false, which
+          // is the honest answer rather than a green dot for a partial tape.
+          streamAlive: canMarkStreamAlive(this.store, "bitcoin"),
+        });
+      }
+    }
+
     return { ingested, disconnected: disconnect };
   }
 }
