@@ -298,6 +298,43 @@ jobs:
           # The commit SHA prevents a deploy from restoring another release.
           key: passenger-release-${{ github.sha }}
 
+  legacy-postgres:
+    # Production rejected transition-table syntax. Test the actual legacy
+    # parser/runtime, in addition to both execution paths on modern CI.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:9.6-alpine
+        env:
+          POSTGRES_DB: plank
+          POSTGRES_USER: plankapp
+          POSTGRES_PASSWORD: github-actions-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U plankapp -d plank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: plank
+      PGUSER: plankapp
+      PGPASSWORD: github-actions-postgres
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npx tsx --test test/market/market-trigger-compat.test.ts test/market/market-realtime.test.ts test/market/hub-rank-delivery.test.ts
+
   deploy:
     needs: build
     if: >-
