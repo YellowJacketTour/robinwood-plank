@@ -81,7 +81,17 @@ export interface BackfillProgress {
  */
 export type BackfillStore = Pick<
   PostgresArchiveStore,
-  "getBackfillTail" | "setBackfillTail" | "headersAtHeight" | "getCursor" | "enqueueGap"
+  | "getBackfillTail"
+  | "setBackfillTail"
+  | "headersAtHeight"
+  | "getCursor"
+  | "enqueueGap"
+  // Added for the in-place self-parent repair below. Declared explicitly
+  // rather than widening back to the whole class: this type exists so the
+  // worker's dependencies stay legible, and the compiler correctly rejected
+  // the first attempt to use methods that were not part of the contract.
+  | "putHeader"
+  | "repairParentHash"
 >;
 
 export interface BackfillDeps {
@@ -186,6 +196,45 @@ export class BackfillWorker {
       // like a considered refusal rather than a data defect.
       const expected = tailHeader?.parentHash ?? null;
       const found = store.headersAtHeight(chain, to).map((h) => h.hash);
+
+      // SELF-HEAL A SELF-PARENT, HERE, WITH NO NETWORK CALL.
+      //
+      // A row whose parent_hash equals its own hash is not a reorg and not a
+      // disagreement with the chain -- it is a placeholder that was never
+      // overwritten, and it is detectable by pure comparison. Recognising it
+      // needs no vendor, no header fetch, and cannot fail.
+      //
+      // This existed only in the BOOT path, which meant a poisoned row
+      // discovered mid-run waited for the next hourly restart -- and if that
+      // one boot-time header read failed, waited another hour. Measured live
+      // 2026-09-09: block 966081 stayed self-parented across multiple boots
+      // while the backfill refused, correctly, every 15 seconds.
+      //
+      // The repair is narrow on purpose: it fires ONLY when the stored parent
+      // is the block's own hash AND exactly one header is stored at the height
+      // below. That is the single unambiguous case -- any other mismatch is a
+      // real claim about the chain and must keep being refused.
+      if (
+        tailHeader &&
+        expected &&
+        expected.toLowerCase() === tailHeader.hash.toLowerCase() &&
+        found.length === 1
+      ) {
+        const realParent = found[0]!;
+        store.putHeader({ ...tailHeader, parentHash: realParent });
+        store.repairParentHash(chain, tailHeader.hash, realParent);
+        return {
+          chain,
+          from,
+          to,
+          linked: false,
+          tailMoved: false,
+          reason:
+            `self-parented tail ${tail} repaired in place: parent ${expected} -> ${realParent}; ` +
+            `the next epoch will link`,
+        };
+      }
+
       store.enqueueGap({ chain, fromHeight: from, toHeight: to, reason: "bloom_audit" });
       return {
         chain,
