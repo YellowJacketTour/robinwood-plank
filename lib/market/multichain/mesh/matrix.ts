@@ -437,7 +437,13 @@ export const MESH_LANES: MeshLane[] = [
     // itself for the same rows.
     id: "retention:cross-chain",
     source: "retention",
-    chainSlug: "cross-chain",
+    // The id says cross-chain; the chainSlug must still name a REAL manifest
+    // chain, because chain-manifest.test.ts requires every lane to. The
+    // existing archival-frontier:cross-chain and fills-reconcile:cross-chain
+    // lanes use the same convention -- an invented slug fails that test, and
+    // rightly: a lane whose chain does not exist cannot be scheduled or
+    // jailed like any other.
+    chainSlug: "eth-mainnet",
     cells: [],
     sliceSec: 30,
     notes: "Prunes floor observations older than 30 days in bounded passes; the only reader needs the newest row and one >=24h old.",

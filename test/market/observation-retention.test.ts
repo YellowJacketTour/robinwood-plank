@@ -113,8 +113,19 @@ test("retention runs cross-chain, once, not once per chain", () => {
   // copies would contend for the same rows and do the same work eleven times.
   const at = MATRIX.indexOf('id: "retention:cross-chain"');
   assert.ok(at > 0, "the lane must be registered");
-  const block = MATRIX.slice(at, at + 400);
-  assert.match(block, /chainSlug: "cross-chain"/, "one lane, not one per chain");
+  // Bound on the lane object's own closing brace, not a character count --
+  // the explanatory comment inside the lane pushed chainSlug past a 400-char
+  // window and this test failed while the code was correct. Same fixed-offset
+  // mistake this session has now made four times.
+  const block = MATRIX.slice(at, MATRIX.indexOf("\n  },", at));
+  // The ID says cross-chain; the chainSlug names a real manifest chain,
+  // because chain-manifest.test.ts requires every lane to -- an invented slug
+  // fails it, and rightly, since a lane whose chain does not exist cannot be
+  // scheduled or jailed like any other. What matters here is that there is
+  // exactly ONE retention lane, not eleven.
+  const lanes = (MATRIX.match(/source: "retention"/g) ?? []).length;
+  assert.equal(lanes, 1, `one retention lane, not one per chain (saw ${lanes})`);
+  assert.match(block, /chainSlug: "eth-mainnet"/, "and it must name a real manifest chain");
   assert.match(block, /source: "retention"/);
 });
 
