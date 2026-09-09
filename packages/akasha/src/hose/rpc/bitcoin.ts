@@ -53,6 +53,17 @@ const DEFAULT_HOSTS = [
   "https://blockstream.info/api",
   "https://mempool.emzy.de/api",
   "https://mempool.ninja/api",
+  // mempool.space's REGIONAL nodes: different IPs, separate rate budgets, same
+  // data. Added 2026-09-09 after the telemetry showed all four hosts above
+  // failing from the production box (bitcoinHostFailures ~5,705 EACH) while
+  // every one of them answered 200 from a developer machine at the same
+  // moment -- and while that same box was successfully querying UniSat and
+  // OrdinalsWallet, so general egress was fine. The block is
+  // Esplora-reputation-specific to that IP.
+  // Both verified live: /blocks/tip/height and /block-height/{n} answer 200,
+  // and both return the byte-identical hash for block 966,080.
+  "https://mempool.va1.mempool.space/api",
+  "https://mempool.tk7.mempool.space/api",
 ];
 
 /** HTTP statuses that mean "ask again later", not "this data does not exist". */
@@ -70,7 +81,12 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   constructor(opts: EsploraOpts = {}) {
     this.hosts = opts.hosts ?? DEFAULT_HOSTS;
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.timeoutMs = opts.timeoutMs ?? 20_000;
+    // 20s x 6 hosts is a two-minute worst case for ONE height lookup, on a
+    // 15s tick. A host that has not answered in 8s is not going to save this
+    // call; moving on is what turns a blocked host into a hop instead of a
+    // stall. The failover loop still tries every host, so this shortens the
+    // wait per host rather than giving up sooner overall.
+    this.timeoutMs = opts.timeoutMs ?? 8_000;
   }
 
   /**
