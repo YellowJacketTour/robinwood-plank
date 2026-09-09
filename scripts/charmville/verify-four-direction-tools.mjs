@@ -20,6 +20,13 @@ try{
    }
    throw Error(name+' cannot reach '+key+'='+target+': '+JSON.stringify(pose));
   }
+  if(name==='down'){
+   await axis('x',24);await axis('y',56);
+   const before=events.filter(e=>e.includes('CHARMVILLE_ACTION_COMPLETE')).length;
+   await press();await page.waitForTimeout(950);
+   assert(events.some(e=>e.includes('CHARMVILLE_INTERACT BED 1 NEAR 0')),'Two-tile remote work must be refused');
+   assert.equal(events.filter(e=>e.includes('CHARMVILLE_ACTION_COMPLETE')).length,before,'Distant interaction must not mutate the crop');
+  }
   await axis('x',x);await axis('y',y);
   async function work(tool){
    const completed=events.filter(e=>e.includes('CHARMVILLE_ACTION_COMPLETE')).length;

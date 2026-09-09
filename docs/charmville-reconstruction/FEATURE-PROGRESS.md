@@ -52,8 +52,8 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Native-style turn battle | ██░░░ | Encounter domain prototype; no playable native battle integration |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
 | Capture / ball consumption / ownership | ██░░░ | Idempotent domain capture; DB and live presentation missing |
-| Followers and companion reactions | █░░░░ | Path following, doors, mounts and disconnect behavior required |
-| Party / storage / clinic | ██░░░ | One persistent account-bound starter implemented; party slots, clinic and storage gameplay missing |
+| Followers and companion reactions | ███░░ | Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing |
+| Party / storage / clinic | ██░░░ | Normalized six-slot owned roster and UI verified; actual capture acquisition, clinic and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | Definitions and balancing missing; prototype only holds limited status names |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
@@ -167,3 +167,11 @@ A prominent Game menus button now appears inside the native player and its fulls
 ## 2026-09-09 party and Enter menu
 
 The account party now displays the owned starter in a six-slot belt and persists a follow/return preference. All three starter account-to-native follow/return checks passed with visible source walking sprites. Enter opens Party, Gear, Inventory, Charmdex, Exchange, Friends and Voice notes. Corrected the native indexed PNG exporter: tRNS metadata had caused incompatible RGBA decoding and distorted artwork. Native sprite export now retains indexed pixels and index-zero masking; original assets remain intact. This is local follower presentation, not shared creature simulation, capture, battle or a completed skill system. See `PARTY-AND-UNIFIED-MENU.md` and `NATIVE-STARTER-FOLLOWERS.md`.
+
+## 2026-09-09 six-slot integration and swarm coverage
+
+Six distinct database fixture creatures now pass through the authenticated roster API, account menu, native follower rendering and recall. This verifies roster-to-renderer integration, not capture gameplay: five extra fixture records were inserted only for an isolated synthetic test account. Original user accounts were not granted creatures. Migration112 preserves the starter UUID, prevents duplicate starter entitlement and supports explicit roster clearing. The native train has18px arc-length spacing; path reversals can still bunch sprites and obstacle-aware formation is not implemented.
+
+The source pipeline preserves107 animation entries (102 physical sets,314 source files including existing metadata) for Treecko, Torchic and Mudkip. These are animation assets, not107 implemented moves. Pure command-policy tests cover ownership, target validity and bounded livestock intent; live combat AI remains unconnected.
+
+`SWARM-WORK-QUEUE.md` and its JSON sibling map every progress-table row plus explicit subsequent requirements into106 work items across8 lanes. Three workers run concurrently with a coordinator; queued items are not active work or completion evidence.

@@ -1,0 +1,1071 @@
+{
+  "generatedAt": "2026-09-09",
+  "source": "FEATURE-PROGRESS.md",
+  "concurrency": {
+    "coordinator": 1,
+    "workers": 3
+  },
+  "note": "Complete row coverage is assignment coverage, not implementation completion. Maturity is copied from the evidence tracker and is not percent complete. Workers rotate through lanes; queued lanes are not running.",
+  "items": [
+    {
+      "id": "CV-001",
+      "feature": "Approved PlankSpace account entrance",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Existing session validation and saved garden; real wallet/device matrix still needed",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-002",
+      "feature": "One stable profile across game/social",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Account entrance now resolves canonical profile ID; native runtime still separate",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-003",
+      "feature": "Multiple wallets per profile",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Must add explicit proof-based account linking; not equivalent to wallet switching",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-004",
+      "feature": "OAuth and passkeys for same game identity",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Other auth namespace exists; safe linking not implemented",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-005",
+      "feature": "Durable account garden",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "████░",
+      "evidence": "PostgreSQL lifecycle, ownership, retries and races tested; existing small garden only",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-006",
+      "feature": "Native world persistent account progress",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Guest native counters must not be imported as authoritative rewards",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-007",
+      "feature": "Account-owned map instances",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Durable region admission now exists; native authored home maps still missing",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-008",
+      "feature": "Friend invitations / revoke / expiry",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Durable API and account garden controls; private native visits still missing",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-009",
+      "feature": "Help versus harvest/build/storage rights",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Durable garden tending checks grants transactionally; other native actions not connected",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-010",
+      "feature": "Player movement replication",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Local guest relay by scene; no authenticated authoritative movement",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-011",
+      "feature": "Shared resource replication",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Requires versioned entities and server action commits",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-012",
+      "feature": "Reconnect / crash recovery",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Garden durable; native world recovery missing",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-013",
+      "feature": "Party and region shard routing",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Keep party together, separate region capacity from economic identity",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-014",
+      "feature": "Abuse prevention",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Garden transactions and relay rate limits; movement/automation/encounter authority incomplete",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-015",
+      "feature": "Directional walk / native character sprites",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Native quest playable; source-specific animation audit remains",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-016",
+      "feature": "Sword swipe / shield displacement",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native source behavior available; directional visual acceptance incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-017",
+      "feature": "Sword charge / spin",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Source quest equipment initialization; interruption and device verification needed",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-018",
+      "feature": "Bow / arrows / ammunition",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Native bow fires; draw behavior varies by source and needs explicit binding",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-019",
+      "feature": "Bomb fuse / flash / blast",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native source behavior; interaction/collision matrix not fully verified",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-020",
+      "feature": "Shield blocking / knockback / damage",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source systems; unified combat authority not wired",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-021",
+      "feature": "Lift / carry / throw pots and objects",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "█░░░░",
+      "evidence": "Native lifting source located; correct held art and world identity integration missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-022",
+      "feature": "Cut grass / drops / collection",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native reference; authenticated yield and respawn policy missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-023",
+      "feature": "Magic / fire / protection",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Sword tile-bank fix for broken casting implemented; full spell matrix incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-024",
+      "feature": "Transformations / sustained aura / energy wave",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Procedural aura exists; character transformation and wave not finished",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-025",
+      "feature": "Doors / interiors / puzzles / switches",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source quest functionality; original shared-world content not authored",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-026",
+      "feature": "Dialogue / scripted introduction",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Small native farming intro; complete account-to-village storyline missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-027",
+      "feature": "Layering / canopy / foot sorting",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Local crop depth handling; general entity layering and collision incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-028",
+      "feature": "Source asset provenance and replacement pipeline",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source vault/catalogue and validation prototypes; complete licensed distribution/replacement mapping missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-029",
+      "feature": "Species and encounter tables",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Source catalogue resolves386 species and184 evolution rules; target habitats/rates not authored",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-030",
+      "feature": "Creatures visible in adventure world",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Needs world entities, directional art, pathing and spawn budgets",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-031",
+      "feature": "Real-time creature combat",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Shared damage/ownership authority and source animation adapters missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-032",
+      "feature": "Native-style turn battle",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Encounter domain prototype; no playable native battle integration",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-033",
+      "feature": "Hybrid HP/status continuity",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Domain transition tests; live world/turn handoff missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-034",
+      "feature": "Capture / ball consumption / ownership",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Idempotent domain capture; DB and live presentation missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-035",
+      "feature": "Followers and companion reactions",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "███░░",
+      "evidence": "Six owned fixture members reach native path rendering; 18px spacing. Reactions, obstacle avoidance, mounts and shared replication remain missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "in progress"
+    },
+    {
+      "id": "CV-036",
+      "feature": "Party / storage / clinic",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Normalized six-slot owned roster and UI verified; actual capture acquisition, clinic and storage gameplay remain missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "in progress"
+    },
+    {
+      "id": "CV-037",
+      "feature": "Moves / types / status durations",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Definitions and balancing missing; prototype only holds limited status names",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-038",
+      "feature": "Evolution / traits / breeding",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Time, food, habitat capacity and offspring issuance specified conceptually",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-039",
+      "feature": "Fishing / aquatic encounters",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Rod, line, bobber, bite, reel and catch required",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-040",
+      "feature": "Collections / discovery journal",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Emoji discovery exists separately; creature discovery not connected",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-041",
+      "feature": "Game Corner activities",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Separate amusement budget; game implementation and reward model absent",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-042",
+      "feature": "Till / sow / water",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Local native sequence and direction logic; server integration absent",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-043",
+      "feature": "Visible crop growth stages",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Indexed source berry art; growth and harvest tested locally",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-044",
+      "feature": "Fertilizer / bonus harvest",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Local one-use fertilizer loop verified; durable balancing absent",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-045",
+      "feature": "Orchards / seasons / weather",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Crop definitions, environmental clock and art sets required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-046",
+      "feature": "Soil / irrigation / compost",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Limited garden compost exists; rich soil system not built",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-047",
+      "feature": "Livestock / feed / produce",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Species, care, habitat and limited production chains specified",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-048",
+      "feature": "Woodcutting / mining",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Tool loops, deposits, depletion and authority required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-049",
+      "feature": "Cooking / smithing / carpentry / tailoring",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Recipe graph, station permissions, input escrow and outputs required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-050",
+      "feature": "Alchemy / engineering / automation",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Bounded energy/material throughput, no offline infinite production",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-051",
+      "feature": "Skills / XP / unlocks",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Local farm counter; persistent multi-profession system absent",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-052",
+      "feature": "Equipment tiers / durability / modifiers",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Separate material, quality, traits and unique-instance identity",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-053",
+      "feature": "Home furnishings / construction",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Durable small scenery layout; native home building missing",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-054",
+      "feature": "Museum / collections / village relationships",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Authored content and persistent progression required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-055",
+      "feature": "Companion labor / habitat utility",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Limited tasks and resource budgets; avoid currency generation by unattended loops",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-056",
+      "feature": "Combinatorial crafting and transmutation",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Input/output conservation, discoverable recipes and variant compatibility",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-057",
+      "feature": "Connected world geography",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Master specification; twelve proposed regions are not authored maps",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-058",
+      "feature": "Private/public border transitions",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "██░░░",
+      "evidence": "Travel domain tests; native map bindings and authoritative host missing",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-059",
+      "feature": "Mounts / boats / warp towers",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Logical requirements only; boarding and travel gameplay absent",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-060",
+      "feature": "Guild settlements / businesses",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Ownership roles, contribution escrow and public contracts",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-061",
+      "feature": "Roads / harbors / industry",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Shared construction, maintenance and logistics graph",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-062",
+      "feature": "Resource transport / regional trade",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Cargo identity, routes, delivery receipts and supply demand",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-063",
+      "feature": "Ecology / disasters / world events",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Bounded reversible events and persistent consequences; no unannounced home destruction",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-064",
+      "feature": "Sky / orbital / planetary travel",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Planned expansion; renderer and streaming decision not proven",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-065",
+      "feature": "Modern 3D within top-down world",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Requires renderer prototype benchmarks and asset compatibility; not native current camera",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-066",
+      "feature": "Continuing endgame",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Horizontal mastery, collections, public projects and authored expansions",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-067",
+      "feature": "Full Unicode discovery catalogue",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "████░",
+      "evidence": "3,953 entries, searchable native overlay; discovery only",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-068",
+      "feature": "Custom memoji registry",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Historical registry reference; live completeness not verified",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-069",
+      "feature": "Family/species/quality/instance taxonomy",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Master specification; content definitions not exhaustively authored",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-070",
+      "feature": "Gameplay inventory versus Satchel",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Durable garden compartment projection; native unification missing",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-071",
+      "feature": "Finite Grain rewards",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Local migration and garden integration; conservation/retry/exhaustion checked in PostgreSQL",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-072",
+      "feature": "Commodity production budgets",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Currency reserve does not make every crop or creature scarce",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-073",
+      "feature": "Player trades / order book / escrow",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Fixed-price offers, escrow, partial fills and cancellation tested; automatic matching absent",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-074",
+      "feature": "Exchange prices / volume / supply feed",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Actual offers and aggregate Grain supply available; charts/volume feed missing",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-075",
+      "feature": "Liquidity pools / fees / slippage",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Simulated funded-reserve design only",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-076",
+      "feature": "Derivatives and trader analytics",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Later separately funded subsystem; no implemented game perps",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-077",
+      "feature": "Cash skins / season passes",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Commerce and entitlements not integrated",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-078",
+      "feature": "Purchased Grain without minting",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Existing-supply transfer requirement; no cash purchase flow",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-079",
+      "feature": "Crafting sinks / social consumption",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Existing stamp consumes charm; broad sinks not implemented",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-080",
+      "feature": "PlankSpace posts and charm stamps",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Existing account garden/social routes; native feed not embedded",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-081",
+      "feature": "In-game feed / Lumberyard / Pine browsing",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Same-origin account shell and input-isolated overlay required",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-082",
+      "feature": "In-game composing / reacting",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Needs existing authenticated APIs and explicit publication UX",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-083",
+      "feature": "Voice note recording / playback",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "████░",
+      "evidence": "Local draft flow tested with synthetic mic; no actual user audio recorded",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-084",
+      "feature": "Audio attachment to post",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Existing composer upload/playback code; native publication not connected",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-085",
+      "feature": "Voice-to-text",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Optional browser recognition; browser/provider support varies",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-086",
+      "feature": "Proximity voice / party voice",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Server-authorized room membership and transport not built",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-087",
+      "feature": "Moderation / blocking / reporting",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Existing social moderation; native comms policy integration absent",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-088",
+      "feature": "Two-button menu and controller adapter",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Synthetic gamepad tests; physical-controller matrix pending",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-089",
+      "feature": "Mobile zoom / fullscreen / pixel scale",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Local browser verification; broad hardware coverage pending",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-090",
+      "feature": "Large seamless camera",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Current native viewport fixed; fullscreen is scaling, not a larger world view",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-091",
+      "feature": "Accessibility / remapping / subtitles",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Partial controls and labels; full accessibility testing absent",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-092",
+      "feature": "Community content contract",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "██░░░",
+      "evidence": "Pack validation prototype; editor and publishing pipeline absent",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-093",
+      "feature": "Collaborative map/art editor",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Versioned assets, review, rollback and bounded scripting required",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-094",
+      "feature": "Animated action conformance suite",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "██░░░",
+      "evidence": "Several local regression scripts; full directional/action matrix absent",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-095",
+      "feature": "Economy concurrency testing",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "███░░",
+      "evidence": "Durable garden tested; future trades/encounters require their own races",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-096",
+      "feature": "Performance budgets / low-end fallback",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Proposed targets only; benchmark device set not measured",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-097",
+      "feature": "Remote friends-playable release",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Current links are localhost; no authenticated MMO deployment",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-098",
+      "feature": "Full source-to-bespoke replacement coverage",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Provenance exists for subsets; replacement catalogue incomplete",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-099",
+      "feature": "Six-member follower train and formations",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Distinct owned UUIDs; six visible followers; corners/warps; spacing and ordering.",
+      "status": "in progress"
+    },
+    {
+      "id": "CV-100",
+      "feature": "Attack, defend, hold and free-roam commands",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Acknowledged server commands, valid target selection, no neutral aggression, recall and leash.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-101",
+      "feature": "Species-specific move animation and effects",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Source markers and anchors bound to defined move events; projectile/effect ownership and single hit.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-102",
+      "feature": "Livestock intelligence and habitat assignment",
+      "section": "Additional explicit player requirements",
+      "lane": "professions",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Care and grazing permissions, species capabilities, bounded produce and breeding receipts.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-103",
+      "feature": "Nintendo-quality Charmdex interaction pass",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Consistent hierarchy, belt selection, meaningful feedback, input parity and visual review of every state.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-104",
+      "feature": "All-source art replacement and provenance completeness",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Each used asset has source, hash, attribution, runtime role, replacement status and verified dimensions.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-105",
+      "feature": "Browser desktop/mobile GPU and memory budgets",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Measure startup, frame time, memory and input latency; record device/browser and fallback.",
+      "status": "queued"
+    },
+    {
+      "id": "CV-106",
+      "feature": "Account-transition recovery and GitHub handoff",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Committed sources, reproducible setup and zero-context handoff with current blockers.",
+      "status": "queued"
+    }
+  ]
+}

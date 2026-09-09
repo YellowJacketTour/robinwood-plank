@@ -10,6 +10,12 @@ Visual inspection of the four-direction samples did not establish a universal co
 
 The earlier fixes remain: binary-transparent indexed assets, source-defined watering frame sequence, complete hoe sequence, foreground/background layers, ground anchor adjustment, and the first-frame native movement-grid alignment correction. No new art substitution is introduced by this audit.
 
+## Tool contact reach
+
+The action gate in `Homestead.zs` previously accepted a 32-pixel radius while rendering tools in a 32-pixel cell around the actor. It could therefore complete farm work from two tiles away. The gate now requires at most 20 pixels center distance and at most 8 pixels perpendicular offset to the chosen cardinal direction. It does not teleport the actor or stretch the tool. The four-direction verifier now first tries working from two tiles north and asserts rejection without a crop action completing, then tests all existing reachable cardinal positions.
+
+Remaining conformance work is explicit: planting/fertilizing/harvesting still reuse generic body poses instead of dedicated source work cycles; hoe and watering need per-frame hand sockets; tool collision is a proximity/ground/action gate rather than a sampled tool hitbox against the bed; source crop palettes need refreshed mapping after palette-changing travel; interrupt-after-contact keeps the already-applied crop result, while interrupt-before-contact must not grant it. Fishing, tree-cutting loops, mining, livestock care and construction do not yet have native implementations in this script. Acceptance requires directional source sprites, contact-timed authoritative action results, interruption tests and actual visual comparison for each activity, not an added menu entry.
+
 ## Source-grounded corrective pass
 
 The native source maps hero sprite ID 6 to LSprpoundspr in src/zc/ffscript.h and getHeroOTile in src/zc/ffscript.cpp. The native hammer renderer selects ls_pound during its windup in src/zc/hero.cpp. Farming now uses this existing directional raised-tool pose for the first 14 hoe ticks, followed by the existing stab/contact pose and recovery. This replaces the ordinary shield-carrying walk pose during preparation without modifying source artwork or forcing a native attack. Watering retains its previous body sequence. Per-frame hand sockets and complete bespoke farm poses remain unfinished.

@@ -30,6 +30,11 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const frame=useRef<HTMLIFrameElement|null>(null);
   const frameReady=useRef(false);
   const followerSpecies=useRef(0);
+  const partySpecies=useRef<number[]>([]);
+  const updateFollowers=useCallback((speciesIds:number[])=>{
+    partySpecies.current=speciesIds.filter(id=>[277,280,283].includes(id)).slice(0,6);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current},'http://localhost:3021');
+  },[]);
   const updateFollower=useCallback((speciesId:number)=>{
     followerSpecies.current=[277,280,283].includes(speciesId)?speciesId:0;
     if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower',speciesId:followerSpecies.current},'http://localhost:3021');
@@ -47,9 +52,10 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
     accountClient.disconnect(); session.current=null; location.current=null;
     updateFollower(0);
+    updateFollowers([]);
     pendingPanel.current=null;
     frameReady.current=false;
-  },[accountClient,updateFollower]);
+  },[accountClient,updateFollower,updateFollowers]);
 
   const load=useCallback(async(destination?:{destination:"home"|"public";handle?:string})=>{
     const account=session.current;
@@ -111,7 +117,9 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
 
   useEffect(()=>{
     const returnToMenus=(event:MessageEvent)=>{
-      if(event.origin!=='http://localhost:3021'||event.source!==frame.current?.contentWindow||event.data?.type!=='charmville:account-menu')return;
+      if(event.origin!=='http://localhost:3021'||event.source!==frame.current?.contentWindow)return;
+      if(event.data?.type==='charmville:follower-ready'){updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);return;}
+      if(event.data?.type!=='charmville:account-menu')return;
       const panel=event.data.panel;
       if(!tabs.some(([id])=>id===panel)||panel==='play')return;
       if(document.fullscreenElement===frame.current)void document.exitFullscreen().catch(()=>{});
@@ -120,7 +128,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     };
     window.addEventListener('message',returnToMenus);
     return()=>window.removeEventListener('message',returnToMenus);
-  },[]);
+  },[updateFollower,updateFollowers]);
 
   useEffect(()=>{
     const changed=()=>setFullscreen(Boolean(document.fullscreenElement));
@@ -212,7 +220,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-xl">Adventure camera</h2><span className="text-sm text-cream-muted">Reference map · separate movement</span></div>
         <p className="mb-3 text-sm text-cream-muted">Account travel and players appear in the panel. This camera still uses the reference map; movement and harvests here do not change your saved inventory.</p>
-        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
+        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Open adventure camera</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>
       <aside className={tab==='play'?'hidden':'space-y-4'} aria-label="Account world controls">
@@ -229,7 +237,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <section className="rounded-xl border border-line bg-panel p-4" aria-label="Saved inventory"><h2 className="font-display text-xl">Saved inventory</h2>{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{stack.face} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face}>{stack.face} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<p className="mt-2 text-cream-muted">Claim your saved home to begin.</p>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
-        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
+        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
         <div id="panel-exchange" role="tabpanel" aria-labelledby="tab-exchange" hidden={tab!=='exchange'}>{address&&<ExchangePanel key={`${address}:${identity.handle}`} wallet={address} handle={identity.handle} onChanged={()=>void load()} />}</div>
       </aside>
     </div></>}

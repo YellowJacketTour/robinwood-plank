@@ -59,8 +59,8 @@ global script Active
         hair->Read(0,"/charmville/gold-hair.png");
         bitmap treecko=new bitmap();bitmap torchic=new bitmap();bitmap mudkip=new bitmap();
         treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
-        int follower=0;int lastFollowerDraw=0;int trailX[64];int trailY[64];int trailDir[64];int trailHead=0;int trailCount=0;int followerClock=0;
-        int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[8];
+        int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
+        int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
         // Slot 36's optional costume bank has broken casting frames in this quest.
         // Keep the sword's weapon art, damage and abilities; use the complete hero bank.
         itemdata masterSword=Game->LoadItemData(36);masterSword->TileMod=0;
@@ -155,7 +155,9 @@ global script Active
                     Waitframe();continue;
                 }
                 int reachX=plotCenterX-(Hero->X+8);int reachY=plotCenterY-(Hero->Y+8);
-                bool nearPlot = reachX*reachX+reachY*reachY<=1024;
+                // One-tile tools must contact the selected bed, not work from
+                // two tiles away or diagonally beyond the directional sprite.
+                bool nearPlot = reachX*reachX+reachY*reachY<=400 && Min(Abs(reachX),Abs(reachY))<=8;
                 if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
                 if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (stages[selectedPlot]!=3 || (cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
@@ -262,25 +264,39 @@ global script Active
             }
             // Parent supplies only a visual selection, never inventory authority.
             if(ticks%30==0){
-                file preference=new file("/charmville/follower.txt","r");
+                file preference=new file("/charmville/party-followers.txt","r");
                 if(preference->isValid()){
                     followerText[0]=0;preference->ReadString(followerText);preference->Close();
-                    int next=atoi(followerText);if(next!=277 && next!=280 && next!=283)next=0;
-                    if(next!=follower){follower=next;followerClock=0;printf("CHARMVILLE_FOLLOWER %d\n",follower);}
+                    for(int member=0;member<6;member++){
+                        int next=field(followerText,member);if(next!=277 && next!=280 && next!=283)next=0;
+                        if(next!=partyFollowers[member]){partyFollowers[member]=next;lastFollowerDraw[member]=0;if(member==0)printf("CHARMVILLE_FOLLOWER %d\n",next);}
+                    }
                 }
             }
             int stepX=Hero->X-lastHeroX;int stepY=Hero->Y-lastHeroY;
             if(Abs(stepX)>24 || Abs(stepY)>24){trailCount=0;trailHead=0;}
             else if(stepX!=0 || stepY!=0){
                 trailX[trailHead]=Hero->X;trailY[trailHead]=Hero->Y;trailDir[trailHead]=Hero->Dir;
-                trailHead=(trailHead+1)%64;trailCount=Min(trailCount+1,64);followerClock++;
+                trailHead=(trailHead+1)%512;trailCount=Min(trailCount+1,512);followerClock++;
             }
             lastHeroX=Hero->X;lastHeroY=Hero->Y;
-            if(follower==0)lastFollowerDraw=0;
-            if(follower>0 && trailCount>=28){
-                if(lastFollowerDraw!=follower){printf("CHARMVILLE_FOLLOWER_DRAW %d\n",follower);lastFollowerDraw=follower;}
-                if(trailCount==28 && (stepX!=0 || stepY!=0))printf("CHARMVILLE_FOLLOWER_TRAIL %d\n",follower);
-                int trail=(trailHead+64-28)%64;int fx=trailX[trail];int fy=trailY[trail];int direction=trailDir[trail];
+            for(int member=5;member>=0;member--){
+            follower=partyFollowers[member];if(follower==0)continue;
+            // Follow eighteen world pixels along the visited path, independent
+            // of movement speed. Interpolate only inside a recorded segment.
+            int followerGap=18*(member+1);int walked=0;int fx=Hero->X;int fy=Hero->Y;int direction=Hero->Dir;bool trailReady=false;
+            for(int age=0;age<trailCount;age++){
+                int trail=(trailHead+511-age)%512;
+                int dx=trailX[trail]-fx;int dy=trailY[trail]-fy;
+                int length=Sqrt(dx*dx+dy*dy);
+                if(length>0 && walked+length>=followerGap){
+                    int fraction=(followerGap-walked)/length;
+                    fx+=dx*fraction;fy+=dy*fraction;direction=trailDir[trail];trailReady=true;break;
+                }
+                walked+=length;fx=trailX[trail];fy=trailY[trail];direction=trailDir[trail];
+            }
+            if(follower>0 && trailReady){
+                if(lastFollowerDraw[member]!=follower){printf("CHARMVILLE_FOLLOWER_DRAW %d\n",follower);printf("CHARMVILLE_PARTY_DRAW %d %d\n",member,follower);lastFollowerDraw[member]=follower;}
                 // PMD source rows: S,SE,E,NE,N,NW,W,SW. Draw unchanged walking frames.
                 int row=direction==DIR_UP?4:(direction==DIR_LEFT?6:(direction==DIR_DOWN?0:2));
                 int layer=fy+16<Hero->Y+16?2:6;
@@ -289,6 +305,7 @@ global script Active
                 if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx-4,fy+48,24,32);}
                 if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx-8,fy+44,32,40);}
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
+            }
             }
             Waitframe();
         }
