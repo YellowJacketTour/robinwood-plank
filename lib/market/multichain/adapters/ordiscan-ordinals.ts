@@ -22,10 +22,9 @@
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
 import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
 import { checkSourceBudget, recordSourceFailure, recordSourceSuccess } from "@/lib/market/multichain/discovery/source-budget";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { reserveProviderCapacity, settleProviderCapacity, ordiscanBackgroundDayWindow, ProviderCapacityDeferredError } from "@/lib/market/multichain/control-plane";
 import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 
-const ORDISCAN_DAILY_ALLOWANCE = 24;
 
 function requireApiKey(): string {
   const key = process.env.ORDISCAN_API_KEY?.trim();
@@ -49,10 +48,10 @@ async function ordiscanGet<T>(path: string, key: string): Promise<T> {
   if (await isSourceJailed("ordiscan")) throw new Error("ordiscan-ordinals: source jailed");
   const gate = checkSourceBudget("ordiscan");
   if (!gate.allowed) throw new Error(`ordiscan-ordinals: source ${gate.reason}`);
-  const window = utcDayWindow(ORDISCAN_DAILY_ALLOWANCE);
+  const window = ordiscanBackgroundDayWindow();
   const account = "ordiscan:default";
   if (!(await reserveProviderCapacity(account, window))) {
-    throw new Error("ordiscan-ordinals: durable daily ceiling");
+    throw new ProviderCapacityDeferredError("ordiscan", window.endsAt);
   }
   let settled = false;
   try {

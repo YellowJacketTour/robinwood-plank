@@ -451,15 +451,18 @@ function ChainTabBanner({ chainSlug, meta }: { chainSlug: string; meta: HubChain
     );
   }
   if (meta.laneHealth.down.length === 0) return null;
+  const onlyPaused = meta.laneHealth.down.every(d => d.reason === "paused");
   return (
-    <div role="status" className="mt-2 border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+    <div role="status" className={`mt-2 border px-3 py-2 text-xs ${onlyPaused ? "border-gold-500/40 bg-gold-500/10 text-gold-300" : "border-red-400/40 bg-red-400/10 text-red-200"}`}>
       {meta.laneHealth.down.map((d) => {
         const since = d.since ? new Date(d.since) : null;
         const sinceLabel = since && Number.isFinite(since.getTime()) ? since.toLocaleString() : "an unknown time";
         return (
           <p key={d.source}>
-            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)} down since {sinceLabel}
-            {d.reason === "backoff" ? " (last run failed)" : " (no successful run)"} -- counts and floors on this tab may be stale.
+            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)}
+            {d.reason === "paused"
+              ? " is waiting for provider capacity. Updates from this source will resume after its cooldown."
+              : ` has not refreshed since ${sinceLabel}${d.reason === "backoff" ? " (last run failed)" : " (no recent successful run)"}. Its data may be stale.`}
           </p>
         );
       })}

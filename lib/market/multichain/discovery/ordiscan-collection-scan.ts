@@ -31,7 +31,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
-import { reserveProviderCapacity, settleProviderCapacity, utcDayWindow } from "@/lib/market/multichain/control-plane";
+import { reserveProviderCapacity, settleProviderCapacity, ordiscanBackgroundDayWindow, ProviderCapacityDeferredError } from "@/lib/market/multichain/control-plane";
 import { isSourceJailed } from "@/lib/market/multichain/mesh/jail";
 
 const API_BASE = "https://api.ordiscan.com/v1/collections";
@@ -57,9 +57,9 @@ function requireApiKey(): string {
 async function fetchPage(page: number): Promise<OrdiscanCollectionEntry[]> {
   if (await isSourceJailed("ordiscan")) throw new Error("ordiscan-collection-scan: source jailed");
   const key = requireApiKey();
-  const window = utcDayWindow(24);
+  const window = ordiscanBackgroundDayWindow();
   if (!(await reserveProviderCapacity("ordiscan:default", window))) {
-    throw new Error("ordiscan-collection-scan: durable daily ceiling");
+    throw new ProviderCapacityDeferredError("ordiscan", window.endsAt);
   }
   try {
     const res = await fetch(`${API_BASE}?page=${page}`, {
