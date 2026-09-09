@@ -22,6 +22,9 @@ global script Active
         Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
         // This quest uses legacy 6-bit palette channel values.
         paldata world=new paldata();world->LoadMainPalette();
+        // Level CSets replace main-palette slots on the actual world screen.
+        paldata level=new paldata();level->LoadLevelPalette(Game->DMapPalette[Game->GetCurDMap()]);
+        for(int c=0;c<256;c++)if(level->R[c]>=0){world->R[c]=level->R[c];world->G[c]=level->G[c];world->B[c]=level->B[c];}
         bitmap mask=new bitmap(art->Width,art->Height);
         art->Blit(0,mask,0,0,art->Width,art->Height,0,0,art->Width,art->Height,0,0,0,0,0,false);
         Waitframe();
@@ -53,7 +56,11 @@ global script Active
         bitmap waterFG=new bitmap(); bitmap waterBG=new bitmap(); bitmap hair=new bitmap();
         hoeFG->Read(0,"/charmville/hoe-fg.png");hoeBG->Read(0,"/charmville/hoe-bg.png");
         waterFG->Read(0,"/charmville/water-fg.png");waterBG->Read(0,"/charmville/water-bg.png");
-        hair->Read(0,"/charmville/gold-hair.png");Waitframe();
+        hair->Read(0,"/charmville/gold-hair.png");
+        bitmap treecko=new bitmap();bitmap torchic=new bitmap();bitmap mudkip=new bitmap();
+        treecko->Read(0,"/charmville/follower-treecko.png");torchic->Read(0,"/charmville/follower-torchic.png");mudkip->Read(0,"/charmville/follower-mudkip.png");Waitframe();
+        int follower=0;int lastFollowerDraw=0;int trailX[64];int trailY[64];int trailDir[64];int trailHead=0;int trailCount=0;int followerClock=0;
+        int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[8];
         // Slot 36's optional costume bank has broken casting frames in this quest.
         // Keep the sword's weapon art, damage and abilities; use the complete hero bank.
         itemdata masterSword=Game->LoadItemData(36);masterSword->TileMod=0;
@@ -76,13 +83,13 @@ global script Active
         while (true)
         {
             ticks++;
-            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);}
+            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);}
             if(channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
                 for(int p=0;p<16;p++)life[p]=0;
                 activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;
-                clearingReady=false;
+                clearingReady=false;trailCount=0;trailHead=0;lastHeroX=Hero->X;lastHeroY=Hero->Y;
                 previousDMap=Game->GetCurDMap();previousScreen=Game->GetCurScreen();
             }
             if(channel->State == WEBSOCKET_STATE_OPEN && ticks%6==0)
@@ -253,19 +260,38 @@ global script Active
                 else sprintf(line,"Cuttings %d Guests %d",cuttings,guests);
                 Screen->DrawString(6,4,168,0,0x01,-1,0,line);
             }
+            // Parent supplies only a visual selection, never inventory authority.
+            if(ticks%30==0){
+                file preference=new file("/charmville/follower.txt","r");
+                if(preference->isValid()){
+                    followerText[0]=0;preference->ReadString(followerText);preference->Close();
+                    int next=atoi(followerText);if(next!=277 && next!=280 && next!=283)next=0;
+                    if(next!=follower){follower=next;followerClock=0;printf("CHARMVILLE_FOLLOWER %d\n",follower);}
+                }
+            }
+            int stepX=Hero->X-lastHeroX;int stepY=Hero->Y-lastHeroY;
+            if(Abs(stepX)>24 || Abs(stepY)>24){trailCount=0;trailHead=0;}
+            else if(stepX!=0 || stepY!=0){
+                trailX[trailHead]=Hero->X;trailY[trailHead]=Hero->Y;trailDir[trailHead]=Hero->Dir;
+                trailHead=(trailHead+1)%64;trailCount=Min(trailCount+1,64);followerClock++;
+            }
+            lastHeroX=Hero->X;lastHeroY=Hero->Y;
+            if(follower==0)lastFollowerDraw=0;
+            if(follower>0 && trailCount>=28){
+                if(lastFollowerDraw!=follower){printf("CHARMVILLE_FOLLOWER_DRAW %d\n",follower);lastFollowerDraw=follower;}
+                if(trailCount==28 && (stepX!=0 || stepY!=0))printf("CHARMVILLE_FOLLOWER_TRAIL %d\n",follower);
+                int trail=(trailHead+64-28)%64;int fx=trailX[trail];int fy=trailY[trail];int direction=trailDir[trail];
+                // PMD source rows: S,SE,E,NE,N,NW,W,SW. Draw unchanged walking frames.
+                int row=direction==DIR_UP?4:(direction==DIR_LEFT?6:(direction==DIR_DOWN?0:2));
+                int layer=fy+16<Hero->Y+16?2:6;
+                Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
+                if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));treecko->Blit(layer,RT_SCREEN,frame*32,row*32,32,32,fx-8,fy+48,32,32);}
+                if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx-4,fy+48,24,32);}
+                if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx-8,fy+44,32,40);}
+                Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
+            }
             Waitframe();
         }
         Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
     }
 }
-
-
-
-
-
-
-
-
-
-
-

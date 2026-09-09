@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PNG } from 'pngjs';
+import { inflateSync } from 'node:zlib';
 import { compileIndexedSprite } from './indexed-sprite.mjs';
 
 test('indexed compilation preserves opaque colors and transparency, including opaque black', () => {
@@ -10,7 +11,10 @@ test('indexed compilation preserves opaque colors and transparency, including op
   assert.equal(result.bytes[25], 3);
   assert.deepEqual(result.colors, [0,0,0, 0,0,0, 255,170,22]);
   const decoded = PNG.sync.read(result.bytes);
-  assert.equal(decoded.data[3], 0);
+  assert.equal(result.bytes.includes(Buffer.from('tRNS')), false);
+  let offset=8;const imageChunks=[];
+  while(offset<result.bytes.length){const size=result.bytes.readUInt32BE(offset);if(result.bytes.toString('ascii',offset+4,offset+8)==='IDAT')imageChunks.push(result.bytes.subarray(offset+8,offset+8+size));offset+=size+12;}
+  assert.deepEqual([...inflateSync(Buffer.concat(imageChunks))],[0,0,1,2,2]);
   assert.deepEqual(decoded.data.subarray(4), source.data.subarray(4));
 });
 

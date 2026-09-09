@@ -163,3 +163,7 @@ The world shell now keeps Play, Inventory, Companions, Exchange and Friends abov
 ## 2026-09-09 in-game menu access
 
 A prominent Game menus button now appears inside the native player and its fullscreen toolbar. It returns to account Inventory and focuses the navigation; direct `?panel=companions` and other allowlisted panel links work. Browser verification covers embedded fullscreen, a narrow viewport, standalone navigation and rejection of messages from the wrong origin or window. This fixes access to the existing panels, not the still-unbuilt unified equipment system.
+
+## 2026-09-09 party and Enter menu
+
+The account party now displays the owned starter in a six-slot belt and persists a follow/return preference. All three starter account-to-native follow/return checks passed with visible source walking sprites. Enter opens Party, Gear, Inventory, Charmdex, Exchange, Friends and Voice notes. Corrected the native indexed PNG exporter: tRNS metadata had caused incompatible RGBA decoding and distorted artwork. Native sprite export now retains indexed pixels and index-zero masking; original assets remain intact. This is local follower presentation, not shared creature simulation, capture, battle or a completed skill system. See `PARTY-AND-UNIFIED-MENU.md` and `NATIVE-STARTER-FOLLOWERS.md`.

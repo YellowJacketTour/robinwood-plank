@@ -37,7 +37,9 @@ export function compileIndexedSprite(bytes) {
   return {
     colors: colors.flat(),
     bytes: Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header),
-      chunk('PLTE', Buffer.from(colors.flat())), chunk('tRNS', Buffer.from([0])),
+      // Allegro loadpng expands tRNS to 32-bit RGBA. Its native mask renderer
+      // requires 8-bit pixels and treats index zero as transparent itself.
+      chunk('PLTE', Buffer.from(colors.flat())),
       chunk('IDAT', deflateSync(scanlines)), chunk('IEND', Buffer.alloc(0))]),
   };
 }

@@ -1,5 +1,5 @@
 import {postgresPool} from "@/lib/postgres";
-import {companions,parseCompanionChoice} from "@/lib/charmville/companions";
+import {companions,parseCompanionCommand} from "@/lib/charmville/companions";
 import {YardError} from "@/lib/charmville/errors";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
@@ -11,5 +11,5 @@ export async function POST(r:Request){try{
  const origin=r.headers.get("origin");if(origin&&origin!==new URL(r.url).origin)throw new YardError("Choose your companion on Plank Love",403);
  const text=await r.text();if(text.length>512)throw new YardError("Request too large",413);
  let raw:unknown;try{raw=JSON.parse(text);}catch{throw new YardError("Invalid companion",400);}
- return Response.json(await companions(postgresPool(),token(r),parseCompanionChoice(raw)),{headers});
+ return Response.json(await companions(postgresPool(),token(r),parseCompanionCommand(raw)),{headers});
 }catch(e){return fail(e);}}

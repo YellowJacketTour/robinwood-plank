@@ -1,3 +1,4 @@
 # Preserve reference bytes exactly: their provenance records contain SHA-256 hashes.
 public/charmville/reference-items/** -text
 public/charmville/catalog/emoji-test-17.0.txt -text
+public/charmville/creatures/followers/** -text -whitespace

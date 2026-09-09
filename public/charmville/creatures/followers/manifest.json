@@ -1,0 +1,108 @@
+{
+  "repository": "https://github.com/PMDCollab/SpriteCollab",
+  "commit": "db1928346e452e1a36b8ecff62f7e4d195504763",
+  "files": [
+    {
+      "path": "LICENSE.md",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/LICENSE.md",
+      "sha256": "284233a8bc62ac54d878552845ef66ab94b25112e6fc8f902fcdfa6149748c31",
+      "bytes": 17607
+    },
+    {
+      "path": "README.md",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/README.md",
+      "sha256": "a3da413054b0cf19427bf87a1ab1401f153fce9aaa9e27e865b91ef589d37b92",
+      "bytes": 5789
+    },
+    {
+      "path": "sprite/0252/Walk-Anim.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Walk-Anim.png",
+      "sha256": "1f94a5fbb85d432258df75aa6c729fef62aedd7add8bcdfa480696a3c98fc5ac",
+      "bytes": 6309
+    },
+    {
+      "path": "sprite/0252/Walk-Offsets.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Walk-Offsets.png",
+      "sha256": "3ee82dbe4df2ff2d46462f5656e3e13178417430b0fde7a00d491f16badc82f9",
+      "bytes": 562
+    },
+    {
+      "path": "sprite/0252/Walk-Shadow.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Walk-Shadow.png",
+      "sha256": "986ed7e027135db592e146107bff26dac9ab00e787f7e4002bcca92696fc54b3",
+      "bytes": 502
+    },
+    {
+      "path": "sprite/0252/AnimData.xml",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/AnimData.xml",
+      "sha256": "772dcb43c7838d9393c444a39c13a1398e91192ae3188f40706ffee73e848c75",
+      "bytes": 11662
+    },
+    {
+      "path": "sprite/0252/credits.txt",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/credits.txt",
+      "sha256": "9f344de5b105be662c5c02221b3a1beba2f67a467de135f9c2694d62d0c38b20",
+      "bytes": 292
+    },
+    {
+      "path": "sprite/0255/Walk-Anim.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Walk-Anim.png",
+      "sha256": "312b4dd66d4b29ea242ca6e70c080b904453e70efc45208d8375b177a19d6a53",
+      "bytes": 4851
+    },
+    {
+      "path": "sprite/0255/Walk-Offsets.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Walk-Offsets.png",
+      "sha256": "efa3ea192038675357ca736a6cc10223aaddcf6c517561c58ac9a7aa2c8ffff6",
+      "bytes": 497
+    },
+    {
+      "path": "sprite/0255/Walk-Shadow.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Walk-Shadow.png",
+      "sha256": "c0ba6d2d4ef8e26824dace9aca22a63c8cc4bd423ffa67d6755e5ad2ec6423d8",
+      "bytes": 463
+    },
+    {
+      "path": "sprite/0255/AnimData.xml",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/AnimData.xml",
+      "sha256": "03538ebf39f6d079db2161af686ff2ce7d149af363410369289f781788746699",
+      "bytes": 11817
+    },
+    {
+      "path": "sprite/0255/credits.txt",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/credits.txt",
+      "sha256": "1138671bb2f6adf97a18fc85d6336451ccb3f87af6f78567d5fe61f8c2efc714",
+      "bytes": 288
+    },
+    {
+      "path": "sprite/0258/Walk-Anim.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Walk-Anim.png",
+      "sha256": "7d58e47f24a65db9188f50036a5e83b5680b8cf443576be9764e43b2456a15c6",
+      "bytes": 7735
+    },
+    {
+      "path": "sprite/0258/Walk-Offsets.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Walk-Offsets.png",
+      "sha256": "6736d65ea8ea7182fa6a8faa8dc2224a72fb2028a2c9272bcb49b0db3338e67e",
+      "bytes": 795
+    },
+    {
+      "path": "sprite/0258/Walk-Shadow.png",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Walk-Shadow.png",
+      "sha256": "f10b25220810710e7980b07922687e6cfcf7bb68f9e6046ac757dad899b20b2d",
+      "bytes": 1635
+    },
+    {
+      "path": "sprite/0258/AnimData.xml",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/AnimData.xml",
+      "sha256": "7e0f93ed47ab1f9e935920342057862622663d7923cf34c44fd6232c161b6734",
+      "bytes": 11944
+    },
+    {
+      "path": "sprite/0258/credits.txt",
+      "source": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/credits.txt",
+      "sha256": "116d58438bd492875b61a675cd400b5da82ebf86e35bd90fecd9a92e32bde0b1",
+      "bytes": 282
+    }
+  ]
+}
