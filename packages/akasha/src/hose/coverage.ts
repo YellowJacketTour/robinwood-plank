@@ -38,6 +38,70 @@ export function collapseRuns(runs: CoverageRun[]): CoverageRun[] {
   return out;
 }
 
+/**
+ * Collapse runs, but REFUSE to merge a seam whose hashes disagree.
+ *
+ * `collapseRuns` merges any two runs that touch. That is correct for a serial
+ * walker, where every adjacency was produced by following parentHash and is
+ * verified by construction. It is NOT correct once shards are walked
+ * independently: two shards can be numerically adjacent and belong to
+ * different chains -- a fork, a reorg one worker saw and another did not, or
+ * an RPC that lied to exactly one of them.
+ *
+ * Merging such a pair would manufacture a contiguous run from two histories
+ * and hand `complete_from_protocol` a single span it must not have. The
+ * archive would report completeness over a seam nobody checked.
+ *
+ * So the seam is checked against what the archive actually HOLDS: the block at
+ * the upper run's low edge must name the lower run's high block as its parent.
+ * This is the same rule the serial backfill applies at its tail, applied at
+ * every seam -- and it is strictly stronger, because the two sides were
+ * fetched independently and must now agree.
+ *
+ * An unverified seam is not an error: the two runs simply stay separate, which
+ * `holesIn` already renders as the boundary it is. The archive says "I have
+ * these two spans and cannot prove they join", which is the honest answer.
+ */
+export function collapseVerifiedRuns(
+  runs: CoverageRun[],
+  parentHashAt: (chain: ChainId, height: number) => string | undefined,
+): CoverageRun[] {
+  if (runs.length === 0) return [];
+  const sorted = [...runs].sort((a, b) => a.fromHeight - b.fromHeight);
+  const out: CoverageRun[] = [];
+  let cur = { ...sorted[0]! };
+  for (const r of sorted.slice(1)) {
+    const touches = r.fromHeight <= cur.toHeight + 1 && r.chain === cur.chain;
+    // An OVERLAP is self-consistent by construction (the same blocks, walked
+    // twice) and needs no seam proof. Only a true adjacency -- where two
+    // independently walked spans meet at a boundary neither verified -- does.
+    const isAdjacency = touches && r.fromHeight === cur.toHeight + 1;
+    const linked =
+      !isAdjacency ||
+      (() => {
+        const parent = parentHashAt(r.chain, r.fromHeight);
+        return (
+          parent !== undefined && parent.toLowerCase() === cur.toHash.toLowerCase()
+        );
+      })();
+    if (touches && linked) {
+      cur = {
+        ...cur,
+        toHeight: Math.max(cur.toHeight, r.toHeight),
+        toHash: r.toHeight >= cur.toHeight ? r.toHash : cur.toHash,
+        eventCount: cur.eventCount + r.eventCount,
+        artifactCount: cur.artifactCount + r.artifactCount,
+        receiptDigest: r.receiptDigest,
+      };
+    } else {
+      out.push(cur);
+      cur = { ...r };
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 export function holesIn(runs: CoverageRun[], from: number, to: number): Array<{ from: number; to: number }> {
   const collapsed = collapseRuns(runs).filter((r) => r.toHeight >= from && r.fromHeight <= to);
   const holes: Array<{ from: number; to: number }> = [];
