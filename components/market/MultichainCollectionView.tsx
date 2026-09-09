@@ -558,53 +558,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const ident = await swrJson<{
-        collection: {
-          slug: string;
-          name: string;
-          imageUrl: string | null;
-          contractAddress: string;
-          listedCount: number | null;
-          totalSupply: number | null;
-          volume24hWei: string | null;
-          sales24h: number | null;
-          volume7dWei: string | null;
-          sales7d: number | null;
-          volume30dWei: string | null;
-          sales30d: number | null;
-          holderCount: number | null;
-          floorPriceWei?: string | null;
-          floorPriceCurrency?: string | null;
-          primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
-          archival?: {
-            archivalScore: number | null;
-            scoreMethod: string;
-            tokensEverHydrated: number | null;
-            knownSupply: number | null;
-            lastArchivedAt: string | null;
-            jobProcessing: boolean;
-            metadataTokens: number | null;
-            metadataCoverage: number | null;
-            traitsCoverage?: number | null;
-            metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
-          } | null;
-        };
-      }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
-        // Real bug found live 2026-08-25: this page's own load() is polled
-        // every 20s (see the setInterval below), but ttlMs here was 30s --
-        // LONGER than the poll interval, so most polls were guaranteed
-        // cache hits returning stale data with zero network call, not a
-        // "live" refresh at all. Archive-depth (and every other stat this
-        // fetch carries) must always reflect a real, current backend read
-        // on every poll tick for a live-time integrity product to mean
-        // anything. ttlMs now below the poll interval so every tick is a
-        // genuine fetch; swrMs left generous so a slow/failed request still
-        // shows the last real value instead of a loading flash.
-        ttlMs: 15_000,
-        swrMs: 120_000,
-        session: true,
-      });
-      const data = ident;
       void swrJson<{
         listings: Listing[];
         listingsUnavailable?: string | null;
@@ -637,6 +590,53 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         .catch(() => {
           setListingsUnavailable("book-unavailable");
         });
+      const ident = await swrJson<{
+        collection: {
+          slug: string;
+          name: string;
+          imageUrl: string | null;
+          contractAddress: string;
+          listedCount: number | null;
+          totalSupply: number | null;
+          volume24hWei: string | null;
+          sales24h: number | null;
+          volume7dWei: string | null;
+          sales7d: number | null;
+          volume30dWei: string | null;
+          sales30d: number | null;
+          holderCount: number | null;
+          floorPriceWei?: string | null;
+          floorPriceCurrency?: string | null;
+          primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
+          archival?: {
+            archivalScore: number | null;
+            scoreMethod: string;
+            tokensEverHydrated: number | null;
+            knownSupply: number | null;
+            lastArchivedAt: string | null;
+            jobProcessing: boolean;
+            metadataTokens: number | null;
+            metadataCoverage: number | null;
+            traitsCoverage?: number | null;
+            metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
+          } | null;
+        };
+      }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&projection=1`, {
+        // Real bug found live 2026-08-25: this page's own load() is polled
+        // every 20s (see the setInterval below), but ttlMs here was 30s --
+        // LONGER than the poll interval, so most polls were guaranteed
+        // cache hits returning stale data with zero network call, not a
+        // "live" refresh at all. Archive-depth (and every other stat this
+        // fetch carries) must always reflect a real, current backend read
+        // on every poll tick for a live-time integrity product to mean
+        // anything. ttlMs now below the poll interval so every tick is a
+        // genuine fetch; swrMs left generous so a slow/failed request still
+        // shows the last real value instead of a loading flash.
+        ttlMs: 15_000,
+        swrMs: 120_000,
+        session: true,
+      });
+      const data = ident;
       /* catalog tokens: fetchCatalogTokens effect */
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
@@ -963,7 +963,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (all || change.family === "orders") work.push(loadOffers());
     if (all || change.family === "activity") work.push(loadActivity());
     await Promise.allSettled(work);
-  });
+  }, 2_000);
 
   useEffect(() => {
     let cancelled = false;

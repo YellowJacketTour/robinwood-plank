@@ -11,11 +11,12 @@
 type Entry = {
   at: number;
   data: unknown;
-  inflight: Promise<unknown> | null;
 };
 
 const memory = new Map<string, Entry>();
 let invalidationEpoch = 0;
+const versions = new Map<string, number>();
+const requests = new Map<string, { version: number; promise: Promise<unknown> }>();
 
 const DEFAULT_TTL_MS = 12_000;
 const DEFAULT_SWR_MS = 90_000;
@@ -85,9 +86,9 @@ async function idbGet(key: string): Promise<{ at: number; data: unknown } | null
   });
 }
 
-async function idbSet(key: string, data: unknown): Promise<void> {
+async function idbSet(key: string, data: unknown, version: number): Promise<void> {
   const db = await idbOpen();
-  if (!db) return;
+  if (!db || version !== (versions.get(key) ?? 0)) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
     tx.objectStore(IDB_STORE).put({ at: Date.now(), data }, key);
@@ -120,80 +121,65 @@ export async function swrJson<T>(url: string, opts: SwrOptions = {}): Promise<T>
   const useSession = opts.session !== false;
   const isGood = opts.isGood;
   const now = Date.now();
-
   let entry = memory.get(url);
-  // Drop poisoned empty entries so we don't keep serving "0 held".
   if (entry && isGood && entry.data !== undefined && !isGood(entry.data)) {
     memory.delete(url);
     entry = undefined;
   }
-
-  if (entry && now - entry.at < ttlMs) {
+  if (entry?.data !== undefined && now - entry.at < ttlMs) return entry.data as T;
+  if (entry?.data !== undefined && now - entry.at < swrMs) {
+    void fetchShared(url, useSession, isGood).catch(() => {});
     return entry.data as T;
   }
-
-  // Soft-stale: return immediately, refresh in background.
-  if (entry && now - entry.at < swrMs) {
-    if (!entry.inflight) {
-      entry.inflight = fetchAndStore(url, useSession, isGood).finally(() => {
-        const e = memory.get(url);
-        if (e) e.inflight = null;
-      });
-    }
-    return entry.data as T;
-  }
-
-  // Cold memory — try session for instant paint, then network.
   if (!entry && useSession) {
     const sess = sessionGet(url);
     if (sess && now - sess.at < swrMs && (!isGood || isGood(sess.data))) {
-      entry = { at: sess.at, data: sess.data, inflight: null };
-      memory.set(url, entry);
-      if (now - sess.at >= ttlMs) {
-        entry.inflight = fetchAndStore(url, useSession, isGood).finally(() => {
-          const e = memory.get(url);
-          if (e) e.inflight = null;
-        });
-      }
+      memory.set(url, sess);
+      if (now - sess.at >= ttlMs) void fetchShared(url, useSession, isGood).catch(() => {});
       return sess.data as T;
     }
-  }
-
-  // Cold memory + no fresh session entry (new tab after a browser restart) —
-  // fall back to IndexedDB. Allowed to be older than swrMs since this is a
-  // last-known-good instant paint, not a "fresh enough to skip refetch"
-  // claim; a background refresh always still fires.
-  if (!entry && useSession) {
+    const epoch = invalidationEpoch;
     const idb = await idbGet(url);
-    if (idb && now - idb.at < IDB_MAX_AGE_MS && (!isGood || isGood(idb.data))) {
-      entry = { at: idb.at, data: idb.data, inflight: null };
-      memory.set(url, entry);
-      entry.inflight = fetchAndStore(url, useSession, isGood).finally(() => {
-        const e = memory.get(url);
-        if (e) e.inflight = null;
-      });
+    // Another caller or invalidation may have advanced this resource while
+    // IndexedDB was opening. Never overwrite that newer state.
+    if (epoch === invalidationEpoch && !memory.has(url) && !requests.has(url)
+      && idb && now - idb.at < IDB_MAX_AGE_MS && (!isGood || isGood(idb.data))) {
+      memory.set(url, idb);
+      void fetchShared(url, useSession, isGood).catch(() => {});
       return idb.data as T;
     }
+    entry = memory.get(url);
+    if (entry?.data !== undefined && now - entry.at < ttlMs) return entry.data as T;
   }
+  return await fetchShared(url, useSession, isGood) as T;
+}
 
-  if (entry?.inflight) return entry.inflight as Promise<T>;
-
-  const inflight = fetchAndStore(url, useSession, isGood);
-  memory.set(url, { at: entry?.at ?? 0, data: entry?.data, inflight });
-  try {
-    return (await inflight) as T;
-  } finally {
-    const e = memory.get(url);
-    if (e) e.inflight = null;
+/** Invalidations queue one follow-up; they never detach an active request. */
+async function fetchShared(url: string, useSession: boolean, isGood?: (data: unknown) => boolean): Promise<unknown> {
+  let active = requests.get(url);
+  if (!active) {
+    const version = versions.get(url) ?? 0;
+    const promise = fetchAndStore(url, useSession, isGood, version).finally(() => {
+      if (requests.get(url)?.promise === promise) requests.delete(url);
+    });
+    active = { version, promise };
+    requests.set(url, active);
   }
+  const data = await active.promise;
+  if (active.version !== (versions.get(url) ?? 0)) {
+    const published = memory.get(url);
+    if (published?.data !== undefined && published.at !== -Infinity) return published.data;
+    return fetchShared(url, useSession, isGood);
+  }
+  return data;
 }
 
 async function fetchAndStore(
   url: string,
   useSession: boolean,
-  isGood?: (data: unknown) => boolean
+  isGood: ((data: unknown) => boolean) | undefined,
+  version: number
 ): Promise<unknown> {
-  const epoch = invalidationEpoch;
   const res = await fetch(url, {
     // Bypass shared HTTP caches for live inventory — an empty CDN edge
     // response was painting "nothing held" for minutes while the vault had 57.
@@ -220,11 +206,11 @@ async function fetchAndStore(
     throw new Error(`Unusable response for ${url}`);
   }
   // A response started before an invalidation must not restore stale storage.
-  if (epoch !== invalidationEpoch) return data;
-  memory.set(url, { at: Date.now(), data, inflight: null });
+  if (version !== (versions.get(url) ?? 0)) return data;
+  memory.set(url, { at: Date.now(), data });
   if (useSession) {
     sessionSet(url, data);
-    void idbSet(url, data);
+    void idbSet(url, data, version);
   }
   return data;
 }
@@ -238,9 +224,10 @@ export function invalidateSwr(urlPrefix?: string): void {
   invalidationEpoch++;
   // Keep an expired entry: deleting it let an asynchronous IndexedDB read
   // resurrect exactly the snapshot this invalidation was meant to expire.
-  for (const [key, entry] of memory) {
+  for (const key of new Set([...memory.keys(), ...requests.keys()])) {
     if (!urlPrefix || key.startsWith(urlPrefix)) {
-      memory.set(key, { at: -Infinity, data: entry.data, inflight: null });
+      versions.set(key, (versions.get(key) ?? 0) + 1);
+      memory.set(key, { at: -Infinity, data: memory.get(key)?.data });
     }
   }
   if (typeof window === "undefined") return;
