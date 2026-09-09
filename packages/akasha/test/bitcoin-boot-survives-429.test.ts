@@ -120,8 +120,9 @@ test("one blocked host costs a hop, not the tick", () => {
   // 20s x 6 hosts is a two-minute worst case for ONE height lookup on a 15s
   // tick: the timeout itself becomes the stall.
   const m = RPC.match(/opts\.timeoutMs \?\? ([0-9_]+)/);
-  ok(m, "the timeout must be an explicit default");
-  const ms = Number(m![1].replace(/_/g, ""));
+  const digits = m?.[1];
+  ok(digits, "the timeout must be an explicit numeric default");
+  const ms = Number(digits!.replace(/_/g, ""));
   ok(ms <= 10_000, `${ms}ms per host x 6 hosts is longer than the tick itself`);
   ok(ms >= 3_000, `${ms}ms is too tight for a healthy-but-slow mirror`);
 });
