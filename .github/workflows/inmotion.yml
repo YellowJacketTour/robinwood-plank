@@ -1438,8 +1438,14 @@ jobs:
                 AND (c.relname='plank_market_events' OR NOT l.granted)
               ORDER BY l.granted,l.pid LIMIT 100`);
             console.log('[lock-diagnostic] locks',JSON.stringify(locks.rows));
+            const table = await pool.query(`SELECT s.n_live_tup,s.n_dead_tup,s.last_vacuum,s.last_autovacuum,
+              s.vacuum_count,s.autovacuum_count,age(c.relfrozenxid) AS xid_age,pg_relation_size(c.oid)::text AS heap_bytes
+              FROM pg_stat_all_tables s JOIN pg_class c ON c.oid=s.relid
+              WHERE s.schemaname='public' AND s.relname='plank_market_events'`);
+            console.log('[lock-diagnostic] table',JSON.stringify(table.rows));
           } finally {await pool.end();}
           JS
+          ps -eo pid,comm,args | awk '/[a]utovacuum/ {print "[lock-diagnostic] maintenance", $1, $2, ($0 ~ /wraparound/ ? "wraparound" : "autovacuum")}' || true
           REMOTE
 
   provision-market-mesh:
