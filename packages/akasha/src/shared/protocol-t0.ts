@@ -65,15 +65,23 @@ export const PROTOCOL_T0: Record<ChainId, ProtocolOrigin> = {
       "UNPINNED, deliberately. The origin is the deploy slot of the sealed program " +
       "set -- Token Metadata (metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s) and, if " +
       "cNFTs are archived, Bubblegum (BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY) " +
-      "separately. Attempted 2026-09-08 over the public RPC: getAccountInfo returns " +
-      "no deploy slot for a BPFLoaderUpgradeable program, and getSignaturesForAddress " +
-      "pages 1,000 at a time (~22 minutes of history per page) so reaching the deploy " +
-      "would take millions of requests against a rate-limited endpoint. The number " +
-      "must be read once from an explorer or an archival node and stored here as a " +
-      "literal, the way Bitcoin's 767430 is. Zero would mean walking every slot ever " +
-      "produced, so `assertPinnedForCutover` throws for this chain until then. The " +
-      "throw is the feature: a guessed origin yields a completeness claim that is a " +
-      "guess.",
+      "separately. " +
+      "TWO ROUTES TRIED AND REJECTED 2026-09-08, recorded so nobody repeats them. " +
+      "(1) getSignaturesForAddress pages 1,000 signatures at a time -- roughly 22 " +
+      "minutes of history per page -- so walking back to the deploy would take " +
+      "millions of requests against a rate-limited public endpoint. " +
+      "(2) The BPFLoaderUpgradeable programData account DOES carry a readable slot: " +
+      "metaqbxx's programData is PwDiXFxQsGra4sFFTT8r1QWRMd4vfumiWC1jfWNfdYT and its " +
+      "header decodes to slot 380,725,176. That is the LAST UPGRADE, not the original " +
+      "deploy -- against a tip of 445,466,896 it is about 300 days old, while Solana " +
+      "NFTs date from 2020, so pinning it would silently discard roughly six years of " +
+      "history while reporting a confident completeness number. An upgradeable program " +
+      "account only ever stores its most recent deployment. " +
+      "The real origin needs an archival node or an explorer that retains 2020 " +
+      "history, stored here as a literal the way Bitcoin's 767430 is. Zero would " +
+      "mean walking every slot ever produced, so `assertPinnedForCutover` throws " +
+      "until then. The throw is the feature: route 2 is exactly the kind of " +
+      "plausible wrong number that would pass review.",
     precision: "conservative",
   },
 };

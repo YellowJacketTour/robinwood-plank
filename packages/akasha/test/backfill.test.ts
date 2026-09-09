@@ -208,3 +208,26 @@ test("the worker reports exhaustion instead of spinning", async () => {
   const worker = new BackfillWorker({ store: s, ingestRange: async () => undefined });
   eq(await worker.step(["bitcoin"]), undefined, "every past is closed");
 });
+
+test("the Solana pin records the plausible-but-wrong route that was rejected", () => {
+  // A programData account's slot LOOKS like a deploy slot and is trivially
+  // readable, so the next person will find it. Measured 2026-09-08:
+  // metaqbxx's programData decodes to slot 380,725,176, which is the LAST
+  // UPGRADE -- about 300 days old against a tip of 445,466,896, while Solana
+  // NFTs date from 2020. Pinning it would silently discard roughly six years
+  // of history while reporting a confident completeness number.
+  //
+  // That is exactly the shape this program keeps refusing: a number that is
+  // easy to obtain, looks authoritative, and is quietly wrong. Recording WHY
+  // it was rejected is the only thing that stops it being "fixed" back in.
+  const why = PROTOCOL_T0.solana.because;
+  ok(/380,725,176/.test(why), "the rejected slot must be named, not just described");
+  ok(/LAST UPGRADE/.test(why), "and why it is wrong");
+  ok(
+    /getSignaturesForAddress/.test(why),
+    "the other exhausted route belongs here too, so it is not retried",
+  );
+  // And the pin itself must still refuse.
+  eq(isCutoverReady("solana"), false);
+  throws(() => assertPinnedForCutover("solana"), /no reviewed protocol_t0/);
+});
