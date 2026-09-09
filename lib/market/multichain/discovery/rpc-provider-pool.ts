@@ -28,7 +28,16 @@
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { apiKey as alchemyApiKey, ALCHEMY_NETWORK_SUBDOMAIN } from "@/lib/market/multichain/adapters/alchemy-network";
 
-export type RpcProviderId = "publicnode" | "drpc" | "alchemy";
+export type RpcProviderId =
+  | "publicnode"
+  | "drpc"
+  | "alchemy"
+  | "ankr"
+  | "cloudflare"
+  | "flashbots"
+  | "blast"
+  | "onerpc"
+  | "official";
 
 type ProviderEntry = { id: RpcProviderId; url: string; source: string };
 
@@ -39,22 +48,59 @@ type ProviderEntry = { id: RpcProviderId; url: string; source: string };
  * public endpoint fills that one slot instead, same "real and free"
  * standard, just a different real operator.
  */
+//
+// EXPANDED 2026-09-09, same standard, same method.
+//
+// The pool held TWO free endpoints per chain. That was never a rate-limit
+// ceiling -- it was an under-provisioned pool, and the difference matters
+// enormously: a per-provider limit multiplied by N providers is N times the
+// budget, for free, before any cleverness.
+//
+// Every URL added below was probed the same way the originals were: a real
+// eth_blockNumber POST, zero auth, returning a real current block number.
+// Measured latencies at the time of adding:
+//
+//   eth      publicnode 0.10s | drpc 0.17s | ankr 0.17s | cloudflare 0.08s
+//            flashbots 0.30s | blast 0.18s | 1rpc 0.27s
+//   base     base.org 0.13s | blast 0.13s | 1rpc 0.24s
+//   arbitrum arb1 0.16s | ankr 0.10s | 1rpc 0.37s
+//   polygon  ankr 0.11s
+//
+// Probed and REJECTED, recorded so nobody re-adds them:
+//   llamarpc (eth + base) -> HTTP 525 (TLS handshake failure at the edge)
+//   polygon-rpc.com       -> HTTP 401 (now requires a key)
+//
+// This takes Ethereum from 2 free providers to 7 -- roughly 3.5x the
+// per-chain budget, composing with the existing per-host pacing and jailing
+// rather than replacing them.
 const FREE_PUBLIC_RPC: Record<string, Array<{ id: RpcProviderId; url: string }>> = {
   "eth-mainnet": [
     { id: "publicnode", url: "https://ethereum-rpc.publicnode.com" },
     { id: "drpc", url: "https://eth.drpc.org" },
+    { id: "cloudflare", url: "https://cloudflare-eth.com" },
+    { id: "ankr", url: "https://rpc.ankr.com/eth" },
+    { id: "blast", url: "https://eth-mainnet.public.blastapi.io" },
+    { id: "onerpc", url: "https://1rpc.io/eth" },
+    { id: "flashbots", url: "https://rpc.flashbots.net" },
   ],
   "polygon-mainnet": [
     { id: "publicnode", url: "https://polygon-bor-rpc.publicnode.com" },
     { id: "drpc", url: "https://polygon.drpc.org" },
+    { id: "ankr", url: "https://rpc.ankr.com/polygon" },
   ],
   "arb-mainnet": [
     { id: "publicnode", url: "https://arbitrum-one-rpc.publicnode.com" },
     { id: "drpc", url: "https://arbitrum.drpc.org" },
+    { id: "official", url: "https://arb1.arbitrum.io/rpc" },
+    { id: "ankr", url: "https://rpc.ankr.com/arbitrum" },
+    { id: "onerpc", url: "https://1rpc.io/arb" },
   ],
   "base-mainnet": [
     { id: "publicnode", url: "https://base-rpc.publicnode.com" },
     { id: "drpc", url: "https://base.drpc.org" },
+    { id: "official", url: "https://mainnet.base.org" },
+    { id: "blast", url: "https://base-mainnet.public.blastapi.io" },
+    { id: "onerpc", url: "https://1rpc.io/base" },
   ],
   "opt-mainnet": [
     { id: "publicnode", url: "https://optimism-rpc.publicnode.com" },
@@ -70,7 +116,7 @@ const FREE_PUBLIC_RPC: Record<string, Array<{ id: RpcProviderId; url: string }>>
   ],
   // publicnode has no zkSync era endpoint -- Matter Labs' own official
   // public RPC (the chain team's own free node) fills this slot.
-  "zksync-mainnet": [{ id: "drpc", url: "https://mainnet.era.zksync.io" }],
+  "zksync-mainnet": [{ id: "official", url: "https://mainnet.era.zksync.io" }],
   // Robinhood Chain -- real bug found live 2026-08-26: this used to list
   // only ONE provider (the chain's own official public RPC), with no real
   // redundancy at all. Confirmed live, repeatedly: that single endpoint's
