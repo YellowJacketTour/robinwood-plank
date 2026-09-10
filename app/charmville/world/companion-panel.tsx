@@ -14,7 +14,7 @@ type Command=Feed|{speciesId:number}|{action:"following";companionId:string;foll
 const button="min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 const primary="min-h-11 rounded-lg border border-line-strong bg-gold-500 px-4 py-2 font-bold text-wood-950 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 function Sprite({choice}:{choice:Choice}) {return <div role="img" aria-label={choice.sourceName} className="mx-auto h-16 w-16 overflow-hidden" style={{backgroundImage:`url(${choice.sprite})`,backgroundPosition:"0 0",backgroundRepeat:"no-repeat",imageRendering:"pixelated"}}/>;}
-export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onFormation,onTestProfile,onPlay,onHomeReady}:{wallet:string;handle:string;onFollower?:(speciesId:number)=>void;onFollowers?:(speciesIds:number[])=>void;onFormation?:(formation:'close'|'relaxed')=>void;onTestProfile?:(profile:TestProfile)=>void|Promise<void>;onPlay?:()=>void;onHomeReady?:()=>void}) {
+export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onFormation,onTestProfile,onPlay,onHomeReady}:{wallet:string;handle:string;onFollower?:(speciesId:number)=>void;onFollowers?:(speciesIds:number[],creatureIds?:string[])=>void;onFormation?:(formation:'close'|'relaxed')=>void;onTestProfile?:(profile:TestProfile)=>void|Promise<void>;onPlay?:()=>void;onHomeReady?:()=>void}) {
  const [state,setState]=useState<State|null>(null),[selection,setSelection]=useState<Choice|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [roster,setRoster]=useState<Roster|null>(null),[selectedSlot,setSelectedSlot]=useState(0);
  const [formation,setFormation]=useState<'close'|'relaxed'>('close');
@@ -46,7 +46,7 @@ export default function CompanionPanel({wallet,handle,onFollower,onFollowers,onF
    const rosterResponse=await fetch('/api/charmville/creature-roster',options);
    const nextRoster=await rosterResponse.json();if(controller.signal.aborted||current!==version.current)return;
    if(!rosterResponse.ok){setRoster(null);onFollowers?.([]);throw new Error(nextRoster.error??'Your party could not be loaded. Refresh to retry.');}
-   setRoster(nextRoster);onFollowers?.(data.companion?.following?nextRoster.slots.filter((entry:Creature|null)=>entry&&[277,280,283,25,133,286].includes(entry.speciesId)).map((entry:Creature)=>entry.speciesId):[]);
+   setRoster(nextRoster);const followers:Creature[]=data.companion?.following?nextRoster.slots.filter((entry:Creature|null)=>entry&&[277,280,283,25,133,286].includes(entry.speciesId)):[];onFollowers?.(followers.map(entry=>entry.speciesId),followers.map(entry=>entry.id));
    const health=await fetch('/api/charmville/companions/vitals',options);const healthData=await health.json();if(controller.signal.aborted||current!==version.current)return;if(!health.ok){setVitals(null);throw new Error(healthData.error??'Companion health unavailable.');}setVitals(healthData);
   }catch(error){if(!controller.signal.aborted&&current===version.current)setMessage(error instanceof Error?error.message:"Party could not be saved. Refresh to check its state.");}
   finally{if(!controller.signal.aborted&&current===version.current)setBusy(false);}

@@ -1,0 +1,111 @@
+{
+  "commit": "db1928346e452e1a36b8ecff62f7e4d195504763",
+  "provenance": [
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Attack-Anim.png",
+      "sha256": "65ccf90cb1fe7906af49b4e7b839d61c263ce682773d72191cfd44aa4dec9a0c"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Attack-Shadow.png",
+      "sha256": "fcd4d091384984348589ca6fe8847b77fffeb063134126013aab255de62997c8"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0252/Attack-Offsets.png",
+      "sha256": "293a496bc2d96b1d49f3ad72f280438c2f3d1d9422e583e06048089b0ef7491d"
+    },
+    {
+      "species": 277,
+      "move": 1,
+      "id": "0252",
+      "w": 64,
+      "h": 72,
+      "frames": 10,
+      "durations": [
+        2,
+        4,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "hitFrame": 4,
+      "contactTick": 8,
+      "totalTicks": 19
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Attack-Anim.png",
+      "sha256": "a3c22fe34c88cfb695483df48c37434e48ba0a63af8e786bbc4c2c45b7ba2451"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Attack-Shadow.png",
+      "sha256": "8e87c84d6aeb8c133171d43e6a9d271c30f38c0dbb8d1947fa7c5090a5dc20ca"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0255/Attack-Offsets.png",
+      "sha256": "14c6888963a83f1e66759d12474cefb396083d688abdec83f4b4cea6f93e33d9"
+    },
+    {
+      "species": 280,
+      "move": 10,
+      "id": "0255",
+      "w": 64,
+      "h": 64,
+      "frames": 11,
+      "durations": [
+        4,
+        2,
+        4,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        4
+      ],
+      "hitFrame": 5,
+      "contactTick": 14,
+      "totalTicks": 28
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Attack-Anim.png",
+      "sha256": "9fb65ad66825a8fbb9dbb891389d7131205ab04724c7adc2bc0d01ff4f82b827"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Attack-Shadow.png",
+      "sha256": "ace806b9bc891b762e63af3e7c5a95ec2256f00fc7337a973c662d82cdea9064"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0258/Attack-Offsets.png",
+      "sha256": "a31bed777f9afe2628fc4f106472f8ae6d0a6bb5e2cc450dfb08d5a2f9a77ec7"
+    },
+    {
+      "species": 283,
+      "move": 33,
+      "id": "0258",
+      "w": 72,
+      "h": 80,
+      "frames": 10,
+      "durations": [
+        2,
+        4,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        4
+      ],
+      "hitFrame": 4,
+      "contactTick": 10,
+      "totalTicks": 24
+    }
+  ]
+}

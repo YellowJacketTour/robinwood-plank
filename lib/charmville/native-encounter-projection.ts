@@ -1,15 +1,31 @@
-type Event={eventId:string;log:{targetId?:string;damage:number;appliedDamage?:number}[]};
-type Snapshot={encounter:{id:string;speciesId:number;cell:{x:number;y:number};hp:number;maxHp:number;revision:string};events?:Event[]};
+type Cell = {x:number;y:number};
+type DamageEvent = {eventId:string;damage:number;actorId?:string;actorSpeciesId?:number;moveId?:number;actorCell?:Cell};
+const record = (value:unknown): Record<string,unknown>|null => value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
+const integer = (value:unknown,min:number,max:number):value is number => typeof value==='number'&&Number.isInteger(value)&&value>=min&&value<=max;
+const cell = (value:unknown):value is Cell => {const c=record(value);return !!c&&integer(c.x,0,30)&&integer(c.y,0,20);};
+const sequence = (value:unknown):value is string => typeof value==='string'&&/^\d{1,20}$/.test(value);
+
 /** Read-only rendering message. Never accepted as damage or ownership authority. */
 export function nativeEncounterProjection(raw:unknown){
- const s=raw as Snapshot|null,e=s?.encounter;
+ const snapshot=record(raw),e=record(snapshot?.encounter);
  const off={type:'charmville:world-encounter',active:false};
- if(!e||typeof e.id!=='string'||e.speciesId!==286||!e.cell||!Number.isInteger(e.cell.x)||!Number.isInteger(e.cell.y)||e.cell.x<0||e.cell.x>30||e.cell.y<0||e.cell.y>20||!Number.isInteger(e.hp)||!Number.isInteger(e.maxHp)||e.hp<0||e.maxHp<1||e.hp>e.maxHp||e.maxHp>65535||typeof e.revision!=='string'||!/^\d+$/.test(e.revision))return off;
- let damageEvent:{eventId:string;damage:number}|undefined;
- for(const event of s?.events??[]){
-  if(!/^\d+$/.test(event.eventId)||!Array.isArray(event.log))continue;
-  const damage=event.log.filter(hit=>hit.targetId===e.id).map(hit=>hit.appliedDamage??hit.damage).filter(damage=>Number.isInteger(damage)&&damage>0&&damage<=65535).reduce((sum,damage)=>sum+damage,0);
-  if(damage>0&&(!damageEvent||BigInt(event.eventId)>BigInt(damageEvent.eventId)))damageEvent={eventId:event.eventId,damage:Math.min(65535,damage)};
+ if(!e||typeof e.id!=='string'||e.speciesId!==286||!cell(e.cell)||!integer(e.hp,0,65535)||!integer(e.maxHp,1,65535)||e.hp>e.maxHp||!sequence(e.revision))return off;
+ const projected=new Map<string,DamageEvent>();
+ for(const rawEvent of Array.isArray(snapshot?.events)?snapshot.events:[]){
+  const event=record(rawEvent);
+  if(!event||!sequence(event.eventId)||!Array.isArray(event.log))continue;
+  const hits=event.log.map(record).filter((hit):hit is Record<string,unknown>=>!!hit&&hit.targetId===e.id&&integer(hit.appliedDamage??hit.damage,1,65535));
+  if(!hits.length)continue;
+  const damage=Math.min(65535,hits.reduce((sum,hit)=>sum+Number(hit.appliedDamage??hit.damage),0));
+  const damageEvent:DamageEvent={eventId:event.eventId,damage};
+  // A single attributable strike can select source animation. Aggregate events cannot.
+  const hit=hits.length===1?hits[0]:null;
+  if(hit&&typeof hit.actor==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hit.actor)&&integer(hit.actorSpeciesId,1,65535)&&integer(hit.moveId,1,65535)&&cell(hit.actorCell)){
+   Object.assign(damageEvent,{actorId:hit.actor,actorSpeciesId:hit.actorSpeciesId,moveId:hit.moveId,actorCell:{x:hit.actorCell.x,y:hit.actorCell.y}});
+  }
+  projected.set(event.eventId,damageEvent);
  }
- return {type:'charmville:world-encounter',active:true,encounter:e,...(damageEvent?{damageEvent}:{})};
+ const damageEvents=[...projected.values()].sort((a,b)=>BigInt(a.eventId)<BigInt(b.eventId)?-1:1).slice(-16);
+ const damageEvent=damageEvents.at(-1);
+ return {type:'charmville:world-encounter',active:true,encounter:{id:e.id,speciesId:e.speciesId,cell:{x:e.cell.x,y:e.cell.y},hp:e.hp,maxHp:e.maxHp,revision:e.revision},...(damageEvent?{damageEvent,damageEvents}:{})};
 }

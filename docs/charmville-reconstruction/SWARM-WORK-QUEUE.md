@@ -6,9 +6,9 @@ Capacity: one integration coordinator and three concurrent workers. Every progre
 
 ## Current assignments
 
-- Native worker: trusted geometry and source contact observation validation.
-- State worker: authenticated movement service; unverified until integration evidence is recorded.
-- Experience worker: unified action feedback and menu/accessibility acceptance; standalone garden UI is retired.
+- Native worker: source-backed committed companion attack playback with directional ground anchors.
+- State worker: consented second-player combat contribution, atomic HP/PP and retry/permission tests.
+- Experience worker: shared encounter assistance controls and two-account browser acceptance; standalone garden UI is retired.
 - Coordinator: cross-system test, evidence reconciliation, source preservation and next work dispatch.
 
 ## Dispatch order and integration gates

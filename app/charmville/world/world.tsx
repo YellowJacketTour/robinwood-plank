@@ -45,14 +45,17 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   },[]);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
+  const partyCreatureIds=useRef<string[]>([]);
   const followerFormation=useRef<'close'|'relaxed'>('close');
   const updateFormation=useCallback((formation:'close'|'relaxed')=>{
     followerFormation.current=formation;
     if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower-formation',formation},'http://localhost:3021');
   },[]);
-  const updateFollowers=useCallback((speciesIds:number[])=>{
-    partySpecies.current=speciesIds.filter(id=>[277,280,283,25,133,286].includes(id)).slice(0,6);
-    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current},'http://localhost:3021');
+  const updateFollowers=useCallback((speciesIds:number[],creatureIds:string[]=[])=>{
+    const members=speciesIds.map((speciesId,index)=>({speciesId,id:creatureIds[index]??''})).filter(member=>[277,280,283,25,133,286].includes(member.speciesId)).slice(0,6);
+    partySpecies.current=members.map(member=>member.speciesId);
+    partyCreatureIds.current=members.map(member=>member.id);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current,creatureIds:partyCreatureIds.current},'http://localhost:3021');
   },[]);
   const updateFollower=useCallback((speciesId:number)=>{
     followerSpecies.current=[277,280,283,25,133,286].includes(speciesId)?speciesId:0;
@@ -156,7 +159,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   useEffect(()=>{
     const returnToMenus=(event:MessageEvent)=>{
       if(event.origin!=='http://localhost:3021'||event.source!==frame.current?.contentWindow)return;
-      if(event.data?.type==='charmville:follower-ready'){updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);return;}
+      if(event.data?.type==='charmville:follower-ready'){updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);return;}
       if(event.data?.type!=='charmville:account-menu')return;
       const panel=event.data.panel;
       if(!tabs.some(([id])=>id===panel)||panel==='play')return;
@@ -262,7 +265,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
         <p className="mb-3 text-sm text-cream-muted">{presence?.active?'Your movement and Oran harvests save to your account. Combat rewards are still local.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p>
         {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter}/>}
-        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
+        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
       </section>
       <aside className={tab==='play'?'hidden':'space-y-4'} aria-label="Account world controls">

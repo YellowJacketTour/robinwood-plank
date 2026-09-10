@@ -1,3 +1,15 @@
+# Current integration checkpoint
+
+Updated 2026-09-09. This section supersedes the historical snapshots below. Read FEATURE-PROGRESS.md and the latest Git history for evidence; the older garden/frontier descriptions are not the current product direction.
+
+The playable route is `/charmville/world?panel=play` on local port3017, with native runtime on3021. The standalone garden UI is retired. Authenticated native movement, bounded same-region peers, private Oran cultivation with conserved inventory, six-member isolated test rosters, persistent companion HP/PP, supported turn combat and home recovery are connected locally. A consented one-move helper now contributes to the same wild encounter without taking control. Two-account browser and PostgreSQL checks cover the assist, expiry, revocation and retries. Read SHARED-BATTLE-SCENE.md, SIX-MEMBER-TEST-PARTY.md and NATIVE-ECONOMIC-LOOP.md.
+
+Native committed attack presentation is being integrated separately; consult NATIVE-WORLD-ENCOUNTER.md for its verified coverage rather than assuming every species or move has animation. Full raids, real-time sword authority, autonomous companion combat, capture/evolution/rewards, broad authored maps, shared status clocks and production-scale networking remain unfinished.
+
+UNIFIED-COMBAT-RESEARCH.md and RESEARCH-OSRS-DIABLO.md, RESEARCH-PARTY-AND-PRESENTATION.md and RESEARCH-WORLD-OF-WARCRAFT.md distinguish source findings from proposed synthesis. SWARM-WORK-QUEUE.md maps the wider backlog; assignments and bars do not imply release readiness.
+
+## Historical snapshots (superseded where inconsistent above)
+
 Latest checkpoint: see ACCOUNT-AND-BUILDER-CHECKPOINT.md (2026-09-09). Account entrance at /charmville/start, native welcome, validated pack and preparatory authority modules.
 
 Latest working build (2026-09-09): read [HOMESTEAD-PLAYTEST.md](HOMESTEAD-PLAYTEST.md). Native-212 authored quest now runs a till/plant/water/harvest loop, prototype XP, moving gold aura and two-player guest sprite presence after harvest. Real browser WebSocket traffic is verified. Earlier invalid-quest results included an HTTP compression mistake; native 219 still gives Version not supported after correcting it. Progress remains session-only and unauthenticated; Pokemon, account inventory/economy and full source animation fidelity remain missing. Continue from the working native tutorial and transport.

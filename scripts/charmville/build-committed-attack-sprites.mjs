@@ -1,0 +1,17 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';import {createHash} from 'node:crypto';import {PNG} from 'pngjs';import assert from 'node:assert/strict';import {compileIndexedSprite} from './indexed-sprite.mjs';
+const commit='db1928346e452e1a36b8ecff62f7e4d195504763',vault='public/charmville/creatures/followers',target='../charmville-references/charmville-native-homestead/action-sprites';
+const manifest=JSON.parse(await readFile(target+'/manifest.json','utf8')).filter(a=>!a.name.startsWith('attack-'));let generated='// Pinned PMD Attack frames; presentation only.\n';const provenance=[];
+for(const [id,name,species,move] of [['0252','treecko',277,1],['0255','torchic',280,10],['0258','mudkip',283,33]]){
+ for(const filename of ['Attack-Anim.png','Attack-Shadow.png','Attack-Offsets.png']){const url=`https://raw.githubusercontent.com/PMDCollab/SpriteCollab/${commit}/sprite/${id}/${filename}`;const r=await fetch(url,{signal:AbortSignal.timeout(30000)});assert(r.ok,url);const b=Buffer.from(await r.arrayBuffer());await mkdir(`${vault}/sprite/${id}`,{recursive:true});await writeFile(`${vault}/sprite/${id}/${filename}`,b);provenance.push({url,sha256:createHash('sha256').update(b).digest('hex')});}
+ const xml=await readFile(`${vault}/sprite/${id}/AnimData.xml`,'utf8'),anim=xml.match(/<Anim>\s*<Name>Attack<\/Name>([\s\S]*?)<\/Anim>/)[1];
+ const w=Number(anim.match(/<FrameWidth>(\d+)/)[1]),h=Number(anim.match(/<FrameHeight>(\d+)/)[1]),durations=[...anim.matchAll(/<Duration>(\d+)/g)].map(m=>Number(m[1])),frames=durations.length;
+ const bytes=await readFile(`${vault}/sprite/${id}/Attack-Anim.png`),compiled=compileIndexedSprite(bytes);await writeFile(`${target}/attack-${name}.png`,compiled.bytes);
+ manifest.push({name:`attack-${name}.png`,source:`PMDCollab/${commit}/sprite/${id}/Attack-Anim.png`,sha256:createHash('sha256').update(bytes).digest('hex'),runtimeSha256:createHash('sha256').update(compiled.bytes).digest('hex')});
+ const shadow=PNG.sync.read(await readFile(`${vault}/sprite/${id}/Attack-Shadow.png`)),ax=[],ay=[];assert.equal(shadow.width,w*frames);assert.equal(shadow.height,h*8);
+ for(let row=0;row<8;row++)for(let frame=0;frame<frames;frame++){const points=[];for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=((row*h+y)*shadow.width+frame*w+x)*4;if(shadow.data.subarray(i,i+4).every(v=>v===255))points.push([x,y]);}assert.equal(points.length,1);ax.push(points[0][0]);ay.push(points[0][1]);}
+ const hit=Number(anim.match(/<HitFrame>(\d+)/)[1]),total=durations.reduce((a,b)=>a+b,0);generated+=`int attack_${name}_colors[]={${compiled.colors}};\nint attack_${name}_x[]={${ax}};\nint attack_${name}_y[]={${ay}};\n`;
+ let sum=0;const expression=durations.slice(0,-1).map((d,i)=>{sum+=d;return `clock<${sum}?${i}:(`;}).join('')+(frames-1)+')'.repeat(frames-1);
+ generated+=`void drawAttack_${name}(bitmap art,int clock,int row,int x,int y,int layer){int frame=${expression};int anchor=row*${frames}+frame;art->Blit(layer,RT_SCREEN,frame*${w},row*${h},${w},${h},x+8-attack_${name}_x[anchor],y+72-attack_${name}_y[anchor],${w},${h});}\n`;
+ provenance.push({species,move,id,w,h,frames,durations,hitFrame:hit,contactTick:durations.slice(0,hit).reduce((a,b)=>a+b,0),totalTicks:total});
+}
+await writeFile('scripts/charmville/zquest/CommittedAttackFrames.zh',generated);await writeFile(target+'/manifest.json',JSON.stringify(manifest,null,2));await writeFile('public/charmville/catalog/committed-attack-provenance.json',JSON.stringify({commit,provenance},null,2)+'\n');console.log(provenance.filter(p=>p.species));

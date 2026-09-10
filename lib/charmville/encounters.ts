@@ -1,3 +1,4 @@
+import {assistAvailable} from "./battle-assist";
 import {encounterProjection} from "./encounter-projection";
 import {createHash,randomInt,randomUUID} from "node:crypto";
 import type {Pool} from "pg";
@@ -39,6 +40,7 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
     else if(String(e.controller_id)!==profileId)throw new YardError("Approach this creature first",403);
     if(q.action==="enter-turn"&&e.mode!=="world"||q.action==="return-world"&&e.mode!=="turn")throw new YardError("Encounter mode changed",409);
     e=(await c.query("UPDATE charmville_encounters SET controller_id=CASE WHEN $2='release' THEN NULL ELSE $3::bigint END,lease_until=CASE WHEN $2='release' THEN NULL ELSE clock_timestamp()+interval '90 seconds' END,mode=CASE WHEN $2='enter-turn' THEN 'turn' ELSE 'world' END,revision=revision+1 WHERE id=$1 RETURNING *",[e.id,q.action,profileId])).rows[0];
+    if((await c.query("SELECT to_regclass('charmville_battle_assists') AS present")).rows[0].present)await c.query("DELETE FROM charmville_battle_assists WHERE encounter_id=$1",[e.id]);
     // Preserve compatibility with installations before the additive rest table.
     if(q.action==="enter-turn"&&(await c.query("SELECT to_regclass('charmville_creature_rest') AS table_name")).rows[0].table_name)await c.query("UPDATE charmville_creature_rest SET status='cancelled' WHERE profile_id=$1 AND status='pending'",[profileId]);
     await c.query("INSERT INTO charmville_encounter_receipts(profile_id,request_id,payload_hash) VALUES($1,$2,$3)",[profileId,q.requestId,hash]);
@@ -46,7 +48,8 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
   }
   const owned=String(e.controller_id)===profileId;
   const legalActions=!inRange?[]:!e.controller_id?["claim"]:owned?[e.mode==="world"?"enter-turn":"return-world","release"]:[];
+  const canAssist=inRange&&e.mode==="turn"&&await assistAvailable(c,e.id,profileId,e.controller_id?String(e.controller_id):null);
   const projection=await encounterProjection(c,e.id,region,manifest.revision,presence.owner);
-  await c.query("COMMIT");return {...projection,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
+  await c.query("COMMIT");return {...projection,canAssist,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}
 }

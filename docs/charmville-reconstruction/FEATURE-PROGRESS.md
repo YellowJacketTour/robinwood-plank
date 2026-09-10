@@ -229,3 +229,11 @@ The local interface loads six distinct persistent companions through a trusted-m
 ## Shared battle scene evidence
 
 Two actual authorized accounts now observe identical encounter HP and committed events with real nearby Fighting/Watching labels and source portraits. Spectators receive no battle controls. Hit feedback is tied to new committed target events; it is not source attack animation. The watcher native adapter consumes matching HP/effect state and displays Poochyena while the viewport remains mounted. See [SHARED-BATTLE-SCENE.md](SHARED-BATTLE-SCENE.md). Full moves/AI/capture/rewards and broad spectator performance remain incomplete; bars are unchanged.
+
+## Consented cooperative assist evidence
+
+A controller can invite one nearby approved player for one companion move. Actual two-account browser verification covers invitation, helper-owned move and PP, shared enemy HP, retaliation against the helper, unchanged controller and consumed access. PostgreSQL checks cover duplicate action/invitation, expiry, private access revocation and invalidation on battle transitions. This extends shared combat beyond spectators without claiming simultaneous party AI, raids, capture or rewards. Native source animation integration is tracked separately and must pass playback verification before its evidence advances. See SHARED-BATTLE-SCENE.md.
+
+## Native committed attack integration evidence
+
+The current native build maps Treecko/Pound, Torchic/Scratch and Mudkip/Tackle to preserved PMD Attack sequences with source ground markers and contact timing. Queued events wait for native completion; old event history and stale acknowledgments cannot replay attacks. Owned follower UUIDs select the existing body for temporary attack playback. The final fresh two-account assist check verified Treecko contact, exact slot and completion with the real shared result. Full per-frame/direction visual QA, the other three test-party attack mappings, misses/statuses and autonomous movement remain incomplete. See NATIVE-WORLD-ENCOUNTER.md; maturity bars remain unchanged.

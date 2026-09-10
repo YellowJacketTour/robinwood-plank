@@ -1,6 +1,6 @@
 # Shared encounter and raid target
 
-The requested end state is one battlefield shared by direct player combat, commanded companions, nearby friends and large cooperative groups. Entering a staged battle changes the camera and available commands; it must not duplicate the enemy or reset HP, status, threat, loot eligibility or time. Current implementation remains a single active fighter with authenticated spectators; this document is the target, not completed functionality.
+The requested end state is one battlefield shared by direct player combat, commanded companions, nearby friends and large cooperative groups. Entering a staged battle changes the camera and available commands; it must not duplicate the enemy or reset HP, status, threat, loot eligibility or time. Current implementation has one encounter controller plus an explicitly invited nearby player who may contribute one authorized companion action. The invitation expires, is consumed once, and is invalidated by lifecycle transitions. That action spends persisted PP and updates the same enemy HP with a committed event and replay-safe receipt; it does not establish a second controller or a raid party. Other nearby players remain authenticated spectators. The wider raid system below remains a target, not completed functionality.
 
 ## Rules that both views share
 
@@ -18,7 +18,7 @@ Raid readability requires limits on visible effect density, party emphasis, redu
 
 ## Friendly controls over deep systems
 
-Default play uses one context action and one equipped action, with clear target and feedback. Advanced controls expose companion selection, attack/defend/recall, movement and ability shortcuts. Each command needs an acknowledged outcome. Spectators must be visibly distinguished from fighters until assistance is implemented; buttons cannot imply unsupported commands.
+Default play uses one context action and one equipped action, with clear target and feedback. Advanced controls expose companion selection, attack/defend/recall, movement and ability shortcuts. Each command needs an acknowledged outcome. Spectators, the controller and an invited one-action helper must remain visibly distinct; buttons cannot imply unrestricted assistance or unsupported commands.
 
 ## Remaining gates
 
