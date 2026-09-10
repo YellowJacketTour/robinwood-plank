@@ -19,7 +19,7 @@ export function useNativeMovement(frame:RefObject<HTMLIFrameElement|null>,sessio
   const client=createNativeMovementClient({request,correct(payload){if(!disposed)frame.current?.contentWindow?.postMessage(payload,'http://localhost:3021');},status(message){if(!disposed)setStatus(message);}});
   const receive=(event:MessageEvent)=>{if(event.origin!=='http://localhost:3021'||!frame.current||event.source!==frame.current.contentWindow)return;void client.observe(event.data);};
   window.addEventListener('message',receive);
-  const timer=setInterval(()=>{if(polling||document.hidden||!frame.current)return;polling=true;void request(undefined,controller.signal).catch(()=>{if(!disposed)sendPeers();}).finally(()=>{polling=false;});},2000);
+  const timer=setInterval(()=>{if(polling||document.hidden||!frame.current)return;polling=true;void request(undefined,controller.signal).then(snapshot=>{if(!disposed)client.synchronize(snapshot);}).catch(()=>{if(!disposed)sendPeers();}).finally(()=>{polling=false;});},2000);
   return()=>{disposed=true;controller.abort();clearInterval(timer);client.dispose();sendPeers();window.removeEventListener('message',receive);};
  },[frame,session,accountId,admission]);
  return accountId&&admission?status:'';

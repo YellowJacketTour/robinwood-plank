@@ -297,3 +297,7 @@ The native creature now remains visible through queued committed attacks before 
 Normal homestead arrival now uses a basic sword and three hearts, while the explicit endgame laboratory remains available. A compact account-backed guide connects home claim, starter selection, home admission and public admission; it does not manufacture tutorial completion. Fresh-account UI verification passes at390px and1440px with one mounted iframe. Native hoe/water playback passes through the starter route. Account capture/reward copy is corrected.
 
 A separate multiplayer audit confirms mutual authenticated actor API presence, but its existing native movement test failed with sequence0; do not interpret this as a new movement pass. Home and public regions still share one authored layout. Distinct maps and an atomic in-world exit are required next, as specified in FIRST-PLAYER-WORLD-CONTRACT.md. The full scripted tutorial and seamless open world remain incomplete; maturity bars are unchanged.
+
+## Walking synchronization repair
+
+Native observations are now queued through in-flight saves and paced from acknowledgment. Admission renewal metadata no longer rewinds the actor, and a proven uncommitted renewal race retries once. Ten regression tests pass. Actual browser walking committed199 steps across an automatic renewal with no corrective teleport beyond initial spawn; one409 recovered. The old zero-sequence browser harness now focuses the native canvas correctly. Full terrain collision parity and multi-map movement remain incomplete. See MOVEMENT-CONTINUITY.md.
