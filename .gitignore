@@ -96,3 +96,6 @@ test/e2e/.casino-keeper.pid
 
 # Generated local-chain epoch calibration
 public/arcade/practice-clock.js
+
+# Invite test gateway state -- tokens and guest keys must never be committed
+work/invite/
