@@ -82,3 +82,8 @@ test("computeWashSuspicion returns ratio 0 with no volume to judge", () => {
   assert.equal(result.suspicionRatio, 0);
   assert.equal(result.totalTradeCount, 0);
 });
+
+test("screening preserves distinct case-sensitive wallets while matching EVM case", () => {
+  assert.equal(computeWashSuspicion([sale({ from: "AbCdEf", to: "abcdef" })]).selfTransferCount, 0);
+  assert.equal(computeWashSuspicion([sale({ from: A, to: A.toUpperCase() })]).selfTransferCount, 1);
+});

@@ -70,6 +70,12 @@ function safeBigInt(wei: string): bigint | null {
   }
 }
 
+/** EVM addresses are case insensitive; base58 identities are not. */
+export function screeningWalletKey(address: string | null | undefined): string | null {
+  if (!address) return null;
+  return /^0x[0-9a-f]{40}$/i.test(address) ? address.toLowerCase() : address;
+}
+
 /**
  * Score a window of sales for a single collection. Order-independent;
  * callers should pre-filter to the window they want scored (e.g. last 24h,
@@ -87,8 +93,8 @@ export function computeWashSuspicion(sales: readonly WashCandidateSale[]): WashS
     if (price == null) continue;
     totalTradeCount += 1;
     totalVolumeWei += price;
-    const from = s.from?.toLowerCase() || null;
-    const to = s.to?.toLowerCase() || null;
+    const from = screeningWalletKey(s.from);
+    const to = screeningWalletKey(s.to);
     if (!from || !to) continue;
     const pairKey = [from, to].sort().join("|");
     const entry = pairCounts.get(pairKey) ?? { count: 0, directions: new Set<string>() };
@@ -106,8 +112,8 @@ export function computeWashSuspicion(sales: readonly WashCandidateSale[]): WashS
   for (const s of sales) {
     const price = safeBigInt(s.priceWei);
     if (price == null) continue;
-    const from = s.from?.toLowerCase() || null;
-    const to = s.to?.toLowerCase() || null;
+    const from = screeningWalletKey(s.from);
+    const to = screeningWalletKey(s.to);
     if (!from || !to) continue;
 
     const isSelfTransfer = from === to;

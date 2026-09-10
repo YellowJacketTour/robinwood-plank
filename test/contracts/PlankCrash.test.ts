@@ -236,7 +236,11 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     const { receipt, round } = await settleCurrent(env, toBeHex(31337n, 32));
     console.log(`      settleRound gas at MAX_SEATS=${max}: ${receipt.gasUsed}`);
     expect(round.phase).to.equal(2n);
-    expect(round.totalPlayerPaid + round.totalBonus + round.houseReturned).to.be.greaterThan(0n);
+    // A valid all-bust round pays nobody; its distributable funds return to reserve.
+    const settled = receipt.logs.map((log: any) => { try { return env.crash.interface.parseLog(log); } catch { return null; } }).find((event: any) => event?.name === "RoundSettled");
+    expect(settled, "settlement event is present").to.not.equal(undefined);
+    expect(round.totalPlayerPaid + round.totalBonus + round.houseReturned + settled.args.bustedToReserve)
+      .to.equal(round.playerDistributable + round.seed);
     await assertConserved(env, expect);
   });
 

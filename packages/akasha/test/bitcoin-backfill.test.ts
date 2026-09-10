@@ -392,3 +392,24 @@ test("the repair cannot be a silent no-op", () => {
   // history.
   ok(/parent_hash = \$2/.test(body), "and only where the parent IS the hash");
 });
+
+
+test("a deadline-limited epoch commits only its completed contiguous prefix", async () => {
+  const store = newStore();
+  seeded(store);
+  const deadline = Date.now() + 100;
+  let receivedDeadline: number | undefined;
+  const worker = new BackfillWorker({
+    store,
+    ingestRange: async (chain, _from, to, stopAt) => {
+      receivedDeadline = stopAt;
+      const header = { chain, height: to, hash: toHex(h(to)), parentHash: toHex(h(to - 1)) };
+      store.putHeader(header);
+      return header;
+    },
+  });
+  const result = await worker.step(["bitcoin"], deadline);
+  eq(receivedDeadline, deadline, "the actual reader receives the phase budget");
+  eq(result?.tailMoved, true);
+  eq(store.getBackfillTail("bitcoin"), LOCKED - 1, "unread blocks remain ahead of the tail");
+});

@@ -2108,6 +2108,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
       {loadError && <p role="status" className="text-sm text-foreground/60">Refresh delayed. Showing the last received collection data.</p>}
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
+      <details open={browseMode !== "intelligence" || tab !== "buy-sell"}><summary className={browseMode === "intelligence" && tab === "buy-sell" ? "cursor-pointer text-xs text-foreground/60" : "hidden"}>Collection sources, statistics and archive coverage</summary>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
@@ -2309,6 +2310,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
       )}
 
+      </details>
       <MarketTabRail
         navigation={
           <MarketNav
@@ -2333,7 +2335,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
       <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
         <MarketBrowseLayout
-          summary={
+          summary={browseMode === "intelligence" ? "Collection intelligence" :
             bookFilter === "listed"
               ? `${filteredListings.length} on the market`
               : catalogMeta && (catalogMeta.expectedCount ?? catalogMeta.projectedCount) > browseItems.length
@@ -2341,7 +2343,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 : `${browseItems.length.toLocaleString()} NFTs${catalogMeta?.partial ? " · completing metadata" : ""}`
           }
           lead={
-            listings.length > 0 || rarityMap.size > 0 ? (
+            browseMode !== "intelligence" && (listings.length > 0 || rarityMap.size > 0) ? (
               <>
               {rarityMap.size > 0 && raritySample && (
                 <p className="px-0.5 text-[0.58rem] text-foreground/40">
@@ -2371,7 +2373,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </>
             ) : undefined
           }
-          filters={
+          filters={browseMode === "intelligence" ? undefined : (
             <div className="space-y-3">
               <div className="mb-3">
                 <p className="mb-1 text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Show</p>
@@ -2522,7 +2524,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 </button>
               )}
             </div>
-          }
+          )}
           toolbar={
             <>
               <button
@@ -2535,6 +2537,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               >
                 {browseMode === "intelligence" ? "Art & listings" : "Intel"}
               </button>
+              {browseMode !== "intelligence" && <>
               <button
                 type="button"
                 onClick={() => setSweepOpen((v) => !v)}
@@ -2598,6 +2601,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   {rarityMap.size > 0 && <option value="rarity-desc">Common first</option>}
                 </select>
               </label>
+              </>}
             </>
           }
         >
@@ -2605,6 +2609,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <CollectionIntelligence
               name={collection?.name ?? collectionSlug}
               chain={chainDisplayName(chainSlug)}
+              currencySymbol={statCurrencySymbol}
+              tokens={tokens}
+              profileLinks={(["website", "twitter", "discord"] as const).flatMap((field) => {
+                const evidence = collectionProfile?.[field];
+                const href = profileLink(field, evidence?.value);
+                return href && evidence ? [{ label: field === "twitter" ? "X" : field === "website" ? "Website" : "Discord", href, source: evidence.source, observedAt: evidence.observedAt ?? null }] : [];
+              })}
               supply={supplyStats?.totalSupply ?? null}
               holders={supplyStats?.holderCount ?? null}
               indexed={catalogMeta?.projectedCount ?? tokens.length}
@@ -2613,8 +2624,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               artUrls={[collection?.image, ...tokens.map((token) => token.imageUrl)].filter((url): url is string => Boolean(url))}
               listings={listings.map((listing) => ({
                 priceWei: listing.priceWei,
+                currencySymbol: listing.currencySymbol,
                 maker: listing.maker,
                 tokenId: listing.tokenId,
+                traits: listing.traits,
               }))}
               sales={saleEvents}
               historyCoverage={historyCoverage}
