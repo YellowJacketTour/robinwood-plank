@@ -26,12 +26,19 @@ export const adventureEntry = {
   initData: equipmentDelta+' flags[1]=1 counter[0]=320 mcounter[0]=320 counter[1]=999 mcounter[1]=999 counter[2]=99 mcounter[2]=99 counter[3]=99 mcounter[3]=99 counter[4]=256 mcounter[4]=256 counter[5]=99 mcounter[5]=99 counter[6]=24',
 };
 export const diagnosticKits = {
+  starter: {label:'Starter adventure',delta:'items[5]=1 flags[1]=1 counter[0]=48 mcounter[0]=48 counter[1]=0 counter[2]=0 counter[3]=0 counter[4]=0 mcounter[4]=0'},
   bow: {label:'Bow timing',delta:'items[13]=1 items[15]=1 counter[1]=100 counter[3]=30 mcounter[3]=30'},
   bomb: {label:'Bomb fuse',delta:'items[3]=1 counter[2]=8 mcounter[2]=8'},
   wand: {label:'Wand effect',delta:'items[25]=1 counter[4]=64 mcounter[4]=64'},
   fire: {label:'Divine fire',delta:'items[64]=1 counter[4]=64 mcounter[4]=64'},
   sword: {label:'Sword charge timing',delta:'items[5]=1 items[94]=1 items[98]=1 flags[1]=1 counter[4]=128 mcounter[4]=128'},
 };
+// Normal arrival uses a small native loadout. Account supplies remain server-owned.
+export function homesteadUrl() {
+  const query=new URLSearchParams(adventureUrl('starter').split('?')[1]);
+  query.set('test','/quests/charmville/homestead/r01/Homestead.qst');
+  return '/play/?'+query;
+}
 export function adventureUrl(kit='endgame') {
   return '/play/?' + new URLSearchParams({
     test: adventureEntry.quest, dmap: String(adventureEntry.dmap),

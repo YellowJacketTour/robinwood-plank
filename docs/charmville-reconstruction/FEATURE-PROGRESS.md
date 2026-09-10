@@ -292,3 +292,8 @@ An actual browser fight waited the real cooldown, saw a new full-HP encounter wi
 ## Attack-to-defeat visual continuity
 
 The native creature now remains visible through queued committed attacks before playing one source faint sequence. Authoritative HP remains unchanged; identity and map transitions cancel pending presentation. Five bridge tests and the native two-strike terminal and identity fixtures pass. A new read-only source audit verifies 18 preserved PNG hashes and 504 directional attack frames against source timings. This improves the current supported attack mappings; complete move effects and full visual conformance remain outstanding. See ATTACK-SOURCE-QUALITY.md and NATIVE-DEFEAT-PRESENTATION.md.
+## First-player entrance
+
+Normal homestead arrival now uses a basic sword and three hearts, while the explicit endgame laboratory remains available. A compact account-backed guide connects home claim, starter selection, home admission and public admission; it does not manufacture tutorial completion. Fresh-account UI verification passes at390px and1440px with one mounted iframe. Native hoe/water playback passes through the starter route. Account capture/reward copy is corrected.
+
+A separate multiplayer audit confirms mutual authenticated actor API presence, but its existing native movement test failed with sequence0; do not interpret this as a new movement pass. Home and public regions still share one authored layout. Distinct maps and an atomic in-world exit are required next, as specified in FIRST-PLAYER-WORLD-CONTRACT.md. The full scripted tutorial and seamless open world remain incomplete; maturity bars are unchanged.

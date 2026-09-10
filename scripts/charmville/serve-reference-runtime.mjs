@@ -2,7 +2,7 @@ import http from 'node:http';
 import {createReadStream} from 'node:fs';
 import {stat,readFile} from 'node:fs/promises';
 import path from 'node:path';
-import {adventureUrl,diagnosticKits} from './adventure-entry.mjs';
+import {adventureUrl,diagnosticKits,homesteadUrl} from './adventure-entry.mjs';
 import {midiBankManifest} from './midi-bank.mjs';
 import {encodedStatic} from './static-encoding.mjs';
 const root=path.resolve('../charmville-references/zquest-web-runtime');
@@ -24,7 +24,7 @@ http.createServer(async(req,res)=>{
    res.writeHead(200,{...headers,'Content-Type':name.endsWith('.json')?'application/json':'image/png'});res.end(await readFile(path.resolve('../charmville-references/charmville-native-homestead/action-sprites',name)));return;
   }
   if(url.pathname==='/charmville/tutorial/'){
-   const entry=new URL(adventureUrl(),'http://localhost:3021');entry.searchParams.set('test','/quests/charmville/homestead/r01/Homestead.qst');res.writeHead(302,{...headers,Location:entry.pathname+entry.search});res.end();return;
+   res.writeHead(302,{...headers,Location:homesteadUrl()});res.end();return;
   }
   if(url.pathname==='/charmville-display.js'){
    res.writeHead(200,{...headers,'Content-Type':'text/javascript'});res.end(await readFile(new URL('./display-controls.js',import.meta.url)));return;
