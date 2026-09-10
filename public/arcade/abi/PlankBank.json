@@ -222,6 +222,31 @@
   "type": "event"
  },
  {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "WithdrawnTo",
+  "type": "event"
+ },
+ {
   "inputs": [
    {
     "internalType": "address",
@@ -282,6 +307,34 @@
    }
   ],
   "name": "betVia",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "game",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "expectedRound",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "betViaInRound",
   "outputs": [],
   "stateMutability": "nonpayable",
   "type": "function"
@@ -416,6 +469,24 @@
  {
   "inputs": [],
   "name": "withdrawAll",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address payable",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "withdrawTo",
   "outputs": [],
   "stateMutability": "nonpayable",
   "type": "function"

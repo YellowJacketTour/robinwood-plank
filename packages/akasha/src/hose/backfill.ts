@@ -84,7 +84,7 @@ export type BackfillStore = Pick<
 export interface BackfillDeps {
   store: BackfillStore;
   /** Ingest one epoch. Returns the LOWEST header it actually persisted. */
-  ingestRange: (chain: ChainId, from: number, to: number) => Promise<Header | undefined>;
+  ingestRange: (chain: ChainId, from: number, to: number, deadline?: number) => Promise<Header | undefined>;
   /** Gaze pressure per chain, 0..1. Absent means no attention. */
   gaze?: (chain: ChainId) => number;
 }
@@ -145,7 +145,7 @@ export class BackfillWorker {
    * Returns undefined when every chain's tail has reached its protocol origin,
    * which is the only honest way to report "the past is closed".
    */
-  async step(chains: ChainId[]): Promise<BackfillProgress | undefined> {
+  async step(chains: ChainId[], deadline?: number): Promise<BackfillProgress | undefined> {
     const { store } = this.deps;
     const chain = pickChain(store, chains, this.deps.gaze);
     if (!chain) return undefined;
@@ -157,7 +157,7 @@ export class BackfillWorker {
     const to = tail - 1;
     if (to < from) return { chain, from: tail, to: tail, linked: true, tailMoved: false, reason: "tail is at protocol_t0" };
 
-    const lowest = await this.deps.ingestRange(chain, from, to);
+    const lowest = await this.deps.ingestRange(chain, from, to, deadline);
     if (!lowest) {
       return { chain, from, to, linked: false, tailMoved: false, reason: "epoch produced no header" };
     }

@@ -23,6 +23,13 @@ const CREDIT = 10n ** 12n;
 async function main() {
   const [deployer] = await ethers.getSigners();
   const treasury = deployer;
+  const guardian = process.env.TESTNET_SAFETY_GUARDIAN;
+  const governance = process.env.TESTNET_SAFETY_GOVERNANCE;
+  if (!guardian || !governance || !ethers.isAddress(guardian) || !ethers.isAddress(governance)
+    || guardian === ethers.ZeroAddress || governance === ethers.ZeroAddress
+    || guardian.toLowerCase() === governance.toLowerCase()) {
+    throw new Error("Set distinct nonzero TESTNET_SAFETY_GUARDIAN and TESTNET_SAFETY_GOVERNANCE addresses before deployment.");
+  }
 
   const bal = await ethers.provider.getBalance(deployer.address);
   console.log("Deployer:", deployer.address, " balance:", ethers.formatEther(bal), "ETH");
@@ -33,10 +40,10 @@ async function main() {
   const DRAND_PERIOD = 3n;
   const DRAND_GENESIS = 1727521075n;
   const STRICT = process.env.STRICT === "1";
-  const BETTING_SECONDS = 20;
-  const MIN_PARTICIPANTS = STRICT ? 2n : 1n;
-  const MIN_POOL = ethers.parseEther("0.001");
-  const MAX_STAKE_BPS = STRICT ? 6000n : 10000n;
+  const BETTING_SECONDS = 30;
+  const MIN_PARTICIPANTS = 1n;
+  const MIN_POOL = 0n;
+  const MAX_STAKE_BPS = 10000n;
   const COMMUNITY_LOTTERY_BPS = 6500n;
   const MOCK_PLANK_PER_WEI = 1000n;
 
@@ -81,18 +88,20 @@ async function main() {
   const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lottery = await (
-    await ethers.getContractFactory("PlankLottery")
+    await ethers.getContractFactory("PlankCycleLottery")
   ).deploy({
     source: predictedCrash,
     founderSink: treasury.address,
     founderFeeBps: 1000n,
     oddsOneIn: STRICT ? 16n : 8n, // flat ceiling; the actuarial rule prices each round by its contribution
-    contributionBps: 2600n, // router: 40% community x 65% lottery
+    contributionBps: 6900n * COMMUNITY_LOTTERY_BPS / 10_000n, // 69% community, then lottery allocation
     kappaBps: 20_000n, // kappa = 2
     carveMinBps: 1000n,
     carveMaxBps: 3000n,
     carveHalfSaturationWei: 250_000n * CREDIT,
-  }, FEES);
+    carveDecayWad: 999_000_000_000_000_000n,
+    carveHalfSaturationCeilingWei: 2_500_000n * CREDIT,
+  }, 2000n, 1000n * CREDIT, 1000n, FEES);
   await lottery.waitForDeployment();
 
   const rakeRouter = await (
@@ -101,11 +110,12 @@ async function main() {
   await rakeRouter.waitForDeployment();
 
   const crash = await (
-    await ethers.getContractFactory("PlankCrash")
+    await ethers.getContractFactory("PlankGuardedCrash")
   ).deploy({
     beacon: await beacon.getAddress(),
     router: await rakeRouter.getAddress(),
     lottery: await lottery.getAddress(),
+    lotteryRule: "numbered",
     bank: predictedBank,
     bettingDurationSeconds: BETTING_SECONDS,
     roundIntervalSeconds: 0,
@@ -116,7 +126,7 @@ async function main() {
     keeperRewardBps: 0n,
     minParticipants: MIN_PARTICIPANTS,
     minPoolWei: MIN_POOL,
-    minStakeWei: 100n * CREDIT,
+    minStakeWei: CREDIT,
     maxStakePerWalletBps: MAX_STAKE_BPS,
     maxTargetBps: 1_000_000n,
     maxSeats: 128n,
@@ -126,9 +136,11 @@ async function main() {
     floorBps: 7500n,
     houseCapBps: 1000n,
     houseRakeCapBps: 5000n,
+    maxVaultBonusBps: 2500n,
+    vaultBonusDecayWad: 999_000_000_000_000_000n,
     seedBootstrapBudgetWei: ethers.parseEther("0.005"),
-    refundTimeoutSeconds: 30n * 86400n,
-  }, FEES);
+    refundTimeoutSeconds: 3600n,
+  }, guardian, governance, 3600n, FEES);
   await crash.waitForDeployment();
   const crashAddr = await crash.getAddress();
   if (crashAddr.toLowerCase() !== predictedCrash.toLowerCase()) {
@@ -153,13 +165,13 @@ async function main() {
     bank: await bank.getAddress(),
     plank: await plank.getAddress(),
     lottery: await lottery.getAddress(),
+    lotteryRule: "numbered",
     beacon: await beacon.getAddress(),
     rakeRouter: await rakeRouter.getAddress(),
     oracle: await oracle.getAddress(),
     burnEngine: await burnEngine.getAddress(),
     deployer: deployer.address,
-    // Throwaway burner funded with worthless testnet ETH; manifest is gitignored.
-    simulateKey: process.env.DEPLOYER_PK,
+    // Never publish the deployment key. Remote testers connect their own wallet.
   };
   fs.writeFileSync(
     new URL("../public/arcade/deploy-addresses.testnet.json", import.meta.url),

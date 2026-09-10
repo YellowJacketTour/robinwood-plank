@@ -146,23 +146,37 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
    * door exists.
    */
   private rr = 0;
+  private readonly providerCooldowns = new Map<string, number>();
+  private providerKey(host: string): string {
+    const hostname = new URL(host).hostname;
+    return hostname === "mempool.space" || hostname.endsWith(".mempool.space") ? "mempool.space" : hostname;
+  }
   private async get(path: string, asJson: boolean | "block"): Promise<unknown> {
     let last: Error | undefined;
     const start = this.hosts.length > 1 ? this.rr++ % this.hosts.length : 0;
     const rotated =
       start === 0 ? this.hosts : [...this.hosts.slice(start), ...this.hosts.slice(0, start)];
-    // Skip benched hosts -- but NEVER fail shut. If every host is benched the
-    // full list is tried anyway, so a jail can only ever cost latency, never
-    // availability. A pool that refuses to try is worse than a slow one.
+    // A fully cooling pool is deferred. Retrying it immediately compounds
+    // throttling and can consume the entire worker phase without progress.
     const now = Date.now();
     const live = rotated.filter((h) => (this.benched.get(h)?.until ?? 0) <= now);
-    const ordered = live.length > 0 ? live : rotated;
+    const ordered = live;
+    const deadline = Date.now() + Math.min(16_000, this.timeoutMs * 2);
     for (const host of ordered) {
+      if ((this.providerCooldowns.get(this.providerKey(host)) ?? 0) > Date.now()) continue;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
       try {
         const res = await this.fetchImpl(`${host}${path}`, {
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: AbortSignal.timeout(Math.max(1, Math.min(this.timeoutMs, remaining))),
         });
         if (!res.ok) {
+          if (res.status === 429) {
+            const retry = res.headers?.get("retry-after");
+            const seconds = retry != null && /^\d+$/.test(retry) ? Number(retry) : NaN;
+            const retryAt = Number.isFinite(seconds) ? Date.now() + seconds*1000 : retry ? Date.parse(retry) : NaN;
+            this.providerCooldowns.set(this.providerKey(host), Math.max(Date.now()+60_000, Number.isFinite(retryAt) ? retryAt : 0));
+          }
           // A 429 is a WAIT, not a verdict on the data. Marking it retryable
           // lets the loop fall through to the next host instead of surfacing
           // the first host's throttle as the answer -- which is exactly how a

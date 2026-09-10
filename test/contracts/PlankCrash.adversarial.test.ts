@@ -137,7 +137,7 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
   });
 
   // ── A-3 abandoned-round hatch ──────────────────────────────────────────
-  it("A-3: a LIVE round whose randomness exists but which nobody settles becomes refundable only after 30x the timeout (negative control: RandomnessAvailable forever on 0391515)", async () => {
+  it("A-3: known randomness cannot be cancelled even beyond 30x the timeout", async () => {
     const env = await fresh();
     const id: bigint = await env.crash.currentRoundId();
     const r0 = await env.crash.rounds(id);
@@ -151,18 +151,14 @@ describe("PlankCrash -- adversarial hardening cases (2026-09-05)", () => {
     const reveal = BigInt(r0.revealNotBefore);
     const timeout = DEFAULT_CRASH.refundTimeoutSeconds;
     await increaseToAtLeast(reveal + timeout);
-    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "RandomnessAvailable");
+    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "CommittedRoundCannotBeCancelled");
     await increaseToAtLeast(reveal + timeout * mult - 2n);
-    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "RandomnessAvailable");
+    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "CommittedRoundCannotBeCancelled");
     await increaseToAtLeast(reveal + timeout * mult);
-    // Whoever settles first still wins: settle is possible right up to the refund.
-    // (Here nobody does, modelling an unsettleable round.)
-    await expect(env.crash.refundRound()).to.emit(env.crash, "RoundRefunded").withArgs(id, E("2"), r0.seed);
-    await env.crash.claimRefund(id, env.alice.address);
-    await env.crash.claimRefund(id, env.bob.address);
-    expect(await env.crash.owed(env.alice.address)).to.equal(E("1"));
-    expect(await env.crash.owed(env.bob.address)).to.equal(E("1"));
-    await expect(env.crash.settleRound()).to.be.revertedWithCustomError(env.crash, "TooEarly"); // the NEW round is betting
+    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "CommittedRoundCannotBeCancelled");
+    await env.crash.settleRound();
+    expect((await env.crash.rounds(id)).phase).to.equal(2n);
+    await expect(env.crash.claimRefund(id, env.alice.address)).to.be.revertedWithCustomError(env.crash, "BadPhase");
     await assertConserved(env, expect);
   });
 

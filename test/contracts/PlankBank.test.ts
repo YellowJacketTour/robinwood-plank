@@ -74,6 +74,16 @@ describe("PlankBank -- session-key play against PlankCrash + keeper loop", () =>
     await expect(bank.connect(alice).withdraw(E("6"))).to.be.revertedWithCustomError(bank, "InsufficientBalance");
   });
 
+  it('local free-play settles at betting close without changing the chain clock or production beacon wait',async()=>{
+    const {env,cfg}=await deploy();
+    await bet(env,env.alice,'1',15000n);
+    const id=await env.crash.currentRoundId(),r=await env.crash.rounds(id);
+    await increaseToAtLeast(r.bettingEndsAt);
+    await tick(ethers.provider,env.keeper,{...cfg,mockImmediateAfterClose:true});
+    expect((await env.crash.rounds(id)).phase).eq(2n);
+    expect(BigInt((await ethers.provider.getBlock('latest'))!.timestamp)).lessThan(r.revealNotBefore);
+    await assertConserved(env,expect);
+  });
   it("the keeper's tick() drives lock -> relay -> settle -> flush -> router claims -> burn with a gas-only signer", async () => {
     const { env, cfg } = await deploy();
     const { crash, alice, bob, keeper } = env;

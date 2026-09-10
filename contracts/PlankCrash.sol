@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {IDrandBeacon} from "./IDrandBeacon.sol";
-import {PlankCcs2LMath} from "./lib/PlankCcs2LMath.sol";
+import {PlankCappedPoolMath} from "./lib/PlankCappedPoolMath.sol";
 
 interface IPlankLottery {
     function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) external;
@@ -20,61 +20,22 @@ interface IPlankBankCredit {
 }
 
 /**
- * PlankCrash -- plank.love's crash game, rebuilt on the ratified CCS-2L
- * settlement (docs/marketplank/RATIFICATION-ccs2l-2026-09-02.md) and the
- * ratified Vault/lottery design (DESIGN-vault-lottery-progressive-carve-
- * 2026-09-04.md). Successor to PlankCrashDrand; the audit that motivated every
- * change is docs/marketplank/AUDIT-contracts-hardening-2026-09-04.md.
+ * Immutable capped survivor-pool crash game. Targets, rule hash, beacon round
+ * and funded underwriting are committed before entropy. Visible flight is a
+ * replay of that result; there is no post-entropy cash-out action.
  *
- * WHAT A ROUND IS
- *   1. _startRound (in the previous round's settle/void/refund transaction)
- *      commits the randomness envelope BEFORE any stake exists: the target
- *      drand round, its emission time, the settlement rule + parameter hash
- *      (RATIFICATION s6.2), the Vault seed, and the house-cap base
- *      (reserveAtLock = the seedable buffer after the seed draw, exactly the
- *      lib kernel's snapshot).
- *   2. placeBet(targetBps): a seat commits (stake, target) once. There is NO
- *      manual cash-out, no cash-out window, no block-number time law: the
- *      flight is purely presentational off-chain. Survival is targetBps <=
- *      crashBps, a pure function of the drand output. (Closes audit B-1.)
- *   3. lockRound (optional, permissionless; settle implies it): after betting
- *      closes the round either voids (under-threshold / whale-dominated; all
- *      stakes refundable exactly, seed returns) or goes LIVE.
- *   4. settleRound: once the beacon holds the target round, ONE pass settles
- *      every seat with PlankCcs2LMath (player layer f*s + lambda*s*ln m with
- *      the survivor floor; house layer with the GLOBAL partition-invariant
- *      cap; no per-wallet cap of any kind), credits the in-contract pull
- *      ledger, pays the keeper, escrows net rake for the router, runs the
- *      round-only lottery draw, and starts the next round. No registration
- *      window (B-4); a settled seat's payout depends only on committed data
- *      and the crash.
- *   5. refundRound: OUTCOME-INDEPENDENT long-timeout refund (B-3). If the
- *      target drand round has still not been relayed refundTimeoutSeconds
- *      after its emission time, anyone may refund the round: every stake
- *      exactly, the seed back to the Vault. settle and refund are mutually
- *      exclusive by phase; whoever holds the signature can always settle
- *      first. The refund condition never reads the outcome.
+ * Surviving positions receive at most stake * target / BPS. Funded floors are
+ * followed by stake-proportional capped allocation; unused player funding and
+ * house seed return to the recyclable buffer. Fees remain separately escrowed.
  *
- * THE VAULT (one role: the solvency floor of the house layer)
- *   reserve            the whole Vault balance
- *   protectedPrincipal a monotone floor inside it -- credited, never spent;
- *                      the buffer (reserve - protectedPrincipal) is the only
- *                      seedable money  ......................... (I1)
- *   seedBudget         cumulative-income bound: seeds drawn - seeds returned
- *                      <= bootstrap + retained rake + donations .. (V2)
- *   emissionBufferCap  buffer above the cap cascades to the lottery (V3)
- *   The seed is the lib kernel's fixed crashSeedWei, clamped to the buffer
- *   and the budget. Unused seed (houseReturned) and busted pots return to
- *   the buffer, exactly as lib/casino/simulation.ts routes them.
+ * Underwriting is houseCapBps of the spendable buffer, clamped to the income
+ * budget and arithmetic bound. Protected principal is never seeded. The old
+ * fixed-seed, rake-bonus and participation-age settings remain ABI metadata
+ * only and do not govern capped-pool v1. Any nonempty valid book settles;
+ * wallet counts/concentration cannot cancel admitted bets.
  *
- * RAKE: effectiveRakeBps follows the ratified staircase (lib evolutionQuote):
- *   rakeBps - min(maxTiers, qualifiedVolume / rakeVolumeStepWei) * rakeStepBps,
- *   floored at rakeFloorBps, on the volume BEFORE the settling round. The
- *   keeper bounty is keeperRewardBps of gross rake (bps of realised rake =>
- *   farm-proof); the remainder goes to PlankRakeRouter's 40/40/20 of NET.
- *
- * POSTURE: no owner, no setters, no pause, no selfdestruct, no upgrade path.
- * Every trigger is permissionless. accountedBalance() is exact (B-12).
+ * State transitions, exits, pull credits and accounting are permissionless.
+ * Oracle finality, network availability and keeper funding remain assumptions.
  */
 contract PlankCrash is ReentrancyGuard {
     uint256 private constant BPS = 10_000;
@@ -87,21 +48,18 @@ contract PlankCrash is ReentrancyGuard {
     // headroom under that cap (512 measured past 30M before this change).
     uint256 public constant MAX_SEATS_CEILING = 256;
     uint256 public constant MAX_TARGET_CEILING = 100_000_000; // 10,000x, the crash law's own maximum
-    uint256 public constant MAX_STAKE_WEI = type(uint96).max; // < PlankCcs2LMath.MAX_STAKE
+    uint256 public constant MAX_STAKE_WEI = type(uint96).max; // < PlankCappedPoolMath.MAX_STAKE
     uint256 public constant MAX_KEEPER_BPS = 500;
     // Whole drand rounds of headroom past the strictly-next round after betting
     // closes, absorbing chain/drand clock skew and Orbit idle-gap timestamp jumps.
     uint256 public constant TARGET_ROUND_SAFETY_PERIODS = 20;
+    bytes32 public constant RECOVERY_POLICY = keccak256("PLANK_ORIGINAL_RESULT_ONLY_V1");
     bytes32 public constant RESULT_DOMAIN = keccak256("PLANKCRASH_RESULT_V2");
     bytes32 public constant TICKET_DOMAIN = keccak256("PLANK_TICKET_V1");
     // PlankLottery.fund() on a never-touched lottery writes four zero->nonzero
     // slots (~91k gas); 100k left no margin, so the stipend is 2x that.
     uint256 public constant OVERFLOW_GAS_STIPEND = 200_000;
-    // A LIVE round whose randomness IS on the beacon but which nobody has
-    // settled for ABANDONED_ROUND_MULTIPLIER x refundTimeoutSeconds after its
-    // emission time is treated as unsettleable (bricked lottery, gas ceiling,
-    // dead beacon read) and becomes refundable. Settlement stays permissionless
-    // and first-come the whole time, so this never reads the outcome.
+    // Legacy ABI metadata only. No deadline permits cancellation of a live bet.
     uint256 public constant ABANDONED_ROUND_MULTIPLIER = 30;
 
     enum Phase {
@@ -123,7 +81,7 @@ contract PlankCrash is ReentrancyGuard {
         uint64 targetDrandRound;
         uint64 bettingEndsAt;
         uint64 revealNotBefore; // the target round's emission time
-        bytes32 paramsHash; // PlankCcs2LMath.paramsHash at commitment
+        bytes32 paramsHash; // PlankCappedPoolMath.paramsHash at commitment
         uint256 seed;
         uint256 playerPool;
         uint256 reserveAtLock; // house-cap base: buffer after the seed draw
@@ -167,7 +125,7 @@ contract PlankCrash is ReentrancyGuard {
         uint256 houseCapBps; // CCS-2L GLOBAL house cap (ratified 1_000)
         uint256 houseRakeCapBps; // CCS-2L v2 actuarial house cap, of the round's rake (ratified 5_000)
         // CCS-2L v3, SPEC-monotonic-vault-positive-sum-2026-09-05 §3.4/§4.
-        // 0 = feature OFF (backward-compatible default; see PlankCcs2LMath's
+        // 0 = feature OFF (backward-compatible default; see PlankCappedPoolMath's
         // own _houseLayer guard) -- setting maxVaultBonusBps > 0 opts a
         // deployment into the participation-count vault bonus.
         uint256 maxVaultBonusBps; // ceiling, bps of the round's rake (ratified 2_500 = 25%)
@@ -209,6 +167,10 @@ contract PlankCrash is ReentrancyGuard {
     bytes32 public immutable settlementParamsHash;
 
     uint256 public currentRoundId;
+    uint256 public stalledRound;
+    event RoundStalled(uint256 indexed roundId);
+    error RoundAlreadyStalled();
+    error CommittedRoundCannotBeCancelled();
     uint256 public reserve;
     uint256 public protectedPrincipal;
     uint256 public seedBudget;
@@ -217,6 +179,11 @@ contract PlankCrash is ReentrancyGuard {
     uint256 public pendingOverflow; // escrowed buffer overflow, delivered to the lottery
     uint256 public unclaimedRefunds; // voided/refunded stakes not yet pulled
     uint256 public totalOwed;
+    // One unresolved draw blocks the next book; its committed board cannot be
+    // consumed by a later round. Crash credits remain independently withdrawable.
+    uint256 public pendingLotteryRound;
+    bytes32 private _pendingLotterySeed;
+    uint256 private _pendingLotteryRake;
     uint256 public totalSeeded;
     uint256 public totalSeedReturned;
     // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.4/§4.1. Monotone: only
@@ -317,17 +284,17 @@ contract PlankCrash is ReentrancyGuard {
             revert BadConfig();
         }
         if (cfg.roundIntervalSeconds == 0 && cfg.bettingDurationSeconds < period) revert BadConfig();
-        if (cfg.rakeBps > BPS || cfg.rakeFloorBps > cfg.rakeBps || cfg.rakeStepBps == 0 || cfg.rakeVolumeStepWei == 0) {
+        if (cfg.rakeBps > BPS || cfg.rakeFloorBps > cfg.rakeBps || cfg.rakeStepBps == 0 || cfg.rakeStepBps > BPS || cfg.rakeVolumeStepWei == 0) {
             revert BadConfig();
         }
         if (cfg.keeperRewardBps > MAX_KEEPER_BPS) revert BadConfig();
         if (cfg.minParticipants == 0 || cfg.maxStakePerWalletBps == 0 || cfg.maxStakePerWalletBps > BPS) revert BadConfig();
-        if (cfg.maxTargetBps < PlankCcs2LMath.MIN_TARGET_BPS || cfg.maxTargetBps > MAX_TARGET_CEILING) revert BadConfig();
+        if (cfg.maxTargetBps < PlankCappedPoolMath.MIN_TARGET_BPS || cfg.maxTargetBps > MAX_TARGET_CEILING) revert BadConfig();
         if (cfg.maxSeats == 0 || cfg.maxSeats > MAX_SEATS_CEILING) revert BadConfig();
         // A table that can never reach quorum, or a minimum stake no seat can
         // pay, would void every round forever (no setter can repair it).
         if (cfg.minParticipants > cfg.maxSeats || cfg.minStakeWei > MAX_STAKE_WEI) revert BadConfig();
-        if (cfg.crashSeedWei > PlankCcs2LMath.MAX_POT) revert BadConfig();
+        if (cfg.crashSeedWei > PlankCappedPoolMath.MAX_POT) revert BadConfig();
         if (cfg.protectedPrincipalBps > BPS) revert BadConfig();
         // The survivor floor must be payable from the rake-net pot; otherwise the
         // math's floor-degenerate branch (defensive) would be the normal case.
@@ -336,7 +303,7 @@ contract PlankCrash is ReentrancyGuard {
         // rake on that round (>= BPS would re-open the seed farm, F-2).
         if (cfg.houseRakeCapBps >= BPS) revert BadConfig();
         // v3 vault bonus: maxVaultBonusBps == 0 is the valid "feature off"
-        // default (see PlankCcs2LMath's own guard) so it is NOT bounded below;
+        // default (see PlankCappedPoolMath's own guard) so it is NOT bounded below;
         // only bounded above, same actuarial reasoning as houseRakeCapBps —
         // this additional cap must never be able to authorize MORE room than
         // houseRakeCapBps already permits. vaultBonusDecayWad must be a real
@@ -350,7 +317,7 @@ contract PlankCrash is ReentrancyGuard {
         if (cfg.maxVaultBonusBps > 0 && (cfg.vaultBonusDecayWad == 0 || cfg.vaultBonusDecayWad >= 1e18)) {
             revert BadConfig();
         }
-        if (cfg.refundTimeoutSeconds == 0) revert BadConfig();
+        if (cfg.refundTimeoutSeconds == 0 || cfg.refundTimeoutSeconds > 30 days) revert BadConfig();
 
         genesisTimestamp = block.timestamp;
         bettingDurationSeconds = cfg.bettingDurationSeconds;
@@ -377,17 +344,17 @@ contract PlankCrash is ReentrancyGuard {
         seedBootstrapBudgetWei = cfg.seedBootstrapBudgetWei;
         seedBudget = cfg.seedBootstrapBudgetWei;
         refundTimeoutSeconds = cfg.refundTimeoutSeconds;
-        settlementRuleId = PlankCcs2LMath.RULE_ID;
-        settlementRuleVersion = PlankCcs2LMath.RULE_VERSION;
-        settlementParamsHash = PlankCcs2LMath.paramsHash(_params());
+        settlementRuleId = PlankCappedPoolMath.RULE_ID;
+        settlementRuleVersion = PlankCappedPoolMath.RULE_VERSION;
+        settlementParamsHash = PlankCappedPoolMath.paramsHash(_params());
 
         _startRound();
     }
 
     // ── Round lifecycle ─────────────────────────────────────────────────
 
-    function _params() private view returns (PlankCcs2LMath.Params memory) {
-        return PlankCcs2LMath.Params({
+    function _params() private view returns (PlankCappedPoolMath.Params memory) {
+        return PlankCappedPoolMath.Params({
             floorBps: floorBps,
             houseCapBps: houseCapBps,
             houseRakeCapBps: houseRakeCapBps,
@@ -401,12 +368,50 @@ contract PlankCrash is ReentrancyGuard {
         return genesisTimestamp + ((elapsed / roundIntervalSeconds) + 1) * roundIntervalSeconds;
     }
 
+    event RoundStartDeferred(uint256 indexed completedRound);
+    error OnlySelf();
+    error InsufficientSettlementGas();
+    error LotteryRecoveryPending();
+    event LotteryRecordRecovered(uint256 indexed roundId);
+
+    function retryLottery() external nonReentrant {
+        uint256 id = pendingLotteryRound;
+        if (id == 0) revert BadPhase();
+        if (gasleft() < 1_600_000) revert InsufficientSettlementGas();
+        // A revert preserves both the pending commitment and lottery state.
+        IPlankLottery(lottery).recordRound{gas: 1_000_000}(id, _pendingLotterySeed, rounds[id].lotteryWinner, _pendingLotteryRake);
+        pendingLotteryRound = 0;
+        delete _pendingLotterySeed;
+        delete _pendingLotteryRake;
+        emit LotteryRecordRecovered(id);
+        _tryStartRound();
+    }
+    // Preserve final accounting even if the next beacon schedule is unavailable.
+    function restartRounds() external nonReentrant {
+        if (uint8(rounds[currentRoundId].phase) < uint8(Phase.SETTLED)) revert BadPhase();
+        _startRound();
+    }
+    function startRoundIsolated() external {
+        if (msg.sender != address(this)) revert OnlySelf();
+        _startRound();
+    }
+    function _tryStartRound() private {
+        try this.startRoundIsolated{gas: 400_000}() {} catch { emit RoundStartDeferred(currentRoundId); }
+    }
+
+    /// @dev Production behavior is unchanged; local presentation harnesses may
+    /// override the admission schedule without changing settlement mathematics.
+    function _bettingDeadline(uint256 id) internal virtual returns (uint256) {
+        return (id == 1 || roundIntervalSeconds == 0) ? block.timestamp + bettingDurationSeconds : _nextSlot();
+    }
+
     function _startRound() private {
+        if (pendingLotteryRound != 0) revert LotteryRecoveryPending();
         currentRoundId += 1;
         uint256 id = currentRoundId;
         Round storage r = rounds[id];
         r.phase = Phase.BETTING;
-        uint256 endsAt = (id == 1 || roundIntervalSeconds == 0) ? block.timestamp + bettingDurationSeconds : _nextSlot();
+        uint256 endsAt = _bettingDeadline(id);
         r.bettingEndsAt = uint64(endsAt);
         // Bind the randomness envelope before any stake is visible.
         uint64 target = beacon.nextRoundAfter(endsAt) + uint64(TARGET_ROUND_SAFETY_PERIODS);
@@ -422,14 +427,10 @@ contract PlankCrash is ReentrancyGuard {
         emit RoundStarted(id, r.bettingEndsAt, target, r.revealNotBefore, seed, r.reserveAtLock, r.paramsHash);
     }
 
-    /// @dev The ONLY place the Vault is debited: seed = min(crashSeedWei,
-    ///      buffer, seedBudget). Never below protectedPrincipal (I1); never
-    ///      beyond cumulative income (V2).
+    /// @dev Debit only the pre-funded nextSeed quote; protected principal and
+    ///      other obligations are excluded by the spendable-buffer ledger.
     function _drawSeed() private returns (uint256 seed) {
-        seed = crashSeedWei;
-        uint256 buf = _buffer();
-        if (seed > buf) seed = buf;
-        if (seed > seedBudget) seed = seedBudget;
+        seed = nextSeed();
         if (seed == 0) return 0;
         reserve -= seed;
         seedBudget -= seed;
@@ -462,6 +463,21 @@ contract PlankCrash is ReentrancyGuard {
         _placeBet(msg.sender, targetBps, msg.sender);
     }
 
+    error WrongRound();
+
+    /// @notice Bind the signed wager to the exact round shown to the player.
+    function placeBetInRound(uint256 expectedRound, uint256 targetBps) external payable nonReentrant {
+        if (expectedRound != currentRoundId) revert WrongRound();
+        _placeBet(msg.sender, targetBps, msg.sender);
+    }
+
+    function placeBetForInRound(address player, uint256 expectedRound, uint256 targetBps) external payable nonReentrant {
+        if (msg.sender != bank) revert NotBank();
+        if (player == address(0)) revert ZeroAddress();
+        if (expectedRound != currentRoundId) revert WrongRound();
+        _placeBet(player, targetBps, msg.sender);
+    }
+
     /// @notice Commit a seat FOR `player`, funded by the fixed PlankBank only.
     ///         A seat is one-per-player-per-round, so an OPEN third-party
     ///         funder would let anyone squat a player's seat for the round at
@@ -475,7 +491,11 @@ contract PlankCrash is ReentrancyGuard {
         _placeBet(player, targetBps, msg.sender);
     }
 
+    function _beforeBet() internal view virtual {}
+    function _afterRoundStalled(uint256) internal virtual {}
+
     function _placeBet(address player, uint256 targetBps, address fundedBy) private {
+        _beforeBet();
         uint256 id = currentRoundId;
         Round storage r = rounds[id];
         if (r.phase != Phase.BETTING) revert BadPhase();
@@ -483,7 +503,7 @@ contract PlankCrash is ReentrancyGuard {
         if (stakeOf[id][player] != 0) revert AlreadyBet();
         uint256 stake = msg.value;
         if (stake == 0 || stake < minStakeWei || stake > MAX_STAKE_WEI) revert BadStake();
-        if (targetBps < PlankCcs2LMath.MIN_TARGET_BPS || targetBps > maxTargetBps) revert BadTarget();
+        if (targetBps < PlankCappedPoolMath.MIN_TARGET_BPS || targetBps > maxTargetBps) revert BadTarget();
         Seat[] storage seats = _seats[id];
         if (seats.length >= maxSeats) revert RoundFull();
         seats.push(Seat({player: player, stake: uint96(stake), targetBps: uint32(targetBps)}));
@@ -494,7 +514,7 @@ contract PlankCrash is ReentrancyGuard {
         emit BetPlaced(id, player, stake, targetBps, fundedBy);
     }
 
-    /// @notice Close betting: void (under-threshold / whale-dominated) or go
+    /// @notice Close betting: void an empty book or go
     ///         LIVE. Permissionless; settleRound performs it implicitly.
     function lockRound() external nonReentrant {
         _lock();
@@ -506,13 +526,15 @@ contract PlankCrash is ReentrancyGuard {
         if (r.phase != Phase.BETTING) revert BadPhase();
         if (block.timestamp < r.bettingEndsAt) revert TooEarly();
         uint256 n = _seats[id].length;
-        bool whale = r.playerPool > 0 && r.largestStake * BPS > r.playerPool * maxStakePerWalletBps;
-        if (n < minParticipants || r.playerPool < minPoolWei || whale) {
+        // Identity counts and concentration are not economic security. They
+        // permit Sybil bypass and let a late whale cancel honest positions.
+        // Any nonempty funded book settles under the same capped rule.
+        if (n == 0) {
             r.phase = Phase.VOIDED;
             unclaimedRefunds += r.playerPool;
             _returnSeed(r);
-            emit RoundVoided(id, r.playerPool, whale ? "whale-dominated" : "under-threshold");
-            _startRound();
+            emit RoundVoided(id, r.playerPool, "empty");
+            _tryStartRound();
             return false;
         }
         r.phase = Phase.LIVE;
@@ -558,12 +580,12 @@ contract PlankCrash is ReentrancyGuard {
 
         Seat[] storage seats = _seats[id];
         uint256 n = seats.length;
-        PlankCcs2LMath.Seat[] memory mseats = new PlankCcs2LMath.Seat[](n);
+        PlankCappedPoolMath.Seat[] memory mseats = new PlankCappedPoolMath.Seat[](n);
         for (uint256 i = 0; i < n; i++) {
-            mseats[i] = PlankCcs2LMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
+            mseats[i] = PlankCappedPoolMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
         }
-        PlankCcs2LMath.Result memory res =
-            PlankCcs2LMath.settle(
+        PlankCappedPoolMath.Result memory res =
+            PlankCappedPoolMath.settle(
                 playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, r.vaultRoundsContributedAtLock, _params()
             );
 
@@ -588,7 +610,8 @@ contract PlankCrash is ReentrancyGuard {
             _creditBuffer(res.houseReturned, true);
         }
         if (res.bustedToReserve > 0) {
-            totalSeedReturned += r.seed;
+            // The capped rule reports only unused PLAYER money here. Seed
+            // returns are always in houseReturned, including no-survivor rounds.
             _creditBuffer(res.bustedToReserve, true);
         }
 
@@ -605,15 +628,14 @@ contract PlankCrash is ReentrancyGuard {
         address winner = _ticketWinner(seats, n, seedHash, playerPool);
         r.lotteryWinner = winner;
         emit LotteryTicket(id, winner, uint256(keccak256(abi.encode(TICKET_DOMAIN, seedHash))) % playerPool, playerPool);
-        // The draw must never be able to lock player money: PlankLottery.
-        // recordRound is revert-free by analysis, but if it ever reverts the
-        // round still settles and the failure is logged. Insufficient-gas
-        // griefing (make the callee OOG, keep the caller alive) cannot skip a
-        // healthy draw: the work after this call (_startRound) costs far more
-        // than the 1/64 EIP-150 retains, so a starved call reverts the whole
-        // transaction (proven in PlankCrash.adversarial.test.ts).
-        try IPlankLottery(lottery).recordRound(id, seedHash, winner, netRake) {}
+        // Explicitly budget the draw. Recovery no longer relies on the next
+        // round consuming EIP-150's retained gas to prevent a caller skipping it.
+        if (gasleft() < 1_600_000) revert InsufficientSettlementGas();
+        try IPlankLottery(lottery).recordRound{gas: 1_000_000}(id, seedHash, winner, netRake) {}
         catch (bytes memory reason) {
+            pendingLotteryRound = id;
+            _pendingLotterySeed = seedHash;
+            _pendingLotteryRake = netRake;
             emit LotteryRecordFailed(id, winner, reason);
         }
 
@@ -629,7 +651,7 @@ contract PlankCrash is ReentrancyGuard {
             res.bustedToReserve,
             res.mode
         );
-        _startRound();
+        _tryStartRound();
     }
 
     function _ticketWinner(Seat[] storage seats, uint256 n, bytes32 seedHash, uint256 playerPool)
@@ -646,29 +668,24 @@ contract PlankCrash is ReentrancyGuard {
         return seats[n - 1].player; // unreachable: ticket < playerPool == acc
     }
 
-    /// @notice OUTCOME-INDEPENDENT liveness escape (B-3): if the target drand
-    ///         round is still un-relayed refundTimeoutSeconds after its
-    ///         emission time, refund every stake exactly and return the seed.
-    ///         Reverts the moment the randomness exists on the beacon, so a
-    ///         settle always wins the race; the condition never reads the crash.
-    ///         ABANDONED ROUND: if the randomness exists but nobody has settled
-    ///         for ABANDONED_ROUND_MULTIPLIER x the timeout (settlement is
-    ///         permissionless and rewarded, so only an UNSETTLEABLE round gets
-    ///         here), the refund is allowed anyway so no configuration or
-    ///         dependency failure can lock stakes forever.
-    function refundRound() external nonReentrant {
+    /// @notice Deprecated ABI: committed outcomes are never cancellable.
+    /// Missing relay is not proof of missing public entropy. Existing credits
+    /// remain withdrawable; unresolved stakes await their ORIGINAL result.
+    function refundRound() external view {
+        if (rounds[currentRoundId].phase != Phase.LIVE) revert BadPhase();
+        revert CommittedRoundCannotBeCancelled();
+    }
+
+    /// @notice Permissionless incident report. No funds or commitments move.
+    function freezeStalledRound() external nonReentrant {
         uint256 id = currentRoundId;
         Round storage r = rounds[id];
         if (r.phase != Phase.LIVE) revert BadPhase();
         if (block.timestamp < uint256(r.revealNotBefore) + refundTimeoutSeconds) revert TooEarly();
-        bool abandoned = block.timestamp >= uint256(r.revealNotBefore) + refundTimeoutSeconds * ABANDONED_ROUND_MULTIPLIER;
-        if (!abandoned && beacon.randomnessOrZero(r.targetDrandRound) != bytes32(0)) revert RandomnessAvailable();
-        r.phase = Phase.REFUNDED;
-        unclaimedRefunds += r.playerPool;
-        uint256 seed = r.seed;
-        _returnSeed(r);
-        emit RoundRefunded(id, r.playerPool, seed);
-        _startRound();
+        if (stalledRound == id) revert RoundAlreadyStalled();
+        stalledRound = id;
+        emit RoundStalled(id);
+        _afterRoundStalled(id);
     }
 
     /// @notice Pull a voided/refunded stake into the player's ledger. Anyone
@@ -693,6 +710,15 @@ contract PlankCrash is ReentrancyGuard {
         (bool ok,) = msg.sender.call{value: amount}("");
         if (!ok) revert TransferFailed();
         emit Withdrawn(msg.sender, msg.sender, amount);
+    }
+
+    /// @notice Root-authorized exit for wallets that cannot receive native ETH.
+    function withdrawTo(address payable recipient) external nonReentrant {
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 amount = _debit();
+        (bool ok,) = recipient.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        emit Withdrawn(msg.sender, recipient, amount);
     }
 
     /// @notice Recycle winnings into the fixed PlankBank play balance
@@ -849,11 +875,11 @@ contract PlankCrash is ReentrancyGuard {
     }
 
     /// @notice What the next round will be seeded with, given the Vault now.
-    function nextSeed() external view returns (uint256 seed) {
-        seed = crashSeedWei;
-        uint256 b = _buffer();
-        if (seed > b) seed = b;
+    function nextSeed() public view returns (uint256 seed) {
+        // The same quote is used by _drawSeed: no preview/ledger divergence.
+        seed = (_buffer() * houseCapBps) / BPS;
         if (seed > seedBudget) seed = seedBudget;
+        if (seed > PlankCappedPoolMath.MAX_POT) seed = PlankCappedPoolMath.MAX_POT;
     }
 
     /// @notice What a settled seat was credited (player payout + house bonus).
@@ -868,7 +894,7 @@ contract PlankCrash is ReentrancyGuard {
         uint256 n = seats.length;
         for (uint256 i = 0; i < n; i++) {
             if (seats[i].player != player) continue;
-            PlankCcs2LMath.Result memory res = _preview(roundId, r.crashBps);
+            PlankCappedPoolMath.Result memory res = _preview(roundId, r.crashBps);
             return res.playerPayouts[i] + res.bonuses[i];
         }
         return 0;
@@ -879,24 +905,24 @@ contract PlankCrash is ReentrancyGuard {
     function previewSettlement(uint256 roundId, uint256 crashBps)
         external
         view
-        returns (PlankCcs2LMath.Result memory)
+        returns (PlankCappedPoolMath.Result memory)
     {
         return _preview(roundId, crashBps);
     }
 
-    function _preview(uint256 roundId, uint256 crashBps) private view returns (PlankCcs2LMath.Result memory) {
+    function _preview(uint256 roundId, uint256 crashBps) private view returns (PlankCappedPoolMath.Result memory) {
         Round storage r = rounds[roundId];
         Seat[] storage seats = _seats[roundId];
         uint256 n = seats.length;
-        PlankCcs2LMath.Seat[] memory mseats = new PlankCcs2LMath.Seat[](n);
+        PlankCappedPoolMath.Seat[] memory mseats = new PlankCappedPoolMath.Seat[](n);
         for (uint256 i = 0; i < n; i++) {
-            mseats[i] = PlankCcs2LMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
+            mseats[i] = PlankCappedPoolMath.Seat({stake: seats[i].stake, targetBps: seats[i].targetBps});
         }
         uint256 rake = r.phase == Phase.SETTLED ? r.effectiveRakeBps : effectiveRakeBps();
         uint256 playerDistributable = (r.playerPool * (BPS - rake)) / BPS;
         uint256 grossRake = r.playerPool - playerDistributable;
         uint256 netRake = grossRake - (grossRake * keeperRewardBps) / BPS;
-        return PlankCcs2LMath.settle(
+        return PlankCappedPoolMath.settle(
             playerDistributable, r.seed, crashBps, mseats, r.reserveAtLock, netRake, r.vaultRoundsContributedAtLock, _params()
         );
     }

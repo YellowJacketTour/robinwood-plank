@@ -110,3 +110,48 @@ test("a pre-roll snapshot (serverNow before startedAt) anchors the display start
   assert.ok(clock.sample(7_600) > 10_000, "liftoff only after T + δ");
   assert.equal(clock.sample(8_500), Math.floor(10_000 * Math.exp(LIVE_GROWTH_PER_SECOND * 1)), "then exactly m(t − δ)");
 });
+
+test('duplicate stale snapshots cannot release a prediction hold', () => {
+  const clock = new PrivateLiveClock();
+  clock.synchronize(snapshot({crashAt:null}), 5000);
+  const held = clock.sample(10000);
+  for (let t=10000; t<=30000; t+=1000) {
+    assert.equal(clock.synchronize(snapshot({crashAt:null}),t),true);
+    assert.equal(clock.sample(t),held);
+    assert.equal(clock.isPredictionHeld(t),true);
+  }
+});
+
+test('malformed high-version input cannot poison the next valid snapshot', () => {
+  const clock = new PrivateLiveClock();
+  clock.synchronize(snapshot(),5000);
+  assert.equal(clock.synchronize(snapshot({version:'999',serverNow:'bad'}),6000),false);
+  assert.equal(clock.synchronize(snapshot({version:'11',serverNow:'2026-08-30T00:00:02.000Z'}),6000),true);
+  assert.equal(clock.synchronize(snapshot({version:'not-an-integer'}),6001),false);
+  assert.ok(Number.isFinite(clock.sample(NaN)));
+});
+
+test('settlement is terminal for one round even if delayed live messages arrive', () => {
+  const clock = new PrivateLiveClock();
+  clock.synchronize(snapshot(),5000);
+  assert.equal(clock.synchronize(snapshot({version:'11',phase:'settled',serverNow:'2026-08-30T00:00:11.000Z'}),15000),true);
+  assert.equal(clock.synchronize(snapshot({version:'12',serverNow:'2026-08-30T00:00:12.000Z'}),16000),false);
+});
+
+
+test('late finality replaces any prediction overshoot with the exact revealed endpoint', () => {
+  const clock = new PrivateLiveClock();
+  clock.synchronize(snapshot({crashAt:null}),5000);
+  const predicted=clock.sample(7500);
+  assert.equal(clock.synchronize(snapshot({version:'11',phase:'settled',crashAt:'2026-08-30T00:00:02.000Z',serverNow:'2026-08-30T00:00:04.000Z'}),8000),true);
+  const final=Math.floor(10000*Math.exp(0.22*2));
+  assert.ok(predicted>final);
+  assert.equal(clock.sample(9000),final);
+});
+
+test('a delayed previous-round message cannot restart a completed flight', () => {
+  const clock=new PrivateLiveClock();
+  clock.synchronize(snapshot({roundKey:'room:8'}),5000);
+  assert.equal(clock.synchronize(snapshot({roundKey:'room:7',version:'999'}),6000),false);
+  assert.equal(clock.roundKey,'room:8');
+});

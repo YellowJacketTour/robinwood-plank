@@ -553,3 +553,10 @@ A redesign pass should treat this table as its scope, and empty it.
 - Do not render `V1`, `V2`, `V3`, or any version ladder in user-facing copy — use the product names from the vault registry, see "Vault naming" above.
 - Do not hardcode a vault name, address, or fee model in a component, or select a vault by role instead of by address.
 - Do not present migration as automatic or mandatory, or state a fee in the wrong vault's denomination.
+
+
+### PlankCrash approved art direction — 2026-09-09
+The user approved `.dream-loop/concept.png`: an ivory handheld control dock over a full-height cinematic launch scene, superseding the dense cockpit layout for `public/arcade/crash.html` only. Preserve the original Chalkstronaut painted identity on a dimensional wood character. Use cream and gold controls, cool steel infrastructure and amber lamps. One stake selector with ETH and approximate USD, target and play; detailed accounting remains reachable through tools. Geometry must have actual openings and ball clearance, not transparent shells or result overlays that phase through the model. Other app and marketing surfaces retain their existing rules.
+## Collection intelligence art direction
+
+The scoped CollectionIntelArt.module.css shell uses these explicit art-direction tokens: intel-night #0c0a16, intel-glass #171321, intel-violet #bd94ef, intel-light #f5edf9, intel-muted #c8b8dc. Translucent derivatives belong only to this shell. Preserve cream/purple contrast, artwork fidelity, spatial evidence and restrained luminous borders. The shared environment is abstract and analytical; do not apply penguin, arctic or other collection-specific scenery universally. Real collection/NFT images remain separate and are never synthesized as evidence. Visual quality is a release gate; do not replace this with generic metric cards.

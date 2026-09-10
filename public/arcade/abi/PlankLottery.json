@@ -216,6 +216,31 @@
   "type": "event"
  },
  {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "WithdrawnTo",
+  "type": "event"
+ },
+ {
   "inputs": [],
   "name": "BALL_DOMAIN",
   "outputs": [
@@ -378,6 +403,32 @@
  {
   "inputs": [],
   "name": "committedPrize",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "committedSeeded",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "committedWinnerPaid",
   "outputs": [
    {
     "internalType": "uint256",
@@ -753,6 +804,19 @@
  {
   "inputs": [],
   "name": "withdrawFounderFees",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address payable",
+    "name": "recipient",
+    "type": "address"
+   }
+  ],
+  "name": "withdrawTo",
   "outputs": [],
   "stateMutability": "nonpayable",
   "type": "function"

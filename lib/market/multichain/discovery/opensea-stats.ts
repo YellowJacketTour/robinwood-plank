@@ -379,7 +379,6 @@ export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddr
   }
   result.slugResolved = 1;
   const stats = await fetchOpenSeaCollectionStats(slug);
-  if (!stats) return { ...result, errors: 1 };
   const display = await fetchOpenSeaCollectionDisplay(slug);
   if (display?.profile) {
     const { recordCollectionProfile } = await import("../collection-profile");
@@ -392,6 +391,7 @@ export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddr
       creatorHandle: display.creatorHandle,
     }).then(() => { result.displayUpdated = 1; }).catch(() => { result.errors += 1; });
   }
+  if (!stats) return { ...result, errors: result.errors + 1 };
   const listedCount = await fetchOpenSeaListedCount(slug, openSeaChain);
   await updateCollectionSupplyFields(chainSlug, contractAddress, {
     listedCount,
@@ -511,12 +511,6 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
     processed += 1;
 
     const stats = await fetchOpenSeaCollectionStats(slug);
-    if (!stats) {
-      if (lastStatsNotFound) await kv.set(noneKey, "1", { ex: NONE_TTL_SECONDS }).catch(() => {});
-      result.errors += 1;
-      lastSeenId = row.id;
-      continue;
-    }
     const display = await fetchOpenSeaCollectionDisplay(slug);
     if (display?.profile) {
       const { recordCollectionProfile } = await import("../collection-profile");
@@ -532,6 +526,12 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       }).catch(() => {
         result.errors += 1;
       });
+    }
+    if (!stats) {
+      if (lastStatsNotFound) await kv.set(noneKey, "1", { ex: NONE_TTL_SECONDS }).catch(() => {});
+      result.errors += 1;
+      lastSeenId = row.id;
+      continue;
     }
     const listedCount = await fetchOpenSeaListedCount(slug, openSeaChain);
     if (listedCount != null || display?.totalSupply != null) {

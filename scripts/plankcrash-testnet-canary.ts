@@ -34,7 +34,8 @@ const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
   "function seatCount(uint256) view returns (uint256)",
   "function minPoolWei() view returns (uint256)",
-  "function rounds(uint256) view returns (uint8 phase,uint64 targetDrandRound,uint64 bettingEndsAt,uint64 revealNotBefore,bytes32 paramsHash,uint256 seed,uint256 playerPool,uint256 reserveAtLock,uint256 largestStake,uint256 crashBps,uint256 effectiveRakeBps,uint256 playerDistributable,uint256 totalPlayerPaid,uint256 totalBonus,uint256 houseReturned,address lotteryWinner)",
+  "function minStakeWei() view returns (uint256)",
+  "function rounds(uint256) view returns (uint8 phase,uint64 targetDrandRound,uint64 bettingEndsAt,uint64 revealNotBefore,bytes32 paramsHash,uint256 seed,uint256 playerPool,uint256 reserveAtLock,uint256 vaultRoundsContributedAtLock,uint256 largestStake,uint256 crashBps,uint256 effectiveRakeBps,uint256 playerDistributable,uint256 totalPlayerPaid,uint256 totalBonus,uint256 houseReturned,address lotteryWinner)",
   "function placeBet(uint256) payable",
   "function lockRound()",
   "function settleRound()",
@@ -120,12 +121,12 @@ async function main() {
   const rakeRouter = await ethers.getContractAt(ROUTER_ABI, addresses.rakeRouter, signer);
   const beacon = await ethers.getContractAt(BEACON_ABI, addresses.beacon, signer);
 
-  const ccs2lRuleId = ethers.keccak256(ethers.toUtf8Bytes("ccs-2l"));
+  const cappedPoolRuleId = ethers.keccak256(ethers.toUtf8Bytes("capped-survivor-pool"));
   const assertions = {
     crashBeacon: (await crash.beacon()).toLowerCase() === addresses.beacon.toLowerCase(),
     crashRouter: (await crash.router()).toLowerCase() === addresses.rakeRouter.toLowerCase(),
     crashLottery: (await crash.lottery()).toLowerCase() === addresses.lottery.toLowerCase(),
-    crashSettlesCcs2L: (await crash.settlementRuleId()) === ccs2lRuleId,
+    crashSettlesCappedPool: (await crash.settlementRuleId()) === cappedPoolRuleId,
     lotterySource: (await lottery.source()).toLowerCase() === addresses.crash.toLowerCase(),
     routerSource: (await rakeRouter.source()).toLowerCase() === addresses.crash.toLowerCase(),
     routerLottery: (await rakeRouter.lottery()).toLowerCase() === addresses.lottery.toLowerCase(),
@@ -157,7 +158,8 @@ async function main() {
     if (round.phase !== 0n || round.playerPool !== 0n || (await crash.seatCount(roundId)) !== 0n) {
       throw new Error("Full lifecycle canary requires a fresh, unused betting round");
     }
-    const bet = await crash.placeBet(10_100n, { value: await crash.minPoolWei() });
+    const minimumStake = await crash.minStakeWei();
+    const bet = await crash.placeBet(10_100n, { value: minimumStake > 0n ? minimumStake : 1n });
     transactions.push(await receiptEvidence("crash:placeBet", bet.hash));
     await waitUntil(round.bettingEndsAt);
     const lock = await crash.lockRound();

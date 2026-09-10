@@ -22,9 +22,9 @@ test("production casino deployment is chain-pinned and validates venue identity"
   assert.match(deploy, /Router WETH mismatch/);
 });
 
-test("production deploys exactly the canonical CCS-2L set and nothing retired", async () => {
+test("production selects capped crash and numbered lottery without retired contracts", async () => {
   const deploy = await source("scripts/deploy-casino.ts");
-  for (const name of ["PlankV2TwapOracle", "PlankBurnEngine", "PlankLottery", "PlankRakeRouter", "PlankCrash", "PlankBank"]) {
+  for (const name of ["PlankV2TwapOracle", "PlankBurnEngine", "PlankCycleLottery", "PlankRakeRouter", "PlankGuardedCrash", "PlankBank"]) {
     assert.match(deploy, new RegExp(`getContractFactory\\("${name}"\\)`), `deploys ${name}`);
   }
   for (const retired of ["PlankCrashDrand", "PlankPowerboard", "PlankRakeDistributor", "PlankFuelBooster", "PlankProgression", "singlePayoutCapBps"]) {
@@ -51,7 +51,7 @@ test("ratified settlement and lottery parameters are the deploy defaults", async
   // v2 actuarial identity (RESEARCH-game-theory-lottery-seed-resolution-2026-09-05):
   // house risks <= half the round's rake; the pool keeps >= half of every
   // contribution (kappa = 2); the flat ceiling is 1/16; NO forced hit exists.
-  assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 5000n\)/);
+  assert.match(deploy, /envBig\("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 0n\)/);
   assert.match(deploy, /envBig\("CASINO_LOTTERY_ODDS_ONE_IN", 16n\)/);
   assert.match(deploy, /envBig\("CASINO_LOTTERY_KAPPA_BPS", 20_000n\)/);
   assert.match(deploy, /LOTTERY_CONTRIBUTION_BPS = \(6900n \* COMMUNITY_LOTTERY_BPS\) \/ 10_000n/);
@@ -64,8 +64,8 @@ test("ratified settlement and lottery parameters are the deploy defaults", async
   // positive-sum-2026-09-05, owner decision 2026-09-05): 25% bonus ceiling,
   // r=0.999 on both curves, lottery ceiling 10x the base carve constant. An
   // explicit env override to 0 still disables either mechanism.
-  assert.match(deploy, /envBig\("CASINO_MAX_VAULT_BONUS_BPS", 2_500n\)/);
-  assert.match(deploy, /envBig\("CASINO_VAULT_BONUS_DECAY_WAD", 999_000_000_000_000_000n\)/);
+  assert.match(deploy, /envBig\("CASINO_MAX_VAULT_BONUS_BPS", 0n\)/);
+  assert.match(deploy, /envBig\("CASINO_VAULT_BONUS_DECAY_WAD", 0n\)/);
   assert.match(deploy, /envBig\("CASINO_LOTTERY_CARVE_DECAY_WAD", 999_000_000_000_000_000n\)/);
   assert.match(deploy, /envBig\(\s*"CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI",\s*2_500_000n \* CREDIT,\s*\)/);
 });
@@ -78,13 +78,35 @@ test("production TWAP liquidity floor has no permissive generic default", async 
   assert.doesNotMatch(deploy, /envBig\("CASINO_TWAP_MIN_RESERVE_WEI"/);
 });
 
-test("local and testnet fixtures deploy the same canonical set with the ratified community subdivision", async () => {
+test("local and public deployment candidates select the funded-cycle numbered lottery", async () => {
   for (const path of ["scripts/local-casino-setup.ts", "scripts/testnet-casino-setup.ts"]) {
     const fixture = await source(path);
     assert.match(fixture, /COMMUNITY_LOTTERY_BPS = 6500n/);
-    for (const name of ["PlankLottery", "PlankRakeRouter", "PlankCrash", "PlankBank"]) {
+    const lottery = "PlankCycleLottery";
+    if (path.includes("local-")) assert.match(fixture, /chainId !== 31337n/);
+    for (const name of [lottery, "PlankRakeRouter", path.includes("local-") ? "PlankTimedPracticeCrash" : "PlankGuardedCrash", "PlankBank"]) {
       assert.match(fixture, new RegExp(`getContractFactory\\("${name}"\\)`), `${path} deploys ${name}`);
     }
     assert.doesNotMatch(fixture, /PlankCrashDrand|PlankPowerboard|PlankRakeDistributor|PlankProgression|PlankFuelBooster/);
   }
+});
+
+
+test("public testnet manifests never serialize the deployment private key",async()=>{
+ const deploy=await source("scripts/testnet-casino-setup.ts");
+ assert.doesNotMatch(deploy,/simulateKey\s*:|process\.env\.DEPLOYER_PK/);
+ assert.match(deploy,/TESTNET_SAFETY_GUARDIAN/);
+ assert.match(deploy,/TESTNET_SAFETY_GOVERNANCE/);
+});
+
+
+test("unreviewed session gas funding cannot execute on the real-money UI path",async()=>{
+ const html=await source("public/arcade/crash.html");
+ const enter=html.slice(html.indexOf("async function enterInstantPlay("),html.indexOf("async function leaveInstantPlay("));
+ assert.match(enter,/if \(!PRACTICE_FAST_TIMING\)/);
+ assert.ok(enter.indexOf("!PRACTICE_FAST_TIMING")<enter.indexOf("bank.deposit"));
+ assert.match(enter,/chainId !== 31337n/);
+ assert.match(enter,/const cap = value;/);assert.doesNotMatch(enter,/value \* 100n/);
+ const leave=html.slice(html.indexOf("async function leaveInstantPlay("),html.indexOf("async function leaveInstantPlay(")+1000);
+ assert.doesNotMatch(leave,/revokeSession[\s\S]*?catch \(_\)/);
 });

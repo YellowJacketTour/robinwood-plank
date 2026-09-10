@@ -427,6 +427,12 @@ export async function placePlaytestBet(identity: PlaytestIdentity, roomId: strin
     const roundId = bettingRoundId(room.phase, BigInt(room.current_round));
     const prior = await client.query<{ stake: string }>(`SELECT stake::text FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2 AND user_id=$3 FOR UPDATE`, [roomId, roundId.toString(), identity.id]);
     const priorStake = BigInt(prior.rows[0]?.stake ?? "0");
+    const cappedPool = parsePolicy(room.policy).allocationRule === "capped-survivor-pool";
+    if (cappedPool) {
+      autoLockEnabled = true;
+      const count = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2`, [roomId, roundId.toString()]);
+      if (priorStake === 0n && Number(count.rows[0].count) >= 256) throw new PlaytestRoomError(409, "ROUND_FULL", "This round is full.");
+    }
     const balanceRow = await client.query<{ test_credit_balance: string }>(`SELECT test_credit_balance::text FROM playtest_room_members WHERE room_id=$1 AND user_id=$2 FOR UPDATE`, [roomId, identity.id]);
     const available = BigInt(balanceRow.rows[0].test_credit_balance) + priorStake;
     if (stake > available) throw new PlaytestRoomError(409, "INSUFFICIENT_TEST_CREDITS", "Not enough test credits.");
@@ -482,10 +488,10 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
       || storedPolicy.rakeStepBps === undefined
       || storedPolicy.rakeVolumeStep === undefined;
     const legacyMinimumStake = policy.minimumStake === 100n;
-    if (policy.allocationRule !== "ccs-2l" || legacyPrizeProfile || legacyEvolutionProfile || legacyMinimumStake) {
+    if (!["ccs-2l", "capped-survivor-pool"].includes(policy.allocationRule) || legacyPrizeProfile || legacyEvolutionProfile || legacyMinimumStake) {
       policy = {
         ...policy,
-        allocationRule: "ccs-2l",
+        allocationRule: policy.allocationRule === "capped-survivor-pool" ? "capped-survivor-pool" : "ccs-2l",
         ...(legacyPrizeProfile ? Object.fromEntries(PLAYTEST_PRIZE_PROFILE_KEYS.map((key) => [key, DEFAULT_PLAYTEST_POLICY[key]])) : {}),
         ...(legacyMinimumStake ? { minimumStake: DEFAULT_PLAYTEST_POLICY.minimumStake } : {}),
       };
@@ -528,8 +534,11 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
         ORDER BY m.joined_at FOR UPDATE OF m`,
       [roomId, room.current_round],
     );
+    const existingSeats = await client.query<{ count: string }>(`SELECT COUNT(*)::text count FROM playtest_round_seats WHERE room_id=$1 AND round_id=$2`, [roomId, room.current_round]);
+    let availableSeats = policy.allocationRule === "capped-survivor-pool" ? Math.max(0, 256 - Number(existingSeats.rows[0].count)) : Infinity;
     const welcomed: string[] = [];
     for (const newcomer of newcomers.rows) {
+      if (availableSeats === 0) break;
       const plan = newcomerSeatPlan(BigInt(newcomer.test_credit_balance), policy.minimumStake);
       if (!plan) continue;
       const inserted = await client.query(
@@ -539,6 +548,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
         [roomId, room.current_round, newcomer.user_id, plan.stake.toString(), plan.targetBps.toString(), plan.autoLockEnabled, randomUUID()],
       );
       if (!inserted.rowCount) continue;
+      availableSeats--;
       await client.query(
         `UPDATE playtest_room_members SET test_credit_balance=test_credit_balance-$3
           WHERE room_id=$1 AND user_id=$2`,
@@ -554,6 +564,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
     );
     const committed: Array<{ id: string; stake: bigint; targetBps: bigint; preset: string }> = [];
     for (const bot of bots.rows) {
+      if (availableSeats === 0) break;
       try { validateBotProfile(bot.bot_profile); } catch { continue; }
       const choice = botRoundCommitment({ roomId, roundId: BigInt(room.current_round), botId: bot.user_id, bankroll: BigInt(bot.test_credit_balance), minimumStake: policy.minimumStake, profile: bot.bot_profile });
       if (!choice) continue;
@@ -563,6 +574,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
         [roomId, room.current_round, bot.user_id, choice.stake.toString(), choice.targetBps.toString(), randomUUID()],
       );
       if (inserted.rowCount) {
+        availableSeats--;
         await client.query(`UPDATE playtest_room_members SET test_credit_balance=test_credit_balance-$3 WHERE room_id=$1 AND user_id=$2`, [roomId, bot.user_id, choice.stake.toString()]);
         committed.push({ id: bot.user_id, ...choice, preset: bot.bot_profile.preset });
       }
@@ -608,6 +620,7 @@ export async function startPlaytestRound(identity: PlaytestIdentity, roomId: str
 export async function lockPlaytestBet(identity: PlaytestIdentity, roomId: string, commandId: string) {
   return withPostgresTransaction(async (client) => {
     const room = await lockedRoom(client, roomId); await requireMember(client, roomId, identity.id);
+    if (parsePolicy(room.policy).allocationRule === "capped-survivor-pool") throw new PlaytestRoomError(409, "TARGET_COMMITTED", "Your target was committed before launch.");
     if (await duplicateCommand(client, roomId, commandId)) return { duplicate: true };
     if (room.phase !== "running" || !room.started_at || !room.crash_at) throw new PlaytestRoomError(409, "NOT_RUNNING", "No round is currently running.");
     const now = Date.now();
@@ -666,7 +679,7 @@ export async function settlePlaytestRound(identity: PlaytestIdentity, roomId: st
     // engine prices it against THIS round's own contribution (actuarial rule).
     const powerboardDraw = powerboardRoundDraw(room.reveal!);
     const result = simulateIteration(prior, policy, {
-      players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: effectiveSettlementTarget(BigInt(room.crash_bps!), BigInt(seat.requested_target_bps), seat.accepted_target_bps === null ? null : BigInt(seat.accepted_target_bps), seat.auto_lock_enabled) })),
+      players: seats.rows.map((seat) => ({ id: seat.user_id, stake: BigInt(seat.stake), targetBps: effectiveSettlementTarget(BigInt(room.crash_bps!), BigInt(seat.requested_target_bps), seat.accepted_target_bps === null ? null : BigInt(seat.accepted_target_bps), seat.auto_lock_enabled, policy.allocationRule === "capped-survivor-pool") })),
       crashBps: BigInt(room.crash_bps), lotteryOutcome, lotteryDrawE18: powerboardDraw.sampleE18,
     });
     const powerboardFundingAdded = result.state.totals.powerboardFunded - prior.totals.powerboardFunded;

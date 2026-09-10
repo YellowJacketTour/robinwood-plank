@@ -91,12 +91,19 @@ export async function deployCasino(opts: {
   crash?: Partial<CrashConfig>;
   lottery?: Partial<LotteryConfig>;
   communityLotteryBps?: bigint;
+  numberedLottery?: boolean;
+  cycleLottery?: boolean;
+  guarded?: boolean;
+  timedPractice?: boolean;
+  recoverableLottery?: boolean;
+  scalable?: { maxRoundStakeWei: bigint; maxUnderwritingWei: bigint };
+  beaconInstance?: any;
 } = {}): Promise<CasinoEnv> {
   const signers = await ethers.getSigners();
   const [deployer, treasury, alice, bob, carol, dave, keeper] = signers;
   const chainId = (await ethers.provider.getNetwork()).chainId;
 
-  const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
+  const beacon: any = opts.beaconInstance ?? await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
   const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
   const weth: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
   const pair: any = await (
@@ -113,7 +120,9 @@ export async function deployCasino(opts: {
   const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lotteryConfig: LotteryConfig = { source: predictedCrash, founderSink: treasury.address, ...DEFAULT_LOTTERY, ...(opts.lottery ?? {}) };
-  const lottery: any = await (await ethers.getContractFactory("PlankLottery")).deploy(lotteryConfig);
+  const lottery: any = opts.cycleLottery
+    ? await (await ethers.getContractFactory(opts.recoverableLottery ? "RecoverableCycleLottery" : "PlankCycleLottery")).deploy(lotteryConfig,2000n,250_000n*CREDIT,1000n)
+    : await (await ethers.getContractFactory(opts.numberedLottery ? "PlankNumberedLottery" : "PlankLottery")).deploy(lotteryConfig);
   const rakeRouter: any = await (
     await ethers.getContractFactory("PlankRakeRouter")
   ).deploy(predictedCrash, await burnEngine.getAddress(), await lottery.getAddress(), predictedCrash, treasury.address, opts.communityLotteryBps ?? 6500n);
@@ -125,7 +134,11 @@ export async function deployCasino(opts: {
     ...DEFAULT_CRASH,
     ...(opts.crash ?? {}),
   };
-  const crash: any = await (await ethers.getContractFactory("PlankCrash")).deploy(crashConfig);
+  const crash: any = opts.guarded
+    ? await (await ethers.getContractFactory(opts.timedPractice ? "PlankTimedPracticeCrash" : "PlankGuardedCrash")).deploy(crashConfig,keeper.address,treasury.address,3600n)
+    : opts.scalable
+    ? await (await ethers.getContractFactory("PlankScalableCrash")).deploy(crashConfig, opts.scalable.maxRoundStakeWei, opts.scalable.maxUnderwritingWei)
+    : await (await ethers.getContractFactory("PlankCrash")).deploy(crashConfig);
   const crashAddr = await crash.getAddress();
   if (crashAddr.toLowerCase() !== predictedCrash.toLowerCase()) throw new Error("crash address prediction failed");
   const bank: any = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);

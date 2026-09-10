@@ -1,0 +1,10 @@
+body[data-invite-test] #gearBtn,body[data-invite-test] #adminLinkBtn,
+body[data-invite-test] #simBtn,body[data-invite-test] #bankPanel,
+body[data-invite-test] .console-stop-auto {display:none!important}
+.invite-player{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px;color:var(--color-wood-950);width:100%}
+.invite-player output{font-size:13px;font-weight:750;font-variant-numeric:tabular-nums;flex:1;white-space:nowrap}
+.invite-player button{min-height:44px;border:1px solid var(--color-gold-500);border-radius:12px;padding:8px 12px;background:transparent;color:inherit;font:650 13px system-ui;cursor:pointer}
+.invite-player .invite-repeat[aria-pressed="true"]{background:var(--color-gold-300)}
+.invite-player input{width:100%;font-size:12px}
+body[data-invite-test] .deck{padding-top:12px}
+@media(max-width:420px){.invite-player{gap:6px}.invite-player button{padding:8px;font-size:12px}.invite-player output{font-size:12px}}

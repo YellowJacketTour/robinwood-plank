@@ -22,14 +22,14 @@ test("public/arcade/abi/*.json equals the compiled artifacts of the current set"
   assert.equal(existsSync(new URL("../../public/arcade/plankcrashv2-abi.json", import.meta.url)), false, "the retired PlankCrashDrand ABI must not exist");
 });
 
-test("the arcade wallet client binds to PlankCrash / PlankLottery / PlankBank / PlankRakeRouter / IDrandBeacon only", () => {
-  for (const name of ["PlankCrash", "PlankLottery", "PlankBank", "PlankRakeRouter", "IDrandBeacon"]) {
+test("the arcade wallet client binds to guarded crash / PlankLottery / PlankBank / PlankRakeRouter / IDrandBeacon only", () => {
+  for (const name of ["PlankGuardedCrash", "PlankCrash", "PlankLottery", "PlankBank", "PlankRakeRouter", "IDrandBeacon"]) {
     assert.match(arcade, new RegExp(`"${name}"`), `crash.html loads abi/${name}.json`);
   }
   assert.match(arcade, /fetch\(`abi\/\$\{name\}\.json`, \{ cache: "no-store" \}\)/);
-  assert.match(arcade, /abi = ARCADE_ABI\.PlankCrash;/);
+  assert.match(arcade, /abi = ARCADE_ABI\.PlankGuardedCrash;/);
   // Current calls the client depends on.
-  for (const call of ["crash.placeBet(", "crash.lockRound()", "crash.settleRound()", "crash.refundRound()", "crash.withdraw()", "crash.withdrawToBank(BANK_ADDR)", "crash.seatsOf(", "crash.targetOf(", "crash.owed(", "crash.resultSeed(", "lotteryContract.quote()", "lotteryContract.hitThreshold(", "beaconContract.isRoundAvailable("]) {
+  for (const call of ["crash.placeBetInRound(", "crash.lockRound()", "crash.settleRound()", "crash.freezeStalledRound()", "crash.withdraw()", "crash.withdrawToBank(BANK_ADDR)", "crash.seatsOf(", "scoreCrash.targetOf(", "crash.owed(", "scoreCrash.resultSeed(", "readingLottery.quote(at)", "readingLottery.hitThreshold(", "beaconContract.isRoundAvailable("]) {
     assert.ok(arcade.includes(call), `crash.html calls ${call}`);
   }
   for (const evt of ["filters.RoundSettled()", "filters.SeatSettled(", "filters.BetPlaced()"]) assert.ok(arcade.includes(evt), `crash.html reads ${evt}`);
