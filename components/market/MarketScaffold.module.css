@@ -298,6 +298,10 @@
   align-items: start;
 }
 
+.browse.browseWithoutFilters {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .filterPanel {
   position: sticky;
   top: 8.6rem;

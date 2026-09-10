@@ -40,8 +40,8 @@ export default function MarketBrowseLayout({
   }, [close, open]);
 
   return (
-    <div className={styles.browse}>
-      <button
+    <div className={`${styles.browse} ${!filters ? styles.browseWithoutFilters : ""}`}>
+      {filters && <button
         ref={triggerRef}
         type="button"
         className={styles.filterTrigger}
@@ -50,9 +50,9 @@ export default function MarketBrowseLayout({
         onClick={() => setOpen(true)}
       >
         Filters &amp; traits
-      </button>
+      </button>}
 
-      {open && (
+      {filters && open && (
         <button
           type="button"
           className={styles.backdrop}
@@ -61,7 +61,7 @@ export default function MarketBrowseLayout({
         />
       )}
 
-      <aside
+      {filters && <aside
         id={drawerId}
         className={`${styles.filterPanel} ${open ? styles.filterPanelOpen : ""}`}
         aria-label="Marketplace filters"
@@ -79,7 +79,7 @@ export default function MarketBrowseLayout({
           </button>
         </div>
         <div className={styles.filterBody}>{filters}</div>
-      </aside>
+      </aside>}
 
       <div className={styles.browseMain}>
         {lead && <div className={styles.lead}>{lead}</div>}
