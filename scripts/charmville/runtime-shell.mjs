@@ -17,12 +17,24 @@ async function returnToAccountMenus(panel='inventory'){
 let unifiedMenu=null,forwarding=false,nativeEquipment=false;
 const suppressedKeys=new Set();
 function nativeKey(key,code,down){forwarding=true;try{document.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{key,code:key,keyCode:code,which:code,bubbles:true}));}finally{forwarding=false;}}
+function moveUnifiedFocus(action){
+  const choices=[...unifiedMenu.querySelectorAll('button:not(:disabled)')].filter(button=>button.getClientRects().length);
+  const current=document.activeElement;if(!choices.includes(current)){choices[0]?.focus();return;}
+  const from=current.getBoundingClientRect(),horizontal=action==='left'||action==='right',sign=action==='left'||action==='up'?-1:1;
+  const cx=(from.left+from.right)/2,cy=(from.top+from.bottom)/2;
+  const candidates=choices.filter(button=>button!==current).map(button=>{const rect=button.getBoundingClientRect(),dx=(rect.left+rect.right)/2-cx,dy=(rect.top+rect.bottom)/2-cy;return {button,rect,primary:(horizontal?dx:dy)*sign,orthogonal:horizontal?Math.abs(dy):Math.abs(dx)};}).filter(item=>item.primary>1&&(!horizontal||(item.rect.top<from.bottom&&item.rect.bottom>from.top)));
+  candidates.sort((a,b)=>(a.orthogonal*4+a.primary)-(b.orthogonal*4+b.primary));candidates[0]?.button.focus();
+}
+if(typeof document!=='undefined')document.addEventListener('charm-menu-action',event=>{
+  if(event.detail?.dialog!==unifiedMenu||!unifiedMenu?.open)return;
+  if(['up','down','left','right'].includes(event.detail.action)){event.preventDefault();moveUnifiedFocus(event.detail.action);}
+});
 function openUnifiedMenu(){
   if(!unifiedMenu||document.querySelector('dialog[open]'))return;
   unifiedMenu.querySelector('[data-destination="capture"]').disabled=!captureAvailable;
   unifiedMenu.querySelector('[data-destination="gear"]').disabled=Boolean(document.querySelector('button.charm-runtime-enter'));
   for(const [key,code] of [['ArrowUp',38],['ArrowDown',40],['ArrowLeft',37],['ArrowRight',39],['z',90],['x',88],['d',68],['c',67],['Enter',13]])nativeKey(key,code,false);
-  unifiedMenu.showModal();unifiedMenu.querySelector('button').focus();
+  unifiedMenu.showModal();unifiedMenu.querySelector('button:not(:disabled)').focus();
 }
 function mountUnifiedMenu(root){
   unifiedMenu=root.createElement('dialog');unifiedMenu.className='charm-game-menu';unifiedMenu.setAttribute('aria-label','Game menu');
@@ -52,8 +64,7 @@ if(typeof window!=='undefined')for(const type of ['keydown','keyup'])window.addE
       if(event.key==='Escape'){event.preventDefault();unifiedMenu.close();}
       else if(event.key==='Enter'){event.preventDefault();if(!event.repeat)document.activeElement?.click();}
       else if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)){
-        event.preventDefault();const choices=[...unifiedMenu.querySelectorAll('button:not(:disabled)')],index=choices.indexOf(document.activeElement);
-        const step=event.key==='ArrowUp'?-2:event.key==='ArrowDown'?2:event.key==='ArrowLeft'?-1:1;choices[(index+step+choices.length)%choices.length]?.focus();
+        event.preventDefault();moveUnifiedFocus(event.key.slice(5).toLowerCase());
       }
     }
     return;
@@ -127,7 +138,7 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   if (event.source !== window.parent || !['http://localhost:3017', 'http://127.0.0.1:3017'].includes(event.origin)) return;
   const request = event.data;
   if (!request) return;
-  if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button)button.disabled=!captureAvailable;return;}
+  if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
   if(request.type==='charmville:host-ready'){accountOrigin=event.origin;return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;

@@ -2,6 +2,8 @@
 import {createCaptureStream} from "./capture-stream";
 
 import Link from "next/link";
+import ControlGuide from "./control-guide";
+import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -37,6 +39,9 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const [fullscreen,setFullscreen]=useState(false);
   const [tab,setTab]=useState<WorldTab>('play');
   const frame=useRef<HTMLIFrameElement|null>(null);
+  const menuRoot=useRef<HTMLElement|null>(null);
+  const returnToPlay=useCallback(()=>{setTab('play');requestAnimationFrame(()=>frame.current?.focus());},[]);
+  useMenuGamepad(menuRoot,Boolean(identity),returnToPlay,tab);
   useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
@@ -254,11 +259,12 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     if(camera)sendPanel();else {frameReady.current=false;setCamera(true);}
   }
 
-  return <main data-market-shell className="min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
+  return <main ref={menuRoot} data-market-shell className="min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
     <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div><p className="text-xs font-bold tracking-widest text-cream-muted">CHARMVILLE</p><h1 className="font-display text-xl text-gold-300">Charmdex</h1></div>
       <nav aria-label="World shortcuts" className="flex flex-wrap gap-2"><button className={button} aria-pressed={fullscreen} onClick={toggleFullscreen}>Toggle fullscreen</button><Link className={button} href="/plankspace">Lumberyard</Link></nav>
     </header>
+    <ControlGuide />
     {!identity?<section className="rounded-xl border border-line bg-panel p-5"><h2 className="font-display text-xl">Bring your account into the world</h2><p className="my-3 text-cream-muted">Sign in with your approved PlankSpace profile. Your saved inventory stays with your account.</p><button className={button} disabled={busy} onClick={enter}>{busy?"Signing in…":"Connect and sign in"}</button><Link className="ml-4 text-gold-300" href="/charmville/start">Create or finish your profile</Link></section>:
     <>
     <div className="sticky top-0 z-10 mb-3 overflow-hidden rounded-2xl border-2 border-line-strong bg-wood-900 p-2 shadow-lg">

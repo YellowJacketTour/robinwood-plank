@@ -268,3 +268,9 @@ The native Enter/Game menu now exposes an eligibility-gated Throw ball option an
 Captured companions were incorrectly excluded from rest queries; all recovery paths now include them. A dedicated PostgreSQL lifecycle test captures with all six slots occupied, preserves the seventh creature in storage, explicitly swaps it into the party, fights and rests to full HP/PP while preserving level/IVs and preventing repeated-commit duplication. Private-home revocation also blocks capture history immediately.
 
 The source pose audit found no usable directional lift/throw frames in this quest: lifting and lift-walking return tile0, and the spell pose repeats one tile. No unrelated animation was substituted. Authored directional throw poses remain outstanding.
+
+## Keyboard, touch and gamepad menu integration
+
+Party slots and detail controls now use roving focus, arrows and Home/End; actual390px and desktop checks pass. Native menus navigate spatially around disabled options and retain valid focus. Reserved controller buttons cannot be assigned as gameplay face actions, and closing a menu no longer leaks a sword press in the same frame.
+
+A parent menu adapter now handles standard-pad navigation only while parent UI has focus. Actual-account testing with an injected gamepad verifies Party/Care navigation, one confirm for a held button, Back, parent fullscreen and native-frame isolation. Keyboard, touch-target and synthetic-pad checks do not certify physical controller hardware. The compact Controls guide describes the current mappings; INPUT-MODEL.md records the contract and limits.
