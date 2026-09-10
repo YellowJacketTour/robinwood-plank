@@ -17,7 +17,7 @@ for(const [id,name,species] of [['0025','pikachu',25],['0133','eevee',133],['026
  }
  source+=`int ${name}AnchorX[]={${ax}};\nint ${name}AnchorY[]={${ay}};\n`;
  let cumulative=0;const expression=durations.slice(0,-1).map((d,i)=>{cumulative+=d;return `phase<${cumulative}?${i}:(`;}).join('')+(frames-1)+')'.repeat(frames-1);
- metadata.push({id,name,species,w,h,frames,durations,draw:`if(follower==${species}){int phase=(stepX==0 && stepY==0)?0:followerClock%${durations.reduce((a,b)=>a+b,0)};int frame=${expression};int anchor=row*${frames}+frame;${name}->Blit(layer,RT_SCREEN,frame*${w},row*${h},${w},${h},fx+8-${name}AnchorX[anchor],fy+72-${name}AnchorY[anchor],${w},${h});}`});
+ metadata.push({id,name,species,w,h,frames,durations,draw:`if(follower==${species}){int phase=(stepX==0 && stepY==0)?0:followerClock%${durations.reduce((a,b)=>a+b,0)};int frame=${expression};int anchor=row*${frames}+frame;drawCompanionScaled(${name},${species},layer,frame*${w},row*${h},${w},${h},fx+8,fy+72,${name}AnchorX[anchor],${name}AnchorY[anchor]);}`});
 }
 await writeFile('scripts/charmville/zquest/ExtraFollowerFrames.zh',source);
 await writeFile('public/charmville/catalog/extra-follower-frames.json',JSON.stringify(metadata,null,2)+'\n');

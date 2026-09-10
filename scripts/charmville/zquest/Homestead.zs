@@ -1,6 +1,7 @@
 #include "std.zh"
 #include "ActionPalettes.zh"
 #include "ExtraFollowerFrames.zh"
+#include "FollowerScale.zh"
 #include "CommittedAttackFrames.zh"
 
 // Native, local tutorial prototype. No shared-account inventory authority.
@@ -459,12 +460,12 @@ global script Active
                 int layer=fy+16<Hero->Y+16?2:6;
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
                 // The recorded foot point is (fx+8,fy+16), plus the56px HUD.
-                if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;pikachu->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-pikachuAnchorX[anchor],fy+72-pikachuAnchorY[anchor],32,40);}
-if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;eevee->Blit(layer,RT_SCREEN,frame*40,row*48,40,48,fx+8-eeveeAnchorX[anchor],fy+72-eeveeAnchorY[anchor],40,48);}
-if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;poochyena->Blit(layer,RT_SCREEN,frame*32,row*48,32,48,fx+8-poochyenaAnchorX[anchor],fy+72-poochyenaAnchorY[anchor],32,48);}
-                if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));treecko->Blit(layer,RT_SCREEN,frame*32,row*32,32,32,fx+8-16,fy+72-20,32,32);}
-                if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;torchic->Blit(layer,RT_SCREEN,frame*24,row*32,24,32,fx+8-12,fy+72-20,24,32);}
-                if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));int anchor=row*6+frame;mudkip->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-mudkipAnchorX[anchor],fy+72-mudkipAnchorY[anchor],32,40);}
+                if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;drawCompanionScaled(pikachu,25,layer,frame*32,row*40,32,40,fx+8,fy+72,pikachuAnchorX[anchor],pikachuAnchorY[anchor]);}
+if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;drawCompanionScaled(eevee,133,layer,frame*40,row*48,40,48,fx+8,fy+72,eeveeAnchorX[anchor],eeveeAnchorY[anchor]);}
+if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;drawCompanionScaled(poochyena,286,layer,frame*32,row*48,32,48,fx+8,fy+72,poochyenaAnchorX[anchor],poochyenaAnchorY[anchor]);}
+                if(follower==277){int phase=(stepX==0 && stepY==0)?0:followerClock%32;int frame=phase<6?0:(phase<16?1:(phase<22?2:3));drawCompanionScaled(treecko,277,layer,frame*32,row*32,32,32,fx+8,fy+72,16,20);}
+                if(follower==280){int frame=(stepX==0 && stepY==0)?0:Floor(followerClock/8)%4;drawCompanionScaled(torchic,280,layer,frame*24,row*32,24,32,fx+8,fy+72,12,20);}
+                if(follower==283){int phase=(stepX==0 && stepY==0)?0:followerClock%30;int frame=phase<4?0:(phase<10?1:(phase<14?2:(phase<20?3:(phase<26?4:5))));int anchor=row*6+frame;drawCompanionScaled(mudkip,283,layer,frame*32,row*40,32,40,fx+8,fy+72,mudkipAnchorX[anchor],mudkipAnchorY[anchor]);}
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
             }
             }
@@ -481,7 +482,7 @@ if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=
             }
             if(encounterVisible==1 && Game->GetCurDMap()==4 && Game->GetCurScreen()==63){
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                poochyena->Blit(encounterY<Hero->Y?2:6,RT_SCREEN,0,0,32,48,encounterX+8-poochyenaAnchorX[0],encounterY+72-poochyenaAnchorY[0],32,48);
+                drawCompanionScaled(poochyena,286,encounterY<Hero->Y?2:6,0,0,32,48,encounterX+8,encounterY+72,poochyenaAnchorX[0],poochyenaAnchorY[0]);
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 Screen->Rectangle(6,encounterX-2,encounterY-12,encounterX+18,encounterY-9,0x00);
                 if(encounterHP>0)Screen->Rectangle(6,encounterX-1,encounterY-11,encounterX-1+18*encounterHP/encounterMaxHP,encounterY-10,0x91);

@@ -12,7 +12,7 @@
       8,
       10
     ],
-    "draw": "if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;pikachu->Blit(layer,RT_SCREEN,frame*32,row*40,32,40,fx+8-pikachuAnchorX[anchor],fy+72-pikachuAnchorY[anchor],32,40);}"
+    "draw": "if(follower==25){int phase=(stepX==0 && stepY==0)?0:followerClock%36;int frame=phase<8?0:(phase<18?1:(phase<26?2:(3)));int anchor=row*4+frame;drawCompanionScaled(pikachu,25,layer,frame*32,row*40,32,40,fx+8,fy+72,pikachuAnchorX[anchor],pikachuAnchorY[anchor]);}"
   },
   {
     "id": "0133",
@@ -30,7 +30,7 @@
       2,
       2
     ],
-    "draw": "if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;eevee->Blit(layer,RT_SCREEN,frame*40,row*48,40,48,fx+8-eeveeAnchorX[anchor],fy+72-eeveeAnchorY[anchor],40,48);}"
+    "draw": "if(follower==133){int phase=(stepX==0 && stepY==0)?0:followerClock%26;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(phase<22?4:(phase<24?5:(6))))));int anchor=row*7+frame;drawCompanionScaled(eevee,133,layer,frame*40,row*48,40,48,fx+8,fy+72,eeveeAnchorX[anchor],eeveeAnchorY[anchor]);}"
   },
   {
     "id": "0261",
@@ -46,6 +46,6 @@
       4,
       4
     ],
-    "draw": "if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;poochyena->Blit(layer,RT_SCREEN,frame*32,row*48,32,48,fx+8-poochyenaAnchorX[anchor],fy+72-poochyenaAnchorY[anchor],32,48);}"
+    "draw": "if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=phase<4?0:(phase<8?1:(phase<12?2:(phase<16?3:(4))));int anchor=row*5+frame;drawCompanionScaled(poochyena,286,layer,frame*32,row*48,32,48,fx+8,fy+72,poochyenaAnchorX[anchor],poochyenaAnchorY[anchor]);}"
   }
 ]
