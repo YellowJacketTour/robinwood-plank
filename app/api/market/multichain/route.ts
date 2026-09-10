@@ -212,7 +212,7 @@ async function buildHubIndex(req: Request) {
       : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
     const nativeSubject = { chainSlug: "robinhood", collectionKey: nativeAddr, marketplace: NATIVE_BOOK_OBSERVATION_KEY, currency: "ETH", currentPriceAtomic: nativeFloor?.toString() ?? null };
-    const nativeFloorChange = (await observedFloorChanges24h([nativeSubject]).catch(() => new Map())).get(floorSubjectKey(nativeSubject)) ?? null;
+    const nativeFloorChange = (await observedFloorChanges24h([nativeSubject])).get(floorSubjectKey(nativeSubject)) ?? null;
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
     try {
@@ -301,7 +301,7 @@ async function buildHubIndex(req: Request) {
       chainSlug: collection.chainSlug, collectionKey: collection.contractAddress,
       marketplace: collection.floorPriceMarketplace, currency: collection.floorPriceCurrency,
       currentPriceAtomic: collection.floorPriceWei,
-    }))).catch(() => new Map());
+    })));
 
     const mapped = collections.map((c) => {
       const isCryptoPunks = c.chainSlug === "eth-mainnet"
