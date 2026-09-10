@@ -107,7 +107,7 @@ export class Hose {
       const pg = this.pg;
       this.backfill = new BackfillWorker({
         store: pg,
-        ingestRange: async (chain, from, to) => {
+        ingestRange: async (chain, from, to, deadline) => {
           // BITCOIN WALKS LEFT TOO.
           //
           // This function used to look only in the EVM adapter map. Bitcoin
@@ -174,6 +174,9 @@ export class Hose {
             // permanently.
             let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
             for (const h of heights) {
+              // Stop between complete blocks; the verified contiguous prefix
+              // remains durable progress instead of being killed mid-epoch.
+              if (lowest && deadline != null && Date.now() >= deadline) break;
               const hash = hashes.get(h);
               if (!hash) break; // a hole: everything below it is unproven this epoch
               // And a block whose transaction walk was TRUNCATED is not proven
@@ -609,7 +612,7 @@ export class Hose {
       });
       return undefined;
     }
-    const first = await this.backfill.step(this.cfg.chains).catch((e: unknown) => {
+    const first = await this.backfill.step(this.cfg.chains, budgetMs > 0 ? until : undefined).catch((e: unknown) => {
       // A THROW HERE USED TO VANISH.
       //
       // step() rejecting propagated to the caller's shared try/catch, which
@@ -647,7 +650,7 @@ export class Hose {
     let last = first;
     let epochs = 1;
     while (Date.now() < until) {
-      const next = await this.backfill.step(this.cfg.chains);
+      const next = await this.backfill.step(this.cfg.chains, budgetMs > 0 ? until : undefined);
       if (!next || next.tailMoved !== true) break;
       last = next;
       epochs += 1;

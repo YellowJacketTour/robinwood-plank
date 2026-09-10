@@ -107,15 +107,13 @@ test("A SUCCESS REALLY CLEARS THE STREAK, not just the expiry", async () => {
   );
 });
 
-test("NEVER FAILS SHUT: with every host benched, the full pool is still tried", async () => {
-  // The dangerous failure mode of any jail. If all hosts are benched the read
-  // must still be attempted -- a pool that refuses to try is worse than a slow
-  // one.
+test("a fully cooling pool waits instead of hammering failed providers", async () => {
+  // Retry only after the provider cooldown expires.
   const { rpc, calls } = rpcWith(HOSTS, () => false);
   for (let i = 0; i < 6; i++) await rpc.getBlockHashAtHeight(966_000 + i);
   calls.length = 0;
   await rpc.getBlockHashAtHeight(999_999);
-  eq(calls.length, HOSTS.length, "every host must still be attempted when all are benched");
+  eq(calls.length, 0, "no provider is retried before its cooldown expires");
 });
 
 test("one blip does not sideline a healthy host", async () => {
@@ -131,4 +129,18 @@ test("one blip does not sideline a healthy host", async () => {
   const benched = (rpc as unknown as { benched: Map<string, { until: number }> }).benched;
   const entry = benched.get("https://a/api");
   ok(!entry || entry.until === 0, "a single failure must not bench a host");
+});
+
+
+test("429 Retry-After applies across regional endpoints of the same provider", async () => {
+  const calls:string[]=[];
+  const rpc=new EsploraBitcoinRpc({hosts:["https://mempool.space/api","https://mempool.va1.mempool.space/api","https://independent.example/api"],fetchImpl:(async(url)=>{
+    calls.push(String(url));
+    return String(url).includes("mempool.space") ? new Response("limited",{status:429,headers:{"retry-after":"120"}}) : new Response("ab".repeat(32));
+  }) as typeof fetch});
+  ok(await rpc.getBlockHashAtHeight(100));
+  eq(calls.some(url=>url.includes("mempool.va1")),false);
+  calls.length=0;
+  ok(await rpc.getBlockHashAtHeight(101));
+  eq(calls.some(url=>url.includes("mempool.space")),false);
 });
