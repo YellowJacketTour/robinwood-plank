@@ -690,6 +690,12 @@
     body[data-playtest="true"] #gearBtn, body[data-playtest="true"] #simBtn,
     body[data-playtest="true"] #bankPanel, body[data-playtest="true"] #fuelPanel,
     body[data-playtest="true"] #adminLinkBtn { display:none !important }
+    /* The chain scoreboard is what supplies lottery-theatre's result, and it
+       never runs in playtest -- so this button could only ever open the
+       theatre's PREVIEW branch: a fabricated "Ball 1 - round odds 1 in 16"
+       with no relation to the table's real draw. Playtest shows its own
+       live number draw inline instead. */
+    body[data-playtest="true"] .lottery-open { display:none !important }
     #privateHud{position:fixed;z-index:85;top:58px;left:18px;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 354px);padding:7px 9px;border:1px solid rgba(255,200,87,.35);border-radius:10px;background:rgba(6,10,9,.9);backdrop-filter:blur(10px);font:700 11px/1.2 inherit;color:#e9dec9}
     #privateHud button,#privateHud a{min-height:34px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 10px;background:#14221b;color:#f5ecdc;font:700 11px inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}
     #privateHud select{min-height:34px;max-width:240px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 8px;background:#07100c;color:#f5ecdc;font:700 11px inherit}
@@ -1239,7 +1245,25 @@ document.addEventListener("visibilitychange", () => {
   if (!renderSuspended) { clock.getDelta(); resize(); }
 });
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+// A blocked or unavailable WebGL context throws HERE, at module top level,
+// aborting the rest of this module and leaving a black frame with no
+// explanation. Context LOSS is handled gracefully further down (see the
+// reconnect curtain); context never-created was not. The flight scene is
+// genuinely unrecoverable without a renderer -- `renderer` is load-bearing
+// for the whole frame loop -- so this does NOT pretend to keep playing.
+// It replaces a silent black rectangle with a stated reason, then rethrows
+// so the failure still surfaces to logs.
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+} catch (error) {
+  const notice = document.createElement("div");
+  notice.setAttribute("role", "alert");
+  notice.style.cssText = "position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:#0b0f0d;color:#f5ecdc;font:700 14px/1.5 system-ui,sans-serif;text-align:center";
+  notice.textContent = "This browser cannot open a 3D view, which PlankCrash needs to render the flight. Try another browser, or disable a content blocker that turns off WebGL.";
+  document.body.prepend(notice);
+  throw error;
+}
 const resolutionGovernor = createResolutionGovernor();
 renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;

@@ -680,3 +680,36 @@ test("the header speaks plain money: no ticket-weight jargon, and the economy pa
   assert.match(arcadeSource, /pot × \$\{privatePpmPct\(vault\.shareOfPotPpm\)\}/);
   assert.doesNotMatch(arcadeSource, /0\.315%/);
 });
+
+// The chain scoreboard is the only source of `plank:lottery-result`, and it
+// never runs under PLAYTEST_MODE. So lottery-theatre's button could only ever
+// reach its PREVIEW branch: a fabricated "Ball 1 - round odds 1 in 16" with no
+// relation to the table's real draw. Verified against a live room before this
+// test existed -- the button was visible and did exactly that.
+test("the lottery-theatre button is hidden in playtest, where it could only show a fabricated draw", () => {
+  const theatreSource = readFileSync(
+    new URL("../../public/arcade/lottery-theatre.js", import.meta.url),
+    "utf8"
+  );
+  // Guard the premise: if the button ever stops being appended unconditionally,
+  // this test is asserting about something that no longer exists.
+  assert.match(theatreSource, /class='lottery-open'|className='lottery-open'|classList\.add\('lottery-open'\)/,
+    "lottery-theatre still appends a .lottery-open button; keep the playtest hide rule aligned with it");
+  assert.match(
+    arcadeSource,
+    /body\[data-playtest="true"\][^{]*\.lottery-open[^{]*\{[^}]*display:\s*none/,
+    "playtest must hide .lottery-open so no fabricated preview draw is reachable"
+  );
+});
+
+// Context LOSS had a reconnect curtain; context NEVER-CREATED did not. A
+// browser with WebGL blocked threw at module top level, aborting the module
+// (including startPrivatePlaytest) and leaving a black frame with no reason.
+test("a WebGL context that cannot be created explains itself instead of leaving a black frame", () => {
+  const construction = arcadeSource.indexOf("new THREE.WebGLRenderer(");
+  assert.ok(construction > 0, "the renderer construction site must exist to be guarded");
+  const window = arcadeSource.slice(Math.max(0, construction - 400), construction + 900);
+  assert.match(window, /try\s*\{/, "renderer construction must be inside a try block");
+  assert.match(window, /setAttribute\(\s*["']role["']\s*,\s*["']alert["']\s*\)/, "the failure must announce itself to assistive tech");
+  assert.match(window, /cannot open a 3D view/, "the message must state the actual cause");
+});
