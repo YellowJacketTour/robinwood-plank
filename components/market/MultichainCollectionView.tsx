@@ -72,6 +72,8 @@ import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
 import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import TradingParityMatrix from "@/components/market/TradingParityMatrix";
+import type { CollectionProfile } from "@/lib/market/multichain/collection-profile";
+import { profileLink } from "@/lib/market/multichain/collection-profile-url";
 import BiggestBuyersBoard from "@/components/market/BiggestBuyersBoard";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
@@ -236,6 +238,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [nonEvmAccount, setNonEvmAccount] = useState<string | null>(null);
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
+  const [collectionProfile, setCollectionProfile] = useState<CollectionProfile | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null;
     animationUrl?: string | null; mediaType?: string | null;
@@ -597,6 +600,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           name: string;
           imageUrl: string | null;
           contractAddress: string;
+          creatorHandle?: string | null;
+          profile?: CollectionProfile | null;
           listedCount: number | null;
           totalSupply: number | null;
           volume24hWei: string | null;
@@ -638,6 +643,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         session: true,
       });
       const data = ident;
+      const profile = { ...data.collection.profile };
+      const handle = data.collection.creatorHandle;
+      if (!profile.twitter && handle && /^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+        profile.twitter = { value: `https://x.com/${handle}`, source: "Collection catalog", observedAt: "" };
+      }
+      setCollectionProfile(profile);
       /* catalog tokens: fetchCatalogTokens effect */
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
@@ -2127,6 +2138,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
             {collection.contractAddress}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            {(["website", "twitter", "discord"] as const).map((field) => {
+              const evidence = collectionProfile?.[field];
+              const href = profileLink(field, evidence?.value);
+              return href && evidence ? <a key={field} href={href} target="_blank" rel="noopener noreferrer"
+                title={`${evidence.source}${evidence.observedAt ? ` · observed ${new Date(evidence.observedAt).toLocaleString()}` : " · observation time unavailable"}`}
+                className="rounded-md border border-line px-2 py-1 text-gold-300 hover:border-gold-400">
+                {field === "twitter" ? "X" : field === "website" ? "Website" : "Discord"} ↗
+              </a> : null;
+            })}
+            {(["website", "twitter", "discord"] as const).some((field) => profileLink(field, collectionProfile?.[field]?.value)) && <span className="text-foreground/45">Source-reported links</span>}
+          </div>
             </div>
           </div>
         </div>

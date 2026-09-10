@@ -65,6 +65,7 @@ export type OpenSeaCollectionDisplay = {
   imageUrl: string | null;
   totalSupply: number | null;
   creatorHandle: string | null;
+  profile?: { website?: string | null; twitter?: string | null; discord?: string | null; description?: string | null };
 };
 
 /** True when OpenSea's own `name` is just the contract (ONESHOT Avalanche pattern) — never store that as a collection title. */
@@ -257,9 +258,9 @@ export async function fetchOpenSeaCollectionDisplay(
     return null;
   }
 
-  let body: { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null };
+  let body: { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null; project_url?: string | null; discord_url?: string | null; description?: string | null };
   try {
-    body = (await res.json()) as { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null };
+    body = (await res.json()) as typeof body;
   } catch {
     recordSourceFailure(slot.providerAccount, false);
     return null;
@@ -273,6 +274,8 @@ export async function fetchOpenSeaCollectionDisplay(
     imageUrl: sanitizeOpenSeaImageUrl(body.image_url),
     totalSupply: typeof supply === "number" && Number.isFinite(supply) && supply > 0 ? Math.round(supply) : null,
     creatorHandle: handle && handle.toLowerCase() !== "null" ? handle : null,
+    profile: { website: body.project_url, discord: body.discord_url, description: body.description,
+      twitter: handle && /^[A-Za-z0-9_]{1,15}$/.test(handle) ? `https://x.com/${handle}` : null },
   };
 }
 
@@ -378,6 +381,10 @@ export async function syncOpenSeaCollectionStats(chainSlug: string, contractAddr
   const stats = await fetchOpenSeaCollectionStats(slug);
   if (!stats) return { ...result, errors: 1 };
   const display = await fetchOpenSeaCollectionDisplay(slug);
+  if (display?.profile) {
+    const { recordCollectionProfile } = await import("../collection-profile");
+    await recordCollectionProfile(chainSlug, contractAddress, display.profile, "OpenSea").catch(() => { result.errors += 1; });
+  }
   if (display && (display.name || display.imageUrl || display.creatorHandle)) {
     await updateCollectionDisplay(chainSlug, contractAddress, {
       name: display.name,
@@ -511,6 +518,10 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       continue;
     }
     const display = await fetchOpenSeaCollectionDisplay(slug);
+    if (display?.profile) {
+      const { recordCollectionProfile } = await import("../collection-profile");
+      await recordCollectionProfile(chainSlug, row.contract_address, display.profile, "OpenSea").catch(() => { result.errors += 1; });
+    }
     if (display && (display.name || display.imageUrl || display.creatorHandle)) {
       await updateCollectionDisplay(chainSlug, row.contract_address, {
         name: display.name,

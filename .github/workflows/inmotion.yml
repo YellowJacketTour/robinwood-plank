@@ -40,6 +40,7 @@ on:
           - cutover-bitcoin-existence
           - deploy-mesh
           - configure-plankspace-x
+          - diagnose-market-locks
       cutover_direction:
         description: >-
           For cutover-bitcoin-existence only. `arm` hands Bitcoin EXISTENCE to
@@ -1390,6 +1391,61 @@ jobs:
           pkill -f "opensea-stream-standalone.mjs" || true
           pkill -f "market-realtime.mjs" || true
           echo "mesh bundles swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
+          REMOTE
+
+  diagnose-market-locks:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'diagnose-market-locks'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Inspect database lock metadata without changing sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+          ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" \
+            "${INMOTION_USER}@${INMOTION_HOST}" bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in /home/*/plank.tanggang.life) ;; *) exit 1 ;; esac
+          cd "$app_dir/current"
+          "$node_bin" --env-file="$app_dir/shared/.env.production" --input-type=module <<'JS'
+          import pg from 'pg';
+          const pool = new pg.Pool({max:1,connectionTimeoutMillis:10000,statement_timeout:10000,application_name:'plank-lock-diagnostic'});
+          try {
+            const settings = await pool.query("SELECT current_setting('track_activities') AS track_activities, current_setting('server_version_num') AS version");
+            console.log('[lock-diagnostic] settings',JSON.stringify(settings.rows));
+            const locks = await pool.query(`SELECT l.pid,l.locktype,l.mode,l.granted,c.relname,a.state,
+              a.usename=current_user AS same_role,extract(epoch FROM clock_timestamp()-a.xact_start)::int AS transaction_age_seconds,
+              a.wait_event_type,a.wait_event,pg_blocking_pids(a.pid) AS blockers
+              FROM pg_locks l LEFT JOIN pg_class c ON c.oid=l.relation
+              LEFT JOIN pg_stat_activity a ON a.pid=l.pid
+              WHERE (a.datname=current_database() OR l.pid IS NULL)
+                AND (c.relname='plank_market_events' OR NOT l.granted)
+              ORDER BY l.granted,l.pid LIMIT 100`);
+            console.log('[lock-diagnostic] locks',JSON.stringify(locks.rows));
+            const table = await pool.query(`SELECT s.n_live_tup,s.n_dead_tup,s.last_vacuum,s.last_autovacuum,
+              s.vacuum_count,s.autovacuum_count,age(c.relfrozenxid) AS xid_age,pg_relation_size(c.oid)::text AS heap_bytes
+              FROM pg_stat_all_tables s JOIN pg_class c ON c.oid=s.relid
+              WHERE s.schemaname='public' AND s.relname='plank_market_events'`);
+            console.log('[lock-diagnostic] table',JSON.stringify(table.rows));
+          } finally {await pool.end();}
+          JS
+          ps -eo pid,comm,args | awk '/[a]utovacuum/ {print "[lock-diagnostic] maintenance", $1, $2, ($0 ~ /wraparound/ ? "wraparound" : "autovacuum")}' || true
           REMOTE
 
   provision-market-mesh:
