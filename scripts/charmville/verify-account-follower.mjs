@@ -24,7 +24,7 @@ try {
  assert(events.some(e=>e==='CHARMVILLE_FOLLOWER '+speciesId),'Account selection must reach the native script');
  assert(events.some(e=>e.includes('CHARMVILLE_FOLLOWER_DRAW '+speciesId)),'The selected follower must render along actual movement');
  await page.screenshot({path:out+'/following.png'});
- await page.getByRole('tab',{name:'Companions',exact:true}).click();await party.getByRole('button',{name:'Return to party',exact:true}).click();await party.getByRole('button',{name:'Walk with me',exact:true}).waitFor();
+ await page.getByRole('tab',{name:'Party',exact:true}).click();await party.getByRole('button',{name:'Return to party',exact:true}).click();await party.getByRole('button',{name:'Walk with me',exact:true}).waitFor();
  await page.getByRole('tab',{name:'Play',exact:true}).click();await runtime.waitForFunction(()=>FS.readFile(FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/follower.txt',{encoding:'utf8'})==='0');await page.waitForTimeout(1200);
  assert(events.some(e=>e==='CHARMVILLE_FOLLOWER 0'),'Returning the companion must hide its native projection');
  assert.deepEqual(errors,[]);await writeFile(out+'/verification.json',JSON.stringify({events,errors},null,2));

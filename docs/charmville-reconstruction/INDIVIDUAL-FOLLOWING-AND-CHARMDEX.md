@@ -1,0 +1,15 @@
+# Individual party following and Charmdex menu repair
+
+The reported bug had two independent causes. CompanionPanel used the starter's single following flag to project every occupied roster slot. Native presentation then required a long movement history before drawing those followers. Selecting another slot therefore changed the apparent choice for the entire party, while a stationary player could see nobody.
+
+Migration122 adds a following preference to each owned creature. Only the original starter imports its legacy preference. Roster changes use the shared roster revision, ownership checks and absolute desired state, with same-state retries remaining idempotent. Choosing or returning a companion does not change its siblings. Reordering retains the creature's preference and identity; unplaced creatures are not projected into the world.
+
+The Party interface now uses source portrait cards showing level, HP and individual walking state. Selected-member Summary, Care and Organize views separate information, consumable/rest actions and roster changes. Source elemental types are labeled alongside actual account health. Test grants remain inside an explicit expandable test section. Keyboard arrows follow the rendered card grid. A container query adapts the inner layout to its actual panel width, avoiding desktop viewport breakpoints that previously clipped controls in a narrow sidebar.
+
+The shared shell uses Play, Party, Satchel, Exchange and Friends with one return control. It preserves native panel protocol IDs and the mounted runtime. This is an improvement to the existing operational interfaces, not a claim that every Zelda inventory, social feature or market screen is now a finished unified device.
+
+Native spawn placement seeds a bounded connected trail using the map's solid-footprint checks. Selected followers can appear before movement; real movement history subsequently takes over. Tight spaces may not fit every follower safely, and dynamic entity avoidance/reversal overlap remain unfinished.
+
+Verification: PostgreSQL checks cover independent preferences, persistence, stale edits, retries and foreign ownership; the account browser test selects two members of a six-member test roster, reloads, then returns only the second. Native fixture checks render six and two followers before directional input. See the final verifier output for additional account-to-render evidence. Responsive Party captures are in work/party-device-390.png and work/party-device-desktop.png. The current state is a repaired and redesigned party interface, not certification of commercial release quality.
+
+Final account-to-render check passed: the actual two selected owned companions produced native draw events for Treecko and Torchic and appeared next to the stationary player. Only non-directional intro confirmation was used. Screenshot work/party-two-native-account.png was visually inspected. This joins saved preferences, the account bridge and actual rendered sprites in one test.

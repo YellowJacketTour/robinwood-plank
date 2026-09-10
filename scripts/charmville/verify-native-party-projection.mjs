@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 const out='work/native-party-projection';await mkdir(out,{recursive:true});
 const browser=await chromium.launch();
+async function verify(){
 try{
  const page=await browser.newPage({viewport:{width:1100,height:950}}),events=[],errors=[];
  await page.addInitScript(()=>{window.nativeLifecycle=[];window.addEventListener('message',event=>{if(event.origin==='http://localhost:3021'&&event.source===document.querySelector('iframe')?.contentWindow&&event.data?.type==='charmville:action-lifecycle')window.nativeLifecycle.push(event.data);});});
@@ -75,9 +76,15 @@ try{
  await page.evaluate(speciesIds=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds},'http://localhost:3021'),species);
  await page.waitForTimeout(800);
  async function move(key,ms){await page.keyboard.down(key);await page.waitForTimeout(ms);await page.keyboard.up(key);await page.waitForTimeout(200);}
- await move('ArrowDown',500);await move('ArrowRight',1500);await move('ArrowUp',450);await move('ArrowLeft',350);
+ if(!process.argv.includes('--spawn')){await move('ArrowDown',500);await move('ArrowRight',1500);await move('ArrowUp',450);await move('ArrowLeft',350);}
  for(let i=0;i<6;i++)assert(events.includes(`CHARMVILLE_PARTY_DRAW ${i} ${species[i]}`),`Slot ${i} must draw`);
  await page.screenshot({fullPage:true,path:out+'/six-followers.png'});
+ if(process.argv.includes('--spawn')){
+  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds:[25,133]},'http://localhost:3021'));await page.waitForTimeout(600);
+  assert(events.includes('CHARMVILLE_PARTY_DRAW 0 25'));assert(events.includes('CHARMVILLE_PARTY_DRAW 1 133'));
+  await page.screenshot({fullPage:true,path:out+'/two-followers-spawn.png'});
+  await writeFile(out+'/spawn.json',JSON.stringify({scope:'Read-only six then two species projection at stationary native spawn; not account roster ownership.',events,errors},null,2));assert.deepEqual(errors,[]);console.log('Six and two native companions visible before any directional input.');process.exitCode=0;return;
+ }
  const path='/Files/Homestead/charmville/party-followers.txt';
  assert.equal(await runtime.evaluate(path=>FS.readFile(path,{encoding:'utf8'}),path),[...species,18].join('|'));
  await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:party-followers',speciesIds:[277,280,283,277,280,283,277]},'http://localhost:3021'));
@@ -89,4 +96,6 @@ try{
  assert.deepEqual(errors,[]);await writeFile(out+'/verification.json',JSON.stringify({scope:'Synthetic six-member presentation projection; does not establish account ownership of six creatures.',events,errors},null,2));
  console.log('Six synthetic native projection slots rendered; oversized party rejected; clearing works.');
  }
-}finally{await browser.close();}
+}catch(error){await writeFile(out+'/failure.txt',String(error));const last=browser.contexts()[0]?.pages()[0];if(last)await last.screenshot({path:out+'/failure.png'});throw error;}finally{await browser.close();}
+}
+await verify();

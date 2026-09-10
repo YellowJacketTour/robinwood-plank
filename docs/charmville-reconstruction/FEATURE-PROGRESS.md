@@ -237,3 +237,7 @@ A controller can invite one nearby approved player for one companion move. Actua
 ## Native committed attack integration evidence
 
 The current native build maps Treecko/Pound, Torchic/Scratch and Mudkip/Tackle to preserved PMD Attack sequences with source ground markers and contact timing. Queued events wait for native completion; old event history and stale acknowledgments cannot replay attacks. Owned follower UUIDs select the existing body for temporary attack playback. The final fresh two-account assist check verified Treecko contact, exact slot and completion with the real shared result. Full per-frame/direction visual QA, the other three test-party attack mappings, misses/statuses and autonomous movement remain incomplete. See NATIVE-WORLD-ENCOUNTER.md; maturity bars remain unchanged.
+
+## Individual following and party menu repair
+
+Following now belongs to each creature rather than the starter's global flag. A real six-member account test selects exactly two, verifies persistence after reload, sees both source sprites beside the stationary hero, and returns the second without changing the first. Native six-species spawn placement also passes independently. Party portrait cards, health/types, Summary/Care/Organize controls and the shared Charmdex navigation replace the mixed controls; desktop container sizing and 390px checks pass. This repairs the reported behavior and menu organization; it does not certify the complete game's visual or SocialFi scope. See INDIVIDUAL-FOLLOWING-AND-CHARMDEX.md.

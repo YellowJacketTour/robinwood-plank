@@ -31,7 +31,7 @@ try {
  await second.getByText(`At @${owner.handle}’s home`,{exact:true}).waitFor();
  await page.getByRole('button',{name:'Refresh account'}).click();
  await page.getByRole('region',{name:'Players here'}).getByText('@'+friend.handle,{exact:true}).waitFor();
- await page.getByRole('tab',{name:'Inventory',exact:true}).click();await page.getByRole('region',{name:'Saved inventory'}).getByText('Gameplay supplies',{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'Satchel',exact:true}).click();await page.getByRole('region',{name:'Saved inventory'}).getByText('Gameplay supplies',{exact:true}).waitFor();
  assert.equal((await page.request.post(`${base}/api/charmville/${owner.handle}/access`,{headers,data:{visitor:friend.handle,revision:'1',revoke:true}})).status(),200);
  await second.getByRole('button',{name:'Refresh account'}).click();
  await second.getByText('Choose where to join',{exact:true}).waitFor();
@@ -61,13 +61,13 @@ try {
   }
   await page.getByRole('tab',{name:'Exchange',exact:true}).click();
   await page.getByLabel('Quantity',{exact:true}).fill('2');
-  await page.getByRole('tab',{name:'Inventory',exact:true}).click();
+  await page.getByRole('tab',{name:'Satchel',exact:true}).click();
   await page.getByRole('tab',{name:'Exchange',exact:true}).click();
   assert.equal(await page.getByLabel('Quantity',{exact:true}).inputValue(),'2');
   await page.screenshot({path:out+`/account-world-${width}.png`,fullPage:true});
  }
- await page.getByRole('tab',{name:'Inventory',exact:true}).focus();await page.keyboard.press('ArrowRight');
- assert.equal(await page.getByRole('tab',{name:'Companions',exact:true}).getAttribute('aria-selected'),'true');
+ await page.getByRole('tab',{name:'Satchel',exact:true}).focus();await page.keyboard.press('ArrowRight');
+ assert.equal(await page.getByRole('tab',{name:'Party',exact:true}).getAttribute('aria-selected'),'true');
  await page.keyboard.press('End');assert.equal(await page.getByRole('tab',{name:'Friends',exact:true}).getAttribute('aria-selected'),'true');
  await page.keyboard.press('Home');assert.equal(await page.getByRole('tab',{name:'Play',exact:true}).getAttribute('aria-selected'),'true');
  await page.screenshot({path:out+'/account-world-mobile.png',fullPage:true});

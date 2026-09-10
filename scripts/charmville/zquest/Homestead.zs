@@ -7,6 +7,14 @@
 // Active is the engine's global per-frame script slot.
 global script Active
 {
+    // Conservative presentation footprint: sample all 8px quadrants.
+    bool followerSpace(int x,int y)
+    {
+        if(x<0 || y<0 || x>240 || y>128)return false;
+        for(int px=0;px<=15;px+=5)for(int py=0;py<=15;py+=5)
+            if(Screen->isSolid(x+px,y+py))return false;
+        return true;
+    }
     void resetContactOutbox()
     {
         char32 text[32];int run=0;
@@ -404,6 +412,30 @@ global script Active
                 trailHead=(trailHead+1)%512;trailCount=Min(trailCount+1,512);followerClock++;
             }
             lastHeroX=Hero->X;lastHeroY=Hero->Y;
+            // At spawn there is no walked history. Seed a short connected,
+            // collision-tested presentation path instead of hiding the party.
+            // Later entries are exclusively the hero's actual visited positions.
+            if(trailCount==0){
+                int seedX[16];int seedY[16];int seedDir[16];int count=1;
+                seedX[0]=Hero->X;seedY[0]=Hero->Y;seedDir[0]=Hero->Dir;
+                for(int n=1;n<16;n++){
+                    bool found=false;
+                    for(int turn=0;turn<4 && !found;turn++){
+                        int dir=DIR_RIGHT;
+                        if(turn==1)dir=DIR_DOWN;if(turn==2)dir=DIR_LEFT;if(turn==3)dir=DIR_UP;
+                        int dx=dir==DIR_RIGHT?16:(dir==DIR_LEFT?-16:0);
+                        int dy=dir==DIR_DOWN?16:(dir==DIR_UP?-16:0);
+                        int x=seedX[n-1]+dx;int y=seedY[n-1]+dy;bool clear=true;
+                        for(int k=0;k<n;k++)if(seedX[k]==x && seedY[k]==y)clear=false;
+                        if(clear && followerSpace(x,y) && followerSpace(seedX[n-1]+dx/2,seedY[n-1]+dy/2)){
+                            seedX[n]=x;seedY[n]=y;seedDir[n]=dir;count++;found=true;
+                        }
+                    }
+                    if(!found)break;
+                }
+                for(int n=count-1;n>=0;n--){trailX[trailHead]=seedX[n];trailY[trailHead]=seedY[n];trailDir[trailHead]=seedDir[n]^1;trailHead=(trailHead+1)%512;trailCount++;}
+                printf("CHARMVILLE_FOLLOWER_SPAWN_PATH %d\n",count);
+            }
             for(int member=5;member>=0;member--){
             follower=partyFollowers[member];if(follower==0)continue;
             // Follow eighteen world pixels along the visited path, independent

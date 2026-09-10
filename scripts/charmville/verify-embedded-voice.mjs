@@ -20,7 +20,7 @@ try {
  let release,arrived;
  const gate=new Promise(resolve=>{release=resolve;}),loading=new Promise(resolve=>{arrived=resolve;});
  await page.route('http://localhost:3021/charmville/tutorial/',async route=>{arrived();await gate;await route.continue();});
- await page.getByRole('button',{name:'Charmdex',exact:true}).click();
+ await page.getByRole('button',{name:'Discover charms',exact:true}).click();
  await loading;
  await page.getByRole('button',{name:'Voice note',exact:true}).click();
  release();
@@ -28,7 +28,7 @@ try {
  await frame.getByRole('button',{name:'Close voice note',exact:true}).waitFor({state:'visible'});
  assert(await frame.getByRole('button',{name:'Close Charmdex',exact:true}).isHidden());
  await frame.getByRole('button',{name:'Close voice note',exact:true}).click();
- await page.getByRole('button',{name:'Charmdex',exact:true}).click();
+ await page.getByRole('button',{name:'Discover charms',exact:true}).click();
  await frame.getByRole('button',{name:'Close Charmdex',exact:true}).click();
  assert(await frame.getByRole('button',{name:'Close Charmdex',exact:true}).isHidden());
  await page.getByRole('button',{name:'Voice note',exact:true}).click();

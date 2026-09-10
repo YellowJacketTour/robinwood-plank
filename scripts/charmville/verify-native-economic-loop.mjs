@@ -14,7 +14,7 @@ try{
  assert.equal(stages[1].seeds,'2');await page.screenshot({path:out+'/growing.png'});await page.waitForTimeout(31000);
  const ripe=await get('/api/charmville/world/resources');assert.equal(ripe.beds[0].stage,4);await tap();await page.waitForTimeout(1000);const harvested=await get('/api/charmville/world/resources');if(harvested.beds[0].stage!==1){await page.screenshot({path:out+'/harvest-failure.png'});const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));await writeFile(out+'/harvest-failure.json',JSON.stringify({harvested,events:await page.evaluate(()=>window.lifecycle),native:await runtime.evaluate(()=>FS.readFile(FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/resource-state.txt',{encoding:'utf8'}))},null,2));}assert.equal(harvested.beds[0].stage,1);assert.equal(harvested.produce,'1');assert.equal(harvested.seeds,'3');
  const inventory=await get('/api/charmville/'+user.handle);assert(inventory.inventory.faces.some(f=>f.face==='oran-berry'&&f.qty==='1'));
- await page.getByRole('tab',{name:'Inventory',exact:true}).click();await page.screenshot({path:out+'/harvest-inventory.png'});
+ await page.getByRole('tab',{name:'Satchel',exact:true}).click();await page.screenshot({path:out+'/harvest-inventory.png'});
  await page.reload();await page.locator('iframe').waitFor();const restored=await get('/api/charmville/world/resources');assert.equal(restored.produce,'1');assert.equal(restored.beds[0].stage,1);
  await writeFile(out+'/result.json',JSON.stringify({stages,ripe,harvested,restored},null,2));console.log('Native animation -> server crop cycle -> shared Oran inventory -> reload verified.');
 }finally{await browser.close();}
