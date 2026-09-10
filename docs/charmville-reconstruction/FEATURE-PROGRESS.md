@@ -311,3 +311,7 @@ This is a32-connection local gateway over existing HTTP/database authority, not 
 ## Socket encounter presentation
 
 The native view now receives authenticated encounter snapshots over the existing socket at a5Hz target, including shared HP and committed event history. Fresh socket presentation takes precedence over slower HTTP callbacks; failures clear the stream. Two authenticated sockets verified matching creature identity and HP. The native walking/renewal regression passed with the stream enabled(207successful socket acknowledgments). The suite passed1442tests with8skips. Battle commands and menus retain their existing HTTP paths; autonomous roaming, creature simulation ticks, all-move effects and large-scale region architecture remain unfinished. See WORLD-SOCKET.md.
+
+## Remote position presentation
+
+Adjacent saved peer positions now interpolate over100ms, remain identity-stable across reordering, and never extrapolate. Native reads occur everytwoframes. Four bridge tests and an authenticated two-account browser step pass; the loaded scene was inspected. Standing sprites remain. This is presentation work, not scalable shared persistence; the region-authority, durable recovery and interest-management gates are explicitly recorded in REMOTE-MOVEMENT-PRESENTATION.md.

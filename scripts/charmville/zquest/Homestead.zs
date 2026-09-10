@@ -161,7 +161,7 @@ global script Active
                 }
                 if(resourceMode && !resourceReady && activity>=0){if(lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;pendingReceipt=false;}
             }
-            if(ticks==1 || ticks%15==0){
+            if(ticks==1 || ticks%2==0){
                 file peers=new file("/charmville/account-peers.txt","r");
                 if(peers->isValid()){
                     accountText[0]=0;peers->ReadString(accountText);peers->Close();
