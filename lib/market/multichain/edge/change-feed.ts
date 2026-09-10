@@ -9,9 +9,11 @@ export class MarketChangeFeed {
   private subscribers = new Set<{ scopes: MarketScope[]; send: (change: MarketChange) => void }>();
   private client: Client | null = null;
   private retry: NodeJS.Timeout | null = null;
+  private schemaTimer: NodeJS.Timeout | null = null;
+  constructor(private schemaCheckMs = 15_000) {}
   private generation = 0;
   private ready = false;
-  readonly stats = { notifications: 0, delivered: 0, failures: 0, malformed: 0, reconnects: 0, omittedScopes: 0, subscriberFailures: 0 };
+  readonly stats = { deliveryMode: "checking" as "checking" | "notifications" | "periodic-resync", notifications: 0, delivered: 0, failures: 0, malformed: 0, reconnects: 0, omittedScopes: 0, subscriberFailures: 0 };
 
   subscribe(scopes: MarketScope[], send: (change: MarketChange) => void) {
     const sub = { scopes, send };
@@ -34,6 +36,29 @@ export class MarketChangeFeed {
   private broadcast(change: MarketChange) {
     for (const sub of this.subscribers) if (matchesChange(change, sub.scopes)) this.deliver(sub, change);
   }
+  protected async notificationSchemaReady(client: Client) {
+    const result = await client.query("SELECT EXISTS (SELECT 1 FROM plank_schema_migrations WHERE version='110_market_change_notifications.sql') AS ready");
+    return result.rows[0]?.ready === true;
+  }
+  private async checkSchema(client: Client, generation: number) {
+    if (generation !== this.generation) return;
+    try {
+      const ready = await this.notificationSchemaReady(client);
+      if (generation !== this.generation) return;
+      const before = this.stats.deliveryMode;
+      this.stats.deliveryMode = ready ? "notifications" : "periodic-resync";
+      if (!ready) this.broadcast(this.resync("notifications-pending-periodic-resync"));
+      else if (before === "periodic-resync") this.broadcast(this.resync("notifications-activated"));
+    } catch {
+      if (generation !== this.generation) return;
+      this.stats.deliveryMode = "periodic-resync";
+      this.broadcast(this.resync("notification-readiness-unavailable"));
+    }
+    if (generation === this.generation) {
+      this.schemaTimer = setTimeout(() => { void this.checkSchema(client, generation); }, this.schemaCheckMs);
+      this.schemaTimer.unref();
+    }
+  }
   private async connect() {
     const generation = ++this.generation;
     let client: Client;
@@ -43,6 +68,8 @@ export class MarketChangeFeed {
       const failed = () => {
         if (generation !== this.generation) return;
         this.generation++;
+        if (this.schemaTimer) clearTimeout(this.schemaTimer);
+        this.schemaTimer = null;
         this.ready = false;
         this.client = null;
         this.stats.failures++;
@@ -67,6 +94,7 @@ export class MarketChangeFeed {
       this.ready = true;
       this.stats.reconnects++;
       this.broadcast(this.resync("listener-ready"));
+      void this.checkSchema(client, generation);
     } catch {
       if (generation !== this.generation) return;
       this.stats.failures++;
@@ -80,6 +108,8 @@ export class MarketChangeFeed {
     this.retry.unref();
   }
   private stopConnection() {
+    if (this.schemaTimer) clearTimeout(this.schemaTimer);
+    this.schemaTimer = null;
     this.generation++;
     this.ready = false;
     const client = this.client;
