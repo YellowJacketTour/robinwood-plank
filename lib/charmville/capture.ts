@@ -65,6 +65,7 @@ export async function captureCreature(pool:Pool,token:string,raw?:unknown,allowP
   }
   await c.query('UPDATE charmville_wild_combat SET turn=turn+1 WHERE encounter_id=$1',[e.id]);await c.query('UPDATE charmville_encounters SET revision=revision+1 WHERE id=$1',[e.id]);await c.query('UPDATE charmville_capture_supply SET balls=balls-1 WHERE profile_id=$1',[id]);
   if(retaliation)await c.query('INSERT INTO charmville_battle_events(encounter_id,actor_profile_id,turn,log) VALUES($1,$2,$3,$4::jsonb)',[e.id,id,Number(w.turn)+1,JSON.stringify([retaliation])]);
+  if((await c.query("SELECT to_regclass('charmville_capture_events') AS present")).rows[0].present)await c.query('INSERT INTO charmville_capture_events(encounter_id,actor_profile_id,event_id,actor_x,actor_y,target_x,target_y,captured,shakes) VALUES($1,$2,$3,$4,$5,4,9,$6,$7)',[e.id,id,q.requestId,actor.x,actor.y,roll.captured,roll.shakes]);
   const result={eventId:q.requestId,actorCell:{x:actor.x,y:actor.y},targetCell:{x:4,y:9},encounterId:e.id,...roll,creatureId:roll.captured?e.id:null,balls:supply.balls-1,revision:String(BigInt(e.revision)+1n),retaliation,storage:roll.captured?'owned-storage':null};
   const hash=createHash('sha256').update(JSON.stringify([q.encounterId,q.revision,q.actorEpoch])).digest('hex');await c.query('INSERT INTO charmville_capture_receipts VALUES($1,$2,$3,$4::jsonb)',[id,q.requestId,hash,JSON.stringify(result)]);await c.query('COMMIT');return result;
  }

@@ -1,4 +1,5 @@
 "use client";
+import {createCaptureStream} from "./capture-stream";
 
 import Link from "next/link";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
@@ -11,7 +12,7 @@ import type { YardInventory } from "@/lib/charmville/inventory";
 import ExchangePanel from "./exchange-panel";
 import CompanionPanel from "./companion-panel";
 import EncounterPanel from "./encounter-panel";
-import {nativeEncounterProjection,nativeCaptureProjection} from "@/lib/charmville/native-encounter-projection";
+import {nativeEncounterProjection} from "@/lib/charmville/native-encounter-projection";
 import {useNativeResources} from "./native-resources";
 import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
@@ -39,14 +40,16 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
+  const [captureStream]=useState(()=>createCaptureStream());
   const updateEncounter=useCallback((snapshot:unknown|null)=>{
     encounterSnapshot.current=snapshot;
     if(frameReady.current)frame.current?.contentWindow?.postMessage(nativeEncounterProjection(snapshot),'http://localhost:3021');
-  },[]);
+    for(const event of captureStream.snapshot(snapshot)){if(frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');}
+  },[captureStream]);
   const showCapture=useCallback((receipt:unknown)=>{
-    const event=nativeCaptureProjection(receipt);
+    const event=captureStream.receipt(receipt);
     if(event&&frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');
-  },[]);
+  },[captureStream]);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
   const partyCreatureIds=useRef<string[]>([]);

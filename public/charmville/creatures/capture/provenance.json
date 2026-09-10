@@ -11,5 +11,6 @@
     }
   ],
   "code": "src/pokeball.c:sBallAnimSeq0/1/2 and LoadBallGfx",
+  "transparency": "GBA OBJ palette index0 transparent, applied before RGBA decoding; other indices retained.",
   "layout": "16x48: closed, opening, shared fully-open. Five ticks per opening frame from source; world arc/shake timing adapted."
 }

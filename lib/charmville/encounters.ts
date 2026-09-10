@@ -50,7 +50,7 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
   const owned=String(e.controller_id)===profileId;
   const legalActions=e.captured||!inRange?[]:!e.controller_id?["claim"]:owned?[e.mode==="world"?"enter-turn":"return-world","release"]:[];
   const canAssist=!e.captured&&inRange&&e.mode==="turn"&&await assistAvailable(c,e.id,profileId,e.controller_id?String(e.controller_id):null);
-  const projection=await encounterProjection(c,e.id,region,manifest.revision,presence.owner);
+  const projection=await encounterProjection(c,e.id,region,manifest.revision,presence.owner,profileId);
   await c.query("COMMIT");return {...projection,canAssist,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{captured:!!e.captured,id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}
 }

@@ -13,4 +13,11 @@ This checkpoint validates committed UI and ownership, not a complete source thro
 
 The final actual account regression throws directly after approaching the creature, without opening staged battle. One recorded run broke free on its first attempt and succeeded on the second, consuming two of the three finite balls. Both committed receipts reached native START, OPEN and RESULT logs, and the final native acknowledgment matched the successful sequence. The captured creature was saved, exposed in Party organization, and the native iframe remained mounted. `work/capture-native-committed.png` is a post-animation screenshot. The test uses server RNG and no injected capture event.
 
-Native delivery initially failed because the new bridge module was absent from the server route allowlist; that route was corrected and the fresh regression passed. Receipt playback currently belongs to the acting player's view; spectator capture animation is not yet replicated. The ordinary ball sequence is the only ball visual in this checkpoint.
+Native delivery initially failed because the new bridge module was absent from the server route allowlist; that route was corrected and the fresh regression passed. The initial receipt-only checkpoint has now been extended to authorized nearby spectator playback as described below. The ordinary ball sequence is the only ball visual in this checkpoint.
+
+
+## Authorized spectator playback
+
+Encounter snapshots now expose a bounded, server-filtered capture event stream to authorized nearby players. The parent view establishes a sequence baseline on first snapshot, encounter change and range reentry, so old captures do not play when joining. Direct initiating receipts and snapshot events share UUID deduplication. Events received before the native frame is ready are not replayed later; current world state remains the source of truth. These are cosmetic messages and grant no capture or inventory authority.
+
+`verify-spectator-capture.mjs` passed with two actual local accounts in an invited private home: a committed throw played in the spectator native view, native completion acknowledged the same success/failure result, exact receipt replay produced no second start, and the spectator had no capture availability. Reloading the spectator view baselined the prior capture: native sequence remained zero and no historical start logged. Three stream tests cover ordering, validation, deduplication and leaving/reentering range. `work/spectator-capture.png` was inspected as post-animation state.
