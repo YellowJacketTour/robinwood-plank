@@ -1,3 +1,4 @@
+import { observedFloorChanges24h, floorSubjectKey } from "@/lib/market/multichain/observed-floor-change";
 import { NextRequest } from "next/server";
 import { postgresQuery } from "@/lib/postgres";
 import { rateLimit } from "@/lib/security";
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
       s.volume_24h_wei::text AS "volume24hWei", s.sales_24h AS "sales24h",
       s.volume_7d_wei::text AS "volume7dWei", s.sales_7d AS "sales7d",
       s.volume_30d_wei::text AS "volume30dWei", s.sales_30d AS "sales30d",
-      s.floor_change_pct AS "floorChangePct", s.floor_observed_at AS "floorObservedAt",
+      s.floor_price_marketplace AS "floorPriceMarketplace", s.floor_observed_at AS "floorObservedAt",
       s.total_supply::float8 AS "totalSupply", s.holder_count AS "holderCount", s.synced_at AS "syncedAt"
     FROM wanted w JOIN plank_multichain_collections c ON c.chain_slug = w.chain AND c.contract_address = w.collection
     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id`,
@@ -30,8 +31,16 @@ export async function GET(req: NextRequest) {
   // The native book owns its floor, inventory, supply and owner projection.
   // A generic discovery snapshot must never erase that independent source.
   // Its rolling sales come from the same permanent ledger as the native page.
+  const changes = await observedFloorChanges24h(result.rows.map(row => ({
+    chainSlug: String(row.chainSlug), collectionKey: String(row.contractAddress),
+    marketplace: row.floorPriceMarketplace as string | null, currency: row.floorPriceCurrency as string | null,
+    currentPriceAtomic: row.floorPriceWei as string | null,
+  })));
   const collections = await Promise.all(result.rows.map(async (row) => {
-    if (row.chainSlug !== "robinhood" || row.contractAddress !== NFT_CONTRACT_ADDRESS.toLowerCase()) return row;
+    if (row.chainSlug !== "robinhood" || row.contractAddress !== NFT_CONTRACT_ADDRESS.toLowerCase()) {
+      const change = changes.get(floorSubjectKey({chainSlug:String(row.chainSlug),collectionKey:String(row.contractAddress)}));
+      return {...row, floorChangePct:change?.changePct ?? null, floorChangeEvidence:change ?? null};
+    }
     const stats = await salesStatsFromLedger();
     return { chainSlug: row.chainSlug, contractAddress: row.contractAddress,
       sales24h: stats.sales24h, volume24hWei: stats.volume24hWei,

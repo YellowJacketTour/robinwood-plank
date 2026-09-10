@@ -21,12 +21,23 @@ test("live snapshot delivers exact multi-window statistics and preserves chain i
     const body = await response.json();
     assert.equal(body.returned, 2, "EVM identity normalizes; a different-case Solana key does not match");
     for (const row of body.collections) {
+      assert.equal(row.floorChangeEvidence, null, "legacy sale-average change is not floor evidence");
       assert.equal(row.volume24hWei, "123456789012345678901");
       assert.equal(row.volume7dWei, "223456789012345678901");
       assert.equal(row.volume30dWei, "323456789012345678901");
-      assert.deepEqual([row.sales24h,row.sales7d,row.sales30d,row.floorChangePct],[3,7,30,12.5]);
+      assert.deepEqual([row.sales24h,row.sales7d,row.sales30d,row.floorChangePct],[3,7,30,null]);
+    }
+    await postgresQuery(`UPDATE plank_multichain_snapshots SET floor_price_wei=120, floor_price_currency='ETH', floor_price_marketplace='test' WHERE collection_id=ANY($1::bigint[])`,[ids]);
+    await postgresQuery(`INSERT INTO plank_collection_floor_observations(collection_id,price_atomic,currency,marketplace,source,observed_at,observation_bucket)
+      SELECT id,100,'ETH','test','test',NOW()-INTERVAL '24 hours 10 minutes',NOW()-INTERVAL '24 hours 10 minutes' FROM unnest($1::bigint[]) id
+      UNION ALL SELECT id,120,'ETH','test','test',NOW(),NOW() FROM unnest($1::bigint[]) id`,[ids]);
+    const updated=await GET(new NextRequest(`http://localhost/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scopes))}`));
+    for(const row of (await updated.json()).collections){
+      assert.equal(row.floorChangePct,20,"live updates use the same real floor history as the hub");
+      assert.equal(row.floorChangeEvidence.comparisonPriceAtomic,"100");
     }
   } finally {
+    await postgresQuery("DELETE FROM plank_collection_floor_observations WHERE collection_id=ANY($1::bigint[])",[ids]);
     await postgresQuery("DELETE FROM plank_multichain_collections WHERE id=ANY($1::bigint[])", [ids]);
     await closePostgres();
   }
