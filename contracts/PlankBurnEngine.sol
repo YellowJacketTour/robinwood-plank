@@ -106,6 +106,10 @@ contract PlankBurnEngine is ReentrancyGuard {
         if (plank_ == address(0) || v2Router_ == address(0) || weth_ == address(0) || oracle_ == address(0)) {
             revert ZeroAddress();
         }
+        if (maxEthPerCall_ == 0 || plank_.code.length == 0 || v2Router_.code.length == 0 || weth_.code.length == 0 || oracle_.code.length == 0) revert BadConfig();
+        address token0 = PlankV2TwapOracle(oracle_).token0();
+        address token1 = PlankV2TwapOracle(oracle_).token1();
+        if (!((token0 == weth_ && token1 == plank_) || (token1 == weth_ && token0 == plank_))) revert BadConfig();
         if (maxSlippageBps_ > MAX_SLIPPAGE_CEILING_BPS || keeperRewardBps_ > MAX_KEEPER_REWARD_CEILING_BPS) {
             revert BadConfig();
         }
@@ -129,6 +133,7 @@ contract PlankBurnEngine is ReentrancyGuard {
      * route, a recipient, or a minimum-output -- so it can neither redirect
      * the ETH nor accept a rigged price. See the header.
      */
+    error ZeroFairFloor();
     function executeBurn(uint256 ethAmount) external nonReentrant {
         if (ethAmount == 0 || ethAmount > address(this).balance) revert NothingToBurn();
         if (ethAmount > maxEthPerCall) revert ExceedsRateLimit();
@@ -138,6 +143,7 @@ contract PlankBurnEngine is ReentrancyGuard {
         // run until the keeper refreshes it, and no ETH moves.
         uint256 fairOut = oracle.consult(weth, ethAmount);
         uint256 floor = (fairOut * (10000 - maxSlippageBps)) / 10000;
+        if (floor == 0) revert ZeroFairFloor();
 
         address[] memory path = new address[](2);
         path[0] = weth;

@@ -2,7 +2,7 @@
  * MAINNET-CAPABLE deploy of the plank.love casino economics stack:
  *   PlankV2TwapOracle -> PlankBurnEngine, PlankLottery, PlankRakeRouter,
  *   PlankCrash, PlankBank -- wired so the crash's NET rake flows through the
- *   ratified 40/40/20 router into burn / lottery+Vault / founders.
+ *   25/69/6 router into burn / lottery+Vault / founders.
  *
  *   npx hardhat run scripts/deploy-casino.ts --network robinhood
  *
@@ -23,13 +23,15 @@
  *   CASINO_V2_PAIR         the CANONICAL, deepest PLANK/WETH Uniswap v2 pair
  *   CASINO_V2_ROUTER       the real Uniswap v2 router (swapExactETHForTokens)
  *   CASINO_DRAND_BEACON    the already-deployed shared DrandBeacon
- *   CASINO_TREASURY        the founder/ops sink (20% of net rake + lottery fee)
+ *   CASINO_TREASURY        the founder/ops sink (6% of net rake plus disclosed lottery fees)
  *
  * Economic parameters default to the RATIFIED values (lib/playtest-room-core.ts
  * DEFAULT_PLAYTEST_POLICY and DESIGN-vault-lottery-progressive-carve-2026-09-04.md
  * s6.1/s6.5), denominated in wei at 1 credit = 1e-6 ETH.
  */
 import hardhat from "hardhat";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 const { ethers } = await hardhat.network.create();
 
 /**
@@ -80,6 +82,9 @@ async function main() {
   if (net.chainId !== 4663n) {
     throw new Error(`Production casino deploy is pinned to Robinhood mainnet chainId 4663; got ${net.chainId}`);
   }
+  // Enforce the existing release requirements before any deployment transaction.
+  // A failing or unreadable gate must abort; no environment bypass is provided.
+  execFileSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./plankcrash-launch-gate.ts", import.meta.url))], { stdio: "inherit" });
 
   // ── Real infrastructure (all required) ─────────────────────────────
   const PLANK = required("CASINO_PLANK_TOKEN");
@@ -138,23 +143,28 @@ async function main() {
   const RAKE_VOLUME_STEP_WEI = envBig("CASINO_RAKE_VOLUME_STEP_WEI", 25_000_000n * CREDIT);
   // Keeper bounty as bps of realised rake (lib default 0; bps-of-rake is farm-proof).
   const KEEPER_REWARD_BPS = envBig("CASINO_KEEPER_REWARD_BPS", 0n);
-  // The router's 40/40/20 of NET is bytecode; only the community subdivision is configured.
+  // The router's 25/69/6 of NET is bytecode; only the community subdivision is configured.
   const COMMUNITY_LOTTERY_BPS = envBig("CASINO_COMMUNITY_LOTTERY_BPS", 6500n); // 65% lottery / 35% Vault
   // CCS-2L v1 variant A (ratified): survivor floor 75%, GLOBAL house cap 10% of reserveAtLock.
   const FLOOR_BPS = envBig("CASINO_CCS2L_FLOOR_BPS", 7500n);
   const HOUSE_CAP_BPS = envBig("CASINO_CCS2L_HOUSE_CAP_BPS", 1000n);
   // v2 actuarial identity (RESEARCH-game-theory-lottery-seed-resolution-2026-09-05):
   // the house risks at most this share of a round's OWN rake on that round.
-  const HOUSE_RAKE_CAP_BPS = envBig("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 5000n);
+  const HOUSE_RAKE_CAP_BPS = envBig("CASINO_CCS2L_HOUSE_RAKE_CAP_BPS", 0n);
   // The Vault (solvency floor): fixed seed 10,000 credits, buffer cap 1,000,000 credits,
   // 50% of the retained community leg becomes protected principal (the floor).
-  const CRASH_SEED_WEI = envBig("CASINO_CRASH_SEED_WEI", 10_000n * CREDIT);
+  const CRASH_SEED_WEI = envBig("CASINO_CRASH_SEED_WEI", 0n);
   const EMISSION_BUFFER_CAP_WEI = envBig("CASINO_EMISSION_BUFFER_CAP_WEI", 1_000_000n * CREDIT);
   const PROTECTED_PRINCIPAL_BPS = envBig("CASINO_PROTECTED_PRINCIPAL_BPS", 5000n);
   // Seed-income bootstrap: the only house money that can be seeded before any rake is earned.
   const SEED_BOOTSTRAP_BUDGET_WEI = envBig("CASINO_SEED_BOOTSTRAP_BUDGET_WEI", 200_000n * CREDIT); // PROPOSED
   // Outcome-independent liveness escape: 30 days after the drand emission time.
-  const REFUND_TIMEOUT_SECONDS = envBig("CASINO_REFUND_TIMEOUT_SECONDS", 30n * 86400n);
+  const REFUND_TIMEOUT_SECONDS = envBig("CASINO_REFUND_TIMEOUT_SECONDS", 3600n);
+  if(REFUND_TIMEOUT_SECONDS < 3600n || REFUND_TIMEOUT_SECONDS > 86400n) throw new Error("Refund timeout must be 1–24 hours for this release");
+  const SAFETY_GUARDIAN = required("CASINO_SAFETY_GUARDIAN");
+  const SAFETY_GOVERNANCE = required("CASINO_SAFETY_GOVERNANCE");
+  const SAFETY_REOPEN_DELAY = envBig("CASINO_SAFETY_REOPEN_DELAY", 86400n);
+  for(const role of [SAFETY_GUARDIAN,SAFETY_GOVERNANCE])if(await ethers.provider.getCode(role)==="0x")throw new Error("Production safety roles must be contract accounts; verify multisig ownership separately");
   // Max multiplier: OWNER MUST SUPPLY (explicitly not a Fable proposal). No default.
   const MAX_TARGET_BPS = (() => {
     const v = process.env.CASINO_MAX_MULTIPLIER_BPS?.trim();
@@ -168,20 +178,19 @@ async function main() {
 
   const BETTING_SECONDS = envNum("CASINO_BETTING_SECONDS", 30);
   const ROUND_INTERVAL_SECONDS = envNum("CASINO_ROUND_INTERVAL_SECONDS", 0);
-  const MIN_PARTICIPANTS = envBig("CASINO_MIN_PARTICIPANTS", 2n);
-  const MIN_POOL = envBig("CASINO_MIN_POOL_WEI", ethers.parseEther("0.005"));
-  const MIN_STAKE = envBig("CASINO_MIN_STAKE_WEI", 500n * CREDIT);
-  const MAX_STAKE_BPS = envBig("CASINO_MAX_STAKE_BPS", 6000n);
+  const MIN_PARTICIPANTS = envBig("CASINO_MIN_PARTICIPANTS", 1n);
+  const MIN_POOL = envBig("CASINO_MIN_POOL_WEI", 0n);
+  const MIN_STAKE = envBig("CASINO_MIN_STAKE_WEI", CREDIT);
+  const MAX_STAKE_BPS = envBig("CASINO_MAX_STAKE_BPS", 10000n);
   const MAX_SEATS = envBig("CASINO_MAX_SEATS", 128n);
 
-  // Lottery (DESIGN s6.1/s6.5 + actuarial hit rule, RESEARCH-game-theory-
-  // lottery-seed-resolution-2026-09-05): 10% founder fee on fresh inflow only;
-  // p_hit = min(1/oddsOneIn, c/(kappa * W)) with c the round's routed
-  // contribution (69% community x communityLotteryBps of the rake, revised
-  // 2026-09-05 from 40% -- SPEC-monotonic-vault-positive-sum §4) and
-  // kappa = 2 (the pool keeps >= half of every contribution in expectation);
-  // NO forced hit -- a progressive lottery pays when the ball falls;
-  // progressive carve x(P) = 0.10 + 0.20 * P / (P + 250,000 credits) (D2).
+  // Every bet participates pro rata. Numbered odds budget against the total
+  // winner + retained-seed fee outflow, using funding net of both fresh fees.
+  // Banked prizes are never charged on a miss. See FUNDED-CYCLE-FUNDING.md.
+  // Funded-cycle release candidate; reviewed values are bound by the launch gate.
+  const CYCLE_RETENTION_MAX_BPS = envBig("CASINO_CYCLE_RETENTION_MAX_BPS", 2000n);
+  const LOTTERY_ROLLOVER_FEE_BPS = envBig("CASINO_LOTTERY_ROLLOVER_FEE_BPS", 1000n);
+  const CYCLE_FUNDING_SCALE_WEI = envBig("CASINO_CYCLE_FUNDING_SCALE_WEI", 250_000n * CREDIT);
   const LOTTERY_FOUNDER_FEE_BPS = envBig("CASINO_LOTTERY_FOUNDER_FEE_BPS", 1000n);
   const LOTTERY_ODDS_ONE_IN = envBig("CASINO_LOTTERY_ODDS_ONE_IN", 16n);
   const LOTTERY_CONTRIBUTION_BPS = (6900n * COMMUNITY_LOTTERY_BPS) / 10_000n; // router bytecode: community 69%
@@ -189,24 +198,11 @@ async function main() {
   const CARVE_MIN_BPS = envBig("CASINO_CARVE_MIN_BPS", 1000n);
   const CARVE_MAX_BPS = envBig("CASINO_CARVE_MAX_BPS", 3000n);
   const CARVE_HALF_SATURATION_WEI = envBig("CASINO_CARVE_HALF_SATURATION_WEI", 250_000n * CREDIT);
-  // v3 vault bonus/carve-ceiling (SPEC-monotonic-vault-positive-sum-2026-09-05),
-  // ON BY DEFAULT as of 2026-09-05 (owner decision, after reviewing the
-  // mechanism live) with the spec's own ratified worked-example numbers:
-  //   - maxVaultBonusBps 2_500 (25%) -- the ratified ceiling on how much of a
-  //     round's rake the participation-count signal can ever unlock; still
-  //     capped by houseRakeCapBps's own room, never widens it (see
-  //     PlankCcs2LMath.vaultBonusBps's own docs).
-  //   - vaultBonusDecayWad 0.999e18 -- r=0.999, the spec's own default: curve
-  //     ~63% saturated by 1,000 contributing rounds (~9h at full 30s-launch
-  //     tempo), ~99.3% by 5,000 rounds (spec §3.4.1's worked table).
-  //   - lottery carve ceiling 10x today's carveHalfSaturationWei (2,500,000
-  //     credits against the 250,000-credit base) with the SAME r=0.999 decay
-  //     -- same ramp pace as the crash-game curve for a consistent feel
-  //     across both games, per spec §6.2's worked table.
-  // Explicit env overrides still work (0/0 disables either mechanism again),
-  // so this is a default, not a hardcoded floor.
-  const CRASH_MAX_VAULT_BONUS_BPS = envBig("CASINO_MAX_VAULT_BONUS_BPS", 2_500n);
-  const CRASH_VAULT_BONUS_DECAY_WAD = envBig("CASINO_VAULT_BONUS_DECAY_WAD", 999_000_000_000_000_000n);
+  // Retired crash bonus slots remain ABI compatible and default to zero.
+  // Capped-pool underwriting uses only the funded buffer fraction. The lottery
+  // retains its separately committed carve progression.
+  const CRASH_MAX_VAULT_BONUS_BPS = envBig("CASINO_MAX_VAULT_BONUS_BPS", 0n);
+  const CRASH_VAULT_BONUS_DECAY_WAD = envBig("CASINO_VAULT_BONUS_DECAY_WAD", 0n);
   const LOTTERY_CARVE_DECAY_WAD = envBig("CASINO_LOTTERY_CARVE_DECAY_WAD", 999_000_000_000_000_000n);
   const LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI = envBig(
     "CASINO_LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI",
@@ -253,7 +249,7 @@ async function main() {
   const predictedBank = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 3 });
 
   const lottery = await (
-    await ethers.getContractFactory("PlankLottery")
+    await ethers.getContractFactory("PlankCycleLottery")
   ).deploy({
     source: predictedCrash,
     founderSink: TREASURY,
@@ -266,7 +262,7 @@ async function main() {
     carveHalfSaturationWei: CARVE_HALF_SATURATION_WEI,
     carveDecayWad: LOTTERY_CARVE_DECAY_WAD,
     carveHalfSaturationCeilingWei: LOTTERY_CARVE_HALF_SATURATION_CEILING_WEI,
-  }); // nonce
+  }, CYCLE_RETENTION_MAX_BPS, CYCLE_FUNDING_SCALE_WEI, LOTTERY_ROLLOVER_FEE_BPS); // nonce
   await lottery.waitForDeployment();
 
   const rakeRouter = await (
@@ -282,7 +278,7 @@ async function main() {
   await rakeRouter.waitForDeployment();
 
   const crash = await (
-    await ethers.getContractFactory("PlankCrash")
+    await ethers.getContractFactory("PlankGuardedCrash")
   ).deploy({
     beacon: BEACON,
     router: await rakeRouter.getAddress(),
@@ -311,7 +307,7 @@ async function main() {
     vaultBonusDecayWad: CRASH_VAULT_BONUS_DECAY_WAD,
     seedBootstrapBudgetWei: SEED_BOOTSTRAP_BUDGET_WEI,
     refundTimeoutSeconds: REFUND_TIMEOUT_SECONDS,
-  }); // nonce+2
+  }, SAFETY_GUARDIAN, SAFETY_GOVERNANCE, SAFETY_REOPEN_DELAY); // nonce+2
   await crash.waitForDeployment();
 
   const crashAddr = await crash.getAddress();
@@ -334,7 +330,7 @@ async function main() {
   console.log("PlankCrash        :", crashAddr);
   console.log("PlankBank         :", await bank.getAddress());
   console.log("====================================================");
-  console.log(`\nrake ${Number(RAKE_BPS) / 100}% -> ${Number(RAKE_FLOOR_BPS) / 100}% floor; net rake split 40 burn / 40 community / 20 founders (bytecode);`);
+  console.log(`\nrake ${Number(RAKE_BPS) / 100}% -> ${Number(RAKE_FLOOR_BPS) / 100}% floor; net rake split 25 burn / 69 community / 6 founders (bytecode);`);
   console.log(`community leg: ${Number(COMMUNITY_LOTTERY_BPS) / 100}% lottery / ${(10000 - Number(COMMUNITY_LOTTERY_BPS)) / 100}% Vault`);
   console.log("settlement rule:", await crash.settlementRuleId(), "params hash:", await crash.settlementParamsHash());
   console.log("\nPOST-DEPLOY (required before the game is fully live):");

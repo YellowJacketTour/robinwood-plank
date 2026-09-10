@@ -9,7 +9,7 @@
 export const BPS = 10_000n;
 export const MIN_TARGET_BPS = 10_100n;
 
-export type AllocationRule = "stake-multiplier" | "stake-only" | "pfss" | "ccs-2l";
+export type AllocationRule = "stake-multiplier" | "stake-only" | "pfss" | "ccs-2l" | "capped-survivor-pool";
 
 // "ccs-2l" is settled by settleCcs2L() in ./economics-ccs2l (two purses:
 // player distributable + house seed), NOT by settleParimutuel() below, which
@@ -85,7 +85,7 @@ export function settleParimutuel(
   crashBps: bigint,
   seats: readonly Seat[],
 ): Settlement {
-  if (rule === "ccs-2l") {
+  if (rule === "ccs-2l" || rule === "capped-survivor-pool") {
     throw new RangeError(
       "ccs-2l is two-purse: use settleCcs2L(playerDistributable, seedH, ...) from ./economics-ccs2l",
     );

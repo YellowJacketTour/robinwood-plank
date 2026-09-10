@@ -1,0 +1,297 @@
+/* Pocket console. Canonical DESIGN.md palette; isolated to the arcade document. */
+:root {
+  --color-wood-950:#1b120a; --color-wood-800:#3d2513; --color-forest-900:#0d1f16;
+  --color-forest-800:#123322; --color-gold-500:#e9b43f; --color-gold-300:#f8d98a;
+  --color-cream:#fff2cf; --color-cream-muted:#c9b58a; --color-panel-strong:rgba(17,10,5,.97);
+  --bg-0:var(--color-wood-950); --bg-1:var(--color-forest-900); --bg-2:var(--color-wood-800);
+  --ink:var(--color-cream); --ink-dim:var(--color-cream-muted); --accent:var(--color-gold-500);
+  --accent-glow:var(--color-gold-300); --gold:var(--color-gold-500);
+}
+html body {overflow:auto;background:var(--color-wood-950)}
+body {font-family:ui-rounded,system-ui,-apple-system,"Segoe UI",sans-serif!important}
+body .deck,body .console-drawer,body .candy-flow {font-family:ui-rounded,system-ui,-apple-system,"Segoe UI",sans-serif!important}
+body .substatus {text-transform:none!important;letter-spacing:0!important;font-size:13px!important}
+body #primaryBtn {font-family:inherit!important;font-weight:750;letter-spacing:0!important}
+body .mult {font-family:ui-rounded,system-ui,sans-serif!important;font-variant-numeric:tabular-nums;font-weight:850}
+body .mult * {font-family:inherit!important}
+body .candy-flow small,body .candy-flow b,body #stakeRow .chip {font-family:inherit!important}
+body .candy-flow small {font-size:11px;letter-spacing:.5px}
+body .candy-flow b {font-size:13px}
+body .console-drawer .live-board,body .console-drawer .scoreboard {position:static;transform:none;max-width:100%;width:100%;margin:14px 0;font:14px/1.5 system-ui}
+body .stage {flex:0 0 auto!important}
+.console-rules summary {cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:15px}
+body .console-rules .payout-note,body .console-rules .payout-floor {font:400 14px/1.6 system-ui;text-align:left;margin:12px 0}
+body .console-stake-label {font:600 12px system-ui;letter-spacing:.3px}
+body #stakeValueQuote {font:400 12px system-ui;color:var(--ink-dim)}
+body #app {width:min(100%,860px);height:auto;min-height:100svh;margin:auto;padding:16px 22px 20px;
+  background:var(--color-wood-800);border:1px solid var(--color-gold-500);border-radius:28px 28px 64px 28px;
+  box-shadow:inset 0 2px 0 var(--color-gold-300),0 24px 80px var(--color-panel-strong)}
+body .topbar {position:relative;z-index:30;padding:0 0 12px;height:60px;gap:10px;flex-shrink:0}
+body .brand {flex:1;align-items:center;flex-wrap:wrap;gap:5px 12px}
+body .brand .mark {font-size:19px;letter-spacing:-.5px;background:none;color:var(--ink)}
+body .brand .round {font-size:10px}
+body .gear,body summary.console-menu {width:48px;height:48px;min-width:48px;display:grid;place-items:center;
+  border:1px solid var(--color-gold-500);border-radius:50%;background:var(--color-wood-950);font-size:20px;cursor:pointer}
+body .history-ribbon {min-height:30px;margin:0;padding:2px 12px 8px;background:var(--color-forest-900);border-radius:18px 18px 0 0}
+body .stage {flex:auto;min-height:300px;height:clamp(300px,47svh,520px);overflow:hidden;background:var(--color-forest-900);
+  border:1px solid var(--color-gold-500);border-radius:0 0 20px 20px;isolation:isolate}
+body .center-readout {top:7%;bottom:auto;right:auto;left:50%;width:95%;transform:translateX(-50%);justify-content:flex-start}
+body .mult {font-size:clamp(56px,10vw,98px);letter-spacing:-4px}
+body .substatus {color:var(--ink);font-size:10px;letter-spacing:1px;max-width:90%;margin:6px auto}
+body .mult-graph {height:38px;opacity:.5}
+body .deck,body[data-playtest="true"] .deck {position:relative;padding:14px 0 0;display:grid;
+  grid-template-columns:1fr;justify-items:center;gap:10px;background:none;flex-shrink:0}
+body .payout-note {order:5;margin:0;max-width:100%;font-size:11px;line-height:1.5;color:var(--ink-dim)}
+body #stakeRow {width:min(100%,460px);display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0}
+body #stakeRow .chip {min-height:50px;width:100%;padding:8px 2px;font:700 15px var(--font-mono);border-radius:12px;
+  background:var(--color-wood-950);color:var(--ink);border:1px solid var(--ink-dim)}
+body #stakeRow .chip.active {background:var(--gold);color:var(--color-wood-950);border:2px solid var(--ink);box-shadow:0 3px 0 var(--color-wood-950)}
+body #primaryBtn {width:min(100%,460px);min-height:76px;margin:2px 0 4px;border-radius:20px;
+  background:var(--gold);color:var(--color-wood-950);border:2px solid var(--color-gold-300);
+  box-shadow:0 6px 0 var(--color-wood-950);font-size:clamp(17px,4vw,24px);letter-spacing:0;touch-action:manipulation}
+body #primaryBtn.cashout {background:var(--win);border-color:var(--win-glow)}
+body #primaryBtn:disabled {opacity:.65;cursor:not-allowed}
+body #primaryBtn:active:not(:disabled) {transform:translateY(3px);box-shadow:0 3px 0 var(--color-wood-950)}
+body #btnSub {margin:0;max-width:100%;height:auto;min-height:16px;line-height:1.5;font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+body #simBtn {min-height:44px;margin:0;color:var(--ink);font-size:12px}
+.console-tools {position:relative;z-index:90}
+.console-menu {list-style:none}.console-menu::-webkit-details-marker {display:none}
+.console-drawer {position:absolute;top:58px;right:0;width:min(440px,calc(100vw - 32px));max-height:75svh;overflow:auto;
+  padding:18px;background:var(--color-panel-strong);border:1px solid var(--gold);border-radius:18px;box-shadow:0 20px 50px var(--color-wood-950)}
+.console-drawer h2 {font:400 16px var(--font-display);color:var(--ink);margin:0 0 16px}
+.console-tools:not([open])>.console-drawer {display:none}
+body .console-drawer .stats {display:flex;flex-wrap:wrap;gap:16px;margin:12px 0 20px;font-size:12px}
+.console-icons {display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+body .console-drawer #autoRow {display:flex;flex-wrap:wrap;margin:18px 0;gap:12px}
+body .console-drawer input,body .console-drawer button,body .console-drawer select {min-height:44px}
+.console-auto-warning {font-size:12px;color:var(--ink-dim);line-height:1.5}
+.console-stop-auto {min-height:44px;padding:10px 18px;border:1px solid var(--gold);border-radius:12px;background:var(--color-wood-950);color:var(--ink);cursor:pointer}
+.console-stop-auto[hidden] {display:none}
+body .deck #privateLaunch {min-height:48px;padding:12px 24px;border:1px solid var(--gold);border-radius:12px;background:var(--color-forest-900);color:var(--ink);cursor:pointer}
+body .deck #privateLaunch[hidden],body .deck #privateLaunch:disabled {display:none}
+body .console-drawer #privateTablePanel,body .console-drawer #privateHud {position:static;width:100%;max-width:none;max-height:none;margin:14px 0;padding:12px;display:block}
+body .console-drawer #privateHud select {width:100%;max-width:100%;min-height:44px}
+body .console-drawer #privateHudStatus {display:block;white-space:normal;margin-top:8px}
+body .console-drawer #bankPanel,body .console-drawer #fuelPanel {position:static;width:100%;margin-top:16px}
+body #privateJourney {position:static;width:min(100%,860px);margin:8px auto;padding:10px;border-radius:12px}
+body #privateReconnect {max-width:calc(100vw - 24px)}
+body .result-card.private-result {width:min(700px,calc(100vw - 40px));max-height:80svh}
+body .toast-log {position:fixed;bottom:12px;max-width:calc(100vw - 24px)}
+body .live-board {max-height:105px;overflow:auto}
+body .scoreboard {max-height:160px;overflow:auto}
+body button:focus-visible,body summary:focus-visible,body [role="button"]:focus-visible {outline:3px solid var(--ink);outline-offset:4px}
+.console-stake-label {font:700 10px var(--font-mono);letter-spacing:2px;color:var(--ink-dim)}
+.console-stake-label span {color:var(--ink)}
+.console-economy,.lottery-open {min-height:44px;padding:8px 12px;border:1px solid var(--gold);border-radius:16px;background:var(--color-wood-950);color:var(--ink);font:600 13px system-ui;cursor:pointer}
+.console-receipt {font:600 14px system-ui;color:var(--ink)}
+.lottery-theatre {padding:22px;border:1px solid var(--gold);border-radius:28px;background:radial-gradient(ellipse at 50% 38%,#20463a,var(--color-wood-950) 75%);color:var(--ink);width:min(680px,calc(100vw - 28px));max-height:94dvh;overflow:auto;text-align:center;box-shadow:0 30px 100px #000b}
+.lottery-theatre::backdrop {background:#080e0bdd;backdrop-filter:blur(8px)}
+.lottery-theatre-head {display:flex;align-items:center;justify-content:space-between;font:700 20px system-ui}
+.lottery-theatre-head button {width:44px;height:44px;border-radius:50%;border:1px solid var(--gold);background:transparent;color:var(--ink);font-size:20px;cursor:pointer}
+.lottery-theatre-scene {height:clamp(260px,54dvh,540px);width:100%}
+.lottery-theatre canvas {width:100%;height:100%;display:block}
+.lottery-theatre h2 {font:750 clamp(22px,5vw,30px) system-ui;margin:0 0 10px}
+.lottery-theatre p {font:400 15px/1.5 system-ui;color:var(--ink-dim);margin:0 0 20px}
+.lottery-next {min-height:48px;padding:12px 32px;border:0;border-radius:16px;background:var(--gold);color:var(--color-wood-950);font:700 16px system-ui;cursor:pointer}
+.lottery-amount{font:750 clamp(24px,5vw,34px)/1.3 system-ui;color:var(--ink);min-height:1.3em;font-variant-numeric:tabular-nums}
+.lottery-status{display:block;font:500 12px/1.5 system-ui;color:var(--ink-dim);min-height:1.5em;margin:8px 0 18px}
+.lottery-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.lottery-collect{min-height:48px;padding:12px 26px;border:1px solid var(--gold);border-radius:16px;background:var(--color-forest-800);color:var(--ink);font:700 16px system-ui;cursor:pointer}
+.lottery-collect[hidden]{display:none}.lottery-collect:disabled{opacity:.65;cursor:wait}
+.lottery-theatre .lottery-odds{margin-bottom:8px}
+#communityFuelControl {width:min(100%,460px);font:400 14px/1.5 system-ui;color:var(--ink)}
+#communityFuelControl summary {cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:center;border:1px solid var(--gold);border-radius:14px}
+#communityFuelControl>div {padding:16px;background:var(--color-wood-950);border-radius:14px;margin-top:8px}
+#communityFuelControl input {width:100px;min-height:44px;font:600 16px system-ui;border-radius:8px;padding:6px;color:var(--ink);background:var(--color-wood-800);border:1px solid var(--gold)}
+#communityFuelControl button {min-height:44px;border:0;border-radius:12px;background:var(--gold);color:var(--color-wood-950);padding:10px 20px;font-weight:700;cursor:pointer}
+#communityFuelControl button:disabled {opacity:.5;cursor:not-allowed}
+#communityFuelControl small {display:block;margin-top:12px;font-size:12px;color:var(--ink-dim)}
+@media(max-width:540px){body .brand .mark{font-size:14px}body .brand .round{font-size:10px}.topbar>.console-economy{display:none}.lottery-open{padding:8px;font-size:12px}body .topbar{gap:6px}body .stage{height:44svh;min-height:300px}.lottery-theatre{padding:16px}.lottery-theatre-scene{height:46dvh}}
+.console-target {min-height:44px;justify-content:center;opacity:1!important}
+body .console-target input {min-height:44px;width:80px!important;font-size:18px!important}
+body #stakeRow .chip {white-space:pre-line;font-size:12px;line-height:1.8;min-height:64px}
+.candy-flow {display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0 0;min-height:116px}
+.candy-flow>div,.candy-lottery {width:125px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink)}
+.candy-flow small {font:700 9px var(--font-mono);letter-spacing:2px;color:var(--ink-dim)}
+.candy-flow b {font:700 11px var(--font-mono);max-width:100%;overflow-wrap:anywhere;text-align:center}
+.candy-pool>span,.candy-prize>span {font-size:33px;color:#ffe09a;text-shadow:0 3px 0 #ad597a,0 0 24px #ffcd7044}
+.candy-lottery {position:relative;border:0;background:none;cursor:pointer;min-height:110px;padding:0}
+.candy-lottery canvas {width:100px;height:93px;margin-top:-12px}
+.candy-arrow {color:#eab77c;font-size:24px}
+.candy-token {position:fixed;z-index:1000;width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 30% 25%,#fff8d5,#ff9fab 45%,#cd6399);pointer-events:none}
+body .payout-floor {font-size:11px;line-height:1.4;max-width:440px;text-align:center}
+body[data-playtest="true"] #primaryBtn {position:static;inset:auto;transform:none;width:min(100%,460px)}
+body .private-powerball-canvas {filter:none!important}
+@media(max-width:540px){.candy-flow{gap:4px;min-height:105px}.candy-flow>div,.candy-lottery{width:95px}.candy-lottery canvas{height:80px;width:85px}body .stage{height:32svh;min-height:240px}}
+@media(prefers-reduced-motion:reduce){.candy-token{display:none}body #primaryBtn,body .chip{transition:none!important}}
+@media(min-width:900px) {html body {padding:24px}body #app {min-height:calc(100svh - 48px)}}
+@media(max-width:540px) {body #app {padding:10px 12px max(16px,env(safe-area-inset-bottom));border-radius:0 0 32px 32px;border-top:0;min-height:100svh}
+  body .brand .mark {font-size:15px}body .brand .round {flex-basis:100%}body .stage {height:40svh;min-height:260px}
+  body .topbar {height:60px;padding:0 0 10px}body .deck {gap:8px}body .history-ribbon {min-height:25px}
+  body .private-powerball {min-height:280px}body .result-card.private-result {padding:16px}
+}
+@media(max-height:500px) and (orientation:landscape) {body #app {display:grid;grid-template-columns:1.2fr 1fr;gap:0 16px;padding:8px 14px}
+  body .topbar {grid-column:1/-1}body .history-ribbon {display:none}body .stage {height:72svh;min-height:250px;border-radius:16px}
+  body .deck {align-content:center}body #primaryBtn {min-height:60px}}
+
+#stakeRow[hidden]{display:none!important}
+.pocket-stake-picker{display:flex;align-items:center;justify-content:center;gap:24px;margin:8px auto 4px}
+.pocket-stake-picker button{width:48px;height:48px;border-radius:50%;font-size:26px;border:1px solid #e9b43f;background:#4d351b;color:#fff2cf}
+.pocket-stake-picker button:disabled{opacity:.3}
+.pocket-stake-picker output{min-width:155px;text-align:center;white-space:pre-line;font:600 17px/1.6 system-ui;color:#fff2cf}
+
+/* Approved 2026-09-09 art direction: full scene above an ivory handheld dock. */
+html body{padding:0;background:#081221}
+body #app{position:relative;width:min(100%,1120px);padding:0;border:0;border-radius:0;background:#081221;min-height:100svh;box-shadow:none}
+body .topbar{position:absolute;inset:0 0 auto;padding:20px 24px;height:88px;background:linear-gradient(#081221aa,transparent);z-index:30}
+body .brand .mark{font-size:clamp(18px,3vw,28px)}
+body .stage{height:78svh;min-height:440px;border:0;border-radius:0;width:100%}
+body .center-readout{top:18%;width:auto}
+body .mult{font-size:clamp(30px,5vw,52px);letter-spacing:-1px;color:#f5ecdc!important}
+body .mult-graph{display:none}
+body .substatus{font-size:12px!important}
+body .deck,body[data-playtest="true"] .deck{position:relative;background:linear-gradient(#f5ecdc,#e8ddc9);border-radius:28px 28px 0 0;margin-top:-22px;padding:18px 18px max(14px,env(safe-area-inset-bottom));gap:5px;z-index:20;color:#3d2513;box-shadow:0 -6px 30px #0002}
+.pocket-actions{display:grid;grid-template-columns:minmax(190px,1.6fr) 90px minmax(160px,1fr);gap:16px;width:100%;align-items:center}
+.pocket-stake-picker{gap:12px;margin:0;min-width:0}
+.pocket-stake-picker button{flex-shrink:0;border-radius:16px;background:#f5ecdc;color:#684e2e;border:1px solid #cdbf9f;box-shadow:0 3px 0 #cdbf9f;width:48px;height:56px}
+.pocket-stake-picker output{min-width:0;flex:1;color:#3d2513;font-size:15px;line-height:1.5}
+body .console-target{margin:0;gap:3px;color:#3d2513;border-left:1px solid #cdbf9f;padding-left:10px}
+body .console-target input{color:#3d2513;background:transparent;border:0;width:62px!important;font-size:23px!important}
+body #primaryBtn,body[data-playtest="true"] #primaryBtn{min-height:70px;width:100%;font-size:24px;margin:0;box-shadow:0 4px 0 #b38c40;border-color:#ffe09b;border-radius:20px}
+body .console-stake-label{display:none}
+body #stakeValueQuote,body #btnSub,body .console-receipt{color:#684e2e;font-size:11px;min-height:0;margin:0}
+body #communityFuelControl{color:#684e2e;width:auto;min-width:180px;font-size:12px}body #communityFuelControl summary{min-height:36px;border:0}
+body #communityFuelControl>div{color:#fff2cf}
+body .console-drawer .history-ribbon{height:auto;display:flex;flex-wrap:wrap}
+@media(max-width:540px){body .topbar{height:76px;padding:12px}body .stage{height:76svh;min-height:400px}body .brand .round{display:none}body .deck{padding:12px 10px;gap:4px}.pocket-actions{grid-template-columns:minmax(155px,1fr) 60px 90px;gap:6px}.pocket-stake-picker{gap:4px}.pocket-stake-picker button{width:44px;height:52px;font-size:23px}.pocket-stake-picker output{font-size:11px}.console-target{padding-left:4px!important}body .console-target input{width:42px!important;font-size:20px!important}body #primaryBtn{font-size:17px;min-height:60px}body .center-readout{top:17%}}
+
+/* Keep the flight readout above the character, clear of the face. */
+body .center-readout{top:12%}
+@media(max-width:540px){body .center-readout{top:13%}}
+
+/* Keep an explicit scene height: the WebGL canvas is absolutely positioned. */
+body .stage{height:calc(100svh - 142px);min-height:400px}
+@media(max-width:540px){body .stage{height:calc(100svh - 136px)}}
+@media(max-width:540px){body #primaryBtn.pending{font-size:14px;padding:10px 6px}}
+/* Keep every control reachable on small phones and short landscape screens. */
+@media(max-width:360px){
+  body:not([data-playtest="true"]) .pocket-actions{grid-template-columns:minmax(0,1fr) 60px;gap:8px}
+  body:not([data-playtest="true"]) #primaryBtn{grid-column:1/-1;min-height:48px}
+  body:not([data-playtest="true"]) .stage{height:calc(100svh - 194px);min-height:320px}
+}
+@media(orientation:landscape) and (max-height:540px) and (min-width:640px){
+  body:not([data-playtest="true"]) .stage{width:calc(100% - 260px);height:100svh;min-height:300px}
+  body:not([data-playtest="true"]) .topbar{right:260px;height:72px;padding:12px}
+  body:not([data-playtest="true"]) .deck{position:absolute;inset:0 0 0 auto;width:260px;margin:0;border-radius:24px 0 0 24px;padding:16px;align-content:center}
+  body:not([data-playtest="true"]) .pocket-actions{grid-template-columns:60px minmax(0,1fr);gap:12px 8px}
+  body:not([data-playtest="true"]) .pocket-stake-picker{grid-column:1/-1;gap:6px}
+  body:not([data-playtest="true"]) .pocket-stake-picker output{font-size:13px}
+  body:not([data-playtest="true"]) #primaryBtn{font-size:19px;min-height:60px}
+  body:not([data-playtest="true"]) .console-target{padding-left:0;border-left:0}
+}
+
+/* A target glyph identifies the input; exact risk details stay accessible. */
+.target-mark{display:block;width:18px;height:18px;flex-shrink:0;color:inherit}
+.target-mark svg{display:block;width:100%;height:100%}
+.console-target[data-draft="true"] .target-mark svg{display:none}
+.console-target[data-draft="true"] .target-mark::after{content:"Next";position:absolute;left:50%;transform:translateX(-50%);font:600 11px/18px system-ui}
+body .console-target{position:relative;padding-top:14px}
+.console-target .target-mark{position:absolute;top:-3px;left:calc(50% - 9px)}
+.lottery-amount-label{display:block;color:var(--ink-dim);font:500 12px/1.5 system-ui}
+.lottery-details{margin:8px auto;max-width:320px;color:var(--ink-dim);font:500 12px/1.5 system-ui}
+.lottery-details[hidden]{display:none}
+.lottery-details summary{min-height:44px;cursor:pointer;align-content:center}
+.lottery-details .lottery-personal-odds{font-size:12px;text-align:left;margin:8px 0}
+body button:focus-visible,body summary:focus-visible,body input:focus-visible{outline:3px solid var(--gold);outline-offset:4px}
+
+.lottery-funding-icon{display:block;width:160px;height:160px;margin:auto;color:var(--gold)}
+.lottery-static-ball{width:min(220px,80%);aspect-ratio:1;border-radius:50%;margin:24px auto;display:grid;place-items:center;background:var(--ink);color:var(--color-wood-950);border:12px solid var(--gold);font:700 clamp(16px,5vw,32px) system-ui;overflow-wrap:anywhere;padding:12px;box-sizing:border-box}
+.lottery-theatre-scene:has(.lottery-funding-icon){height:200px;display:grid;place-items:center}
+
+/* Public handheld layout: retain page zoom and scrolling on very short screens. */
+body:not([data-playtest="true"]) #app{display:block}
+body:not([data-playtest="true"]) .stage{height:calc(100svh - var(--console-dock-height,240px) + 22px);min-height:280px}
+body:not([data-playtest="true"]) .topbar{padding-top:max(12px,env(safe-area-inset-top));padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+body:not([data-playtest="true"]) .deck{padding-bottom:max(12px,env(safe-area-inset-bottom));padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right))}
+body:not([data-playtest="true"]) button,body:not([data-playtest="true"]) summary{touch-action:manipulation}
+body .lottery-open,body .console-menu,body #sfxBtn{min-width:44px;min-height:44px;flex-shrink:0}
+body #communityFuelControl summary{min-height:44px;align-content:center}
+.console-drawer{overscroll-behavior:contain;max-height:calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+.console-drawer input,.console-drawer select{font-size:16px}
+.lottery-theatre{box-sizing:border-box;max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overscroll-behavior:contain}
+.lottery-theatre-head{position:sticky;top:0;z-index:2;background:#10221b;border-radius:12px}
+@media(orientation:landscape) and (max-height:540px) and (min-width:540px){
+  body:not([data-playtest="true"]) .stage{width:calc(100% - 260px);height:100svh;min-height:280px}
+  body:not([data-playtest="true"]) .topbar{right:260px;height:72px;gap:4px}
+  body:not([data-playtest="true"]) .brand .mark{font-size:12px}
+  body:not([data-playtest="true"]) .brand .round{display:none}
+  body:not([data-playtest="true"]) .deck{position:absolute;inset:0 0 0 auto;width:260px;height:100svh;overflow-y:auto;margin:0;border-radius:24px 0 0 24px;align-content:center;padding-top:max(12px,env(safe-area-inset-top))}
+  body:not([data-playtest="true"]) .pocket-actions{grid-template-columns:76px minmax(0,1fr);gap:12px 8px}
+  body:not([data-playtest="true"]) .pocket-stake-picker{grid-column:1/-1}
+  body:not([data-playtest="true"]) #primaryBtn{grid-column:auto;font-size:17px;min-height:60px}
+  body:not([data-playtest="true"]) .console-target{padding-left:0;border-left:0;min-width:0}
+  body:not([data-playtest="true"]) .console-target input{width:48px;font-size:20px}
+  body:not([data-playtest="true"]) .centerreadout{top:76px}
+  .console-drawer{position:fixed;top:max(70px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right))}
+  .lottery-theatre-scene{height:220px}
+}
+
+/* Handheld controls: a full-width stake rocker and two generous action wells.
+   Explicit text-fill overrides WebKit's disabled-looking input inheritance. */
+body:not([data-playtest="true"]) .pocket-actions{grid-template-columns:minmax(200px,1.4fr) minmax(130px,1fr) minmax(130px,1fr);gap:12px;align-items:stretch}
+body:not([data-playtest="true"]) .console-target{position:relative;min-width:0;min-height:76px;margin:0;padding:26px 12px 8px;border:2px solid var(--color-gold-500,var(--gold));border-radius:18px;background:var(--ink);color:var(--color-wood-950);box-sizing:border-box;gap:6px}
+body:not([data-playtest="true"]) .console-target input{width:calc(100% - 24px)!important;min-width:0;flex:1;min-height:38px;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;color:var(--color-wood-950)!important;-webkit-text-fill-color:var(--color-wood-950)!important;opacity:1!important;font:700 23px/1.2 system-ui!important;font-variant-numeric:tabular-nums;text-align:center}
+body:not([data-playtest="true"]) .console-target input:disabled{opacity:.5!important}
+body:not([data-playtest="true"]) .console-target input::-webkit-inner-spin-button,body:not([data-playtest="true"]) .console-target input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+body:not([data-playtest="true"]) .console-target input{appearance:textfield;-moz-appearance:textfield}
+body:not([data-playtest="true"]) .pocket-actions,body:not([data-playtest="true"]) .pocket-actions input,body:not([data-playtest="true"]) .pocket-actions output,body:not([data-playtest="true"]) .target-mark,body:not([data-playtest="true"]) .invite-player button{font-family:var(--font-body,-apple-system),BlinkMacSystemFont,"Segoe UI",Arial,sans-serif!important}
+body:not([data-playtest="true"]) .console-target:focus-within{outline:3px solid var(--gold);outline-offset:3px}
+body:not([data-playtest="true"]) .console-target .target-mark{position:absolute;top:5px;left:12px;width:auto;height:auto;font:600 11px/16px system-ui}
+body:not([data-playtest="true"]) .console-target span{color:var(--color-wood-950)!important;opacity:1!important}
+body:not([data-playtest="true"]) .console-target .target-mark svg{display:none}
+body:not([data-playtest="true"]) .console-target .target-mark::after{content:"Target";position:static;transform:none;font:inherit}
+body:not([data-playtest="true"]) .console-target[data-draft="true"] .target-mark::after{content:"Next target"}
+body:not([data-playtest="true"]) #primaryBtn{min-height:76px;margin:0;border-radius:20px;font-size:20px;grid-column:auto}
+body:not([data-playtest="true"]) .pocket-stake-picker{min-width:0;gap:8px}
+body:not([data-playtest="true"]) .pocket-stake-picker output{min-width:0;font:650 13px/1.5 system-ui;white-space:pre-line}
+@media(max-width:600px),(orientation:landscape) and (max-height:540px){
+  body:not([data-playtest="true"]) .pocket-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  body:not([data-playtest="true"]) .pocket-stake-picker{grid-column:1/-1}
+  body:not([data-playtest="true"]) .pocket-stake-picker button{width:48px;min-height:48px}
+  body:not([data-playtest="true"]) .pocket-stake-picker output{font-size:14px}
+  body:not([data-playtest="true"]) .invite-player{margin-bottom:4px}
+}
+
+/* Flight deck: tactile command controls, with the same accessible layout. */
+body:not([data-playtest="true"]) .deck{
+  background:linear-gradient(160deg,var(--color-forest-800),var(--color-forest-900) 60%);
+  color:var(--ink);border:1px solid var(--color-gold-500);border-bottom:0;
+  border-radius:26px 26px 0 0;box-shadow:inset 0 3px 0 color-mix(in srgb,var(--ink) 12%,transparent),0 -10px 32px color-mix(in srgb,var(--color-wood-950) 30%,transparent);
+}
+body:not([data-playtest="true"]) .invite-player{color:var(--ink);border-bottom:1px solid color-mix(in srgb,var(--ink) 15%,transparent);padding-bottom:8px;margin-bottom:8px}
+body:not([data-playtest="true"]) .invite-player button{color:var(--ink);background:var(--color-forest-900);border-color:color-mix(in srgb,var(--color-gold-500) 65%,transparent);border-radius:12px;box-shadow:inset 0 1px 0 color-mix(in srgb,var(--ink) 12%,transparent)}
+body:not([data-playtest="true"]) .invite-repeat[aria-pressed="true"]{background:var(--color-gold-500);color:var(--color-wood-950)}
+body:not([data-playtest="true"]) .pocket-stake-picker{border:1px solid color-mix(in srgb,var(--ink) 22%,transparent);border-radius:14px;padding:6px;background:var(--color-forest-900);box-shadow:inset 0 2px 5px color-mix(in srgb,var(--color-wood-950) 50%,transparent)}
+body:not([data-playtest="true"]) .pocket-stake-picker output{color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:.015em}
+body:not([data-playtest="true"]) .pocket-stake-picker button{border-radius:10px;color:var(--ink);background:var(--color-forest-800);border:1px solid var(--color-cream-muted);box-shadow:0 3px 0 var(--color-wood-950),inset 0 1px 0 color-mix(in srgb,var(--ink) 20%,transparent)}
+body:not([data-playtest="true"]) .pocket-stake-picker button:disabled{opacity:.45}
+body:not([data-playtest="true"]) .console-target{border-radius:14px;background:var(--color-forest-900);border-color:var(--color-gold-500);box-shadow:inset 0 3px 6px color-mix(in srgb,var(--color-wood-950) 50%,transparent)}
+body:not([data-playtest="true"]) .console-target input,body:not([data-playtest="true"]) .console-target span{color:var(--ink)!important;-webkit-text-fill-color:var(--ink)!important}
+body:not([data-playtest="true"]) .console-target .target-mark{font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+body:not([data-playtest="true"]) .console-target:focus-within{background:var(--color-forest-800);outline:3px solid var(--color-gold-300);outline-offset:3px}
+body:not([data-playtest="true"]) #primaryBtn{border-radius:16px;background:linear-gradient(var(--color-gold-300),var(--color-gold-500));color:var(--color-wood-950);border:2px solid var(--color-gold-300);box-shadow:0 5px 0 var(--color-wood-950),inset 0 2px 0 var(--ink);font-weight:850;letter-spacing:.015em!important}
+body:not([data-playtest="true"]) #primaryBtn::before{content:"";display:inline-block;width:14px;height:20px;background:currentColor;clip-path:polygon(50% 0,80% 35%,80% 60%,100% 85%,65% 75%,50% 100%,35% 75%,0 85%,20% 60%,20% 35%);margin-right:9px;vertical-align:-3px}
+body:not([data-playtest="true"]) #primaryBtn:disabled{opacity:.72;box-shadow:0 2px 0 var(--color-wood-950),inset 0 1px 0 var(--ink)}
+body:not([data-playtest="true"]) .pocket-actions button:not(:disabled):active{transform:translateY(2px)}
+body:not([data-playtest="true"]) #stakeValueQuote,body:not([data-playtest="true"]) #btnSub,body:not([data-playtest="true"]) .console-receipt,body:not([data-playtest="true"]) #communityFuelControl{color:var(--color-cream-muted)}
+body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) .lottery-open,body:not([data-playtest="true"]) #sfxBtn{border-radius:13px;background:var(--color-forest-900);border-color:var(--color-gold-500);color:var(--ink)}
+@media(orientation:landscape) and (max-height:540px) and (min-width:540px){body:not([data-playtest="true"]) .deck{border-radius:24px 0 0 24px;border-bottom:1px solid var(--color-gold-500)}}
+@media(prefers-reduced-motion:reduce){body:not([data-playtest="true"]) .pocket-actions button:active{transform:none}}
+
+/* Interactive prize sculpture: bounded viewport, exact value stays readable. */
+.lottery-prize-summary{display:flex;align-items:center;justify-content:center;gap:8px;min-width:0}
+.lottery-prize-summary>div{min-width:0}.lottery-prize-summary .lottery-amount{overflow-wrap:anywhere}
+.lottery-prize-art{display:block;width:132px;height:104px;flex:0 0 132px;touch-action:pan-y;cursor:grab;border-radius:12px;outline-offset:2px}
+.lottery-prize-art[hidden]{display:none}.lottery-prize-art:active{cursor:grabbing}.lottery-prize-art:focus-visible{outline:2px solid var(--accent)}
+.lottery-theatre:not([data-reveal="presented"]) .lottery-prize-art{visibility:hidden}
+@media(max-width:400px){.lottery-prize-art{width:104px;height:92px;flex-basis:104px}.lottery-prize-summary .lottery-amount{font-size:24px}}

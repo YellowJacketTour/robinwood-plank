@@ -1,0 +1,3 @@
+import {JsonRpcProvider,Contract} from 'ethers';import{readFileSync}from'node:fs';
+const p=new JsonRpcProvider('http://127.0.0.1:8545');const abi=JSON.parse(readFileSync('public/arcade/abi/PlankCrash.json'));
+for(const address of ['0x8b9d5A75328b5F3167b04B42AD00092E7d6c485c','0xA56F946D6398Dd7d9D4D9B337Cf9E0F68982ca5B']){const c=new Contract(address,abi,p);const r=await c.currentRound();const block=await p.getBlock('latest');console.log(JSON.stringify({address,id:String(await c.currentRoundId()),phase:String(r.phase),playerPool:String(r.playerPool),bettingEnds:String(r.bettingEndsAt),revealNotBefore:String(r.revealNotBefore),chainNow:block.timestamp}));}

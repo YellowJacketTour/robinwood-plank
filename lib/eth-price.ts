@@ -22,6 +22,7 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
 
   let usd = hit?.usd ?? 0;
   let source = hit?.source ?? "stale";
+  let refreshed = false;
 
   try {
     const ac = new AbortController();
@@ -40,6 +41,7 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
       if (typeof n === "number" && Number.isFinite(n) && n > 0) {
         usd = n;
         source = "coingecko";
+        refreshed = true;
       }
     }
   } catch {
@@ -47,7 +49,7 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
   }
 
   // Fallback: Coinbase if CG failed and we have no price yet
-  if (!(usd > 0)) {
+  if (!refreshed) {
     try {
       const ac = new AbortController();
       const t = setTimeout(() => ac.abort(), 2_500);
@@ -62,6 +64,7 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
         if (Number.isFinite(n) && n > 0) {
           usd = n;
           source = "coinbase";
+          refreshed = true;
         }
       }
     } catch {
@@ -69,14 +72,14 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
     }
   }
 
-  if (usd > 0) {
-    g.__plankEthUsd = { usd, fetchedAt: now, source };
+  if (refreshed) {
+    g.__plankEthUsd = { usd, fetchedAt: Date.now(), source };
   }
 
   return {
     usd: usd > 0 ? usd : 0,
     source,
-    ageMs: g.__plankEthUsd ? now - g.__plankEthUsd.fetchedAt : Number.POSITIVE_INFINITY,
+    ageMs: g.__plankEthUsd ? Date.now() - g.__plankEthUsd.fetchedAt : Number.POSITIVE_INFINITY,
   };
 }
 

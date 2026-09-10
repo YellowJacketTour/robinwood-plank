@@ -7,6 +7,7 @@ import {
   type Seat,
 } from "./economics";
 import { DEFAULT_CCS2L_PARAMS, settleCcs2L, type Ccs2LSettlement } from "./economics-ccs2l";
+import { settleCappedPool, type CappedPoolSettlement } from "./economics-capped-pool";
 
 /**
  * The laboratory economy kernel. Since 2026-09-05 the lottery half of this
@@ -133,7 +134,7 @@ export interface IterationResult {
    * Both expose allocations[{id, payout, net, survived, ...}] so downstream
    * seat accounting (lib/playtest-rooms.ts) is rule-agnostic.
    */
-  settlement?: ReturnType<typeof settleParimutuel> | Ccs2LSettlement;
+  settlement?: ReturnType<typeof settleParimutuel> | Ccs2LSettlement | CappedPoolSettlement;
   lotteryEvent: LotteryEvent;
   /** The draw record: prize on the board, threshold, sample, natural result, forced flag, W and S. */
   lotteryDraw: {
@@ -305,7 +306,7 @@ export function simulateIteration(
   const sample = input.lotteryDrawE18 ?? null;
   if (sample !== null && (sample < 0n || sample >= PROB_ONE)) throw new RangeError("lottery sample out of range");
 
-  const qualified = input.players.length >= policy.minimumPlayers
+  const qualified = input.players.length >= (policy.allocationRule === "capped-survivor-pool" ? 1 : policy.minimumPlayers)
     && input.players.every((player) => player.stake >= policy.minimumStake);
   let settlement: IterationResult["settlement"];
   let seed = 0n;
@@ -314,6 +315,7 @@ export function simulateIteration(
   const evolution = evolutionQuote(policy, prior.totals.freshWagers);
   if (qualified) {
     seed = state.emissionBuffer < policy.crashSeed ? state.emissionBuffer : policy.crashSeed;
+    if (policy.allocationRule === "capped-survivor-pool") seed = state.emissionBuffer * DEFAULT_CCS2L_PARAMS.houseCapBps / BPS;
     state.emissionBuffer -= seed;
     state.totals.flightSeeded = (state.totals.flightSeeded ?? 0n) + seed;
     const stakes = input.players.map((player) => player.stake);
@@ -326,12 +328,14 @@ export function simulateIteration(
     // seed's source) and is NEVER split through the community/principal path.
     let vaultRemainder = 0n;
     let reserveReturn = 0n;
-    if (policy.allocationRule === "ccs-2l") {
+    if (policy.allocationRule === "ccs-2l" || policy.allocationRule === "capped-survivor-pool") {
       // reserveAtLock = the emission buffer snapshot after the seed draw:
       // the funds actually still protecting the house when locks are accepted.
       // The round's NET rake (after the keeper bounty) is the base of the v2
       // actuarial house cap, exactly as PlankCrash passes it.
-      const ccs = settleCcs2L(
+      const ccs = policy.allocationRule === "capped-survivor-pool" ? settleCappedPool(
+        economics.distributable - seed, seed, input.crashBps, input.players,
+      ) : settleCcs2L(
         economics.distributable - seed,
         seed,
         input.crashBps,

@@ -90,9 +90,9 @@ test("tampered or drifted records are refused, never defaulted", () => {
   assert.throws(() => replayCommittedRound(badVersion), SettlementRuleMismatch);
 });
 
-test("the public playtest defaults to the proven ccs-2l rule", () => {
-  assert.equal(DEFAULT_PLAYTEST_POLICY.allocationRule, "ccs-2l");
-  const policy: SimulationPolicy = { ...DEFAULT_PLAYTEST_POLICY, allocationRule: "ccs-2l" };
+test("new playtests use capped survivor sharing while legacy rules remain replayable", () => {
+  assert.equal(DEFAULT_PLAYTEST_POLICY.allocationRule, "capped-survivor-pool");
+  const policy: SimulationPolicy = { ...DEFAULT_PLAYTEST_POLICY };
   const state = initialSimulationState(policy);
   const result = simulateIteration(state, policy, {
     players: SEATS.map((seat) => ({ ...seat, stake: seat.stake * 100n })),
@@ -102,9 +102,9 @@ test("the public playtest defaults to the proven ccs-2l rule", () => {
   assert.ok(result.qualified);
   assert.ok(result.settlement);
   const settlement = result.settlement as Ccs2LSettlement;
-  assert.equal(settlement.rule, "ccs-2l");
+  assert.equal(settlement.rule, "capped-survivor-pool");
   // Both conservation identities hold inside the simulation dispatch too.
-  assert.equal(settlement.totalPlayerPaid, settlement.playerDistributable);
+  assert.equal(settlement.totalPlayerPaid + settlement.bustedToReserve, settlement.playerDistributable);
   assert.equal(settlement.totalBonus + settlement.houseReturned, settlement.seedH);
 });
 

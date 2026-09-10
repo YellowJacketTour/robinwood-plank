@@ -272,11 +272,14 @@ Only after authentic evidence exists, provide the gate variables through a secur
 
 ```text
 PLANKCRASH_EXTERNAL_CONTRACT_AUDIT_SHA256=<64 lowercase hex>
+PLANKCRASH_EXTERNAL_CONTRACT_AUDIT_PATH=<actual audit report file>
 PLANKCRASH_EXTERNAL_MATH_REVIEW_SHA256=<64 lowercase hex>
+PLANKCRASH_EXTERNAL_MATH_REVIEW_PATH=<actual math review file>
 PLANKCRASH_LEGAL_APPROVAL_REFERENCE=<real controlled-system reference>
 PLANKCRASH_INCIDENT_DRILL_REFERENCE=<real immutable drill reference>
 PLANKCRASH_BUG_BOUNTY_REFERENCE=<active program reference>
 PLANKCRASH_TESTNET_CANARY_PATH=<signed artifact path>
+CANARY_EXPECTED_SIGNER=<expected canary signer public address>
 ```
 
 Run:
@@ -284,6 +287,8 @@ Run:
 ```powershell
 npm run plankcrash:launch-gate
 ```
+
+The production deployment script runs this gate before its first deployment transaction. Reports must be nonempty files matching their supplied digests. Canary evidence must use the signed producer format `plankcrash-testnet-canary/v1`, contain every named wiring assertion and distinct successful receipts for deployments and the complete betting/lock/reveal/settlement lifecycle, and be no more than seven days old. A sentinel-only run is insufficient. The gate verifies payload integrity and the configured signer; this does not establish independent custody, audited-release equivalence, live receipt canonicality, or fairness of the mock beacon. Those remain review requirements, not properties proved by this local check.
 
 Do not weaken validation to make it pass. Do not replace missing evidence with placeholders. If it fails, report every remaining blocker and its exact owner/next action.
 

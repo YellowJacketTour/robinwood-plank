@@ -6,6 +6,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 /// Minimal surface the bank needs on a casino game (PlankCrash).
 interface IPlankGame {
     function placeBetFor(address player, uint256 targetBps) external payable;
+    function placeBetForInRound(address player, uint256 expectedRound, uint256 targetBps) external payable;
 }
 
 /**
@@ -77,6 +78,7 @@ contract PlankBank is ReentrancyGuard {
         if (games.length == 0) revert NoGames();
         for (uint256 i = 0; i < games.length; i++) {
             if (games[i] == address(0)) revert ZeroAddress();
+            if (games[i].code.length == 0) revert NotAGame();
             isGame[games[i]] = true;
         }
     }
@@ -104,6 +106,17 @@ contract PlankBank is ReentrancyGuard {
         (bool ok, ) = msg.sender.call{value: amount}("");
         require(ok, "ETH send failed");
         emit Withdrawn(msg.sender, amount, 0);
+    }
+
+    event WithdrawnTo(address indexed player, address indexed recipient, uint256 amount);
+    function withdrawTo(address payable recipient, uint256 amount) external nonReentrant {
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 bal = balanceOf[msg.sender];
+        if (amount == 0 || amount > bal) revert InsufficientBalance();
+        balanceOf[msg.sender] = bal - amount;
+        (bool ok,) = recipient.call{value: amount}("");
+        require(ok, "ETH send failed");
+        emit WithdrawnTo(msg.sender, recipient, amount);
     }
 
     /// Authorize a session key. Re-callable by the same owner to raise the
@@ -152,6 +165,19 @@ contract PlankBank is ReentrancyGuard {
 
     /// A game pushes `player`'s winnings back into their play buffer
     /// (PlankCrash.withdrawToBank). Guarded to games so no one can mint balance.
+    function betViaInRound(address game, uint256 expectedRound, uint256 amount, uint256 targetBps) external nonReentrant {
+        Session storage s = _liveSession(msg.sender);
+        uint256 newSpent = uint256(s.spent) + amount;
+        if (newSpent > s.spendCap) revert CapExceeded();
+        if (!isGame[game]) revert NotAGame();
+        uint256 bal = balanceOf[s.player];
+        if (amount == 0 || amount > bal) revert InsufficientBalance();
+        s.spent = uint128(newSpent);
+        balanceOf[s.player] = bal - amount;
+        IPlankGame(game).placeBetForInRound{value: amount}(s.player, expectedRound, targetBps);
+        emit BetPlaced(s.player, game, msg.sender, amount);
+    }
+
     function creditFor(address player) external payable {
         if (!isGame[msg.sender]) revert NotAGame();
         balanceOf[player] += msg.value;

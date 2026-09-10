@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const ARCADE_ABI_SET = [
+  ["PlankGuardedCrash", "contracts/PlankGuardedCrash.sol/PlankGuardedCrash.json"],
+  ["PlankCycleLottery", "contracts/PlankCycleLottery.sol/PlankCycleLottery.json"],
+  ["PlankNumberedLottery", "contracts/PlankNumberedLottery.sol/PlankNumberedLottery.json"],
   ["PlankCrash", "contracts/PlankCrash.sol/PlankCrash.json"],
   ["PlankLottery", "contracts/PlankLottery.sol/PlankLottery.json"],
   ["PlankBank", "contracts/PlankBank.sol/PlankBank.json"],

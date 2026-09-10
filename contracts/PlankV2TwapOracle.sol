@@ -59,6 +59,10 @@ contract PlankV2TwapOracle {
     uint224 public price0Average;
     uint224 public price1Average;
     uint256 public lastUpdate;
+    // Full-width observation age prevents a whole uint32 epoch from looking
+    // like a short interval. Pair accumulators still wrap as V2 specifies.
+    uint256 public lastObservationAt;
+    event ObservationRestarted(uint256 timestamp);
 
     /// Floors/ceilings that keep a deploy from silently defeating the
     /// TWAP: a window below MIN_WINDOW degenerates toward a spot (sandwich-
@@ -99,7 +103,7 @@ contract PlankV2TwapOracle {
 
     constructor(address pair_, uint256 windowSize_, uint256 maxStaleness_, uint112 minReserveEach_) {
         if (pair_ == address(0)) revert BadConfig();
-        if (windowSize_ < MIN_WINDOW) revert BadConfig();
+        if (windowSize_ < MIN_WINDOW || windowSize_ > type(uint32).max || maxStaleness_ > type(uint32).max) revert BadConfig();
         if (maxStaleness_ < windowSize_ || maxStaleness_ > windowSize_ * MAX_STALENESS_MULTIPLE) revert BadConfig();
         if (minReserveEach_ == 0) revert BadConfig();
         IUniswapV2Pair p = IUniswapV2Pair(pair_);
@@ -119,6 +123,7 @@ contract PlankV2TwapOracle {
         price0CumulativeLast = p0;
         price1CumulativeLast = p1;
         blockTimestampLast = ts;
+        lastObservationAt = block.timestamp;
         // price{0,1}Average stay 0 until the first update() >= windowSize
         // later; consult() reverts NotInitialized until then.
     }
@@ -143,12 +148,23 @@ contract PlankV2TwapOracle {
             revert PairTooShallow(reserve0, reserve1, minReserveEach);
         }
         (uint256 p0, uint256 p1, uint32 ts) = _currentCumulativePrices();
-        uint32 timeElapsed;
-        unchecked {
-            // uint32 subtraction wraps by design (matches Uniswap V2).
-            timeElapsed = ts - blockTimestampLast;
-        }
+        uint256 timeElapsed = block.timestamp - lastObservationAt;
         if (timeElapsed < windowSize) revert PeriodNotElapsed();
+
+        // Updating after an outage must not relabel an arbitrarily old average
+        // as fresh. Start a new observation and keep swaps disabled until a
+        // complete bounded window has actually been observed.
+        if (timeElapsed > maxStaleness) {
+            price0CumulativeLast = p0;
+            price1CumulativeLast = p1;
+            blockTimestampLast = ts;
+            lastObservationAt = block.timestamp;
+            price0Average = 0;
+            price1Average = 0;
+            lastUpdate = 0;
+            emit ObservationRestarted(block.timestamp);
+            return;
+        }
 
         unchecked {
             // Cumulative-price subtraction is correct modulo 2**256 even
@@ -160,6 +176,7 @@ contract PlankV2TwapOracle {
         price1CumulativeLast = p1;
         blockTimestampLast = ts;
         lastUpdate = block.timestamp;
+        lastObservationAt = block.timestamp;
     }
 
     /// The fair (time-averaged) amount of the OTHER token you should
@@ -168,6 +185,12 @@ contract PlankV2TwapOracle {
     /// consumer can never accidentally price against no data or old data.
     function consult(address tokenIn, uint256 amountIn) external view returns (uint256 amountOut) {
         if (lastUpdate == 0) revert NotInitialized();
+        // Liquidity can disappear between updates; a still-fresh average does
+        // not waive the execution-time depth requirement.
+        (uint112 reserve0, uint112 reserve1,) = pair.getReserves();
+        if (reserve0 < minReserveEach || reserve1 < minReserveEach) {
+            revert PairTooShallow(reserve0, reserve1, minReserveEach);
+        }
         if (block.timestamp - lastUpdate > maxStaleness) revert StaleOracle();
         if (tokenIn == token0) {
             amountOut = _decodeMul(price0Average, amountIn); // token1 out

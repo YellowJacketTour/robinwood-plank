@@ -13,7 +13,7 @@ import { ratifiedRakeSplit } from "../../lib/casino/economics.js";
  * docs/marketplank/AUDIT-contracts-hardening-2026-09-04.md, proven against
  * the REAL contract graph (only the beacon / PLANK / DEX are mocks).
  */
-describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants", () => {
+describe("PlankCrash -- capped survivor pool on-chain: lifecycle + C.8 settlement invariants", () => {
   const E = (x: string) => ethers.parseEther(x);
 
   async function fresh(overrides: Parameters<typeof deployCasino>[0] = {}) {
@@ -41,8 +41,8 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     const expectedHash = keccak256(AbiCoder.defaultAbiCoder().encode(
       ["bytes32", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256"],
       [
-        keccak256(toUtf8Bytes("ccs-2l")),
-        2n,
+        keccak256(toUtf8Bytes("capped-survivor-pool")),
+        1n,
         DEFAULT_CRASH.floorBps,
         DEFAULT_CRASH.houseCapBps,
         DEFAULT_CRASH.houseRakeCapBps,
@@ -50,7 +50,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
         DEFAULT_CRASH.vaultBonusDecayWad,
       ],
     ));
-    expect(await env.crash.settlementRuleId()).to.equal(keccak256(toUtf8Bytes("ccs-2l")));
+    expect(await env.crash.settlementRuleId()).to.equal(keccak256(toUtf8Bytes("capped-survivor-pool")));
     expect(await env.crash.settlementParamsHash()).to.equal(expectedHash);
     const r1 = await env.crash.rounds(1n);
     expect(r1.paramsHash).to.equal(expectedHash);
@@ -85,7 +85,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     const env = await fresh({ crash: { crashSeedWei: E("0.5"), seedBootstrapBudgetWei: E("10") } });
     const id: bigint = await env.crash.currentRoundId();
     const r0 = await env.crash.rounds(id);
-    expect(r0.seed).to.equal(E("0.5"));
+    expect(r0.seed).to.equal(E("0.1")); // 10% of the funded buffer
     await bet(env, env.alice, "2", 12_000n);
     await bet(env, env.bob, "3", 25_000n);
     await bet(env, env.carol, "1", 90_000n);
@@ -102,10 +102,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     expect(round.totalPlayerPaid).to.equal(D);
     // S-2: bonuses + houseReturned == seed; bonuses <= min(seed, reserveAtLock*cap)
     expect(round.totalBonus + round.houseReturned).to.equal(round.seed);
-    const capBase = (BigInt(round.reserveAtLock) * DEFAULT_CRASH.houseCapBps) / BPS;
-    expect(round.totalBonus <= (round.seed < capBase ? round.seed : capBase)).to.equal(true);
-    // S-2b (v2 actuarial identity): bonuses <= houseRakeCapBps of the round's rake.
-    expect(round.totalBonus <= ((playerPool - D) * DEFAULT_CRASH.houseRakeCapBps) / BPS).to.equal(true);
+    expect(round.totalBonus).at.most(round.seed); // precommitted, fully escrowed underwriting
     const preview = await env.crash.previewSettlement(id, crashBps);
     let paidSum = 0n;
     for (let i = 0; i < seats.length; i++) {
@@ -115,8 +112,8 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
       paidSum += owed;
       if (s.targetBps <= crashBps) {
         // S-5 survivor floor; S-3 fair-odds cap.
-        expect(preview.playerPayouts[i] >= (DEFAULT_CRASH.floorBps * s.stake) / BPS).to.equal(true);
-        expect(preview.bonuses[i] <= (s.stake * (s.targetBps - BPS)) / BPS).to.equal(true);
+        expect(owed >= (DEFAULT_CRASH.floorBps * s.stake) / BPS).to.equal(true);
+        expect(owed <= (s.stake * s.targetBps) / BPS).to.equal(true);
       } else {
         expect(owed).to.equal(0n);
       }
@@ -139,7 +136,7 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     await assertConserved(env, expect);
   });
 
-  it("S-1 (all-bust): bustedToReserve == playerDistributable + seed and nobody is paid", async () => {
+  it("S-1 (all-bust): both funding sources return in full and nobody is paid", async () => {
     const env = await fresh({ crash: { crashSeedWei: E("0.2"), seedBootstrapBudgetWei: E("10") } });
     const id: bigint = await env.crash.currentRoundId();
     const r0 = await env.crash.rounds(id);
@@ -151,7 +148,8 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     const settled = receipt.logs.map((l: any) => { try { return env.crash.interface.parseLog(l); } catch { return null; } }).find((e: any) => e?.name === "RoundSettled");
     expect(settled.args.mode).to.equal(0n);
     const D = (2n * 10n ** 18n * (BPS - 450n)) / BPS;
-    expect(settled.args.bustedToReserve).to.equal(D + round.seed);
+    expect(settled.args.bustedToReserve).to.equal(D);
+    expect(round.houseReturned).to.equal(round.seed);
     expect(await env.crash.paidOf(id, env.alice.address)).to.equal(0n);
     expect(await env.crash.paidOf(id, env.bob.address)).to.equal(0n);
     const next = await env.crash.currentRound();
@@ -258,67 +256,34 @@ describe("PlankCrash -- CCS-2L on-chain: lifecycle + C.8 settlement invariants",
     console.log("      settleRound gas:", rows.join("  "));
   });
 
-  it("void path: an under-threshold round refunds every stake exactly and returns the seed", async () => {
+  it("only empty rounds void; a sole bettor and a late whale cannot cancel funded play", async () => {
     const env = await fresh();
-    const id: bigint = await env.crash.currentRoundId();
-    const r0 = await env.crash.rounds(id);
-    const reserveBefore: bigint = await env.crash.reserve();
-    await bet(env, env.alice, "1", 15_000n); // minParticipants is 2
+    const empty = await env.crash.currentRoundId();
     await closeBetting(env);
-    await expect(env.crash.lockRound()).to.emit(env.crash, "RoundVoided");
-    expect((await env.crash.rounds(id)).phase).to.equal(3n);
-    expect(await env.crash.unclaimedRefunds()).to.equal(E("1"));
-    await env.crash.claimRefund(id, env.alice.address);
-    expect(await env.crash.owed(env.alice.address)).to.equal(E("1"));
-    await expect(env.crash.claimRefund(id, env.alice.address)).to.be.revertedWithCustomError(env.crash, "AlreadyRefunded");
-    const next = await env.crash.currentRound();
-    expect(await env.crash.reserve()).to.equal(reserveBefore + r0.seed - next.seed);
+    await expect(env.crash.lockRound()).to.emit(env.crash, "RoundVoided").withArgs(empty, 0n, "empty");
+    await bet(env, env.alice, "1", 15000n);
+    await closeBetting(env);
+    await expect(env.crash.lockRound()).to.emit(env.crash, "RoundLocked");
+    await settleCurrent(env, toBeHex(7n, 32));
+    await bet(env, env.alice, "10", 15000n);
+    await bet(env, env.bob, "1", 15000n);
+    await closeBetting(env);
+    await expect(env.crash.lockRound()).to.emit(env.crash, "RoundLocked");
+    expect(await env.crash.unclaimedRefunds()).eq(0n);
     await assertConserved(env, expect);
-    // Whale-dominated rounds void too (60% cap of the FINAL pool).
-    await bet(env, env.alice, "10", 15_000n);
-    await bet(env, env.bob, "1", 15_000n);
-    await closeBetting(env);
-    await expect(env.crash.lockRound()).to.emit(env.crash, "RoundVoided").withArgs(await env.crash.currentRoundId() , E("11"), "whale-dominated");
   });
 
-  it("S-13: outcome-independent refund -- fires only after the timeout with NO randomness; settle always wins the race", async () => {
-    const env = await fresh();
-    const id: bigint = await env.crash.currentRoundId();
-    const r0 = await env.crash.rounds(id);
-    const reserveBefore: bigint = await env.crash.reserve();
-    await bet(env, env.alice, "1", 15_000n);
-    await bet(env, env.bob, "1", 20_000n);
-    await closeBetting(env);
-    await env.crash.lockRound();
-    expect((await env.crash.rounds(id)).phase).to.equal(1n);
-    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "TooEarly");
-    await increaseToAtLeast(BigInt(r0.revealNotBefore) + DEFAULT_CRASH.refundTimeoutSeconds);
-    // Randomness present => refund is impossible, whatever the outcome would be.
-    await env.beacon.setRandomness(r0.targetDrandRound, toBeHex(5n, 32));
-    await expect(env.crash.refundRound()).to.be.revertedWithCustomError(env.crash, "RandomnessAvailable");
-    // A fresh env where drand truly went dark:
-    const env2 = await fresh();
-    const id2: bigint = await env2.crash.currentRoundId();
-    const r2 = await env2.crash.rounds(id2);
-    const reserve2: bigint = await env2.crash.reserve();
-    await bet(env2, env2.alice, "1", 15_000n);
-    await bet(env2, env2.bob, "1", 20_000n);
-    await closeBetting(env2);
-    await env2.crash.lockRound();
-    await increaseToAtLeast(BigInt(r2.revealNotBefore) + DEFAULT_CRASH.refundTimeoutSeconds);
-    await expect(env2.crash.refundRound()).to.emit(env2.crash, "RoundRefunded").withArgs(id2, E("2"), r2.seed);
-    await env2.crash.claimRefund(id2, env2.alice.address);
-    await env2.crash.claimRefund(id2, env2.bob.address);
-    expect(await env2.crash.owed(env2.alice.address)).to.equal(E("1"));
-    expect(await env2.crash.owed(env2.bob.address)).to.equal(E("1"));
-    const next = await env2.crash.currentRound();
-    expect(await env2.crash.reserve()).to.equal(reserve2 + r2.seed - next.seed);
-    // Late signature: the refunded round can never settle (mutual exclusion by phase).
-    await env2.beacon.setRandomness(r2.targetDrandRound, toBeHex(5n, 32));
-    expect((await env2.crash.rounds(id2)).phase).to.equal(4n);
-    await expect(env2.crash.settleRound()).to.be.revertedWithCustomError(env2.crash, "TooEarly"); // the NEW round is still betting
-    await assertConserved(env2, expect);
-    void reserveBefore;
+  it("S-13: missing entropy cannot cancel a funded commitment at any deadline", async () => {
+    const env=await fresh();const id=await env.crash.currentRoundId(),r=await env.crash.rounds(id);
+    await bet(env,env.alice,"1",15000n);await closeBetting(env);await env.crash.lockRound();
+    await expect(env.crash.freezeStalledRound()).revertedWithCustomError(env.crash,"TooEarly");
+    await increaseToAtLeast(r.revealNotBefore+DEFAULT_CRASH.refundTimeoutSeconds*30n);
+    await expect(env.crash.refundRound()).revertedWithCustomError(env.crash,"CommittedRoundCannotBeCancelled");
+    await env.crash.freezeStalledRound();
+    expect((await env.crash.rounds(id)).phase).eq(1n);
+    await expect(env.crash.claimRefund(id,env.alice.address)).revertedWithCustomError(env.crash,"BadPhase");
+    await env.beacon.setRandomness(r.targetDrandRound,toBeHex(5n,32));await env.crash.settleRound();
+    expect((await env.crash.rounds(id)).phase).eq(2n);await assertConserved(env,expect);
   });
 
   it("S-14: the rake staircase matches lib evolutionQuote for 10,000 random volumes, and keeper + net == gross exactly", async () => {

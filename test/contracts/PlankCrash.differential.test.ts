@@ -4,32 +4,24 @@ import { join, dirname } from "node:path";
 import { toBeHex } from "ethers";
 import { ethers } from "./helpers/hardhat.js";
 import { BPS, CREDIT, assertConserved, betFor, deployCasino, freshAddress, seatsOf, settleCurrent, type CasinoEnv } from "./helpers/casino.js";
-import { DEFAULT_CCS2L_PARAMS, settleCcs2L } from "../../lib/casino/economics-ccs2l.js";
+import { DEFAULT_CCS2L_PARAMS } from "../../lib/casino/economics-ccs2l.js";
+
+import { settleCappedPool } from "../../lib/casino/economics-capped-pool.js";
 
 interface CcsEngine {
-  settleCcs2L: (
-    playerD: bigint, seedH: bigint, crashBps: bigint,
-    seats: Array<{ id: string; stake: bigint; targetBps: bigint }>, reserveAtLock: bigint,
-    params: { floorBps: bigint; playerWeight: string; houseCapBps: bigint; houseRakeCapBps: bigint },
-    rakeWei?: bigint,
-  ) => { allBust: boolean; houseReturned: bigint; bustedToReserve: bigint; totalPlayerPaid: bigint; totalBonus: bigint; allocations: Array<{ playerPayout: bigint; houseBonus: bigint }>; meta: { mode: string } };
   makeRng: (seed: bigint) => () => bigint;
   rngBelow: (rng: () => bigint, bound: bigint) => bigint;
 }
 
 /**
- * C.9 three-way differential: the REAL PlankCrash.settleRound (pull-ledger
- * credits per seat) vs lib/casino/economics-ccs2l.ts settleCcs2L vs the
- * simulation engine docs/marketplank/sim-settlement-ccs2l/engine.mjs --
- * same seats, same crashBps, same seed, same reserveAtLock, same params,
- * wei-exact. Deterministic seed; every round also asserts S-1/S-2 and
- * physical conservation.
+ * Real stateful settlement versus the independent sorted capped allocator.
+ * The historical simulation module supplies only the deterministic RNG.
+ * Every round also checks payout-source and physical conservation.
  */
-describe("PlankCrash -- three-way wei-exact differential (settleRound vs settleCcs2L vs engine.mjs)", () => {
+describe("PlankCrash -- capped-pool wei-exact differential (stateful settlement vs sorted reference)", () => {
   const E = (x: string) => ethers.parseEther(x);
   let engine: CcsEngine;
   let env: CasinoEnv;
-
   before(async () => {
     engine = (await import(
       pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "marketplank", "sim-settlement-ccs2l", "engine.mjs")).href
@@ -56,31 +48,27 @@ describe("PlankCrash -- three-way wei-exact differential (settleRound vs settleC
     expect(round.seed, `${label}: seed committed before bets`).to.equal(before.seed);
 
     const libSeats = seats.map((s, i) => ({ id: `s${i}`, stake: s.stake, targetBps: s.targetBps }));
-    const netRake = playerPool - D; // keeper bounty is 0 in the fixture
-    const lib = settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, DEFAULT_CCS2L_PARAMS, netRake);
-    const eng = engine.settleCcs2L(D, before.seed, crashBps, libSeats, before.reserveAtLock, { floorBps: 7500n, playerWeight: "ln", houseCapBps: 1000n, houseRakeCapBps: 5000n }, netRake);
+    
+    const lib = settleCappedPool(D, before.seed, crashBps, libSeats, DEFAULT_CCS2L_PARAMS);
 
     for (let i = 0; i < seats.length; i++) {
       const onChain: bigint = await env.crash.paidOf(id, seats[i].player);
       expect(onChain, `${label}: seat ${i} chain==lib`).to.equal(lib.allocations[i].playerPayout + lib.allocations[i].houseBonus);
-      expect(onChain, `${label}: seat ${i} chain==engine`).to.equal(eng.allocations[i].playerPayout + eng.allocations[i].houseBonus);
     }
     expect(round.totalPlayerPaid, `${label}: totalPlayerPaid`).to.equal(lib.totalPlayerPaid);
     expect(round.totalBonus, `${label}: totalBonus`).to.equal(lib.totalBonus);
     expect(round.houseReturned, `${label}: houseReturned`).to.equal(lib.houseReturned);
-    expect(eng.houseReturned, `${label}: engine houseReturned`).to.equal(lib.houseReturned);
-    expect(eng.bustedToReserve, `${label}: engine bustedToReserve`).to.equal(lib.bustedToReserve);
     if (lib.allBust) {
       expect(round.totalPlayerPaid + round.totalBonus).to.equal(0n);
     } else {
-      expect(round.totalPlayerPaid).to.equal(D); // S-1
+      expect(round.totalPlayerPaid + lib.bustedToReserve).to.equal(D); // unused player funding returns
       expect(round.totalBonus + round.houseReturned).to.equal(before.seed); // S-2
     }
     await assertConserved(env, expect);
     return lib;
   }
 
-  it("300 random rounds through the real contract match both JS references wei-for-wei", async () => {
+  it("300 random rounds through the real contract match the independent capped reference wei-for-wei", async () => {
     const rng = engine.makeRng(20260904n);
     let busts = 0;
     for (let t = 0; t < 300; t++) {

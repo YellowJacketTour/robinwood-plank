@@ -1,0 +1,1 @@
+Rapier 3D JavaScript compatibility build, version 0.12.0, vendored from the installed @dimforge/rapier3d-compat package. Apache-2.0 license is included. Original source: https://github.com/dimforge/rapier.js . The ESM build contains its WebAssembly payload and loads locally. Used only for lottery presentation collisions; no economic or randomness authority.

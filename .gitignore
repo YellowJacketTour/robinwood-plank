@@ -91,3 +91,8 @@ test/e2e/.casino-keeper.pid
 
 # Session scratch -- never belongs in the repo
 *.tmp.sh
+
+.dream-loop/
+
+# Generated local-chain epoch calibration
+public/arcade/practice-clock.js
