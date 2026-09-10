@@ -128,7 +128,7 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Permissions-Policy", value: 'camera=(), microphone=(self "http://localhost:3021"), geolocation=(), cross-origin-isolated=(self "http://localhost:3021"), keyboard-map=(self "http://localhost:3021")' },
-          { key: "Content-Security-Policy", value: securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021") },
+          { key: "Content-Security-Policy", value: securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:3023") },
         ],
       }] : []),
       // Marketplank is a live application shell. Never let an edge or hosting

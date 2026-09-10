@@ -3,6 +3,8 @@ const base='http://localhost:3017',out='work/native-account-movement';await mkdi
 const browser=await chromium.launch();
 try{
  const page=await browser.newPage({viewport:{width:1100,height:900}}),responses=[],renewals=[];
+ let socketSteps=0,socketResults=0;
+ page.on('websocket',ws=>{if(!ws.url().includes(':3023'))return;ws.on('framesent',frame=>{try{if(JSON.parse(String(frame.payload)).type==='step')socketSteps++;}catch{}});ws.on('framereceived',frame=>{try{const data=JSON.parse(String(frame.payload));if(data.type==='result'&&data.status===200)socketResults++;}catch{}});});
  page.on('response',async r=>{if(r.url().endsWith('/api/charmville/world/presence')&&r.request().method()==='POST')renewals.push({status:r.status(),at:Date.now()});});
  page.on('response',async r=>{if(r.url().includes('/api/charmville/world/actor'))responses.push({status:r.status(),method:r.request().method(),body:await r.json().catch(()=>null)});});
  const r=await page.request.post(base+'/api/charmville/local-playtest',{headers:{Origin:base}});assert.equal(r.status(),200);const user=await r.json();
@@ -40,6 +42,7 @@ try{
  assert(responses.filter(r=>r.method==='POST').every(r=>r.status===200||(r.status===409&&/Movement too fast|World admission changed/.test(r.body?.error??''))),'Only recoverable pacing/admission conflicts are allowed');
  assert.equal(new Set(positions.filter(p=>p.appliedCorrectionSequence>0).map(p=>p.appliedCorrectionSequence)).size,1,'Normal walking and renewal must not teleport through corrective resync');
  assert(after.sequence>before.sequence,'Actual native movement must reach persisted actor');
+ if(process.argv.includes('--socket')){assert(socketSteps>0&&socketResults>0,'Actual native movement must use socket commands and acknowledgments');console.log(`WebSocket commands ${socketSteps}; committed acknowledgments ${socketResults}`);}
  assert.equal(after.profileId,before.profileId);
  assert(after.peers.some(p=>p.profileId===bobActor.profileId),'Authenticated peer must be visible');
  const peerFile=await runtime.evaluate(()=>FS.readFile(FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/account-peers.txt',{encoding:'utf8'}));

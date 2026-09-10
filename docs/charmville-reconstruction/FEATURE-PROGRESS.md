@@ -301,3 +301,9 @@ A separate multiplayer audit confirms mutual authenticated actor API presence, b
 ## Walking synchronization repair
 
 Native observations are now queued through in-flight saves and paced from acknowledgment. Admission renewal metadata no longer rewinds the actor, and a proven uncommitted renewal race retries once. Ten regression tests pass. Actual browser walking committed199 steps across an automatic renewal with no corrective teleport beyond initial spawn; one409 recovered. The old zero-sequence browser harness now focuses the native canvas correctly. Full terrain collision parity and multi-map movement remain incomplete. See MOVEMENT-CONTINUITY.md.
+
+## Authenticated local WebSocket movement
+
+The local world now sends movement commands and authorized actor snapshots over an authenticated loopback socket targeting10Hz, with HTTP recovery. Existing server transactions retain authority. Two sockets verified persisted movement and peer delivery; invalid sessions and foreign origins were rejected. Native browser walking recorded209 commands and209 committed acknowledgments across automatic renewal without a corrective teleport after spawn. Full suite1442passed8skipped.
+
+This is a32-connection local gateway over existing HTTP/database authority, not a distributed tick simulation. The16-peer query cap, standing remote sprites and separate creature/resource transports remain. Region workers, spatial interest, shared creature ticks, multi-map dungeons and capacity measurements remain unfinished. See WORLD-SOCKET.md; large-world maturity is not advanced by changing transport alone.
