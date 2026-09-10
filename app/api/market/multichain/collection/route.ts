@@ -8,6 +8,7 @@ import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chain
 import { publicError, rateLimit } from "@/lib/security";
 import { primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 import { getArchivalStatsForCollection } from "@/lib/market/multichain/archival-ledger";
+import { readCollectionProfile } from "@/lib/market/multichain/collection-profile";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,9 +47,10 @@ export async function GET(req: NextRequest) {
     // A failed database read is not an absent snapshot. Reject the refresh
     // so the client keeps its last successful response instead of caching
     // invented empty statistics for any collection or chain.
-    const [supply, marketStats] = await Promise.all([
+    const [supply, marketStats, profile] = await Promise.all([
       getCollectionSupplyStats(chainSlug, collectionSlug),
       getCollectionMarketStats(chainSlug, collectionSlug),
+      readCollectionProfile(chainSlug, tracked.contractAddress),
     ]);
     let holderCount = supply?.holderCount ?? null;
     let listedCount = supply?.listedCount ?? null;
@@ -157,6 +159,11 @@ export async function GET(req: NextRequest) {
           name: tracked.name ?? tracked.contractAddress,
           imageUrl: tracked.imageUrl,
           contractAddress: tracked.contractAddress,
+          externalUrl: tracked.externalUrl,
+          creatorHandle: tracked.creatorHandle,
+          creatorAddress: tracked.creatorAddress,
+          creatorEns: tracked.creatorEns,
+          profile,
           listedCount,
           totalSupply,
           holderCount,

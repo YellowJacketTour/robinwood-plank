@@ -100,3 +100,4 @@ c[a-z].json
 .p[0-9]
 p[a-z].json
 q[a-z].json
+.dream-loop/
