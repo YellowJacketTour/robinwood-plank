@@ -1,7 +1,13 @@
-# Poochyena capture integration contract (not implemented)
+# Poochyena capture integration contract
 
 Primary reference: local `../charmville-references/pokeemerald`, commit `5eff78649e7170a877b961ef0b3da13b81a16038`. File hashes are recorded in `capture-source-provenance.json`. No new assets were copied and no capture issuance was added by this audit.
 
+
+## Current implementation checkpoint
+
+Migration123 and `/api/charmville/world/capture` add a finite once-only three-ball supply for trusted local sandbox profiles. Capture uses server randomness and replayable receipts. A failed throw consumes one ball and allows wild Tackle retaliation. Success transfers the encounter UUID, level, HP and combat IVs to owned storage without overwriting the six party slots. The captured encounter becomes terminal and leaves native presentation. Status-bearing captures and other ball types remain unsupported. This paragraph supersedes implementation-status statements in the original audit below; the source analysis remains applicable.
+
+PostgreSQL checks cover failure/retaliation, replay and concurrent duplicate success, ownership transfer, stored creature assignment and individual following, plus terminal encounter rejection. The full acceptance list below is still a release gate, not a claim that every case or capture animation has passed.
 ## Exact source behavior
 
 `src/battle_script_commands.c` contains the ball bonuses (line 841) and capture calculation (lines 9987–10048). Preserve integer division at each operation: `a = floor(floor(catchRate * multiplier / 10) * (3*maxHP - 2*HP) / (3*maxHP))`. Sleep/freeze doubles `a`; poison/burn/paralysis/toxic multiplies by 15 then divides by 10. These are two separate source conditionals; valid status modeling should prevent impossible combinations. Ordinary Poké Ball multiplier is 10, Great 15, Ultra 20. Poochyena catchRate is 255 (`src/data/pokemon/species_info.h:7889`). Full-health, no-status, ordinary-ball `a` is therefore 85, not a guaranteed capture.

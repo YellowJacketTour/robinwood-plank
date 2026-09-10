@@ -24,7 +24,31 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--resources')){
+ if(process.argv.includes('--capture-visual')){
+  for(const [won,shakes] of [[false,2],[true,4]]){
+   const eventId=randomUUID();await page.evaluate(data=>document.querySelector('iframe').contentWindow.postMessage(data,'http://localhost:3021'),{type:'charmville:capture-event',eventId,actorCell:{x:2,y:9},targetCell:{x:8,y:9},captured:won,shakes});
+   await page.waitForTimeout(220);await page.screenshot({path:out+`/capture-${won}-throw.png`});
+   await page.waitForTimeout(250);await page.screenshot({path:out+`/capture-${won}-open.png`});
+   await page.waitForTimeout(650);await page.screenshot({path:out+`/capture-${won}-shake.png`});
+   await page.waitForTimeout(1700);
+   assert(events.some(e=>e.startsWith('CHARMVILLE_CAPTURE_RESULT ')&&e.endsWith(`WON ${won?1:0}`)));
+  }
+  await writeFile(out+'/capture-visual.json',JSON.stringify({scope:'Synthetic committed-outcome presentation snapshots. Timed screenshots, not exact frame assertions. Actual server receipts verified separately.',events,errors},null,2));assert.deepEqual(errors,[]);console.log('Capture source presentation sampled for release and success.');
+ }else if(process.argv.includes('--attack-directions')){
+  // Isolate presentation fixture from the unadmitted parent's periodic clear.
+  // This is not a committed account battle or ownership verification.
+  await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>{if(path.endsWith('/world-encounter.txt'))return;return write(path,...args);};});
+  const emit=async(revision,hit)=>runtime.evaluate(({revision,hit})=>window.fixtureWriteEncounter([revision,1,4,9,9,13,revision-1,hit?1:0,hit?.actorSpeciesId||0,hit?.actorCell.x||0,hit?.actorCell.y||0,0].join('|')),{revision,hit});
+  await emit(1,null);await page.waitForTimeout(350);let sequence=1;
+  for(const [species,move] of [[25,98],[133,33],[286,33]])for(const [row,x,y] of [[0,4,7],[1,2,7],[2,2,9],[3,2,11],[4,4,11],[5,6,11],[6,6,9],[7,6,7]]){
+   sequence++;const marker=`CHARMVILLE_ATTACK_CONTACT ${species} ROW ${row}`;
+   await emit(sequence,{eventId:String(sequence),damage:1,actorId:'fixture-actor',actorSpeciesId:species,moveId:move,actorCell:{x,y}});
+   await page.waitForTimeout(120);await page.screenshot({path:out+`/attack-${species}-${row}.png`});
+   const deadline=Date.now()+3500;while(!events.includes(marker)&&Date.now()<deadline)await page.waitForTimeout(50);if(!events.includes(marker))await writeFile(out+"/attack-failure.json",JSON.stringify({events,fs:await runtime.evaluate(()=>FS.readFile("/Files/Homestead/charmville/world-encounter.txt",{encoding:"utf8"}))},null,2));assert(events.includes(marker),marker);
+   await page.waitForTimeout(450);
+  }
+  await writeFile(out+'/attack-directions.json',JSON.stringify({scope:'Synthetic native FS presentation (JS bridge writes isolated): three added species, eight facings. Screenshots sampled at elapsed time, not exact contact tick; no battle ownership proof.',events,errors},null,2));assert.deepEqual(errors,[]);console.log('Three added species emitted source contact in all eight native directions.');
+ }else if(process.argv.includes('--resources')){
   await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({type:'charmville:resource-state',active:true,beds:[0,1,2].map(id=>({id,stage:0,growthVisualPhase:0,allowedActions:['till','plant','water','harvest']})),seeds:3,produce:0},'http://localhost:3021'));
   await page.waitForTimeout(300);await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');
   await page.waitForFunction(()=>window.nativeLifecycle.some(e=>e.phase==='begin'));

@@ -11,7 +11,7 @@ import type { YardInventory } from "@/lib/charmville/inventory";
 import ExchangePanel from "./exchange-panel";
 import CompanionPanel from "./companion-panel";
 import EncounterPanel from "./encounter-panel";
-import {nativeEncounterProjection} from "@/lib/charmville/native-encounter-projection";
+import {nativeEncounterProjection,nativeCaptureProjection} from "@/lib/charmville/native-encounter-projection";
 import {useNativeResources} from "./native-resources";
 import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
@@ -42,6 +42,10 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const updateEncounter=useCallback((snapshot:unknown|null)=>{
     encounterSnapshot.current=snapshot;
     if(frameReady.current)frame.current?.contentWindow?.postMessage(nativeEncounterProjection(snapshot),'http://localhost:3021');
+  },[]);
+  const showCapture=useCallback((receipt:unknown)=>{
+    const event=nativeCaptureProjection(receipt);
+    if(event&&frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');
   },[]);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
@@ -75,6 +79,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const clear=useCallback(()=>{
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
     accountClient.disconnect(); session.current=null; location.current=null;
+    frame.current?.contentWindow?.postMessage({type:'charmville:capture-event',active:false},'http://localhost:3021');
     updateEncounter(null);
     updateFollower(0);
     updateFollowers([]);
@@ -266,7 +271,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <details className="mb-2 text-xs text-cream-muted"><summary className="cursor-pointer py-2">What saves with your account</summary><p className="py-2">{presence?.active?'Your movement, Oran harvests and companion health save to your account. Capture and combat rewards are not available yet.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p></details>
         {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
-        {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter}/>}
+        {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter} onCaptureReceipt={showCapture}/>}
       </section>
       <aside className={tab==='play'?'hidden':'space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={()=>{setTab('play');requestAnimationFrame(()=>frame.current?.focus());}}>Return to play</button></div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">

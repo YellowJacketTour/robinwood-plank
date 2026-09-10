@@ -47,13 +47,13 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Feature | Progress | Evidence / next integration |
 |---|---|---|
 | Species and encounter tables | ██░░░ | Source catalogue resolves386 species and184 evolution rules; one persisted Poochyena inspection anchor exists, wider habitats/rates not authored |
-| Creatures visible in adventure world | █░░░░ | Needs world entities, directional art, pathing and spawn budgets |
+| Creatures visible in adventure world | ███░░ | Six owned test species and one authoritative wild Poochyena render locally with source art; general habitat spawning, remote companion replication and pathfinding remain missing |
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
 | Native-style turn battle | ███░░ | Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
-| Capture / ball consumption / ownership | ██░░░ | Source formula and atomic capture contract audited in CAPTURE-INTEGRATION-CONTRACT.md; finite ball issuance, DB capture and live presentation remain missing |
-| Followers and companion reactions | ███░░ | Six distinct authenticated local-test species project to native trail;18/26px presets verified. Reversals overlap; reactions, obstacle avoidance and shared creature replication missing |
-| Party / storage / clinic | ██░░░ | Six-slot owned roster plus source-backed level/HP and Oran consumption verified; server-timed home HP/PP recovery verified; full clinic, capture and storage gameplay remain missing |
+| Capture / ball consumption / ownership | ███░░ | Finite sandbox balls, shared world/turn capture calculation, conserved ownership transfer and replay tested. Source ball presentation integration underway; broader ball types, statuses, spectators and full visual acceptance remain incomplete |
+| Followers and companion reactions | ███░░ | Six distinct test species, individual persisted walking selection, stationary spawn anchors and compressed source-size presentation verified. Reversals, reactions, obstacle avoidance and shared creature replication remain incomplete |
+| Party / storage / clinic | ███░░ | Six-slot owned roster, individual following, source size/type/HP summaries, Oran care and server-timed home HP/PP recovery connected. Full clinic and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | 354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing |
 | Evolution / traits / breeding | █░░░░ | Time, food, habitat capacity and offspring issuance specified conceptually |
 | Fishing / aquatic encounters | █░░░░ | Rod, line, bobber, bite, reel and catch required |
@@ -245,3 +245,12 @@ Following now belongs to each creature rather than the starter's global flag. A 
 ## Source dimensions and companion scale
 
 The pinned Emerald catalogue now supplies species height and weight for 386 species, with internal IDs joined by species names and source units preserved. Party Summary displays these as species references. Six supported native followers use compressed 16/18/20-pixel envelopes, fixed across walking and supported attacks, with transformed ground anchors and audited opaque bounds. The audit covers 488 frames and 240 anchors; stationary six-party and individual-follow browser checks pass. This is readable chibi scaling, not literal human-to-creature proportions. Catalogue coverage does not imply 386 playable creatures. Large bodies, mounts, authored footprints and complete attack-direction visual review remain outstanding; maturity bars are unchanged. See CREATURE-SCALE-AND-WORLD-CONTRACT.md.
+
+
+All new features must apply MULTIPLAYER-INTERACTION-CONTRACT.md across solo, allied, competing, PvE and PvP contexts. Current controller-only capture does not implement PvP or group reward allocation.
+
+## Shared capture and six-species attack checkpoint
+
+Ordinary-ball capture now runs through the same controller-owned transaction in world and staged modes. Finite local sandbox supply, failed retaliation, preserved wild identity/HP/IVs, stored ownership, exact retry and competing-account rejection pass PostgreSQL checks. The actual browser overhead run observed one failed and one successful throw through native START/OPEN/RESULT and acknowledgment, spent two balls, verified receipt replay and found the caught Poochyena in Party. Original ordinary-ball frames drive a receipt-only visual; this is not a complete predicted release/contact control or spectator capture system. Distinct React keys fix stale battle controls after capture.
+
+All six test-party basic attacks now have pinned source sequences. The added three species pass 24 synthetic direction/contact cases; 744 walk/attack frames and 504 attack anchors are audited. This does not certify every animation frame or authenticated move in every direction. See CAPTURE-UI.md, CAPTURE-INTEGRATION-CONTRACT.md and NATIVE-WORLD-ENCOUNTER.md.

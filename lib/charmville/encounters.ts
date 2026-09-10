@@ -35,6 +35,7 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
    if(prior){if(prior.payload_hash!==hash)throw new YardError("Request ID already used",409);}
    else{
     if(q.encounterId!==e.id||q.revision!==String(e.revision)||q.actorEpoch!==Number(actor.region_epoch))throw new YardError("Encounter changed. Refresh first",409);
+    if(e.captured)throw new YardError("This creature is already captured",409);
     if(!inRange)throw new YardError("Move closer to the creature",409);
     if(q.action==="claim"){if(e.controller_id)throw new YardError(String(e.controller_id)===profileId?"This creature is already approached":"Another player is inspecting this creature",409);}
     else if(String(e.controller_id)!==profileId)throw new YardError("Approach this creature first",403);
@@ -47,9 +48,9 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
    }
   }
   const owned=String(e.controller_id)===profileId;
-  const legalActions=!inRange?[]:!e.controller_id?["claim"]:owned?[e.mode==="world"?"enter-turn":"return-world","release"]:[];
-  const canAssist=inRange&&e.mode==="turn"&&await assistAvailable(c,e.id,profileId,e.controller_id?String(e.controller_id):null);
+  const legalActions=e.captured||!inRange?[]:!e.controller_id?["claim"]:owned?[e.mode==="world"?"enter-turn":"return-world","release"]:[];
+  const canAssist=!e.captured&&inRange&&e.mode==="turn"&&await assistAvailable(c,e.id,profileId,e.controller_id?String(e.controller_id):null);
   const projection=await encounterProjection(c,e.id,region,manifest.revision,presence.owner);
-  await c.query("COMMIT");return {...projection,canAssist,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
+  await c.query("COMMIT");return {...projection,canAssist,profileId,actorEpoch:Number(actor.region_epoch),inRange,legalActions,encounter:{captured:!!e.captured,id:e.id,speciesId:e.species_id,name:"Poochyena",cell,level:e.level,hp:e.hp,maxHp:e.max_hp,statuses:e.statuses,mode:e.mode,controllerId:e.controller_id?String(e.controller_id):null,leaseUntil:e.lease_until?.toISOString()??null,revision:String(e.revision)}};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}
 }

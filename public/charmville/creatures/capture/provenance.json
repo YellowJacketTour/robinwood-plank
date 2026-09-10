@@ -1,0 +1,15 @@
+{
+  "sourceCommit": "5eff78649e7170a877b961ef0b3da13b81a16038",
+  "files": [
+    {
+      "path": "graphics/balls/poke.png",
+      "sha256": "7e8e78babd958f24d282a647f0ea9dfe41b20b6cd49800c7a7b2cffa8bd01450"
+    },
+    {
+      "path": "graphics/balls/open.png",
+      "sha256": "b987127a398492a7a19bcda5b11dcd26c7cb89086cfce4fdadefd1f7cd511cd0"
+    }
+  ],
+  "code": "src/pokeball.c:sBallAnimSeq0/1/2 and LoadBallGfx",
+  "layout": "16x48: closed, opening, shared fully-open. Five ticks per opening frame from source; world arc/shake timing adapted."
+}

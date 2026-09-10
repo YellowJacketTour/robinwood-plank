@@ -1,7 +1,7 @@
 import {readFile,writeFile,mkdir} from 'node:fs/promises';import {createHash} from 'node:crypto';import {PNG} from 'pngjs';import assert from 'node:assert/strict';import {compileIndexedSprite} from './indexed-sprite.mjs';
 const commit='db1928346e452e1a36b8ecff62f7e4d195504763',vault='public/charmville/creatures/followers',target='../charmville-references/charmville-native-homestead/action-sprites';
 const manifest=JSON.parse(await readFile(target+'/manifest.json','utf8')).filter(a=>!a.name.startsWith('attack-'));let generated='// Pinned PMD Attack frames; presentation only.\n';const provenance=[];
-for(const [id,name,species,move] of [['0252','treecko',277,1],['0255','torchic',280,10],['0258','mudkip',283,33]]){
+for(const [id,name,species,move] of [['0252','treecko',277,1],['0255','torchic',280,10],['0258','mudkip',283,33],['0025','pikachu',25,98],['0133','eevee',133,33],['0261','poochyena',286,33]]){
  for(const filename of ['Attack-Anim.png','Attack-Shadow.png','Attack-Offsets.png']){const url=`https://raw.githubusercontent.com/PMDCollab/SpriteCollab/${commit}/sprite/${id}/${filename}`;const r=await fetch(url,{signal:AbortSignal.timeout(30000)});assert(r.ok,url);const b=Buffer.from(await r.arrayBuffer());await mkdir(`${vault}/sprite/${id}`,{recursive:true});await writeFile(`${vault}/sprite/${id}/${filename}`,b);provenance.push({url,sha256:createHash('sha256').update(b).digest('hex')});}
  const xml=await readFile(`${vault}/sprite/${id}/AnimData.xml`,'utf8'),anim=xml.match(/<Anim>\s*<Name>Attack<\/Name>([\s\S]*?)<\/Anim>/)[1];
  const w=Number(anim.match(/<FrameWidth>(\d+)/)[1]),h=Number(anim.match(/<FrameHeight>(\d+)/)[1]),durations=[...anim.matchAll(/<Duration>(\d+)/g)].map(m=>Number(m[1])),frames=durations.length;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {nativeEncounterProjection} from '../../lib/charmville/native-encounter-projection';
+import {nativeEncounterProjection,nativeCaptureProjection} from '../../lib/charmville/native-encounter-projection';
 test('native encounter projects only wild-target committed damage and newest event',()=>{
  const encounter={id:'wild',speciesId:286,cell:{x:4,y:9},hp:8,maxHp:14,revision:'2'};
  const result=nativeEncounterProjection({encounter,events:[{eventId:'12',log:[{targetId:'wild',damage:4}]},{eventId:'13',log:[{targetId:'partner',damage:9}]},{eventId:'11',log:[{targetId:'wild',damage:2}]}]});
@@ -33,4 +33,17 @@ test('multiple committed strikes are ordered and deduplicated for playback',()=>
  assert.deepEqual(result.damageEvents?.map(e=>e.eventId),['9','10','11']);
  assert.equal(result.damageEvent?.eventId,'11');
  assert.equal(nativeEncounterProjection({encounter,events:Array.from({length:20},(_,i)=>event(String(i+1)))}).damageEvents?.length,16);
+});
+
+test('captured creature leaves native world even while its preserved HP and old attacks remain',()=>{
+ const encounter={id:'wild',speciesId:286,cell:{x:4,y:9},hp:8,maxHp:14,revision:'3',captured:true};
+ assert.deepEqual(nativeEncounterProjection({encounter,events:[{eventId:'12',log:[{targetId:'wild',damage:4}]}]}),{type:'charmville:world-encounter',active:false});
+ assert.equal(nativeEncounterProjection({encounter:{...encounter,captured:false}}).active,true);
+});
+
+test('capture presentation accepts only consistent recorded outcome and bounded anchors',()=>{
+ const receipt={eventId:'11111111-1111-4111-8111-111111111111',actorCell:{x:3,y:9},targetCell:{x:4,y:9},captured:true,shakes:4};
+ assert.equal(nativeCaptureProjection(receipt)?.type,'charmville:capture-event');
+ for(const bad of [null,{}, {...receipt,captured:false},{...receipt,shakes:5},{...receipt,actorCell:{x:-1,y:9}},{...receipt,eventId:'guess'}])assert.equal(nativeCaptureProjection(bad),null);
+ assert.equal(nativeCaptureProjection({...receipt,captured:false,shakes:2})?.shakes,2);
 });

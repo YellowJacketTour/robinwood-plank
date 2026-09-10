@@ -16,5 +16,5 @@ for(const [name,relative] of entries){
 await writeFile('scripts/charmville/zquest/ActionPalettes.zh',paletteSource);
 // Attack staging owns its separate generated palette include. Preserve those
 // entries when refreshing the walking/tool sheets, without duplicating colors.
-try {const prior=JSON.parse(await readFile(path.join(target,'manifest.json'),'utf8'));manifest.push(...prior.filter(a=>['attack-treecko.png','attack-torchic.png','attack-mudkip.png'].includes(a.name)));} catch(error){if(error.code!=='ENOENT')throw error;}
+try {const prior=JSON.parse(await readFile(path.join(target,'manifest.json'),'utf8'));manifest.push(...prior.filter(a=>['attack-treecko.png','attack-torchic.png','attack-mudkip.png','attack-pikachu.png','attack-eevee.png','attack-poochyena.png','capture-ball.png'].includes(a.name)));} catch(error){if(error.code!=='ENOENT')throw error;}
 await writeFile(path.join(target,'manifest.json'),JSON.stringify(manifest,null,2));console.log(manifest);

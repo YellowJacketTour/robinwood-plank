@@ -6,10 +6,12 @@ Capacity: one integration coordinator and three concurrent workers. Every progre
 
 ## Current assignments
 
-- Native worker: source-backed committed companion attack playback with directional ground anchors.
-- State worker: consented second-player combat contribution, atomic HP/PP and retry/permission tests.
-- Experience worker: shared encounter assistance controls and two-account browser acceptance; standalone garden UI is retired.
+- Native worker: six-species committed attacks and source ordinary-ball capture presentation.
+- State worker: one capture authority across world and turn views, finite supply, atomic ownership and retry/permission tests.
+- Experience worker: capture controls, receipt-driven presentation and owned-party browser acceptance; standalone garden UI is retired.
 - Coordinator: cross-system test, evidence reconciliation, source preservation and next work dispatch.
+
+Every lane must apply MULTIPLAYER-INTERACTION-CONTRACT.md: solo, allied, competing, PvE and PvP behavior must be explicit. Disabled modes are not implemented features.
 
 ## Dispatch order and integration gates
 
