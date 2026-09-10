@@ -20,7 +20,7 @@ http.createServer(async(req,res)=>{
   if(url.pathname==='/charmdex-catalog.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(await readFile('public/charmville/catalog/emoji-catalog.json'));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);
-   if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png','berry-dirt.png','berry-sprout.png','berry-oran.png','follower-treecko.png','follower-torchic.png','follower-mudkip.png','follower-pikachu.png','follower-eevee.png','follower-poochyena.png','attack-treecko.png','attack-torchic.png','attack-mudkip.png','attack-pikachu.png','attack-eevee.png','attack-poochyena.png','capture-ball.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
+   if(!['manifest.json','hoe-fg.png','hoe-bg.png','water-fg.png','water-bg.png','gold-hair.png','berry-dirt.png','berry-sprout.png','berry-oran.png','follower-treecko.png','follower-torchic.png','follower-mudkip.png','follower-pikachu.png','follower-eevee.png','follower-poochyena.png','attack-treecko.png','attack-torchic.png','attack-mudkip.png','attack-pikachu.png','attack-eevee.png','attack-poochyena.png','capture-ball.png','faint-poochyena.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
    res.writeHead(200,{...headers,'Content-Type':name.endsWith('.json')?'application/json':'image/png'});res.end(await readFile(path.resolve('../charmville-references/charmville-native-homestead/action-sprites',name)));return;
   }
   if(url.pathname==='/charmville/tutorial/'){

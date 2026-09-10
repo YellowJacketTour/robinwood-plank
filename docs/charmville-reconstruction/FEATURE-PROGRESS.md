@@ -274,3 +274,11 @@ The source pose audit found no usable directional lift/throw frames in this ques
 Party slots and detail controls now use roving focus, arrows and Home/End; actual390px and desktop checks pass. Native menus navigate spatially around disabled options and retain valid focus. Reserved controller buttons cannot be assigned as gameplay face actions, and closing a menu no longer leaks a sword press in the same frame.
 
 A parent menu adapter now handles standard-pad navigation only while parent UI has focus. Actual-account testing with an injected gamepad verifies Party/Care navigation, one confirm for a held button, Back, parent fullscreen and native-frame isolation. Keyboard, touch-target and synthetic-pad checks do not certify physical controller hardware. The compact Controls guide describes the current mappings; INPUT-MODEL.md records the contract and limits.
+
+## Companion victory progression
+
+Supported controller finishing strikes now settle one durable XP award per encounter, using pinned source growth curves through level100. Level changes preserve inherited stats and HP deficit; the UI displays receipt-backed XP and the next threshold. Assisted finishing strikes explicitly report pending party allocation; this is not a complete party reward policy. Capture, evolution, move learning and professional skill XP are separate systems and are not implied by this implementation.
+
+Native Poochyena defeat now uses a preserved source Faint sequence on a committed positive-HP-to-zero transition, followed by removal of the standing body. Already-defeated snapshots do not replay the sequence. See VICTORY-EXPERIENCE.md for source arithmetic and current restrictions. The single authored wild encounter still does not respawn.
+
+Actual-account verification: a supported fight awarded15XP, replay returned the same receipt with no extra award, and Party displayed the saved150XP total with29XP remaining to the next level. Native defeat START/COMPLETE were observed. This browser run did not cross a level threshold; database tests cover level increases and HP deficit preservation. See VICTORY-XP-UI.md.

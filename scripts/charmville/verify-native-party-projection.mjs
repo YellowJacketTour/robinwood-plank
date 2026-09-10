@@ -24,7 +24,15 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--capture-visual')){
+ if(process.argv.includes('--defeat')){
+  await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>path.endsWith('/world-encounter.txt')?undefined:write(path,...args);});
+  const emit=async(seq,active,hp)=>runtime.evaluate(({seq,active,hp})=>window.fixtureWriteEncounter([seq,active,8,9,hp,13,0,0,0,0,0,0].join('|')),{seq,active,hp});
+  await emit(100,1,0);await page.waitForTimeout(300);assert(!events.includes('CHARMVILLE_DEFEAT_START'));
+  await emit(101,1,5);await page.waitForTimeout(250);await emit(102,1,0);await page.waitForTimeout(140);await page.screenshot({path:out+'/defeat-falling.png'});await page.waitForTimeout(500);await page.screenshot({path:out+'/defeat-held.png'});await page.waitForTimeout(600);await page.screenshot({path:out+'/defeat-finished.png'});
+  assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);assert(events.includes('CHARMVILLE_DEFEAT_COMPLETE'));await emit(103,1,0);await page.waitForTimeout(200);assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);
+  await emit(104,1,5);await page.waitForTimeout(100);await emit(105,0,0);await page.waitForTimeout(200);assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);
+  await writeFile(out+'/defeat.json',JSON.stringify({scope:'Synthetic native snapshot transitions, not a server defeat/reward test.',events,errors},null,2));assert.deepEqual(errors,[]);console.log('Native defeat source transition, terminal hiding, duplicate baseline and captured/off behavior pass.');
+ }else if(process.argv.includes('--capture-visual')){
   for(const [won,shakes] of [[false,2],[true,4]]){
    const eventId=randomUUID();await page.evaluate(data=>document.querySelector('iframe').contentWindow.postMessage(data,'http://localhost:3021'),{type:'charmville:capture-event',eventId,actorCell:{x:2,y:9},targetCell:{x:8,y:9},captured:won,shakes});
    await page.waitForTimeout(220);await page.screenshot({path:out+`/capture-${won}-throw.png`});

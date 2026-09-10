@@ -1,0 +1,6 @@
+import {readFile,writeFile} from 'node:fs/promises';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';import path from 'node:path';
+const root=process.argv[2];if(!root)throw Error('Pass pinned pokeemerald root');
+const files=['include/constants/species.h','src/data/pokemon/species_info.h','src/data/pokemon/experience_tables.h','src/battle_script_commands.c'];const text=await Promise.all(files.map(f=>readFile(path.join(root,f),'utf8')));const ids=Object.fromEntries([...text[0].matchAll(/^#define SPECIES_(\w+)\s+(\d+)\s*$/gm)].map(m=>[m[1],Number(m[2])]));const species={};
+for(const m of text[1].matchAll(/\[SPECIES_(\w+)\]\s*=\s*\{\r?\n([\s\S]*?)\n    \}/g)){const growth=/\.growthRate\s*=\s*GROWTH_(\w+)/.exec(m[2]);if(growth&&ids[m[1]])species[ids[m[1]]]={name:m[1],growth:growth[1]};}
+if(Object.keys(species).length!==386)throw Error('Expected 386 source growth rates got '+Object.keys(species).length);
+await writeFile('lib/charmville/species-growth.json',JSON.stringify({source:'https://github.com/pret/pokeemerald',revision:execFileSync('git',['-C',root,'rev-parse','HEAD'],{encoding:'utf8'}).trim(),files:Object.fromEntries(files.map((f,i)=>[f,createHash('sha256').update(text[i]).digest('hex')])),species},null,2)+'\n');

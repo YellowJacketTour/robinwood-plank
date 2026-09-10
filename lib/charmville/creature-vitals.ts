@@ -1,3 +1,4 @@
+import {experienceAtLevel} from './experience';
 import {createHash,randomInt} from "node:crypto";
 import type {Pool} from "pg";
 import {homeActor} from "./home-access-store";
@@ -30,6 +31,8 @@ export async function creatureVitals(pool:Pool,token:string,raw?:unknown){
    }
   }
   const creatures=(await c.query("SELECT e.id,e.source_species_id AS \"speciesId\",v.level,v.hp_iv AS \"hpIv\",v.hp_ev AS \"hpEv\",v.hp,v.max_hp AS \"maxHp\",v.revision::text FROM charmville_creature_entities e JOIN charmville_creature_vitals v ON v.creature_id=e.id WHERE e.owner_profile_id=$1 ORDER BY e.id",[profile])).rows;
+  const xpReady=(await c.query("SELECT to_regclass('charmville_creature_experience') AS present")).rows[0].present;
+  if(xpReady){for(const creature of creatures){await c.query('INSERT INTO charmville_creature_experience VALUES($1,$2) ON CONFLICT DO NOTHING',[creature.id,experienceAtLevel(creature.speciesId,creature.level)]);creature.experience=(await c.query('SELECT xp FROM charmville_creature_experience WHERE creature_id=$1',[creature.id])).rows[0].xp;creature.levelStartExperience=experienceAtLevel(creature.speciesId,creature.level);creature.nextLevelExperience=creature.level<100?experienceAtLevel(creature.speciesId,creature.level+1):null;}}
   const oranQuantity=(await c.query("SELECT COALESCE((SELECT qty FROM charmville_stacks WHERE profile_id=$1 AND face_id='oran-berry'),0)::text AS qty",[profile])).rows[0].qty;
   await c.query("COMMIT");return {creatures,oranQuantity,policy:"emerald-starter-level5-v1",result};
  }catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}

@@ -4,6 +4,7 @@
 #include "FollowerScale.zh"
 #include "CommittedAttackFrames.zh"
 #include "CaptureBall.zh"
+#include "FaintFrames.zh"
 
 // Native, local tutorial prototype. No shared-account inventory authority.
 // Active is the engine's global per-frame script slot.
@@ -117,6 +118,7 @@ global script Active
         bitmap captureBall=new bitmap();captureBall->Read(0,"/charmville/capture-ball.png");
         int captureSeq=0;int captureClock=-1;int captureFromX=0;int captureFromY=0;int captureToX=0;int captureToY=0;int captureWon=0;int captureShakes=0;char32 captureText[96];
         bool attackJustStarted=false;int attackSlot=-1;int followerX[6];int followerY[6];bool followerVisible[6];int attackAcknowledged=0;int attackSpecies=0;int attackClock=-1;int attackX=0;int attackY=0;int attackRow=0;int attackTotal=0;int attackHit=0;
+        bitmap faintPoochyena=new bitmap();faintPoochyena->Read(0,"/charmville/faint-poochyena.png");int faintClock=-1;
         int encounterVersion=0;int encounterVisible=0;int encounterX=0;int encounterY=0;int encounterHP=0;int encounterMaxHP=1;int encounterEffect=0;int encounterDamage=0;int encounterFlash=0;char32 encounterText[160];
         int followerSpacing=18;int follower=0;int partyFollowers[6];int lastFollowerDraw[6];int trailX[512];int trailY[512];int trailDir[512];int trailHead=0;int trailCount=0;int followerClock=0;
         int lastHeroX=Hero->X;int lastHeroY=Hero->Y;char32 followerText[64];
@@ -193,7 +195,7 @@ global script Active
                     position->WriteString(line);position->Close();
                 }
             }
-            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);matchPalette(pikachu,follower_pikachu_colors);matchPalette(eevee,follower_eevee_colors);matchPalette(poochyena,follower_poochyena_colors);matchPalette(attackTreecko,attack_treecko_colors);matchPalette(attackTorchic,attack_torchic_colors);matchPalette(attackMudkip,attack_mudkip_colors);matchPalette(attackPikachu,attack_pikachu_colors);matchPalette(attackEevee,attack_eevee_colors);matchPalette(attackPoochyena,attack_poochyena_colors);matchPalette(captureBall,capture_ball_colors);}
+            if(ticks==60){int dirtColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,213,32,222,156,16,106,57,8,230,82,98,197,0,49,98,0,24,156,98,74,106,49,49,49,0,24,255,255,255,0,0,0};int sproutColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,205,205,222,156,156,189,74,74,123,115,189,0,65,123,0,16,57,0,205,98,74,148,57,41,82,16,0,255,255,255,0,0,0};int berryColors[]={115,197,164,255,213,180,255,197,148,222,148,115,123,65,65,255,164,180,213,106,123,139,65,82,148,197,246,90,139,189,16,49,82,180,164,98,123,115,65,57,57,24,255,255,255,0,0,0};matchPalette(dirt,dirtColors);matchPalette(sprout,sproutColors);matchPalette(berry,berryColors);matchPalette(hoeFG,hoe_fg_colors);matchPalette(hoeBG,hoe_bg_colors);matchPalette(waterFG,water_fg_colors);matchPalette(waterBG,water_bg_colors);matchPalette(hair,gold_hair_colors);matchPalette(treecko,follower_treecko_colors);matchPalette(torchic,follower_torchic_colors);matchPalette(mudkip,follower_mudkip_colors);matchPalette(pikachu,follower_pikachu_colors);matchPalette(eevee,follower_eevee_colors);matchPalette(poochyena,follower_poochyena_colors);matchPalette(attackTreecko,attack_treecko_colors);matchPalette(attackTorchic,attack_torchic_colors);matchPalette(attackMudkip,attack_mudkip_colors);matchPalette(attackPikachu,attack_pikachu_colors);matchPalette(attackEevee,attack_eevee_colors);matchPalette(attackPoochyena,attack_poochyena_colors);matchPalette(captureBall,capture_ball_colors);matchPalette(faintPoochyena,faint_poochyena_colors);}
             if(!accountMode && channel->State==WEBSOCKET_STATE_CLOSED && ticks%180==0)channel=new websocket("ws://localhost:3022");
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
@@ -477,16 +479,19 @@ if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=
                 if(encounterFile->isValid()){
                     encounterText[0]=0;encounterFile->ReadString(encounterText);encounterFile->Close();
                     int version=field(encounterText,0);
-                    if(version!=encounterVersion){bool established=encounterVersion>0;encounterVersion=version;encounterVisible=field(encounterText,1);encounterX=field(encounterText,2)*8;encounterY=field(encounterText,3)*8;encounterHP=field(encounterText,4);encounterMaxHP=Max(1,field(encounterText,5));
+                    if(version!=encounterVersion){int previousHP=encounterHP;int previousVisible=encounterVisible;bool established=encounterVersion>0;encounterVersion=version;encounterVisible=field(encounterText,1);encounterX=field(encounterText,2)*8;encounterY=field(encounterText,3)*8;encounterHP=field(encounterText,4);encounterMaxHP=Max(1,field(encounterText,5));
                         int effect=field(encounterText,6);if(established && effect>encounterEffect){encounterFlash=30;encounterDamage=field(encounterText,7);attackSpecies=field(encounterText,8);attackX=field(encounterText,9)*8;attackY=field(encounterText,10)*8;attackSlot=field(encounterText,11)-1;if(attackSlot>=0 && attackSlot<6 && followerVisible[attackSlot] && partyFollowers[attackSlot]==attackSpecies){attackX=followerX[attackSlot];attackY=followerY[attackSlot];}else attackSlot=-1;attackClock=0;attackJustStarted=true;attackTotal=attackSpecies==277?19:(attackSpecies==280?28:(attackSpecies==283?24:(attackSpecies==25?21:(attackSpecies==133?30:(attackSpecies==286?24:0)))));attackHit=attackSpecies==277?8:(attackSpecies==280?14:(attackSpecies==25?7:(attackSpecies==133?8:10)));if(attackTotal>0)encounterFlash=0;int dx=encounterX-attackX;int dy=encounterY-attackY;attackRow=Abs(dx)>Abs(dy)?(dx<0?6:2):(dy<0?4:0);if(dx!=0 && dy!=0 && Abs(dx)*2>=Abs(dy) && Abs(dy)*2>=Abs(dx))attackRow=dy>0?(dx>0?1:7):(dx>0?3:5);printf("CHARMVILLE_ENCOUNTER_EFFECT %d DAMAGE %d\n",effect,encounterDamage);}encounterEffect=effect;
+                        if(encounterVisible!=1 || encounterHP>0)faintClock=-1;else if(previousVisible==1 && previousHP>0){faintClock=0;printf("CHARMVILLE_DEFEAT_START\n");}
                         printf("CHARMVILLE_ENCOUNTER_STATE %d HP %d/%d\n",encounterVisible,encounterHP,encounterMaxHP);
                     }
                 }
             }
             if(ticks%3==0){file captureFile=new file("/charmville/capture-event.txt","r");if(captureFile->isValid()){captureText[0]=0;captureFile->ReadString(captureText);captureFile->Close();int next=field(captureText,0);if(next!=captureSeq){captureSeq=next;captureClock=field(captureText,1)==1?0:-1;captureFromX=field(captureText,2)*8;captureFromY=field(captureText,3)*8;captureToX=field(captureText,4)*8;captureToY=field(captureText,5)*8;captureWon=field(captureText,6);captureShakes=field(captureText,7);printf("CHARMVILLE_CAPTURE_START %d RESULT %d SHAKES %d\n",captureSeq,captureWon,captureShakes);}}}
+            if(Game->GetCurDMap()!=4 || Game->GetCurScreen()!=63)faintClock=-1;
             if(encounterVisible==1 && !(captureClock>=34 && captureClock<64+captureShakes*24) && Game->GetCurDMap()==4 && Game->GetCurScreen()==63){
                 Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;
-                drawCompanionScaled(poochyena,286,encounterY<Hero->Y?2:6,0,0,32,48,encounterX+8,encounterY+72,poochyenaAnchorX[0],poochyenaAnchorY[0]);
+                if(encounterHP>0)drawCompanionScaled(poochyena,286,encounterY<Hero->Y?2:6,0,0,32,48,encounterX+8,encounterY+72,poochyenaAnchorX[0],poochyenaAnchorY[0]);
+                else {if(faintClock>=0 && faintClock<52){drawFaintPoochyena(faintPoochyena,Min(faintClock,33),0,encounterX,encounterY,encounterY<Hero->Y?2:6);faintClock++;if(faintClock==52)printf("CHARMVILLE_DEFEAT_COMPLETE\n");}sprintf(encounterText,"Defeated");Screen->DrawString(6,encounterX-16,encounterY+32,0,0x01,-1,0,encounterText);}
                 Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 Screen->Rectangle(6,encounterX-2,encounterY-12,encounterX+18,encounterY-9,0x00);
                 if(encounterHP>0)Screen->Rectangle(6,encounterX-1,encounterY-11,encounterX-1+18*encounterHP/encounterMaxHP,encounterY-10,0x91);
@@ -523,7 +528,7 @@ if(follower==286){int phase=(stepX==0 && stepY==0)?0:followerClock%20;int frame=
                     captureBall->Blit(6,RT_SCREEN,0,frame*16,16,16,bx,by+56,16,16);
                     if(captureClock==24)printf("CHARMVILLE_CAPTURE_OPEN %d\n",captureSeq);
                     if(captureClock==end)printf("CHARMVILLE_CAPTURE_RESULT %d WON %d\n",captureSeq,captureWon);
-                    if(captureClock>=end){if(captureWon==1)sprintf(captureText,"Captured");else sprintf(captureText,"Broke free");Screen->DrawString(6,captureToX,captureToY-16,0,0x01,-1,0,captureText);}
+                    if(captureClock>=end){if(captureWon==1)sprintf(captureText,"Captured");else sprintf(captureText,"Broke free");Screen->DrawString(6,captureToX,captureToY+40,0,0x01,-1,0,captureText);}
                     Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;captureClock++;
                 }
                 if(captureClock>=total){file ack=new file("/charmville/capture-ack.txt","w");if(ack->isValid()){sprintf(captureText,"%d",captureSeq);ack->WriteString(captureText);ack->Close();}captureClock=-1;}

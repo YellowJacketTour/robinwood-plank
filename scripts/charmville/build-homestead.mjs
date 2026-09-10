@@ -8,6 +8,7 @@ await copyFile('scripts/charmville/zquest/ActionPalettes.zh',path.join(runtime,'
 await copyFile('scripts/charmville/zquest/ExtraFollowerFrames.zh',path.join(runtime,'include/ExtraFollowerFrames.zh'));
 await copyFile('scripts/charmville/zquest/FollowerScale.zh',path.join(runtime,'include/FollowerScale.zh'));
 await copyFile('scripts/charmville/zquest/CaptureBall.zh',path.join(runtime,'include/CaptureBall.zh'));
+await copyFile('scripts/charmville/zquest/FaintFrames.zh',path.join(runtime,'include/FaintFrames.zh'));
 await copyFile('scripts/charmville/zquest/CommittedAttackFrames.zh',path.join(runtime,'include/CommittedAttackFrames.zh'));
 const child=spawn(path.join(runtime,'zeditor.exe'),['-smart-assign',quest],{cwd:runtime,windowsHide:true,stdio:'pipe'});let log='';child.stdout.on('data',d=>log+=d);child.stderr.on('data',d=>log+=d);
 const code=await new Promise((resolve,reject)=>{child.on('exit',resolve);child.on('error',reject);});await writeFile(path.join(bundle,'compile.log'),log);if(code!==0)throw Error(`Native compilation failed (${code}): ${log.slice(-2000)}`);
