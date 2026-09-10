@@ -1,0 +1,2 @@
+ALTER TABLE charmville_habitat_budget DROP CONSTRAINT IF EXISTS charmville_habitat_budget_spawn_count_check;
+ALTER TABLE charmville_habitat_budget ADD CONSTRAINT charmville_habitat_budget_spawn_count_check CHECK(spawn_count BETWEEN 1 AND 12);

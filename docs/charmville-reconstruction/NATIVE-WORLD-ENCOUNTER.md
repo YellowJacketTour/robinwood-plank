@@ -22,3 +22,10 @@ Rebuild order: run `node scripts/charmville/build-committed-attack-sprites.mjs`,
 
 
 The remaining three mappings now pass `verify-native-party-projection.mjs --attack-directions`: all24 added-species/direction combinations emit their native source-contact marker. This fixture explicitly isolates parent encounter FS writes and supplies synthetic native snapshots; it does not verify authenticated attacks or ownership. The JS bridge separately passes all-six mapping and acknowledgment/replay tests. Screenshots sample elapsed time rather than exact contact ticks; representative Pikachu/Eevee east and Poochyena west samples were inspected for actual source art and facing. Complete per-frame visual conformance is still unverified. Source acquisition validates all504 attack ground markers; the combined walk/attack opaque audit covers744 frames. Full source originals and hashes are preserved, with identical species scaling across walk and attack.
+
+
+## Encounter identity replacement
+
+The bridge appends a visual generation to the native record (field12), incrementing on a new encounter UUID, active-to-off transition or expiry. This is a local presentation generation, not a server revision or authority token. New identity clears queued prior attacks and damage metadata, baselines its event history, and keeps effect counters monotonic. Native generation changes clear the previous attack body/slot, damage flash and faint state before applying the new creature snapshot. A replacement already at zeroHP therefore does not inherit a fake positive-to-zero transition; a new living body is visible after prior defeat or capture. Leaving via expiry also clears stale attack metadata.
+
+Bridge identity/replay unit checks pass. The native `--identity` fixture exercises controlled snapshot generations: an observed in-progress attack is canceled by replacement, a dead baseline does not faint, a later same-identity defeat plays once, and a living respawn returns after defeat/off. This fixture is native rendering verification, not server encounter creation or reward proof.

@@ -282,3 +282,9 @@ Supported controller finishing strikes now settle one durable XP award per encou
 Native Poochyena defeat now uses a preserved source Faint sequence on a committed positive-HP-to-zero transition, followed by removal of the standing body. Already-defeated snapshots do not replay the sequence. See VICTORY-EXPERIENCE.md for source arithmetic and current restrictions. The single authored wild encounter still does not respawn.
 
 Actual-account verification: a supported fight awarded15XP, replay returned the same receipt with no extra award, and Party displayed the saved150XP total with29XP remaining to the next level. Native defeat START/COMPLETE were observed. This browser run did not cross a level threshold; database tests cover level increases and HP deficit preservation. See VICTORY-XP-UI.md.
+
+## Repeatable starter habitat
+
+The current Poochyena habitat now renews after a60-second server cooldown with a12-spawn one-hour budget and no accumulated offline credits. Each successor has a new UUID; terminal HP/IVs, original region provenance, capture ownership and reward receipts remain preserved. Concurrent refresh and budget tests pass. Native encounter generations reset old attacks/flashes/faint state before a replacement renders.
+
+An actual browser fight waited the real cooldown, saw a new full-HP encounter without reload, entered the next battle and confirmed an old request added noXP. The native frame remained mounted. The timer reads server deadlines. This completes only the current single-species renewal loop; diverse habitats, evolving ecology, ball replenishment and party reward allocation remain unfinished. See HABITAT-RENEWAL.md and REPEATABLE-ENCOUNTER-UI.md.

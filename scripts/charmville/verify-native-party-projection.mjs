@@ -24,7 +24,14 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--defeat')){
+ if(process.argv.includes('--identity')){
+  await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>path.endsWith('/world-encounter.txt')?undefined:write(path,...args);});
+  const emit=async(version,generation,hp,effect=0,species=0,active=1)=>runtime.evaluate(data=>window.fixtureWriteEncounter(data.join('|')),[version,active,8,9,hp,13,effect,species?1:0,species,2,9,0,generation]);
+  await emit(100,100,13);await page.waitForTimeout(200);await emit(101,100,10,1,277);const deadline=Date.now()+1000;while(!events.some(e=>e.startsWith('CHARMVILLE_ENCOUNTER_EFFECT 1 '))&&Date.now()<deadline)await page.waitForTimeout(10);assert(events.some(e=>e.startsWith('CHARMVILLE_ENCOUNTER_EFFECT 1 ')));await emit(102,101,13,1);await page.waitForTimeout(700);assert(!events.some(e=>e.startsWith('CHARMVILLE_ATTACK_CONTACT')));assert(!events.includes('CHARMVILLE_DEFEAT_START'));
+  await emit(103,102,0,1);await page.waitForTimeout(250);assert(!events.includes('CHARMVILLE_DEFEAT_START'));await emit(104,103,13,1);await page.waitForTimeout(200);await emit(105,103,0,1);await page.waitForTimeout(1100);assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);assert(events.includes('CHARMVILLE_DEFEAT_COMPLETE'));
+  await emit(106,104,13,1);await page.waitForTimeout(250);await page.screenshot({path:out+'/identity-respawn.png'});await emit(107,105,0,1,0,0);await page.waitForTimeout(100);await emit(108,106,13,1);await page.waitForTimeout(200);assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);assert(events.includes('CHARMVILLE_ENCOUNTER_IDENTITY 106'));
+  await writeFile(out+'/identity.json',JSON.stringify({scope:'Synthetic native generation lifecycle, no server encounter creation or rewards.',events,errors},null,2));assert.deepEqual(errors,[]);console.log('Native new identity cancels old attack, suppresses old defeat and restores new live body.');
+ }else if(process.argv.includes('--defeat')){
   await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>path.endsWith('/world-encounter.txt')?undefined:write(path,...args);});
   const emit=async(seq,active,hp)=>runtime.evaluate(({seq,active,hp})=>window.fixtureWriteEncounter([seq,active,8,9,hp,13,0,0,0,0,0,0].join('|')),{seq,active,hp});
   await emit(100,1,0);await page.waitForTimeout(300);assert(!events.includes('CHARMVILLE_DEFEAT_START'));
