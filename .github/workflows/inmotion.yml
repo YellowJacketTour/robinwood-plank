@@ -239,6 +239,7 @@ jobs:
           cp deploy/inmotion/passenger.cjs .next/standalone/deploy/inmotion/passenger.cjs
           mkdir -p .next/standalone/scripts
           cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
+          cp scripts/notification-migration-policy.mjs .next/standalone/scripts/notification-migration-policy.mjs
           cp scripts/market-migration-drain.mjs .next/standalone/scripts/market-migration-drain.mjs
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
           cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
@@ -349,7 +350,7 @@ jobs:
       - run: npm install -g npm@11.6.2
       - run: npm ci
       - run: npm run db:migrate
-      - run: npx tsx --test test/market/market-trigger-compat.test.ts test/market/market-realtime.test.ts test/market/hub-rank-delivery.test.ts test/market/collective-cold-hydration.test.ts test/market/bitcoin-source-health.test.ts test/market/market-live-snapshot.test.ts test/market/mesh-query-deadlines.test.ts test/market/migration-db-drain.test.ts test/market/hub-chain-filter.test.ts
+      - run: npx tsx --test test/market/market-trigger-compat.test.ts test/market/market-realtime.test.ts test/market/hub-rank-delivery.test.ts test/market/collective-cold-hydration.test.ts test/market/bitcoin-source-health.test.ts test/market/market-live-snapshot.test.ts test/market/mesh-query-deadlines.test.ts test/market/migration-db-drain.test.ts test/market/hub-chain-filter.test.ts test/market/notification-compatibility.test.ts test/market/notification-migration-integration.test.ts
 
   deploy:
     needs: build
@@ -809,10 +810,10 @@ jobs:
           if [ "$check_status" -eq 3 ]; then
             bash "$release_dir/scripts/guard-market-migration.sh" "$app_dir" \
               "$node_bin" --env-file="$app_dir/shared/.env.production" \
-              "$release_dir/scripts/migrate-postgres.mjs"
+              "$release_dir/scripts/migrate-postgres.mjs" --defer-locked-notifications
           else
             "$node_bin" --env-file="$app_dir/shared/.env.production" \
-              "$release_dir/scripts/migrate-postgres.mjs"
+              "$release_dir/scripts/migrate-postgres.mjs" --defer-locked-notifications
           fi
 
           if [ -L "$app_dir/current" ]; then
