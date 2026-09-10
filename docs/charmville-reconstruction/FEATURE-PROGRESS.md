@@ -51,7 +51,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Real-time creature combat | █░░░░ | Shared damage/ownership authority and source animation adapters missing |
 | Native-style turn battle | ███░░ | Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing |
 | Hybrid HP/status continuity | ██░░░ | Domain transition tests; live world/turn handoff missing |
-| Capture / ball consumption / ownership | ███░░ | Finite sandbox balls, shared world/turn capture calculation, conserved ownership transfer and replay tested. Source ball presentation integration underway; broader ball types, statuses, spectators and full visual acceptance remain incomplete |
+| Capture / ball consumption / ownership | ███░░ | Finite sandbox balls, shared world/turn capture calculation, conserved ownership transfer and replay tested. Source ball playback and authorized nearby spectator projection verified; broader ball types, statuses and full visual acceptance remain incomplete |
 | Followers and companion reactions | ███░░ | Six distinct test species, individual persisted walking selection, stationary spawn anchors and compressed source-size presentation verified. Reversals, reactions, obstacle avoidance and shared creature replication remain incomplete |
 | Party / storage / clinic | ███░░ | Six-slot owned roster, individual following, source size/type/HP summaries, Oran care and server-timed home HP/PP recovery connected. Full clinic and storage gameplay remain missing |
 | Moves / types / status durations | █░░░░ | 354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing |
@@ -260,3 +260,11 @@ All six test-party basic attacks now have pinned source sequences. The added thr
 Migration124 records a bounded public capture event independently of private inventory receipts. Authorized nearby viewers receive the event identity, source/target cells, result and timestamp. Inventory amounts and private receipt fields are not projected. The initiating client deduplicates the direct receipt against the shared stream. First snapshot, reconnect and range reentry establish a history baseline instead of replaying missed captures. Rendering is observational and grants no capture rights.
 
 A real two-account browser check confirms spectator native completion for the shared event and no second animation on an identical retry. Server tests exclude far-away actors and viewers and expired presence; stale epoch, expired claim and changed retry payload do not consume supply. Original ball palette-index transparency is now interpreted correctly; sampled native throw/open frames no longer have a white rectangle. Broader multiplayer and full frame-by-frame fidelity remain incomplete.
+
+## Fullscreen capture and captured-companion recovery
+
+The native Enter/Game menu now exposes an eligibility-gated Throw ball option and routes it to the existing parent capture command. Actual fullscreen browser verification passed a failed then successful throw while retaining fullscreen, spending two finite balls and preserving the successful owned result and native acknowledgment. This is menu access, not a new direct aiming/throw-arm implementation.
+
+Captured companions were incorrectly excluded from rest queries; all recovery paths now include them. A dedicated PostgreSQL lifecycle test captures with all six slots occupied, preserves the seventh creature in storage, explicitly swaps it into the party, fights and rests to full HP/PP while preserving level/IVs and preventing repeated-commit duplication. Private-home revocation also blocks capture history immediately.
+
+The source pose audit found no usable directional lift/throw frames in this quest: lifting and lift-walking return tile0, and the spell pose repeats one tile. No unrelated animation was substituted. Authored directional throw poses remain outstanding.

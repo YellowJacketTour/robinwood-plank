@@ -1,0 +1,186 @@
+{
+  "poses": [
+    {
+      "pose": 0,
+      "direction": 0,
+      "tile": 28
+    },
+    {
+      "pose": 0,
+      "direction": 1,
+      "tile": 23
+    },
+    {
+      "pose": 0,
+      "direction": 2,
+      "tile": 20
+    },
+    {
+      "pose": 0,
+      "direction": 3,
+      "tile": 20
+    },
+    {
+      "pose": 1,
+      "direction": 0,
+      "tile": 31
+    },
+    {
+      "pose": 1,
+      "direction": 1,
+      "tile": 27
+    },
+    {
+      "pose": 1,
+      "direction": 2,
+      "tile": 26
+    },
+    {
+      "pose": 1,
+      "direction": 3,
+      "tile": 26
+    },
+    {
+      "pose": 2,
+      "direction": 0,
+      "tile": 1056
+    },
+    {
+      "pose": 2,
+      "direction": 1,
+      "tile": 1057
+    },
+    {
+      "pose": 2,
+      "direction": 2,
+      "tile": 1058
+    },
+    {
+      "pose": 2,
+      "direction": 3,
+      "tile": 1059
+    },
+    {
+      "pose": 3,
+      "direction": 0,
+      "tile": 206
+    },
+    {
+      "pose": 3,
+      "direction": 1,
+      "tile": 203
+    },
+    {
+      "pose": 3,
+      "direction": 2,
+      "tile": 200
+    },
+    {
+      "pose": 3,
+      "direction": 3,
+      "tile": 200
+    },
+    {
+      "pose": 6,
+      "direction": 0,
+      "tile": 7
+    },
+    {
+      "pose": 6,
+      "direction": 1,
+      "tile": 6
+    },
+    {
+      "pose": 6,
+      "direction": 2,
+      "tile": 5
+    },
+    {
+      "pose": 6,
+      "direction": 3,
+      "tile": 5
+    },
+    {
+      "pose": 7,
+      "direction": 0,
+      "tile": 28
+    },
+    {
+      "pose": 7,
+      "direction": 1,
+      "tile": 23
+    },
+    {
+      "pose": 7,
+      "direction": 2,
+      "tile": 20
+    },
+    {
+      "pose": 7,
+      "direction": 3,
+      "tile": 20
+    },
+    {
+      "pose": 10,
+      "direction": 0,
+      "tile": 33
+    },
+    {
+      "pose": 10,
+      "direction": 1,
+      "tile": 33
+    },
+    {
+      "pose": 10,
+      "direction": 2,
+      "tile": 33
+    },
+    {
+      "pose": 10,
+      "direction": 3,
+      "tile": 33
+    },
+    {
+      "pose": 27,
+      "direction": 0,
+      "tile": 0
+    },
+    {
+      "pose": 27,
+      "direction": 1,
+      "tile": 0
+    },
+    {
+      "pose": 27,
+      "direction": 2,
+      "tile": 0
+    },
+    {
+      "pose": 27,
+      "direction": 3,
+      "tile": 0
+    },
+    {
+      "pose": 28,
+      "direction": 0,
+      "tile": 0
+    },
+    {
+      "pose": 28,
+      "direction": 1,
+      "tile": 0
+    },
+    {
+      "pose": 28,
+      "direction": 2,
+      "tile": 0
+    },
+    {
+      "pose": 28,
+      "direction": 3,
+      "tile": 0
+    }
+  ],
+  "templateSha256": "01f9d100468bdba275e0b64d9a3184d7c4b9aeecf2a061f10cc2d3d891cdc8c2",
+  "source": "hero_tiles.h enum; no ls_throw member"
+}

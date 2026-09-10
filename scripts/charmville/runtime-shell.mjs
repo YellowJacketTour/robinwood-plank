@@ -7,7 +7,7 @@ import './account-peers.js';
 import './world-encounter.js';
 import './capture-bridge.js';
 import './resource-bridge.js';
-let accountOrigin=null;
+let accountOrigin=null,captureAvailable=false;
 async function returnToAccountMenus(panel='inventory'){
   if(!['inventory','companions','exchange','friends'].includes(panel))return;
   if(window.parent===window){window.open('http://localhost:3017/charmville/world?panel='+panel,'_blank','noopener');return;}
@@ -19,6 +19,7 @@ const suppressedKeys=new Set();
 function nativeKey(key,code,down){forwarding=true;try{document.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{key,code:key,keyCode:code,which:code,bubbles:true}));}finally{forwarding=false;}}
 function openUnifiedMenu(){
   if(!unifiedMenu||document.querySelector('dialog[open]'))return;
+  unifiedMenu.querySelector('[data-destination="capture"]').disabled=!captureAvailable;
   unifiedMenu.querySelector('[data-destination="gear"]').disabled=Boolean(document.querySelector('button.charm-runtime-enter'));
   for(const [key,code] of [['ArrowUp',38],['ArrowDown',40],['ArrowLeft',37],['ArrowRight',39],['z',90],['x',88],['d',68],['c',67],['Enter',13]])nativeKey(key,code,false);
   unifiedMenu.showModal();unifiedMenu.querySelector('button').focus();
@@ -26,12 +27,13 @@ function openUnifiedMenu(){
 function mountUnifiedMenu(root){
   unifiedMenu=root.createElement('dialog');unifiedMenu.className='charm-game-menu';unifiedMenu.setAttribute('aria-label','Game menu');
   Object.assign(unifiedMenu.style,{boxSizing:'border-box',width:'min(92vw,540px)',maxHeight:'85vh',overflow:'auto',padding:'20px',border:'1px solid var(--color-line)',borderRadius:'12px',background:'var(--color-wood-950)',color:'var(--color-cream)'});
-  unifiedMenu.innerHTML='<strong>Game menu</strong><p>Choose where to go. Gear controls the adventure; the other pages use your account or catalogue.</p><div data-menu-choices style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><button type="button" data-destination="companions">Party</button><button type="button" data-destination="gear">Gear</button><button type="button" data-destination="inventory">Inventory</button><button type="button" data-destination="charmdex">Charmdex</button><button type="button" data-destination="exchange">Exchange</button><button type="button" data-destination="friends">Friends</button><button type="button" data-destination="voice">Voice notes</button></div><p>Enter opens this menu. Arrow keys choose · Enter confirms · Escape returns.</p><button type="button" data-menu-close>Back to game</button>';
+  unifiedMenu.innerHTML='<strong>Game menu</strong><p>Choose where to go. Gear controls the adventure; the other pages use your account or catalogue.</p><div data-menu-choices style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><button type="button" data-destination="companions">Party</button><button type="button" data-destination="gear">Gear</button><button type="button" data-destination="inventory">Inventory</button><button type="button" data-destination="charmdex">Charmdex</button><button type="button" data-destination="exchange">Exchange</button><button type="button" data-destination="friends">Friends</button><button type="button" data-destination="voice">Voice notes</button><button type="button" data-destination="capture" disabled>Throw ball</button></div><p>Enter opens this menu. Arrow keys choose · Enter confirms · Escape returns.</p><button type="button" data-menu-close>Back to game</button>';
   root.body.append(unifiedMenu);
   unifiedMenu.querySelector('[data-menu-close]').onclick=()=>unifiedMenu.close();
   unifiedMenu.addEventListener('close',()=>root.querySelector('canvas')?.focus());
   for(const button of unifiedMenu.querySelectorAll('[data-destination]'))button.onclick=()=>{
     const destination=button.dataset.destination;unifiedMenu.close();
+    if(destination==='capture'){if(captureAvailable&&accountOrigin){captureAvailable=false;button.disabled=true;window.parent.postMessage({type:'charmville:capture-request'},accountOrigin);}return;}
     if(destination==='gear'){
       if(nativeEquipment)return;
       nativeEquipment=true;nativeKey('Enter',13,true);setTimeout(()=>nativeKey('Enter',13,false),100);
@@ -50,7 +52,7 @@ if(typeof window!=='undefined')for(const type of ['keydown','keyup'])window.addE
       if(event.key==='Escape'){event.preventDefault();unifiedMenu.close();}
       else if(event.key==='Enter'){event.preventDefault();if(!event.repeat)document.activeElement?.click();}
       else if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)){
-        event.preventDefault();const choices=[...unifiedMenu.querySelectorAll('button')],index=choices.indexOf(document.activeElement);
+        event.preventDefault();const choices=[...unifiedMenu.querySelectorAll('button:not(:disabled)')],index=choices.indexOf(document.activeElement);
         const step=event.key==='ArrowUp'?-2:event.key==='ArrowDown'?2:event.key==='ArrowLeft'?-1:1;choices[(index+step+choices.length)%choices.length]?.focus();
       }
     }
@@ -125,6 +127,7 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   if (event.source !== window.parent || !['http://localhost:3017', 'http://127.0.0.1:3017'].includes(event.origin)) return;
   const request = event.data;
   if (!request) return;
+  if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button)button.disabled=!captureAvailable;return;}
   if(request.type==='charmville:host-ready'){accountOrigin=event.origin;return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
