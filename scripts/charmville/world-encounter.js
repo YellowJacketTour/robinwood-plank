@@ -26,9 +26,9 @@ function flush(){
  if(current&&Date.now()>expires){current=null;queue=[];busy=false;attack=null;damage=0;generation++;version++;}
  try{const path=FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/';FS.mkdirTree(path);
   if(!initialized){for(const [file,index] of [['encounter-effect-ack.txt',0],['world-encounter.txt',6]])if(FS.analyzePath(path+file).exists){const previous=Number(FS.readFile(path+file,{encoding:'utf8'}).replace(/\0/g,'').split('|')[index]);if(Number.isSafeInteger(previous)&&previous>=0)effect=Math.max(effect,previous);}initialized=true;}
-  if(busy&&FS.analyzePath(path+'encounter-effect-ack.txt').exists&&Number(FS.readFile(path+'encounter-effect-ack.txt',{encoding:'utf8'}).replace(/\0/g,''))===effect)busy=false;
+  if(busy&&FS.analyzePath(path+'encounter-effect-ack.txt').exists&&Number(FS.readFile(path+'encounter-effect-ack.txt',{encoding:'utf8'}).replace(/\0/g,''))===effect){busy=false;version++;}
   if(current&&!busy&&queue.length){const hit=queue.shift();effect++;damage=hit.damage;attack=null;busy=true;version++;const supported={277:1,280:10,283:33,25:98,133:33,286:33};if(typeof hit.actorId==='string'&&hit.actorId.length<=80&&supported[hit.actorSpeciesId]===hit.moveId&&Number.isInteger(hit.actorCell?.x)&&Number.isInteger(hit.actorCell?.y)&&hit.actorCell.x>=0&&hit.actorCell.x<=30&&hit.actorCell.y>=0&&hit.actorCell.y<=20)attack={species:hit.actorSpeciesId,x:hit.actorCell.x,y:hit.actorCell.y,slot:0};if(attack&&FS.analyzePath(path+"party-follower-ids.txt").exists){const ids=FS.readFile(path+"party-follower-ids.txt",{encoding:"utf8"}).split("|");attack.slot=ids.slice(0,6).indexOf(hit.actorId)+1;}}
-  if(written!==version){FS.writeFile(path+'world-encounter.txt',[version,current?1:0,current?.cell.x||0,current?.cell.y||0,current?.hp||0,current?.maxHp||1,effect,damage,attack?.species||0,attack?.x||0,attack?.y||0,attack?.slot||0,generation].join('|'));written=version;}
+  if(written!==version){FS.writeFile(path+'world-encounter.txt',[version,current?1:0,current?.cell.x||0,current?.cell.y||0,current?.hp||0,current?.maxHp||1,effect,damage,attack?.species||0,attack?.x||0,attack?.y||0,attack?.slot||0,generation,(busy||queue.length)?1:0].join('|'));written=version;}
  }catch{}
 }
 const timer=setInterval(flush,100);window.addEventListener('pagehide',()=>clearInterval(timer),{once:true});

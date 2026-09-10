@@ -24,7 +24,15 @@ try{
  const runtime=page.frames().find(f=>f.url().startsWith('http://localhost:3021/play/'));assert(runtime);
  await page.waitForTimeout(12000);
  for(let i=0;i<2;i++){await page.keyboard.down('d');await page.waitForTimeout(150);await page.keyboard.up('d');await page.waitForTimeout(800);}
- if(process.argv.includes('--identity')){
+ if(process.argv.includes('--defeat-order')){
+  await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>path.endsWith('/world-encounter.txt')?undefined:write(path,...args);});
+  const emit=async(version,hp,effect,pending)=>runtime.evaluate(data=>window.fixtureWriteEncounter(data.join('|')),[version,1,8,9,hp,13,effect,2,effect?277:0,2,9,0,100,pending]);
+  await emit(100,4,0,0);await page.waitForTimeout(200);
+  await emit(101,0,1,1);await page.waitForTimeout(600);assert(events.some(e=>e.startsWith('CHARMVILLE_ATTACK_CONTACT 277 ')));assert(!events.includes('CHARMVILLE_DEFEAT_START'));await page.screenshot({path:out+'/defeat-order-pending.png'});
+  await emit(102,0,2,1);await page.waitForTimeout(600);assert.equal(events.filter(e=>e.startsWith('CHARMVILLE_ATTACK_CONTACT 277 ')).length,2);assert(!events.includes('CHARMVILLE_DEFEAT_START'));
+  await emit(103,0,2,0);await page.waitForTimeout(1100);assert.equal(events.filter(e=>e==='CHARMVILLE_DEFEAT_START').length,1);assert(events.includes('CHARMVILLE_DEFEAT_COMPLETE'));await page.screenshot({path:out+'/defeat-order-complete.png'});
+  assert(events.findLastIndex(e=>e.startsWith('CHARMVILLE_ATTACK_CONTACT 277 '))<events.indexOf('CHARMVILLE_DEFEAT_START'));assert.deepEqual(errors,[]);await writeFile(out+'/defeat-order.json',JSON.stringify({scope:'Synthetic two-strike terminal native presentation; real HP remains zero throughout pending attacks; no gameplay authority.',events,errors},null,2));console.log('Two source attacks finish before a single native faint; authoritative terminal HP stays zero.');
+ }else if(process.argv.includes('--identity')){
   await runtime.evaluate(()=>{const write=FS.writeFile.bind(FS);window.fixtureWriteEncounter=text=>write('/Files/Homestead/charmville/world-encounter.txt',text);FS.writeFile=(path,...args)=>path.endsWith('/world-encounter.txt')?undefined:write(path,...args);});
   const emit=async(version,generation,hp,effect=0,species=0,active=1)=>runtime.evaluate(data=>window.fixtureWriteEncounter(data.join('|')),[version,active,8,9,hp,13,effect,species?1:0,species,2,9,0,generation]);
   await emit(100,100,13);await page.waitForTimeout(200);await emit(101,100,10,1,277);const deadline=Date.now()+1000;while(!events.some(e=>e.startsWith('CHARMVILLE_ENCOUNTER_EFFECT 1 '))&&Date.now()<deadline)await page.waitForTimeout(10);assert(events.some(e=>e.startsWith('CHARMVILLE_ENCOUNTER_EFFECT 1 ')));await emit(102,101,13,1);await page.waitForTimeout(700);assert(!events.some(e=>e.startsWith('CHARMVILLE_ATTACK_CONTACT')));assert(!events.includes('CHARMVILLE_DEFEAT_START'));
