@@ -18,6 +18,8 @@
  * number is evidence about the sources, so it is reported rather than hidden.
  */
 import type { BitcoinBlock, BitcoinRpc } from "../adapters/bitcoin.ts";
+import { fromHex } from "../adapters/bitcoin.ts";
+import { decodeBitcoinBlock, readBitcoinBlockBody } from "./bitcoin-raw.ts";
 
 export interface EsploraOpts {
   /** Ordered by preference. Each must speak the Esplora REST shape. */
@@ -69,6 +71,14 @@ const DEFAULT_HOSTS = [
 /** HTTP statuses that mean "ask again later", not "this data does not exist". */
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/** Consecutive failures before a host is benched. Two, not one: a single blip
+ *  must never sideline a healthy host. */
+const HOST_BENCH_AFTER = 2;
+/** First bench length; doubles per additional consecutive failure. */
+const HOST_BENCH_BASE_MS = 60_000;
+/** Ceiling, so a dead host is still retried periodically and can come back. */
+const HOST_BENCH_MAX_MS = 15 * 60_000;
+
 export class EsploraBitcoinRpc implements BitcoinRpc {
   private hosts: string[];
   private fetchImpl: typeof fetch;
@@ -77,6 +87,33 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   disagreementsSeen = 0;
   /** Per-host failure tallies, so a dying source is visible in health. */
   readonly hostFailures = new Map<string, number>();
+  /**
+   * Hosts benched until a timestamp, and their consecutive-failure streak.
+   *
+   * WHY A JAIL, PROVEN NOT GUESSED
+   * ------------------------------
+   * Production host counts on 2026-09-09 were
+   *   space 164 | blockstream 351 | emzy 538 | ninja 712 | va1 852 | tk7 1
+   *
+   * Those are not six health readings. Simulating this exact loop -- rotate
+   * the START index, then walk the remaining hosts in order, stopping at the
+   * first success -- with ONLY tk7 healthy predicts 167/334/501/668/834/0.
+   * Max deviation from production: 0.035 when normalised. The counts are a
+   * POSITION artefact: every call walks the five dead hosts to reach the one
+   * live one.
+   *
+   * The cost is the bug. Five dead hosts at an 8s timeout is 40s per get();
+   * getBestBlockHash is two gets plus walkPath's first header, so one
+   * bitcoinTick needed >=120s against a 60s phase deadline. It could never
+   * finish, and `bitcoin-tip` failed with "exceeded 60000ms" every single
+   * tick.
+   *
+   * Benching a host after repeated CONSECUTIVE failures removes that cost.
+   * The bench is short and the streak resets on any success, so a host that
+   * recovers rejoins on its own -- this is not a permanent removal, and a
+   * fully-benched pool is still tried (see get()) rather than failing shut.
+   */
+  private readonly benched = new Map<string, { until: number; streak: number }>();
 
   constructor(opts: EsploraOpts = {}) {
     this.hosts = opts.hosts ?? DEFAULT_HOSTS;
@@ -109,17 +146,37 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
    * door exists.
    */
   private rr = 0;
-  private async get(path: string, asJson: boolean): Promise<unknown> {
+  private readonly providerCooldowns = new Map<string, number>();
+  private providerKey(host: string): string {
+    const hostname = new URL(host).hostname;
+    return hostname === "mempool.space" || hostname.endsWith(".mempool.space") ? "mempool.space" : hostname;
+  }
+  private async get(path: string, asJson: boolean | "block"): Promise<unknown> {
     let last: Error | undefined;
     const start = this.hosts.length > 1 ? this.rr++ % this.hosts.length : 0;
-    const ordered =
+    const rotated =
       start === 0 ? this.hosts : [...this.hosts.slice(start), ...this.hosts.slice(0, start)];
+    // A fully cooling pool is deferred. Retrying it immediately compounds
+    // throttling and can consume the entire worker phase without progress.
+    const now = Date.now();
+    const live = rotated.filter((h) => (this.benched.get(h)?.until ?? 0) <= now);
+    const ordered = live;
+    const deadline = Date.now() + Math.min(16_000, this.timeoutMs * 2);
     for (const host of ordered) {
+      if ((this.providerCooldowns.get(this.providerKey(host)) ?? 0) > Date.now()) continue;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
       try {
         const res = await this.fetchImpl(`${host}${path}`, {
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: AbortSignal.timeout(Math.max(1, Math.min(this.timeoutMs, remaining))),
         });
         if (!res.ok) {
+          if (res.status === 429) {
+            const retry = res.headers?.get("retry-after");
+            const seconds = retry != null && /^\d+$/.test(retry) ? Number(retry) : NaN;
+            const retryAt = Number.isFinite(seconds) ? Date.now() + seconds*1000 : retry ? Date.parse(retry) : NaN;
+            this.providerCooldowns.set(this.providerKey(host), Math.max(Date.now()+60_000, Number.isFinite(retryAt) ? retryAt : 0));
+          }
           // A 429 is a WAIT, not a verdict on the data. Marking it retryable
           // lets the loop fall through to the next host instead of surfacing
           // the first host's throttle as the answer -- which is exactly how a
@@ -128,9 +185,22 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
           (err as { retryable?: boolean }).retryable = RETRYABLE_STATUS.has(res.status);
           throw err;
         }
-        return asJson ? await res.json() : (await res.text()).trim();
+        // A success clears the streak: a host that recovers must rejoin
+        // immediately, not serve out a sentence it no longer deserves.
+        this.benched.delete(host);
+        return asJson === "block" ? await readBitcoinBlockBody(res) : asJson ? await res.json() : (await res.text()).trim();
       } catch (e) {
         this.hostFailures.set(host, (this.hostFailures.get(host) ?? 0) + 1);
+        const prior = this.benched.get(host)?.streak ?? 0;
+        const streak = prior + 1;
+        // Bench only after CONSECUTIVE failures, so one blip cannot sideline a
+        // healthy host. Back off with the streak, hard-capped, so a genuinely
+        // dead host is retried occasionally rather than never.
+        const until =
+          streak >= HOST_BENCH_AFTER
+            ? Date.now() + Math.min(HOST_BENCH_MAX_MS, HOST_BENCH_BASE_MS * 2 ** (streak - HOST_BENCH_AFTER))
+            : 0;
+        this.benched.set(host, { until, streak });
         last = e instanceof Error ? e : new Error(String(e));
       }
     }
@@ -157,7 +227,7 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
     hash: string,
   ): Promise<{ hash: string; previousblockhash: string | null; height: number } | null> {
     try {
-      const b = (await this.get(`/block/${hash}`, true)) as {
+      const b = (await this.get(`/block/${fromHex(hash)}`, true)) as {
         id?: string;
         previousblockhash?: string;
         height?: number;
@@ -176,41 +246,16 @@ export class EsploraBitcoinRpc implements BitcoinRpc {
   /**
    * A full block with witness data.
    *
-   * Esplora pages transactions 25 at a time, so a busy block is dozens of
-   * round trips. The cap is deliberate: an unbounded fetch of a 4,000-tx block
-   * would let one block stall the tip walk, and a bounded read that reports how
-   * far it got is better than an unbounded one that hangs. A partial block is
-   * still honest -- coverage only advances for what was actually persisted.
+   * One raw-block request replaces transaction pagination and its former
+   * 500-transaction truncation. Verify transaction and witness commitments;
+   * an incomplete response must throw before the adapter records coverage.
    */
-  async getBlock(hash: string, maxTxs = 500): Promise<BitcoinBlock | null> {
+  async getBlock(hash: string): Promise<BitcoinBlock | null> {
     const header = await this.getBlockHeader(hash);
     if (!header) return null;
 
-    const tx: BitcoinBlock["tx"] = [];
-    for (let start = 0; start < maxTxs; start += 25) {
-      let page: Array<{ txid: string; vin?: Array<{ witness?: string[] }> }>;
-      try {
-        page = (await this.get(`/block/${hash}/txs/${start}`, true)) as typeof page;
-      } catch {
-        break; // ran past the end, or both hosts refused: keep what we have
-      }
-      if (!Array.isArray(page) || page.length === 0) break;
-      for (const t of page) {
-        tx.push({
-          txid: t.txid,
-          // Esplora calls it `witness`; the adapter's shape says `txinwitness`.
-          vin: (t.vin ?? []).map((v) => ({ txinwitness: v.witness ?? [] })),
-        });
-      }
-      if (page.length < 25) break;
-    }
-
-    return {
-      hash: header.hash,
-      previousblockhash: header.previousblockhash,
-      height: header.height,
-      tx,
-    };
+    const bytes = await this.get(`/block/${fromHex(hash)}/raw`, "block") as Uint8Array;
+    return decodeBitcoinBlock(bytes, hash, header.height);
   }
 
   /**

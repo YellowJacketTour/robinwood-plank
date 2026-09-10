@@ -264,7 +264,7 @@ export async function deriveApproxHolderCountFromLedger(
 
 function currencyMetadata(chainSlug: string, token: string | null) {
   const chain = foreignChainByChainSlug(chainSlug);
-  if (!token) return { symbol: chain?.nativeCurrencySymbol ?? "ETH", decimals: 18 };
+  if (!token || /^0x0{40}$/i.test(token)) return { symbol: chain?.nativeCurrencySymbol ?? "ETH", decimals: 18 };
   const stable = chain
     ? STABLECOINS_BY_CHAIN[chain.chainId]?.find((entry) => entry.address.toLowerCase() === token.toLowerCase())
     : null;

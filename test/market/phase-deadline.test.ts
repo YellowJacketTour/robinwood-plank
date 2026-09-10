@@ -41,12 +41,12 @@ test("the deadline is longer than a tick but shorter than the cron hour", () => 
   assert.ok(floor * mult <= 600_000, "the deadline must be far below the cron hour");
 });
 
-test("a timed-out phase is recorded as a FAILURE, not silently skipped", () => {
+test("a timed-out phase exits nonzero to fence unfinished writes", () => {
   const at = RUNNER.indexOf("const phase = async (");
   const body = RUNNER.slice(at, RUNNER.indexOf("const tick = async ()", at));
   // The catch that records the failure must still be reached by a timeout,
   // which is only true if the race REJECTS rather than resolving.
-  assert.match(body, /reject\(new Error\(`phase \$\{name\} exceeded/, "the timer must reject");
+  assert.match(body, /process\.exit\(75\)/, "the timer must terminate the writer");
   assert.match(body, /"failure"/, "and the rejection must be recorded as a failure");
 });
 
@@ -142,4 +142,55 @@ test("the watchdog EXITS rather than trying a graceful shutdown", () => {
   const body = RUNNER.slice(at, at + 1200);
   assert.match(body, /process\.exit\(75\)/, "must exit hard, with EX_TEMPFAIL");
   assert.ok(!/shutdown\("watchdog"\)/.test(body), "must not attempt a flush that can hang");
+});
+
+/**
+ * The exit that could not exit.
+ *
+ * Measured live 2026-09-09: pid 4184666 reached uptime 3,568s against a
+ * --max-seconds=3540 budget. The budget timer HAD fired -- the process was
+ * past its deadline -- but the shutdown it triggered awaited an UNBOUNDED
+ * flush and never reached process.exit. Meanwhile `stopping = true` makes
+ * every tick return immediately, so the watchdog (which measures time since
+ * the last completed TICK) could not see it either.
+ *
+ * Result: a worker that outlived its own deadline while holding the `flock -n`
+ * that cron uses to decide whether to start the newer build.
+ */
+
+test("shutdown cannot wait forever on a flush", () => {
+  const at = RUNNER.indexOf("const shutdown = async (sig: string)");
+  assert.ok(at > 0, "shutdown must exist");
+  const body = RUNNER.slice(at, RUNNER.indexOf("process.on(\"SIGINT\"", at));
+  assert.match(body, /EXIT_GRACE_MS/, "the flush must be bounded by a named grace period");
+  assert.match(body, /Promise\.race\(/, "and raced against it");
+  // Assert the PROPERTY: the flush must be inside the race, not awaited
+  // ahead of it. A leading-whitespace regex also matched the flush INSIDE the
+  // race and failed while the code was correct -- position, not structure.
+  const race = body.indexOf("Promise.race(");
+  const flush = body.indexOf("hose.flush()");
+  assert.ok(race > 0 && flush > 0, "both must be present");
+  assert.ok(race < flush, "the flush must be raced, not awaited before the race");
+});
+
+test("a hung shutdown still exits, because the watchdog cannot see it", () => {
+  // stopping = true stops ticks by design, and the watchdog measures time
+  // since the last completed tick -- so it is blind here. Shutdown needs its
+  // own backstop.
+  const at = RUNNER.indexOf("const shutdown = async (sig: string)");
+  const body = RUNNER.slice(at, RUNNER.indexOf("process.on(\"SIGINT\"", at));
+  assert.match(body, /shutdown did not complete -- exiting hard/, "a backstop must exist");
+  assert.match(body, /process\.exit\(75\)/, "and must exit hard with EX_TEMPFAIL");
+});
+
+test("the shutdown backstop is NOT unref'd", () => {
+  // An unref'd timer cannot hold the event loop open, so it would never fire
+  // in the one case it exists for. This is the opposite of the tick timers,
+  // which must be unref'd -- getting the two backwards is silent either way.
+  const at = RUNNER.indexOf("shutdown did not complete");
+  const tail = RUNNER.slice(at, at + 320);
+  assert.ok(
+    !/\}, 20_000\)\.unref/.test(tail),
+    "unref'ing the backstop would stop it firing in exactly the case it guards",
+  );
 });

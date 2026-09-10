@@ -29,31 +29,18 @@ import { protocolT0 } from "../shared/protocol-t0.ts";
  * Blocks per epoch, by family. Bitcoin is smaller than EVM because one block
  * means parsing every witness in it; EVM is a topic-only getLogs over a range.
  *
- * BITCOIN WAS 8, AND 8 IS AN ARITHMETIC DEAD END.
- * ----------------------------------------------
- * 198,651 blocks separate the lock height from protocol_t0. At 8 blocks per
- * epoch that is 24,832 epochs, and this file's own caller notes the result:
- * "at 8 blocks per epoch the default rate needed 43 days".
- *
- * Measured live 2026-09-09 against real Esplora hosts:
- *   blockstream.info  8/8 serial  148 ms/block
- *   mempool.space     8/8 serial   47 ms/block
- *   mempool.space    32 concurrent  3.6 ms/block effective (32/32 ok)
- *
- * So the whole remaining past is ~2.6 hours serial on the faster host, and
- * ~12 minutes at 32-way. The 43-day figure was never a vendor limit; it was
- * this constant plus a serial walk.
- *
- * 64 keeps each epoch a bounded unit of work (the hash-link is still verified
- * once per epoch, and a crash mid-epoch re-walks at most 64 blocks) while
- * cutting the epoch count 8x. The fetch inside an epoch is parallel; the
- * INGEST stays ordered, because the witness parse is the CPU cost the original
- * 8 was protecting and because coverage must extend contiguously.
+ * The old throughput estimate measured header lookups, not complete blocks.
+ * A verified read of block 966080 fetched 4,008 transactions in 10.6 seconds
+ * including cold provider failover. Four full blocks form a bounded commit
+ * unit; backfillTick repeats epochs within its wall-clock budget. The raw
+ * reader eliminates the former 500-transaction cap and pagination overhead.
  */
 export const EPOCH_WINDOW: Record<string, number> = {
   evm: 2_000,
   solana: 512,
-  bitcoin: 64,
+  // Complete raw blocks can contain thousands of transactions each. Keep a
+  // commit unit below the worker's phase deadline; the budget loop repeats it.
+  bitcoin: 4,
 };
 
 export function familyOf(chain: ChainId): "evm" | "solana" | "bitcoin" {
@@ -81,13 +68,23 @@ export interface BackfillProgress {
  */
 export type BackfillStore = Pick<
   PostgresArchiveStore,
-  "getBackfillTail" | "setBackfillTail" | "headersAtHeight" | "getCursor" | "enqueueGap"
+  | "getBackfillTail"
+  | "setBackfillTail"
+  | "headersAtHeight"
+  | "getCursor"
+  | "enqueueGap"
+  // Added for the in-place self-parent repair below. Declared explicitly
+  // rather than widening back to the whole class: this type exists so the
+  // worker's dependencies stay legible, and the compiler correctly rejected
+  // the first attempt to use methods that were not part of the contract.
+  | "putHeader"
+  | "repairParentHash"
 >;
 
 export interface BackfillDeps {
   store: BackfillStore;
   /** Ingest one epoch. Returns the LOWEST header it actually persisted. */
-  ingestRange: (chain: ChainId, from: number, to: number) => Promise<Header | undefined>;
+  ingestRange: (chain: ChainId, from: number, to: number, deadline?: number) => Promise<Header | undefined>;
   /** Gaze pressure per chain, 0..1. Absent means no attention. */
   gaze?: (chain: ChainId) => number;
 }
@@ -148,7 +145,7 @@ export class BackfillWorker {
    * Returns undefined when every chain's tail has reached its protocol origin,
    * which is the only honest way to report "the past is closed".
    */
-  async step(chains: ChainId[]): Promise<BackfillProgress | undefined> {
+  async step(chains: ChainId[], deadline?: number): Promise<BackfillProgress | undefined> {
     const { store } = this.deps;
     const chain = pickChain(store, chains, this.deps.gaze);
     if (!chain) return undefined;
@@ -160,7 +157,7 @@ export class BackfillWorker {
     const to = tail - 1;
     if (to < from) return { chain, from: tail, to: tail, linked: true, tailMoved: false, reason: "tail is at protocol_t0" };
 
-    const lowest = await this.deps.ingestRange(chain, from, to);
+    const lowest = await this.deps.ingestRange(chain, from, to, deadline);
     if (!lowest) {
       return { chain, from, to, linked: false, tailMoved: false, reason: "epoch produced no header" };
     }
@@ -170,14 +167,68 @@ export class BackfillWorker {
     const tailHeader = store
       .headersAtHeight(chain, tail)
       .find((h) => h.height === tail);
-    const linked =
-      !tailHeader ||
-      store.headersAtHeight(chain, to).some(
+    let linked =
+      !!tailHeader && store.headersAtHeight(chain, to).some(
         (h) => h.hash.toLowerCase() === tailHeader.parentHash.toLowerCase(),
       );
+    // Every seam in the newly ingested interval must link, including holes
+    // inside an epoch. Endpoint agreement alone cannot certify the interval.
+    let expectedHash = tailHeader?.parentHash;
+    for (let height = to; linked && height >= lowest.height; height--) {
+      const header = store.headersAtHeight(chain, height).find((h) => h.hash === expectedHash);
+      linked = !!header;
+      expectedHash = header?.parentHash;
+    }
 
     if (!linked) {
       // Refuse to move. An unlinked boundary is a claim we cannot support.
+      //
+      // BUT SAY WHICH HASHES DISAGREED. "did not hash-link" is true and
+      // useless: it cannot distinguish a genuine reorg from a poisoned
+      // parent_hash in our own row, and those need opposite responses. This
+      // stalled Bitcoin's past for a full day while the reason string looked
+      // like a considered refusal rather than a data defect.
+      const expected = tailHeader?.parentHash ?? null;
+      const found = store.headersAtHeight(chain, to).map((h) => h.hash);
+
+      // SELF-HEAL A SELF-PARENT, HERE, WITH NO NETWORK CALL.
+      //
+      // A row whose parent_hash equals its own hash is not a reorg and not a
+      // disagreement with the chain -- it is a placeholder that was never
+      // overwritten, and it is detectable by pure comparison. Recognising it
+      // needs no vendor, no header fetch, and cannot fail.
+      //
+      // This existed only in the BOOT path, which meant a poisoned row
+      // discovered mid-run waited for the next hourly restart -- and if that
+      // one boot-time header read failed, waited another hour. Measured live
+      // 2026-09-09: block 966081 stayed self-parented across multiple boots
+      // while the backfill refused, correctly, every 15 seconds.
+      //
+      // The repair is narrow on purpose: it fires ONLY when the stored parent
+      // is the block's own hash AND exactly one header is stored at the height
+      // below. That is the single unambiguous case -- any other mismatch is a
+      // real claim about the chain and must keep being refused.
+      if (
+        tailHeader &&
+        expected &&
+        expected.toLowerCase() === tailHeader.hash.toLowerCase() &&
+        found.length === 1
+      ) {
+        const realParent = found[0]!;
+        store.putHeader({ ...tailHeader, parentHash: realParent });
+        store.repairParentHash(chain, tailHeader.hash, realParent);
+        return {
+          chain,
+          from,
+          to,
+          linked: false,
+          tailMoved: false,
+          reason:
+            `self-parented tail ${tail} repaired in place: parent ${expected} -> ${realParent}; ` +
+            `the next epoch will link`,
+        };
+      }
+
       store.enqueueGap({ chain, fromHeight: from, toHeight: to, reason: "bloom_audit" });
       return {
         chain,
@@ -185,11 +236,37 @@ export class BackfillWorker {
         to,
         linked: false,
         tailMoved: false,
-        reason: "epoch did not hash-link to the current tail; audit enqueued",
+        reason:
+          `epoch did not hash-link: tail ${tail} expects parent ${expected ?? "(none)"}, ` +
+          `but height ${to} holds ${found.length === 0 ? "(no header)" : found.join(",")}`,
       };
     }
 
     const moved = store.setBackfillTail(chain, lowest.height);
-    return { chain, from, to, linked: true, tailMoved: moved };
+    // A SUCCESSFUL STEP THAT MOVES NOTHING MUST STILL SAY WHY.
+    //
+    // This returned `tailMoved: moved` with NO reason, so a refused tail
+    // update surfaced as the caller's fallback string -- "no progress, no
+    // reason given" -- which is precisely the silent-miss shape the rest of
+    // this file exists to prevent.
+    //
+    // setBackfillTail only moves LEFT, so `moved` is false when the lowest
+    // header we actually persisted sits at or above the current tail. That
+    // happens when the BOTTOM of the epoch failed to ingest: the walk
+    // succeeded, the hash-link held, and the deepest block we hold is still
+    // the one we already had. Measured live 2026-09-09 with backfill
+    // ok 285 / fail 183 -- partial epochs, not a stalled worker.
+    return {
+      chain,
+      from,
+      to,
+      linked: true,
+      tailMoved: moved,
+      reason: moved
+        ? `tail moved ${tail} -> ${lowest.height}`
+        : `epoch linked but the tail did not move: lowest header persisted was ` +
+          `${lowest.height}, which is not below the tail ${tail} -- the bottom of ` +
+          `the epoch (${from}) did not ingest`,
+    };
   }
 }

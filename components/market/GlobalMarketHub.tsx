@@ -12,6 +12,8 @@ import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { useHydrationJobStatus } from "@/hooks/useHydrationJobStatus";
 import { findRelatedByCreator, flattenRelatedCreatorGroup } from "@/lib/market/multichain/creator-links";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { useMarketRealtime } from "@/hooks/useMarketRealtime";
+import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
 import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -427,6 +429,7 @@ function laneSourceLabel(source: string): string {
     "opensea-bulk": "OpenSea catalog",
     "coingecko-nft": "CoinGecko stats",
     "adapter-sync": "marketplace adapter",
+    "rolling-stats": "rolling statistics",
     "unisat-collections": "UniSat stats",
     "bestinslot-stats": "BestInSlot stats",
     "native-robinwood": "native book",
@@ -450,15 +453,18 @@ function ChainTabBanner({ chainSlug, meta }: { chainSlug: string; meta: HubChain
     );
   }
   if (meta.laneHealth.down.length === 0) return null;
+  const onlyPaused = meta.laneHealth.down.every(d => d.reason === "paused");
   return (
-    <div role="status" className="mt-2 border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+    <div role="status" className={`mt-2 border px-3 py-2 text-xs ${onlyPaused ? "border-gold-500/40 bg-gold-500/10 text-gold-300" : "border-red-400/40 bg-red-400/10 text-red-200"}`}>
       {meta.laneHealth.down.map((d) => {
         const since = d.since ? new Date(d.since) : null;
         const sinceLabel = since && Number.isFinite(since.getTime()) ? since.toLocaleString() : "an unknown time";
         return (
           <p key={d.source}>
-            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)} down since {sinceLabel}
-            {d.reason === "backoff" ? " (last run failed)" : " (no successful run)"} -- counts and floors on this tab may be stale.
+            <span className="font-black uppercase tracking-wider">{chainDisplayName(chainSlug)}:</span> {laneSourceLabel(d.source)}
+            {d.reason === "paused"
+              ? " is waiting for provider capacity. Updates from this source will resume after its cooldown."
+              : ` has not refreshed since ${sinceLabel}${d.reason === "backoff" ? " (last run failed)" : " (no recent successful run)"}. Its data may be stale.`}
           </p>
         );
       })}
@@ -1091,10 +1097,10 @@ export default function GlobalMarketHub() {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [onlyTradeable, setOnlyTradeable] = useState(() => searchParams.get("tradeable") === "1");
-  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") !== "0");
+  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") === "1");
   const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(() => searchParams.get("creator") === "1");
   const [onlyListed, setOnlyListed] = useState(() => searchParams.get("listed") === "1");
-  const [showShells, setShowShells] = useState(() => searchParams.get("shells") === "1");
+  const [showShells, setShowShells] = useState(() => searchParams.get("shells") !== "0");
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
   const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -1152,16 +1158,20 @@ export default function GlobalMarketHub() {
   // stale scroll position deep into a different result set.
   const GRID_PAGE_SIZE = 60;
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
-  const [tokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
-  const [tokenSearchLoading, setTokenSearchLoading] = useState(false);
-  const [relatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
+  const [storedTokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
+  const [storedTokenSearchLoading, setTokenSearchLoading] = useState(false);
+  const [storedRelatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
+  const tokenHits = search.trim().length >= 2 ? storedTokenHits : [];
+  const tokenSearchLoading = search.trim().length >= 2 && storedTokenSearchLoading;
+  const relatedByCreator = search.trim().length >= 2 ? storedRelatedByCreator : [];
   // Real, full-catalog search results (/api/market/multichain/collection-
   // search) -- see that route's own header for the real bug this fixes:
   // the client-side searchIndex below only ever covers whatever rows have
   // scrolled into view via infinite scroll, never the full ~383,000-row
   // catalog, so a real tracked collection could return "no matches" purely
   // for not having been scrolled to yet.
-  const [serverCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
+  const [storedServerCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
+  const serverCollectionHits = search.trim().length >= 2 ? storedServerCollectionHits : [];
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -1189,16 +1199,14 @@ export default function GlobalMarketHub() {
   // (confirmed live: "ARBITRUM 4268" vs the real 17,333+). null until the
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
-  const [chainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  const [initialChainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
   // Per-chain honesty block from the index response (Batch E6): statsCapable + lane health.
   const [chainMeta, setChainMeta] = useState<Record<string, HubChainMeta> | null>(null);
   // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
   // collections increase while I'm on screen"): polled every 15 s; a chain
   // whose count grew pulses its badge for a few seconds.
   const liveCounts = useLiveChainCounts(15_000);
-  useEffect(() => {
-    if (Object.keys(liveCounts.counts).length > 0) setChainCounts(liveCounts.counts);
-  }, [liveCounts.counts]);
+  const chainCounts = Object.keys(liveCounts.counts).length > 0 ? liveCounts.counts : initialChainCounts;
   const countDelta = (slug: string): number => liveCounts.deltas[slug] ?? 0;
   useEffect(() => {
     let cancelled = false;
@@ -1221,6 +1229,8 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("plank:market:watchlist-v1");
+      // This browser-only external state must load after matching SSR hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setWatchlist(new Set(JSON.parse(raw) as string[]));
     } catch {
       // Corrupt/blocked storage -- start empty rather than throw.
@@ -1466,7 +1476,7 @@ export default function GlobalMarketHub() {
     const rows = collections.filter((c) => {
       if (onlyWatched && !watchlist.has(key(c))) return false;
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (isSpamCollectionTitle(c.name)) return false;
+      if (!showShells && isSpamCollectionTitle(c.name)) return false;
       if (!showShells && isTitleJunkWithoutData(c)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
@@ -1596,9 +1606,6 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     const query = search.trim();
     if (query.length < 2) {
-      setTokenHits([]);
-      setTokenSearchLoading(false);
-      setRelatedByCreator([]);
       return;
     }
     const controller = new AbortController();
@@ -1625,7 +1632,6 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     const query = search.trim();
     if (query.length < 2) {
-      setServerCollectionHits([]);
       return;
     }
     const controller = new AbortController();
@@ -1643,9 +1649,12 @@ export default function GlobalMarketHub() {
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [search, chainFilter]);
 
-  useEffect(() => {
+  const gridScope = JSON.stringify([[...chainFilter].sort(), search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
+  const [previousGridScope, setPreviousGridScope] = useState(gridScope);
+  if (previousGridScope !== gridScope) {
+    setPreviousGridScope(gridScope);
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, onlyWatched, showShells, priceMin, priceMax]);
+  }
 
   // Real, genuinely-uncapped reachability -- no manual "load more" wall, no
   // fixed row ceiling. `collections` keeps growing via real server-side
@@ -1825,11 +1834,11 @@ export default function GlobalMarketHub() {
     if (sortColumn !== "grade") params.set("sort", sortColumn);
     if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
     if (onlyTradeable) params.set("tradeable", "1");
-    if (!onlyArt) params.set("art", "0");
+    if (onlyArt) params.set("art", "1");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
     if (onlyWatched) params.set("starred", "1");
-    if (showShells) params.set("shells", "1");
+    if (!showShells) params.set("shells", "0");
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
@@ -1879,6 +1888,23 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
+  // Subscribe to committed changes across the catalog. Reconnect snapshots
+  // cover rendered rows; ordinary messages refresh the changed collections.
+  useMarketRealtime([], async (change) => {
+    const scopes = change.type === "resync" ? rankings.map((row) => ({ chainSlug: row.chainSlug, collectionKey: row.contractAddress })) : change.scopes;
+    const updates = new Map<string, Partial<TrackedCollection>>();
+    for (let offset = 0; offset < scopes.length; offset += 64) {
+      const response = await fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scopes.slice(offset, offset + 64)))}`,
+        { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`Live snapshot ${response.status}`);
+      const data = await response.json() as { collections: Array<Partial<TrackedCollection> & { chainSlug: string; contractAddress: string }> };
+      for (const row of data.collections) updates.set(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`, row);
+    }
+    setCollections((previous) => previous.map((row) => {
+      const update = updates.get(`${row.chainSlug}:${normalizeContractAddress(row.chainSlug, row.contractAddress)}`);
+      return update ? { ...row, ...update } : row;
+    }));
+  }, 5_000);
 
   // Viewport-aware continuous hydration (docs/marketplank/GROK-FINDINGS-
   // viewport-predictive-hydration-2026-08-25.md): whatever the visitor is
@@ -2010,6 +2036,7 @@ export default function GlobalMarketHub() {
     (onlyVerifiedCreator ? 1 : 0) +
     (onlyListed ? 1 : 0) +
     (onlyWatched ? 1 : 0) +
+    (!showShells ? 1 : 0) +
     (priceMin.trim() ? 1 : 0) +
     (priceMax.trim() ? 1 : 0);
 
@@ -2104,6 +2131,7 @@ export default function GlobalMarketHub() {
             setChainFilter(new Set());
             setOnlyTradeable(false);
             setOnlyArt(false);
+            setShowShells(true);
             setOnlyVerifiedCreator(false);
             setOnlyListed(false);
             setOnlyWatched(false);

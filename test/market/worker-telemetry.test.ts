@@ -149,10 +149,10 @@ test("the verdict checks a dead worker BEFORE the backfill's counters", () => {
   assert.ok(dead < cannotAdvance, "liveness must be ruled out first");
 });
 
-test("a hang is expressible: attempts minus completions minus failures", () => {
+test("historical unsettled attempts are reported without claiming they are active jobs", () => {
   // A phase that starts and neither finishes nor throws is HANGING, which no
   // single counter can express.
-  assert.match(ROUTE, /inFlightOrHung/, "the hang signal must be surfaced");
+  assert.match(ROUTE, /unsettledHistoricalAttempts/, "historical counts must be surfaced");
   assert.match(
     ROUTE,
     /Number\(p\.attempts\) - Number\(p\.completions\) - Number\(p\.failures\)/,

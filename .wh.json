@@ -1,1 +1,0 @@
-{"verdict":"no-heartbeat","nextStep":"The worker has never written a heartbeat. Either it is not running, or it is running a build older than this telemetry. Check that the akasha-hose process exists and is on this commit.","heartbeat":null,"phases":[]}

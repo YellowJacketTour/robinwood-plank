@@ -99,3 +99,12 @@ public/arcade/practice-clock.js
 
 # Invite test gateway state -- tokens and guest keys must never be committed
 work/invite/
+# Scratch probe captures from live-API diagnosis. Evidence, not source.
+.w*.json
+.probe/
+w[a-z].json
+c[a-z].json
+.p[0-9]
+p[a-z].json
+q[a-z].json
+.dream-loop/

@@ -1,6 +1,7 @@
+import { observedFloorChanges24h, floorSubjectKey } from "@/lib/market/multichain/observed-floor-change";
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshotsPage, getObservedFloorChange24h } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshotsPage } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isSolanaChainSlug, isRobinhoodChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { hasUnindexedNativeBook, primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
@@ -170,7 +171,12 @@ async function buildHubIndex(req: Request) {
           [NFT_CONTRACT_ADDRESS]
         ).then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0)
       : 0;
-    const nativeSales = await salesStatsFromLedger().catch(() => null);
+    // A failed read is not an empty ledger. Let the shared edge retain its
+    // last-good index rather than caching fabricated missing statistics.
+    const nativeSales = await salesStatsFromLedger().catch((error) => {
+      if (offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"))) throw error;
+      return null;
+    });
     let canonical: Awaited<
       ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
     > = null;
@@ -201,11 +207,8 @@ async function buildHubIndex(req: Request) {
       ? nativeSales?.volume24hWei ?? null
       : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
-    const nativeFloorChange = await getObservedFloorChange24h(
-      "robinhood",
-      NFT_CONTRACT_ADDRESS,
-      NATIVE_BOOK_OBSERVATION_KEY
-    ).catch(() => null);
+    const nativeSubject = { chainSlug: "robinhood", collectionKey: nativeAddr, marketplace: NATIVE_BOOK_OBSERVATION_KEY, currency: "ETH", currentPriceAtomic: nativeFloor?.toString() ?? null };
+    const nativeFloorChange = (await observedFloorChanges24h([nativeSubject]).catch(() => new Map())).get(floorSubjectKey(nativeSubject)) ?? null;
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
     try {
@@ -290,9 +293,16 @@ async function buildHubIndex(req: Request) {
       collections.map((c) => ({ chainSlug: c.chainSlug, collectionKey: c.contractAddress }))
     ).catch(() => new Map());
 
+    const floorChanges = await observedFloorChanges24h(collections.map((collection) => ({
+      chainSlug: collection.chainSlug, collectionKey: collection.contractAddress,
+      marketplace: collection.floorPriceMarketplace, currency: collection.floorPriceCurrency,
+      currentPriceAtomic: collection.floorPriceWei,
+    }))).catch(() => new Map());
+
     const mapped = collections.map((c) => {
       const isCryptoPunks = c.chainSlug === "eth-mainnet"
         && c.contractAddress.toLowerCase() === "0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb";
+      const floorChange = floorChanges.get(floorSubjectKey({chainSlug:c.chainSlug, collectionKey:c.contractAddress}));
       return ({
         chainSlug: c.chainSlug,
         chainId: c.chainId,
@@ -373,24 +383,11 @@ async function buildHubIndex(req: Request) {
         // chains only) -- null for chains/collections without a fetched
         // count yet, never a fabricated 0.
         holderCount: c.holderCount,
-        // Real, computed from this app's own prior observation (see
-        // updateCollectionMarketStats's header) -- OpenSea's stats
-        // endpoint has no floor-change field at all.
-        // A CHANGE REQUIRES TRADES. The stored value is now derived from the
-        // same 24h trade set as sales_24h (see updateVolumeFromMarketEvents),
-        // so it already carries that guarantee. The floor-diff fallback below
-        // does NOT: it compares two listing observations and fires happily on
-        // a collection that never traded, which is how a row showed -0.2%
-        // against zero sales. Gate it on real sales so both halves of the
-        // pair always agree about whether anything happened.
-        floorChangePct:
-          c.floorChangePct != null && Number.isFinite(c.floorChangePct)
-            ? c.floorChangePct
-            : c.sales24h != null && c.sales24h > 0 &&
-                c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
-              ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
-              : null,
-        floorChangeEvidence: null,
+        // Price changes use two comparable floor observations. A sale-average
+        // comparison or the previous refresh is not a 24-hour floor history.
+        floorChangePct: floorChange?.changePct ?? null,
+        floorChangeEvidence: floorChange ?? null,
+        floorChangeStatus: floorChange ? "observed-24h" : c.floorPriceWei ? "collecting-baseline" : null,
         isNativeHome: false,
         // Real venue-registry lookup (Issue 4, inline completeness UX --
         // see docs/marketplank/GROK-FINDINGS-biggest-issues-unified-

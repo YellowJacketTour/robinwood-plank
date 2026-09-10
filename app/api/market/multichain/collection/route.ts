@@ -2,12 +2,13 @@
  * Collection identity + snapshot stats without depending on a live order book.
  * Featured-card clicks were dying in /listings when UniSat/OpenSea 500'd.
  */
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStats, updateHolderCount } from "@/lib/market/multichain/store";
 import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { publicError, rateLimit } from "@/lib/security";
 import { primaryVenueForCollection } from "@/lib/market/multichain/venue-registry";
 import { getArchivalStatsForCollection } from "@/lib/market/multichain/archival-ledger";
+import { readCollectionProfile } from "@/lib/market/multichain/collection-profile";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,6 +19,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
+  // Initial page reads use stored snapshots; the mesh refreshes venue data.
+  const projectionOnly = searchParams.get("projection") === "1";
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
@@ -35,14 +38,20 @@ export async function GET(req: NextRequest) {
     // signal is best-effort by design (never worth failing the page
     // over), but best-effort must still mean "logged and moved on," never
     // "silently vanished."
-    void prioritizeCollectionDemand(chainSlug, tracked.contractAddress).catch((error) => {
+    after(() => prioritizeCollectionDemand(chainSlug, tracked.contractAddress).catch((error) => {
       console.error(
         `[collection-route] prioritizeCollectionDemand failed for ${chainSlug}:${tracked.contractAddress}:`,
         error instanceof Error ? error.message : error
       );
-    });
-    const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
-    const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
+    }));
+    // A failed database read is not an absent snapshot. Reject the refresh
+    // so the client keeps its last successful response instead of caching
+    // invented empty statistics for any collection or chain.
+    const [supply, marketStats, profile] = await Promise.all([
+      getCollectionSupplyStats(chainSlug, collectionSlug),
+      getCollectionMarketStats(chainSlug, collectionSlug),
+      readCollectionProfile(chainSlug, tracked.contractAddress),
+    ]);
     let holderCount = supply?.holderCount ?? null;
     let listedCount = supply?.listedCount ?? null;
     let totalSupply = supply?.totalSupply ?? null;
@@ -70,7 +79,7 @@ export async function GET(req: NextRequest) {
         floorPriceCurrency = native.floorWei == null ? null : "ETH";
       }
     }
-    if (isSolanaChainSlug(chainSlug)) {
+    if (!projectionOnly && isSolanaChainSlug(chainSlug)) {
       // REAL BUG FIXED 2026-08-25 (alpha-readiness audit, HIGH: "rate-limit
       // assumptions look built for a single-developer dev loop"): this call
       // had ZERO caching -- every single page view of a Solana collection
@@ -129,19 +138,20 @@ export async function GET(req: NextRequest) {
     // costs one real chain read per collection per cache window, not per
     // page view, matching every other live upstream call on this route.
     const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
-    await getOrRefresh<number | null>(
+    // A cold RPC/cache lease must never hold the collection response.
+    after(() => getOrRefresh<number | null>(
       `known-supply-correction:${chainSlug}:${tracked.contractAddress.toLowerCase()}`,
       { softTtlMs: 30 * 60_000, hardTtlMs: 24 * 60 * 60_000 },
       async () => {
         const { correctKnownSupplyFromChain } = await import("@/lib/market/multichain/archival-ledger");
         return correctKnownSupplyFromChain(chainSlug, tracked.contractAddress);
       }
-    ).catch(() => null);
+    ).then(() => undefined).catch(() => undefined));
     // Real collection_archival_stats read (see archival-ledger.ts's own
     // "API exposure" header) -- a single indexed lookup plus a cheap
     // plank_data_jobs 'running' check, both trivial at single-collection
     // scale. Null/omitted (not fabricated) when no ledger row exists yet.
-    const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug).catch(() => null);
+    const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug);
     return NextResponse.json(
       {
         collection: {
@@ -149,6 +159,11 @@ export async function GET(req: NextRequest) {
           name: tracked.name ?? tracked.contractAddress,
           imageUrl: tracked.imageUrl,
           contractAddress: tracked.contractAddress,
+          externalUrl: tracked.externalUrl,
+          creatorHandle: tracked.creatorHandle,
+          creatorAddress: tracked.creatorAddress,
+          creatorEns: tracked.creatorEns,
+          profile,
           listedCount,
           totalSupply,
           holderCount,

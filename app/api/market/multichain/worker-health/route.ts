@@ -95,14 +95,17 @@ export async function GET(req: NextRequest) {
       nextStep =
         "The worker is ticking but the backfill phase has no row at all, so it " +
         "is not being reached. Check the phases that run before it.";
-    } else if (Number(backfill.attempts) > Number(backfill.completions) + Number(backfill.failures)) {
+    } else if (Date.parse(backfill.last_attempt_at ?? "") > Math.max(Date.parse(backfill.last_success_at ?? "") || 0, Date.parse(backfill.last_failure_at ?? "") || 0)
+      && Date.now() - Date.parse(backfill.last_attempt_at ?? "") > 120_000) {
       verdict = "backfill-hangs";
       nextStep =
-        "The backfill starts more often than it finishes: it is hanging, not " +
-        "failing. Suspect an un-timed-out RPC call inside the epoch walk.";
-    } else if (Number(backfill.failures) > 0 && backfill.last_error) {
+        "The latest backfill attempt has no completion after two minutes. Check its deadline and worker restart.";
+    } else if (backfill.last_error && Date.parse(backfill.last_failure_at ?? "") > (Date.parse(backfill.last_success_at ?? "") || 0)) {
       verdict = "backfill-throws";
       nextStep = `The backfill is throwing: ${backfill.last_error}`;
+    } else if ((backfill.last_detail as { tailMoved?: boolean } | null)?.tailMoved === true) {
+      verdict = "backfill-advancing";
+      nextStep = "The latest completed epoch moved the archive tail. Compare coverage over time for throughput.";
     } else if (Number(backfill.completions) > 0) {
       verdict = "backfill-runs-but-cannot-advance";
       nextStep =
@@ -136,7 +139,7 @@ export async function GET(req: NextRequest) {
           // attempts - (completions + failures): a phase that starts and
           // neither finishes nor throws is HANGING, which no single counter
           // can express.
-          inFlightOrHung: Number(p.attempts) - Number(p.completions) - Number(p.failures),
+          unsettledHistoricalAttempts: Number(p.attempts) - Number(p.completions) - Number(p.failures),
           lastReason: p.last_reason,
           lastError: p.last_error,
           lastDetail: p.last_detail,

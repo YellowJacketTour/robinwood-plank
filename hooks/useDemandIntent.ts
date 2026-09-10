@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
+import { demandIntentKey } from "@/lib/market/demand-intent-key";
 
 /**
  * Client side of the demand bus (lib/market/multichain/edge/demand-bus.ts).
@@ -42,12 +43,13 @@ export function useDemandIntent() {
   const lastSent = useRef<Map<string, number>>(new Map());
   return useCallback((intent: ClientIntent) => {
     const now = Date.now();
-    const key = `${intent.kind}|${intent.chainSlug}|${intent.subjects.slice(0, 5).join(",")}|${Math.round(intent.moneyAtStakeUsd ?? 0)}`;
+    const key = demandIntentKey(intent);
     const prev = lastSent.current.get(key) ?? 0;
     if (now - prev < DEDUPE_MS) return;
     lastSent.current.set(key, now);
     if (lastSent.current.size > 200) {
-      for (const [k, t] of lastSent.current) if (now - t > 60_000) lastSent.current.delete(k);
+      const oldest = lastSent.current.keys().next().value;
+      if (oldest !== undefined) lastSent.current.delete(oldest);
     }
     publishDemandIntent(intent);
   }, []);

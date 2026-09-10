@@ -1,6 +1,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { amountUsdAtSale } from "@/lib/market/asset-price-hourly";
+import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 /**
  * The one sink (2026-09-06, AUDIT lens 6 section 3): every venue's fill
@@ -37,7 +38,8 @@ const pendingAggregation = new Map<string, Set<string>>();
 
 export async function recordSaleEvent(input: SaleEventInput): Promise<boolean> {
   if (!input.collectionKey || !input.txHash) return false;
-  const collectionKey = input.collectionKey.toLowerCase();
+  const normalize = (value: string) => isNonEvmChainSlug(input.chainSlug) ? value : value.toLowerCase();
+  const collectionKey = normalize(input.collectionKey);
   const nativeSymbol = chainManifest(input.chainSlug)?.nativeCurrencySymbol ?? null;
   const priced = await amountUsdAtSale(input.chainSlug, input.currencyToken, input.priceWei, input.blockTimestamp).catch(() => ({ amountUsd: null, source: null, asset: null }));
   const result = await postgresQuery(
@@ -63,8 +65,8 @@ export async function recordSaleEvent(input: SaleEventInput): Promise<boolean> {
       input.logIndex,
       input.blockNumber,
       input.blockTimestamp,
-      input.seller?.toLowerCase() ?? null,
-      input.buyer?.toLowerCase() ?? null,
+      input.seller ? normalize(input.seller) : null,
+      input.buyer ? normalize(input.buyer) : null,
       input.currencyToken?.toLowerCase() ?? null,
       input.currencyToken ? null : nativeSymbol,
       input.priceWei,

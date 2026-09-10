@@ -107,7 +107,7 @@ export class Hose {
       const pg = this.pg;
       this.backfill = new BackfillWorker({
         store: pg,
-        ingestRange: async (chain, from, to) => {
+        ingestRange: async (chain, from, to, deadline) => {
           // BITCOIN WALKS LEFT TOO.
           //
           // This function used to look only in the EVM adapter map. Bitcoin
@@ -160,17 +160,44 @@ export class Hose {
               for (const [h, hash] of settled) if (hash) hashes.set(h, hash);
             }
 
+            // THE LOWEST CONTIGUOUS HEADER, NOT MERELY THE LOWEST ONE.
+            //
+            // `heights` runs DOWNWARD (to -> from), and this loop used to keep
+            // overwriting `lowest` on every success. A block that failed in
+            // the middle was skipped with `continue`, so a deeper block still
+            // became `lowest` -- and the caller moves backfill_tail there,
+            // claiming a contiguous run across a hole it never read.
+            //
+            // Stopping at the first miss keeps the tail honest: the archive
+            // advances exactly as far as it can prove, and the unread portion
+            // stays in front of the next epoch rather than being skipped over
+            // permanently.
             let lowest: { chain: ChainId; height: number; hash: Hex; parentHash: Hex } | undefined;
             for (const h of heights) {
+              // Stop between complete blocks; the verified contiguous prefix
+              // remains durable progress instead of being killed mid-epoch.
+              if (lowest && deadline != null && Date.now() >= deadline) break;
               const hash = hashes.get(h);
-              if (!hash) continue;
-              await btc.ingestBlock(hash);
+              if (!hash) break; // a hole: everything below it is unproven this epoch
+              // And a block whose transaction walk was TRUNCATED is not proven
+              // either -- upstream's guard, kept: claiming a tail past a block
+              // we only partly read is the same lie as claiming one past a
+              // block we never read.
+              const result = await btc.ingestBlock(hash);
+              if (!result.completed) break;
               // Read the header back from the store rather than trusting the
               // walk: ingestBlock is what actually wrote it, and the backfill
               // verifies the hash-link against exactly that record.
               const stored = this.store.headersAtHeight("bitcoin", h);
-              const header = stored[stored.length - 1];
-              if (header) lowest = header;
+              // COMPARE THE SAME SHAPE. getBlockHashAtHeight returns a BARE
+              // 64-hex string; the store keeps headers 0x-prefixed via toHex.
+              // Comparing them raw never matches, so the contiguity break below
+              // fired on every block and the walk advanced nothing -- caught by
+              // the wired boot-repair test, which drives the real hose.
+              const want = hash.toLowerCase().replace(/^0x/, "");
+              const header = stored.find((x) => x.hash.toLowerCase().replace(/^0x/, "") === want);
+              if (!header) break; // ingest did not persist it -- do not claim it
+              lowest = header;
             }
             return lowest;
           }
@@ -267,13 +294,61 @@ export class Hose {
       const lock = this.store
         .headersAtHeight("bitcoin", alreadyLocked.t0Height)
         .find((h) => h.hash.toLowerCase() === lockHash.toLowerCase());
-      if (lock && lock.parentHash.toLowerCase() === lock.hash.toLowerCase()) {
-        const header = await rpc.getBlockHeader(lockHash).catch(() => null);
+      // REPAIR ANY WRONG PARENT, NOT ONLY A SELF-PARENT.
+      //
+      // This checked `parentHash === hash` -- the one poisoning shape known at
+      // the time. Measured live 2026-09-09, the backfill was refusing to move
+      // with "epoch did not hash-link to the current tail" while the REAL
+      // chain linked perfectly (966081's previousblockhash IS 966080's hash,
+      // verified against a working host). So the stored parent was wrong in
+      // some other way, and a repair that only recognised self-parents could
+      // never fix it -- a guard that cannot fire, in the repair path itself.
+      //
+      // Now: read the real parent, compare, and correct any disagreement.
+      if (lock) {
+        // THE REPAIR MUST NOT BE ABLE TO SKIP SILENTLY.
+        //
+        // `.catch(() => null)` is right -- a failed repair must never kill the
+        // worker -- but it made the failure INVISIBLE. Measured live
+        // 2026-09-09: the worker booted at 14:46 on a build containing this
+        // repair, and block 966081 was STILL self-parented afterwards, with no
+        // record anywhere of the repair having been attempted or having
+        // failed. Boot is exactly when the host pool has not yet learned which
+        // endpoints work, so this read is MORE likely to fail here than
+        // anywhere else.
+        //
+        // Every outcome is now recorded, so "the repair ran and could not read
+        // the header" is distinguishable from "the repair never ran".
+        let header: Awaited<ReturnType<typeof rpc.getBlockHeader>> | null = null;
+        let readError: string | null = null;
+        for (let attempt = 0; attempt < 3 && !header; attempt++) {
+          header = await rpc.getBlockHeader(lockHash).catch((e: unknown) => {
+            readError = e instanceof Error ? e.message : String(e);
+            return null;
+          });
+        }
         const realParent = header?.previousblockhash ?? null;
-        if (realParent) {
+        if (!realParent) {
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "failure", {
+            error: readError ?? "could not read the lock block header after 3 attempts",
+            detail: { lockHeight: alreadyLocked.t0Height, storedParent: lock.parentHash },
+          });
+        } else if (lock.parentHash.toLowerCase() === asHex(realParent)) {
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
+            reason: "lock block parent already correct",
+          });
+        }
+        if (realParent && lock.parentHash.toLowerCase() !== asHex(realParent)) {
           this.store.putHeader({ ...lock, parentHash: asHex(realParent) });
-          this.pg?.repairSelfParent("bitcoin", asHex(lockHash), asHex(realParent));
-          console.log(`[hose] bitcoin: repaired the self-parented lock block ${alreadyLocked.t0Height}`);
+          this.pg?.repairParentHash("bitcoin", asHex(lockHash), asHex(realParent));
+          this.pg?.recordPhase("bitcoin", "lock-parent-repair", "success", {
+            reason: `repaired ${lock.parentHash} -> ${realParent}`,
+            detail: { lockHeight: alreadyLocked.t0Height },
+          });
+          console.log(
+            `[hose] bitcoin: repaired lock block ${alreadyLocked.t0Height} parent ` +
+              `${lock.parentHash} -> ${realParent}`,
+          );
         }
       }
       return;
@@ -521,6 +596,7 @@ export class Hose {
    * RPC is refusing.
    */
   async backfillTick(budgetMs = 0): Promise<unknown> {
+    const until = Date.now() + budgetMs;
     // TELEMETRY FIRST, BEFORE ANY EARLY RETURN.
     //
     // `if (!this.backfill) return undefined` is itself one of the states that
@@ -536,7 +612,7 @@ export class Hose {
       });
       return undefined;
     }
-    const first = await this.backfill.step(this.cfg.chains).catch((e: unknown) => {
+    const first = await this.backfill.step(this.cfg.chains, budgetMs > 0 ? until : undefined).catch((e: unknown) => {
       // A THROW HERE USED TO VANISH.
       //
       // step() rejecting propagated to the caller's shared try/catch, which
@@ -571,11 +647,10 @@ export class Hose {
     // `tailMoved` is the only honest signal of progress -- a step that
     // returns a reason string but moved nothing would otherwise spin.
     if (!first || first.tailMoved !== true) return first;
-    const until = Date.now() + budgetMs;
     let last = first;
     let epochs = 1;
     while (Date.now() < until) {
-      const next = await this.backfill.step(this.cfg.chains);
+      const next = await this.backfill.step(this.cfg.chains, budgetMs > 0 ? until : undefined);
       if (!next || next.tailMoved !== true) break;
       last = next;
       epochs += 1;

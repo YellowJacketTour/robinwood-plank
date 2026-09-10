@@ -38,6 +38,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
+    // Live commit delivery is a read of stored data, never a new demand job.
+    if (searchParams.get("projection") === "1") {
+      const { readCollectionTokenProjection } = await import("@/lib/market/multichain/collection-token-store");
+      const projected = await readCollectionTokenProjection({ chainSlug, collectionSlug, limit, cursor, sort, tier });
+      return NextResponse.json(projected ? { ...projected, building: projected.partial && projected.tokens.length === 0 } :
+        { tokens: [], nextCursor: null, building: true, partial: true, projectedCount: 0 },
+      { headers: { "Cache-Control": "no-store" } });
+    }
     // Projection-first: page loads never spend a provider request when a
     // background worker has already materialized real collection members.
     const { hasCollectionTokenStore, readCollectionTokenProjection } = await import("@/lib/market/multichain/collection-token-store");

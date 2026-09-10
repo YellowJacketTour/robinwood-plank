@@ -29,6 +29,13 @@ export interface BitcoinBlock {
   hash: string;
   previousblockhash: string | null;
   height: number;
+  /**
+   * False when the transaction walk did not reach the end of the block.
+   * Optional so existing constructors stay valid; ONLY an explicit `false`
+   * suppresses coverage, so a source that cannot report completeness is
+   * treated exactly as it was before rather than silently downgraded.
+   */
+  complete?: boolean;
   tx: Array<{
     txid: string;
     /** Witness stacks per input; tapscript is typically the second-to-last item. */
@@ -143,9 +150,9 @@ export class BitcoinAdapter {
   }
 
   /** Parse every envelope in a block and write events plus artifacts. */
-  async ingestBlock(hash: string): Promise<{ events: ChainEvent[]; inscriptions: Inscription[] }> {
+  async ingestBlock(hash: string): Promise<{ events: ChainEvent[]; inscriptions: Inscription[]; completed: boolean }> {
     const block = await this.rpc.getBlock(hash);
-    if (!block) return { events: [], inscriptions: [] };
+    if (!block) return { events: [], inscriptions: [], completed: false };
 
     const header: Header = {
       chain: "bitcoin",
@@ -223,9 +230,27 @@ export class BitcoinAdapter {
     // It goes here, at the END, so a block that threw on the way through is
     // never claimed as covered. Coverage has to be earned by a completed
     // ingest, not by the attempt.
-    extendCoverage(this.store, "bitcoin", block.height, header.hash);
+    //
+    // AND A TRUNCATED READ IS NOT A COMPLETED INGEST. getBlock used to stop
+    // after 500 transactions; block 965700 has 6,754, so 92.6% of it went
+    // unread while this line still recorded the block as covered. Every
+    // inscription in those transactions was missed, permanently and silently.
+    //
+    // The run-list is the archive's completeness claim. Recording a run for a
+    // block we only partly read makes that claim a lie, and a hole the gap
+    // worker would have absorbed becomes a hole nothing will ever revisit.
+    if (block.complete === false) {
+      this.store.enqueueGap({
+        chain: "bitcoin",
+        fromHeight: block.height,
+        toHeight: block.height,
+        reason: "incomplete_tx_walk",
+      });
+    } else {
+      extendCoverage(this.store, "bitcoin", block.height, header.hash);
+    }
 
-    return { events, inscriptions: all };
+    return { events, inscriptions: all, completed: block.complete !== false };
   }
 
   /**

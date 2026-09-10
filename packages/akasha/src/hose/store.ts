@@ -41,7 +41,21 @@ export class ArchiveStore {
     this.headers.set(this.headerKey(h.chain, h.hash), h);
     const hk = `${h.chain}:${h.height}`;
     const arr = this.headersByHeight.get(hk) ?? [];
-    if (!arr.some((x) => x.hash === h.hash)) arr.push(h);
+    // REPLACE, DO NOT SKIP.
+    //
+    // This was `if (!arr.some(x => x.hash === h.hash)) arr.push(h)`, so a
+    // re-put of an EXISTING hash updated `headers` and left the by-height
+    // array holding the OLD object. Every correction to a header was
+    // therefore invisible to headersAtHeight -- which is precisely what the
+    // backfill's hash-link check reads.
+    //
+    // The two maps disagreed silently, and a repair could report success
+    // while the value the reader sees never changed. Found 2026-09-09 while
+    // repairing a self-parented Bitcoin lock block: the repair ran, `headers`
+    // updated, and the link check kept failing on the stale copy.
+    const index = arr.findIndex((x) => x.hash === h.hash);
+    if (index === -1) arr.push(h);
+    else arr[index] = h;
     this.headersByHeight.set(hk, arr);
   }
 

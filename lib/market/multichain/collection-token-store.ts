@@ -1,3 +1,5 @@
+import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
+import { COLLECTION_MATCH_SQL } from "@/lib/market/multichain/collection-key-sql";
 import { hasPostgresConfig, postgresQuery, withPostgresTransaction } from "@/lib/postgres";
 
 export type ProjectedCollectionToken = {
@@ -30,9 +32,6 @@ type ProjectionRow = { projected_count: number; expected_count: number | null; p
   provenance: string[]; source_observed_at: Date | string; projected_at: Date | string };
 
 export function hasCollectionTokenStore(): boolean { return hasPostgresConfig(); }
-function canonicalCollectionSlug(value: string): string {
-  return /^0x[0-9a-f]{40}$/i.test(value) ? value.toLowerCase() : value;
-}
 type TokenCursor = { tokenId: string; rarityRank: number | null };
 export function encodeTokenCursor(tokenId: string, rarityRank: number | null = null): string {
   return Buffer.from(JSON.stringify({ tokenId, rarityRank } satisfies TokenCursor), "utf8").toString("base64url");
@@ -62,12 +61,12 @@ export async function readCollectionTokenProjection(input: {
   const state = await postgresQuery<ProjectionRow>(
     `SELECT projected_count, expected_count, partial, provenance, source_observed_at, projected_at
      FROM plank_collection_token_projections
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`,
     [input.chainSlug, input.collectionSlug]
   );
   if (!state.rows[0]) return null;
   const params: unknown[] = [input.chainSlug, input.collectionSlug];
-  let where = "chain_slug = $1 AND lower(collection_slug) = lower($2)";
+  let where = `chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`;
   if (tier) { params.push(tier); where += ` AND lower(rarity_tier) = lower($${params.length})`; }
   if (cursor && sort === "id") {
     params.push(cursor.tokenId);
@@ -134,7 +133,7 @@ export async function readProjectedTokensByIds(
     `SELECT token_id, name, image_url, animation_url, media_type, traits,
             rarity_score, rarity_rank, rarity_percentile, rarity_tier
      FROM plank_collection_tokens
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}
        AND token_id = ANY($3::text[])`,
     [chainSlug, collectionSlug, ids]
   );
@@ -166,7 +165,7 @@ export const PROJECTION_WRITE_CHUNK = 500;
 export async function upsertCollectionTokenProjection(
   chainSlug: string, collectionSlug: string, page: CollectionTokenProjectionPage
 ): Promise<void> {
-  collectionSlug = canonicalCollectionSlug(collectionSlug);
+  collectionSlug = normalizeContractAddress(chainSlug, collectionSlug);
   const provenance = [...new Set(page.provenance.map((value) => value.trim()).filter(Boolean))];
   if (!provenance.length) throw new Error("collection token projection requires provenance");
   if (!Number.isFinite(page.sourceObservedAt.getTime())) throw new Error("sourceObservedAt must be a valid date");
@@ -237,7 +236,7 @@ export async function upsertCollectionTokenProjection(
     }
     const count = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM plank_collection_tokens
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`, [chainSlug, collectionSlug]);
+       WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`, [chainSlug, collectionSlug]);
     await client.query(
       `INSERT INTO plank_collection_token_projections (
          chain_slug, collection_slug, projected_count, expected_count, partial,
@@ -268,7 +267,7 @@ export async function readCollectionMembershipCursor(
     complete: boolean; last_error: string | null;
   }>(`SELECT cursor, expected_count, observed_count, complete, last_error
       FROM plank_collection_membership_cursors
-      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND source = $3
+      WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL} AND source = $3
       ORDER BY updated_at DESC LIMIT 1`,
   [chainSlug, collectionSlug, source]);
   const row = result.rows[0];
@@ -281,10 +280,10 @@ export async function writeCollectionMembershipCursor(input: {
   expectedCount?: number | null; complete: boolean; lastError?: string | null;
   sourceObservedAt?: Date;
 }): Promise<void> {
-  input = { ...input, collectionSlug: canonicalCollectionSlug(input.collectionSlug) };
+  input = { ...input, collectionSlug: normalizeContractAddress(input.chainSlug, input.collectionSlug) };
   const count = await postgresQuery<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM plank_collection_tokens
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`,
     [input.chainSlug, input.collectionSlug]);
   await postgresQuery(
     `INSERT INTO plank_collection_membership_cursors (
@@ -307,7 +306,7 @@ export async function writeCollectionMembershipCursor(input: {
 export async function readProjectedRarityInputs(chainSlug: string, collectionSlug: string) {
   const result = await postgresQuery<{ token_id: string; name: string | null; traits: unknown }>(
     `SELECT token_id, name, traits FROM plank_collection_tokens
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}
      ORDER BY token_id`, [chainSlug, collectionSlug]);
   return result.rows.map((row) => ({ tokenId: row.token_id, name: row.name, traits: normalizeTraits(row.traits) }));
 }
@@ -323,7 +322,7 @@ export async function readProjectedTraitIndex(chainSlug: string, collectionSlug:
       [chainSlug, collectionSlug]),
     postgresQuery<{ projected_count: number; expected_count: number | null; partial: boolean }>(
       `SELECT projected_count, expected_count, partial FROM plank_collection_token_projections
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`, [chainSlug, collectionSlug]),
+       WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`, [chainSlug, collectionSlug]),
   ]);
   if (!projection.rows[0]) return null;
   const traits: Record<string, Record<string, string[]>> = {};
@@ -417,7 +416,7 @@ export async function readTokenMetadataWork(
   // metadata pass; a subject job may now pull up to METADATA_WORK_MAX rows.
   const bounded = Math.min(Math.max(Math.trunc(limit), 1), METADATA_WORK_MAX);
   const params: unknown[] = [chainSlug];
-  const collectionClause = collectionSlug ? `AND lower(collection_slug) = lower($2)` : "";
+  const collectionClause = collectionSlug ? `AND ${COLLECTION_MATCH_SQL}` : "";
   if (collectionSlug) params.push(collectionSlug);
   params.push(bounded);
   const limitParam = `$${params.length}`;
@@ -452,7 +451,7 @@ export async function writeTokenMetadataResult(input: {
        metadata_attempted_at = NOW(),
        metadata_error = CASE WHEN $4 = 'retry' AND metadata_attempts + 1 >= $6 THEN 'gave up after ' || $6 || ' attempts: ' || COALESCE($5, 'unknown error') ELSE $5 END,
        projected_at = NOW()
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3`,
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL} AND token_id = $3`,
     [input.chainSlug, input.collectionSlug, input.tokenId, input.state, input.error?.slice(0, 400) ?? null, METADATA_ATTEMPT_CAP]);
 }
 
@@ -491,7 +490,7 @@ export async function readMetadataCoverageCounters(chainSlug: string, collection
                  WHERE m.chain_slug = $1 AND lower(m.collection_slug) = lower($2))
              ))::text AS expected
      FROM plank_collection_tokens
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`,
     [chainSlug, collectionSlug]);
   const row = result.rows[0];
   const rows = Number(row?.rows ?? 0);

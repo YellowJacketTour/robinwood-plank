@@ -88,12 +88,12 @@ export function postgresPool(): Pool {
       max: postgresPoolMax(),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-      // Web requests keep the 15 s guard; mesh workers run bounded but real
-      // scans (HyperSync backfill windows, activity tallies) that legitimately
-      // exceed it -- 2026-09-07 diagnostics: "canceling statement due to
-      // statement timeout" on hypersync-backfill:base-mainnet.
-      statement_timeout: isMeshWorkerProcess() ? 120_000 : 15_000,
-      query_timeout: 20_000,
+      // Let PostgreSQL cancel before the client abandons its response. The
+      // former worker pair (120s server / 20s client) discarded useful scans
+      // while SQL kept running. Both worker guards fit below the scheduler's
+      // 89s child kill; web requests retain their existing short deadlines.
+      statement_timeout: isMeshWorkerProcess() ? 80_000 : 15_000,
+      query_timeout: isMeshWorkerProcess() ? 85_000 : 20_000,
       application_name: "plank-love-passenger",
       ssl: postgresSsl(),
     });

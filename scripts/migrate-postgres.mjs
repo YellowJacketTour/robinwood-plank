@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import { withMarketMigrationDrain } from "./market-migration-drain.mjs";
+import { notificationDeferralCandidate, canDeferNotificationLock } from "./notification-migration-policy.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.resolve(
@@ -63,9 +65,19 @@ const files = (await fs.readdir(migrationsDir))
 // the production database as of 2026-09-06) on releases that carry no
 // schema change, while keeping the backup on every release that does.
 const checkOnly = process.argv.includes("--check");
+const allowDeferredNotifications = process.argv.includes("--defer-locked-notifications");
+const deferred = [];
 
 const client = await pool.connect();
 try {
+  const version = await client.query("SHOW server_version_num");
+  const serverVersion = Number(version.rows[0].server_version_num);
+  console.log(`[postgres-migrate] server_version_num=${serverVersion}`);
+  if (serverVersion < 90500) throw new Error("Market migrations require PostgreSQL 9.5 or newer.");
+  if (serverVersion < 100000) {
+    const temporary = await client.query("SELECT has_database_privilege(current_user, current_database(), 'TEMP') AS allowed");
+    if (!temporary.rows[0].allowed) throw new Error("Legacy market notifications require database TEMP privilege.");
+  }
   await client.query(`
     CREATE TABLE IF NOT EXISTS plank_schema_migrations (
       version TEXT PRIMARY KEY,
@@ -100,9 +112,16 @@ try {
     }
 
     const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
+    const deferrable = notificationDeferralCandidate(allowDeferredNotifications, file, sql);
     await client.query("BEGIN");
     try {
-      await client.query(sql);
+      if (deferrable) await client.query("SET LOCAL lock_timeout = '2s'");
+      if (process.env.PLANK_MIGRATION_WRITERS_QUIESCED === "1" && serverVersion >= 90600
+        && /^(110|111)_/.test(file)) {
+        await withMarketMigrationDrain(client, pool.options, () => client.query(sql));
+      } else {
+        await client.query(sql);
+      }
       await client.query(
         "INSERT INTO plank_schema_migrations (version) VALUES ($1)",
         [file]
@@ -111,6 +130,11 @@ try {
       console.log(`[postgres-migrate] applied ${file}`);
     } catch (error) {
       await client.query("ROLLBACK");
+      if (await canDeferNotificationLock(client, deferrable, error)) {
+        deferred.push(file);
+        console.warn(`[postgres-migrate] PENDING ${file}: other-role maintenance lock; delivery uses periodic resync until migration succeeds`);
+        continue;
+      }
       throw error;
     }
   }
@@ -119,4 +143,4 @@ try {
   await pool.end();
 }
 
-console.log("[postgres-migrate] schema is current");
+console.log(deferred.length ? `[postgres-migrate] required schema ready; optional notifications PENDING: ${deferred.join(", ")}` : "[postgres-migrate] schema is current");

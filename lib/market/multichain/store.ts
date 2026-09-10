@@ -3,11 +3,11 @@
  * See that migration for why this is a separate, current-state cache rather
  * than an extension of lib/market/chain-events.ts's append-only ledger.
  */
-import { chainManifest } from "@/lib/market/multichain/chains/manifest";
 import { refreshHubRank, HUB_SORT_COLUMN, HUB_DEFAULT_ORDER } from "@/lib/market/multichain/hub-rank";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import type { CollectionSnapshot, TrackedCollection } from "@/lib/market/multichain/types";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { wrappedNativeAddress } from "./native-currency";
 
 export function hasMultichainStore(): boolean {
   return hasPostgresConfig();
@@ -543,9 +543,9 @@ export async function sanitizeUnknownZeros(): Promise<{ floors: number; volumes:
  * venue moves volume, grade and the buyer board within seconds.
  */
 export async function updateVolumeFromMarketEvents(chainSlug: string, collectionKeys: string[]): Promise<{ updated: number }> {
-  const keys = [...new Set(collectionKeys.map((k) => k.toLowerCase()))].slice(0, 200);
+  const keys = [...new Set(collectionKeys.map((k) => normalizeContractAddress(chainSlug, k)))].slice(0, 200);
   if (keys.length === 0) return { updated: 0 };
-  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const wrappedNative = wrappedNativeAddress(chainSlug);
   const rows = await postgresQuery<{
     collection_key: string; sales_24h: string; sales_7d: string; sales_30d: string;
     wei_24h: string | null; wei_7d: string | null; wei_30d: string | null;
@@ -553,13 +553,18 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
     change_pct: string | null;
   }>(
     `WITH sales AS (
-       SELECT lower(e.collection_key) AS collection_key, e.block_timestamp, e.amount_usd,
-              CASE WHEN e.currency_address IS NULL OR lower(e.currency_address) = $3 THEN e.amount_atomic ELSE NULL END AS native_wei
+       SELECT CASE WHEN $4 THEN e.collection_key ELSE lower(e.collection_key) END AS collection_key, e.block_timestamp, e.amount_usd,
+              CASE WHEN e.currency_address IS NULL OR lower(e.currency_address) IN ($3, '0x0000000000000000000000000000000000000000') THEN e.amount_atomic ELSE NULL END AS native_wei
          FROM plank_market_events e
-        WHERE e.chain_slug = $1 AND e.event_type = 'sale' AND lower(e.collection_key) = ANY($2::text[])
+        WHERE e.chain_slug = $1 AND e.event_type = 'sale' AND (CASE WHEN $4 THEN e.collection_key ELSE lower(e.collection_key) END) = ANY($2::text[])
+          AND lower(e.collection_key) = ANY($5::text[])
           AND e.finality <> 'reverted' AND e.block_timestamp > NOW() - INTERVAL '30 days'
-          AND NOT (e.seller IS NOT NULL AND e.seller = e.buyer)
-          AND NOT (e.venue_id = 'opensea-stream' AND EXISTS (SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = e.chain_slug AND f.tx_hash = e.tx_hash))
+          AND e.block_timestamp <= NOW()
+          AND (e.seller IS NULL OR e.buyer IS NULL OR
+               CASE WHEN $4 THEN e.seller <> e.buyer ELSE lower(e.seller) <> lower(e.buyer) END)
+          AND NOT (e.venue_id = 'opensea-stream' AND EXISTS (
+            SELECT 1 FROM plank_seaport_fills f WHERE f.chain_slug = e.chain_slug AND f.tx_hash = e.tx_hash
+              AND lower(f.nft_contract) = lower(e.collection_key) AND f.token_id::text = e.token_id))
      )
      SELECT collection_key,
             COUNT(*) FILTER (WHERE block_timestamp > NOW() - INTERVAL '24 hours')::text AS sales_24h,
@@ -602,7 +607,7 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
               ELSE NULL
             END::text AS change_pct
        FROM sales GROUP BY collection_key`,
-    [chainSlug, keys, wrappedNative ?? ""]
+    [chainSlug, keys, wrappedNative ?? "", isNonEvmChainSlug(chainSlug), keys.map(k => k.toLowerCase())]
   );
   let updated = 0;
   const seen = new Set<string>();
@@ -619,6 +624,21 @@ export async function updateVolumeFromMarketEvents(chainSlug: string, collection
       floorChangePct: row.change_pct == null ? null : Number(row.change_pct),
     });
     updated += 1;
+  }
+  // A quiet collection still ages out of rolling windows. Clear only a
+  // previously ledger-owned projection; an empty local ledger cannot erase
+  // a vendor observation or establish complete market coverage.
+  for (const key of keys) {
+    if (seen.has(key)) continue;
+    await postgresQuery(
+      `UPDATE plank_multichain_snapshots s SET volume_24h_wei = NULL, sales_24h = NULL,
+         volume_7d_wei = NULL, sales_7d = NULL, volume_30d_wei = NULL, sales_30d = NULL,
+         volume_24h_usd = NULL, volume_7d_usd = NULL, volume_30d_usd = NULL,
+         floor_change_pct = NULL, volume_computed_at = NOW()
+       FROM plank_multichain_collections c WHERE s.collection_id = c.id
+         AND c.chain_slug = $1 AND c.contract_address = $2 AND s.volume_source = 'ledger'`,
+      [chainSlug, key]
+    );
   }
   return { updated };
 }
@@ -650,20 +670,21 @@ export async function sweepStaleLedgerStats(
   limit = 200
 ): Promise<{ considered: number; updated: number }> {
   const rows = await postgresQuery<{ collection_key: string }>(
-    `SELECT DISTINCT lower(e.collection_key) AS collection_key
-       FROM plank_market_events e
-       JOIN plank_multichain_collections c
-         ON c.chain_slug = e.chain_slug
-        AND lower(c.contract_address) = lower(e.collection_key)
-       LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-      WHERE e.chain_slug = $1
-        AND e.event_type = 'sale'
-        AND e.finality <> 'reverted'
-        AND e.block_timestamp > NOW() - INTERVAL '24 hours'
-        -- Never aggregated, or aggregated BEFORE the trades it should cover.
-        AND (s.volume_computed_at IS NULL OR s.volume_computed_at < e.block_timestamp)
+    `SELECT c.contract_address AS collection_key
+       FROM plank_multichain_collections c
+       JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+      WHERE c.chain_slug = $1
+        AND ((s.volume_source = 'ledger' AND s.volume_computed_at < NOW() - INTERVAL '5 minutes')
+          OR EXISTS (SELECT 1 FROM plank_market_events e
+            WHERE e.chain_slug = c.chain_slug
+              AND lower(e.collection_key) = lower(c.contract_address)
+              AND (CASE WHEN $3 THEN e.collection_key ELSE lower(e.collection_key) END) = c.contract_address
+              AND e.event_type = 'sale' AND e.finality <> 'reverted'
+              AND e.block_timestamp > NOW() - INTERVAL '24 hours' AND e.block_timestamp <= NOW()
+              AND (s.volume_computed_at IS NULL OR s.volume_computed_at < e.block_timestamp)))
+      ORDER BY s.volume_computed_at ASC NULLS FIRST, c.id
       LIMIT $2::int`,
-    [chainSlug, limit]
+    [chainSlug, Math.min(200, Math.max(1, limit)), isNonEvmChainSlug(chainSlug)]
   );
   if (rows.rows.length === 0) return { considered: 0, updated: 0 };
   const { updated } = await updateVolumeFromMarketEvents(
@@ -682,16 +703,17 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
   // with NULL sales_24h at the bottom of the hub. Other ERC-20s (USDC,
   // DAI) are still excluded from the wei sum; they stay in payment_legs
   // for USD aggregation.
-  const wrappedNative = chainManifest(chainSlug)?.offerCurrencyAddress?.toLowerCase() ?? null;
+  const wrappedNative = wrappedNativeAddress(chainSlug);
   const result = await postgresQuery<{ contract_address: string; volume_wei: string; sales: string }>(
     `SELECT LOWER(nft_contract) AS contract_address,
-            SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) = $2)::text AS volume_wei,
+            SUM(price_wei) FILTER (WHERE currency_token IS NULL OR LOWER(currency_token) IN ($2, '0x0000000000000000000000000000000000000000'))::text AS volume_wei,
             COUNT(*)::text AS sales
      FROM plank_seaport_fills
      WHERE chain_slug = $1
        AND nft_contract IS NOT NULL
        AND price_wei IS NOT NULL
        AND block_timestamp > NOW() - INTERVAL '24 hours'
+       AND block_timestamp <= NOW()
      GROUP BY LOWER(nft_contract)`,
     [chainSlug, wrappedNative ?? ""]
   );
@@ -1316,7 +1338,9 @@ export async function listCollectionsWithSnapshotsPage(input: {
   // cached because a total that is a few seconds stale has never mattered to
   // anyone. Pagination end-detection does not need it at all: a page that
   // returns fewer rows than it asked for IS the last page.
-  const totalCount = await countMatchingCollections(whereClauses, params.slice(0, params.length - 2));
+  // The count reads the catalog as c; rank-page aliases do not exist there.
+  const totalCount = await countMatchingCollections(
+    chainSlugs.length ? ["c.chain_slug = ANY($1::text[])"] : [], chainSlugs.length ? [chainSlugs] : []);
   const collections = result.rows.map((row) => ({
     ...rowToCollection(row),
     floorPriceWei: row.floor_price_wei,

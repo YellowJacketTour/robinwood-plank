@@ -41,6 +41,8 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { applyProjectionFields } from "@/lib/market/multichain/edge/projection-patch";
+import { useMarketRealtime } from "@/hooks/useMarketRealtime";
 import { useVisibleCollectionDemand } from "@/hooks/useVisibleCollectionDemand";
 import { useDemandIntent } from "@/hooks/useDemandIntent";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
@@ -70,6 +72,8 @@ import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
 import CollectionIntelligence from "@/components/market/CollectionIntelligence";
 import TradingParityMatrix from "@/components/market/TradingParityMatrix";
+import type { CollectionProfile } from "@/lib/market/multichain/collection-profile";
+import { profileLink } from "@/lib/market/multichain/collection-profile-url";
 import BiggestBuyersBoard from "@/components/market/BiggestBuyersBoard";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { MarketTab } from "@/lib/market/types";
@@ -234,6 +238,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [nonEvmAccount, setNonEvmAccount] = useState<string | null>(null);
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
+  const [collectionProfile, setCollectionProfile] = useState<CollectionProfile | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null;
     animationUrl?: string | null; mediaType?: string | null;
@@ -509,7 +514,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
-  const fetchCatalogTokens = useCallback(async () => {
+  const fetchCatalogTokens = useCallback(async (projectionOnly = false) => {
     const sort =
       listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
     const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
@@ -527,6 +532,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         const qs = new URLSearchParams({ chainSlug, collectionSlug,
           limit: String(Math.min(surface.catalogPageSize, tokenLimit - accumulated.length)), art: "2", sort });
         if (tierFilter) qs.set("tier", tierFilter);
+        if (projectionOnly) qs.set("projection", "1");
         if (cursor) qs.set("cursor", cursor);
         last = await swrJson<TokenPage>(`/api/market/multichain/tokens?${qs.toString()}`,
           { ttlMs: 8_000, swrMs: 45_000, session: true });
@@ -534,6 +540,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         cursor = last.nextCursor ?? null;
         if (!cursor || !last.tokens?.length) break;
       }
+      if (projectionOnly && last?.building && accumulated.length === 0) return;
       setTokens(accumulated);
       setCatalogBuilding(Boolean(last?.building));
       setCatalogMeta(typeof last?.projectedCount === "number" ? {
@@ -543,8 +550,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         projectedAt: last.projectedAt ?? null,
       } : null);
     } catch {
-      setTokens(accumulated);
-      setCatalogBuilding(false);
+      if (!projectionOnly) {
+        setTokens(accumulated);
+        setCatalogBuilding(false);
+      }
     } finally {
       setCatalogInitialLoading(false);
     }
@@ -553,53 +562,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const ident = await swrJson<{
-        collection: {
-          slug: string;
-          name: string;
-          imageUrl: string | null;
-          contractAddress: string;
-          listedCount: number | null;
-          totalSupply: number | null;
-          volume24hWei: string | null;
-          sales24h: number | null;
-          volume7dWei: string | null;
-          sales7d: number | null;
-          volume30dWei: string | null;
-          sales30d: number | null;
-          holderCount: number | null;
-          floorPriceWei?: string | null;
-          floorPriceCurrency?: string | null;
-          primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
-          archival?: {
-            archivalScore: number | null;
-            scoreMethod: string;
-            tokensEverHydrated: number | null;
-            knownSupply: number | null;
-            lastArchivedAt: string | null;
-            jobProcessing: boolean;
-            metadataTokens: number | null;
-            metadataCoverage: number | null;
-            traitsCoverage?: number | null;
-            metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
-          } | null;
-        };
-      }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
-        // Real bug found live 2026-08-25: this page's own load() is polled
-        // every 20s (see the setInterval below), but ttlMs here was 30s --
-        // LONGER than the poll interval, so most polls were guaranteed
-        // cache hits returning stale data with zero network call, not a
-        // "live" refresh at all. Archive-depth (and every other stat this
-        // fetch carries) must always reflect a real, current backend read
-        // on every poll tick for a live-time integrity product to mean
-        // anything. ttlMs now below the poll interval so every tick is a
-        // genuine fetch; swrMs left generous so a slow/failed request still
-        // shows the last real value instead of a loading flash.
-        ttlMs: 15_000,
-        swrMs: 120_000,
-        session: true,
-      });
-      const data = ident;
       void swrJson<{
         listings: Listing[];
         listingsUnavailable?: string | null;
@@ -632,6 +594,61 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         .catch(() => {
           setListingsUnavailable("book-unavailable");
         });
+      const ident = await swrJson<{
+        collection: {
+          slug: string;
+          name: string;
+          imageUrl: string | null;
+          contractAddress: string;
+          creatorHandle?: string | null;
+          profile?: CollectionProfile | null;
+          listedCount: number | null;
+          totalSupply: number | null;
+          volume24hWei: string | null;
+          sales24h: number | null;
+          volume7dWei: string | null;
+          sales7d: number | null;
+          volume30dWei: string | null;
+          sales30d: number | null;
+          holderCount: number | null;
+          floorPriceWei?: string | null;
+          floorPriceCurrency?: string | null;
+          primaryVenue?: { id: string; label: string; coverage: CollectionCoverageInfo["coverage"] } | null;
+          archival?: {
+            archivalScore: number | null;
+            scoreMethod: string;
+            tokensEverHydrated: number | null;
+            knownSupply: number | null;
+            lastArchivedAt: string | null;
+            jobProcessing: boolean;
+            metadataTokens: number | null;
+            metadataCoverage: number | null;
+            traitsCoverage?: number | null;
+            metadataCounters?: NonNullable<Parameters<typeof MetadataCoverageBar>[0]["metadataCounters"]> | null;
+          } | null;
+        };
+      }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&projection=1`, {
+        // Real bug found live 2026-08-25: this page's own load() is polled
+        // every 20s (see the setInterval below), but ttlMs here was 30s --
+        // LONGER than the poll interval, so most polls were guaranteed
+        // cache hits returning stale data with zero network call, not a
+        // "live" refresh at all. Archive-depth (and every other stat this
+        // fetch carries) must always reflect a real, current backend read
+        // on every poll tick for a live-time integrity product to mean
+        // anything. ttlMs now below the poll interval so every tick is a
+        // genuine fetch; swrMs left generous so a slow/failed request still
+        // shows the last real value instead of a loading flash.
+        ttlMs: 15_000,
+        swrMs: 120_000,
+        session: true,
+      });
+      const data = ident;
+      const profile = { ...data.collection.profile };
+      const handle = data.collection.creatorHandle;
+      if (!profile.twitter && handle && /^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+        profile.twitter = { value: `https://x.com/${handle}`, source: "Collection catalog", observedAt: "" };
+      }
+      setCollectionProfile(profile);
       /* catalog tokens: fetchCatalogTokens effect */
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
@@ -713,7 +730,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     // screen just because the viewer never re-navigated. swrJson's own ttl
     // (8s) means most of these calls are cheap no-op cache hits; this timer
     // just guarantees the check happens even on a long-idle tab.
-    const id = setInterval(() => void load(), 20_000);
+    const id = setInterval(() => { if (!document.hidden) void load(); }, 20_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -731,7 +748,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   useEffect(() => {
     if (!catalogBuilding) return;
-    const id = setInterval(() => void fetchCatalogTokens(), 10_000);
+    const id = setInterval(() => { if (!document.hidden) void fetchCatalogTokens(); }, 10_000);
     return () => clearInterval(id);
   }, [catalogBuilding, fetchCatalogTokens]);
 
@@ -924,6 +941,45 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     void loadMyListings();
   }, [loadMyListings]);
 
+  const [liveMetadataRevision, setLiveMetadataRevision] = useState(0);
+  useMarketRealtime([
+    { chainSlug, collectionKey: collectionSlug },
+    ...(collection?.contractAddress ? [{ chainSlug, collectionKey: collection.contractAddress }] : []),
+  ], async (change) => {
+    const all = change.type === "resync";
+    const metadata = all || change.family === "hydration" || change.family === "tokens" || change.family === "rarity";
+    const roots = ["collection", ...(metadata ? ["tokens", "rarity", "trait-index"] : []),
+      ...(all || change.family === "orders" ? ["listings", "offers"] : []),
+      ...(all || change.family === "activity" ? ["activity"] : [])];
+    for (const root of roots) invalidateSwr(`/api/market/multichain/${root}?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`);
+    // Do not call load(): that path publishes fresh demand and may write
+    // holder stats, feeding the same notification back into another hydrate.
+    const scope = [{ chainSlug, collectionKey: collection?.contractAddress ?? collectionSlug }];
+    const work: Promise<unknown>[] = [fetch(`/api/market/multichain/changes/snapshot?scopes=${encodeURIComponent(JSON.stringify(scope))}`,
+      { cache: "no-store", signal: AbortSignal.timeout(10_000) }).then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json();
+        const row = data.collections?.[0];
+        if (row) {
+          setSupplyStats((previous) => previous ? applyProjectionFields(previous, row,
+            ["listedCount", "totalSupply", "holderCount", "floorPriceWei", "floorPriceCurrency"]) : previous);
+          setMarketStats((previous) => previous ? applyProjectionFields(previous, row,
+            ["sales24h", "volume24hWei", "sales7d", "volume7dWei", "sales30d", "volume30dWei"]) : previous);
+        }
+      })];
+    if (metadata) { work.push(fetchCatalogTokens(true)); setLiveMetadataRevision((n) => n + 1); }
+    if (all || change.family === "orders" || change.family === "activity") {
+      const url = `/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`;
+      invalidateSwr(url);
+      work.push(swrJson<{ listings?: Listing[]; bookCoverage?: { partial?: boolean } }>(url).then((book) => {
+        setListings((previous) => book.listings?.length ? book.listings : book.bookCoverage?.partial ? previous : []);
+      }));
+    }
+    if (all || change.family === "orders") work.push(loadOffers());
+    if (all || change.family === "activity") work.push(loadActivity());
+    await Promise.allSettled(work);
+  }, 2_000);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -935,7 +991,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         // one-off background job (scripts/index-foreign-rarity.ts), so a
         // collection can go from unindexed to indexed between two page
         // loads within the same swr window.
-        const rarityUrl = `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`;
+        const rarityUrl = `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}${liveMetadataRevision ? "&projection=1" : ""}`;
         const apply = (data: {
           byTokenId?: Record<string, { name: string; tier: string; rank: number; percentile: number; score?: number }>;
           sampleSize?: number;
@@ -959,7 +1015,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         }>(rarityUrl, { ttlMs: 15_000, swrMs: 120_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) });
         if (cancelled) return;
         const ready = apply(data);
-        if (!ready) {
+        if (!ready && !liveMetadataRevision) {
           for (const wait of [4_000, 8_000, 16_000]) {
             await new Promise((r) => setTimeout(r, wait));
             if (cancelled) return;
@@ -975,7 +1031,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => {
       cancelled = true;
     };
-  }, [chainSlug, collectionSlug]);
+  }, [chainSlug, collectionSlug, liveMetadataRevision]);
 
   useEffect(() => {
     if (rarityFromIndex) return;
@@ -1094,7 +1150,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               derived[type] = {};
               for (const [value, ids] of Object.entries(values)) derived[type][value] = ids.length;
             }
-            setTraitCounts((prev) => (prev && Object.keys(prev).length > 0 ? prev : derived));
+            setTraitCounts((prev) => liveMetadataRevision && idx.complete ? derived : (prev && Object.keys(prev).length > 0 ? prev : derived));
             if (idx.complete) setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
           }
         }
@@ -1105,7 +1161,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => {
       cancelled = true;
     };
-  }, [collectionSlug, chainSlug, isSolana, isBitcoin]);
+  }, [collectionSlug, chainSlug, isSolana, isBitcoin, liveMetadataRevision]);
 
   const browseAsListing = useCallback(
     (tokenId: string, imageUrl?: string | null, name?: string | null,
@@ -1964,7 +2020,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       </div>
     );
   }
-  if (loadError || !collection) {
+  if (!collection) {
     return <p className="p-6 text-center text-red-300">{loadError ?? "Collection not found."}</p>;
   }
 
@@ -2050,7 +2106,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   return (
     <div className="space-y-4 p-4" data-collection-key={`${chainSlug}:${collection.contractAddress}`}>
+      {loadError && <p role="status" className="text-sm text-foreground/60">Refresh delayed. Showing the last received collection data.</p>}
       <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
+      <details open={browseMode !== "intelligence" || tab !== "buy-sell"}><summary className={browseMode === "intelligence" && tab === "buy-sell" ? "cursor-pointer text-xs text-foreground/60" : "hidden"}>Collection sources, statistics and archive coverage</summary>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
@@ -2081,6 +2139,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
             {collection.contractAddress}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            {(["website", "twitter", "discord"] as const).map((field) => {
+              const evidence = collectionProfile?.[field];
+              const href = profileLink(field, evidence?.value);
+              return href && evidence ? <a key={field} href={href} target="_blank" rel="noopener noreferrer"
+                title={`${evidence.source}${evidence.observedAt ? ` · observed ${new Date(evidence.observedAt).toLocaleString()}` : " · observation time unavailable"}`}
+                className="rounded-md border border-line px-2 py-1 text-gold-300 hover:border-gold-400">
+                {field === "twitter" ? "X" : field === "website" ? "Website" : "Discord"} ↗
+              </a> : null;
+            })}
+            {(["website", "twitter", "discord"] as const).some((field) => profileLink(field, collectionProfile?.[field]?.value)) && <span className="text-foreground/45">Source-reported links</span>}
+          </div>
             </div>
           </div>
         </div>
@@ -2240,6 +2310,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
       )}
 
+      </details>
       <MarketTabRail
         navigation={
           <MarketNav
@@ -2264,7 +2335,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
       <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
         <MarketBrowseLayout
-          summary={
+          summary={browseMode === "intelligence" ? "Collection intelligence" :
             bookFilter === "listed"
               ? `${filteredListings.length} on the market`
               : catalogMeta && (catalogMeta.expectedCount ?? catalogMeta.projectedCount) > browseItems.length
@@ -2272,7 +2343,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 : `${browseItems.length.toLocaleString()} NFTs${catalogMeta?.partial ? " · completing metadata" : ""}`
           }
           lead={
-            listings.length > 0 || rarityMap.size > 0 ? (
+            browseMode !== "intelligence" && (listings.length > 0 || rarityMap.size > 0) ? (
               <>
               {rarityMap.size > 0 && raritySample && (
                 <p className="px-0.5 text-[0.58rem] text-foreground/40">
@@ -2302,7 +2373,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </>
             ) : undefined
           }
-          filters={
+          filters={browseMode === "intelligence" ? undefined : (
             <div className="space-y-3">
               <div className="mb-3">
                 <p className="mb-1 text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Show</p>
@@ -2453,7 +2524,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 </button>
               )}
             </div>
-          }
+          )}
           toolbar={
             <>
               <button
@@ -2466,6 +2537,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               >
                 {browseMode === "intelligence" ? "Art & listings" : "Intel"}
               </button>
+              {browseMode !== "intelligence" && <>
               <button
                 type="button"
                 onClick={() => setSweepOpen((v) => !v)}
@@ -2529,6 +2601,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   {rarityMap.size > 0 && <option value="rarity-desc">Common first</option>}
                 </select>
               </label>
+              </>}
             </>
           }
         >
@@ -2536,6 +2609,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <CollectionIntelligence
               name={collection?.name ?? collectionSlug}
               chain={chainDisplayName(chainSlug)}
+              currencySymbol={statCurrencySymbol}
+              tokens={tokens}
+              profileLinks={(["website", "twitter", "discord"] as const).flatMap((field) => {
+                const evidence = collectionProfile?.[field];
+                const href = profileLink(field, evidence?.value);
+                return href && evidence ? [{ label: field === "twitter" ? "X" : field === "website" ? "Website" : "Discord", href, source: evidence.source, observedAt: evidence.observedAt ?? null }] : [];
+              })}
               supply={supplyStats?.totalSupply ?? null}
               holders={supplyStats?.holderCount ?? null}
               indexed={catalogMeta?.projectedCount ?? tokens.length}
@@ -2544,8 +2624,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               artUrls={[collection?.image, ...tokens.map((token) => token.imageUrl)].filter((url): url is string => Boolean(url))}
               listings={listings.map((listing) => ({
                 priceWei: listing.priceWei,
+                currencySymbol: listing.currencySymbol,
                 maker: listing.maker,
                 tokenId: listing.tokenId,
+                traits: listing.traits,
               }))}
               sales={saleEvents}
               historyCoverage={historyCoverage}

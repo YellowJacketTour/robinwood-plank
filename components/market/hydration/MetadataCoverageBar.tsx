@@ -103,18 +103,15 @@ export function MetadataCoverageBar({
       : metadataTokens != null
         ? `Traits & metadata - ${metadataTokens.toLocaleString()} tokens with real data - denominator unknown`
         : "Traits & metadata - not yet measured") +
-    (provisional ? ` - ${provisional}` : "") + countersLine;
+    (provisional ? ` - ${provisional}` : "") +
+    (!final && metadataCounters ? " - metadata verification incomplete" : "") + countersLine;
 
-  // Nothing to show for a genuinely unmeasured collection, and nothing
-  // to show once metadata has fully caught up to membership -- this bar
-  // exists specifically to surface a real, current GAP, never to restate
-  // "also 100%" a second time right under a bar that already said so.
-  // EXCEPT while traits are provisional (F5): "100% name-or-image" with
-  // 3% traits is exactly the lie this bar exists to expose.
-  if (!known || (displayPct != null && displayPct >= 99.9 && !provisional)) return null;
+  // Name/image coverage can reach 100% long before metadata fetches finish.
+  // Hide only when terminal counters prove completion, not just present art.
+  if (known && displayPct != null && displayPct >= 99.9 && !provisional && final) return null;
 
   const fillStyle: CSSProperties = {
-    width: `${displayPct}%`,
+    width: `${displayPct ?? 0}%`,
     background: active ? undefined : restColor ? `linear-gradient(180deg, color-mix(in srgb, ${restColor} 85%, white) 0%, ${restColor} 45%, color-mix(in srgb, ${restColor} 60%, black) 100%)` : undefined,
   };
 
@@ -158,7 +155,7 @@ export function MetadataCoverageBar({
           )}
         </span>
         <span className="tabular-nums text-amber-100/70" aria-live="polite">
-          {pctLabel}%
+          {pctLabel == null ? "Not yet measured" : `${pctLabel}%`}
         </span>
       </div>
       <div

@@ -339,6 +339,7 @@ async function main(): Promise<void> {
     lanes.push(lane);
     await enqueueDataJob({
       jobKey: `mesh:${lane.id}`,
+      preserveNotBefore: true,
       kind: `mesh-lane:${lane.chainSlug}`,
       source: lane.source,
       chainSlug: lane.chainSlug,
@@ -399,7 +400,7 @@ async function main(): Promise<void> {
     "unisat-collections", "ordinals-wallet", "ow-catalog",
   ];
   async function worker(role: WorkerRole = "general"): Promise<void> {
-    const { recordLaneClaim, recordLaneOutcome } = await import("../lib/market/multichain/mesh/lane-health");
+    const { recordLaneClaim, recordLaneOutcome, recordLaneDeferred } = await import("../lib/market/multichain/mesh/lane-health");
     // Worker heartbeat (2026-09-07): diagnostics showed every standing lane
     // with zero claims ever, and nothing said whether the standing slot even
     // existed in the running process. Each worker now records its role,
@@ -483,7 +484,7 @@ async function main(): Promise<void> {
         // The lane asked for a delayed retry (jailed / pool busy): release
         // the slot now, come back at not_before, never sleep in a slot.
         await deferDataJob(job, new Date(Date.now() + defer.ms), defer.reason);
-        await recordLaneOutcome(laneKey, true);
+        await recordLaneDeferred(laneKey);
         console.log(`[mesh-tick] deferred ${job.jobKey} for ${Math.round(defer.ms / 1000)}s (${defer.reason ?? "no reason"})`);
         continue;
       }
