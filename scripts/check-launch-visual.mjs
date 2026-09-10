@@ -1,0 +1,10 @@
+import {chromium} from '@playwright/test';
+const b=await chromium.launch({headless:true,args:['--use-angle=swiftshader']});
+const p=await b.newPage({viewport:{width:1100,height:900}});let errors=[];p.on('pageerror',e=>errors.push(e.message));
+await p.goto('http://127.0.0.1:8765/arcade/crash.html');await p.getByText('☰',{exact:true}).click();await p.getByRole('button',{name:'Explore space',exact:true}).click();
+await p.waitForFunction(()=>document.querySelector('.stage')?.dataset.presentation==='flight');
+await p.screenshot({path:'C:/Users/k1rby/Documents/Codex/2026-09-09/find/outputs/ignition-current.png'});
+await p.waitForFunction(()=>Number(document.querySelector('.stage')?.dataset.altitude)>.3);
+await p.screenshot({path:'C:/Users/k1rby/Documents/Codex/2026-09-09/find/outputs/ascent-current.png'});
+await p.waitForTimeout(20000);
+console.log(JSON.stringify({errors,flight:await p.evaluate(()=>window.__plankFlight)}));await b.close();

@@ -101,12 +101,10 @@ contract PlankLottery is ReentrancyGuard {
     uint256 public totalWinnerPaid;
     uint256 public totalSeeded;
     uint256 public highWaterPrize;
-    // SPEC-monotonic-vault-positive-sum-2026-09-05 §5.2/§4.1. Monotone: only
-    // ever incremented, by AT MOST one per real round, whichever of an
-    // organic funded round (fund()) or an external donation happens FIRST in
-    // that round -- mirrors PlankCrash's own _creditRoundsContributed gate
-    // exactly (same exploit-resistance reasoning: no amount of donations can
-    // advance it faster than real rounds pass).
+    // Progression credits come from settled rounds and authenticated crash-side
+    // spillover. This is not a count of unique people or proof of economic cost.
+    // A public crash donation can indirectly advance it after crash maturity.
+    // Committed draw terms below are therefore independent of this live value.
     uint256 public roundsContributed;
     uint256 private _lastRoundCountedFor;
     // SPEC-monotonic-vault-positive-sum-2026-09-05 §3.5, mirrored from
@@ -114,6 +112,12 @@ contract PlankLottery is ReentrancyGuard {
     // curve is already ~98.2% saturated, further contributing rounds
     // accelerate the crash vault's still-climbing curve instead.
     uint256 public constant SPILLOVER_THRESHOLD_ROUNDS = 4_000;
+
+    // Commit the payout alongside the prize, before the next round's entropy.
+    // Live progression (including crash-side donation spillover) must not change
+    // either the odds or the amount won on an already committed board.
+    uint256 public committedWinnerPaid;
+    uint256 public committedSeeded;
 
     event Funded(address indexed from, uint256 amount, uint256 fee, uint256 poolAfter);
     event Draw(
@@ -157,7 +161,7 @@ contract PlankLottery is ReentrancyGuard {
         if (cfg.founderFeeBps >= BPS) revert BadConfig();
         // oddsOneIn == 1 would make every funded round a hit: the ball must
         // be a genuine draw.
-        if (cfg.oddsOneIn < 2) revert BadConfig();
+        if (cfg.oddsOneIn < 2 || cfg.oddsOneIn > PROB_ONE) revert BadConfig();
         // The contribution share is a fact about the rake router (community
         // leg x lottery leg); 0 would make every round un-drawable.
         if (cfg.contributionBps == 0 || cfg.contributionBps > BPS) revert BadConfig();
@@ -201,13 +205,14 @@ contract PlankLottery is ReentrancyGuard {
     // ── Funding (router leg, Vault overflow, donations) ─────────────────
 
     /// @notice Permissionless. Fee is charged here, once, on fresh inflow.
-    function fund() external payable {
+    function fund() external payable virtual {
         if (msg.value == 0) revert NothingToFund();
         uint256 fee = (msg.value * founderFeeBps) / BPS;
         founderEscrow += fee;
         pool += msg.value - fee;
         totalFunded += msg.value;
         totalFees += fee;
+        _onFunding(msg.value - fee);
         emit Funded(msg.sender, msg.value, fee, pool);
     }
 
@@ -227,7 +232,7 @@ contract PlankLottery is ReentrancyGuard {
     /// @param resultSeed the round's domain-separated drand-derived seed.
     /// @param winner the stake-weighted ticket holder among the round's seats.
     /// @param rakeWei the rake the round left behind (net of keeper bounty).
-    function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) external {
+    function recordRound(uint256 roundId, bytes32 resultSeed, address winner, uint256 rakeWei) public virtual {
         if (msg.sender != source) revert UnauthorizedSource();
         if (winner == address(0)) revert ZeroAddress();
         // SPEC-monotonic-vault-positive-sum-2026-09-05 §5.2: advances
@@ -236,10 +241,9 @@ contract PlankLottery is ReentrancyGuard {
         // here has no roundId to gate on at all -- this contract has no
         // reference back to PlankCrash, so "a round happened" is a fact only
         // recordRound's caller (PlankCrash itself, enforced by the
-        // UnauthorizedSource check above) can ever attest to. A donor
-        // calling fund() any number of times, of any size, therefore cannot
-        // move this counter even indirectly: only genuine settled crash
-        // rounds can, at the fixed rate of one per round.
+        // UnauthorizedSource check above) can ever attest to. Direct fund()
+        // calls do not move this counter. Crash-side donations can also earn
+        // authenticated spillover credit; neither path reprices a committed draw.
         if (roundId != _lastRoundCountedFor) {
             _lastRoundCountedFor = roundId;
             if (roundsContributed >= SPILLOVER_THRESHOLD_ROUNDS) {
@@ -256,29 +260,47 @@ contract PlankLottery is ReentrancyGuard {
         uint256 prize = committedPrize;
         if (prize == 0) {
             // Nothing banked before this round was committed: no draw.
-            committedPrize = pool;
+            _commitBoard();
             emit Draw(roundId, 0, 0, false, winner, 0, 0, pool);
             return;
         }
         draws += 1;
         uint256 threshold = hitThreshold(rakeWei, prize);
         // hash % PROB_ONE is uniform to within 2^256 mod 1e18 / 2^256 < 1e-59.
-        bool hit = uint256(keccak256(abi.encode(BALL_DOMAIN, resultSeed))) % PROB_ONE < threshold;
+        bool hit = _drawBall(roundId, resultSeed, threshold);
         uint256 winnerPaid = 0;
         uint256 seeded = 0;
         if (hit) {
-            (winnerPaid, seeded) = carve(prize);
+            winnerPaid = committedWinnerPaid;
+            seeded = committedSeeded;
             owed[winner] += winnerPaid;
             totalOwed += winnerPaid;
             // W + S == P exactly; the post-snapshot inflow (pool - prize) stays.
             pool = pool - prize + seeded;
+            seeded = _onWin(seeded);
             hits += 1;
             totalWinnerPaid += winnerPaid;
             totalSeeded += seeded;
-        }
-        committedPrize = pool;
+        } else { _onMiss(); }
+        _commitBoard();
         if (pool > highWaterPrize) highWaterPrize = pool;
         emit Draw(roundId, prize, threshold, hit, winner, winnerPaid, seeded, pool);
+    }
+
+    function _onMiss() internal virtual {}
+
+    function _onFunding(uint256) internal virtual {}
+
+    function _onWin(uint256 grossSeed) internal virtual returns (uint256) { return grossSeed; }
+
+    function _commitBoard() internal virtual {
+        committedPrize = pool;
+        (committedWinnerPaid, committedSeeded) = carve(pool);
+    }
+
+    /// @dev Legacy rule remains unchanged. Local numbered candidate overrides only this hook.
+    function _drawBall(uint256, bytes32 resultSeed, uint256 threshold) internal virtual returns (bool) {
+        return uint256(keccak256(abi.encode(BALL_DOMAIN, resultSeed))) % PROB_ONE < threshold;
     }
 
     // ── Payouts ─────────────────────────────────────────────────────────
@@ -291,6 +313,18 @@ contract PlankLottery is ReentrancyGuard {
         (bool ok,) = msg.sender.call{value: amount}("");
         if (!ok) revert TransferFailed();
         emit Withdrawn(msg.sender, amount);
+    }
+
+    event WithdrawnTo(address indexed player, address indexed recipient, uint256 amount);
+    function withdrawTo(address payable recipient) external nonReentrant {
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 amount = owed[msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
+        owed[msg.sender] = 0;
+        totalOwed -= amount;
+        (bool ok,) = recipient.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        emit WithdrawnTo(msg.sender, recipient, amount);
     }
 
     /// @notice Permissionless push of the accrued founder fee to the fixed sink.
@@ -309,9 +343,13 @@ contract PlankLottery is ReentrancyGuard {
     ///         round that leaves `rakeWei` of rake against a prize `prize`:
     ///             min( PROB_ONE / oddsOneIn , c * PROB_ONE / (kappa * W(prize)) )
     ///         with c = rakeWei * contributionBps / BPS and W the winner's take.
-    function hitThreshold(uint256 rakeWei, uint256 prize) public view returns (uint256) {
+    function hitThreshold(uint256 rakeWei, uint256 prize) public view virtual returns (uint256) {
         uint256 flat = PROB_ONE / oddsOneIn;
-        (uint256 winnerPaid,) = carve(prize);
+        // A quote for the current board must use its frozen terms. Other prize
+        // values remain hypothetical quotes under the current progression.
+        uint256 winnerPaid;
+        if (prize == committedPrize) winnerPaid = committedWinnerPaid;
+        else (winnerPaid,) = carve(prize);
         if (winnerPaid == 0) return flat;
         uint256 c = (rakeWei * contributionBps) / BPS;
         // c <= 1e33 (PlankCrash pots), so c * 1e18 * 1e4 < 1e56: no overflow.
@@ -346,7 +384,7 @@ contract PlankLottery is ReentrancyGuard {
 
     /// @notice The progressive carve as ONE floor division:
     ///   S = P * (xMin*(P+c) + (xMax-xMin)*P) / (BPS*(P+c)),  W = P - S.
-    function carve(uint256 prize) public view returns (uint256 winnerPaid, uint256 seeded) {
+    function carve(uint256 prize) public view virtual returns (uint256 winnerPaid, uint256 seeded) {
         if (prize == 0) return (0, 0);
         uint256 denom = prize + effectiveHalfSaturationWei();
         uint256 numer = carveMinBps * denom + (carveMaxBps - carveMinBps) * prize;
@@ -357,19 +395,20 @@ contract PlankLottery is ReentrancyGuard {
     /// @notice Effective carve rate at `prize`, in bps (informational). Uses
     ///         the SAME effectiveHalfSaturationWei() as carve() itself, so
     ///         this figure is never stale relative to what a real draw pays.
-    function carveBps(uint256 prize) external view returns (uint256) {
+    function carveBps(uint256 prize) external view virtual returns (uint256) {
         if (prize == 0) return carveMinBps;
         return carveMinBps + ((carveMaxBps - carveMinBps) * prize) / (prize + effectiveHalfSaturationWei());
     }
 
     /// @notice What the next draw pays: the committed pool, the winner's exact
     ///         receipt and the exact amount that seeds the following board.
-    function quote() external view returns (uint256 prize, uint256 winnerPaid, uint256 seeded) {
+    function quote() external view virtual returns (uint256 prize, uint256 winnerPaid, uint256 seeded) {
         prize = committedPrize;
-        (winnerPaid, seeded) = carve(prize);
+        winnerPaid = committedWinnerPaid;
+        seeded = committedSeeded;
     }
 
-    function accountedBalance() public view returns (uint256) {
+    function accountedBalance() public view virtual returns (uint256) {
         return pool + founderEscrow + totalOwed;
     }
 

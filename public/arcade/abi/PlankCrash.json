@@ -179,17 +179,27 @@
  },
  {
   "inputs": [],
-  "name": "InvalidCrash",
+  "name": "CommittedRoundCannotBeCancelled",
   "type": "error"
  },
  {
   "inputs": [],
-  "name": "InvalidPot",
+  "name": "FloorNotFunded",
   "type": "error"
  },
  {
   "inputs": [],
-  "name": "InvalidSeat",
+  "name": "InsufficientSettlementGas",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidInput",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "LotteryRecoveryPending",
   "type": "error"
  },
  {
@@ -224,12 +234,22 @@
  },
  {
   "inputs": [],
+  "name": "OnlySelf",
+  "type": "error"
+ },
+ {
+  "inputs": [],
   "name": "RandomnessAvailable",
   "type": "error"
  },
  {
   "inputs": [],
   "name": "RandomnessNotYetAvailable",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RoundAlreadyStalled",
   "type": "error"
  },
  {
@@ -255,6 +275,11 @@
  {
   "inputs": [],
   "name": "TransferFailed",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "WrongRound",
   "type": "error"
  },
  {
@@ -353,6 +378,19 @@
    }
   ],
   "name": "LotteryRecordFailed",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
+   }
+  ],
+  "name": "LotteryRecordRecovered",
   "type": "event"
  },
  {
@@ -593,6 +631,32 @@
     "internalType": "uint256",
     "name": "roundId",
     "type": "uint256"
+   }
+  ],
+  "name": "RoundStalled",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "completedRound",
+    "type": "uint256"
+   }
+  ],
+  "name": "RoundStartDeferred",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "roundId",
+    "type": "uint256"
    },
    {
     "indexed": false,
@@ -819,6 +883,19 @@
     "internalType": "uint256",
     "name": "",
     "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "RECOVERY_POLICY",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
    }
   ],
   "stateMutability": "view",
@@ -1216,6 +1293,13 @@
  },
  {
   "inputs": [],
+  "name": "freezeStalledRound",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
   "name": "fundCommunityReturn",
   "outputs": [],
   "stateMutability": "payable",
@@ -1449,6 +1533,19 @@
  },
  {
   "inputs": [],
+  "name": "pendingLotteryRound",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
   "name": "pendingOverflow",
   "outputs": [
    {
@@ -1500,6 +1597,47 @@
    }
   ],
   "name": "placeBetFor",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "player",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "expectedRound",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "placeBetForInRound",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "expectedRound",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "targetBps",
+    "type": "uint256"
+   }
+  ],
+  "name": "placeBetInRound",
   "outputs": [],
   "stateMutability": "payable",
   "type": "function"
@@ -1572,7 +1710,7 @@
       "type": "uint256[]"
      }
     ],
-    "internalType": "struct PlankCcs2LMath.Result",
+    "internalType": "struct PlankCappedPoolMath.Result",
     "name": "",
     "type": "tuple"
    }
@@ -1675,7 +1813,7 @@
   "inputs": [],
   "name": "refundRound",
   "outputs": [],
-  "stateMutability": "nonpayable",
+  "stateMutability": "view",
   "type": "function"
  },
  {
@@ -1729,6 +1867,13 @@
   "type": "function"
  },
  {
+  "inputs": [],
+  "name": "restartRounds",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
   "inputs": [
    {
     "internalType": "uint256",
@@ -1755,6 +1900,13 @@
    }
   ],
   "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "retryLottery",
+  "outputs": [],
+  "stateMutability": "nonpayable",
   "type": "function"
  },
  {
@@ -2047,6 +2199,26 @@
   "type": "function"
  },
  {
+  "inputs": [],
+  "name": "stalledRound",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "startRoundIsolated",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
   "inputs": [
    {
     "internalType": "uint256",
@@ -2151,6 +2323,19 @@
  {
   "inputs": [],
   "name": "withdraw",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address payable",
+    "name": "recipient",
+    "type": "address"
+   }
+  ],
+  "name": "withdrawTo",
   "outputs": [],
   "stateMutability": "nonpayable",
   "type": "function"

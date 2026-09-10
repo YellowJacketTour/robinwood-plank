@@ -1,3 +1,5 @@
+// @ts-expect-error browser ESM module
+import {advanceFlightMotion} from "../../public/arcade/flight-motion.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -99,8 +101,8 @@ test("the intermission clock cannot be corrupted by a repaint of stale cached da
   // paintPrivateSnapshot must accept an explicit sentPerfMs and only observe
   // a real round trip when one was actually provided.
   assert.match(arcadeSource, /function paintPrivateSnapshot\(snapshot, sentPerfMs = null\)/);
-  assert.match(arcadeSource, /if \(sentPerfMs !== null\) \{/);
-  assert.match(arcadeSource, /privateServerClock\.observe\(serverNowMs, sentPerfMs, receivedPerfMs\)/);
+  assert.match(arcadeSource, /if \(sentPerfMs !== null\) privateServerClock/);
+  assert.match(arcadeSource, /privateServerClock\.observe\(Date\.parse\(snapshot\.serverNow\), sentPerfMs, receivedPerfMs\)/);
   // The reveal-dismiss repaint (acknowledgePrivateSettlement) must call
   // paintPrivateSnapshot with NO second argument -- passing a fresh
   // performance.now() here for stale cached data is exactly the bug.
@@ -143,36 +145,13 @@ test("funding samples cannot masquerade as unpaid jackpot draws", () => {
   assert.match(arcadeSource, /drawActive \? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"/);
 });
 
-test("Powerboard uses an air-mix lottery machine and selection tube instead of fruit theater", () => {
-  assert.match(arcadeSource, /function mountPrivateLotteryMachine/);
-  assert.match(arcadeSource, /equally eligible numbered balls/);
-  assert.match(arcadeSource, /selection tube/);
-  assert.match(arcadeSource, /for\(let i=1;i<=population;i\+\+\)/);
-  assert.match(arcadeSource, /const makeBallSkin = \(number\)/);
-  assert.match(arcadeSource, /MeshPhysicalMaterial\(\{map:texture/);
-  assert.doesNotMatch(
-    arcadeSource,
-    /new THREE\.Sprite\(new THREE\.SpriteMaterial\(\{map:texture/
-  );
-  assert.doesNotMatch(arcadeSource, /new THREE\.CircleGeometry\(\.122,28\)/);
-  assert.match(
-    arcadeSource,
-    /new THREE\.TubeGeometry\(tubeCurve,72,\.31,24,false\)/
-  );
-  assert.match(
-    arcadeSource,
-    /selected\.group\.position\.copy\(tubeCurve\.getPointAt/
-  );
-  assert.match(
-    arcadeSource,
-    /const selected=hasActiveDraw\?balls\.find\(\(ball\)=>ball\.number===Number\(drawNumber\)\):null;/
-  );
-  assert.match(
-    arcadeSource,
-    /mountPrivateLotteryMachine\(powerball\.querySelector\("\.private-powerball-canvas"\), card, drawActive \? draw\.drawnNumber : null, draw\.balls \|\| 16\)/
-  );
-  assert.match(arcadeSource, /\$\{perBallChance\}% each/);
-  assert.doesNotMatch(arcadeSource, /THE ORANGE KNOWS THE NUMBER/);
+const gumballSource = readFileSync(new URL("../../public/arcade/gumball-machine.js", import.meta.url), "utf8");
+test("lottery presentation uses the committed draw and supports reduced motion", () => {
+  assert.match(arcadeSource, /mountGumballMachine\(canvas, card, drawNumber, populationSize\)/);
+  assert.match(gumballSource, /prefers-reduced-motion: reduce/);
+  assert.match(gumballSource, /Invalid committed lottery ball/);
+  assert.match(gumballSource, /cancelAnimationFrame\(frame\)/);
+  assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : null/);
 });
 
 test("displayed == redeemable: the prize chip and tiles show the winner's exact take from the carve, never the pool", () => {
@@ -232,14 +211,14 @@ test("a playtest commitment always carries its displayed pre-launch lock target"
   assert.match(arcadeSource, /REPEAT&nbsp;/);
   assert.match(arcadeSource, /auto-lock .*armed/);
   assert.match(arcadeSource, /new ethers\.Contract\(BANK_ADDR, ARCADE_ABI\.PlankBank, signer\)/);
-  assert.match(arcadeSource, /crash\.placeBet\(committedTargetBps,/);
-  assert.match(arcadeSource, /sessionBank\.betVia\(crash\.target, ethers\.parseEther\(betAmount\), committedTargetBps\)/);
+  assert.match(arcadeSource, /crash\.placeBetInRound\(BigInt\(expectedRound\), committedTargetBps,/);
+  assert.match(arcadeSource, /sessionBank\.betViaInRound\(crash\.target, BigInt\(expectedRound\), ethers\.parseEther\(betAmount\), committedTargetBps\)/);
 });
 
 test("pre-lock execution is authoritative and manual lock reports the included value", () => {
   assert.match(arcadeSource, /browser must NOT race a second manual transaction/);
   assert.doesNotMatch(arcadeSource, /Number\(liveBps\) >= autoTarget \* 10000/);
-  assert.match(arcadeSource, /crash\.filters\.SeatSettled\(rid, signer\.address\)/);
+  assert.match(arcadeSource, /scoreCrash\.filters\.SeatSettled\(rid,scoreSigner\.address\)/);
   assert.match(arcadeSource, /Lock granted at/);
 });
 
@@ -331,8 +310,8 @@ test("the live curve advances across a CONTINUOUS time horizon and the launch co
   assert.match(arcadeSource, /quadraticCurveTo\(x0, y0, \(x0 \+ x1\) \/ 2, \(y0 \+ y1\) \/ 2\)/);
   assert.match(arcadeSource, /const tracePath = \(\) =>/);
   assert.match(arcadeSource, /createLinearGradient\(0, 0, 0, h\)/);
-  assert.match(arcadeSource, /new THREE\.CylinderGeometry\(6\.2, 6\.5, 0\.28, 32\)/);
-  assert.match(arcadeSource, /new THREE\.RingGeometry\(5\.45, 5\.72, 48\)/);
+  assert.match(arcadeSource, /createLaunchEnvironment\(THREE\)/);
+  assert.match(arcadeSource, /launchEnvironment\.update\(/);
 });
 
 test("the SYSTEM & MATH manual is a readable, plain-language, formula-accurate field manual", () => {
@@ -436,8 +415,8 @@ test("the displayed Powerboard ball is derived server-side from the committed re
   // …and the winner selection is seeded by the same committed reveal.
   assert.match(roomsSource, /\$\{room\.reveal\}:powerboard:ticket/);
   // The client pins the authoritative number and throws rather than substituting.
-  assert.match(arcadeSource, /ball\.number===Number\(drawNumber\)/);
-  assert.match(arcadeSource, /Authoritative lottery result is outside the displayed ball population/);
+  assert.match(gumballSource, /b\.n===Number\(drawNumber\)/);
+  assert.match(gumballSource, /Invalid committed lottery ball/);
 });
 
 test("a host-forced lab outcome that diverges from the reveal-derived ball is computed AND rendered as forced", () => {
@@ -485,7 +464,7 @@ test("no player-facing string renders founder earnings", () => {
   assert.doesNotMatch(arcadeSource, /FOUNDER TOTAL/);
   assert.doesNotMatch(laboratorySource, /crashFounderRake/);
   assert.doesNotMatch(laboratorySource, /\["Founders"/);
-  const allowed = /lotteryFounderFeeBps|crashFounderRake|lotteryFounderFees|privateMinimumLotteryGross|Founder fee \(bps\)|Cumulative founder rake|private-setting|private-admin/;
+  const allowed = /readingLottery\.founderFeeBps|lotteryFounderFeeBps|crashFounderRake|lotteryFounderFees|privateMinimumLotteryGross|Founder fee \(bps\)|Cumulative founder rake|private-setting|private-admin/;
   for (const line of arcadeSource.split("\n")) {
     if (!/founder/i.test(line)) continue;
     assert.ok(
@@ -625,28 +604,20 @@ test("launch geometry: no anticipation dip — altitude is monotone non-decreasi
   // The subtractive ignition kick is gone from the altitude law entirely.
   assert.doesNotMatch(arcadeSource, /ignitionKick/);
   assert.doesNotMatch(arcadeSource, /- ignitionKick/);
-  // Numeric mirror of frame()'s critically-damped spring (omega=6, dt clamp
-  // 0.05, flightProgress floor at 0), driven by the real monotone target law
-  // targetFlightProgress = 1 - 1/(1 + (M(t)-1)/2.5). Any drift between this
-  // model and crash.html's frame() is itself a finding.
-  assert.match(arcadeSource, /const omega = 6\.0;/);
-  assert.match(arcadeSource, /if \(flightProgress < 0\) \{ flightProgress = 0; if \(flightVel < 0\) flightVel = 0; \}/);
-  for (const dt of [1 / 60, 1 / 30]) { // two frame cadences ≈ two devices/viewports
+  // Exercise the same integrator as the renderer across device cadences.
+  assert.match(arcadeSource, /advanceFlightMotion\(flightProgress,flightVel,targetFlightProgress/);
+  for (const dt of [1 / 120, 1 / 30, 1 / 2]) { // two frame cadences ≈ two devices/viewports
     let flightProgress = 0, flightVel = 0, prevY = 0;
     for (let t = 0; t <= 12; t += dt) {
       const m = Math.exp(0.22 * t);
       const target = 1 - 1 / (1 + (m - 1) / 2.5);
-      const omega = 6.0;
-      const accel = omega * omega * (target - flightProgress) - 2 * omega * flightVel;
-      flightVel += accel * dt;
-      flightProgress += flightVel * dt;
-      if (flightProgress < 0) { flightProgress = 0; if (flightVel < 0) flightVel = 0; }
+      const motion=advanceFlightMotion(flightProgress,flightVel,target,dt);
+      flightProgress=motion.position;flightVel=motion.velocity;
       const y = flightProgress; // altitude is an affine map of flightProgress
       assert.ok(y >= prevY - 1e-12, `monotone ascent at t=${t.toFixed(3)} dt=${dt}`);
       prevY = y;
     }
-    // And at t<=0 (pre-ignition) the model never left the pad anchor.
-    assert.equal(0, 0);
+    assert.equal(advanceFlightMotion(0,0,0,1).position,0);
   }
 });
 
@@ -708,4 +679,37 @@ test("the header speaks plain money: no ticket-weight jargon, and the economy pa
   // Policy-derived, never hardcoded: the 0.315% line is computed from ppm.
   assert.match(arcadeSource, /pot × \$\{privatePpmPct\(vault\.shareOfPotPpm\)\}/);
   assert.doesNotMatch(arcadeSource, /0\.315%/);
+});
+
+// The chain scoreboard is the only source of `plank:lottery-result`, and it
+// never runs under PLAYTEST_MODE. So lottery-theatre's button could only ever
+// reach its PREVIEW branch: a fabricated "Ball 1 - round odds 1 in 16" with no
+// relation to the table's real draw. Verified against a live room before this
+// test existed -- the button was visible and did exactly that.
+test("the lottery-theatre button is hidden in playtest, where it could only show a fabricated draw", () => {
+  const theatreSource = readFileSync(
+    new URL("../../public/arcade/lottery-theatre.js", import.meta.url),
+    "utf8"
+  );
+  // Guard the premise: if the button ever stops being appended unconditionally,
+  // this test is asserting about something that no longer exists.
+  assert.match(theatreSource, /class='lottery-open'|className='lottery-open'|classList\.add\('lottery-open'\)/,
+    "lottery-theatre still appends a .lottery-open button; keep the playtest hide rule aligned with it");
+  assert.match(
+    arcadeSource,
+    /body\[data-playtest="true"\][^{]*\.lottery-open[^{]*\{[^}]*display:\s*none/,
+    "playtest must hide .lottery-open so no fabricated preview draw is reachable"
+  );
+});
+
+// Context LOSS had a reconnect curtain; context NEVER-CREATED did not. A
+// browser with WebGL blocked threw at module top level, aborting the module
+// (including startPrivatePlaytest) and leaving a black frame with no reason.
+test("a WebGL context that cannot be created explains itself instead of leaving a black frame", () => {
+  const construction = arcadeSource.indexOf("new THREE.WebGLRenderer(");
+  assert.ok(construction > 0, "the renderer construction site must exist to be guarded");
+  const window = arcadeSource.slice(Math.max(0, construction - 400), construction + 900);
+  assert.match(window, /try\s*\{/, "renderer construction must be inside a try block");
+  assert.match(window, /setAttribute\(\s*["']role["']\s*,\s*["']alert["']\s*\)/, "the failure must announce itself to assistive tech");
+  assert.match(window, /cannot open a 3D view/, "the message must state the actual cause");
 });

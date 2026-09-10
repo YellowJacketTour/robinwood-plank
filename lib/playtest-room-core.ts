@@ -31,8 +31,8 @@ export const DEFAULT_PLAYTEST_POLICY: SimulationPolicy = {
   carveMinBps: 1_000n,
   carveMaxBps: 3_000n,
   carveHalfSaturation: 250_000n,
-  allocationRule: "ccs-2l",
-  minimumPlayers: 2,
+  allocationRule: "capped-survivor-pool",
+  minimumPlayers: 1,
   // 500 credits = 0.0005 ETH, about $1.22 at the current public reference.
   // Test credits have no cash value; this is a conservative UX analogue.
   minimumStake: 500n,
@@ -277,7 +277,9 @@ export function effectiveSettlementTarget(
   requestedTargetBps: bigint,
   acceptedTargetBps: bigint | null,
   autoLockEnabled: boolean,
+  cappedPool = false,
 ): bigint {
+  if (cappedPool) return requestedTargetBps;
   // A pre-committed auto target is a ceiling, never a suggestion that a
   // later manual request may raise. Manual play can improve safety only by
   // locking earlier. (The on-chain PlankCrash has no manual lock at all: a

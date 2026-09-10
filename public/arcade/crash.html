@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<base href="/arcade/" />
+<script>if(location.pathname==="/")location.replace("/arcade/crash.html"+location.search);</script>
 <title>PlankCrash</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="description" content="An on-chain pari-mutuel crash game with a never-zero prize Vault, a real rolling Powerboard jackpot, and instant popup-free play." />
@@ -688,6 +690,12 @@
     body[data-playtest="true"] #gearBtn, body[data-playtest="true"] #simBtn,
     body[data-playtest="true"] #bankPanel, body[data-playtest="true"] #fuelPanel,
     body[data-playtest="true"] #adminLinkBtn { display:none !important }
+    /* The chain scoreboard is what supplies lottery-theatre's result, and it
+       never runs in playtest -- so this button could only ever open the
+       theatre's PREVIEW branch: a fabricated "Ball 1 - round odds 1 in 16"
+       with no relation to the table's real draw. Playtest shows its own
+       live number draw inline instead. */
+    body[data-playtest="true"] .lottery-open { display:none !important }
     #privateHud{position:fixed;z-index:85;top:58px;left:18px;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 354px);padding:7px 9px;border:1px solid rgba(255,200,87,.35);border-radius:10px;background:rgba(6,10,9,.9);backdrop-filter:blur(10px);font:700 11px/1.2 inherit;color:#e9dec9}
     #privateHud button,#privateHud a{min-height:34px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 10px;background:#14221b;color:#f5ecdc;font:700 11px inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}
     #privateHud select{min-height:34px;max-width:240px;border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:0 8px;background:#07100c;color:#f5ecdc;font:700 11px inherit}
@@ -841,6 +849,7 @@
     @media(min-width:701px) and (max-width:900px){body[data-playtest="true"]{overflow-y:auto;height:auto}body[data-playtest="true"] #app{height:auto;min-height:100dvh}body[data-playtest="true"] .topbar,body[data-playtest="true"] #privateHud,body[data-playtest="true"] #privateJourney,body[data-playtest="true"] .history-ribbon,body[data-playtest="true"] .deck{flex:0 0 auto}#privateHud{position:relative;top:auto;left:auto;right:auto;margin:6px 10px 0;max-width:none;display:grid;grid-template-columns:minmax(0,1fr)}#privateHud select{width:100%;max-width:none}#privateHudStatus{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#privateJourney{position:relative;z-index:35;top:auto;left:auto;width:auto;margin:6px 10px 0}#privateTablePanel{position:relative;z-index:35;top:auto;right:auto;width:auto;max-height:none;margin:8px 10px}.private-host-actions{grid-template-columns:repeat(2,1fr)}body[data-playtest="true"] .deck{padding-right:18px}.result-card.private-result{width:min(590px,calc(100% - 24px))}.private-result-world{grid-template-columns:1fr 1fr}.stage{min-height:58vh}.private-how-grid,.private-welcome-steps,.private-setting-grid,.private-admin-grid{grid-template-columns:1fr}}
     @media(max-width:900px) and (orientation:landscape){#privateJourney{display:none}#privateTablePanel{max-height:38dvh}.stage{min-height:72dvh}.result-card.private-result,.result-card.private-result.show{position:fixed;inset:6px;width:auto;max-width:none;transform:none}.private-powerball{min-height:330px}.private-powerball-canvas{position:absolute;left:0;top:0;width:46%;height:100%}.private-powerball-copy{display:block;width:56%;margin-left:auto;padding:18px}.private-powerball-drum{margin:10px auto}}
   </style>
+<link rel="stylesheet" href="pocket-console.css">
 </head>
 <body>
 <div id="boot"><div class="boot-mark">PLANKCRASH</div></div>
@@ -887,7 +896,7 @@
        makes that otherwise-invisible mechanic visible and explained. -->
   <div id="pbPopover" class="pb-popover">
     <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose" role="button" aria-label="Close Powerboard details" tabindex="0">✕</span></div>
-    <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
+    <div class="pb-pop-sub">Your bet enters this round’s lottery. Your chance depends on your stake and how much the prize is funded.</div>
     <div id="pbPopBody"></div>
   </div>
 
@@ -895,7 +904,7 @@
        lottery in plain language, every figure as credits · ETH · USD. -->
   <div id="economyPopover" class="pb-popover economy-popover" role="dialog" aria-label="Economy: vault and lottery">
     <div class="pb-pop-head">⬢ Economy <span class="pb-pop-close" id="economyPopClose" role="button" aria-label="Close economy details" tabindex="0">✕</span></div>
-    <div class="pb-pop-sub">What is in the Vault, what it gives each game, what the lottery is worth, and what it still needs to turn active.</div>
+    <div class="pb-pop-sub">Vault balance, prize funding, and this round’s lottery odds.</div>
     <div id="economyPopBody"></div>
   </div>
 
@@ -934,7 +943,7 @@
     <div class="crash-flash" id="crashFlash"></div>
     <div class="center-readout">
       <div class="mult idle" id="multReadout">1<span class="x">.00x</span></div>
-      <div class="substatus" id="substatus">CONNECT A WALLET TO PLAY</div>
+      <div class="substatus" id="substatus">Ready for launch</div>
       <!-- The other universal convention: a rising multiplier line graph,
            color-shifting cool-to-warm as it climbs, like every real crash
            game's stock-ticker-style curve. Plots this round's own real
@@ -974,28 +983,28 @@
   </div>
 
   <div class="deck">
-    <div class="payout-floor" id="payoutFloorHeadline">Lock in time and you're guaranteed at least <b>75%</b> of your stake back — even if you're the only survivor pays more.</div>
-    <div class="payout-note" title="Your payout isn't stake × multiplier — everyone who cashes out in time splits the pot by (their stake × their own multiplier). Cashing out earlier than others grows your share; more people cashing out late shrinks everyone's per-share.">
-      ⓘ Payout = your share of the shared pot, split by stake × your cash-out multiplier — not a fixed stake × multiplier payout
+    <div class="payout-floor" id="payoutFloorHeadline">Reach your target to share the pool. You can lose your stake.</div>
+    <div class="payout-note" title="Targets are committed before launch. Reach your target to qualify; the contract determines the funded payout.">
+      Reach your target to qualify. Read the connected game's payout rules below.
     </div>
     <div class="payout-note" id="maxPayableDisclosure" title="The settlement ceiling: a crash above this multiplier still pays, but only up to this cap. Your auto cash-out target cannot be set above it."></div>
     <div class="avatar-row" id="avatarRow" style="display:none"></div>
     <div class="stake-row" id="stakeRow">
-      <button class="chip active" data-amt="0.01">0.01</button>
-      <button class="chip" data-amt="0.02">0.02</button>
-      <button class="chip" data-amt="0.05">0.05</button>
-      <button class="chip" data-amt="0.1">0.10</button>
+      <button class="chip active" data-amt="0.000001">0.000001</button>
+      <button class="chip" data-amt="0.00001">0.00001</button>
+      <button class="chip" data-amt="0.0001">0.0001</button>
+      <button class="chip" data-amt="0.001">0.001</button>
     </div>
     <div class="stake-value-quote" id="stakeValueQuote" aria-live="polite"></div>
     <div class="stake-row" id="autoRow" style="opacity:.55">
       <button class="chip" id="autoToggle" title="Repeat this stake and target automatically in future rounds">REPEAT&nbsp;▶</button>
       <span style="display:flex;align-items:center;gap:6px;font:600 13px/1 inherit;color:var(--muted,#9aa7bd);letter-spacing:.02em">
         cash&nbsp;out&nbsp;at
-        <input id="autoTargetInput" type="number" min="1.1" step="0.1" value="2.0"
+        <input id="autoTargetInput" type="number" min="1.01" max="10000" step="0.01" value="2.0" required
           style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:inherit;font:inherit;text-align:center" />x
       </span>
     </div>
-    <button class="primary-btn" id="primaryBtn" disabled>CONNECT WALLET</button>
+    <button class="primary-btn" id="primaryBtn">CONNECT WALLET</button>
     <div class="btn-sub" id="btnSub">&nbsp;</div>
     <button class="sim-btn" id="simBtn">▶ Simulate — no wallet needed</button>
   </div>
@@ -1057,6 +1066,16 @@
   </div>
 </div>
 
+<script>
+window.addEventListener('error', event => {
+  const status = document.getElementById('substatus');
+  if (status && event.message) status.textContent = 'Game startup error: ' + event.message;
+});
+window.addEventListener('unhandledrejection', event => {
+  const status = document.getElementById('substatus');
+  if (status) status.textContent = 'Connection error: ' + (event.reason?.message || 'Please reload');
+});
+</script>
 <script src="vendor/ethers.umd.min.js"></script>
 <script type="importmap">
 {
@@ -1067,13 +1086,25 @@
 }
 </script>
 <script type="module">
+import { mountGumballMachine } from "./gumball-machine.js";
 import * as THREE from "three";
+import { createFlightPlume } from "./flight-plume.js";
+import { advanceFlightMotion } from "./flight-motion.js";
+import { readRoundSnapshot, netRoundRake } from "./chain-snapshot.js";
+import { publicFlightDuration, publicFlightAt, canCommitPublicRound, canRepeatPublicRound } from "./public-round-clock.js";
+import { CRASH_FINALE_MS, REDUCED_CRASH_FINALE_MS } from "./presentation-timing.js";
+import { settledReturn } from "./settled-return.js";
+import { parseTargetBps } from "./target-input.js";
+import { queueWalletTransactions } from "./wallet-transaction-queue.js";
+import { createRoundStory } from "./round-story.js";
+import { renderRatio, createResolutionGovernor } from "./render-budget.js";
+import { createLaunchEnvironment } from "./launch-environment.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
-import { PrivateLiveClock, privateCurveDurationSeconds } from "./private-live-clock.js";
+import { PrivateLiveClock, privateCurveDurationSeconds } from "./private-live-clock.js?v=20260909";
 import { ServerClockSync } from "./private-server-clock.js";
 import { verifyPrivateRound } from "./private-fairness.js";
 import { persistFairnessEntry, readFairnessLedger } from "./fairness-ledger.js";
@@ -1106,6 +1137,15 @@ function setChainAction(stage, details = {}) {
 // file doesn't exist (a real deploy with no local manifest, e.g. mainnet
 // static hosting) this silently keeps the hardcoded values -- never blocks
 // page load either way.
+const INVITE_TEST = document.querySelector('meta[name="plank-invite"]')?.content === 'simulated';
+let inviteStartBlock = 0;
+let NUMBERED_LOTTERY = false;
+let FUNDED_CYCLE_LOTTERY = false;
+let PRACTICE_FAST_TIMING = false;
+let publicPresentationLeadMs=0,publicServerOffsetMs=Date.now()-performance.now(),publicScheduledLiftoffMs=null,publicClockAnchored=false;
+const publicLiftoffs=new Map();
+window.__plankClock=()=>({now:performance.now()+publicServerOffsetMs,ready:publicClockAnchored});
+let localDeploymentWatchBusy=false;
 let REMOTE_DEPLOY = false;
 let REMOTE_NETWORK_NAME = "";
 let REMOTE_RPC_URL = "";
@@ -1115,6 +1155,23 @@ async function loadDeployAddresses() {
     const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
     if (!res.ok) return;
     const m = await res.json();
+    if(INVITE_TEST)inviteStartBlock=Number(m.inviteStartBlock||0);
+    PRACTICE_FAST_TIMING = (INVITE_TEST || ['127.0.0.1','localhost'].includes(location.hostname)) && ['30-second-window-local-mock','30-second-lottery-to-launch-local-mock'].includes(m.practiceTiming);
+    if(PRACTICE_FAST_TIMING&&m.practiceTiming==='30-second-lottery-to-launch-local-mock'){
+      publicPresentationLeadMs=8000;
+      if(INVITE_TEST){
+        let fastest=Infinity;
+        for(let sample=0;sample<3;sample++){
+          const before=performance.now(),clock=await fetch('/api/invite/clock',{cache:'no-store'}).then(r=>r.json()),after=performance.now();
+          if(Number.isFinite(clock.nowMs)&&after-before<fastest){fastest=after-before;publicServerOffsetMs=clock.nowMs-(before+after)/2;}
+        }
+        try{const {default:epoch}=await import('./practice-clock.js');
+          if(epoch.chainId===31337&&epoch.crash?.toLowerCase()===m.crash?.toLowerCase()&&Number.isSafeInteger(epoch.offsetMs)){publicServerOffsetMs+=epoch.offsetMs;publicClockAnchored=true;}
+        }catch{/* Older local builds fall back to their chain snapshot. */}
+      }
+    }
+
+    NUMBERED_LOTTERY=m.lotteryRule==="numbered";
     if (m.bank) BANK_ADDR = m.bank;
     if (m.lottery) LOTTERY_ADDR = m.lottery;
     if (m.rakeRouter) ROUTER_ADDR = m.rakeRouter;
@@ -1181,17 +1238,60 @@ const canvas = $("fx");
 const clock = new THREE.Clock();
 let renderSuspended = document.hidden;
 let webglContextLost = false;
+// Applies to BOTH on-chain practice and private tables. An embedded preview
+// may finish loading before its tab becomes visible.
+document.addEventListener("visibilitychange", () => {
+  renderSuspended = document.hidden;
+  if (!renderSuspended) { clock.getDelta(); resize(); }
+});
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+// A blocked or unavailable WebGL context throws HERE, at module top level,
+// aborting the rest of this module and leaving a black frame with no
+// explanation. Context LOSS is handled gracefully further down (see the
+// reconnect curtain); context never-created was not. The flight scene is
+// genuinely unrecoverable without a renderer -- `renderer` is load-bearing
+// for the whole frame loop -- so this does NOT pretend to keep playing.
+// It replaces a silent black rectangle with a stated reason, then rethrows
+// so the failure still surfaces to logs.
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+} catch (error) {
+  const notice = document.createElement("div");
+  notice.setAttribute("role", "alert");
+  notice.style.cssText = "position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:#0b0f0d;color:#f5ecdc;font:700 14px/1.5 system-ui,sans-serif;text-align:center";
+  notice.textContent = "This browser cannot open a 3D view, which PlankCrash needs to render the flight. Try another browser, or disable a content blocker that turns off WebGL.";
+  document.body.prepend(notice);
+  throw error;
+}
+const resolutionGovernor = createResolutionGovernor();
+renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
 camera.position.set(0, 6, 26);
 camera.lookAt(0, 8, 0);
+const coastMaterial=new THREE.MeshBasicMaterial({transparent:true,depthWrite:false,fog:false});
+const coastBackdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),coastMaterial);coastBackdrop.position.z=-90;coastBackdrop.renderOrder=-9;scene.add(coastBackdrop);
+new THREE.TextureLoader().load('art/launch-coast.png',texture=>{
+  texture.colorSpace=THREE.SRGBColorSpace;coastMaterial.map=texture;coastMaterial.needsUpdate=true;
+  const reflection=texture.clone();reflection.mapping=THREE.EquirectangularReflectionMapping;reflection.needsUpdate=true;
+  const pmrem=new THREE.PMREMGenerator(renderer);const env=pmrem.fromEquirectangular(reflection);scene.environment=env.texture;scene.environmentIntensity=.75;pmrem.dispose();reflection.dispose();
+});
+const cosmicMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, fog: false });
+const cosmicBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cosmicMaterial);
+cosmicBackdrop.position.z = -95;
+cosmicBackdrop.renderOrder = -10;
+scene.add(cosmicBackdrop);
+new THREE.TextureLoader().load('art/cosmic-relics.png', texture => {
+  texture.colorSpace = THREE.SRGBColorSpace;
+  cosmicMaterial.map = texture;
+  cosmicMaterial.needsUpdate = true;
+});
 
 // ── lighting: hemisphere (sky/ground) + a warm "sun" + a thruster point light
 const hemi = new THREE.HemisphereLight(0x88a7ff, 0x2a1c10, 1.1);
@@ -1200,8 +1300,13 @@ const sun = new THREE.DirectionalLight(0xffe6c2, 1.4);
 // Positioned well off to the side and high, so its screen projection reads
 // as a corner glint composed away from the astronaut, not a halo painted
 // directly over their face -- a real bug the first placement had.
-sun.position.set(34, 30, -14);
+sun.position.set(-8, 12, 9);
+sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-12;sun.shadow.camera.right=12;sun.shadow.camera.top=15;sun.shadow.camera.bottom=-10;sun.shadow.bias=-.0005;
 scene.add(sun);
+// Soft camera-side fill reveals the gantry's machined edges without flattening
+// the warm key light or adding another expensive shadow map.
+const serviceFill = new THREE.DirectionalLight(0xc5dbff, 1.9);
+serviceFill.position.set(6,5,10);scene.add(serviceFill);
 const thrusterLight = new THREE.PointLight(0xffb37a, 0, 18, 2);
 scene.add(thrusterLight);
 
@@ -1256,7 +1361,7 @@ const skyDome = new THREE.Mesh(
         // as depth/haze drifting through the sky, not visible grain
         float haze = fbm(vDir.xz * 1.6 + vDir.y * 0.8) * 0.06 - 0.03;
         col += haze;
-        float dither = (hash(gl_FragCoord.xy) - 0.5) / 64.0;
+        float dither = (hash(gl_FragCoord.xy) - 0.5) / 4096.0;
         gl_FragColor = vec4(col + dither, 1.0);
       }
     `,
@@ -1322,123 +1427,12 @@ const PAD_REST_Y = -4.6;
 const PAD_SCALE = 1.12;
 const PAD_DECK_TOP_LOCAL_Y = 0.25; // deck half-height (CylinderGeometry h=0.5)
 const PAD_TOP_Y = PAD_REST_Y + PAD_DECK_TOP_LOCAL_Y * PAD_SCALE;
-const ROCKET_SPRITE_HEIGHT = 5.4;
+const ROCKET_SPRITE_HEIGHT = 4.5;
 const ROCKET_REST_Y = PAD_TOP_Y + ROCKET_SPRITE_HEIGHT / 2;
-const padGroup = new THREE.Group();
+const launchEnvironment=createLaunchEnvironment(THREE);
+const padGroup=launchEnvironment.group;
+padGroup.position.set(0,PAD_REST_Y,0);padGroup.scale.setScalar(PAD_SCALE);scene.add(padGroup);
 
-const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: 0.55, metalness: 0.6 });
-// Wide concrete apron and illuminated perimeter restore the readable
-// launch-site silhouette at phone and desktop framing. The operational
-// deck remains raised above it, so this reads as one complete complex—not
-// a floating disc or an isolated gantry.
-const apron = new THREE.Mesh(
-  new THREE.CylinderGeometry(6.2, 6.5, 0.28, 32),
-  new THREE.MeshStandardMaterial({ color: 0x252c35, roughness: 0.82, metalness: 0.18 })
-);
-apron.position.y = -0.38;
-padGroup.add(apron);
-const perimeter = new THREE.Mesh(
-  new THREE.RingGeometry(5.45, 5.72, 48),
-  new THREE.MeshBasicMaterial({ color: 0x4fc9ff, transparent:true, opacity:.68, side:THREE.DoubleSide })
-);
-perimeter.rotation.x = -Math.PI / 2;
-perimeter.position.y = -0.21;
-padGroup.add(perimeter);
-const deck = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.9, 0.5, 8), deckMat);
-padGroup.add(deck);
-
-// hazard-stripe rim -- alternating red/white wedges around the blast
-// radius, a real launch-pad marking convention
-const stripeMatRed = new THREE.MeshStandardMaterial({ color: 0xd23b3b, roughness: 0.5 });
-const stripeMatWhite = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.5 });
-const STRIPE_COUNT = 16;
-for (let i = 0; i < STRIPE_COUNT; i++) {
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.14, 0.42), i % 2 === 0 ? stripeMatRed : stripeMatWhite);
-  const a = (i / STRIPE_COUNT) * Math.PI * 2;
-  stripe.position.set(Math.cos(a) * 3.85, 0.02, Math.sin(a) * 3.85);
-  stripe.rotation.y = -a;
-  padGroup.add(stripe);
-}
-
-// engine-glow ring: the exhaust port the astronaut launches from
-const glowRing = new THREE.Mesh(
-  new THREE.RingGeometry(0.9, 1.3, 32),
-  new THREE.MeshBasicMaterial({ color: 0xff8a3c, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-);
-glowRing.rotation.x = -Math.PI / 2;
-glowRing.position.y = 0.26;
-padGroup.add(glowRing);
-
-// 4 angled load-bearing legs
-const legMat = new THREE.MeshStandardMaterial({ color: 0x333a44, roughness: 0.7, metalness: 0.4 });
-for (let i = 0; i < 4; i++) {
-  const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 4.6, 6), legMat);
-  leg.position.set(Math.cos(a) * 3.1, -2.4, Math.sin(a) * 3.1);
-  leg.rotation.z = Math.cos(a) * 0.22;
-  leg.rotation.x = -Math.sin(a) * 0.22;
-  padGroup.add(leg);
-}
-
-// 4 retracting clamp arms, closed (cradling the rocket) at rest --
-// padClampOpen (declared with the other animation state below) swings
-// them open at ignition, animated per-frame in frame(), not baked here.
-const clampMat = new THREE.MeshStandardMaterial({ color: 0x8a2f2f, roughness: 0.5, metalness: 0.5 });
-const padClamps = [];
-for (let i = 0; i < 4; i++) {
-  const a = (i / 4) * Math.PI * 2;
-  const pivot = new THREE.Group();
-  pivot.position.set(Math.cos(a) * 1.5, 1.1, Math.sin(a) * 1.5);
-  pivot.rotation.y = -a;
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.22, 0.22), clampMat);
-  arm.position.set(0.75, 0, 0);
-  pivot.add(arm);
-  padGroup.add(pivot);
-  padClamps.push(pivot);
-}
-
-// service gantry off to one side: a vertical lattice mast, cross braces,
-// and a blinking beacon on top
-const towerMat = new THREE.MeshStandardMaterial({ color: 0x555f6b, roughness: 0.6, metalness: 0.5 });
-const towerGroup = new THREE.Group();
-const mast = new THREE.Mesh(new THREE.BoxGeometry(0.35, 9, 0.35), towerMat);
-mast.position.y = 3.6;
-towerGroup.add(mast);
-for (let i = 0; i < 3; i++) {
-  const brace = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.16), towerMat);
-  brace.position.set(-0.8, 1.4 + i * 2.6, 0);
-  brace.rotation.z = 0.5;
-  towerGroup.add(brace);
-}
-const beacon = new THREE.Mesh(
-  new THREE.SphereGeometry(0.16, 8, 8),
-  new THREE.MeshStandardMaterial({ color: 0xff3040, emissive: 0xff2030, emissiveIntensity: 1.6 })
-);
-beacon.position.y = 8.3;
-towerGroup.add(beacon);
-
-// NOTE: an in-scene $PLANK logo plaque used to hang on this gantry at
-// (0.55, 5.4). It was removed deliberately -- it rendered as a small
-// redundant "plank" floating beside the tower on the launch screen (the
-// site's own PLANKCRASH wordmark already carries the branding), and with
-// the pad now raised to sit under the astronaut it read as clutter, not
-// signage. The gantry itself stays as the launch complex's service tower.
-
-towerGroup.position.set(-4.6, -2.3, -0.6);
-padGroup.add(towerGroup);
-
-// The whole launch complex sits directly beneath the astronaut's resting
-// height (groundY = ROCKET_REST_Y, derived from PAD_TOP_Y above so the
-// rocket's base sits exactly ON the deck; the sprite is 5.4 tall, so its feet
-// rest near y = -4.2). Parking the pad here -- rather than the old y=-6,
-// which pushed the deck below the frame and left only the lone gantry
-// mast visible (reading as a stray slingshot pole) -- means the deck,
-// hazard rim, and engine-glow port are actually on screen under the
-// astronaut, so it visibly stands on and launches from a real pad. The
-// fade-out in frame() anchors to this same PAD_REST_Y.
-padGroup.position.set(0, PAD_REST_Y, 0);
-padGroup.scale.setScalar(PAD_SCALE);
-scene.add(padGroup);
 
 // ── satellites: real geometry with metal/roughness PBR values so the sun
 // light actually reads on them, not flat-shaded placeholders.
@@ -1634,7 +1628,17 @@ function loadChalkstronautArt(src) {
   };
   img.src = src;
 }
-loadChalkstronautArt("art/Chalkstronaut4.png");
+// Upright paint mapped onto an actual thick, beveled wooden character.
+new THREE.TextureLoader().load('art/chalkstronaut-front.png',tex=>{
+  tex.colorSpace=THREE.SRGBColorSpace;tex.offset.set(.07,.065);tex.repeat.set(.80,.87);tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  const shape=new THREE.Shape();shape.moveTo(-.78,-2.2);shape.lineTo(.77,-2.18);shape.lineTo(.80,2.16);shape.lineTo(.56,2.23);shape.lineTo(-.78,2.20);shape.closePath();
+  const group=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:.28,bevelEnabled:true,bevelSegments:3,bevelSize:.045,bevelThickness:.045}),new THREE.MeshStandardMaterial({color:0xd1ad67,roughness:.88}));body.position.z=-.18;body.castShadow=true;body.receiveShadow=true;group.add(body);
+  const mat=new THREE.MeshStandardMaterial({map:tex,transparent:false,alphaTest:.15,roughness:.88});
+  const face=new THREE.Mesh(new THREE.PlaneGeometry(1.7,4.5),mat);face.position.z=.15;face.castShadow=true;face.receiveShadow=true;group.add(face);
+  group.material=mat;group.userData.woodCharacter=true;chalkstronautSprite=group;scene.add(group);
+});
+const flightPlume=createFlightPlume(THREE);scene.add(flightPlume.group);
 
 // ── particle systems: chalk-dust thruster + crash burst, real GPU points
 function makeParticleSystem(maxCount, color) {
@@ -1669,7 +1673,7 @@ function makeParticleSystem(maxCount, color) {
   // by remaining life in updateParticles) and a small custom shader, since
   // stock PointsMaterial has no per-vertex alpha channel to fade with.
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color) }, uSize: { value: 260 } },
+    uniforms: { uColor: { value: new THREE.Color(color) }, uSize: { value: 150 } },
     vertexShader: `
       uniform float uSize;
       attribute float aAlpha;
@@ -1688,7 +1692,7 @@ function makeParticleSystem(maxCount, color) {
         if (vAlpha <= 0.001) discard;
         float d = length(gl_PointCoord - 0.5);
         if (d > 0.5) discard;
-        gl_FragColor = vec4(uColor, smoothstep(0.5, 0.0, d) * vAlpha);
+        gl_FragColor = vec4(uColor, smoothstep(0.5, 0.0, d) * vAlpha * 0.22);
       }
     `,
     transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
@@ -1700,7 +1704,30 @@ function makeParticleSystem(maxCount, color) {
   return { points, geo, pos, alpha, vel: new Float32Array(maxCount * 3), life: new Float32Array(maxCount), cursor: 0, maxCount };
 }
 const thrusterParticles = makeParticleSystem(400, 0xe4e8f5);
+const padVapor=makeParticleSystem(240,0xc3cbd1);
+padVapor.points.material.blending=THREE.NormalBlending;
+padVapor.points.material.uniforms.uSize.value=260;
+let vaporAccumulator=0;
 const crashParticles = makeParticleSystem(500, 0xff8a6c);
+const fireworkSystems=[0xffbd45,0xff527d,0x6cdfff,0xba85ff,0xffe9a3].map(color=>makeParticleSystem(160,color));
+let fireworkTimers=[];
+function crashFireworks(){
+  fireworkTimers.forEach(clearTimeout);fireworkTimers=[];
+  if(prefersReducedMotion)return;
+  const origin=chalkstronautSprite.position.clone();
+  fireworkSystems.forEach((system,index)=>{fireworkTimers.push(setTimeout(()=>{
+    if(document.hidden||prefersReducedMotion)return;
+    const center=origin.clone().add(new THREE.Vector3(Math.sin(index*2.4)*2.5,Math.cos(index*1.6)*1.5,0));
+    // Fibonacci shells produce an expanding chrysanthemum instead of an isotropic cloud.
+    for(let k=0;k<130;k++){
+      const i=system.cursor,a=k*2.399963,y=1-2*(k+.5)/130,r=Math.sqrt(1-y*y),speed=2.3+(k%3)*.2;
+      system.pos.set([center.x,center.y,center.z],i*3);
+      system.vel.set([Math.cos(a)*r*speed,y*speed,Math.sin(a)*r*speed],i*3);
+      system.life[i]=1;system.cursor=(i+1)%system.maxCount;
+    }
+    playLaunchSound(false,.45);
+  },index*330));});
+}
 const emberParticles = makeParticleSystem(300, 0xff9a4a);
 emberParticles.points.renderOrder = 6;
 
@@ -1853,7 +1880,7 @@ const GradeShader = {
     tDiffuse: { value: null },
     uTime: { value: 0 },
     uVignette: { value: 0.32 },
-    uGrain: { value: 0.045 },
+    uGrain: { value: 0.0 },
     uContrast: { value: 1.06 },
     uSat: { value: 1.08 },
     uAberration: { value: 0.0 },
@@ -1962,58 +1989,9 @@ const LensFlareShader = {
     }`,
 };
 
-// ── Selective bloom ──────────────────────────────────────────────────
-// Threshold-tuning alone couldn't stop the astronaut sprite from
-// self-blooming: its near-white paint highlights sit close enough to
-// 1.0 luminance that almost any usable threshold still caught them,
-// haloing the character in a "shining light on top of the plank" that
-// wasn't ever the sun -- it was the character's own art. The correct
-// fix (the standard three.js selective-bloom technique, not a
-// threshold hack) is a second, separate render: hide the sprite,
-// render that frame through its own bloom-only composer to get a pure
-// bloom texture, restore the sprite, then additively combine that
-// texture onto the NORMAL frame (sprite visible, not bloomed). Now the
-// thruster/runes/satellites/crash-burst still glow correctly, and the
-// character never blows out no matter how bright its flat art is.
-const bloomComposer = new EffectComposer(renderer);
-bloomComposer.renderToScreen = false;
-bloomComposer.addPass(new RenderPass(scene, camera));
-// The real bug behind "shining white light on top of the plank": this was
-// constructed with a resolution of (1, 1) -- a literal one-pixel internal
-// render target. UnrealBloomPass sizes its mip/blur chain off this value,
-// so a 1x1 buffer upscaled back to screen size produces a content-
-// independent soft square blob, regardless of what's actually in the
-// scene -- confirmed by hiding the astronaut sprite entirely and getting
-// the exact same blob in the exact same place. Needs the real canvas
-// resolution, kept in sync on resize().
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(canvas.clientWidth || 1, canvas.clientHeight || 1), 0.55, 0.35, 0.72);
-bloomComposer.addPass(bloomPass);
-
-const MixShader = {
-  uniforms: { baseTexture: { value: null }, bloomTexture: { value: bloomComposer.renderTarget2.texture } },
-  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-  fragmentShader: `
-    uniform sampler2D baseTexture; uniform sampler2D bloomTexture;
-    varying vec2 vUv;
-    void main(){
-      vec4 base = texture2D(baseTexture, vUv);
-      vec4 bloom = texture2D(bloomTexture, vUv);
-      gl_FragColor = vec4(base.rgb + bloom.rgb, 1.0);
-    }`,
-};
-
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-// Built as a real ShaderMaterial (not a plain shader-def object) and
-// passed to ShaderPass directly: ShaderPass clones uniforms for a plain
-// object, and cloning a render-target TEXTURE silently breaks it (fires
-// "Textures of render targets cannot be cloned" and leaves bloomTexture
-// null, which is why the very first attempt washed the whole screen out
-// white instead of fixing the glow). Passing an already-constructed
-// material skips that clone path entirely.
-const mixMaterial = new THREE.ShaderMaterial(MixShader);
-const mixPass = new ShaderPass(mixMaterial, "baseTexture");
-composer.addPass(mixPass);
+// One lit scene and one bloom contribution. Never add the base scene twice.
+const bloomPass=new UnrealBloomPass(new THREE.Vector2(canvas.clientWidth||1,canvas.clientHeight||1),.35,.3,1.15);
+const composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(bloomPass);
 const godRaysPass = new ShaderPass(GodRaysShader);
 composer.addPass(godRaysPass);
 const warpStreakMaterial = new THREE.ShaderMaterial(WarpStreakShader);
@@ -2028,15 +2006,23 @@ composer.addPass(lensFlarePass);
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  // Hidden/collapsed panels have no drawable size. Keep the last valid camera
+  // and buffers until ResizeObserver reports a visible panel again.
+  if (w <= 0 || h <= 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (!PLAYTEST_MODE) {
+    const ratio=renderRatio(w,h,window.devicePixelRatio||1,resolutionGovernor.cap);
+    if(renderer.getPixelRatio()!==ratio){renderer.setPixelRatio(ratio);composer.setPixelRatio(ratio);}
+    canvas.dataset.renderRatio=ratio.toFixed(2);
+  }
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
-  bloomComposer.setSize(w, h);
   lensFlarePass.uniforms.uAspect.value = w / h;
   warpStreakPass.uniforms.uAspect.value = w / h;
 }
 window.addEventListener("resize", resize);
+new ResizeObserver(resize).observe(canvas);
 
 let webglRecoveryTimer = null;
 // A session that renders for a while is healthy: forget earlier losses so a
@@ -2133,13 +2119,28 @@ function playNoiseBurst(dur, gainPeak) {
   src.connect(gain).connect(ctx.destination);
   src.start();
 }
+let cinematicAudio=[];
+function playLaunchSound(launch=true,volume=1){
+  if(!sfxEnabled || document.hidden)return;
+  const ctx=ensureAudioCtx();if(!ctx)return;
+  const duration=launch?2.8:1.1,now=ctx.currentTime;
+  const source=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),gain=ctx.createGain();
+  const buffer=ctx.createBuffer(1,Math.ceil(ctx.sampleRate*duration),ctx.sampleRate),samples=buffer.getChannelData(0);
+  let low=0;for(let i=0;i<samples.length;i++){low=(low+.025*(Math.random()*2-1))/1.025;samples[i]=low*4+(Math.random()*2-1)*.12;}
+  source.buffer=buffer;filter.type='lowpass';filter.frequency.setValueAtTime(launch?100:1700,now);filter.frequency.exponentialRampToValueAtTime(launch?1800:80,now+duration);
+  gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.28*volume,now+(launch?.65:.015));gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  const compressor=ctx.createDynamicsCompressor();compressor.threshold.value=-18;compressor.ratio.value=6;
+  source.connect(filter).connect(gain).connect(compressor).connect(ctx.destination);
+  cinematicAudio.push(source);source.onended=()=>{cinematicAudio=cinematicAudio.filter(s=>s!==source);source.disconnect();filter.disconnect();gain.disconnect();compressor.disconnect();};source.start();source.stop(now+duration);
+  playTone(launch?46:62,duration,'sine',.1*volume);
+}
 const sfx = {
   click: () => playTone(720, 0.05, "square", 0.05),
   betPlaced: () => { playTone(440, 0.09, "triangle", 0.14); playTone(660, 0.11, "triangle", 0.1); },
-  ignition: () => playNoiseBurst(0.35, 0.16),
+  ignition: () => { playLaunchSound(true); if(!prefersReducedMotion)shakeAmount=.35; },
   cashOut: () => { playTone(660, 0.08, "sine", 0.16); playTone(880, 0.1, "sine", 0.14); playTone(1320, 0.14, "sine", 0.1); },
   win: () => { playTone(880, 0.1, "triangle", 0.16); setTimeout(() => playTone(1320, 0.14, "triangle", 0.14), 90); setTimeout(() => playTone(1760, 0.22, "triangle", 0.12), 180); },
-  crash: () => { playNoiseBurst(0.4, 0.2); playTone(110, 0.35, "sawtooth", 0.14); },
+  crash: () => { playLaunchSound(false); crashFireworks(); },
   powerboardCharge: () => { playTone(146, 0.55, "sine", 0.08); setTimeout(() => playTone(220, 0.45, "triangle", 0.07), 140); },
   powerboardTumble: () => { playTone(510 + Math.random() * 180, 0.045, "triangle", 0.035); },
   powerboardLand: () => { playTone(392, 0.12, "sine", 0.15); setTimeout(() => playTone(784, 0.2, "triangle", 0.12), 80); },
@@ -2148,6 +2149,7 @@ const sfx = {
 };
 function setSfxEnabled(on) {
   sfxEnabled = on;
+  if(!on){cinematicAudio.forEach(source=>{try{source.stop();}catch{}});audioCtx?.suspend();}else if(audioCtx)audioCtx.resume().catch(()=>{});
   try { localStorage.setItem("plankcrash_sfx", on ? "on" : "off"); } catch (_) {}
 }
 
@@ -2161,7 +2163,15 @@ function haptic(pattern) {
 // Respect the OS "reduce motion" setting -- screen shake, particle bursts,
 // and camera warp are exciting for most players but a genuine discomfort
 // trigger for some; this is a real, cheap accessibility win, not a nice-to-have.
-const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const systemMotionPreference=window.matchMedia("(prefers-reduced-motion: reduce)");
+let prefersReducedMotion=systemMotionPreference.matches;
+systemMotionPreference.addEventListener('change',event=>{
+  prefersReducedMotion=event.matches;
+  if(prefersReducedMotion){
+    shakeAmount=0;fireworkTimers.forEach(clearTimeout);fireworkTimers=[];
+    fireworkSystems.forEach(system=>{system.life.fill(0);system.alpha.fill(0);system.geo.attributes.aAlpha.needsUpdate=true;});
+  }
+});
 
 let phaseState = "idle"; // idle | betting | live | crashed
 let flightProgress = 0; // 0..1, drives ascent height -- smoothed toward targetFlightProgress every frame
@@ -2179,6 +2189,27 @@ let targetFlightProgress = 0;
 let flightVel = 0;
 let rocketUprightMix = 0; // 0..1: crash tumble -> upright return-descent attitude
 let crashedAt = null;
+let publicRepeatReviewUntil=0;
+let prepareCoveredPad=false;
+let publicCrashUntil=0,publicCrashX="1.00";
+const publicStory=createRoundStory();
+let publicObservedRound=null,publicObservedHadSeats=false;
+document.addEventListener('plank:lottery-closed',event=>{
+  publicRepeatReviewUntil=performance.now()+8000;
+  if(publicStory.close(event.detail?.roundId)){publicCrashUntil=0;phaseState="betting";void refresh();}
+});
+let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
+let publicFlightReplay = null;
+let publicAdmissionsPaused = true;
+let publicLotteryRecoveryPending = false;
+let publicSnapshotFreshAt = -Infinity, publicSnapshotPhase = -1, publicBetPending = false;
+let publicAcceptedBet = null;
+document.addEventListener('plank:explore', () => {
+  if (publicFlightReplay || PLAYTEST_MODE) return;
+  flightProgress = 0; targetFlightProgress = 0; flightVel = 0; launchAt = null;
+  publicFlightReplay = { preview: true, roundId: 'preview', endBps: 10000000, startedAt: performance.now(), durationMs: 16000, complete: () => { crashedAt=performance.now();sfx.crash();phaseState = 'crashed'; targetFlightProgress = 0; } };
+  sfx.ignition();
+});
 let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
 let padClampOpen = 0; // 0=closed (cradling the rocket), 1=open (launched), eased in frame()
@@ -2201,7 +2232,7 @@ let performanceSeconds = 0;
 function skyColorAt(progress) {
   const bands = [
     { p: 0.00, top: [12, 24, 46], bottom: [46, 74, 120] },
-    { p: 0.22, top: [30, 96, 176], bottom: [120, 176, 224] },
+    { p: 0.22, top: [16, 38, 75], bottom: [70, 101, 135] },
     { p: 0.45, top: [18, 30, 92], bottom: [64, 60, 150] },
     { p: 0.68, top: [6, 8, 22], bottom: [22, 18, 48] },
     { p: 1.00, top: [2, 3, 8], bottom: [4, 5, 14] },
@@ -2217,22 +2248,29 @@ function skyColorAt(progress) {
 }
 
 function frame() {
+  // Visibility is authoritative, even if an embed missed its transition event.
+  renderSuspended = document.hidden;
   if (renderSuspended || webglContextLost) {
     requestAnimationFrame(frame);
     return;
   }
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const realDelta=clock.getDelta();
+  canvas.dataset.renderFrame = String((Number(canvas.dataset.renderFrame) || 0) + 1);
+  const dt = Math.min(realDelta, 0.05);
   const t = clock.elapsedTime;
 
   // Balanced mode is a performance target, not a fixed graphics preset.
   // Sustained samples avoid oscillation: degrade after a real slow window,
   // recover only with generous headroom. Simulation timing never depends on
   // this visual tier; the authoritative clock continues independently.
-  if (PLAYTEST_MODE && privateQualityPreference === "balanced") {
+  if (!PLAYTEST_MODE) {
+    if (!document.querySelector('.lottery-theatre[open]') && resolutionGovernor.sample(realDelta)!==null) resize();
+  } else if (privateQualityPreference === "balanced") {
     performanceFrames++;
-    performanceSeconds += dt;
+    performanceSeconds += realDelta;
     if (performanceFrames >= 180) {
       const fps = performanceFrames / Math.max(performanceSeconds, 0.001);
+      canvas.dataset.measuredFps=fps.toFixed(1);
       if (fps < 48 && effectiveRenderTier !== "low") configureRenderQuality("low");
       else if (fps > 57 && effectiveRenderTier !== "balanced") configureRenderQuality("balanced");
       performanceFrames = 0;
@@ -2290,29 +2328,22 @@ function frame() {
     // liftoff even when no new snapshot arrives after the ignition hold,
     // names the multiplier it will be granted at (displayed == redeemable),
     // and closes the instant an armed auto target has executed.
-    if (privateFlightDisplayed) privateSyncFlightAction(estBps, xStr);
+    if (privateFlightDisplayed) {
+      privateSyncFlightAction(estBps, xStr);
+      if (privateLiveClock.isPredictionHeld(liveGraphNow)) {
+        $("substatus").textContent = "Reconnecting…";
+        if (uiState === "live-hold") { primaryBtn.disabled = true; primaryBtn.textContent = "Reconnecting…"; }
+      }
+    }
     // Drive the ascent from the CONTINUOUS multiplier (estBps/10000), NOT
     // the 2-decimal display string -- feeding the rounded string made the
     // height jump in 0.01 steps (the stair-stepping). This compression maps
     // multiplier -> [0,1) altitude, smooth at every instant.
     const mExact = estBps / 10000;
     targetFlightProgress = 1 - 1 / (1 + (mExact - 1) / 2.5);
-    // Real bug this fixes: velocityNorm (drives shake, thruster intensity,
-    // engine light, FOV punch-in -- everything that's supposed to SELL
-    // "it's accelerating, cash out") used to be estElapsedBlocks/358 -- a
-    // flat LINEAR ramp against raw elapsed time. But the number on screen
-    // is quadratic (_multiplierAt = 10000 + 40e + e^2/5, so its own rate
-    // of climb grows linearly with e, not constant) -- meaning the real
-    // multiplier visibly speeds up while the tension driving every other
-    // visual cue was climbing at a flat, constant rate the whole time. The
-    // number accelerated; the feel of it didn't. Driving straight off
-    // mExact (already computed above, already the exact same curve the
-    // readout shows) instead of a separate elapsed-time proxy makes
-    // velocityNorm inherit that same acceleration for free -- it's the
-    // same quadratic curve, not a hand-tuned imitation of one. Still hits
-    // full intensity around 5x (mExact-1)/4 == 1 at mExact==5), same
-    // "most rounds have already crashed by here" design target as before.
-    targetVelocityNorm = Math.min(1, (mExact - 1) / 4);
+    // The effect envelope follows the same exponential multiplier, then caps
+    // intensity for legibility and device safety; it never changes the result.
+    targetVelocityNorm = .18 + .82 * Math.min(1, Math.max(0,mExact-1)/20);
     // Ignition hold: during [T, T+δ] the authoritative round is running but
     // the lagged display holds the rocket ON THE PAD at exactly 1.00x —
     // engines visibly burning (thruster/rumble floor) with zero altitude.
@@ -2326,12 +2357,84 @@ function frame() {
     const totalMs = (bettingDurationCache || 8) * 1000;
     const remainMs = Math.max(0, bettingEndsAtEstimateMs - performance.now());
     const fuel = Math.max(0, Math.min(1, 1 - remainMs / totalMs));
-    setMultReadout(fuel.toFixed(2), "fueling");
+    setMultReadout("1.00", "fueling");
+    document.querySelector(".stage").dataset.presentation = "betting";
+    document.querySelector(".stage").dataset.altitude = "0.000";
     // The exhaust/altitude sits on the pad (0) and only the gauge fills.
     targetFlightProgress = 0;
-    $("substatus").textContent = secsLeft > 0 ? `⛽ FUELING · LAUNCH IN ${secsLeft}s` : "IGNITION…";
+    $("substatus").textContent = secsLeft > 0 ? "Betting open" : "Preparing launch…";
   }
-  velocityNorm += (targetVelocityNorm - velocityNorm) * Math.min(1, dt * 3);
+  if (publicFlightReplay) {
+    const replay = publicFlightReplay;
+    const elapsed = performance.now() - replay.startedAt;
+    const flight = publicFlightAt(elapsed, replay.endBps);
+    window.__plankLaunch={round:replay.roundId,liftoff:replay.startedAt+1400+publicServerOffsetMs,elapsed,remainingFlightMs:publicFlightDuration(replay.endBps)-Math.max(0,elapsed-1400)};
+    const multiplier = flight.multiplier;
+    phaseState = elapsed<0?"sealed":"live";
+    if(elapsed>=0&&!replay.ignited){replay.ignited=true;if(elapsed<1400)sfx.ignition();}
+    if(elapsed>=1400&&!replay.lifted){replay.lifted=true;document.dispatchEvent(new CustomEvent('plank:liftoff',{detail:{roundId:replay.roundId,scheduledAt:replay.startedAt+1400,presentedAt:performance.now()}}));}
+    targetFlightProgress = 1 - 1 / (1 + (multiplier - 1) / 2.5);
+    targetVelocityNorm = .18+.82*Math.min(1,Math.max(0,multiplier-1)/20);
+    setMultReadout(multiplier.toFixed(2), "live");
+    $("substatus").textContent = replay.preview ? "Flight preview · no wager" : elapsed<1400 ? `Launch in ${Math.max(0,Math.ceil((1400-elapsed)/1000))}` : `Round ${replay.roundId} replay`;
+    document.querySelector(".stage").dataset.presentation = elapsed<0?"countdown":elapsed<1400?"ignition":"flight";
+    document.querySelector(".stage").dataset.altitude = targetFlightProgress.toFixed(3);
+    if (flight.complete) { publicFlightReplay = null; phaseState = "crashed"; replay.complete(); }
+  }
+  if(!publicFlightReplay && (performance.now()<publicCrashUntil || publicStory.phase==='crash' || publicStory.phase==='lottery')){
+    phaseState="crashed";setMultReadout(publicCrashX,"crashed");
+    document.querySelector(".stage").dataset.presentation=publicStory.phase==='lottery'&&performance.now()>=publicCrashUntil?'lottery':'crash';
+    $("substatus").textContent=performance.now()<publicCrashUntil?'Flight ended':publicStory.phase==='lottery'?'Lottery':scoreboardReadFailed?'Reconnecting to verify result…':'Preparing lottery…';
+  }
+  if(publicPresentationLeadMs&&!publicFlightReplay&&!publicStory.active&&performance.now()>=publicCrashUntil&&publicScheduledLiftoffMs!==null){
+    const remaining=Math.ceil((publicScheduledLiftoffMs-performance.now())/1000);
+    $("substatus").textContent=remaining>0?`Launch in ${remaining}`:"Verifying launch…";
+  }
+  if(publicStory.phase==='loading'&&!publicFlightReplay){
+    phaseState='sealed';setMultReadout('1.00','fueling');
+    document.querySelector('.stage').dataset.presentation='sealed';
+    const loadingLiftoff=publicLiftoffs.get(String(publicStory.round))??publicScheduledLiftoffMs;
+    $('substatus').textContent=publicPresentationLeadMs&&loadingLiftoff>performance.now()?`Launch in ${Math.ceil((loadingLiftoff-performance.now())/1000)}`:'Verifying launch…';
+  }
+  if(!PLAYTEST_MODE&&currentRoundIdCache)$("roundLabel").textContent='ROUND '+(publicStory.round||currentRoundIdCache);
+  document.querySelector('.stage').dataset.storyRound=publicStory.round||currentRoundIdCache||'';
+  document.querySelector('.stage').dataset.storyPhase=publicStory.phase;
+  if (!PLAYTEST_MODE && uiState === "betting-open" && !canCommitPublicRound({phase:publicSnapshotPhase,deadlineMs:bettingEndsAtEstimateMs,nowMs:performance.now(),freshAtMs:publicSnapshotFreshAt,pending:publicBetPending})) {
+    updatePrimaryButton("watching",{sub:publicBetPending ? "Confirming your bet…" : performance.now()-publicSnapshotFreshAt >= 8000 ? "Reconnecting…" : "Betting closed"});
+  }
+  if(!PLAYTEST_MODE && publicAdmissionsPaused && crash){
+    primaryBtn.disabled=true;primaryBtn.textContent=publicSnapshotFreshAt>0?"Paused":"Joining…";
+    $("btnSub").textContent="Withdrawals remain open";
+  }
+  if(!PLAYTEST_MODE && publicLotteryRecoveryPending && crash){
+    primaryBtn.disabled=true;primaryBtn.textContent="Draw pending";
+    $("btnSub").textContent="Winnings remain available";
+    if(!publicFlightReplay && performance.now()>=publicCrashUntil)$("substatus").textContent="Recovering lottery";
+  }
+  // The modal fully covers the flight. Keep the authoritative phase/UI above
+  // advancing, but give its rigid-body simulation exclusive animation time.
+  const lotteryCoversScene=!!document.querySelector('.lottery-theatre[open]');
+  const preparePad=lotteryCoversScene&&prepareCoveredPad;
+  if(lotteryCoversScene&&!preparePad){
+    requestAnimationFrame(frame);
+    return;
+  }
+  const authoritativePhase=phaseState;
+  if(preparePad){
+    phaseState="betting";flightPlume.reset();
+    fireworkTimers.forEach(clearTimeout);fireworkTimers=[];
+    [thrusterParticles,crashParticles,emberParticles,...fireworkSystems].forEach(system=>{system.life.fill(0);system.alpha.fill(0);system.geo.attributes.aAlpha.needsUpdate=true;});
+  }
+  const parkedOnPad = phaseState === "betting" || phaseState === "sealed";
+  if (parkedOnPad) {
+    // Every new book starts from the same pose, regardless of the last flight
+    // or a suspended/slow frame during the lottery presentation.
+    targetFlightProgress = 0; flightProgress = 0; flightVel = 0;
+    velocityNorm = 0; targetVelocityNorm = 0; shakeAmount = 0;
+    padClampOpen=0;rocketUprightMix=0;crashedAt=null;
+    warpTriggeredForRound=false;warpMix=0;warpFlash=0;
+  }
+  velocityNorm += (targetVelocityNorm - velocityNorm) * (1-Math.exp(-realDelta*3));
   // Critically-damped spring toward the (continuously-rising) target: real
   // acceleration physics rather than an exponential ease. The craft builds
   // velocity into the climb, chases the target with a touch of inertia, and
@@ -2339,10 +2442,10 @@ function frame() {
   // critical damping (zeta=1) there is no bounce. Semi-implicit Euler,
   // stable for the dt<=0.05 clamp above.
   {
-    const omega = 6.0; // rad/s -- ~0.3s settle, snappy but weighty
-    const accel = omega * omega * (targetFlightProgress - flightProgress) - 2 * omega * flightVel;
-    flightVel += accel * dt;
-    flightProgress += flightVel * dt;
+    // Closed-form critically damped motion keeps altitude aligned with wall time,
+    // even when a slow GPU cannot deliver every animation frame.
+    const motion=advanceFlightMotion(flightProgress,flightVel,targetFlightProgress,Math.min(realDelta,2));
+    flightProgress=motion.position;flightVel=motion.velocity;
     if (flightProgress < 0) { flightProgress = 0; if (flightVel < 0) flightVel = 0; }
   }
   // Post-crash return descent (targetFlightProgress driven to 0 while the
@@ -2394,24 +2497,24 @@ function frame() {
   skyUniforms.topColor.value.setRGB(sky.top[0] / 255, sky.top[1] / 255, sky.top[2] / 255, THREE.SRGBColorSpace);
   skyUniforms.bottomColor.value.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255, THREE.SRGBColorSpace);
   scene.fog.color.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255, THREE.SRGBColorSpace);
-  scene.fog.density = 0.02 - progress * 0.018;
+  scene.fog.density = 0.006 - progress * 0.005;
 
   // stars fade in once above the troposphere; hemisphere light dims as we
   // leave atmosphere (no more scattered daylight to bounce off objects)
   starMat.opacity = Math.max(0, (progress - 0.3) / 0.4) * 0.9;
-  hemi.intensity = 1.1 - progress * 0.7;
-  sun.intensity = 1.4 - progress * 0.3;
+  hemi.intensity = 1.7 - progress * 0.8;
+  sun.intensity = 2.6 - progress * 1.0;
 
-  // launch pad fades out (moves below the horizon) once the climb begins
-  padGroup.visible = progress < 0.1;
-  padGroup.position.y = PAD_REST_Y - Math.max(0, progress - 0.02) * 40;
+  // The tower and pad stay in world space. They leave the camera's view only
+  // when the craft has climbed above them, never by hiding or sinking them.
+  padGroup.visible = true;
+  padGroup.position.y = PAD_REST_Y;
 
   // clamp arms swing open at ignition and stay open through the crash
   // (the rocket doesn't re-cradle mid-round); beacon blinks continuously
   // Clamps re-cradle the craft once the return descent has landed it.
-  padClampOpen += ((phaseState === "live" || (phaseState === "crashed" && (targetFlightProgress > 0 || flightProgress > 0.04)) ? 1 : 0) - padClampOpen) * Math.min(1, dt * 6);
-  for (const clamp of padClamps) clamp.rotation.x = padClampOpen * 0.9;
-  beacon.material.emissiveIntensity = 1.2 + Math.sin(t * 6) * 0.6;
+  padClampOpen += (((phaseState === "live" && (!publicFlightReplay || performance.now()-publicFlightReplay.startedAt>=1200)) || (phaseState === "crashed" && (targetFlightProgress > 0 || flightProgress > 0.04)) ? 1 : 0) - padClampOpen) * Math.min(1, dt * 6);
+  launchEnvironment.update({release:padClampOpen,ignition:phaseState==='live'?1:0,fueling:parkedOnPad?1:0,time:t});
 
   // satellites drift once above the stratosphere
   const satAlpha = Math.max(0, Math.min(1, (progress - 0.45) / 0.2));
@@ -2451,8 +2554,8 @@ function frame() {
   }
   warpMix += ((warpTriggeredForRound && warpFlash > 0.01 ? 1 : 0) - warpMix) * Math.min(1, dt * 3);
   warpFlash = Math.max(0, warpFlash - dt * 1.4);
-  warpStreakPass.uniforms.uWarp.value = warpMix;
-  warpStreakPass.uniforms.uFlash.value = warpFlash * 0.6;
+  warpStreakPass.uniforms.uWarp.value = prefersReducedMotion?0:warpMix * 0.18;
+  warpStreakPass.uniforms.uFlash.value = prefersReducedMotion?0:warpFlash * 0.04;
   warpStreakPass.uniforms.uTime.value = t;
 
   // Chalkstronaut position + tilt
@@ -2460,31 +2563,29 @@ function frame() {
     // Sway narrows as thrust builds (a craft under hard acceleration
     // tracks straighter), and a small velocity-driven lean sells the
     // G-force -- the nose pitches with how fast it's actually climbing.
-    const swayAmp = phaseState === "live" ? 0.4 * (1 - velocityNorm * 0.6) : 0;
+    const swayAmp = 0;
     chalkstronautSprite.position.set(Math.sin(t * 0.4) * swayAmp, astronautY, 0);
-    const accelLean = phaseState === "live" ? -Math.max(-0.25, Math.min(0.25, flightVel * 0.5)) : 0;
-    chalkstronautSprite.material.rotation = phaseState === "crashed"
+    const accelLean = 0;
+    const avatarTilt = phaseState === "crashed"
       ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1 * (1 - rocketUprightMix)
-      : Math.sin(t * 1.1) * 0.06 * (1 - velocityNorm) + accelLean;
+      : 0;
+    if(chalkstronautSprite.userData.woodCharacter)chalkstronautSprite.rotation.z=avatarTilt;else chalkstronautSprite.material.rotation=avatarTilt;
     // Screen-space rocket position for the e2e stage-stack assertions.
     window.__plankRocketScreen = () => {
       const projected = chalkstronautSprite.position.clone().project(camera);
+      const projectedTop = chalkstronautSprite.position.clone();
+      projectedTop.y += ROCKET_SPRITE_HEIGHT / 2;
+      projectedTop.project(camera);
       const rect = document.querySelector("canvas#fx").getBoundingClientRect();
-      return { x: rect.left + (projected.x + 1) / 2 * rect.width, y: rect.top + (1 - projected.y) / 2 * rect.height };
+      return { x: rect.left + (projected.x + 1) / 2 * rect.width, y: rect.top + (1 - projected.y) / 2 * rect.height, top: rect.top + (1 - projectedTop.y) / 2 * rect.height };
     };
     thrusterLight.position.copy(chalkstronautSprite.position).y -= 1;
     // Engine light flickers faster and burns hotter as velocityNorm rises
     // -- a real rocket's exhaust gets more violent under higher thrust,
     // not just a bigger number on screen.
     thrusterLight.intensity = phaseState === "live" ? 2.2 + velocityNorm * 1.6 + Math.sin(t * (20 + velocityNorm * 30)) * 0.4 : 0;
-    if (phaseState === "live" && Math.random() < 0.6) {
-      const origin = chalkstronautSprite.position.clone();
-      origin.y -= 1.6;
-      // Both particle count and exhaust speed scale with velocityNorm --
-      // the plume visibly lengthens and thickens as the round accelerates,
-      // instead of a fixed-looking trickle the whole flight.
-      emitCone(thrusterParticles, origin, 3 + Math.round(velocityNorm * 4), 0.35, 3.2 + velocityNorm * 3.5);
-    }
+    const nozzle=chalkstronautSprite.position.clone();nozzle.y-=ROCKET_SPRITE_HEIGHT/2+.035;
+    flightPlume.update({dt,time:t,origin:nozzle,camera,active:phaseState==='live',intensity:velocityNorm*(publicFlightReplay?Math.min(1,(performance.now()-publicFlightReplay.startedAt)/1400):1),progress,groundY:PAD_TOP_Y,reduced:prefersReducedMotion});
 
     // Heat shield: peaks in the stratosphere/mesosphere band (~0.35-0.68),
     // the same real "densest surviving atmosphere" window already used
@@ -2505,8 +2606,15 @@ function frame() {
     }
   }
 
+  // Ground-hugging deluge vapor expands away from the flame trench.
+  const ignitionAge=publicFlightReplay ? (performance.now()-publicFlightReplay.startedAt)/1000 : 10;
+  const padBurn=phaseState==='live' && progress<.08;
+
+  // Volumetric cel-shaded deluge is owned by flightPlume; no point-sprite dots.
+  padVapor.points.visible=false;
   updateParticles(thrusterParticles, dt);
   updateParticles(crashParticles, dt);
+  fireworkSystems.forEach(system=>updateParticles(system,dt));
   updateParticles(emberParticles, dt);
 
   // camera: slow cinematic dolly that follows the astronaut's altitude,
@@ -2516,21 +2624,37 @@ function frame() {
   // silent until impact) -- Math.max against its own decay so momentary
   // kicks (ignition, crash) can still spike above the floor and settle
   // back down to it, rather than being overwritten by it.
-  shakeAmount = Math.max(shakeAmount * 0.9, phaseState === "live" ? velocityNorm * 0.22 : 0);
+  shakeAmount = prefersReducedMotion?0:Math.max(shakeAmount * 0.9, phaseState === "live" ? velocityNorm * 0.16 : 0);
   const camShakeX = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
   const camShakeY = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
-  const targetCamY = 6 + astronautY * 0.55;
-  camera.position.set(Math.sin(t * 0.06) * 3 + camShakeX, targetCamY + camShakeY, 24 - progress * 6);
-  camera.lookAt(0, astronautY * 0.6 + 6, 0);
+  const speedFraming=THREE.MathUtils.smoothstep(progress,0,.25);
+  // Hold the launch viewpoint until the nozzle clears the platform, then
+  // follow upward. This gives the first ascent a visible world-space reference.
+  const cameraClimb = Math.max(0, astronautY - ROCKET_REST_Y - .8);
+  const targetCamY = ROCKET_REST_Y + 1.8 + cameraClimb;
+  camera.position.set(-.15+camShakeX, targetCamY + camShakeY, (camera.aspect<.8?12.8:12.0) + speedFraming*4.0);
+  camera.lookAt(-.55*(1-speedFraming), ROCKET_REST_Y + cameraClimb + .7-speedFraming*1.2, 0);
+  const coastHeight=2*Math.tan(camera.fov*Math.PI/360)*90;
+  coastBackdrop.scale.set(coastHeight*Math.max(1.78,camera.aspect)*1.02,coastHeight*1.02,1);
+  coastBackdrop.quaternion.copy(camera.quaternion);
+  coastBackdrop.position.copy(camera.position).add(new THREE.Vector3(0,0,-90).applyQuaternion(camera.quaternion));
+  coastMaterial.opacity=1-THREE.MathUtils.smoothstep(progress,.08,.32);
+  const cosmicHeight = 2 * Math.tan(camera.fov * Math.PI / 360) * 95;
+  cosmicBackdrop.scale.set(Math.max(cosmicHeight * 1.78, cosmicHeight * camera.aspect)*1.04, cosmicHeight*1.04, 1);
+  cosmicBackdrop.quaternion.copy(camera.quaternion);
+  cosmicBackdrop.position.copy(camera.position).add(new THREE.Vector3(0,0,-95).applyQuaternion(camera.quaternion));
+  cosmicMaterial.opacity = THREE.MathUtils.smoothstep(progress, .22, .48);
+
   // FOV punch-in: a subtle widening as velocity climbs is a real
   // cinematography/game-feel trick (used for speed boosts in racing games)
   // for communicating acceleration the eye reads instantly, on top of the
   // numeric multiplier and the particle/rumble cues above.
-  const targetFov = 42 + velocityNorm * 9;
-  if (Math.abs(camera.fov - targetFov) > 0.01) {
-    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4);
+  const targetFov = 42 + (prefersReducedMotion?0:velocityNorm * 9);
+  if (parkedOnPad || Math.abs(camera.fov - targetFov) > 0.01) {
+    camera.fov = parkedOnPad ? 42 : camera.fov + (targetFov - camera.fov) * Math.min(1, dt * 4);
     camera.updateProjectionMatrix();
   }
+  window.__plankCamera = {parked:parkedOnPad,fov:camera.fov,x:camera.position.x,y:camera.position.y,z:camera.position.z,aspect:camera.aspect,padY:padGroup.position.y,padVisible:padGroup.visible,rocketY:astronautY,clearance:astronautY-ROCKET_REST_Y};
 
   // god rays + lens flare read as a corner glint, fading as the scene
   // leaves atmosphere. This USED to project the sun's real world position
@@ -2547,27 +2671,20 @@ function frame() {
   // light-source marker, so it never needs to track the real sun at all.
   const sourceStrength = Math.max(0, 1 - progress * 0.6);
   godRaysPass.uniforms.uLight.value.set(0.84, 0.8);
-  godRaysPass.uniforms.uStrength.value = 0.22 * sourceStrength;
+  godRaysPass.uniforms.uStrength.value = 0.015 * sourceStrength;
   godRaysPass.uniforms.uTime.value = t;
   lensFlarePass.uniforms.uLight.value.set(0.84, 0.8);
-  lensFlarePass.uniforms.uStrength.value = 0.12 * sourceStrength;
+  lensFlarePass.uniforms.uStrength.value = 0.025 * sourceStrength;
 
   // cinematic grade: crash impact reads as a lens-stress chromatic-
   // aberration crunch that decays over ~0.6s, same technique as a hull hit
   const crashElapsed = crashedAt ? (performance.now() - crashedAt) / 600 : 1;
-  gradePass.uniforms.uAberration.value = Math.max(0, 1 - crashElapsed);
+  gradePass.uniforms.uAberration.value = prefersReducedMotion?0:Math.max(0, 1 - crashElapsed);
   gradePass.uniforms.uTime.value = t;
 
-  // Selective bloom: hide the astronaut for the bloom-only render (its
-  // flat art must never glow), restore it for the real frame, then
-  // additively combine the two via mixPass inside the main composer.
-  if (effectiveRenderTier !== "low") {
-    if (chalkstronautSprite) chalkstronautSprite.visible = false;
-    bloomComposer.render();
-    if (chalkstronautSprite) chalkstronautSprite.visible = true;
-    mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
-  }
-  composer.render();
+  // Preserve clocks/state while giving the visible lottery exclusive GPU time.
+  if(!lotteryCoversScene||preparePad)composer.render();
+  if(preparePad){prepareCoveredPad=false;phaseState=authoritativePhase;}
   dismissBoot();
   requestAnimationFrame(frame);
 }
@@ -2638,7 +2755,7 @@ let crashExt = null; // alias of `crash` (kept for the instant-play helpers)
 let sessionSigner = null; // ephemeral browser keypair
 let sessionBank = null; // bank bound to the session key (betVia)
 let bankMode = false; // when true, play routes through the buffer, no popup
-let betAmount = "0.01";
+let betAmount = "0.000001";
 let currentRoundIdCache = null;
 let lastMult = 1;
 // Real wall-clock anchor for the betting countdown, refreshed every poll
@@ -2648,6 +2765,7 @@ let lastMult = 1;
 // smoothly in real time between polls instead of jumping unevenly with
 // poll timing.
 let bettingEndsAtEstimateMs = null;
+let revealAtEstimateMs = null;
 
 // ── live multiplier graph + round-history ribbon (JetX/Rocketman/Aviator
 // convention: a rising stock-ticker-style curve for the live round, and an
@@ -2851,16 +2969,18 @@ function toast(msg, type) {
 async function loadAbi() {
   // The compiled ABIs of the CURRENT contracts (abi/*.json). If any is
   // missing the connect fails loudly instead of binding to something else.
-  for (const name of ["PlankCrash", "PlankLottery", "PlankBank", "PlankRakeRouter", "IDrandBeacon"]) {
+  for (const name of ["PlankGuardedCrash", "PlankCycleLottery", "PlankNumberedLottery", "PlankCrash", "PlankLottery", "PlankBank", "PlankRakeRouter", "IDrandBeacon"]) {
     const res = await fetch(`abi/${name}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`abi/${name}.json is missing -- run: node scripts/export-arcade-abi.mjs`);
     ARCADE_ABI[name] = await res.json();
   }
-  abi = ARCADE_ABI.PlankCrash;
+  abi = ARCADE_ABI.PlankGuardedCrash;
+  if(publicPresentationLeadMs)abi=[...abi,"function practiceLiftoffAtMs(uint256) view returns(uint256)"];
 }
 
 document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
   chip.addEventListener("click", () => {
+    if(INVITE_TEST&&autoPlay)$("autoToggle").click();
     document.querySelectorAll(".chip[data-amt]").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     betAmount = chip.dataset.amt;
@@ -2905,16 +3025,26 @@ let autoBusy = false; // a bet/cashout tx is in flight
     autoBetRound = null;
     autoCashRound = null;
     renderToggle();
-    toast(autoPlay
-      ? PLAYTEST_MODE ? `REPEAT ON — committing ${Math.round(Number(betAmount) * 1_000_000).toLocaleString()} credits at ${autoTarget}× every round` : `Auto-play ON — betting ${betAmount} ETH, cashing at ${autoTarget}x`
+    toast(INVITE_TEST ? (autoPlay ? 'Repeat on · next eligible round' : 'Repeat paused · placed bets stay active') : autoPlay
+      ? PLAYTEST_MODE ? `REPEAT ON — committing ${Math.round(Number(betAmount) * 1_000_000).toLocaleString()} credits at ${autoTarget}× every round` : `Auto-play ON — ${betAmount} ETH per round, target ${autoTarget}x`
       : PLAYTEST_MODE ? "REPEAT OFF" : "Auto-play OFF");
   });
+  function validateTarget() {
+    const bps=parseTargetBps(targetInput.value,maxTargetBpsCache);
+    targetInput.setCustomValidity(bps===null?`Choose a target from 1.01 to ${Number(maxTargetBpsCache)/10000}, with up to two decimal places.`:'');
+    targetInput.setAttribute('aria-invalid',String(bps===null));
+    if(bps!==null)autoTarget=Number(bps)/10000;
+    if(typeof uiState!=='undefined')updatePrimaryButton(uiState);
+    return bps!==null;
+  }
+  targetInput.addEventListener('input',()=>{
+    if(INVITE_TEST&&autoPlay)toggle.click();
+    validateTarget();
+  });
   targetInput.addEventListener("change", () => {
-    const v = Number(targetInput.value);
-    autoTarget = Number.isFinite(v) && v >= 1.1 ? v : 2.0;
-    targetInput.value = String(autoTarget);
-    if (autoPlay) toast(`Auto cash-out target: ${autoTarget}x`);
-    if (PLAYTEST_MODE) void privateAmendTarget();
+    if(!validateTarget()){targetInput.reportValidity();return;}
+    if(autoPlay)toast(`Pre-launch target: ${autoTarget}x`);
+    if(PLAYTEST_MODE)void privateAmendTarget();
   });
   renderToggle();
 })();
@@ -3036,6 +3166,7 @@ async function loadAvatarPicker() {
 }
 
 async function connectToChain(rpcUrl, address, pk, label) {
+  publicAcceptedBet=null;
   await loadAbi();
   // On a real (non-local) RPC, this page's several independent poll timers
   // (refresh() @400ms, the scoreboard/vault/fuel/powerboard/progression
@@ -3048,9 +3179,23 @@ async function connectToChain(rpcUrl, address, pk, label) {
   // far fewer actual HTTP requests -- correctness-neutral (still one
   // logical request per call, ethers un-batches the responses transparently),
   // just less request volume against a real-world rate limit.
-  const providerOpts = REMOTE_DEPLOY ? { batchStallTime: 80, batchMaxCount: 40 } : undefined;
-  provider = new ethers.JsonRpcProvider(rpcUrl, undefined, providerOpts);
-  signer = new ethers.Wallet(pk, provider);
+  const providerOpts = REMOTE_DEPLOY || INVITE_TEST ? { batchStallTime: 80, batchMaxCount: 40 } : undefined;
+  const rpcRequest=new ethers.FetchRequest(rpcUrl);
+  if(INVITE_TEST)rpcRequest.timeout=8000;
+  provider = new ethers.JsonRpcProvider(rpcRequest, undefined, providerOpts);
+  if(INVITE_TEST){
+    const readLogs=provider.getLogs.bind(provider);
+    provider.getLogs=async filter=>{
+      if(filter.blockHash)return readLogs(filter);
+      const tip=await provider.getBlockNumber();
+      const end=filter.toBlock===undefined||filter.toBlock==='latest'?tip:Number(filter.toBlock);
+      const start=Math.max(inviteStartBlock,filter.fromBlock===undefined?0:Number(filter.fromBlock));
+      const logs=[];
+      for(let from=start;from<=end;from+=4000)logs.push(...await readLogs({...filter,fromBlock:from,toBlock:Math.min(end,from+3999)}));
+      return logs;
+    };
+  }
+  signer = queueWalletTransactions(new ethers.Wallet(pk, provider),provider);
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);
   crashExt = crash;
@@ -3065,25 +3210,35 @@ async function connectToChain(rpcUrl, address, pk, label) {
     bettingDurationCache = Number(duration);
     rakeBpsCache = Number(rake);
     minStakeWeiCache = minStake;
-    maxTargetBpsCache = maxTarget;
+    maxTargetBpsCache = maxTarget;$("autoTargetInput").max=String(Number(maxTarget)/10000);
     floorBpsCache = Number(floor);
     refundTimeoutCache = Number(refundTimeout);
     // The crash contract is the source of truth for its own graph.
     LOTTERY_ADDR = lotteryAddr; ROUTER_ADDR = routerAddr; BEACON_ADDR = beaconAddr; BANK_ADDR = bankAddr;
     const capLine = document.getElementById("maxPayableDisclosure");
-    if (capLine) capLine.textContent = `Targets from 1.01x to ${(Number(maxTarget) / 10_000).toLocaleString()}x. Payouts are parimutuel with a ${(Number(floor) / 100).toFixed(0)}% survivor floor; the target is committed with the bet and executes at settlement -- there is no cash-out.`;
+    const cappedRule = (await crash.settlementRuleId()) === ethers.id("capped-survivor-pool");
+    if (capLine) capLine.textContent = cappedRule
+      ? `Up to stake × target. If funding is short, survivors share by stake. Minimum survivor return: ${(Number(floor) / 100).toFixed(0)}%.`
+      : `Legacy pool sharing. Target determines survival, not a fixed payout. Minimum survivor return: ${(Number(floor) / 100).toFixed(0)}%.`;
+    if (capLine) capLine.textContent += " Committed bets cannot be cancelled. If verification stops, unsettled stakes wait for the original result; available balances remain withdrawable.";
     // The headline floor fact, populated from the SAME real on-chain value
     // as capLine above -- never a hardcoded "75%" that could drift from a
     // future deploy's actual floorBps.
     const floorHeadline = document.getElementById("payoutFloorHeadline");
     if (floorHeadline) {
       const floorPct = (Number(floor) / 100).toFixed(0);
-      floorHeadline.innerHTML = `Lock in time and you're guaranteed at least <b>${floorPct}%</b> of your stake back — surviving alone pays a lot more.`;
+      floorHeadline.innerHTML = `Survivor floor: <b>${floorPct}%</b> of your stake. Your final return depends on the pool.`;
     }
   } catch (_) { /* disclosure is best-effort; never blocks the bet UI */ }
   try {
     bank = new ethers.Contract(BANK_ADDR, ARCADE_ABI.PlankBank, signer);
-    lotteryContract = new ethers.Contract(LOTTERY_ADDR, ARCADE_ABI.PlankLottery, provider);
+    // Detect the deployed rule instead of relying only on a host/manifest flag.
+    try {
+      const probe = new ethers.Contract(LOTTERY_ADDR, ["function NUMBERED_BALL_DOMAIN() view returns(bytes32)"], provider);
+      NUMBERED_LOTTERY = (await probe.NUMBERED_BALL_DOMAIN()) === ethers.id("PLANK_NUMBERED_BALL_V1");
+    } catch (_) { NUMBERED_LOTTERY = false; }
+    try{const cycleProbe=new ethers.Contract(LOTTERY_ADDR,["function cycleRulesHash() view returns(bytes32)"],provider);FUNDED_CYCLE_LOTTERY=(await cycleProbe.cycleRulesHash())!==ethers.ZeroHash;}catch{FUNDED_CYCLE_LOTTERY=false;}
+    lotteryContract = new ethers.Contract(LOTTERY_ADDR, FUNDED_CYCLE_LOTTERY?ARCADE_ABI.PlankCycleLottery:NUMBERED_LOTTERY?ARCADE_ABI.PlankNumberedLottery:ARCADE_ABI.PlankLottery, provider);
     routerContract = new ethers.Contract(ROUTER_ADDR, ARCADE_ABI.PlankRakeRouter, provider);
     beaconContract = new ethers.Contract(BEACON_ADDR, ARCADE_ABI.IDrandBeacon, provider);
     if (typeof refreshBankUI === "function") refreshBankUI();
@@ -3092,8 +3247,14 @@ async function connectToChain(rpcUrl, address, pk, label) {
     if (typeof tryRestoreSession === "function") tryRestoreSession();
   } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
-  toast("Connected as " + label);
+  if(!INVITE_TEST)toast("Connected as " + label);
   closeSheet();
+  document.dispatchEvent(new CustomEvent("plank:connected", { detail: { signer, provider, crash } }));
+  if (minStakeWeiCache > 0n) {
+    const values = [1n,10n,100n,1000n].map(scale=>ethers.formatEther(minStakeWeiCache*scale));
+    document.querySelectorAll('#stakeRow button').forEach((chip, i) => { chip.dataset.amt = values[i]; chip.classList.toggle('active', i === 0); });
+    betAmount = values[0];
+  }
   startPolling();
   await loadAvatarPicker();
   await loadHistoryRibbon();
@@ -3130,6 +3291,19 @@ let SIMULATE_ADDR = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
 // the deploy manifest, well before any connect/Simulate button is usable.
 if (!PLAYTEST_MODE) await loadDeployAddresses();
 const SIM_RPC = "http://127.0.0.1:8545";
+// Local stack replacement must not strand a tab on an orphaned keeper.
+if(!PLAYTEST_MODE&&['127.0.0.1','localhost'].includes(location.hostname))setInterval(async()=>{
+  if(localDeploymentWatchBusy||!crash||!provider)return;localDeploymentWatchBusy=true;
+  try{
+    if((await provider.getNetwork()).chainId!==31337n)return;
+    const response=await fetch('deploy-addresses.local.json',{cache:'no-store',signal:AbortSignal.timeout(3000)});
+    if(!response.ok)return;const manifest=await response.json();
+    if(ethers.isAddress(manifest.crash)&&manifest.crash.toLowerCase()!==(await crash.getAddress()).toLowerCase()){
+      sessionStorage.setItem('plank:resume-practice','1');location.reload();
+    }
+  }catch{}finally{localDeploymentWatchBusy=false;}
+},5000);
+
 let botBetTimer = null;
 let botBetAttemptedRound = null;
 // Real bug this fixes: setInterval's callback is async, but setInterval
@@ -3181,6 +3355,7 @@ async function startBotBettor() {
 }
 
 $("simBtn").addEventListener("click", async () => {
+  if(INVITE_TEST){document.dispatchEvent(new Event('plank:join-invite'));return;}
   // Remote friend-test deploys (scripts/testnet-casino-setup.ts) carry
   // their own rpcUrl + a shared simulateKey in the manifest -- same idea
   // as local Simulate's hardcoded Hardhat account, just sourced from the
@@ -3202,14 +3377,17 @@ $("simBtn").addEventListener("click", async () => {
     return;
   }
   try {
-    await connectToChain(SIM_RPC, SIMULATE_ADDR, LOCAL_ACCOUNTS[0].pk, "Deployer (Simulate mode)");
-    await startBotBettor();
+    await connectToChain(SIM_RPC, SIMULATE_ADDR, LOCAL_ACCOUNTS[0].pk, "Free play");
     $("simBtn").classList.add("hide");
-    toast("Simulate mode: real contract, real chain, a background bot covers the 2nd bettor");
+    toast("Free play · test funds only");
   } catch (err) {
     toast("Simulate failed: " + err.message + " -- is the local node running with this address deployed?");
   }
 });
+if(!PLAYTEST_MODE&&['127.0.0.1','localhost'].includes(location.hostname)&&sessionStorage.getItem('plank:resume-practice')==='1'){
+  sessionStorage.removeItem('plank:resume-practice');setTimeout(()=>$('simBtn').click(),0);
+}
+
 
 function bpsToXStr(bps) {
   const v = Number(bps) / 10000;
@@ -3262,18 +3440,20 @@ function setMultReadout(xStr, cls) {
 }
 
 let resultCardTimer = null;
+document.addEventListener("plank:lottery-opening",()=>{if(!PLAYTEST_MODE){hideOutcome();if(!publicFlightReplay)prepareCoveredPad=true;}});
 function showResultCard(kind, xNum, deltaText, label) {
   const card = $("resultCard");
   const tier = kind !== "win" ? "" : xNum >= 10 ? "tier-epic" : xNum >= 5 ? "tier-high" : xNum >= 2 ? "tier-mid" : "tier-low";
   card.className = `result-card show ${kind} ${tier}`;
   $("resultTier").textContent = label;
-  $("resultMult").textContent = xNum.toFixed(2) + "x";
+  $("resultMult").textContent = (typeof xNum === "string" ? xNum : xNum.toFixed(2)) + "×";
   $("resultDelta").textContent = deltaText;
   clearTimeout(resultCardTimer);
   // Auto-dismiss well inside BETTING_SECONDS (8s locally) so it's gone
   // before the next round's own launch, not a modal blocking anything --
   // pointer-events stay off the whole time (see .result-card CSS).
-  resultCardTimer = setTimeout(() => card.classList.remove("show"), 3200);
+  if(PLAYTEST_MODE)resultCardTimer = setTimeout(() => card.classList.remove("show"), 3200);
+  // Public receipt remains until the prepared lottery takes over, without a blank beat.
 }
 function hideOutcome() {
   $("resultCard").classList.remove("show");
@@ -3425,14 +3605,14 @@ function showScoreboardForRound(roundId, round) {
   scoreboardDismiss = setTimeout(hideScoreboard, 9000);
 }
 
-// The Prize Vault readout: the perpetual, never-zero reserve that seeds every
-// game. Shows the current Vault and what the next game will be seeded with,
-// and pulses green whenever it grows -- the "always compounding" signal.
+// Current reserve and next underwriting quote. The spendable part can shrink;
+// only protected principal has a monotonic accounting guarantee.
 let lastVaultWei = null;
 async function refreshVault() {
   if (!crash) return;
   try {
-    const [reserve, seed] = await Promise.all([crash.reserve(), crash.nextSeed()]);
+    const blockTag = await provider.getBlockNumber();
+    const [reserve, seed] = await Promise.all([crash.reserve({blockTag}), crash.nextSeed({blockTag})]);
     const amtEl = $("vaultAmt");
     const seedEl = $("vaultSeed");
     if (amtEl) amtEl.textContent = (+ethers.formatEther(reserve)).toFixed(4) + " ETH";
@@ -3464,27 +3644,44 @@ function fmtDuration(sec) {
   return s + "s";
 }
 
+let powerboardReadSequence = 0;
+let powerboardAppliedSequence = 0;
 async function refreshPowerboardUI() {
   if (!lotteryContract || !crash) return;
+  const sequence = ++powerboardReadSequence;
+  const readingLottery = lotteryContract, readingCrash = crash, readingProvider = provider, wallet = signer?.address || null;
   try {
-    const [quote, pool, hits, draws, oddsOneIn, kappaBps, contributionBps, owedToMe, roundId] = await Promise.all([
-      lotteryContract.quote(), lotteryContract.pool(), lotteryContract.hits(), lotteryContract.draws(),
-      lotteryContract.oddsOneIn(), lotteryContract.kappaBps(), lotteryContract.contributionBps(),
-      signer ? lotteryContract.owed(signer.address) : Promise.resolve(0n), crash.currentRoundId(),
+    const block = await readingProvider.getBlock("latest");
+    if (!block) return;
+    const at = {blockTag: block.number};
+    const [quote, pool, hits, draws, oddsOneIn, kappaBps, contributionBps, owedToMe, roundId, rake, keeper] = await Promise.all([
+      readingLottery.quote(at), readingLottery.pool(at), readingLottery.hits(at), readingLottery.draws(at),
+      readingLottery.oddsOneIn(at), readingLottery.kappaBps(at), readingLottery.contributionBps(at),
+      wallet ? readingLottery.owed(wallet, at) : Promise.resolve(0n), readingCrash.currentRoundId(at),
+      readingCrash.effectiveRakeBps(at), readingCrash.keeperRewardBps(at),
     ]);
     const [prize, winnerPaid, seeded] = [quote.prize, quote.winnerPaid, quote.seeded];
+    let cycleFeeCopy='';
+    if(FUNDED_CYCLE_LOTTERY){
+      const [entryFee,rollFee,retentionCap]=await Promise.all([readingLottery.founderFeeBps(at),readingLottery.rolloverFeeBps(at),readingLottery.cycleRetentionMaxBps(at)]);
+      cycleFeeCopy=`<p>Lottery funding fees: ${Number(entryFee)/100}% on fresh inflow, then ${Number(rollFee)/100}% of the remainder reserved for draw rollover. Funded unsuccessful draws pay this reserved fee; banked prizes are not charged again. A win also pays ${Number(rollFee)/100}% of its retained seed to the house. Retention grows with fresh cycle funding, up to ${Number(retentionCap)/100}% of the board. The prize above is the winner’s actual payout.</p>`;
+    }
     // This round's rake so far prices this round's own chance (actuarial rule).
-    const round = await crash.currentRound();
-    const rakeSoFar = (round.playerPool * BigInt(rakeBpsCache)) / 10000n;
-    const threshold = prize > 0n ? await lotteryContract.hitThreshold(rakeSoFar, prize) : 0n;
+    const round = await readingCrash.rounds(roundId, at);
+    const rakeSoFar = netRoundRake(round.playerPool, rake, keeper);
     const PROB_ONE = 10n ** 18n;
-    const roundOdds = threshold > 0n ? (PROB_ONE + threshold - 1n) / threshold : null;
-    const myStake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
+    const ballCount=NUMBERED_LOTTERY?await readingLottery.ballCountFor(rakeSoFar,prize,at):null;
+    const threshold=ballCount!==null?(ballCount>0n?PROB_ONE/ballCount:0n):prize>0n?await readingLottery.hitThreshold(rakeSoFar,prize,at):0n;
+    const roundOdds = ballCount!==null?(ballCount>0n?ballCount:null):threshold > 0n ? (PROB_ONE + threshold - 1n) / threshold : null;
+    const myStake = wallet ? await readingCrash.stakeOf(roundId, wallet, at) : 0n;
+    const canonical = await readingProvider.getBlock(block.number);
+    if (sequence < powerboardAppliedSequence || lotteryContract !== readingLottery || crash !== readingCrash || provider !== readingProvider || (signer?.address || null) !== wallet || canonical?.hash !== block.hash) return;
+    powerboardAppliedSequence = sequence;
     const mine = round.playerPool > 0n ? (threshold * myStake) / round.playerPool : 0n;
     const myOdds = mine > 0n ? (PROB_ONE + mine - 1n) / mine : null;
     const ticketsEl = $("pbTickets");
     const jackpotEl = $("pbJackpot");
-    if (ticketsEl) ticketsEl.textContent = prize > 0n ? "PRIZE " + (+ethers.formatEther(winnerPaid)).toFixed(4) + " Ξ" : "PRIZE FUNDING";
+    if (ticketsEl) ticketsEl.textContent = prize > 0n ? "PRIZE " + Number(ethers.formatEther(winnerPaid)).toLocaleString('en-US',{maximumSignificantDigits:5}) + " Ξ" : "PRIZE FUNDING";
     if (jackpotEl) jackpotEl.textContent = myOdds !== null ? "· your odds 1 in " + myOdds.toLocaleString() : roundOdds !== null ? "· round 1 in " + roundOdds.toLocaleString() : "";
     if (lastPbJackpotWei !== null && prize > lastPbJackpotWei) {
       const chip = $("pbStat");
@@ -3495,14 +3692,15 @@ async function refreshPowerboardUI() {
     if (pop && pop.classList.contains("show")) {
       const pct = (t) => `${(Number(t / 10_000_000_000n) / 1e8 * 100).toFixed(4)}%`;
       $("pbPopBody").innerHTML =
-        '<div class="pb-row"><span class="pb-k">If you win you receive</span><span class="pb-v hi">' + (+ethers.formatEther(winnerPaid)).toFixed(4) + ' Ξ</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Prize on the board</span><span class="pb-v">' + (+ethers.formatEther(prize)).toFixed(4) + ' Ξ = winner + ' + (+ethers.formatEther(seeded)).toFixed(4) + ' Ξ next seed</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Banked right now</span><span class="pb-v">' + (+ethers.formatEther(pool)).toFixed(4) + ' Ξ</span></div>' +
-        '<div class="pb-row"><span class="pb-k">This round\'s chance</span><span class="pb-v">' + (roundOdds !== null ? '1 in ' + roundOdds.toLocaleString() + ' (' + pct(threshold) + ')' : 'no prize on the board yet') + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Your chance this round</span><span class="pb-v hi">' + (myOdds !== null ? 'about 1 in ' + myOdds.toLocaleString() : 'no seat in this round') + '</span></div>' +
-        '<div class="pb-row"><span class="pb-k">Record</span><span class="pb-v">' + draws.toString() + ' draws · ' + hits.toString() + ' hits</span></div>' +
-        (owedToMe > 0n ? '<div class="pb-row"><span class="pb-k">Owed to you</span><span class="pb-v hi">' + (+ethers.formatEther(owedToMe)).toFixed(4) + ' Ξ · <button id="pbWithdraw">withdraw</button></span></div>' : '') +
-        '<div class="pb-guarantee">Round-only eligibility: only seats of the round that draws hold tickets, weighted by stake. Each round\'s chance is min(1 in ' + oddsOneIn.toString() + ', its contribution (' + (Number(contributionBps) / 100).toFixed(0) + '% of its rake) ÷ (' + (Number(kappaBps) / 10_000).toFixed(1) + ' × the winner take)), so a bigger prize is rarer in exact proportion and can never be farmed. Nothing is forced; displayed equals redeemable (PlankLottery.quote()).</div>';
+        '<div class="pb-row"><span class="pb-k">Estimated prize</span><span class="pb-v hi">Ξ ' + ethers.formatEther(winnerPaid) + ' ETH</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Your chance</span><span class="pb-v hi">' + (myStake>0n ? pct(mine) : 'Join a round') + '</span></div>' +
+        (owedToMe>0n ? '<div class="pb-row">Ξ '+ethers.formatEther(owedToMe)+' ETH <button id="pbWithdraw">Collect</button></div>' : '') +
+        '<details><summary>How it works</summary>' +
+        '<p>Estimates may change before settlement. Stakes determine each player’s share of the round chance.</p>' + cycleFeeCopy +
+        '<div class="pb-row"><span>Round chance</span><span>'+pct(threshold)+'</span></div>' +
+        '<div class="pb-row"><span>Pool</span><span>Ξ '+ethers.formatEther(pool)+' ETH</span></div>' +
+        '<div class="pb-row"><span>Next seed if hit</span><span>Ξ '+ethers.formatEther(seeded)+' ETH</span></div>' +
+        '<p>'+draws.toString()+' draws · '+hits.toString()+' hits. The pool can decrease when a prize is paid.</p></details>';
       const wd = document.getElementById("pbWithdraw");
       if (wd) wd.onclick = async () => { try { await (await lotteryContract.connect(signer).withdraw()).wait(); toast("Lottery winnings withdrawn", "success"); } catch (err) { toast("Withdraw failed: " + (err.shortMessage || err.message), "error"); } };
     }
@@ -3529,7 +3727,7 @@ $("pbStat").addEventListener("click", () => {
       '<div class="pb-row"><span class="pb-k">Probability-weighted value of your ticket</span><span class="pb-v">' + (m ? privateCredits(m.myExpected) : '0') + ' cr</span></div>' +
       '<div class="pb-row"><span class="pb-k">Chance for a whole round like this table\'s</span><span class="pb-v">' + (m && m.roundOdds !== null ? '1 in ' + privateCredits(m.roundOdds) : 'no draw yet') + '</span></div>' +
       '<div class="pb-row"><span class="pb-k">Expected time to a hit</span><span class="pb-v">' + (econ.expectedRoundsToHit == null ? 'no funding yet' : '≈ ' + privateCredits(econ.expectedRoundsToHit) + ' rounds') + '</span></div>' +
-      '<div class="pb-guarantee">Round-only eligibility: only the seats of the round that draws hold tickets, weighted by stake. Each round\'s chance is the smaller of 1 in ' + privateCredits(econ.flatOddsOneIn || 16) + ' and what that round paid in ÷ (' + (Number(privateBig(econ.kappaBps || 20_000)) / 10_000).toFixed(1) + ' × the prize), so a bigger prize is rarer in exact proportion and can never be farmed. ' + presentation.detail + ' Nothing is forced; displayed equals redeemable.</div>';
+      '<div class="pb-guarantee">Round-only eligibility: only the seats of the round that draws hold tickets, weighted by stake. Each round\'s chance is the smaller of 1 in ' + privateCredits(econ.flatOddsOneIn || 16) + ' and what that round paid in ÷ (' + (Number(privateBig(econ.kappaBps || 20_000)) / 10_000).toFixed(1) + ' × the prize), so a bigger prize is rarer in exact proportion under this formula. ' + presentation.detail + ' Nothing is forced; displayed equals redeemable.</div>';
   } else refreshPowerboardUI();
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
@@ -3626,7 +3824,7 @@ async function refreshVerifyPopover() {
       `<div class="vf-row"><span class="vf-k">Phase</span><span class="vf-v">${["BETTING", "LIVE", "SETTLED", "VOIDED", "REFUNDED"][Number(round.phase)] ?? round.phase}</span></div>` +
       `<div class="vf-row"><span class="vf-k">drand round #</span><span class="vf-v">${drandRound}</span></div>` +
       `<div class="vf-row"><span class="vf-k">Reveal not before</span><span class="vf-v">${new Date(Number(round.revealNotBefore) * 1000).toLocaleTimeString()}</span></div>` +
-      `<div class="vf-row"><span class="vf-k">Rule</span><span class="vf-v">ccs-2l v${(await crash.settlementRuleVersion()).toString()} · params ${round.paramsHash.slice(0, 10)}…</span></div>` +
+      `<div class="vf-row"><span class="vf-k">Rule</span><span class="vf-v">${(await crash.settlementRuleId()) === ethers.id("capped-survivor-pool") ? "Capped survivor pool" : "Legacy pool"} · ${round.paramsHash.slice(0, 10)}…</span></div>` +
       `<div class="vf-row"><span class="vf-k">Randomness</span>${randomnessHtml}</div>` +
       derivedHtml +
       `<a class="vf-link" href="https://api.drand.sh/${chainHash}/public/${drandRound}" target="_blank" rel="noopener">Check drand round ${drandRound} independently ↗</a>` +
@@ -3644,51 +3842,195 @@ $("verifyPopClose").addEventListener("click", () => $("verifyPopover").classList
 // Event-driven: watch for the newest RoundSettled and show its scoreboard,
 // no matter what the current round is now. Runs on the same poll cadence.
 let lastScoreboardRound = -1n;
+let lastFlightPresentedRound = -1n;
+let lastReceiptPresentedRound = -1n;
+let scoreboardFromBlock = null;
+let scoreboardBusy = false;
+let scoreboardReadFailed = false;
 async function pollScoreboard() {
-  if (!crash || lastScoreboardRound === -1n) return;
+  if (!crash || scoreboardBusy || publicStory.phase==='lottery'||(publicPresentationLeadMs&&!publicClockAnchored)) return;
+  scoreboardBusy = true;
+  const scoreCrash=crash,scoreSigner=signer,scoreProvider=provider,scoreLottery=lotteryContract;
+  const scoreIsCurrent=()=>crash===scoreCrash&&signer===scoreSigner&&provider===scoreProvider&&lotteryContract===scoreLottery;
   try {
-    const evs = await crash.queryFilter(crash.filters.RoundSettled());
-    if (!evs.length) return;
-    const last = evs[evs.length - 1];
+    if (lastScoreboardRound === -1n || scoreboardFromBlock === null) {
+      const startingCrash = crash, startingProvider = provider;
+      const block = await startingProvider.getBlock("latest");
+      if (!block) return;
+      const id = await startingCrash.currentRoundId({blockTag:block.number});
+      if (crash !== startingCrash || provider !== startingProvider) return;
+      lastScoreboardRound = id - 1n;
+      scoreboardFromBlock = block.number;
+      if(publicPresentationLeadMs&&publicClockAnchored&&id>1n){
+        const previous=id-1n;
+        const [record,liftoff]=await Promise.all([startingCrash.rounds(previous),startingCrash.practiceLiftoffAtMs(previous)]);
+        const launch=Number(liftoff)-publicServerOffsetMs;
+        if(record.crashBps>=10000n&&performance.now()<launch+publicFlightDuration(Number(record.crashBps))+CRASH_FINALE_MS+4800){
+          lastScoreboardRound=previous-1n;
+          scoreboardFromBlock=Math.max(0,block.number-1999);
+          publicLiftoffs.set(previous.toString(),launch);publicStory.reserve(previous);
+        }
+      }
+      return;
+    }
+    const head = await provider.getBlockNumber();
+    if (scoreboardFromBlock > head) return;
+    const end = Math.min(head, scoreboardFromBlock + 1999);
+    const evs = await crash.queryFilter(crash.filters.RoundSettled(), scoreboardFromBlock, end);
+    if(!scoreIsCurrent())return;
+    const last = evs.find(event => event.args.roundId > lastScoreboardRound);
+    if (!last) { scoreboardFromBlock = end + 1; return; }
     const rid = last.args.roundId;
+    // Loading is provisional; an older queued settlement owns the next story.
+    if(!publicStory.acceptSettlement(rid))return;
     if (rid > lastScoreboardRound) {
-      lastScoreboardRound = rid;
       const rd = await crash.rounds(rid);
-      if (rd.crashBps > 0n) {
+      const scheduledLiftoff=publicPresentationLeadMs?Number(await scoreCrash.practiceLiftoffAtMs(rid))-publicServerOffsetMs:null;
+      if(!scoreIsCurrent())return;
+      // Resolve receipt and lottery I/O during countdown/flight, not after
+      // the crash card. Capture failures immediately; consume/retry normally.
+      const prefetch=fn=>Promise.resolve().then(fn).then(value=>({value}),error=>({error}));
+      const consume=async pending=>{const r=await pending;if(r.error)throw r.error;return r.value;};
+      const receiptRead=scoreSigner?prefetch(()=>Promise.all([
+        scoreCrash.stakeOf(rid,scoreSigner.address),scoreCrash.targetOf(rid,scoreSigner.address),
+        scoreCrash.queryFilter(scoreCrash.filters.SeatSettled(rid,scoreSigner.address)),scoreCrash.paidOf(rid,scoreSigner.address)
+      ])):null;
+      const drawRead=scoreLottery?prefetch(()=>scoreLottery.queryFilter(scoreLottery.filters.Draw(rid))):null;
+      const numberedRead=NUMBERED_LOTTERY&&scoreLottery?prefetch(()=>scoreLottery.queryFilter(scoreLottery.filters.NumberedDraw(rid))):null;
+      const seedRead=prefetch(async()=>{
+        const randomness=await beaconContract.randomnessOrZero(rd.targetDrandRound);
+        return randomness&&randomness!==ethers.ZeroHash?scoreCrash.resultSeed(rid,rd.targetDrandRound,randomness):null;
+      });
+      const quoteRead=scoreLottery?prefetch(async()=>{
+        const draws=await consume(drawRead);
+        return draws[0]?scoreLottery.quote({blockTag:draws[0].blockNumber}):null;
+      }):null;
+      if(numberedRead)void numberedRead.then(({value:events})=>{
+        const draw=events?.[0]?.args;
+        if(scoreIsCurrent()&&draw)document.dispatchEvent(new CustomEvent("plank:lottery-prepare",{detail:{roundId:rid.toString(),ballCount:draw.ballCount.toString(),drawnBall:draw.drawnBall.toString()}}));
+      }).catch(()=>{});
+      let participated=false,lotteryStake=0n,lotteryTarget=0n;
+      if (rd.crashBps > 0n && lastFlightPresentedRound !== rid) {
+        if(!publicStory.flight(rid))return;
+        // The outcome is already settled. Animate a labelled replay, never a
+        // fictitious opportunity to cash out. Betting for the next round stays real.
+        if (!prefersReducedMotion && !document.hidden) {
+          await new Promise((resolve) => {
+            const durationMs = publicFlightDuration(Number(rd.crashBps));
+            let finished = false;
+            const complete = () => { if (finished) return; finished = true; clearTimeout(timeout); resolve(); };
+            const timeout = setTimeout(() => { if(publicFlightReplay===replay)publicFlightReplay = null; complete(); }, durationMs + 4900 + (publicPresentationLeadMs?Math.max(0,scheduledLiftoff-performance.now()):0));
+            document.dispatchEvent(new CustomEvent("plank:flight-replay-start",{detail:{roundId:rid.toString()}}));
+            const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt: publicPresentationLeadMs ? scheduledLiftoff-1400 : performance.now()+1600, durationMs, complete };
+            publicFlightReplay = replay;
+            const resumedMultiplier=publicFlightAt(performance.now()-replay.startedAt,replay.endBps).multiplier;
+            flightProgress=targetFlightProgress=1-1/(1+(resumedMultiplier-1)/2.5);flightVel=0;
+            warpTriggeredForRound=flightProgress>=GATE_PROGRESS;multGraphSamples=[];clearMultGraph();
+            launchAt = null;
+          });
+        }
+        if(!scoreIsCurrent())return;
+        publicStory.crash(rid);
+        lastFlightPresentedRound=rid;
         showScoreboardForRound(rid, rd);
-        crashedAt = performance.now();
+        crashedAt = publicPresentationLeadMs?scheduledLiftoff+publicFlightDuration(Number(rd.crashBps)):performance.now();
+        publicCrashUntil=crashedAt+(publicPresentationLeadMs?CRASH_FINALE_MS:prefersReducedMotion?REDUCED_CRASH_FINALE_MS:CRASH_FINALE_MS);
+        publicCrashX=bpsToXStr(rd.crashBps);
+        if(performance.now()-crashedAt<500){
         shakeAmount = prefersReducedMotion ? 0 : 1.4;
         spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
         sfx.crash(); haptic([50, 30, 80]);
         const flashEl = $("crashFlash");
         if (flashEl) { flashEl.classList.remove("flash"); void flashEl.offsetWidth; flashEl.classList.add("flash"); }
+        }
         const xStr = bpsToXStr(rd.crashBps);
         setMultReadout(xStr, "crashed");
         targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
         recordMultGraphSample(Number(xStr));
         drawMultGraph();
+        if(!scoreIsCurrent())return;
+      }
+      if(lastReceiptPresentedRound!==rid){
         // The player's own conclusion: real payout from the SeatSettled event.
         if (signer) {
-          const [stake, targetBps, mine] = await Promise.all([crash.stakeOf(rid, signer.address), crash.targetOf(rid, signer.address), crash.queryFilter(crash.filters.SeatSettled(rid, signer.address))]);
+          const [stake, targetBps, mine, fallbackPaid] = await consume(receiptRead);
+          if(!scoreIsCurrent())return;
           if (stake > 0n) {
-            const paid = mine[0] ? mine[0].args.playerPayout + mine[0].args.houseBonus : await crash.paidOf(rid, signer.address);
+            participated=true;lotteryStake=stake;lotteryTarget=targetBps;
+            const paid = mine[0] ? mine[0].args.playerPayout + mine[0].args.houseBonus : fallbackPaid;
             const survived = mine[0] ? mine[0].args.survived : targetBps <= rd.crashBps;
-            const net = paid - stake;
+            const actual = settledReturn(stake,paid);
+            const net = actual.net;
             const targetX = Number(targetBps) / 10000;
-            if (!survived) showResultCard("lose", Number(xStr), `-${ethers.formatEther(stake)} ETH`, `CRASHED BELOW YOUR ${targetX.toFixed(2)}x TARGET`);
+            if (!survived) showResultCard("lose", actual.returnedX, `Ξ ${ethers.formatEther(paid)} returned`, `${actual.roiPercent} · CRASHED`);
             else {
               const profitable = net > 0n;
               const delta = `${net >= 0n ? "+" : "-"}${ethers.formatEther(net >= 0n ? net : -net)} ETH net`;
-              showResultCard(profitable ? "win" : "lose", targetX, delta, profitable ? "PROFIT · TARGET SURVIVED" : "SURVIVED · RETURN BELOW STAKE");
-              if (profitable) celebrate(targetX);
+              showResultCard(profitable ? "win" : "lose", actual.returnedX, `Ξ ${ethers.formatEther(paid)} returned`, `${actual.roiPercent} · ${profitable ? "PROFIT" : net===0n ? "BREAK EVEN" : "LOSS"}`);
+              $("resultDelta").title = `${delta}; excludes gas. Target ${targetX.toFixed(2)}×.`;
+              if (profitable) celebrate(Number(actual.returnedX));
             }
           }
         }
+        lastReceiptPresentedRound=rid;
+      }
+      lastFlightPresentedRound = rid;
+      if (!participated && scoreSigner) {
+        [lotteryStake,lotteryTarget] = await consume(receiptRead);
+        participated = lotteryStake > 0n;
+      }
+      if (lotteryContract) {
+        const drawEvents = await consume(drawRead);
+        const draw = drawEvents[0]?.args;
+        // Keep this settled round queued until its original draw is recorded.
+        // A retry must not replay the flight or invent a replacement result.
+        if (!draw) return;
+        if (draw) {
+          let sample=null,seedForProof=null;
+          try {
+            const seed=await consume(seedRead);
+            if(seed){
+              seedForProof=seed;
+              sample=(BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32','bytes32'],[ethers.id('PLANK_BALL_V1'),seed])))%1000000000000000000n).toString();
+              if(draw.prize>0n && (BigInt(sample)<draw.threshold)!==draw.hit) sample=null;
+            }
+          } catch { /* Do not invent a number if the proof cannot be read. */ }
+          let numbered=null;
+          if(NUMBERED_LOTTERY){const events=await consume(numberedRead);const e=events[0]?.args;if(e){
+            const expected=e.ballCount>0n&&seedForProof?e.ballCount-(BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32','bytes32'],[ethers.id('PLANK_NUMBERED_BALL_V1'),seedForProof])))%e.ballCount):0n;
+            numbered={ballCount:e.ballCount.toString(),drawnBall:e.drawnBall.toString(),verified:seedForProof!==null&&expected===e.drawnBall&&(expected===1n)===draw.hit};
+          }else numbered={ballCount:'0',drawnBall:'0',verified:draw.prize===0n};}
+          const nextQuote = await consume(quoteRead);
+          if(!scoreIsCurrent())return;
+          if(NUMBERED_LOTTERY&&numbered?.verified!==true)return;
+          if(participated||INVITE_TEST)publicStory.lottery(rid);
+          else setTimeout(()=>{if(publicStory.close(rid))void refresh();},Math.max(0,publicCrashUntil-performance.now()));
+          document.dispatchEvent(new CustomEvent("plank:lottery-result", {detail:{roundId:rid.toString(),participated,revealNotBefore:publicCrashUntil,spectatorShow:INVITE_TEST,testFunds:PRACTICE_FAST_TIMING,player:scoreSigner?.address||null,targetBps:lotteryTarget.toString(),myStake:lotteryStake.toString(),roundStake:rd.playerPool.toString(),hit:draw.hit,isWinner:!!signer&&draw.hit&&draw.winner.toLowerCase()===signer.address.toLowerCase(),lotteryAddress:LOTTERY_ADDR,...numbered,sample,threshold:draw.threshold.toString(),prize:ethers.formatEther(draw.prize),paid:ethers.formatEther(draw.winnerPaid),nextPrize:ethers.formatEther(nextQuote[1]),winner:draw.winner}}));
+        }
       }
       if ($("statsPanel").classList.contains("show")) runStatsScan();
+      lastScoreboardRound = rid;
+      scoreboardFromBlock = last.blockNumber;
+      scoreboardReadFailed = false;
     }
-  } catch (_) { /* transient */ }
+  } catch (_) { scoreboardReadFailed=true; /* Retry the original event; never fabricate a result. */ }
+  finally { scoreboardBusy = false; }
 }
+
+let lotteryCollectionBusy = false;
+document.addEventListener('plank:collect-lottery', async event => {
+  const {result,complete}=event.detail||{};
+  if(typeof complete!=='function')return;
+  if(lotteryCollectionBusy){complete({ok:false,message:'Collection already pending.'});return;}
+  lotteryCollectionBusy=true;
+  try{
+    if(!signer||!lotteryContract||!result?.isWinner||result.winner?.toLowerCase()!==signer.address.toLowerCase()||result.lotteryAddress?.toLowerCase()!==LOTTERY_ADDR.toLowerCase())throw new Error('Reconnect the winning wallet to collect.');
+    const connected=lotteryContract.connect(signer),amount=await connected.owed(signer.address);
+    if(amount>0n){const receipt=await (await connected.withdraw()).wait();if(receipt.status!==1)throw new Error('Collection was not confirmed.');}
+    complete({ok:true});refreshPowerboardUI();
+  }catch(error){complete({ok:false,message:error.code==='ACTION_REJECTED'?'Collection cancelled.':error.shortMessage||error.message||'Try collecting again.'});}
+  finally{lotteryCollectionBusy=false;}
+});
 
 // Real celebration, scaled to the real result -- not a fixed-size fireworks
 // burst regardless of outcome. intensityNorm (0..1) is a log scale of the
@@ -3706,7 +4048,7 @@ function celebrate(xNum) {
 
 // ── primary button state machine ────────────────────────────────────────
 const primaryBtn = $("primaryBtn");
-let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
+
 
 // ── AUTO-PLAY ────────────────────────────────────────────────────────────
 // One toggle repeats the already-complete bet commitment each round. The
@@ -3718,12 +4060,19 @@ let uiState = "disconnected"; // disconnected | betting-open | waiting | live-ho
 // declared above wireAutoPlay to avoid a temporal-dead-zone error.)
 
 async function doPlaceBet(viaButton) {
+  const visibleTargetBps=parseTargetBps($("autoTargetInput").value,maxTargetBpsCache);
+  if(visibleTargetBps===null){if(viaButton)$("autoTargetInput").reportValidity();return false;}
+  autoTarget=Number(visibleTargetBps)/10000;
+  if (!PLAYTEST_MODE && (publicAdmissionsPaused || publicAcceptedBet?.round === currentRoundIdCache)) return false;
+  if (!PLAYTEST_MODE && !canCommitPublicRound({phase:publicSnapshotPhase,deadlineMs:bettingEndsAtEstimateMs,nowMs:performance.now(),freshAtMs:publicSnapshotFreshAt,pending:publicBetPending})) return false;
+  const expectedRound = currentRoundIdCache;
+  const bettingCrash=crash,bettingSigner=signer;
   // Fires SYNCHRONOUSLY, before any await -- the player's tap is
   // acknowledged instantly, independent of how long the tx actually takes
   // to confirm. This is the "instant response" 2026 crash-UX research
   // calls out as load-bearing for feeling in-control, not decorative.
   sfx.click(); haptic(15);
-  if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "PLACING BET…"; }
+  if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "Sending…"; }
   if (PLAYTEST_MODE) {
     return privatePlaytestCommand("bet", {
       stake: String(Math.max(1, Math.round(Number(betAmount) * 1_000_000))),
@@ -3737,20 +4086,25 @@ async function doPlaceBet(viaButton) {
     });
   }
   try {
+    publicBetPending = true;
     setChainAction(ACTION_STAGES.INTENT, { action: "bet" });
     setChainAction(ACTION_STAGES.SIGNING);
     // Bank mode: the browser session key bets from the pre-funded buffer --
     // no wallet popup. Otherwise the classic per-bet path.
-    const committedTargetBps = BigInt(Math.round(autoTarget * 10_000));
+    const committedTargetBps = visibleTargetBps;
+    const committedStakeWei=ethers.parseEther(betAmount);
     const tx = bankMode && sessionBank
-      ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount), committedTargetBps)
-      : await crash.placeBet(committedTargetBps, { value: ethers.parseEther(betAmount) });
+      ? await sessionBank.betViaInRound(crash.target, BigInt(expectedRound), ethers.parseEther(betAmount), committedTargetBps)
+      : await crash.placeBetInRound(BigInt(expectedRound), committedTargetBps, { value: ethers.parseEther(betAmount) });
     setChainAction(ACTION_STAGES.SUBMITTED, { hash: tx.hash });
     const receipt = await tx.wait();
+    if(crash===bettingCrash&&signer===bettingSigner)publicAcceptedBet = {round:expectedRound,blockNumber:receipt.blockNumber,stake:committedStakeWei,target:committedTargetBps};
     setChainAction(ACTION_STAGES.INCLUDED, { blockNumber: receipt?.blockNumber ?? null });
     setChainAction(ACTION_STAGES.ACCEPTED);
     sfx.betPlaced(); haptic(30);
-    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH" + (bankMode ? " (instant, from buffer)" : ""), "success");
+    document.dispatchEvent(new CustomEvent("plank:bet-confirmed"));
+    // Ready state, committed stake, sound and haptics acknowledge the bet
+    // without putting a success toast over the flight multiplier.
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
@@ -3758,7 +4112,7 @@ async function doPlaceBet(viaButton) {
     sfx.error();
     toast("Bet failed: " + friendlyRevertReason(err), "error");
     return false;
-  }
+  } finally { publicBetPending = false; }
 }
 
 // Translates the contract's own custom errors into a message that actually
@@ -3784,7 +4138,7 @@ function friendlyRevertReason(err) {
       name = crash.interface.parseError(err.data).name;
     }
   } catch (_) { /* not a recognized custom error -- fall through */ }
-  if (name === "BadPhase" || name === "TooEarly" || name === "TooLate") {
+  if (name === "WrongRound" || name === "BadPhase" || name === "TooEarly" || name === "TooLate") {
     return "Betting just closed for this round -- try the next one.";
   }
   if (name === "BadStake") {
@@ -3848,6 +4202,7 @@ document.addEventListener("keydown", (e) => {
 })();
 
 primaryBtn.addEventListener("click", async () => {
+  if (!crash && !PLAYTEST_MODE) { $(INVITE_TEST||["127.0.0.1","localhost"].includes(location.hostname)?"simBtn":"gearBtn").click(); return; }
   // The result theater has its own close controls. The main action must always
   // commit; consuming its first click as an acknowledgement made betting look
   // broken and created a race against the automatic launch deadline.
@@ -3859,6 +4214,7 @@ primaryBtn.addEventListener("click", async () => {
 // state, so auto-play acts on the SAME authoritative data the UI renders.
 async function autoPlayTick(phase, roundId, hasStake, hasCashedOut, liveBps) {
   if (!autoPlay || autoBusy || (!signer && !PLAYTEST_MODE)) return;
+  if(!PLAYTEST_MODE&&!canRepeatPublicRound({storyActive:(publicStory.active&&!(publicStory.phase==="loading"&&publicStory.round===String(roundId)))||!!document.querySelector(".lottery-theatre[open]"),remainingMs:bettingEndsAtEstimateMs-performance.now(),reviewRemainingMs:publicRepeatReviewUntil-performance.now()}))return;
   const rid = roundId.toString();
   try {
     if (phase === 0 && !hasStake && autoBetRound !== rid) {
@@ -3867,7 +4223,7 @@ async function autoPlayTick(phase, roundId, hasStake, hasCashedOut, liveBps) {
     }
     // No live auto-cash transaction: the multiplier was committed atomically
     // with the bet and executes even if this tab disconnects or the sequencer
-    // delays the browser. A manual click remains available before that ceiling.
+    // delays the browser. Public targets cannot be changed after commitment.
   } finally {
     autoBusy = false;
   }
@@ -3882,22 +4238,27 @@ function updatePrimaryButton(state, opts = {}) {
   const connected = state !== "disconnected";
   $("autoRow").style.opacity = connected ? "1" : "0.55";
   $("autoToggle").disabled = !connected;
-  $("autoTargetInput").disabled = !connected;
+  $("autoTargetInput").disabled = !connected || (!PLAYTEST_MODE&&publicBetPending);
+  $("autoTargetInput").setAttribute('aria-label',state==='betting-open'?'Target multiplier before launch':'Next bet target multiplier');
+  const targetControl=document.querySelector('.console-target');
+  if(targetControl)targetControl.dataset.draft=String(!PLAYTEST_MODE&&state!=='betting-open');
+  primaryBtn.removeAttribute("aria-label");
   switch (state) {
     case "disconnected":
-      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
-      primaryBtn.textContent = "CONNECT WALLET"; $("btnSub").textContent = "Tap the gear icon, top right";
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = false;
+      primaryBtn.textContent = ["127.0.0.1","localhost"].includes(location.hostname)?"Practice":"Connect"; $("btnSub").textContent = "";
       chips.forEach((c) => (c.disabled = true));
       break;
     case "betting-open":
       primaryBtn.className = "primary-btn"; primaryBtn.disabled = false;
-      primaryBtn.textContent = `LAUNCH · ${betAmount} ETH`;
+      primaryBtn.disabled=parseTargetBps($("autoTargetInput").value,maxTargetBpsCache)===null;
+      primaryBtn.textContent = "Play"; primaryBtn.setAttribute("aria-label",`Play · Ξ ${betAmount}`);
       $("btnSub").textContent = opts.sub || "Betting is open";
       chips.forEach((c) => (c.disabled = false));
       break;
     case "waiting":
       primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
-      primaryBtn.textContent = "WAITING FOR LAUNCH…";
+      primaryBtn.textContent = PLAYTEST_MODE ? "Ready" : "Bet placed";
       $("btnSub").textContent = opts.sub || "Your bet is locked in";
       chips.forEach((c) => (c.disabled = true));
       break;
@@ -3909,25 +4270,30 @@ function updatePrimaryButton(state, opts = {}) {
       break;
     case "cashed":
       primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
-      primaryBtn.textContent = "LOCKED IN — WATCHING…";
+      primaryBtn.textContent = PLAYTEST_MODE ? "Ready" : "Bet placed";
       $("btnSub").textContent = opts.sub || "";
       chips.forEach((c) => (c.disabled = true));
       break;
     case "watching":
       primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
-      primaryBtn.textContent = "ROUND IN PROGRESS";
+      primaryBtn.textContent = "Next round";
       $("btnSub").textContent = opts.sub || "You'll play next round";
       chips.forEach((c) => (c.disabled = true));
       break;
     case "settling":
       primaryBtn.className = "primary-btn pending"; primaryBtn.disabled = true;
-      primaryBtn.textContent = "SETTLING…";
+      primaryBtn.textContent = "Checking result…";
       $("btnSub").textContent = opts.sub || "";
       chips.forEach((c) => (c.disabled = true));
       break;
   }
   const customStake = document.getElementById("privateCustomStake");
+  if(connected&&!PLAYTEST_MODE){
+    chips.forEach(c=>{c.disabled=publicBetPending;});
+    document.querySelector('.console-target')?.setAttribute('title',state==='betting-open'?'Choose your target, then Play. Targets are committed before launch.':'Settings for your next bet. Your accepted bet stays unchanged.');
+  }
   if (customStake) customStake.disabled = state !== "betting-open";
+  if(!PLAYTEST_MODE&&publicBetPending){primaryBtn.disabled=true;primaryBtn.textContent='Sending…';}
 }
 
 // ── keeper: auto lock / auto reveal / auto register / auto claim ────────
@@ -3935,23 +4301,24 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
   void blockNum;
   try {
     // Gate on the CHAIN's own clock (the contract's real check).
-    if (Number(round.phase) === 0 && Number(round.bettingEndsAt) <= chainNow && !attemptedLockThisRound) {
+    if (!INVITE_TEST && Number(round.phase) === 0 && Number(round.bettingEndsAt) <= chainNow && !attemptedLockThisRound) {
       attemptedLockThisRound = true;
-      await (await crash.lockRound()).wait().catch(() => {});
+      try { await (await crash.lockRound()).wait(); } catch { attemptedLockThisRound = false; }
     }
-    if (Number(round.phase) === 1 && beaconContract) {
-      const available = await beaconContract.isRoundAvailable(round.targetDrandRound);
+    if (!INVITE_TEST && Number(round.phase) === 1 && beaconContract) {
+      let available = false;
+      try { available = await beaconContract.isRoundAvailable(round.targetDrandRound); } catch { /* freeze a stalled round without discarding it */ }
       if (available && !attemptedSettleThisRound) {
         attemptedSettleThisRound = true;
-        await (await crash.settleRound()).wait().catch(() => {});
-      } else if (!available && chainNow >= Number(round.bettingEndsAt) + refundTimeoutCache && !attemptedRegisterThisRound) {
-        // Outcome-independent liveness escape: the beacon never delivered.
+        try { await (await crash.settleRound()).wait(); } catch { attemptedSettleThisRound = false; }
+      } else if (!available && chainNow >= Number(round.revealNotBefore) + refundTimeoutCache && !attemptedRegisterThisRound) {
+        // Freeze without cancelling or replacing the committed result.
         attemptedRegisterThisRound = true;
-        await (await crash.refundRound()).wait().catch(() => {});
+        try { await (await crash.freezeStalledRound()).wait(); } catch { attemptedRegisterThisRound = false; }
       }
     }
     // Pull ledger: anything owed to this wallet (payouts, keeper bounties,
-    // refunds) is withdrawn -- to the bank buffer in instant-play mode.
+    // historical refunds) is withdrawn -- to the bank buffer in instant-play mode.
     if (signer && !attemptedClaimThisRound) {
       const owedNow = await crash.owed(signer.address);
       if (owedNow > 0n) {
@@ -3968,63 +4335,82 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
   }
 }
 
+let roundRefreshBusy = false;
 async function refresh() {
-  if (!crash) return;
+  if (!crash || roundRefreshBusy) return;
+  roundRefreshBusy = true;
+  const readingCrash = crash, readingProvider = provider, readingWallet = signer?.address || null;
   try {
-    const [roundId, round, blockNum] = await Promise.all([
-      crash.currentRoundId(),
-      crash.currentRound(),
-      provider.getBlockNumber(),
-    ]);
-    const chainNow = (await provider.getBlock(blockNum)).timestamp;
+    const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = await readRoundSnapshot(readingProvider, readingCrash, readingWallet);
+    if(publicPresentationLeadMs&&!publicClockAnchored){
+      // The local development chain can have a deliberate epoch offset.
+      // Preserve the shared server clock's fractional second, then bind it
+      // to the same chain epoch as the contract's scheduled timestamps.
+      publicServerOffsetMs+=(chainNow-Math.floor((performance.now()+publicServerOffsetMs)/1000))*1000;
+      publicClockAnchored=true;
+    }
+    if (crash !== readingCrash || provider !== readingProvider || (signer?.address || null) !== readingWallet) return;
 
+    const [frozen,pendingDraw]=await Promise.all([readingCrash.admissionsPaused({blockTag:blockNum}),readingCrash.pendingLotteryRound({blockTag:blockNum})]);
+    if(crash!==readingCrash||provider!==readingProvider)return;
+    if(publicObservedRound!==null&&publicObservedRound!==roundId.toString()&&publicObservedHadSeats&&BigInt(publicObservedRound)===lastScoreboardRound+1n&&!publicStory.active)publicStory.reserve(publicObservedRound);
+    publicObservedRound=roundId.toString();publicObservedHadSeats=seats>0n;
+    publicAdmissionsPaused=frozen;publicLotteryRecoveryPending=pendingDraw>0n;
+    publicSnapshotFreshAt = performance.now(); publicSnapshotPhase = Number(round.phase);
     if (currentRoundIdCache !== roundId.toString()) {
       currentRoundIdCache = roundId.toString();
       attemptedLockThisRound = false;
       attemptedSettleThisRound = false;
       attemptedRegisterThisRound = false;
       attemptedClaimThisRound = false;
-      warpTriggeredForRound = false;
-      launchAt = null;
-      multGraphSamples = [];
-      clearMultGraph();
+      if(!publicStory.active){warpTriggeredForRound = false;launchAt = null;multGraphSamples = [];clearMultGraph();}
       loadHistoryRibbon();
       // Anchor real wall-clock time to the chain's betting deadline ONCE per round.
       const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
-      bettingEndsAtEstimateMs = performance.now() + secsLeft * 1000;
+      bettingEndsAtEstimateMs = publicPresentationLeadMs ? Number(round.bettingEndsAt)*1000-publicServerOffsetMs : performance.now() + secsLeft * 1000;
+      publicScheduledLiftoffMs=publicPresentationLeadMs?Number(await readingCrash.practiceLiftoffAtMs(roundId,{blockTag:blockNum}))-publicServerOffsetMs:null;
+      if(publicScheduledLiftoffMs!==null){publicLiftoffs.set(roundId.toString(),publicScheduledLiftoffMs);if(publicLiftoffs.size>8)publicLiftoffs.delete(publicLiftoffs.keys().next().value);}
+      revealAtEstimateMs = performance.now() + Math.max(0, Number(round.revealNotBefore) - chainNow) * 1000;
     }
 
-    $("roundLabel").textContent = "ROUND " + roundId.toString();
     $("poolStat").textContent = Number(ethers.formatEther(round.playerPool)).toFixed(3) + " ETH";
-    $("playersStat").textContent = (await crash.seatCount(roundId)).toString();
+    $("playersStat").textContent = seats.toString();
 
     const phase = Number(round.phase);
     const prevPhaseState = phaseState;
-    phaseState = phase === 0 ? "betting" : phase === 1 ? "live" : "crashed";
-    if (phaseState === "live" && prevPhaseState !== "live") {
+    phaseState = publicFlightReplay ? (performance.now()<publicFlightReplay.startedAt?"sealed":"live") : publicStory.phase==='loading' ? 'sealed' : publicStory.active||performance.now()<publicCrashUntil ? "crashed" : phase === 0 ? "betting" : phase === 1 ? "sealed" : "crashed";
+    if (publicFlightReplay && phaseState === "live" && prevPhaseState !== "live") {
       spawnParticles(0xffb37a, prefersReducedMotion ? 12 : 50, 2.4);
       shakeAmount = prefersReducedMotion ? 0 : 0.5;
-      sfx.ignition(); haptic(40);
+      haptic(40);
     }
 
-    const stake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
-    const hasStake = stake > 0n;
-    const myTarget = hasStake ? await crash.targetOf(roundId, signer.address) : 0n;
+    // A read begun before inclusion must not briefly offer a duplicate bet.
+    if(publicAcceptedBet?.round===roundId.toString()&&blockNum>=publicAcceptedBet.blockNumber&&stake===0n)publicAcceptedBet=null;
+    const hasStake = stake > 0n || publicAcceptedBet?.round===roundId.toString();
+    const displayedStake=stake>0n ? stake : hasStake ? publicAcceptedBet.stake : 0n;
+    const displayedTarget=stake>0n ? myTarget : hasStake ? publicAcceptedBet.target : 0n;
 
-    if (phase === 0) {
-      flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
-      setMultReadout("0.00", "fueling");
-      updatePrimaryButton(hasStake ? "waiting" : "betting-open", hasStake ? { sub: `Seat committed: ${ethers.formatEther(stake)} ETH at ${(Number(myTarget) / 10000).toFixed(2)}x` } : {});
+    if (phase === 0 && canCommitPublicRound({phase,deadlineMs:bettingEndsAtEstimateMs,nowMs:performance.now(),freshAtMs:publicSnapshotFreshAt,pending:publicBetPending})) {
+      if (!publicStory.active && !publicFlightReplay && performance.now()>=publicCrashUntil) { flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null; }
+      if(!publicStory.active && !publicFlightReplay && performance.now()>=publicCrashUntil)setMultReadout("1.00", "fueling");
+      updatePrimaryButton(hasStake ? "waiting" : "betting-open", hasStake ? { sub: `Ξ ${ethers.formatEther(displayedStake)} · ${(Number(displayedTarget) / 10000).toFixed(2)}× target` } : {});
+      if(publicStory.active||publicFlightReplay){
+        primaryBtn.textContent=hasStake ? 'Bet placed' : 'Play';
+        $("btnSub").textContent=`Next round ${roundId} · betting open`;
+      }
       autoPlayTick(0, roundId, hasStake, false, 0n);
+    } else if (phase === 0) {
+      updatePrimaryButton("watching",{sub:publicBetPending ? "Confirming your bet…" : "Betting closed"});
     } else if (phase === 1) {
       // CCS-2L: the round is SEALED. Every target is committed; the crash
       // point is derived from the target drand round the moment it is
       // public. There is no live multiplier to extrapolate and no cash-out.
-      const waitSecs = Math.max(0, Number(round.revealNotBefore) - chainNow);
-      setMultReadout(hasStake ? bpsToXStr(myTarget) : "1.00", "live");
-      $("substatus").textContent = waitSecs > 0 ? `SEALED · DRAND #${round.targetDrandRound} IN ${waitSecs}s` : `SEALED · AWAITING DRAND #${round.targetDrandRound}`;
-      if (!hasStake) updatePrimaryButton("watching", { sub: "Seats are sealed until the beacon publishes" });
-      else updatePrimaryButton("cashed", { sub: `Target ${(Number(myTarget) / 10000).toFixed(2)}x committed · ${ethers.formatEther(stake)} ETH staked` });
+      // Randomness readiness is not a second public countdown.
+      if(!publicStory.active && !publicFlightReplay && performance.now()>=publicCrashUntil)setMultReadout("1.00", "fueling");
+      if(!publicStory.active)$("substatus").textContent = PRACTICE_FAST_TIMING ? "Preparing launch…" : "Verifying launch…";
+      if (!hasStake) updatePrimaryButton("watching", { sub: "Join the next round" });
+      else updatePrimaryButton("cashed", { sub: `Ξ ${ethers.formatEther(displayedStake)} · ${(Number(displayedTarget) / 10000).toFixed(2)}× target` });
       autoPlayTick(1, roundId, hasStake, true, 0n);
     } else {
       // SETTLED/VOIDED/REFUNDED is transient here: settleRound opens the next
@@ -4036,7 +4422,9 @@ async function refresh() {
 
     await keeperTick(round, roundId, blockNum, chainNow);
   } catch (err) {
-    /* transient during round transitions */
+    if(INVITE_TEST)document.querySelector(".stage").dataset.snapshotError=String(err.shortMessage||err.message);
+  } finally {
+    roundRefreshBusy = false;
   }
 }
 
@@ -4046,9 +4434,10 @@ function startPolling() {
   // Conclusions are event-driven: settlements that already happened before
   // this connect are history (ribbon/stats), never replayed as a live crash.
   lastScoreboardRound = -1n;
-  crash.queryFilter(crash.filters.RoundSettled())
-    .then((evs) => { lastScoreboardRound = evs.length ? evs[evs.length - 1].args.roundId : 0n; })
-    .catch(() => { lastScoreboardRound = 0n; });
+  lastFlightPresentedRound = -1n;
+  lastReceiptPresentedRound = -1n;
+  publicStory.reset();publicObservedRound=null;publicObservedHadSeats=false;
+  scoreboardFromBlock = null;
   refresh();
   // Was 1200ms. The multiplier/countdown are now driven smoothly every
   // frame regardless of this cadence, but PHASE TRANSITIONS (crash
@@ -4306,7 +4695,8 @@ function clearSessionLocally(playerAddr) {
 // pointed at this player): a stale localStorage entry alone is never
 // trusted blindly.
 async function tryRestoreSession() {
-  if (!bank || !signer || bankMode) return;
+  if (!PRACTICE_FAST_TIMING || !bank || !signer || bankMode) return;
+  if ((await provider.getNetwork()).chainId !== 31337n) return;
   let saved;
   try {
     const raw = localStorage.getItem(sessionStorageKey(signer.address));
@@ -4331,6 +4721,9 @@ async function tryRestoreSession() {
 }
 
 async function enterInstantPlay(depositEth) {
+  // Real-money session funding needs a reviewed gas budget and explicit limits.
+  // The ordinary round-bound wallet-bet path remains available.
+  if (!PRACTICE_FAST_TIMING) { toast("Use wallet bets on this network. Instant play is test-only."); return; }
   if (bankBusy) return;
   if (!bank || !signer) { toast("Connect first"); return; }
   const dep = parseFloat(depositEth);
@@ -4339,18 +4732,19 @@ async function enterInstantPlay(depositEth) {
   const btn = document.getElementById("bkEnter");
   if (btn) { btn.disabled = true; btn.textContent = "Entering…"; }
   try {
+    if ((await signer.provider.getNetwork()).chainId !== 31337n) throw new Error("Instant play requires the local test chain.");
     const value = ethers.parseEther(String(dep));
     await (await bank.deposit({ value })).wait();
     const sk = ethers.Wallet.createRandom().connect(provider);
     await (await signer.sendTransaction({ to: sk.address, value: ethers.parseEther("0.25") })).wait();
-    const cap = value * 100n;
+    const cap = value;
     const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
     await (await bank.grantSession(sk.address, cap, expiry)).wait();
     sessionSigner = sk;
     sessionBank = bank.connect(sk);
     bankMode = true;
     saveSessionLocally(signer.address, sk, expiry);
-    toast("Instant play ON — bet & cash out with no popups");
+    toast("Instant play on · bets limited to your deposit");
   } catch (err) {
     toast("Enter failed: " + (err.shortMessage || err.message));
   } finally {
@@ -4365,7 +4759,7 @@ async function leaveInstantPlay() {
   const btn = document.getElementById("bkLeave");
   if (btn) { btn.disabled = true; btn.textContent = "Leaving…"; }
   try {
-    if (sessionSigner) { try { await (await bank.revokeSession(sessionSigner.address)).wait(); } catch (_) {} }
+    if (sessionSigner) await (await bank.revokeSession(sessionSigner.address)).wait();
     bankMode = false; sessionBank = null; sessionSigner = null;
     clearSessionLocally(signer.address);
     const bal = await bank.balanceOf(signer.address);
@@ -4561,8 +4955,7 @@ function configureRenderQuality(tier) {
   // largely cosmetic.
   renderer.setPixelRatio(ratio);
   composer.setPixelRatio(ratio);
-  bloomComposer.setPixelRatio(ratio);
-  mixPass.enabled = tier !== "low";
+  bloomPass.enabled = tier !== "low";
   godRaysPass.enabled = tier !== "low";
   lensFlarePass.enabled = tier !== "low";
   performanceFrames = 0;
@@ -4764,6 +5157,11 @@ function privateSyncFlightAction(liveBps, xStr) {
   if (!snap || phaseState !== "live" || !primaryBtn || primaryBtn.classList.contains("pending")) return;
   const seat = snap.seats.find((candidate) => candidate.userId === snap.me.id);
   if (!seat) return;
+  if (snap.policy.allocationRule === "capped-survivor-pool") {
+    updatePrimaryButton("cashed", { sub: "Target committed before launch" });
+    primaryBtn.textContent = "Target locked";
+    return;
+  }
   if (seat.acceptedTargetBps) {
     if (uiState !== "cashed") updatePrimaryButton("cashed", { sub: `Locked at ${(Number(seat.acceptedTargetBps) / 10000).toFixed(2)}×` });
     return;
@@ -4861,126 +5259,7 @@ function mountPrivatePowerOrange(canvas, card, drawNumber) {
 
 function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 16) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
-  if (!canvas) return;
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true, powerPreference:"high-performance" });
-  renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
-  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(32, 1, .1, 30); camera.position.set(.45, .12, 8.6);camera.lookAt(.45,-.08,0);
-  scene.add(new THREE.HemisphereLight(0xddecff, 0x060810, 2.5));
-  const key = new THREE.DirectionalLight(0xffffff, 4.4); key.position.set(-3, 5, 5); scene.add(key);
-  const cyan = new THREE.PointLight(0x55d6ff, 15, 10); cyan.position.set(2, 0, 3); scene.add(cyan);
-  const machine = new THREE.Group(); machine.rotation.x = -.04; scene.add(machine);
-  const metal = new THREE.MeshStandardMaterial({ color:0x232b35, metalness:.86, roughness:.24 });
-  const glass = new THREE.MeshPhysicalMaterial({ color:0xbfeaff, transparent:true, opacity:.16, roughness:.04, metalness:0, side:THREE.DoubleSide, depthWrite:false });
-  const chamber = new THREE.Mesh(new THREE.SphereGeometry(1.72, 48, 32), glass); chamber.scale.y = 1.12; machine.add(chamber);
-  const rimTop = new THREE.Mesh(new THREE.TorusGeometry(1.53,.075,12,64),metal); rimTop.rotation.x=Math.PI/2; rimTop.position.y=1.42; machine.add(rimTop);
-  const rimBottom = rimTop.clone(); rimBottom.position.y=-1.42; machine.add(rimBottom);
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.85,2.1,.42,48),metal); base.position.y=-1.78; machine.add(base);
-  // A real pneumatic path: the chamber's capture head feeds one continuous
-  // transparent tube, through a visible gate, into a presentation cradle.
-  // The result sphere travels along this exact centerline; it never teleports
-  // between disconnected props.
-  const capture = new THREE.Vector3(1.08,1.02,0), outlet = new THREE.Vector3(2.22,-1.05,0);
-  const tubeCurve = new THREE.CatmullRomCurve3([
-    capture,new THREE.Vector3(1.42,1.34,0),new THREE.Vector3(1.92,1.38,0),
-    new THREE.Vector3(2.34,.92,0),new THREE.Vector3(2.42,.05,0),outlet,
-  ],false,"centripetal");
-  const tube = new THREE.Mesh(new THREE.TubeGeometry(tubeCurve,72,.31,24,false),glass); machine.add(tube);
-  // The capture mouth and transfer tube retain one ball-clear internal
-  // diameter throughout; there is no decorative taper narrower than a ball.
-  const gate = new THREE.Mesh(new THREE.TorusGeometry(.34,.045,12,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.78,roughness:.2,emissive:0x3b2800}));gate.position.set(1.68,1.39,0);gate.rotation.y=Math.PI/2;machine.add(gate);
-  // The gold reveal pedestal (plinth + cradle) exists ONLY when a committed
-  // result ball will land on it. While the prize is still funding there is
-  // no result, so there is no pedestal highlight and no placeholder ball.
-  const hasActiveDraw=drawNumber!==null&&drawNumber!==undefined;
-  if(hasActiveDraw){
-    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(.67,.82,.22,40),new THREE.MeshStandardMaterial({color:0xd8b04a,metalness:.72,roughness:.25})); plinth.position.set(2.22,-1.55,0); machine.add(plinth);
-    const cradle = new THREE.Mesh(new THREE.TorusGeometry(.35,.075,12,40),metal);cradle.position.set(2.22,-1.28,0);cradle.rotation.x=Math.PI/2;machine.add(cradle);
-  }
-  const blowerGrille=new THREE.Mesh(new THREE.CylinderGeometry(1.18,1.18,.05,48),new THREE.MeshStandardMaterial({color:0x17202a,metalness:.8,roughness:.32}));blowerGrille.position.y=-1.43;machine.add(blowerGrille);
-  for(let i=0;i<12;i++){const vane=new THREE.Mesh(new THREE.BoxGeometry(.92,.018,.025),metal);vane.position.y=-1.39;vane.rotation.y=i*Math.PI/6;machine.add(vane);}
-  // The number is printed into the ball's single continuous surface map.
-  // There are no decals, sprites, cards, or raised sticker edges.
-  const makeBallSkin = (number) => { const c=document.createElement("canvas");c.width=1024;c.height=512;const x=c.getContext("2d");const gradient=x.createLinearGradient(0,0,0,512);gradient.addColorStop(0,"#ffffff");gradient.addColorStop(.5,"#edf5fa");gradient.addColorStop(1,"#c9e1ed");x.fillStyle=gradient;x.fillRect(0,0,1024,512);x.fillStyle="#12394f";x.strokeStyle="rgba(255,255,255,.9)";x.lineWidth=7;x.font=`900 ${number>9?92:112}px monospace`;x.textAlign="center";x.textBaseline="middle";for(const [u,v] of [[.125,.28],[.375,.5],[.625,.28],[.875,.5],[.125,.72],[.625,.72]]){const px=u*1024,py=v*512;x.strokeText(String(number),px,py);x.fillText(String(number),px,py);}const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());t.wrapS=THREE.RepeatWrapping;t.generateMipmaps=true;return t; };
-  const randomUnit=()=>{const values=new Uint32Array(1);crypto.getRandomValues(values);return values[0]/4294967296;};
-  const randomSigned=()=>randomUnit()*2-1;
-  const ballRadius=.255, chamberRadii=new THREE.Vector3(1.36,1.28,.82);
-  const balls=[];
-  const population=Math.max(2,Math.min(64,Math.trunc(Number(populationSize)||16)));
-  for(let i=1;i<=population;i++){
-    const group=new THREE.Group(), texture=makeBallSkin(i), material=new THREE.MeshPhysicalMaterial({map:texture,color:0xffffff,roughness:.2,metalness:0,clearcoat:.78,clearcoatRoughness:.16});
-    const ball=new THREE.Mesh(new THREE.SphereGeometry(ballRadius,32,24),material); group.add(ball);
-    const angle=i*2.399963, ring=.45+(i%4)*.2;
-    group.position.set(Math.cos(angle)*ring,-.9+(i%6)*.34,Math.sin(angle)*ring*.58);
-    const velocity=new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize().multiplyScalar(1.15+randomUnit()*1.1);
-    machine.add(group);balls.push({group,texture,material,velocity,number:i,rotation:new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize()});
-  }
-  const selected=hasActiveDraw?balls.find((ball)=>ball.number===Number(drawNumber)):null;
-  if(hasActiveDraw&&!selected) throw new RangeError("Authoritative lottery result is outside the displayed ball population");
-  let raf=0,disposed=false,last=performance.now(),selection=0,gustClock=0,capturedAt=null;
-  const pedestal=new THREE.Vector3(2.22,-1.25,0);
-  const resize=()=>{const d=Math.min(devicePixelRatio||1,1.5),w=Math.max(2,Math.round(canvas.clientWidth*d)),h=Math.max(2,Math.round(canvas.clientHeight*d));if(canvas.width!==w||canvas.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}};
-  const mixBalls=(dt,now,revealed)=>{
-    gustClock-=dt;
-    if(gustClock<=0){
-      gustClock=.055+randomUnit()*.085;
-      const gust=new THREE.Vector3(randomSigned()*.9,randomSigned()*.95,randomSigned()*.7);
-      for(const entry of balls) if(!(revealed&&entry===selected)) entry.velocity.addScaledVector(gust,.22+randomUnit()*.28);
-    }
-    for(const entry of balls){
-      if(revealed&&entry===selected) continue;
-      const p=entry.group.position,v=entry.velocity;
-      // A turbulent upward air column plus a changing cross-flow keeps the
-      // chamber mixing; crypto-sourced gusts above prevent a repeating orbit.
-      v.x+=(-p.x*.75+Math.sin(now*.0021+p.y*2.7)*.85)*dt;
-      // Counter-rotating air flow keeps the full chamber occupied instead of
-      // pinning every ball against the ceiling. The selected result remains
-      // server-committed; this motion is presentation only.
-      v.y+=(-p.y*1.15+Math.cos(now*.0017+p.x*2.2)*.9)*dt;
-      v.z+=(-p.z*.9+Math.sin(now*.0013+p.x*3.1)*.5)*dt;
-      v.multiplyScalar(Math.exp(-.34*dt));
-      const speed=v.length();if(speed>3.4)v.multiplyScalar(3.4/speed);
-      p.addScaledVector(v,dt);
-      const q=new THREE.Vector3(p.x/chamberRadii.x,p.y/chamberRadii.y,p.z/chamberRadii.z);
-      if(q.lengthSq()>1){
-        q.normalize();p.set(q.x*chamberRadii.x,q.y*chamberRadii.y,q.z*chamberRadii.z);
-        const normal=new THREE.Vector3(q.x/chamberRadii.x,q.y/chamberRadii.y,q.z/chamberRadii.z).normalize();
-        if(v.dot(normal)>0)v.addScaledVector(normal,-1.82*v.dot(normal));
-      }
-    }
-    // Equal-mass impulse resolution makes every visible contact deflect both
-    // balls instead of letting sprites ghost through each other.
-    for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){
-      const a=balls[i],b=balls[j];if(revealed&&(a===selected||b===selected))continue;
-      const delta=b.group.position.clone().sub(a.group.position),distance=delta.length(),minimum=ballRadius*2;
-      if(distance>=minimum)continue;
-      const normal=distance>.0001?delta.multiplyScalar(1/distance):new THREE.Vector3(randomSigned(),randomSigned(),randomSigned()).normalize();
-      const correction=(minimum-Math.max(distance,.0001))*.505;a.group.position.addScaledVector(normal,-correction);b.group.position.addScaledVector(normal,correction);
-      const closing=b.velocity.clone().sub(a.velocity).dot(normal);
-      if(closing<0){const impulse=-(1+.88)*closing/2;a.velocity.addScaledVector(normal,-impulse);b.velocity.addScaledVector(normal,impulse);}
-    }
-    for(const entry of balls){if(revealed&&entry===selected)continue;entry.group.rotation.x+=entry.rotation.x*dt*4;entry.group.rotation.y+=entry.rotation.y*dt*4;entry.group.rotation.z+=entry.rotation.z*dt*4;}
-  };
-  const moveSelected=(progress)=>{
-    if(!selected)return;
-    if(!capturedAt)capturedAt=selected.group.position.clone();
-    let local;
-    if(progress<.26){
-      // Visible suction inside the chamber into the flared capture throat.
-      local=progress/.26;const eased=local*local*(3-2*local);selected.group.position.lerpVectors(capturedAt,capture,eased);
-    }else if(progress<.88){
-      // Constrained motion through the same continuous glass tube geometry.
-      local=(progress-.26)/.62;selected.group.position.copy(tubeCurve.getPointAt(Math.min(1,local)));
-    }else{
-      // The outlet gate releases into the adjacent physical cradle.
-      local=Math.min(1,(progress-.88)/.12);selected.group.position.lerpVectors(outlet,pedestal,local*local*(3-2*local));
-    }
-    selected.group.rotation.x+=.11;selected.group.rotation.y+=.16;
-    selected.group.scale.setScalar(1+Math.max(0,(progress-.68)/.32)*.5);
-    selected.material.color.lerp(new THREE.Color(0xf1c84b),.055);
-  };
-  const render=(now)=>{if(disposed)return;resize();const dt=Math.min(.025,(now-last)/1000);last=now;const stage=card.dataset.reveal||"crash",revealed=hasActiveDraw&&(stage==="drawn"||stage==="ejected"||stage==="world");selection=privateMotionReduced()?(revealed?1:0):THREE.MathUtils.damp(selection,revealed?1:0,2.7,dt);mixBalls(dt,now,revealed);if(revealed)moveSelected(selection);machine.rotation.y=Math.sin(now*.00025)*.05;renderer.render(scene,camera);raf=requestAnimationFrame(render);};
-  raf=requestAnimationFrame(render);
-  privatePowerOrangeDispose=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(raf);scene.traverse((object)=>{object.geometry?.dispose?.();if(object.material){(Array.isArray(object.material)?object.material:[object.material]).forEach((material)=>material.dispose?.());}});balls.forEach((ball)=>ball.texture.dispose());renderer.dispose();privatePowerOrangeDispose=null;};
+  if (canvas) privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
 }
 
 let privateDockObserver = null;
@@ -5201,7 +5480,7 @@ function privateEconomyHtml(snapshot) {
   const quoted = privateBig(lottery.quotedContribution);
   const roundOdds = m.roundOdds === null ? "no draw until a prize is on the board" : `1 in ${privateCredits(m.roundOdds)} for a round that adds ${privateCredits(quoted)} cr (this table's recent average)`;
   const regime = lottery.regime === "actuarial"
-    ? `the prize is big enough that each round's chance is priced by what it pays in: chance = contribution ÷ (${(Number(privateBig(lottery.kappaBps)) / 10_000).toFixed(1)} × prize). A bigger prize is rarer in exact proportion, like every real progressive jackpot — and it can never be farmed.`
+    ? `the prize is big enough that each round's chance is priced by what it pays in: chance = contribution ÷ (${(Number(privateBig(lottery.kappaBps)) / 10_000).toFixed(1)} × prize). A bigger prize is rarer in exact proportion, like every real progressive jackpot — and its payout budget remains bounded by the configured formula.`
     : `the prize is still small, so every round draws at the flat ceiling of 1 in ${privateCredits(lottery.flatOddsOneIn)}.`;
   const pace = lottery.expectedRoundsToHit == null ? "no lottery funding recorded yet"
     : `≈ ${privateCredits(lottery.expectedRoundsToHit)} rounds ≈ ${privateHours(lottery.expectedSecondsToHit)} on average (${lottery.cadenceSeconds || PRIVATE_ECONOMY_CADENCE_FALLBACK}s cadence); it is a draw, not a schedule`;
@@ -5565,7 +5844,10 @@ function paintPrivateConclusion(snapshot, me, seat) {
   const allocation = accounting?.allocations?.find((entry) => entry.id === snapshot.me.id);
   const settledRakeBps = Number(settlementEvent?.publicPayload?.effectiveRakeBps ?? snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
   let settlementDetail = "";
-  if (allocation && accounting?.rule === "ccs-2l") {
+  if (allocation && accounting?.rule === "capped-survivor-pool") {
+    settlementDetail = `${privateCredits(allocation.payout)} returned. Maximum: stake × ${(Number(allocation.targetBps) / 10000).toFixed(2)}. Surviving bets share available funding by stake, up to their caps. `;
+    noteLines.push(settlementDetail);
+  } else if (allocation && accounting?.rule === "ccs-2l") {
     // CCS-2L honest disclosure: player pot after rake, hazard weight, the
     // player-layer decomposition, any house bonus, and the exact totals.
     const potLine = `Player pot after the ${(settledRakeBps / 100).toFixed(2)}% routed rake: ${privateCredits(accounting.playerDistributable)} credits, all of it paid to this round's survivors. `;
@@ -5589,7 +5871,7 @@ function paintPrivateConclusion(snapshot, me, seat) {
     noteLines.push(`Base return: ${privateCredits(allocation.base)}`, `+ risk surplus: ${privateCredits(allocation.surplus)}`, `= ${privateCredits(seat?.payout)} returned`);
   }
   const dilutionNote = survived && !profitable ? `You beat the crash, but too much stake also survived to cover every stake after the ${(settledRakeBps / 100).toFixed(2)}% routed rake; the bounded pool cannot manufacture the difference. ` : "";
-  const claimNote = "The lock multiplier is parimutuel claim weight, not a fixed stake × multiplier promise.";
+  const claimNote = accounting?.rule === "capped-survivor-pool" ? "Your target is a payout cap. Full payment depends on available funding." : "This legacy round uses pool-sharing rules; its target is not a fixed payout.";
   const winnerNote = winner ? ` Lottery hit in round ${winner.round}: ${winner.displayName} won ${privateCredits(winner.payout)} credits.` : "";
   const noteText = `${seat ? `${settlementDetail}${dilutionNote}${claimNote}` : "Commit below to take a seat in the next round."}${winnerNote}`;
   if (note.tagName === "DETAILS") {
@@ -5723,11 +6005,7 @@ function tellPrivateReconnectStory(snapshot, seat) {
  */
 function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
   const receivedPerfMs = performance.now();
-  if (sentPerfMs !== null) {
-    const serverNowMs = Date.parse(snapshot.serverNow);
-    privateServerClock.observe(serverNowMs, sentPerfMs, receivedPerfMs);
-  }
-  privateDisplayLagMs = privateClampDisplayLagMs(snapshot.room.displayLagMs);
+  const nextDisplayLagMs = privateClampDisplayLagMs(snapshot.room.displayLagMs);
   const roundKey = `${snapshot.room.id}:${snapshot.room.currentRound}`;
   if (!privateLiveClock.synchronize({
     roundKey,
@@ -5736,8 +6014,10 @@ function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
     startedAt: snapshot.room.startedAt,
     crashAt: snapshot.room.crashAt,
     serverNow: snapshot.serverNow,
-    displayLagMs: privateDisplayLagMs,
+    displayLagMs: nextDisplayLagMs,
   }, receivedPerfMs)) return;
+  privateDisplayLagMs = nextDisplayLagMs;
+  if (sentPerfMs !== null) privateServerClock.observe(Date.parse(snapshot.serverNow), sentPerfMs, receivedPerfMs);
   privateSnapshot = snapshot;
   if (privateGraphRound !== roundKey) {
     privateGraphRound = roundKey;
@@ -5792,7 +6072,7 @@ function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
   const effectiveRakeBps = Number(snapshot.evolution?.effectiveRakeBps ?? snapshot.policy.rakeBps ?? 450);
   const evolutionTier = Number(snapshot.evolution?.tier ?? 0);
   const nextMilestone = snapshot.evolution?.nextMilestoneVolume;
-  $("rankName").textContent = `RTP ${(100 - effectiveRakeBps / 100).toFixed(2)}%`;
+  $("rankName").textContent = `Fee ${(effectiveRakeBps / 100).toFixed(2)}%`;
   $("rankStat").title = nextMilestone == null
     ? `Evolution tier ${evolutionTier}: the permanent ${Number(snapshot.policy.rakeFloorBps) / 100}% rake floor is unlocked.`
     : `Evolution tier ${evolutionTier}: ${privateCredits(snapshot.evolution.volumeRemaining)} more qualified credits permanently lowers rake by ${Number(snapshot.policy.rakeStepBps) / 100}%. Wallet count never advances this meter.`;
@@ -5981,7 +6261,7 @@ function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
     const queuedHumans = (snapshot.nextRoundSeats || []).length;
     const settledReady = snapshot.room.phase === "settled" && (queuedHumans > 0 || queuedBots > 0);
     launch.disabled = !((snapshot.room.phase === "lobby" && (snapshot.seats.length > 0 || queuedBots > 0)) || settledReady);
-    launch.textContent = settledReady ? `LAUNCH ROUND ${Number(snapshot.room.currentRound) + 1} NOW` : "LAUNCH WHEN EVERYONE IS READY";
+    launch.textContent = settledReady ? `LAUNCH ROUND ${Number(snapshot.room.currentRound) + 1} NOW` : "Start round";
     launch.title = queuedBots ? `${queuedBots} CPU participant${queuedBots === 1 ? "" : "s"} will commit when this round launches` : "Launch when committed players are ready";
   }
   const codeCopy = $("privateCodeCopy");
@@ -6005,9 +6285,12 @@ function paintPrivateSnapshot(snapshot, sentPerfMs = null) {
   if (uiState === "betting-open") primaryBtn.textContent = snapshot.room.phase === "settled"
     ? samePrivateRound(privateSettlementAcknowledgedRound, snapshot.room.currentRound)
       ? `OPEN ROUND ${Number(snapshot.room.currentRound) + 1} · COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))}`
-      : "RETURN TO TABLE · REVIEW COMPLETE"
-    : `COMMIT ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} TEST CREDITS`;
+      : "Next round"
+    : `Play · ${privateCredits(Math.round(Number(betAmount) * 1_000_000))} credits`;
   else if (uiState === "live-hold") primaryBtn.textContent = `LOCK NOW · ${(Number(liveBps) / 10000).toFixed(2)}×`;
+  if (snapshot.policy.allocationRule === "capped-survivor-pool" && snapshot.room.phase === "running") {
+    primaryBtn.disabled = true; primaryBtn.textContent = "Target locked";
+  }
   const phase = $("privatePhaseGuide");
   const people = snapshot.members.filter((member) => !member.isBot);
   const peopleCommitted = snapshot.seats.filter((seat) => people.some((member) => member.id === seat.userId)).length;
@@ -6139,7 +6422,7 @@ async function startPrivatePlaytest() {
     startPrivateUpdates();
   };
   const status = document.createElement("span"); status.id = "privateHudStatus"; status.textContent = "Connecting to private table…";
-  const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "launch"; launch.textContent = "LAUNCH WHEN EVERYONE IS READY"; launch.onclick = () => privatePlaytestCommand("start");
+  const launch = document.createElement("button"); launch.id = "privateLaunch"; launch.className = "launch"; launch.textContent = "Start round"; launch.onclick = () => privatePlaytestCommand("start");
   const solo = document.createElement("button"); solo.id = "privateSolo"; solo.textContent = "SOLO LAB"; solo.title = "Admin: set the minimum-player gate to one for end-to-end host testing"; solo.onclick = () => privatePlaytestCommand("adminPolicy", { policy: { minimumPlayers: 1 } });
   let showPrivateInvite = () => {};
   const copyPrivateText = async (value) => {
@@ -6389,6 +6672,17 @@ async function startPrivatePlaytest() {
 
 if (PLAYTEST_MODE) void startPrivatePlaytest();
 else refreshBankUI();
+if(INVITE_TEST) {
+  document.body.dataset.inviteTest='true';
+  setTimeout(async()=>{
+    const {mountInvitePlay}=await import('./invite-play.js');
+    mountInvitePlay({connect:async key=>{
+      await connectToChain(new URL('/api/invite/rpc',location.origin).href,SIMULATE_ADDR,key,'Free play');
+      if((await provider.getNetwork()).chainId!==31337n)throw new Error('Test chain unavailable');
+      return {provider,address:signer.address};
+    }});
+  },0);
+}
 </script>
 
 <!-- ── Instant Play (PlankBank) ─────────────────────────────────────────
@@ -6420,5 +6714,8 @@ else refreshBankUI();
 </div>
 
 <!-- The pre-CCS fuel-booster panel and its styles were retired with that contract. -->
+<script type="module" src="pocket-console.js"></script>
+<script type="module" src="community-fuel-ui.js"></script>
+<script type="module" src="lottery-theatre.js"></script>
 </body>
 </html>

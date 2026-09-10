@@ -1,0 +1,6 @@
+import {chromium} from '@playwright/test';import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';
+const b=await chromium.launch({headless:true,args:['--use-angle=swiftshader']});
+try{const p=await b.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));const token=(await readFile('C:/Users/k1rby/Documents/Codex/2026-09-09/find/work/invite/invite-token.txt','utf8')).trim();await p.goto('https://keep-heads-questionnaire-okay.trycloudflare.com/#invite='+token);
+const samples=[];for(let i=0;i<2;i++){await p.waitForFunction(()=>window.__plankClock?.().ready,null,{timeout:30000});await p.waitForFunction(()=>document.querySelector('.invite-player output')?.dataset.address,null,{timeout:60000}).catch(async e=>{console.log(await p.locator('body').innerText(),errors);throw e;});await p.waitForTimeout(5000);samples.push(await p.evaluate(()=>({clock:window.__plankClock(),wall:Date.now(),launch:window.__plankLaunch,status:document.querySelector('#substatus').textContent,phase:document.querySelector('.stage').dataset})));if(i===0)await p.reload();}
+console.log(JSON.stringify({samples,errors}));assert.deepEqual(errors,[]);assert.ok(Math.abs((samples[1].clock.now-samples[0].clock.now)-(samples[1].wall-samples[0].wall))<300);
+}finally{await b.close();}

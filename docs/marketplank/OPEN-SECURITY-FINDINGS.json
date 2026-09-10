@@ -1,0 +1,61 @@
+{
+  "schema": "plankcrash.open-findings.v1",
+  "findings": [
+    {
+      "id": "PC-RELAY-OPTION-01",
+      "status": "resolved",
+      "severity": "high",
+      "blocking": false,
+      "summary": "Both crash implementations prohibit cancellation of committed outcomes at every deadline. Stalls freeze admission and preserve the original draw; the former selective-refund attack now reverts for all tested roles and deadlines.",
+      "evidence": "test/contracts/PlankRelayAbsence.audit.test.ts"
+    },
+    {
+      "id": "PC-KNOWN-OUTCOME-REFUND-02",
+      "status": "resolved",
+      "severity": "high",
+      "blocking": false,
+      "summary": "Superseded by unconditional non-cancellation: neither missing nor verified entropy permits a LIVE refund, including gas-starved calls.",
+      "evidence": "test/contracts/PlankRecoverySelection.test.ts"
+    },
+    {
+      "id": "PC-LATE-KEEPER-RELAY-03",
+      "status": "resolved",
+      "severity": "medium",
+      "blocking": false,
+      "summary": "An overdue keeper now attempts the original relay before settlement and recovery instead of skipping relay after the long timeout.",
+      "evidence": "test/contracts/PlankRecoverySelection.test.ts"
+    },
+    {
+      "id": "PC-ORIGINAL-RESULT-LIVENESS-04",
+      "status": "review-required",
+      "severity": "high",
+      "blocking": true,
+      "summary": "Original-result-only recovery eliminates cancellation bias but requires eventual publication and delivery of the committed beacon result. Permanent nonpublication leaves unsettled stakes pending. Independent review of this custody/availability boundary and production incident evidence remain required.",
+      "evidence": "test/contracts/PlankRecoverySelection.test.ts"
+    },
+    {
+      "id": "PC-ORACLE-OUTAGE-05",
+      "severity": "high",
+      "summary": "An overdue observation is discarded instead of being labelled fresh. The buyback remains disabled until a new complete bounded window is observed.",
+      "status": "resolved",
+      "blocking": false,
+      "evidence": "test/contracts/PlankOracleRecovery.audit.test.ts"
+    },
+    {
+      "id": "PC-ZERO-OUTPUT-FLOOR-06",
+      "severity": "low",
+      "summary": "The burn engine rejects an integer minimum output of zero before any swap or ETH transfer.",
+      "status": "resolved",
+      "blocking": false,
+      "evidence": "test/contracts/PlankOracleRecovery.audit.test.ts"
+    },
+    {
+      "id": "PC-ORACLE-EPOCH-07",
+      "severity": "low",
+      "summary": "Full-width observation timestamps and uint32 interval configuration bounds prevent a whole accumulator timestamp epoch from masquerading as a short fresh interval.",
+      "status": "resolved",
+      "blocking": false,
+      "evidence": "test/contracts/PlankOracleRecovery.audit.test.ts"
+    }
+  ]
+}

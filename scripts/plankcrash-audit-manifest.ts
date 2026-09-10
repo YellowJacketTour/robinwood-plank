@@ -4,10 +4,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const outputArg = process.argv.find((arg) => arg.startsWith("--out="))?.slice(6);
-const tracked = execFileSync("git", ["ls-files", "contracts/*.sol", "contracts/lib/*.sol", "test/contracts/PlankCrash*.ts", "hardhat.config.ts", "package.json", "package-lock.json"], { encoding: "utf8" })
+const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", "contracts/*.sol", "contracts/lib/*.sol", "test/contracts/Plank*.ts", "lib/casino/*.ts", "scripts/research/plankcrash-scale.ts", "hardhat.config.ts", "package.json", "package-lock.json"], { encoding: "utf8" })
   .split(/\r?\n/).filter(Boolean).sort();
 const sha256 = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
-const files = await Promise.all(tracked.map(async (file) => ({ file, sha256: sha256(await readFile(file)) })));
+const files = await Promise.all([...new Set(tracked)].map(async (file) => ({ file, sha256: sha256(await readFile(file)) })));
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const status = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
 const artifactPath = path.join(".hardhat-artifacts", "contracts", "PlankCrash.sol", "PlankCrash.json");

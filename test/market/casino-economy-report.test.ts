@@ -73,10 +73,10 @@ test("the flight seed is exposed per round and accumulates in totals.flightSeede
   state = first.state;
   state = { ...state, emissionBuffer: 4_000n };
   const second = simulateIteration(state, policy, { players: twoPlayers, crashBps: 20_000n, lotteryOutcome: "none" });
-  assert.equal(second.seed, 4_000n, "seed = min(buffer, crashSeed)");
-  assert.equal(second.state.totals.flightSeeded, 4_000n);
+  assert.equal(second.seed, 400n, "seed = 10% of spendable buffer");
+  assert.equal(second.state.totals.flightSeeded, 400n);
   const revived = parseSimulationState(serializeBigInts(second.state));
-  assert.equal(revived.totals.flightSeeded, 4_000n);
+  assert.equal(revived.totals.flightSeeded, 400n);
   const legacy = serializeBigInts(second.state) as { totals: Record<string, unknown> };
   delete legacy.totals.flightSeeded;
   assert.equal(parseSimulationState(legacy).totals.flightSeeded, 0n, "pre-provenance snapshots default to 0");

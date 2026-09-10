@@ -3,11 +3,9 @@
  *
  * THE TWO PROPERTIES THIS RELIES ON, AND WHY THEY COEXIST:
  *
- *   PUBLIC    Every function this calls is permissionless -- there is no
- *             owner, no admin, and no access control anywhere in
- *             PlankCrash / PlankLottery / PlankRakeRouter / PlankBurnEngine /
- *             DrandBeacon. Anyone can run this script, or call any step by
- *             hand, and the game advances.
+ *   PUBLIC    Every function this calls is permissionless -- the keeper has no safety role. Admission freezing and reopen
+ *             authorization belong to separate governance accounts. Anyone
+ *             can run these progression steps or execute an authorized reopen.
  *
  *   AUTOMATIC This process calls them on a timer so it happens reliably
  *             without anyone watching.
@@ -36,18 +34,23 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { AbiCoder, Contract, JsonRpcProvider, Wallet, hexlify, keccak256, randomBytes, toBeHex, type Provider, type Signer } from "ethers";
+import { AbiCoder, Contract, FetchRequest, JsonRpcProvider, Wallet, hexlify, keccak256, randomBytes, toBeHex, type Provider, type Signer } from "ethers";
 import { fetchRoundFromApis, parseG1 } from "./relay-drand.js";
 
 export const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
-  "function rounds(uint256) view returns (uint8 phase, uint64 targetDrandRound, uint64 bettingEndsAt, uint64 revealNotBefore, bytes32 paramsHash, uint256 seed, uint256 playerPool, uint256 reserveAtLock, uint256 largestStake, uint256 crashBps, uint256 effectiveRakeBps, uint256 playerDistributable, uint256 totalPlayerPaid, uint256 totalBonus, uint256 houseReturned, address lotteryWinner)",
+  "function rounds(uint256) view returns (uint8 phase, uint64 targetDrandRound, uint64 bettingEndsAt, uint64 revealNotBefore, bytes32 paramsHash, uint256 seed, uint256 playerPool, uint256 reserveAtLock, uint256 vaultRoundsContributedAtLock, uint256 largestStake, uint256 crashBps, uint256 effectiveRakeBps, uint256 playerDistributable, uint256 totalPlayerPaid, uint256 totalBonus, uint256 houseReturned, address lotteryWinner)",
   "function refundTimeoutSeconds() view returns (uint256)",
   "function pendingRake() view returns (uint256)",
   "function pendingOverflow() view returns (uint256)",
   "function lockRound()",
+  "function restartRounds()",
+  "function pendingLotteryRound() view returns(uint256)",
+  "function retryLottery()",
+  "function ABANDONED_ROUND_MULTIPLIER() view returns(uint256)",
   "function settleRound()",
-  "function refundRound()",
+  "function freezeStalledRound()",
+  "function stalledRound() view returns(uint256)",
   "function flushRake() returns (bool)",
   "function deliverOverflow() returns (bool)",
   "event BetPlaced(uint256 indexed roundId, address indexed player, uint256 stake, uint256 targetBps, address indexed fundedBy)",
@@ -91,6 +94,8 @@ export type KeeperConfig = {
   drandChainHash?: string;
   /** LOCAL DEV ONLY -- see KEEPER_MOCK_BEACON in the header. */
   mockBeacon?: boolean;
+  /** Local free-play pacing only. Never skips a real beacon's publication. */
+  mockImmediateAfterClose?: boolean;
   /** LOCAL TEST ONLY -- deterministic lower bound for browser tests. */
   mockMinCrashBps?: bigint;
 };
@@ -131,15 +136,18 @@ const BURN_ENGINE_ABI = [
 async function attempt(
   actions: KeeperAction[],
   step: string,
-  fn: () => Promise<{ wait(): Promise<unknown> }>,
+  fn: () => Promise<{ wait(confirmations?: number, timeout?: number): Promise<unknown> }>,
   detail?: string
 ): Promise<boolean> {
   try {
     const tx = await fn();
-    await tx.wait();
+    await tx.wait(1, 60_000);
     actions.push({ step, detail });
     return true;
-  } catch {
+  } catch (error) {
+    // Emit codes, never RPC URLs, transaction payloads or credentials.
+    const code = (error as {code?: unknown})?.code;
+    console.warn(JSON.stringify({event:"keeper-step-failed",step,code:typeof code === "string" ? code : "UNKNOWN"}));
     return false;
   }
 }
@@ -166,6 +174,10 @@ export async function tick(
   signer: Signer,
   cfg: KeeperConfig
 ): Promise<KeeperAction[]> {
+  if ((cfg.mockBeacon || cfg.mockImmediateAfterClose || cfg.mockMinCrashBps) && (await provider.getNetwork()).chainId !== 31337n) {
+    throw new Error('Mock randomness and accelerated preview timing require local chain 31337');
+  }
+  if (cfg.mockImmediateAfterClose && !cfg.mockBeacon) throw new Error('Accelerated preview timing requires a mock beacon');
   const actions: KeeperAction[] = [];
   const crash = new Contract(cfg.crash, CRASH_ABI, signer);
   const beacon = new Contract(cfg.beacon, BEACON_ABI, signer);
@@ -177,6 +189,12 @@ export async function tick(
 
   // ── 1. Close betting once the window has passed (voids thin rounds early) ──
   let round = await crash.rounds(roundId);
+  if (Number(round.phase) >= 2) {
+    const pendingDraw: bigint = await crash.pendingLotteryRound().catch(() => 0n);
+    if (pendingDraw > 0n) await attempt(actions, "retryLottery", () => crash.retryLottery());
+    else await attempt(actions, "restartRounds", () => crash.restartRounds());
+    round = await crash.rounds(await crash.currentRoundId());
+  }
   if (Number(round.phase) === 0 && now >= round.bettingEndsAt) {
     await attempt(actions, "lockRound", () => crash.lockRound(), `round ${roundId}`);
     round = await crash.rounds(await crash.currentRoundId());
@@ -185,33 +203,27 @@ export async function tick(
   // ── 2. LIVE: relay the committed drand round, then settle in one pass ──
   if (Number(round.phase) === 1) {
     const id: bigint = await crash.currentRoundId();
-    const available: boolean = await beacon.isRoundAvailable(round.targetDrandRound);
+    const timeout: bigint = await crash.refundTimeoutSeconds();
+    let available = false;
+    try { available = await beacon.isRoundAvailable(round.targetDrandRound); } catch { /* try original relay anyway */ }
     if (!available) {
-      if (cfg.mockBeacon) {
-        if (now >= round.revealNotBefore) {
+      try {
+        if (cfg.mockBeacon && (cfg.mockImmediateAfterClose || now >= round.revealNotBefore)) {
           const mock = new Contract(cfg.beacon, MOCK_BEACON_ABI, signer);
           const filler = await mockRandomness(provider, cfg, id, BigInt(round.targetDrandRound));
           await attempt(actions, "mockBeacon.setRandomness", () => mock.setRandomness(round.targetDrandRound, filler));
-        }
-      } else if (cfg.drandApis && cfg.drandChainHash) {
-        try {
+        } else if (!cfg.mockBeacon && cfg.drandApis && cfg.drandChainHash) {
           const drand = await fetchRoundFromApis(cfg.drandApis, cfg.drandChainHash, BigInt(round.targetDrandRound));
           const sig = parseG1(drand.signature);
-          await attempt(actions, "beacon.submitRound", () => beacon.submitRound(round.targetDrandRound, sig),
-            `drand round ${round.targetDrandRound}`);
-        } catch {
-          /* round not published yet -- ordinary, try again next tick */
+          await attempt(actions, "beacon.submitRound", () => beacon.submitRound(round.targetDrandRound, sig), `drand round ${round.targetDrandRound}`);
         }
-      }
+      } catch { /* retry the same commitment next tick; never request replacement entropy */ }
     }
-    if (await beacon.isRoundAvailable(round.targetDrandRound)) {
-      await attempt(actions, "settleRound", () => crash.settleRound(), `round ${id}`);
-    } else {
-      // Outcome-independent liveness escape, only when drand has truly gone dark.
-      const timeout: bigint = await crash.refundTimeoutSeconds();
-      if (now >= BigInt(round.revealNotBefore) + timeout) {
-        await attempt(actions, "refundRound", () => crash.refundRound(), `round ${id}`);
-      }
+    try { available = await beacon.isRoundAvailable(round.targetDrandRound); } catch { available = false; }
+    let settled = false;
+    if (available) settled = await attempt(actions, "settleRound", () => crash.settleRound(), `round ${id}`);
+    if (!settled && now >= BigInt(round.revealNotBefore) + timeout && await crash.stalledRound() !== id) {
+      await attempt(actions, "freezeStalledRound", () => crash.freezeStalledRound(), `round ${id}`);
     }
   }
 
@@ -238,6 +250,11 @@ export async function tick(
     }
   }
 
+  // Execute only a reopening already authorized on chain by governance.
+  // Older unguarded deployments have no reopenAt selector and are skipped.
+  const safety = new Contract(cfg.crash,["function reopenAt() view returns(uint256)","function executeReopen()"],signer);
+  const reopenAt: bigint = await safety.reopenAt().catch(() => 0n);
+  if(reopenAt > 0n && now >= reopenAt)await attempt(actions,"executeReopen",()=>safety.executeReopen());
   return actions;
 }
 
@@ -248,7 +265,9 @@ function required(name: string): string {
 }
 
 async function main() {
-  const provider = new JsonRpcProvider(required("KEEPER_RPC_URL"));
+  const request = new FetchRequest(required("KEEPER_RPC_URL"));
+  request.timeout = 15_000;
+  const provider = new JsonRpcProvider(request);
   const signer = new Wallet(required("KEEPER_PK"), provider);
   const cfg: KeeperConfig = {
     crash: required("CRASH_ADDRESS"),
@@ -272,15 +291,24 @@ async function main() {
 
   const once = process.env.KEEPER_ONCE === "1";
   const interval = Number(process.env.KEEPER_INTERVAL_MS || 2000);
+  if (!Number.isFinite(interval) || interval < 250 || interval > 60_000) throw new Error("KEEPER_INTERVAL_MS must be between 250 and 60000");
+  if (!cfg.mockBeacon && (!cfg.drandChainHash || !/^[0-9a-f]{64}$/i.test(cfg.drandChainHash) || new Set(cfg.drandApis).size < 2)) {
+    throw new Error("Production keeper requires a pinned drand chain hash and at least two relay URLs");
+  }
+  let stopping = false;
+  process.once("SIGTERM", () => { stopping = true; });
+  process.once("SIGINT", () => { stopping = true; });
   do {
     try {
       const actions = await tick(provider, signer, cfg);
+      console.log(JSON.stringify({event:"keeper-tick",at:new Date().toISOString(),actions:actions.length}));
       for (const a of actions) console.log(`  ${a.step}${a.detail ? " -- " + a.detail : ""}`);
     } catch (err) {
-      console.error("tick failed:", err instanceof Error ? err.message : String(err));
+      console.error(JSON.stringify({event:"keeper-tick-failed",code: typeof (err as {code?:unknown})?.code === "string" ? (err as {code:string}).code : "UNKNOWN"}));
     }
-    if (!once) await new Promise((r) => setTimeout(r, interval));
-  } while (!once);
+    if (!once && !stopping) await new Promise((r) => setTimeout(r, interval));
+  } while (!once && !stopping);
+  provider.destroy();
 }
 
 // Only auto-run when executed directly (under `npx hardhat run` the target

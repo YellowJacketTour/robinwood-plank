@@ -174,4 +174,21 @@ describe("PlankBurnEngine (Tier-2, oracle-floored)", () => {
       "NothingToBurn"
     );
   });
+  it("rejects execution immediately after liquidity disappears, even while the TWAP is fresh", async()=>{
+    const {engine,oracle,pair,deployer}=await deployAll();await prime(oracle);
+    await deployer.sendTransaction({to:await engine.getAddress(),value:ethers.parseEther('1')});
+    const before=await ethers.provider.getBalance(await engine.getAddress());
+    await pair.setReserves(0n,R_PLANK);
+    await expect(engine.executeBurn(ethers.parseEther('0.1'))).revertedWithCustomError(oracle,'PairTooShallow');
+    expect(await ethers.provider.getBalance(await engine.getAddress())).eq(before);
+    expect(await engine.totalEthSpent()).eq(0n);
+  });
+  it("rejects a permanently disabled burn cap and an oracle for different assets",async()=>{
+    const e=await deployAll(),factory=await ethers.getContractFactory('PlankBurnEngine');
+    const args=[await e.plank.getAddress(),await e.router.getAddress(),await e.weth.getAddress(),await e.oracle.getAddress()];
+    await expect(factory.deploy(...args,0n,100n,500n)).revertedWithCustomError(factory,'BadConfig');
+    const other=await(await ethers.getContractFactory('MockERC20Burnable')).deploy();
+    await expect(factory.deploy(await other.getAddress(),...args.slice(1),MAX_ETH_PER_CALL,100n,500n)).revertedWithCustomError(factory,'BadConfig');
+  });
+
 });

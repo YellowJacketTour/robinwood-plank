@@ -26,6 +26,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { cappedPoolParamsHash, settleCappedPool, type CappedPoolSettlement } from "./economics-capped-pool";
 import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
 import {
   settleParimutuel,
@@ -115,6 +116,13 @@ export function settlementDescriptor(
       },
     };
   }
+  if (rule === "capped-survivor-pool") {
+    return { rule, version: 1, paramsHash: cappedPoolParamsHash(ccs2lParams), params: {
+      floorBps: ccs2lParams.floorBps.toString(), playerWeight: ccs2lParams.playerWeight,
+      houseCapBps: ccs2lParams.houseCapBps.toString(), houseRakeCapBps: ccs2lParams.houseRakeCapBps.toString(),
+      maxVaultBonusBps: ccs2lParams.maxVaultBonusBps.toString(), vaultBonusDecayWad: ccs2lParams.vaultBonusDecayWad.toString(),
+    } };
+  }
   return { rule, version: 1, paramsHash: parimutuelParamsHash(rule), params: {} };
 }
 
@@ -168,11 +176,17 @@ function reviveCcs2lParams(params: Record<string, string>): Ccs2LParams {
  * settling; a mismatch (tampered or drifted record) throws, it never falls
  * back to a default.
  */
-export function replayCommittedRound(record: CommittedRound): Settlement | Ccs2LSettlement {
+export function replayCommittedRound(record: CommittedRound): Settlement | Ccs2LSettlement | CappedPoolSettlement {
   const { descriptor } = record;
   const registered = descriptor.rule === "ccs-2l" ? CCS2L_RULE_VERSION : 1;
   if (descriptor.version !== registered) {
     throw new SettlementRuleMismatch(`unregistered ${descriptor.rule} version ${descriptor.version}`);
+  }
+  if (descriptor.rule === "capped-survivor-pool") {
+    const params = reviveCcs2lParams(descriptor.params);
+    if (cappedPoolParamsHash(params) !== descriptor.paramsHash) throw new SettlementRuleMismatch("capped pool params hash mismatch");
+    const inputs = (record as CommittedCcs2LRound).inputs;
+    return settleCappedPool(inputs.playerDistributable, inputs.seedH, inputs.crashBps, inputs.seats, params);
   }
   if (descriptor.rule === "ccs-2l") {
     const params = reviveCcs2lParams(descriptor.params);
