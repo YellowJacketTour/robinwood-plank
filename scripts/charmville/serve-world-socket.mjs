@@ -9,8 +9,8 @@ server.on('connection',socket=>{
  let token='',authenticated=false,reading=false,writing=false,closed=false;
  const abort=new AbortController();
  const send=value=>{if(socket.readyState===1){if(socket.bufferedAmount>65536){socket.close(1013,'Slow consumer');return;}socket.send(JSON.stringify(value));}};
- const request=async(body)=>{
-  const response=await fetch(upstream+'/api/charmville/world/actor',{method:body?'POST':'GET',headers:{authorization:`Bearer ${token}`,origin:upstream,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.any([abort.signal,AbortSignal.timeout(5000)]),redirect:'error'});
+ const request=async(body,path='actor')=>{
+  const response=await fetch(upstream+'/api/charmville/world/'+path,{method:body?'POST':'GET',headers:{authorization:`Bearer ${token}`,origin:upstream,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.any([abort.signal,AbortSignal.timeout(5000)]),redirect:'error'});
   const data=await response.json();
   if(!response.ok)throw Object.assign(Error('World request rejected'),{status:response.status,data});
   return data;
@@ -36,7 +36,15 @@ server.on('connection',socket=>{
   reading=true;
   try{send({type:'snapshot',state:await request()});}catch{send({type:'unavailable'});socket.close(1011,'World state unavailable');}finally{reading=false;}
  },100);
- socket.on('close',()=>{closed=true;token='';abort.abort();clearInterval(tick);clearTimeout(deadline);});
+ let encounterReading=false;
+ const encounterTick=setInterval(async()=>{
+  if(!authenticated||encounterReading||closed)return;
+  encounterReading=true;
+  try{send({type:'encounter',state:await request(undefined,'encounter')});}
+  catch{send({type:'encounter',state:null});}
+  finally{encounterReading=false;}
+ },200);
+ socket.on('close',()=>{closed=true;token='';abort.abort();clearInterval(tick);clearInterval(encounterTick);clearTimeout(deadline);});
  socket.on('error',()=>socket.close());
 });
 console.log('Authenticated local world socket listening on ws://127.0.0.1:3023 (10 Hz target, 32 connections).');

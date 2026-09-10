@@ -19,6 +19,10 @@ try{
  const a=await account(),b=await account();const first=connect(a.token),second=connect(b.token);
  const initial=(await first.until(m=>m.type==='ready')).state;
  await second.until(m=>m.type==='ready');
+ const creatureA=(await first.until(m=>m.type==='encounter'&&m.state?.encounter)).state;
+ const creatureB=(await second.until(m=>m.type==='encounter'&&m.state?.encounter)).state;
+ assert.equal(creatureA.encounter.id,creatureB.encounter.id);
+ assert.equal(creatureA.encounter.hp,creatureB.encounter.hp);
  await first.until(m=>m.type==='snapshot'&&m.state.peers?.length>0);
  first.socket.send(JSON.stringify({type:'step',id:1,body:{x:initial.cell.x+1,y:initial.cell.y,sequence:initial.sequence+1,regionEpoch:initial.regionEpoch,presenceRevision:initial.presenceRevision,geometryId:initial.geometryId}}));
  const moved=await first.until(m=>m.type==='result'&&m.id===1);assert.equal(moved.status,200);
@@ -32,5 +36,5 @@ try{
   foreign.on('unexpected-response',(_request,response)=>{try{assert.equal(response.statusCode,401);response.resume();foreign.terminate();resolve();}catch(e){reject(e);}});
   foreign.on('error',()=>{});
  });
- console.log('Two authenticated sockets: committed step persisted and reached the other player; invalid session receives no state.');
+ console.log('Two authenticated sockets: shared creature identity/HP, persisted movement and peer delivery; invalid session receives no state.');
 }finally{for(const socket of sockets)socket.close();}

@@ -46,14 +46,21 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
+  const socketEncounterAt=useRef(0);
   const captureAvailable=useRef(false);
   const updateCaptureAvailability=useCallback((available:boolean)=>{captureAvailable.current=available;if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:capture-availability',available},'http://localhost:3021');},[]);
   const [captureStream]=useState(()=>createCaptureStream());
   const updateEncounter=useCallback((snapshot:unknown|null)=>{
+    if(Date.now()-socketEncounterAt.current<1000)return;
     encounterSnapshot.current=snapshot;
     if(frameReady.current)frame.current?.contentWindow?.postMessage(nativeEncounterProjection(snapshot),'http://localhost:3021');
     for(const event of captureStream.snapshot(snapshot)){if(frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');}
   },[captureStream]);
+  const updateSocketEncounter=useCallback((snapshot:unknown|null)=>{
+    socketEncounterAt.current=0;
+    updateEncounter(snapshot);
+    if(snapshot!==null)socketEncounterAt.current=Date.now();
+  },[updateEncounter]);
   const showCapture=useCallback((receipt:unknown)=>{
     const event=captureStream.receipt(receipt);
     if(event&&frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');
@@ -85,9 +92,10 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const [accountClient]=useState(()=>createGameAccountClient());
   const mounted=useRef(true);
   const signingIn=useRef(false);
-  const movementStatus=useNativeMovement(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined);
+  const movementStatus=useNativeMovement(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,updateSocketEncounter);
 
   const clear=useCallback(()=>{
+    socketEncounterAt.current=0;
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
     accountClient.disconnect(); session.current=null; location.current=null;updateCaptureAvailability(false);
     frame.current?.contentWindow?.postMessage({type:'charmville:capture-event',active:false},'http://localhost:3021');
