@@ -1158,8 +1158,14 @@ let REMOTE_RPC_URL = "";
 let REMOTE_SIM_KEY = "";
 async function loadDeployAddresses() {
   try {
-    const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
-    if (!res.ok) return;
+    // Hosted friend testing must consume the committed, sanitized testnet
+    // manifest. Localhost and file:// retain the Hardhat manifest. This
+    // avoids the brittle deploy-time file-copy that previously left the
+    // hosted UI silently pointed at local addresses.
+    const hosted = location.protocol === "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1";
+    const manifestName = hosted ? "deploy-addresses.testnet.json" : "deploy-addresses.local.json";
+    const res = await fetch(manifestName, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Unable to load ${manifestName} (${res.status})`);
     const m = await res.json();
     if(INVITE_TEST)inviteStartBlock=Number(m.inviteStartBlock||0);
     PRACTICE_FAST_TIMING = (INVITE_TEST || ['127.0.0.1','localhost'].includes(location.hostname)) && ['30-second-window-local-mock','30-second-lottery-to-launch-local-mock'].includes(m.practiceTiming);
@@ -1216,8 +1222,17 @@ async function loadDeployAddresses() {
         }
       }
     }
-    console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
-  } catch (_) { /* no manifest available -- keep the hardcoded fallbacks */ }
+    console.log("[deploy-addresses] synced from " + manifestName + " (generated " + (m.generatedAt || "?") + ")");
+  } catch (error) {
+    // A hosted build that silently kept its hardcoded fallbacks would point
+    // players at addresses that do not exist on the chain they are actually
+    // talking to. Fail loudly there; localhost keeps the old soft behaviour.
+    console.error("[deploy-addresses] refusing stale fallback:", error);
+    if (location.protocol === "https:") {
+      const simBtn = document.getElementById("simBtn");
+      if (simBtn) { simBtn.disabled = true; simBtn.textContent = "Deployment unavailable"; }
+    }
+  }
 }
 // Invoked once all six address `let`s below (including BEACON_ADDR, up
 // above with rakeBpsCache) have their hardcoded fallback values assigned --
@@ -2447,7 +2462,14 @@ function frame() {
   }
   // The modal fully covers the flight. Keep the authoritative phase/UI above
   // advancing, but give its rigid-body simulation exclusive animation time.
-  const lotteryCoversScene=!!document.querySelector('.lottery-theatre[open]');
+  // Playtest's reveal card covers the flight exactly as the theatre does, and
+  // mounts the SAME Rapier machine -- so without this it ran two WebGL
+  // contexts, two composer stacks and two physics-stepped scenes against each
+  // other for the whole reveal. That is the reveal-time lag: the flight scene
+  // kept rendering bloom, god-rays and lens-flare behind a card nobody could
+  // see through. Give the machine the same exclusive animation time here.
+  const lotteryCoversScene=!!document.querySelector('.lottery-theatre[open]')
+    ||!!document.querySelector('.private-result[data-reveal]:not([data-reveal="crash"]):not([data-reveal="personal"])');
   const preparePad=lotteryCoversScene&&prepareCoveredPad;
   if(lotteryCoversScene&&!preparePad){
     requestAnimationFrame(frame);

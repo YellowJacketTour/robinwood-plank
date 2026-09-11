@@ -295,10 +295,23 @@ async function main() {
   if (!cfg.mockBeacon && (!cfg.drandChainHash || !/^[0-9a-f]{64}$/i.test(cfg.drandChainHash) || new Set(cfg.drandApis).size < 2)) {
     throw new Error("Production keeper requires a pinned drand chain hash and at least two relay URLs");
   }
+  // Bounded run, so a supervisor can own the lifecycle instead of this
+  // process. The deployment target is a cPanel cron with flock -- the same
+  // shape the drand relayer and akasha hose already use: start every minute,
+  // exit before the next start, let the lock make overlap impossible. Without
+  // a bound the first invocation would run forever and every later one would
+  // block on the lock, so a crash or a hung RPC would silently end the game.
+  // 0 keeps the old unbounded behaviour for an interactive run.
+  const maxSeconds = Number(process.env.KEEPER_MAX_SECONDS || 0);
+  if (!Number.isFinite(maxSeconds) || maxSeconds < 0 || maxSeconds > 86_400) {
+    throw new Error("KEEPER_MAX_SECONDS must be between 0 and 86400");
+  }
+  const deadline = maxSeconds > 0 ? Date.now() + maxSeconds * 1_000 : null;
   let stopping = false;
   process.once("SIGTERM", () => { stopping = true; });
   process.once("SIGINT", () => { stopping = true; });
   do {
+    if (deadline !== null && Date.now() >= deadline) break;
     try {
       const actions = await tick(provider, signer, cfg);
       console.log(JSON.stringify({event:"keeper-tick",at:new Date().toISOString(),actions:actions.length}));
@@ -323,6 +336,7 @@ function resolvedOrUndefined(p: string | undefined): string | undefined {
 }
 const thisFile = realpathSync(fileURLToPath(import.meta.url));
 const isDirectRun =
+  process.env.PLANK_KEEPER_MAIN === "1" ||
   resolvedOrUndefined(process.argv[1]) === thisFile || resolvedOrUndefined(process.argv[3]) === thisFile;
 
 if (isDirectRun) {

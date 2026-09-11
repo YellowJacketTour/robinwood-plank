@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   DrandRoundUnavailableError,
@@ -121,4 +122,33 @@ test("action failure remains visible when the occupied slot remains", async () =
   assert.equal(value.state, "error");
   assert.equal(value.actionable, true);
   assert.match(value.detail || "", /pin failed: execution reverted/);
+});
+
+// casino-keeper.ts imports from relay-drand.ts, and esbuild bundles both into
+// ONE file for deployment. Both modules carry an "am I the entrypoint?" check,
+// and in the bundle both compare the same process.argv[1] to the same
+// import.meta.url -- so BOTH passed, and running the keeper also started the
+// relayer's main(), which died on its own required("RPC_URL") before the
+// keeper ticked once. Observed against the live testnet deploy:
+//   RELAYER_FATAL={"detail":"Missing required env var RPC_URL"}
+// Identity cannot distinguish two mains sharing a file, so each must name
+// itself.
+test("the bundled keeper cannot start the relayer's main loop", () => {
+  const relay = readFileSync(new URL("../../scripts/relay-drand.ts", import.meta.url), "utf8");
+  const keeper = readFileSync(new URL("../../scripts/casino-keeper.ts", import.meta.url), "utf8");
+  assert.match(
+    relay,
+    /process\.env\.PLANK_RELAYER_MAIN === "1"/,
+    "the relayer must have an explicit opt-in that survives bundling"
+  );
+  assert.match(
+    relay,
+    /!process\.env\.PLANK_KEEPER_MAIN/,
+    "the relayer must stand down when the keeper owns the process"
+  );
+  assert.match(
+    keeper,
+    /process\.env\.PLANK_KEEPER_MAIN === "1"/,
+    "the keeper must be startable by name, since the bundle's argv identity is shared"
+  );
 });
