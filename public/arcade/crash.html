@@ -722,7 +722,12 @@
     .private-result{width:min(920px,calc(100vw - 32px));max-height:min(88vh,900px);overflow:auto;padding:20px;background:linear-gradient(160deg,rgba(17,10,5,.98),rgba(13,31,22,.98));border-color:rgba(233,180,63,.5);box-shadow:0 28px 100px rgba(0,0,0,.72),0 0 42px rgba(233,180,63,.12)}
     .private-powerball{position:relative;min-height:360px;margin:18px auto 0;overflow:hidden;border:1px solid rgba(233,180,63,.5);border-radius:12px;background:radial-gradient(circle at 25% 46%,rgba(174,125,255,.23),transparent 34%),linear-gradient(125deg,#0b0710,#1b120a 58%,#0d1f16);text-align:left;transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
     .private-powerball-haze{position:absolute;inset:0;background:radial-gradient(circle at 22% 50%,rgba(238,193,100,.25),transparent 30%),radial-gradient(circle at 70% 30%,rgba(174,125,255,.18),transparent 36%);animation:private-haze 3.2s ease-in-out infinite alternate}
-    .private-powerball-canvas{position:absolute;z-index:1;left:0;top:0;width:48%;height:100%;filter:drop-shadow(0 22px 34px rgba(0,0,0,.65));opacity:.2;transform:translateY(6%) scale(.88);transition:opacity .7s,transform 1.1s cubic-bezier(.2,.8,.2,1),filter .7s}
+    /* The 3D machine is a tall object -- housing, globe, chute, tray. A 48%-wide
+       slot was sized for the flat 2D placeholder and crops Astra's machine down
+       to the resting ball. lottery-theatre, the surface this machine was built
+       for, gives it a full-width stage at clamp(260px,54dvh,540px); match that
+       shape here so the drum, chute and tray are all visible. */
+    .private-powerball-canvas{position:absolute;z-index:1;left:0;top:0;width:58%;height:100%;min-height:clamp(260px,42dvh,460px);filter:drop-shadow(0 22px 34px rgba(0,0,0,.65));opacity:.2;transform:translateY(6%) scale(.88);transition:opacity .7s,transform 1.1s cubic-bezier(.2,.8,.2,1),filter .7s}
     .private-lottery-fallback{position:absolute;z-index:1;left:4%;top:9%;width:41%;height:78%;border:5px solid #354252;border-radius:48% 48% 24% 24%;background:radial-gradient(circle at 34% 28%,rgba(255,255,255,.36),transparent 17%),linear-gradient(145deg,rgba(167,222,255,.2),rgba(9,20,34,.32));box-shadow:inset 0 0 34px rgba(117,211,255,.22),0 20px 50px rgba(0,0,0,.55)}.private-lottery-fallback:before{content:"";position:absolute;left:10%;right:10%;bottom:-12%;height:17%;border-radius:5px;background:linear-gradient(#485667,#161d27);box-shadow:0 8px 20px rgba(0,0,0,.6)}.private-lottery-fallback i{position:absolute;width:20%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 30% 24%,#fff,#e9eef4 58%,#93a1ae);box-shadow:0 5px 12px rgba(0,0,0,.35);animation:private-lottery-mix 1.15s ease-in-out infinite alternate}.private-lottery-fallback i:nth-child(1){left:15%;bottom:18%}.private-lottery-fallback i:nth-child(2){left:42%;bottom:38%;animation-delay:-.4s}.private-lottery-fallback i:nth-child(3){right:12%;bottom:17%;animation-delay:-.75s}.private-lottery-fallback b{position:absolute;right:-18%;bottom:5%;width:27%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 22%,#fff,#f7f9fc 55%,#c3ccd5);border:5px solid #d4ad43;color:#08111d;font:900 clamp(24px,3vw,46px) var(--font-mono);box-shadow:0 9px 23px rgba(0,0,0,.5)}.webgl-fallback .private-powerball-canvas{display:none}@keyframes private-lottery-mix{to{transform:translate(30%,-90%) rotate(35deg)}}
     .private-powerball-copy{position:relative;z-index:2;width:58%;margin-left:auto;padding:28px 28px 22px}.private-powerball-copy>small{color:#eec164;font:900 9px/1.3 var(--font-mono);letter-spacing:.16em}.private-powerball-copy h3{margin:7px 0;color:#fff2cf;font:400 clamp(22px,3vw,38px)/1 var(--font-display)}.private-powerball-rule{max-width:48ch;color:#c9b58a;font:700 11px/1.45 var(--font-mono)}
     .private-powerball-drum{position:relative;width:104px;height:104px;margin:16px auto;border:1px solid rgba(238,193,100,.7);border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(174,125,255,.22),rgba(3,6,8,.92));box-shadow:inset 0 0 22px rgba(174,125,255,.25),0 0 28px rgba(233,180,63,.13)}.private-powerball-drum i{position:absolute;width:23px;height:23px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff2cf,#e9b43f);opacity:.35;animation:private-ball-orbit .7s linear infinite}.private-powerball-drum i:nth-child(2){animation-delay:-.17s}.private-powerball-drum i:nth-child(3){animation-delay:-.34s}.private-powerball-drum i:nth-child(4){animation-delay:-.51s}.private-powerball-drum b{position:relative;z-index:2;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#fff,#eec164 55%,#af761d);color:#261105;font:900 26px var(--font-mono);box-shadow:0 7px 22px rgba(0,0,0,.6);opacity:0;transform:scale(.1) rotate(-260deg)}
@@ -5295,6 +5300,18 @@ function mountPrivatePowerOrange(canvas, card, drawNumber) {
 // Timing lines up exactly: the machine reaches its "presented" phase at
 // t>=4.8s, which is the same instant the reveal timeline sets data-reveal
 // to "world". So the existing choreography drives it unchanged.
+// Cheap, cached probe: the reveal card decides whether to render the flat
+// drum fallback BEFORE the machine mounts, so it cannot wait on the machine.
+let privateWebglSupport = null;
+function privateSupportsWebgl() {
+  if (privateWebglSupport !== null) return privateWebglSupport;
+  try {
+    const probe = document.createElement("canvas");
+    privateWebglSupport = !!(probe.getContext("webgl2") || probe.getContext("webgl"));
+  } catch (_) { privateWebglSupport = false; }
+  return privateWebglSupport;
+}
+
 function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 16) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
   if (!canvas) return;
@@ -5321,8 +5338,19 @@ function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 1
       privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
     };
     canvas.addEventListener("lottery-render-error", onRenderError, { once: true });
+    // Mount PAUSED and start on the first rendered frame, exactly as
+    // lottery-theatre prepares its scene. Rapier is a 2MB WASM module that
+    // then pre-settles 600 physics steps before it can draw anything; playing
+    // from mount meant the clock ran during that load, so the mixing and chute
+    // phases were already spent by the time the card revealed the canvas and
+    // the player only ever saw the ball resting in the tray. The reveal
+    // timeline gives us a real 1,050ms window here -- the machine mounts
+    // immediately but data-reveal does not reach "powerball" until then -- so
+    // the load lands inside it and the animation starts from its first frame.
     const dispose3d = mountLotteryMachine(canvas, {
       result: { ballCount: String(populationSize), drawnBall: label, drawLabel: label },
+      paused: true,
+      onPrepared: () => { try { dispose3d.start(); } catch (_) {} },
       // Reduced motion already jumps the card straight to "world", and the
       // machine honours the same media query internally, so no branch here.
       startAt: null,
@@ -5853,7 +5881,13 @@ function paintPrivateConclusion(snapshot, me, seat) {
     const drawLedger = drawActive
       ? `Ball ${draw.drawnNumber} of ${drawPopulation} · committed draw ${privateProbPct(sample)} vs this round's winning zone ${privateProbPct(threshold)} (${privateOddsText(threshold)})`
       : "MIXING ONLY · no result ball is selected while the prize is funding";
-    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE LOTTERY · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p>${drawActive ? `<div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div>` : ""}<div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR TICKET THIS ROUND"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} cr · ${(Number(mySharePpm) / 10_000).toFixed(2)}% of the round`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE" : drawActive ? "PRIZE DRAWN FOR" : "NEXT PRIZE"}</small>${winner ? `${privateCredits(nextTake)} CR` : drawActive ? `${privateCredits(privateCarve(prizeDrawn, snapshot.policy).winnerTake)} CR` : `${privateCredits(nextTake)} CR`}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
+    // The orbiting-dots drum was the stand-in for a physical draw back when
+    // there was no machine on this surface at all. Astra's machine now shows
+    // the same ball as a real object that rolls, ejects and settles -- so the
+    // drum is a second, cheaper answer to a question already answered, and
+    // showing both reads as decoration. Keep it only where 3D cannot run.
+    const canvas3dUnavailable = !privateSupportsWebgl();
+    powerball.innerHTML = `<div class="private-powerball-haze" aria-hidden="true"></div><canvas class="private-powerball-canvas" aria-hidden="true"></canvas><div class="private-powerball-copy"><small>THE LOTTERY · ROUND ${snapshot.room.currentRound}</small><h3>${drawActive ? "LIVE NUMBER DRAW" : "PRIZE FUNDING MIX"}</h3><p class="private-powerball-rule">Sixteen numbered balls collide in a turbulent transparent air chamber. The committed result ball enters the selection tube, pops clear, and lands on the reveal pedestal.</p>${drawActive && canvas3dUnavailable ? `<div class="private-powerball-drum" aria-hidden="true"><i></i><i></i><i></i><i></i><b>${draw.drawnNumber}</b></div>` : ""}<div class="private-powerball-outcome"><strong></strong><span>${drawLedger}</span></div><div class="private-powerball-ledger"><span><small>${winner ? "JACKPOT PAID" : "YOUR TICKET THIS ROUND"}</small>${winner ? `${privateCredits(winner.payout)} CR` : `${privateCredits(myWeight)} cr · ${(Number(mySharePpm) / 10_000).toFixed(2)}% of the round`}</span><span><small>THIS FLIGHT FUNDED</small>+${privateCredits(fundingAdded)} CR</span><span><small>${winner ? "NEXT PRIZE" : drawActive ? "PRIZE DRAWN FOR" : "NEXT PRIZE"}</small>${winner ? `${privateCredits(nextTake)} CR` : drawActive ? `${privateCredits(privateCarve(prizeDrawn, snapshot.policy).winnerTake)} CR` : `${privateCredits(nextTake)} CR`}</span></div>${draw.forcedForSimulation ? '<div class="private-powerball-lab">HOST-FORCED LAB OUTCOME · NOT NATURAL RANDOMNESS</div>' : ""}</div>`;
     powerball.dataset.drawActive = drawActive ? "true" : "false";
     const drawCanvas = powerball.querySelector(".private-powerball-canvas");
     drawCanvas.removeAttribute("aria-hidden");
