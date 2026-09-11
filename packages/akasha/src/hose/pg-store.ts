@@ -492,4 +492,45 @@ export class PostgresArchiveStore extends ArchiveStore {
       events: Number(ev.rows[0]?.n ?? 0),
     };
   }
+
+  /**
+   * On-disk bytes of the tape: the akasha_* tables PLUS their indexes and
+   * TOAST. `pg_total_relation_size` is used rather than `pg_relation_size`
+   * because akasha_event carries a `raw JSONB` column and two indexes, and
+   * those are most of the footprint -- measuring the heap alone would report a
+   * fraction of the real disk cost and let the budget sail past its ceiling.
+   *
+   * Cached briefly: this is called on every backfill step, and the size of a
+   * multi-gigabyte table does not change meaningfully between ticks. The cost
+   * of asking is a catalog scan, which is small but not free, and this worker
+   * holds only 2 of PGPOOL_MAX=4 connections.
+   *
+   * Returns undefined when the tables do not exist, so a deploy that has not
+   * applied migration 104 reports "cannot measure" rather than "empty".
+   */
+  private tapeBytesCache?: { bytes: number | undefined; at: number };
+  async tapeBytes(maxAgeMs = 60_000): Promise<number | undefined> {
+    const now = Date.now();
+    if (this.tapeBytesCache && now - this.tapeBytesCache.at < maxAgeMs) {
+      return this.tapeBytesCache.bytes;
+    }
+    let bytes: number | undefined;
+    try {
+      const r = await this.sql.query(
+        `SELECT COALESCE(SUM(pg_total_relation_size(c.oid)), 0)::bigint AS n
+           FROM pg_class c
+           JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE c.relkind = 'r'
+            AND ns.nspname = current_schema()
+            AND c.relname LIKE 'akasha\\_%'`,
+      );
+      const n = Number(r.rows[0]?.n ?? 0);
+      bytes = Number.isFinite(n) ? n : undefined;
+    } catch {
+      // An unmeasurable tape is not an empty tape.
+      bytes = undefined;
+    }
+    this.tapeBytesCache = { bytes, at: now };
+    return bytes;
+  }
 }
