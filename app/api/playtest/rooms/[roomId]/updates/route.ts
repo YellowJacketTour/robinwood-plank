@@ -34,7 +34,12 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     // comment here claimed. The poll worker IS the round keeper — a starved
     // poll freezes a settled table at 0:00 — so keep the budget comfortably
     // above what one live round costs.
-    const limited = rateLimit(req, { key: `playtest-room-updates:${identity.id}`, limit: 120, windowMs: 60_000 });
+    // 2s holds cost ~30 req/min per tab at idle. 120 left almost no headroom
+    // once a round's version bumps made polls return early, and the bucket is
+    // shared by every tab behind one NAT (see above), so a household hit 429s
+    // and froze mid-flight. 300 keeps ~10x headroom for one player and still
+    // bounds abuse well below what a scripted client could do.
+    const limited = rateLimit(req, { key: `playtest-room-updates:${identity.id}`, limit: 300, windowMs: 60_000 });
     if (limited) return limited;
     const { roomId } = await context.params;
     if (!UUID.test(roomId)) return publicJson({ error: "BAD_ROOM_ID", message: "Invalid room identifier." }, 400);
@@ -45,18 +50,23 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     // it lets clients interpolate smoothly while bounding how far a stale
     // tab may visually run ahead of authoritative server time.
     //
-    // 2s was the wrong number and it rate-limited live tables. The client
-    // re-polls immediately on every return (crash.html's update loop has no
-    // success-path delay), so an idle tab spent ~30 req/min of its 120/min
-    // budget, and a LIVE round -- where the version changes every tick, so
-    // every poll returns at once -- ran a tight fetch loop bounded only by
-    // RTT. At 100ms that is ~600 req/min: the round going live is precisely
-    // what pushed the table over its own ceiling, and the player got up to a
-    // 20s "Table busy" blackout mid-flight. 15s matches the surrounding
-    // comment's own claim, sits inside maxDuration=30, and leaves an idle tab
-    // at ~4 req/min. A changed version still returns instantly, so this
-    // lengthens only the NO-CHANGE wait -- responsiveness is unaffected.
-    const deadline = Date.now() + 15_000;
+    // This number is load-bearing for the ANIMATION, not just for traffic.
+    //
+    // PrivateLiveClock may extrapolate at most maxPredictionLeadMs (2,500ms)
+    // past the newest server heartbeat, then it freezes -- deliberately, so a
+    // stalled tab cannot invent a multiplier. A running round does NOT bump
+    // the room version (nothing writes between start and tick; see
+    // playtestRoomPollState), so the ONLY heartbeat mid-flight is this
+    // poll returning. Hold longer than the prediction lead and the client
+    // starves: the multiplier stops dead at exp(0.22 * 2.5) = 1.73x, every
+    // single round, which is exactly what the owner reported.
+    //
+    // The earlier 2s was too short for a different reason -- the client
+    // re-polls with no success-path delay, so a round whose version DOES
+    // change (tick, settle) span-looped at RTT speed into the 120/min limit.
+    // 2,000ms sits under the 2,500ms lead with margin for one RTT, and an
+    // idle tab costs ~30 req/min against a limit now raised to match.
+    const deadline = Date.now() + 2_000;
     let state = await playtestRoomPollState(identity, roomId);
     while (!req.signal.aborted && state.version === after && Date.now() < deadline) {
       if (state.due) {

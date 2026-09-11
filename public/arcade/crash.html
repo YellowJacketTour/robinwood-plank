@@ -2447,7 +2447,14 @@ function frame() {
   }
   // The modal fully covers the flight. Keep the authoritative phase/UI above
   // advancing, but give its rigid-body simulation exclusive animation time.
-  const lotteryCoversScene=!!document.querySelector('.lottery-theatre[open]');
+  // Playtest's reveal card covers the flight exactly as the theatre does, and
+  // mounts the SAME Rapier machine -- so without this it ran two WebGL
+  // contexts, two composer stacks and two physics-stepped scenes against each
+  // other for the whole reveal. That is the reveal-time lag: the flight scene
+  // kept rendering bloom, god-rays and lens-flare behind a card nobody could
+  // see through. Give the machine the same exclusive animation time here.
+  const lotteryCoversScene=!!document.querySelector('.lottery-theatre[open]')
+    ||!!document.querySelector('.private-result[data-reveal]:not([data-reveal="crash"]):not([data-reveal="personal"])');
   const preparePad=lotteryCoversScene&&prepareCoveredPad;
   if(lotteryCoversScene&&!preparePad){
     requestAnimationFrame(frame);
