@@ -24,6 +24,13 @@ jobs:
       DEPLOYER_PK: ${{ secrets.DEPLOYER_PK_TESTNET }}
       ROBINHOOD_TESTNET_RPC_URL: ${{ vars.ROBINHOOD_TESTNET_RPC_URL }}
       ROBINHOOD_TESTNET_CHAIN_ID: ${{ vars.ROBINHOOD_TESTNET_CHAIN_ID }}
+      # PlankGuardedCrash takes immutable, distinct guardian and governance
+      # addresses. testnet-casino-setup.ts requires them but nothing forwarded
+      # them, so this workflow could never reach its own deploy step. They may
+      # be plain EOAs here: the script enforces distinct and nonzero only, and
+      # this stack is explicitly testnet-only-no-represented-value.
+      TESTNET_SAFETY_GUARDIAN: ${{ vars.TESTNET_SAFETY_GUARDIAN }}
+      TESTNET_SAFETY_GOVERNANCE: ${{ vars.TESTNET_SAFETY_GOVERNANCE }}
       SEEDLESS: "1"
     steps:
       - uses: actions/checkout@v4
