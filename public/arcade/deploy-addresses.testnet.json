@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-09-11T15:14:31.986Z",
+  "network": "robinhood-testnet",
+  "chainId": 46630,
+  "rpcUrl": "https://plankcrash-friend-test.pages.dev/rpc",
+  "strict": false,
+  "crash": "0x520De71e05b2B6b68ce87e61538d2b42FD2fAaCd",
+  "bank": "0x89f131d492516588a828bD167F1a11346aA2ADD4",
+  "plank": "0x60Aa4fF710E2217666978fCb43A0777867Ab5005",
+  "lottery": "0x0C5321c8fD24604FFd8F7b25D819683ff75b6a85",
+  "lotteryRule": "numbered",
+  "beacon": "0x0f3eb73f7254e90E451eC8E5E62bd5dceAF0501e",
+  "rakeRouter": "0x58Eb66B6Ed6506a702371f9a8ea64A9cAC57416d",
+  "oracle": "0x53c855932C24DF8564791ba73DC9d7Cb13437b59",
+  "burnEngine": "0x55dF4eb9A43b6B9Bd4CA6A01211d3140ae4c6125",
+  "deployer": "0x1586Def0c9d1bB4Ca93179626A2ba85C6E9ae2aE"
+}
