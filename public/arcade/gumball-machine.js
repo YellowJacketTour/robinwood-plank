@@ -11,11 +11,41 @@ export function mountGumballMachine(canvas, card, drawNumber, populationSize = 1
   let frame, previous = performance.now(), progress = 0, disposed = false;
   const circle = (x,y,r,fill) => {ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=fill;ctx.fill();};
   const round = (x,y,w,h,r,fill) => {ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();};
+  // One offscreen sphere per colour, drawn once and blitted thereafter. The
+  // previous version built a 3-stop radial gradient AND a blurred shadow for
+  // every ball on every frame: at the 64-ball ceiling that is 64 gradient
+  // objects plus 64 shadow-blur passes per frame, on the main thread, while
+  // the WebGL composer runs bloom, god-rays and lens-flare. shadowBlur is the
+  // most expensive 2D canvas operation there is and it is unaccelerated on
+  // most drivers. Sprites are keyed by colour and radius bucket so a resize
+  // rebuilds them rather than smearing a stale one.
+  const sprites = new Map();
+  function sphere(c, r) {
+    const key = `${c}@${Math.round(r)}`;
+    let sprite = sprites.get(key);
+    if (sprite) return sprite;
+    const pad = 6, size = Math.max(2, Math.ceil((r + pad) * 2));
+    sprite = document.createElement('canvas'); sprite.width = sprite.height = size;
+    const c2 = sprite.getContext('2d');
+    if (c2) {
+      const cx = size / 2, cy = size / 2;
+      const g = c2.createRadialGradient(cx - r * .32, cy - r * .4, 1, cx, cy, r);
+      g.addColorStop(0, '#fff9ed'); g.addColorStop(.23, c); g.addColorStop(1, c);
+      c2.save(); c2.shadowColor = '#39204855'; c2.shadowBlur = 5; c2.shadowOffsetY = 3;
+      c2.beginPath(); c2.arc(cx, cy, r, 0, Math.PI * 2); c2.fillStyle = g; c2.fill(); c2.restore();
+      c2.beginPath(); c2.arc(cx - r * .32, cy - r * .4, r * .2, 0, Math.PI * 2); c2.fillStyle = '#ffffffb8'; c2.fill();
+      c2.beginPath(); c2.arc(cx, cy + r * .12, r * .54, 0, Math.PI * 2); c2.fillStyle = '#fff8ea'; c2.fill();
+    }
+    if (sprites.size > 96) sprites.clear();
+    sprites.set(key, sprite);
+    return sprite;
+  }
   function ball(x,y,r,n) {
     const c = colors[(n-1)%colors.length];
-    const g=ctx.createRadialGradient(x-r*.32,y-r*.4,1,x,y,r);g.addColorStop(0,'#fff9ed');g.addColorStop(.23,c);g.addColorStop(1,c);
-    ctx.save();ctx.shadowColor='#39204855';ctx.shadowBlur=5;ctx.shadowOffsetY=3;circle(x,y,r,g);ctx.restore();
-    circle(x-r*.32,y-r*.4,r*.2,'#ffffffb8');circle(x,y+r*.12,r*.54,'#fff8ea');
+    const sprite = sphere(c, r);
+    ctx.drawImage(sprite, x - sprite.width / 2, y - sprite.height / 2);
+    // The sprite already carries the body, shadow and both highlights; only
+    // the number varies per ball, so it stays a live draw.
     ctx.fillStyle='#49304c';ctx.font=`900 ${r*.72}px ui-rounded,system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(n),x,y+r*.15);
   }
   function render(now) {

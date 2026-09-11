@@ -27,10 +27,13 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     // (every 429 dropped the poll, so nobody advanced the settled room).
     const identity = await currentPlaytestIdentity();
     if (!identity) return publicJson({ error: "UNAUTHENTICATED", message: "Playtest PIN sign-in required." }, 401);
-    // Keyed per signed-in player, not per IP: a household or venue on one NAT
-    // must never starve each other's long-poll (the poll worker IS the round
-    // keeper — starved polls froze settled tables at 0:00). 120/min per player
-    // still bounds abuse; a long-poll returns at most every 20s or on change.
+    // Keyed by player AND IP, not player alone: rateLimit appends the client
+    // IP to every key (lib/security.ts), so a household or venue on one NAT
+    // DOES share a bucket per identity. Survivable now the poll holds for 15s
+    // rather than 2s, but it is not the per-player isolation an earlier
+    // comment here claimed. The poll worker IS the round keeper — a starved
+    // poll freezes a settled table at 0:00 — so keep the budget comfortably
+    // above what one live round costs.
     const limited = rateLimit(req, { key: `playtest-room-updates:${identity.id}`, limit: 120, windowMs: 60_000 });
     if (limited) return limited;
     const { roomId } = await context.params;
@@ -41,7 +44,19 @@ export async function GET(req: Request, context: { params: Promise<{ roomId: str
     // A short heartbeat is an economic UX boundary, not decorative traffic:
     // it lets clients interpolate smoothly while bounding how far a stale
     // tab may visually run ahead of authoritative server time.
-    const deadline = Date.now() + 2_000;
+    //
+    // 2s was the wrong number and it rate-limited live tables. The client
+    // re-polls immediately on every return (crash.html's update loop has no
+    // success-path delay), so an idle tab spent ~30 req/min of its 120/min
+    // budget, and a LIVE round -- where the version changes every tick, so
+    // every poll returns at once -- ran a tight fetch loop bounded only by
+    // RTT. At 100ms that is ~600 req/min: the round going live is precisely
+    // what pushed the table over its own ceiling, and the player got up to a
+    // 20s "Table busy" blackout mid-flight. 15s matches the surrounding
+    // comment's own claim, sits inside maxDuration=30, and leaves an idle tab
+    // at ~4 req/min. A changed version still returns instantly, so this
+    // lengthens only the NO-CHANGE wait -- responsiveness is unaffected.
+    const deadline = Date.now() + 15_000;
     let state = await playtestRoomPollState(identity, roomId);
     while (!req.signal.aborted && state.version === after && Date.now() < deadline) {
       if (state.due) {
