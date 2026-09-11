@@ -70,8 +70,13 @@ if [ ! -x "$anvil_bin" ]; then
   # relayer polls api.drand.sh from here every minute -- so the only real
   # unknown is github.com specifically. Say that plainly rather than failing
   # with a bare curl exit code.
-  if ! curl --fail --silent --show-error --location --max-time 600 -o "$tarball" \
-      "https://github.com/foundry-rs/foundry/releases/download/${foundry_version}/foundry_${foundry_version}_linux_amd64.tar.gz"; then
+  # The ALPINE asset, not linux_amd64: it is musl-static, with no ELF
+  # interpreter and no GLIBC version symbols at all. The glibc build needs
+  # GLIBC_2.29-2.35 and this host has older, so it died on launch with
+  #   /lib64/libm.so.6: version `GLIBC_2.29' not found
+  # and the supervisor then reported only "anvil did not come up".
+  if ! curl --fail --silent --show-error --location --max-time 900 -o "$tarball" \
+      "https://github.com/foundry-rs/foundry/releases/download/${foundry_version}/foundry_${foundry_version}_alpine_amd64.tar.gz"; then
     log "FATAL: could not download foundry from github.com."
     log "       If this host blocks github.com, stage the binary by hand at"
     log "       $anvil_bin and re-run."
@@ -80,7 +85,15 @@ if [ ! -x "$anvil_bin" ]; then
   tar -xzf "$tarball" -C "$table_dir/bin" anvil
   rm -f "$tarball"
   chmod 700 "$anvil_bin"
-  log "anvil installed: $("$anvil_bin" --version | head -1)"
+  # Prove it actually executes here. The previous build installed fine and
+  # only failed when launched, which surfaced as an unrelated timeout.
+  if ! version="$("$anvil_bin" --version 2>&1 | head -1)" || [ -z "$version" ]; then
+    log "FATAL: the anvil binary does not run on this host:"
+    "$anvil_bin" --version 2>&1 | head -5 | while read -r line; do log "       $line"; done
+    rm -f "$anvil_bin"
+    exit 1
+  fi
+  log "anvil installed: $version"
 fi
 
 # ── the chain ────────────────────────────────────────────────────────────────
