@@ -231,7 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL -o /tmp/foundry.tar.gz \
-            "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+            "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_alpine_amd64.tar.gz"
           mkdir -p /tmp/foundry && tar -xzf /tmp/foundry.tar.gz -C /tmp/foundry anvil
           mkdir -p .next/standalone/ops/plankcrash-table
           /tmp/foundry/anvil --port 8545 --host 127.0.0.1 --chain-id 31337 \
