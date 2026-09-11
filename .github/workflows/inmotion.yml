@@ -252,7 +252,20 @@ jobs:
           # The manifest the gateway and the browser both read.
           cp public/arcade/deploy-addresses.local.json \
              .next/standalone/public/arcade/deploy-addresses.local.json
-          sleep 4   # let --state-interval flush the final blocks
+          # Stop anvil and let it write its FINAL state, rather than racing
+          # --state-interval. A still-running node keeps rewriting the file,
+          # and the packaging tar caught it mid-write:
+          #   tar: anvil-seed.json: File shrank by 24585584 bytes
+          # which fails the whole build. anvil dumps on SIGTERM, so ask it to
+          # stop and wait for the process to actually exit.
+          pkill -TERM -f 'anvil --port 8545' || true
+          for _ in $(seq 1 30); do
+            pgrep -f 'anvil --port 8545' >/dev/null || break
+            sleep 1
+          done
+          pgrep -f 'anvil --port 8545' >/dev/null && { echo 'anvil did not exit' >&2; exit 1; }
+          # And prove the file is complete JSON, not a truncated snapshot.
+          node -e "JSON.parse(require('fs').readFileSync('.next/standalone/ops/plankcrash-table/anvil-seed.json','utf8'))"
           test -s .next/standalone/ops/plankcrash-table/anvil-seed.json
         env:
           FOUNDRY_VERSION: v1.8.1
