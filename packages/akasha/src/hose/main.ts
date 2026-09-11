@@ -685,6 +685,12 @@ export class Hose {
         ? Object.fromEntries(this.bitcoinRpc.hostFailures)
         : undefined,
       bitcoinSourceDisagreements: this.bitcoinRpc?.disagreementsSeen ?? 0,
+      // Bytes per second per host, for BULK block bodies only. Failure counts
+      // say which hosts ANSWER; this says which ones are worth asking. A
+      // six-fold spread was measured between blockstream and the mempool
+      // mirrors on the same block, and the whole remaining Bitcoin past is
+      // ~298 GB -- so the rate, not the error count, is what sets the ETA.
+      bitcoinHostThroughput: this.bitcoinRpc?.observedThroughput,
       chains: {} as Record<string, unknown>,
     };
     const chains = out.chains as Record<string, unknown>;
