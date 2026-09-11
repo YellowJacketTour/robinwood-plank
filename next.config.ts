@@ -113,6 +113,27 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       { source: "/api/market/multichain/socket", destination: `http://127.0.0.1:${process.env.MARKET_REALTIME_PORT || "3917"}/api/market/multichain/socket` },
+      // The PlankCrash friend table. The invite gateway binds loopback only --
+      // it owns the guest wallets and speaks to a local chain, so it must
+      // never be exposed directly -- and Passenger proxies the few routes it
+      // serves. /api/invite/* carries the whole gate: no invite, no session,
+      // 401 on everything including the arcade HTML. Same shape as the
+      // market-realtime rewrite above.
+      // Only /api/invite/* is proxied. The arcade's own assets keep coming
+      // from public/arcade as they already do -- crash.html carries
+      // <base href="/arcade/">, so a /table-prefixed page still resolves its
+      // scripts, art and wasm against that same path, and those files are
+      // identical either way. Proxying /arcade/* instead would have been
+      // wrong twice over: a plain rewrite never fires for a file that exists
+      // in public/, and a beforeFiles rewrite would have stolen the path from
+      // /playtest/game, which serves the very same file to a different gate.
+      //
+      // What the gateway alone can serve is the INVITE: the session, the
+      // capability-filtered RPC, the funded guest wallet, and the one page it
+      // stamps with <meta name="plank-invite"> to turn INVITE_TEST on.
+      { source: "/api/invite/:path*", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/api/invite/:path*` },
+      { source: "/table", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/` },
+      { source: "/table/crash.html", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/arcade/crash.html` },
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
     ];

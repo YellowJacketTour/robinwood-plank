@@ -63,10 +63,20 @@ else
   log "starting anvil (state $state_file)"
   # --state loads an existing snapshot and keeps dumping to it; the interval
   # is what makes an ungraceful kill survivable.
+  #
+  # The mining flags mirror Astra's hardhat node exactly
+  # (hardhat.config.ts: mining {auto:false, interval:100}):
+  #   --block-time 0.1  a block every 100ms, so the multiplier climbs at a
+  #                     watchable pace and chain time tracks the wall clock
+  #   --mixed-mining    ALSO mine immediately on a transaction, which is what
+  #                     hardhat's automine gave for free. Without it a bet or
+  #                     a guest funding waits for the next timed block; at a
+  #                     1s block time that made joining take 8.6 SECONDS.
+  #                     With it, 0.23s.
   nohup "$anvil_bin" \
     --port "$ANVIL_PORT" --host 127.0.0.1 --chain-id 31337 \
     --state "$state_file" --state-interval 10 \
-    --preserve-historical-states --block-time 1 --silent \
+    --preserve-historical-states --block-time 0.1 --mixed-mining --silent \
     >> "$table_dir/anvil.log" 2>&1 &
   for _ in $(seq 1 30); do chain_up && break; sleep 1; done
   chain_up || { log "FATAL: anvil did not come up"; exit 1; }

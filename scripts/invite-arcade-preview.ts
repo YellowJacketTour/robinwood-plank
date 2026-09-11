@@ -18,6 +18,12 @@ manifest.inviteStartBlock=low;
 const policy=invitePolicy(manifest);
 const stateDir=resolve(process.env.PLANK_INVITE_STATE_DIR||'work/invite');await mkdir(stateDir,{recursive:true});
 const port=Number(process.env.PLANK_INVITE_PORT||8766);
+// Where a joined guest is sent. Direct/tunnel use keeps the gateway's own
+// path. Behind Passenger the arcade HTML is ALSO served statically from
+// public/arcade -- and that copy has no <meta name="plank-invite">, so
+// landing there silently drops INVITE_TEST and the green dock never mounts.
+// The proxied deployment points this at the route only the gateway answers.
+const TABLE_PATH=process.env.PLANK_INVITE_TABLE_PATH?.trim()||'/arcade/crash.html';
 if(!Number.isInteger(port)||port<1||port>65535)throw new Error('PLANK_INVITE_PORT must be a valid port');
 let token='';
 try{token=(await readFile(resolve(stateDir,'invite-token.txt'),'utf8')).trim();}catch{}
@@ -48,7 +54,7 @@ const json=(res:any,status:number,data:unknown)=>{res.writeHead(status,{'Content
 async function body(req:IncomingMessage){let data='';for await(const chunk of req){data+=chunk;if(data.length>65536)throw new Error('Request too large');}return JSON.parse(data||'{}');}
 const types:Record<string,string>={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.jpg':'image/jpeg','.webp':'image/webp','.woff2':'font/woff2','.ttf':'font/ttf','.wasm':'application/wasm','.mp3':'audio/mpeg'};
 const landing=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>PlankCrash · Friend test</title><link rel="stylesheet" href="/arcade/pocket-console.css"></head><body style="display:grid;place-items:center;min-height:100svh;color:var(--ink);text-align:center"><main><h1>PLANKCRASH</h1><p id="status">Joining the launch…</p><p>Simulated ETH · no cash value</p><button id="retry" hidden>Try again</button></main><script>
-async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('/arcade/crash.html');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
+async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
@@ -59,8 +65,20 @@ createServer(async(req,res)=>{
     if(guest&&guest.expires<Date.now()){sessions.delete(sid!);void persistSessions();guest=undefined;}
     if(req.method==='POST'){
       const origin=req.headers.origin;
+      // Same-origin is still the rule; the question is what "same" means once
+      // a reverse proxy is in front. Passenger rewrites Host to this
+      // loopback listener while Origin stays the public site, so comparing
+      // the two rejects every real request. PLANK_INVITE_PUBLIC_ORIGIN names
+      // the one public origin allowed to reach us; unset, behaviour is
+      // unchanged and only a direct same-host POST is accepted.
+      const publicOrigin=process.env.PLANK_INVITE_PUBLIC_ORIGIN?.trim();
       const expectedHost=req.headers.host;
-      if(origin && new URL(origin).host!==expectedHost){json(res,403,{error:'Origin rejected'});return;}
+      if(origin){
+        const originHost=new URL(origin).host;
+        const allowed=originHost===expectedHost
+          || (!!publicOrigin && origin===publicOrigin);
+        if(!allowed){json(res,403,{error:'Origin rejected'});return;}
+      }
       if(req.headers['sec-fetch-site']==='cross-site'){json(res,403,{error:'Cross-site request rejected'});return;}
     }
     if(url.pathname==='/api/invite/join'&&req.method==='POST'){
@@ -87,7 +105,7 @@ createServer(async(req,res)=>{
     }
     if((url.pathname==='/'||url.pathname==='/arcade/crash.html')&&req.method==='GET'&&!guest){res.setHeader('Content-Type','text/html');res.end(landing);return;}
     if(!guest && url.pathname!=='/arcade/pocket-console.css'){json(res,401,{error:'Invite session required'});return;}
-    if(guest&&url.pathname==='/'&&req.method==='GET'){res.writeHead(302,{Location:'/arcade/crash.html'}).end();return;}
+    if(guest&&url.pathname==='/'&&req.method==='GET'){res.writeHead(302,{Location:TABLE_PATH}).end();return;}
     if(url.pathname==='/api/invite/clock'&&req.method==='GET'){json(res,200,{nowMs:Date.now()});return;}
     if(url.pathname==='/api/invite/session'&&req.method==='GET'){
       json(res,200,{address:guest!.address,key:guest!.key,invite:token,simulated:true});return;
