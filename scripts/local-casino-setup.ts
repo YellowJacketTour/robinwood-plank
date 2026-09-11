@@ -178,6 +178,15 @@ async function main() {
     communityFuel: await communityFuel.getAddress(),
     bank: await bank.getAddress(),
     plank: await plank.getAddress(),
+    // The block the deployment starts at. The invite gateway used to find
+    // this by binary-searching getCode over history -- which works on a
+    // short-lived dev node and fails on a long-lived one: anvil keeps only
+    // a few thousand blocks of STATE (blocks and receipts survive, account
+    // state does not), so after ~an hour the search reads '0x' for the
+    // deployment's own early blocks and either mislocates the start or
+    // throws BlockOutOfRangeError and the gateway cannot boot. The deployer
+    // already knows the answer exactly; record it rather than rediscover it.
+    deployedAtBlock: await ethers.provider.getBlockNumber(),
     lottery: await lottery.getAddress(),
     lotteryRule: "numbered",
     lotteryCycle: "funded-cycle-v1",

@@ -12,9 +12,28 @@ const source=JSON.parse(await readFile(resolve(root,'arcade/deploy-addresses.loc
 if(!source.testRig || !['30-second-window-local-mock','30-second-lottery-to-launch-local-mock'].includes(source.practiceTiming))throw new Error('Local test manifest required');
 const manifest={...source,inviteTest:true};delete manifest.simulateKey;delete manifest.rpcUrl;
 // Locate this deployment, not every prior audit fixture on the same dev node.
-let low=0,high=await rpc.getBlockNumber();
-while(low<high){const mid=Math.floor((low+high)/2);if(await rpc.getCode(manifest.plank,mid)==='0x')low=mid+1;else high=mid;}
-manifest.inviteStartBlock=low;
+// The deploy records the answer (deployedAtBlock). The binary search below is
+// the fallback for a manifest written before that field existed -- and it is
+// only safe on a SHORT-LIVED node. A chain keeps blocks and receipts far
+// longer than it keeps account STATE: measured on anvil, state survives about
+// 3,200 blocks, which at 100ms blocks is roughly five minutes. Past that,
+// getCode returns '0x' for the deployment's own early blocks -- or throws
+// BlockOutOfRangeError and the gateway cannot boot at all -- so the search
+// lands too high and the arcade filters out its own logs.
+if(Number.isSafeInteger(source.deployedAtBlock)&&source.deployedAtBlock>=0){
+  manifest.inviteStartBlock=source.deployedAtBlock;
+}else{
+  let low=0,high=await rpc.getBlockNumber();
+  while(low<high){
+    const mid=Math.floor((low+high)/2);
+    let code='0x';
+    // A pruned block is indistinguishable from 'not deployed yet' here, so
+    // treat it the same way rather than crashing the whole gateway.
+    try{code=await rpc.getCode(manifest.plank,mid);}catch{low=mid+1;continue;}
+    if(code==='0x')low=mid+1;else high=mid;
+  }
+  manifest.inviteStartBlock=low;
+}
 const policy=invitePolicy(manifest);
 const stateDir=resolve(process.env.PLANK_INVITE_STATE_DIR||'work/invite');await mkdir(stateDir,{recursive:true});
 const port=Number(process.env.PLANK_INVITE_PORT||8766);
