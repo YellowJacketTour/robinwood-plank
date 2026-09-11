@@ -37,6 +37,7 @@ on:
           - provision-plank-koth-gap-finder
           - provision-market-mesh
           - provision-akasha-hose
+          - provision-plankcrash-table
           - cutover-bitcoin-existence
           - deploy-mesh
           - configure-plankspace-x
