@@ -713,3 +713,113 @@ test("a WebGL context that cannot be created explains itself instead of leaving 
   assert.match(window, /setAttribute\(\s*["']role["']\s*,\s*["']alert["']\s*\)/, "the failure must announce itself to assistive tech");
   assert.match(window, /cannot open a 3D view/, "the message must state the actual cause");
 });
+
+// The owner's live table rate-limited itself mid-flight. The server's poll
+// deadline was 2s while the surrounding comment and maxDuration=30 assumed
+// 20-30s, and the client re-polls with no success-path delay -- so a LIVE
+// round, where the version changes every tick and every poll returns at once,
+// ran a fetch loop bounded only by RTT. At 100ms that is ~600 req/min against
+// a 120/min ceiling, and the player got a "Table busy" blackout of up to 20s.
+test("the room long-poll holds long enough that a live round cannot rate-limit itself", () => {
+  const route = readFileSync(
+    new URL("../../app/api/playtest/rooms/[roomId]/updates/route.ts", import.meta.url),
+    "utf8"
+  );
+  const deadline = route.match(/const deadline = Date\.now\(\) \+ ([\d_]+);/);
+  assert.ok(deadline, "the poll deadline must be explicit");
+  const holdMs = Number(deadline[1].replace(/_/g, ""));
+  const limit = route.match(/limit:\s*(\d+),\s*windowMs:\s*([\d_]+)/);
+  assert.ok(limit, "the rate limit must be explicit");
+  const perMinute = Number(limit[1]) / (Number(limit[2].replace(/_/g, "")) / 60_000);
+  // The failure was never the idle rate -- 2s idles at 30/min, comfortably
+  // under 120. It was the LIVE round: the version changes every tick, so every
+  // poll returns immediately and the client (no success-path delay) re-polls at
+  // RTT speed. What actually protects the table is the hold being long relative
+  // to a round, so a burst of instant returns is bounded by ticks rather than
+  // by network latency. A 20s round must not be able to spend the whole minute
+  // budget, so require the hold to be a meaningful fraction of a round.
+  const idleRequestsPerMinute = 60_000 / holdMs;
+  assert.ok(
+    idleRequestsPerMinute <= perMinute / 8,
+    `idle poll rate ${idleRequestsPerMinute}/min must sit well under the ${perMinute}/min limit`
+  );
+  assert.ok(
+    holdMs >= 10_000,
+    `a ${holdMs}ms hold lets a live round re-poll at RTT speed and rate-limit itself mid-flight`
+  );
+});
+
+// renderRatio bounds by TOTAL PIXELS, not just device ratio. Playtest skipped
+// it and used a bare Math.min(devicePixelRatio, cap), so a 1440p desktop or a
+// 3x phone rendered ~2.25x the pixels through bloom, god-rays and lens-flare.
+test("the pixel budget applies to playtest, not only the public arcade", () => {
+  const resizeAt = arcadeSource.indexOf("function resize()");
+  assert.ok(resizeAt > 0, "resize() must exist");
+  const body = arcadeSource.slice(resizeAt, resizeAt + 1400);
+  const call = body.indexOf("renderRatio(");
+  assert.ok(call > 0, "resize must run the pixel budget");
+  // Discriminate on what precedes the call, not on a regex that a multi-line
+  // `if (!PLAYTEST_MODE) { ... }` block can slip past: no unclosed
+  // PLAYTEST_MODE guard may sit between the function head and the call.
+  const before = body.slice(0, call);
+  const guards = before.match(/!\s*PLAYTEST_MODE/g) || [];
+  assert.equal(
+    guards.length, 0,
+    "renderRatio must not sit behind a !PLAYTEST_MODE guard -- playtest needs the pixel budget too"
+  );
+  assert.match(body, /PLAYTEST_MODE \? privateQualityCap\(\)/, "playtest must supply its tier as the cap");
+});
+
+// The sampler was gated on preference === "balanced", so a player who chose
+// "high" -- the tier that most needs relief -- was never sampled at all.
+test("the adaptive quality sampler can demote a high-tier playtest player", () => {
+  assert.doesNotMatch(
+    arcadeSource,
+    /\} else if \(privateQualityPreference === "balanced"\) \{/,
+    "sampling must not be restricted to the balanced preference -- 'high' needs relief most"
+  );
+  assert.match(
+    arcadeSource,
+    /\} else if \(privateQualityPreference !== "low"\) \{/,
+    "every tier that is not already pinned low must be sampled"
+  );
+  assert.match(
+    arcadeSource,
+    /if \(effectiveRenderTier === "high"\) configureRenderQuality\("balanced"\)/,
+    "a struggling high tier must step down to balanced"
+  );
+});
+
+// Astra built the Rapier lottery drum and verified it with eight headless
+// checks, but playtest only ever reached the 2D placeholder: the 3D machine
+// was mounted exclusively through lottery-theatre, which is fed by the CHAIN
+// scoreboard and so never opens here. The theatre was the chain-coupled part;
+// the machine itself needs only a ball count and the committed ball, both of
+// which the playtest snapshot already carries. Verified on a live local table:
+// data-lottery-renderer="rapier-3d", physics="rapier", and the real phase
+// sequence rolling -> orienting -> presented.
+test("playtest presents the real 3D lottery machine, not the 2D placeholder", () => {
+  assert.match(
+    arcadeSource,
+    /import \{ mountLotteryMachine \} from "\.\/lottery-machine-3d\.js"/,
+    "the 3D machine must be imported"
+  );
+  const mountAt = arcadeSource.indexOf("function mountPrivateLotteryMachine(");
+  assert.ok(mountAt > 0, "the playtest mount point must exist");
+  const body = arcadeSource.slice(mountAt, mountAt + 2400);
+  assert.match(body, /mountLotteryMachine\(canvas, \{/, "playtest must mount the 3D machine");
+  // A committed ball is required to build the population, so a funding round
+  // (no draw) legitimately keeps the placeholder -- but a real draw must not.
+  assert.match(
+    body,
+    /if \(drawNumber === null \|\| drawNumber === undefined\)/,
+    "only a draw-less funding round may fall back to the 2D machine"
+  );
+  // Rapier loads asynchronously: a failure arrives as an event after the call
+  // returns, so a try/catch alone would leave a frozen drum on screen.
+  assert.match(
+    body,
+    /addEventListener\("lottery-render-error"/,
+    "an async physics failure must also fall back, not just a synchronous throw"
+  );
+});
