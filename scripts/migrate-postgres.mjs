@@ -114,10 +114,20 @@ try {
     const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
     const deferrable = notificationDeferralCandidate(allowDeferredNotifications, file, sql);
     await client.query("BEGIN");
+    const drained = process.env.PLANK_MIGRATION_WRITERS_QUIESCED === "1" && serverVersion >= 90600
+      && /^(110|111)_/.test(file);
     try {
-      if (deferrable) await client.query("SET LOCAL lock_timeout = '2s'");
-      if (process.env.PLANK_MIGRATION_WRITERS_QUIESCED === "1" && serverVersion >= 90600
-        && /^(110|111)_/.test(file)) {
+      // The 2s clamp exists so a deferrable migration gives up quickly rather
+      // than stalling a deploy behind another role's maintenance lock. But the
+      // drain's first blocker sweep is at graceMs (30s), so when BOTH are on
+      // the clamp fires first and the drain never runs at all. Measured on the
+      // 2026-09-11 rollout: guard acquired the last writer lock at 04:02:40.95,
+      // the migration began at 04:02:42.12 and failed at 04:02:44.19 -- 2s, on
+      // a same-user lock the deferral path cannot forgive either. Give the
+      // drain room to do its job; the clamp still applies when it is not armed.
+      if (deferrable && !drained) await client.query("SET LOCAL lock_timeout = '2s'");
+      if (drained) {
+        await client.query("SET LOCAL lock_timeout = '90s'");
         await withMarketMigrationDrain(client, pool.options, () => client.query(sql));
       } else {
         await client.query(sql);
