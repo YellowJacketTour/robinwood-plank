@@ -311,29 +311,88 @@ export async function readProjectedRarityInputs(chainSlug: string, collectionSlu
   return result.rows.map((row) => ({ tokenId: row.token_id, name: row.name, traits: normalizeTraits(row.traits) }));
 }
 
+/**
+ * The complete trait index for a collection. NO ROW CEILING.
+ *
+ * WHY THERE IS NO LIMIT HERE
+ * --------------------------
+ * This query is a `CROSS JOIN LATERAL jsonb_array_elements(traits)`: it emits
+ * one row per token PER TRAIT. A 10k-token collection carrying 8 traits each
+ * is 80,000 rows, on a request path that /api/market/multichain/trait-index
+ * serves `Cache-Control: no-store`, against a table measured at 19.4M rows /
+ * 16GB, through a pool capped at PGPOOL_MAX=4.
+ *
+ * An earlier version of this function capped the result at an invented
+ * 200,000 rows. That was the wrong instrument. A row cap is an arbitrary
+ * THROUGHPUT ceiling: it decides in advance that a large collection may not
+ * have a complete trait index, and the number itself was chosen by nobody for
+ * no measured reason. The biggest collections are exactly the ones whose trait
+ * filters matter most.
+ *
+ * The real hazard was never "too many rows". It was "a query that runs
+ * forever holds one of four connections". That hazard is already handled, by
+ * TIME rather than by row count: lib/postgres.ts sets a pool-level
+ * `statement_timeout` (15s for web requests, 80s for mesh workers) with a
+ * matching client `query_timeout`, so PostgreSQL cancels a runaway scan before
+ * the client abandons it. A slow collection costs at most that deadline and
+ * then fails cleanly -- it can never pin the pool.
+ *
+ * So the correct shape is: ask for everything, let the database's own deadline
+ * be the only bound, and report honestly when that deadline is what stopped
+ * us. Throughput is uncapped; only the clock paces it.
+ *
+ * WHY THE FAILURE MUST STILL BE OBSERVABLE
+ * ----------------------------------------
+ * A query that hits `statement_timeout` throws. If that throw were swallowed
+ * into an empty result, the caller would render a trait index that is missing
+ * every value and could not tell -- the "a miss that reports finished" failure
+ * this codebase keeps paying for.
+ *
+ * So a timed-out read is reported as `incomplete: true` alongside the rows it
+ * did NOT get, and `partial` is forced true regardless of what the projection
+ * row claims. The caller already treats `partial` as "keep refreshing, do not
+ * trust this as closed": /trait-index maps it to `building` and raises
+ * collection demand. An incomplete read therefore degrades into the existing
+ * work-in-progress path instead of into a confident wrong answer.
+ */
 export async function readProjectedTraitIndex(chainSlug: string, collectionSlug: string) {
-  const [rows, projection] = await Promise.all([
-    postgresQuery<{ token_id: string; trait_type: string; trait_value: string }>(
+  // The projection row is cheap and must be read even if the trait fan-out
+  // times out -- it is what tells the caller the collection exists at all.
+  const projection = await postgresQuery<{ projected_count: number; expected_count: number | null; partial: boolean }>(
+    `SELECT projected_count, expected_count, partial FROM plank_collection_token_projections
+     WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`, [chainSlug, collectionSlug]);
+  if (!projection.rows[0]) return null;
+
+  let rows: Array<{ token_id: string; trait_type: string; trait_value: string }> = [];
+  let incomplete = false;
+  try {
+    const result = await postgresQuery<{ token_id: string; trait_type: string; trait_value: string }>(
       `SELECT t.token_id, trait->>'traitType' AS trait_type, trait->>'value' AS trait_value
        FROM plank_collection_tokens t
        CROSS JOIN LATERAL jsonb_array_elements(t.traits) trait
        WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)
          AND COALESCE(trait->>'traitType','') <> '' AND COALESCE(trait->>'value','') <> ''`,
-      [chainSlug, collectionSlug]),
-    postgresQuery<{ projected_count: number; expected_count: number | null; partial: boolean }>(
-      `SELECT projected_count, expected_count, partial FROM plank_collection_token_projections
-       WHERE chain_slug = $1 AND ${COLLECTION_MATCH_SQL}`, [chainSlug, collectionSlug]),
-  ]);
-  if (!projection.rows[0]) return null;
+      [chainSlug, collectionSlug]);
+    rows = result.rows;
+  } catch {
+    // Almost always the pool's statement_timeout. Whatever the cause, the one
+    // thing we know is that we do not hold a complete index -- and saying so
+    // is the entire point. Returning null instead would read as "no such
+    // collection", which is a different and wrong fact.
+    incomplete = true;
+  }
+
   const traits: Record<string, Record<string, string[]>> = {};
-  for (const row of rows.rows) {
+  for (const row of rows) {
     traits[row.trait_type] ??= {};
     traits[row.trait_type][row.trait_value] ??= [];
     traits[row.trait_type][row.trait_value].push(row.token_id);
   }
   return { traits, projectedCount: Number(projection.rows[0].projected_count),
     expectedCount: projection.rows[0].expected_count == null ? null : Number(projection.rows[0].expected_count),
-    partial: projection.rows[0].partial };
+    // An incomplete read can never be complete, whatever the projection says.
+    partial: projection.rows[0].partial || incomplete,
+    incomplete };
 }
 
 export type TokenMetadataWork = { collectionSlug: string; tokenId: string };
