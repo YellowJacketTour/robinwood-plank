@@ -8,6 +8,8 @@
     "build": "next build",
     "build:relayer": "esbuild scripts/relay-drand.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/drand-relayer/relay-drand.mjs",
     "build:casino-keeper": "esbuild scripts/casino-keeper.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/casino-keeper/casino-keeper.mjs",
+    "build:arcade-preview": "esbuild scripts/local-arcade-preview.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/plankcrash-table/arcade-preview.mjs",
+    "build:invite-gateway": "esbuild scripts/invite-arcade-preview.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/plankcrash-table/invite-gateway.mjs",
     "build:market-refresh": "esbuild scripts/refresh-market-data.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --external:@envio-dev/* --outfile=.next/standalone/scripts/refresh-market-data.mjs",
     "build:reindex": "esbuild scripts/reindex-chain-events.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --outfile=.next/standalone/scripts/reindex-chain-events.mjs",
     "build:plank-koth-watch": "esbuild scripts/plank-koth-watch-standalone.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --outfile=.next/standalone/scripts/plank-koth-watch-standalone.mjs",

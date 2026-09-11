@@ -210,6 +210,53 @@ jobs:
         if: github.event_name == 'pull_request'
       - run: npm run build
       - run: npm run build:relayer
+      - run: npm run build:casino-keeper
+      - run: npm run build:arcade-preview
+      - run: npm run build:invite-gateway
+
+      # The PlankCrash table's chain seed. The deploy script imports hardhat
+      # and cannot be bundled (native .node modules in solidity-analyzer), and
+      # the standalone release ships no devDependencies -- so the server has no
+      # way to deploy. Instead: deploy ONCE here, where hardhat exists, against
+      # the same anvil the server runs, and ship the resulting state file. The
+      # server loads it with --state and has the identical casino, byte for
+      # byte, with no hardhat anywhere near it.
+      #
+      # LOCAL_CASINO_REAL_TIME=1 matters: without it the setup jumps chain time
+      # ~30s forward via evm_setNextBlockTimestamp to skip the construction
+      # round, and anvil bakes that offset in permanently -- every countdown
+      # then runs 30 seconds out. With it, the offset is 0.
+      - name: Seed the PlankCrash table chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/foundry.tar.gz \
+            "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          mkdir -p /tmp/foundry && tar -xzf /tmp/foundry.tar.gz -C /tmp/foundry anvil
+          mkdir -p .next/standalone/ops/plankcrash-table
+          /tmp/foundry/anvil --port 8545 --host 127.0.0.1 --chain-id 31337 \
+            --accounts 20 --balance 10000 --order fifo \
+            --state .next/standalone/ops/plankcrash-table/anvil-seed.json \
+            --state-interval 2 --preserve-historical-states \
+            --transaction-block-keeper 100000 \
+            --block-time 0.1 --mixed-mining --silent &
+          for _ in $(seq 1 60); do
+            curl -sf --max-time 2 -X POST http://127.0.0.1:8545 \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' >/dev/null && break
+            sleep 1
+          done
+          npx hardhat compile
+          LOCAL_CASINO_REAL_TIME=1 TEST_RIG=1 \
+            npx hardhat run scripts/local-casino-setup.ts --network localhost
+          # The manifest the gateway and the browser both read.
+          cp public/arcade/deploy-addresses.local.json \
+             .next/standalone/public/arcade/deploy-addresses.local.json
+          sleep 4   # let --state-interval flush the final blocks
+          test -s .next/standalone/ops/plankcrash-table/anvil-seed.json
+        env:
+          FOUNDRY_VERSION: v1.8.1
+
       - run: npm run build:market-refresh
       - run: npm run build:reindex
       - run: npm run build:plank-koth-watch
@@ -240,6 +287,13 @@ jobs:
           cp deploy/inmotion/passenger.cjs .next/standalone/deploy/inmotion/passenger.cjs
           mkdir -p .next/standalone/scripts
           cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
+          # PlankCrash table: the supervisor plus the chain seed CI deployed.
+          # The manifest is copied AFTER `cp -R public` above, which would
+          # otherwise overwrite it with the repo copy (gitignored, so absent).
+          mkdir -p .next/standalone/ops/plankcrash-table
+          cp scripts/plankcrash-table.sh .next/standalone/ops/plankcrash-table/plankcrash-table.sh
+          cp public/arcade/deploy-addresses.local.json .next/standalone/public/arcade/deploy-addresses.local.json
+          test -s .next/standalone/ops/plankcrash-table/anvil-seed.json
           cp scripts/notification-migration-policy.mjs .next/standalone/scripts/notification-migration-policy.mjs
           cp scripts/market-migration-drain.mjs .next/standalone/scripts/market-migration-drain.mjs
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
@@ -270,6 +324,9 @@ jobs:
           test -s .next/standalone/scripts/evaluate-plank-koth-tx.mjs
           test -s .next/standalone/scripts/plank-koth-gap-finder-standalone.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
+          test -s .next/standalone/ops/plankcrash-table/arcade-preview.mjs
+          test -s .next/standalone/ops/plankcrash-table/invite-gateway.mjs
+          test -s .next/standalone/ops/plankcrash-table/plankcrash-table.sh
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           # build:market-refresh's esbuild step marks @envio-dev/* as
           # --external (it's a native addon, not something esbuild can
@@ -1307,6 +1364,136 @@ jobs:
           test "$cron_observed" = "true"
           echo "PLANK_KOTH_WATCH_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 5 "$log_file"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # PlankCrash friend table. One managed cron entry supervises the whole stack
+  # Astra documented in docs/marketplank/FRIEND-INVITE-TEST.md -- the chain on
+  # 8545, the arcade preview (keeper + practice clock + simulated crew) on
+  # 8765, and the invite gateway on 8766 -- so the table survives without a
+  # developer's machine. scripts/plankcrash-table.sh carries the reasoning for
+  # every flag; all three services bind loopback only and are reached solely
+  # through next.config.ts's /api/invite/* and /arcade/table.html rewrites.
+  # ---------------------------------------------------------------------------
+  provision-plankcrash-table:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-plankcrash-table'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      PLANK_INVITE_PUBLIC_ORIGIN: ${{ vars.PLANK_INVITE_PUBLIC_ORIGIN }}
+    steps:
+      - name: Validate SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Start the table, then install the managed cron entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "${PLANK_INVITE_PUBLIC_ORIGIN:-https://plank.love}" <<'REMOTE'
+          set -euxo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          public_origin="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+
+          supervisor="$app_dir/current/ops/plankcrash-table/plankcrash-table.sh"
+          seed="$app_dir/current/ops/plankcrash-table/anvil-seed.json"
+          test -s "$supervisor"
+          test -s "$seed"
+          test -s "$app_dir/current/ops/plankcrash-table/arcade-preview.mjs"
+          test -s "$app_dir/current/ops/plankcrash-table/invite-gateway.mjs"
+          chmod 700 "$supervisor"
+
+          table_dir="$app_dir/shared/plankcrash"
+          logs_dir="$app_dir/logs"
+          mkdir -p "$table_dir/state" "$logs_dir"
+          chmod 700 "$table_dir" "$logs_dir"
+          # First run only: seed the chain from the state CI deployed against
+          # the identical anvil. Never overwrite a live table's own state --
+          # that would erase every guest's wallet and the round counter.
+          if [ ! -s "$table_dir/anvil-state.json" ]; then
+            cp "$seed" "$table_dir/anvil-state.json"
+          fi
+          chmod 600 "$table_dir/anvil-state.json"
+
+          log_file="$logs_dir/plankcrash-table.log"
+          touch "$log_file"; chmod 600 "$log_file"
+          lock_file="$app_dir/shared/plankcrash-table.lock"
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          # Run one real pass before trusting the schedule.
+          PLANK_INVITE_PUBLIC_ORIGIN="$public_origin" \
+            "$flock_bin" -n "$lock_file" bash "$supervisor" "$app_dir" "$node_bin" 30 \
+            >> "$log_file" 2>&1 || true
+          tail -n 20 "$log_file"
+
+          cron_before="$(mktemp)"; cron_after="$(mktemp)"
+          trap 'rm -f "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          awk '!/plankcrash-table/' "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# plankcrash-table (managed by inmotion branch)'
+            printf '* * * * * cd %s && %s -n %s /usr/bin/env PLANK_INVITE_PUBLIC_ORIGIN=%s bash %s %s %s 3300 >> %s 2>&1\n' \
+              "$app_dir/current" "$flock_bin" "$lock_file" "$public_origin" \
+              "$supervisor" "$app_dir" "$node_bin" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          # Count the tag comment only: the supervisor's own path contains
+          # "plankcrash-table" too, so a bare substring grep double-counts a
+          # single real entry (the exact trap documented on plank-koth-watch).
+          managed_count="$(crontab -l | grep -c '^# plankcrash-table' || true)"
+          test "$managed_count" -eq 1
+
+          # Do not declare success until the cron has been observed firing.
+          lines_before="$(wc -l < "$log_file")"
+          cron_observed=false
+          for attempt in $(seq 1 30); do
+            sleep 5
+            lines_after="$(wc -l < "$log_file")"
+            if [ "$lines_after" -gt "$lines_before" ]; then cron_observed=true; break; fi
+          done
+          test "$cron_observed" = "true"
+
+          # And not until the table actually answers.
+          curl -sf --max-time 5 -o /dev/null "http://127.0.0.1:8766/"
+          echo "PLANKCRASH_TABLE_PROVISIONED={\"managedEntries\":$managed_count}"
+          tail -n 10 "$log_file"
           REMOTE
 
   # ---------------------------------------------------------------------------

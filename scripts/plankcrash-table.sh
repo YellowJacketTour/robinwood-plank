@@ -1,46 +1,80 @@
 #!/bin/bash
-# PlankCrash friend table -- one cron invocation owns the whole stack for an
-# hour, then exits so the next invocation takes over. flock makes overlap
-# impossible, exactly as the drand relayer and akasha hose already work.
+# PlankCrash friend table -- the whole stack, supervised by one cron entry.
+# Each invocation owns the table for its budget then exits so the next takes
+# over; flock makes overlap impossible, exactly as the drand relayer and the
+# akasha hose already work on this host.
 #
-# Why anvil and not hardhat: hardhat is a devDependency and the standalone
-# Passenger release ships none, so it does not exist on this box. anvil is a
-# single static binary. More importantly hardhat's chain is memory-only, so
-# every hourly restart would wipe contracts, balances and the round counter --
-# players would lose their wallets every hour. anvil's --state-interval dumps
-# to disk periodically, which survives even a hard kill (verified).
+# The stack is Astra's, unchanged (docs/marketplank/FRIEND-INVITE-TEST.md):
 #
-# The chain is fake and local. Guest wallets are funded from a pre-funded
-# anvil account, so play costs nothing and needs no faucet.
+#   :8545  the chain            anvil, standing in for `npx hardhat node`
+#   :8765  arcade preview       THE KEEPER. Also writes practice-clock.js and
+#                               seats the simulated crew. Not optional -- see
+#                               below.
+#   :8766  invite gateway       the gate, the guest wallets, the filtered RPC
+#
+# Why anvil rather than hardhat: hardhat is a devDependency and the standalone
+# Passenger release ships none, so it is not on this box. More importantly
+# hardhat's chain is memory-only, and the hourly restart that cron supervision
+# requires would wipe contracts, balances and the round counter every hour.
+# anvil's --state-interval dumps to disk and survives even a hard kill.
+#
+# 8765 is MANDATORY, and it is easy to mistake for a dev convenience:
+#   - it runs the keeper with mockImmediateAfterClose, which is what makes the
+#     round cycle feel fast. Without a keeper, crash.html does NOT fall back:
+#     it disables its own browser-side lock/settle whenever INVITE_TEST is on,
+#     so the first round locks and the table hangs forever.
+#   - it writes public/arcade/practice-clock.js, the measured chain-vs-wall
+#     clock offset. crash.html imports it inside a try/catch and silently
+#     continues on a mismatch, so a stale or missing file is invisible -- the
+#     countdown is simply wrong.
+#   - it seats the simulated crew, so a lone friend is not staring at empty
+#     rounds.
+#
+# The chain is fake and local. Guests are funded from a pre-funded anvil
+# account: play costs nothing and needs no faucet.
 set -euo pipefail
 
 app_dir="${1:?app_dir required}"
 node_bin="${2:?node_bin required}"
 budget="${3:-3300}"
 
+release="$app_dir/current"
 table_dir="$app_dir/shared/plankcrash"
 state_file="$table_dir/anvil-state.json"
-manifest="$app_dir/current/public/arcade/deploy-addresses.local.json"
+manifest="$release/public/arcade/deploy-addresses.local.json"
 anvil_bin="$table_dir/bin/anvil"
+anvil_port="${ANVIL_PORT:-8545}"
+preview_port="${PLANK_PREVIEW_PORT:-8765}"
+gateway_port="${PLANK_INVITE_PORT:-8766}"
+foundry_version="${FOUNDRY_VERSION:-v1.8.1}"
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
-mkdir -p "$table_dir/bin"
+mkdir -p "$table_dir/bin" "$table_dir/state"
 chmod 700 "$table_dir"
 
+listening() {
+  curl --silent --max-time 3 -o /dev/null "http://127.0.0.1:$1/" 2>/dev/null
+}
+chain_up() {
+  curl --silent --max-time 3 -X POST "http://127.0.0.1:${anvil_port}" \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' 2>/dev/null \
+    | grep -q '"result"'
+}
+
 # ── the binary ───────────────────────────────────────────────────────────────
-# Fetched once and kept. The box already reaches the public internet over
-# HTTPS (the drand relayer polls api.drand.sh from here every minute), so the
-# only real unknown is whether github.com specifically is reachable -- say so
-# plainly rather than failing with a bare curl exit code.
 if [ ! -x "$anvil_bin" ]; then
-  log "anvil missing; fetching foundry $FOUNDRY_VERSION"
+  log "anvil missing; fetching foundry $foundry_version"
   tarball="$table_dir/foundry.tar.gz"
-  if ! curl --fail --silent --show-error --location --max-time 600 \
-      -o "$tarball" \
-      "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"; then
+  # This host reaches the public internet over HTTPS already -- the drand
+  # relayer polls api.drand.sh from here every minute -- so the only real
+  # unknown is github.com specifically. Say that plainly rather than failing
+  # with a bare curl exit code.
+  if ! curl --fail --silent --show-error --location --max-time 600 -o "$tarball" \
+      "https://github.com/foundry-rs/foundry/releases/download/${foundry_version}/foundry_${foundry_version}_linux_amd64.tar.gz"; then
     log "FATAL: could not download foundry from github.com."
-    log "       This host may not permit outbound access to github.com."
-    log "       Stage $table_dir/bin/anvil by hand and re-run."
+    log "       If this host blocks github.com, stage the binary by hand at"
+    log "       $anvil_bin and re-run."
     exit 1
   fi
   tar -xzf "$tarball" -C "$table_dir/bin" anvil
@@ -50,81 +84,120 @@ if [ ! -x "$anvil_bin" ]; then
 fi
 
 # ── the chain ────────────────────────────────────────────────────────────────
-chain_up() {
-  curl --silent --max-time 3 -X POST "http://127.0.0.1:${ANVIL_PORT}" \
-    -H 'Content-Type: application/json' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' 2>/dev/null \
-    | grep -q '"result"'
-}
-
 if chain_up; then
-  log "chain already listening on ${ANVIL_PORT}"
+  log "chain already listening on ${anvil_port}"
 else
-  log "starting anvil (state $state_file)"
-  # --state loads an existing snapshot and keeps dumping to it; the interval
-  # is what makes an ungraceful kill survivable.
+  log "starting anvil"
+  # Every flag here is parity with Astra's hardhat node, and each was found by
+  # running the real stack rather than reading about it:
   #
-  # The mining flags mirror Astra's hardhat node exactly
-  # (hardhat.config.ts: mining {auto:false, interval:100}):
-  #   --block-time 0.1  a block every 100ms, so the multiplier climbs at a
-  #                     watchable pace and chain time tracks the wall clock
-  #   --mixed-mining    ALSO mine immediately on a transaction, which is what
-  #                     hardhat's automine gave for free. Without it a bet or
-  #                     a guest funding waits for the next timed block; at a
-  #                     1s block time that made joining take 8.6 SECONDS.
-  #                     With it, 0.23s.
+  #   --block-time 0.1 --mixed-mining
+  #     hardhat.config.ts runs mining {auto:false, interval:100} PLUS automine.
+  #     100ms blocks keep the multiplier climbing at a watchable pace and the
+  #     chain clock tracking the wall clock; automine is what makes a bet or a
+  #     guest funding land instantly. With a 1s block time and no mixed mining,
+  #     joining took 8.6 SECONDS. With these, 0.23s.
+  #
+  #   --preserve-historical-states
+  #     the gateway binary-searches old blocks for its own deployment. anvil
+  #     prunes historical state by default and answers BlockOutOfRangeError,
+  #     and the gateway cannot even boot.
+  #
+  #   --transaction-block-keeper 100000
+  #     at 100ms blocks the chain makes 36,000 blocks an hour, and the default
+  #     retention pruned the deployment out from under that same search after
+  #     roughly ten minutes of uptime.
+  #
+  #   --accounts 20
+  #     the stack uses signers 0-4, 7 (preview keeper), 8 (gateway funder) and
+  #     9 (simulated crew). anvil defaults to 10, leaving zero headroom.
+  #
+  #   --order fifo
+  #     EDR mines in nonce order; anvil defaults to fee order, which can
+  #     reorder across the keeper, funder and crew senders.
   nohup "$anvil_bin" \
-    --port "$ANVIL_PORT" --host 127.0.0.1 --chain-id 31337 \
+    --port "$anvil_port" --host 127.0.0.1 --chain-id 31337 \
+    --accounts 20 --balance 10000 --order fifo \
     --state "$state_file" --state-interval 10 \
-    --preserve-historical-states --block-time 0.1 --mixed-mining --silent \
+    --preserve-historical-states --transaction-block-keeper 100000 \
+    --block-time 0.1 --mixed-mining --silent \
     >> "$table_dir/anvil.log" 2>&1 &
-  for _ in $(seq 1 30); do chain_up && break; sleep 1; done
+  for _ in $(seq 1 40); do chain_up && break; sleep 1; done
   chain_up || { log "FATAL: anvil did not come up"; exit 1; }
   log "anvil up"
 fi
 
 # ── the casino ───────────────────────────────────────────────────────────────
-# The deploy needs hardhat, which is not on this box. CI compiles and bundles
-# it instead (ops/plankcrash-deploy/deploy.mjs), so this only has to notice an
-# empty chain and run it.
+# The deploy script imports hardhat and cannot be bundled (native .node
+# modules), so CI deploys once against anvil and ships the resulting state
+# file. A chain with no casino loads that seed; a chain that already has one is
+# left alone.
 deployed=false
 if [ -s "$manifest" ]; then
-  crash="$(node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).crash||'')}catch{}" || true)"
+  crash="$("$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).crash||'')}catch{}" "$manifest" || true)"
   if [ -n "$crash" ]; then
-    code="$(curl --silent --max-time 5 -X POST "http://127.0.0.1:${ANVIL_PORT}" \
+    code="$(curl --silent --max-time 5 -X POST "http://127.0.0.1:${anvil_port}" \
       -H 'Content-Type: application/json' \
       -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$crash\",\"latest\"]}" \
-      | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).result||'0x')}catch{process.stdout.write('0x')}})")"
+      | "$node_bin" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).result||'0x')}catch{process.stdout.write('0x')}})")"
     [ "${#code}" -gt 4 ] && deployed=true
   fi
 fi
-
 if [ "$deployed" = false ]; then
-  log "no casino on this chain; deploying"
-  ( cd "$app_dir/current" && \
-    TEST_RIG=1 DEPLOY_RPC_URL="http://127.0.0.1:${ANVIL_PORT}" \
-    "$node_bin" ops/plankcrash-deploy/deploy.mjs ) >> "$table_dir/deploy.log" 2>&1
-  log "deployed"
+  log "FATAL: no casino on this chain and no seeded state to load."
+  log "       The release ships ops/plankcrash-table/anvil-seed.json; copy it"
+  log "       to $state_file and restart, or re-run the deploy in CI."
+  exit 1
+fi
+log "casino present at $crash"
+
+# ── the preview: keeper, practice clock, simulated crew ──────────────────────
+if listening "$preview_port"; then
+  log "preview already listening on ${preview_port}"
 else
-  log "casino already deployed"
+  log "starting arcade preview (keeper + practice clock + crew)"
+  ( cd "$release" && nohup "$node_bin" ops/plankcrash-table/arcade-preview.mjs \
+      >> "$table_dir/preview.log" 2>&1 & )
+  for _ in $(seq 1 40); do listening "$preview_port" && break; sleep 1; done
+  listening "$preview_port" || { log "FATAL: preview did not come up"; exit 1; }
+  log "preview up"
 fi
 
-# ── the keeper ───────────────────────────────────────────────────────────────
-# Advances rounds for the rest of the budget, then exits so the next cron
-# invocation takes the lock. Rounds are what make the table never die.
-log "keeper starting (budget ${budget}s)"
-cd "$app_dir/current"
-exec env \
-  PLANK_KEEPER_MAIN=1 \
-  KEEPER_RPC_URL="http://127.0.0.1:${ANVIL_PORT}" \
-  KEEPER_MOCK_BEACON=1 \
-  KEEPER_MAX_SECONDS="$budget" \
-  KEEPER_INTERVAL_MS=2000 \
-  CRASH_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).crash)")" \
-  LOTTERY_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).lottery)")" \
-  BEACON_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).beacon)")" \
-  ROUTER_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).rakeRouter)")" \
-  ORACLE_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).oracle||'')")" \
-  BURN_ENGINE_ADDRESS="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$manifest','utf8')).burnEngine||'')")" \
-  KEEPER_PK="$KEEPER_PK" \
-  "$node_bin" ops/casino-keeper/casino-keeper.mjs
+# ── the gate ─────────────────────────────────────────────────────────────────
+if listening "$gateway_port"; then
+  log "gateway already listening on ${gateway_port}"
+else
+  log "starting invite gateway"
+  # PLANK_INVITE_PUBLIC_ORIGIN: the gateway's CSRF check compares Origin to
+  # Host, and a reverse proxy rewrites Host to this loopback listener while
+  # Origin stays the public site -- without this every POST is 403.
+  #
+  # PLANK_INVITE_TABLE_PATH: crash.html carries <base href="/arcade/">, so the
+  # gateway's stamped copy must be served under that path or every asset 404s.
+  # It must ALSO be a filename that does not exist in public/, or the static
+  # handler shadows the proxy and the page loads without the invite meta tag --
+  # which silently drops INVITE_TEST and the green dock never mounts.
+  ( cd "$release" && nohup env \
+      PLANK_INVITE_STATE_DIR="$table_dir/state" \
+      PLANK_INVITE_PORT="$gateway_port" \
+      PLANK_INVITE_PUBLIC_ORIGIN="${PLANK_INVITE_PUBLIC_ORIGIN:-https://plank.love}" \
+      PLANK_INVITE_TABLE_PATH="/arcade/table.html" \
+      "$node_bin" ops/plankcrash-table/invite-gateway.mjs \
+      >> "$table_dir/gateway.log" 2>&1 & )
+  for _ in $(seq 1 40); do listening "$gateway_port" && break; sleep 1; done
+  listening "$gateway_port" || { log "FATAL: gateway did not come up"; exit 1; }
+  log "gateway up"
+fi
+
+# ── hold the lock for the rest of the budget ─────────────────────────────────
+# The services are detached; this process exists to own the flock, notice a
+# death, and exit before the next cron invocation starts.
+log "table up; holding for ${budget}s"
+deadline=$(( $(date +%s) + budget ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  sleep 15
+  chain_up            || { log "chain died; exiting so the next run rebuilds"; exit 1; }
+  listening "$preview_port" || { log "preview died; exiting so the next run restarts it"; exit 1; }
+  listening "$gateway_port" || { log "gateway died; exiting so the next run restarts it"; exit 1; }
+done
+log "budget reached; exiting cleanly"
