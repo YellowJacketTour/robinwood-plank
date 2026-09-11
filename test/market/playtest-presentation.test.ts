@@ -789,3 +789,37 @@ test("the adaptive quality sampler can demote a high-tier playtest player", () =
     "a struggling high tier must step down to balanced"
   );
 });
+
+// Astra built the Rapier lottery drum and verified it with eight headless
+// checks, but playtest only ever reached the 2D placeholder: the 3D machine
+// was mounted exclusively through lottery-theatre, which is fed by the CHAIN
+// scoreboard and so never opens here. The theatre was the chain-coupled part;
+// the machine itself needs only a ball count and the committed ball, both of
+// which the playtest snapshot already carries. Verified on a live local table:
+// data-lottery-renderer="rapier-3d", physics="rapier", and the real phase
+// sequence rolling -> orienting -> presented.
+test("playtest presents the real 3D lottery machine, not the 2D placeholder", () => {
+  assert.match(
+    arcadeSource,
+    /import \{ mountLotteryMachine \} from "\.\/lottery-machine-3d\.js"/,
+    "the 3D machine must be imported"
+  );
+  const mountAt = arcadeSource.indexOf("function mountPrivateLotteryMachine(");
+  assert.ok(mountAt > 0, "the playtest mount point must exist");
+  const body = arcadeSource.slice(mountAt, mountAt + 2400);
+  assert.match(body, /mountLotteryMachine\(canvas, \{/, "playtest must mount the 3D machine");
+  // A committed ball is required to build the population, so a funding round
+  // (no draw) legitimately keeps the placeholder -- but a real draw must not.
+  assert.match(
+    body,
+    /if \(drawNumber === null \|\| drawNumber === undefined\)/,
+    "only a draw-less funding round may fall back to the 2D machine"
+  );
+  // Rapier loads asynchronously: a failure arrives as an event after the call
+  // returns, so a try/catch alone would leave a frozen drum on screen.
+  assert.match(
+    body,
+    /addEventListener\("lottery-render-error"/,
+    "an async physics failure must also fall back, not just a synchronous throw"
+  );
+});

@@ -1087,6 +1087,7 @@ window.addEventListener('unhandledrejection', event => {
 </script>
 <script type="module">
 import { mountGumballMachine } from "./gumball-machine.js";
+import { mountLotteryMachine } from "./lottery-machine-3d.js";
 import * as THREE from "three";
 import { createFlightPlume } from "./flight-plume.js";
 import { advanceFlightMotion } from "./flight-motion.js";
@@ -5283,9 +5284,62 @@ function mountPrivatePowerOrange(canvas, card, drawNumber) {
   privatePowerOrangeDispose = () => { if (disposed) return; disposed = true; cancelAnimationFrame(raf); orangeScene.traverse((object) => { object.geometry?.dispose?.(); if (object.material) { const materials = Array.isArray(object.material) ? object.material : [object.material]; materials.forEach((material) => { material.map?.dispose?.(); material.dispose?.(); }); } }); labelTexture.dispose(); orangeRenderer.dispose(); privatePowerOrangeDispose = null; };
 }
 
+// The real machine: Astra's Rapier-physics lottery drum, the same one the
+// public arcade presents and that eight headless checks verify. Playtest ran
+// the 2D gumball placeholder instead -- not because the 3D machine was
+// unwanted, but because it was only ever reached through lottery-theatre,
+// which is fed by the CHAIN scoreboard and so never opens here. The theatre
+// was the chain-coupled part; the machine itself needs only a ball count and
+// the committed ball, and the playtest snapshot already carries both.
+//
+// Timing lines up exactly: the machine reaches its "presented" phase at
+// t>=4.8s, which is the same instant the reveal timeline sets data-reveal
+// to "world". So the existing choreography drives it unchanged.
 function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 16) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
-  if (canvas) privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+  if (!canvas) return;
+  // A funding round has no committed ball. The machine requires one to build
+  // its population, so the placeholder keeps idling those.
+  if (drawNumber === null || drawNumber === undefined) {
+    privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+    return;
+  }
+  try {
+    const label = String(drawNumber);
+    // Rapier loads asynchronously, so a physics failure arrives as an event
+    // long after this call returns -- a try/catch alone would miss it and
+    // leave a frozen drum. Swap to the 2D machine on that signal too.
+    let wrapped = null;
+    const onRenderError = () => {
+      // Only the CURRENT machine may swap itself out: a later round may have
+      // replaced this one before Rapier reported, and tearing that down would
+      // blank a healthy drum.
+      if (privatePowerOrangeDispose !== wrapped) return;
+      console.error("[playtest] 3D lottery physics failed, using 2D machine");
+      try { dispose3d(); } catch (_) {}
+      canvas.dataset.lotteryRenderer = "gumball-2d";
+      privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+    };
+    canvas.addEventListener("lottery-render-error", onRenderError, { once: true });
+    const dispose3d = mountLotteryMachine(canvas, {
+      result: { ballCount: String(populationSize), drawnBall: label, drawLabel: label },
+      // Reduced motion already jumps the card straight to "world", and the
+      // machine honours the same media query internally, so no branch here.
+      startAt: null,
+    });
+    canvas.dataset.lotteryRenderer = "rapier-3d";
+    wrapped = () => {
+      canvas.removeEventListener("lottery-render-error", onRenderError);
+      dispose3d();
+    };
+    privatePowerOrangeDispose = wrapped;
+  } catch (error) {
+    // Never let a GPU/WASM failure cost the player their result. The 2D
+    // machine draws the same committed ball on a plain 2D context.
+    console.error("[playtest] 3D lottery machine unavailable, using 2D machine", error);
+    canvas.dataset.lotteryRenderer = "gumball-2d";
+    privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+  }
 }
 
 let privateDockObserver = null;
