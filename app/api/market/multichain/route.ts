@@ -1,5 +1,6 @@
 import { observedFloorChanges24h, floorSubjectKey } from "@/lib/market/multichain/observed-floor-change";
-import { NextResponse } from "next/server";
+import { publicCollectionViews, type SharedView } from "@/lib/market/multichain/shared-view";
+import { after, NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshotsPage } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -85,12 +86,15 @@ export async function GET(req: Request) {
   const variant = Object.fromEntries(["limit", "offset", "chains", "sort", "dir", "v"].map((k) => [k, url.searchParams.get(k) ?? ""]));
   try {
     const { edgeRead } = await import("@/lib/market/multichain/edge/read-gateway");
-    const { value } = await edgeRead(
-      { kind: "search", chainSlug: "all", subject: "hub-index", variant },
-      () => buildHubIndex(req),
-      { policy: { softTtlMs: 30_000, hardTtlMs: 5 * 60_000 } }
-    );
-    return NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
+    const view = await publicCollectionViews.read(JSON.stringify(["hub",variant]),async()=>{
+      const {value}=await edgeRead<SharedView<Awaited<ReturnType<typeof buildHubIndex>>>>(
+        {kind:"search",chainSlug:"all",subject:"hub-index-observed-floor",variant},
+        async()=>({value:await buildHubIndex(req),capturedAt:Date.now()}),
+        {policy:{softTtlMs:30_000,hardTtlMs:5*60_000}},
+      );
+      return value;
+    },{freshMs:1000,retainMs:5*60_000,defer:work=>after(work)});
+    return NextResponse.json({...view.value,delivery:{capturedAt:new Date(view.capturedAt).toISOString(),ageMs:Math.max(0,Date.now()-view.capturedAt)}}, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     // Private diagnostics (2026-09-06): a door/admin preview holder gets the
     // real failure text; the public still gets the generic message.
@@ -208,7 +212,7 @@ async function buildHubIndex(req: Request) {
       : canonical?.volume24hWei ?? nativeSales?.volume24hWei ?? null;
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
     const nativeSubject = { chainSlug: "robinhood", collectionKey: nativeAddr, marketplace: NATIVE_BOOK_OBSERVATION_KEY, currency: "ETH", currentPriceAtomic: nativeFloor?.toString() ?? null };
-    const nativeFloorChange = (await observedFloorChanges24h([nativeSubject]).catch(() => new Map())).get(floorSubjectKey(nativeSubject)) ?? null;
+    const nativeFloorChange = (await observedFloorChanges24h([nativeSubject])).get(floorSubjectKey(nativeSubject)) ?? null;
     const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
     let nativeHolders: number | null = null;
     try {
@@ -297,7 +301,7 @@ async function buildHubIndex(req: Request) {
       chainSlug: collection.chainSlug, collectionKey: collection.contractAddress,
       marketplace: collection.floorPriceMarketplace, currency: collection.floorPriceCurrency,
       currentPriceAtomic: collection.floorPriceWei,
-    }))).catch(() => new Map());
+    })));
 
     const mapped = collections.map((c) => {
       const isCryptoPunks = c.chainSlug === "eth-mainnet"

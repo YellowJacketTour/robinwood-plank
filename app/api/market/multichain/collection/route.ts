@@ -2,6 +2,9 @@
  * Collection identity + snapshot stats without depending on a live order book.
  * Featured-card clicks were dying in /listings when UniSat/OpenSea 500'd.
  */
+import { publicCollectionViews, type SharedView } from "@/lib/market/multichain/shared-view";
+import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
+import { normalizeContractAddress } from "@/lib/market/multichain/collection-key";
 import { after, NextRequest, NextResponse } from "next/server";
 import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStats, updateHolderCount } from "@/lib/market/multichain/store";
 import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -25,9 +28,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
+    const key = JSON.stringify([chainSlug, normalizeContractAddress(chainSlug, collectionSlug), projectionOnly]);
+    const view = await publicCollectionViews.read(key, async () => {
+      const result = await edgeRead<SharedView<Awaited<ReturnType<typeof buildCollection>>>>(
+        {kind:"collection-meta",chainSlug,subject:normalizeContractAddress(chainSlug,collectionSlug),variant:{format:"shared-view-1",projection:projectionOnly}},
+        async () => ({value:await buildCollection(chainSlug,collectionSlug,projectionOnly),capturedAt:Date.now()}),
+        {policy:{softTtlMs:10_000,hardTtlMs:5*60_000}},
+      );
+      return result.value;
+    }, {freshMs:1000,retainMs:5*60_000,defer:work=>after(work)});
+    return NextResponse.json({...view.value, delivery:{capturedAt:new Date(view.capturedAt).toISOString(),ageMs:Math.max(0,Date.now()-view.capturedAt)}},
+      {headers:{"Cache-Control":"no-store"}});
+  } catch (error) {
+    if (error instanceof CollectionNotFound) return NextResponse.json({error:"NOT_FOUND"},{status:404});
+    return publicError(error,"Failed to load collection");
+  }
+}
+
+class CollectionNotFound extends Error {}
+async function buildCollection(chainSlug:string, collectionSlug:string, projectionOnly:boolean) {
     const tracked = await getTrackedCollection(chainSlug, collectionSlug);
     if (!tracked) {
-      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+      throw new CollectionNotFound();
     }
     const { prioritizeCollectionDemand } = await import("@/lib/market/multichain/collection-demand");
     // Real bug found live 2026-08-25 ("this isnt live time updating"):
@@ -152,8 +174,7 @@ export async function GET(req: NextRequest) {
     // plank_data_jobs 'running' check, both trivial at single-collection
     // scale. Null/omitted (not fabricated) when no ledger row exists yet.
     const archival = await getArchivalStatsForCollection(chainSlug, collectionSlug);
-    return NextResponse.json(
-      {
+    return {
         collection: {
           slug: tracked.contractAddress,
           name: tracked.name ?? tracked.contractAddress,
@@ -201,10 +222,5 @@ export async function GET(req: NextRequest) {
               }
             : null,
         },
-      },
-      { headers: { "Cache-Control": "no-store" } }
-    );
-  } catch (error) {
-    return publicError(error, "Failed to load collection");
-  }
+    };
 }
