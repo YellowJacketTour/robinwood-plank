@@ -180,3 +180,25 @@ test("a feature flag that must be killable is not NEXT_PUBLIC", () => {
     );
   }
 });
+
+// Found live on plank.love 2026-09-11: with GLOBAL_MARKET_ENABLED=false the
+// /market/multichain PAGE correctly showed "Almost open", and MarketMenu
+// correctly hid its Global tile, chain chips and known-limitations link --
+// but /market still rendered a "Global collections →" breadcrumb pointing
+// straight at the gated surface. A gate nobody links to is the point.
+test("no ungated route advertises the global market while it is closed", async () => {
+  const breadcrumb = await readFile(
+    path.join(process.cwd(), "components/market/MarketBreadcrumb.tsx"),
+    "utf8"
+  );
+  assert.match(
+    breadcrumb,
+    /GLOBAL_MARKET_ENABLED/,
+    "the native-market breadcrumb must respect the global-market gate"
+  );
+  assert.match(
+    breadcrumb,
+    /if \(!GLOBAL_MARKET_ENABLED\) return null;/,
+    "the native variant must render nothing while the global surface is gated"
+  );
+});

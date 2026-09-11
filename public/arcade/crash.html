@@ -1087,6 +1087,7 @@ window.addEventListener('unhandledrejection', event => {
 </script>
 <script type="module">
 import { mountGumballMachine } from "./gumball-machine.js";
+import { mountLotteryMachine } from "./lottery-machine-3d.js";
 import * as THREE from "three";
 import { createFlightPlume } from "./flight-plume.js";
 import { advanceFlightMotion } from "./flight-motion.js";
@@ -2004,6 +2005,16 @@ const lensFlarePass = new ShaderPass(LensFlareShader);
 composer.addPass(lensFlarePass);
 
 
+// Playtest's quality tier acts as the ratio CAP; renderRatio then applies the
+// shared pixel budget on top. `var` rather than `let` on purpose: resize()
+// runs during scene setup, before this file's later declarations evaluate, and
+// a `let` read from there would throw in the temporal dead zone rather than
+// yielding a default.
+var effectiveRenderTier = "balanced";
+function privateQualityCap() {
+  return effectiveRenderTier === "high" ? 2 : effectiveRenderTier === "low" ? 1 : 1.5;
+}
+
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   // Hidden/collapsed panels have no drawable size. Keep the last valid camera
@@ -2011,11 +2022,18 @@ function resize() {
   if (w <= 0 || h <= 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  if (!PLAYTEST_MODE) {
-    const ratio=renderRatio(w,h,window.devicePixelRatio||1,resolutionGovernor.cap);
-    if(renderer.getPixelRatio()!==ratio){renderer.setPixelRatio(ratio);composer.setPixelRatio(ratio);}
-    canvas.dataset.renderRatio=ratio.toFixed(2);
-  }
+  // renderRatio bounds by TOTAL PIXELS (1.5M), not just device ratio. Playtest
+  // skipped it entirely and took its ratio from configureRenderQuality's
+  // Math.min(devicePixelRatio, 1.5) instead -- no area term at all, so a 1440p
+  // desktop or a 3x phone rendered ~2.25x the pixels through bloom, god-rays
+  // and lens-flare. That is the main reason the playtest table animates worse
+  // than the public arcade on identical hardware. Playtest keeps its own
+  // quality tier as the CAP (the adaptive governor stays off here), but the
+  // pixel budget now applies to both.
+  const ratioCap = PLAYTEST_MODE ? privateQualityCap() : resolutionGovernor.cap;
+  const ratio = renderRatio(w, h, window.devicePixelRatio || 1, ratioCap);
+  if (renderer.getPixelRatio() !== ratio) { renderer.setPixelRatio(ratio); composer.setPixelRatio(ratio); }
+  canvas.dataset.renderRatio = ratio.toFixed(2);
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
   lensFlarePass.uniforms.uAspect.value = w / h;
@@ -2225,7 +2243,7 @@ const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress 
 let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
 let warpMix = 0; // 0..1, ramps up crossing the gate then decays
 let warpFlash = 0;
-let effectiveRenderTier = "balanced";
+// effectiveRenderTier is declared next to privateQualityCap(), above resize().
 let performanceFrames = 0;
 let performanceSeconds = 0;
 
@@ -2265,14 +2283,25 @@ function frame() {
   // this visual tier; the authoritative clock continues independently.
   if (!PLAYTEST_MODE) {
     if (!document.querySelector('.lottery-theatre[open]') && resolutionGovernor.sample(realDelta)!==null) resize();
-  } else if (privateQualityPreference === "balanced") {
+  } else if (privateQualityPreference !== "low") {
+    // Two fixes here. (1) This was gated on preference === "balanced", so a
+    // player who chose "high" was never sampled at all and got no adaptive
+    // relief no matter how badly the table ran -- the one tier that most needs
+    // it. It now samples anything that is not already pinned low, and steps
+    // high -> balanced -> low. (2) 180 frames is ~7.2s at a struggling 25fps,
+    // so the first correction arrived long after the player felt it; 90 frames
+    // still spans ~1.5s at 60fps, which is well past a transient hitch.
     performanceFrames++;
     performanceSeconds += realDelta;
-    if (performanceFrames >= 180) {
+    if (performanceFrames >= 90) {
       const fps = performanceFrames / Math.max(performanceSeconds, 0.001);
       canvas.dataset.measuredFps=fps.toFixed(1);
-      if (fps < 48 && effectiveRenderTier !== "low") configureRenderQuality("low");
-      else if (fps > 57 && effectiveRenderTier !== "balanced") configureRenderQuality("balanced");
+      if (fps < 48) {
+        if (effectiveRenderTier === "high") configureRenderQuality("balanced");
+        else if (effectiveRenderTier !== "low") configureRenderQuality("low");
+      } else if (fps > 57 && effectiveRenderTier === "low" && privateQualityPreference !== "low") {
+        configureRenderQuality("balanced");
+      }
       performanceFrames = 0;
       performanceSeconds = 0;
     }
@@ -4948,13 +4977,11 @@ function privateMotionReduced() {
 
 function configureRenderQuality(tier) {
   effectiveRenderTier = tier;
-  const cap = tier === "high" ? 2 : tier === "low" ? 1 : 1.5;
-  const ratio = Math.min(window.devicePixelRatio || 1, cap);
-  // EffectComposer maintains its own pixel ratio. Updating only the renderer
-  // leaves post-processing at stale resolution and makes the quality setting
-  // largely cosmetic.
-  renderer.setPixelRatio(ratio);
-  composer.setPixelRatio(ratio);
+  // The ratio itself is resize()'s job now: it runs the tier cap through
+  // renderRatio, which also bounds by total pixels. Setting it here as a bare
+  // Math.min(devicePixelRatio, cap) is what let a high-DPR screen render far
+  // past the 1.5M-pixel budget, and resize() at the end of this function would
+  // only have corrected it for the non-playtest path anyway.
   bloomPass.enabled = tier !== "low";
   godRaysPass.enabled = tier !== "low";
   lensFlarePass.enabled = tier !== "low";
@@ -5257,9 +5284,62 @@ function mountPrivatePowerOrange(canvas, card, drawNumber) {
   privatePowerOrangeDispose = () => { if (disposed) return; disposed = true; cancelAnimationFrame(raf); orangeScene.traverse((object) => { object.geometry?.dispose?.(); if (object.material) { const materials = Array.isArray(object.material) ? object.material : [object.material]; materials.forEach((material) => { material.map?.dispose?.(); material.dispose?.(); }); } }); labelTexture.dispose(); orangeRenderer.dispose(); privatePowerOrangeDispose = null; };
 }
 
+// The real machine: Astra's Rapier-physics lottery drum, the same one the
+// public arcade presents and that eight headless checks verify. Playtest ran
+// the 2D gumball placeholder instead -- not because the 3D machine was
+// unwanted, but because it was only ever reached through lottery-theatre,
+// which is fed by the CHAIN scoreboard and so never opens here. The theatre
+// was the chain-coupled part; the machine itself needs only a ball count and
+// the committed ball, and the playtest snapshot already carries both.
+//
+// Timing lines up exactly: the machine reaches its "presented" phase at
+// t>=4.8s, which is the same instant the reveal timeline sets data-reveal
+// to "world". So the existing choreography drives it unchanged.
 function mountPrivateLotteryMachine(canvas, card, drawNumber, populationSize = 16) {
   if (privatePowerOrangeDispose) privatePowerOrangeDispose();
-  if (canvas) privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+  if (!canvas) return;
+  // A funding round has no committed ball. The machine requires one to build
+  // its population, so the placeholder keeps idling those.
+  if (drawNumber === null || drawNumber === undefined) {
+    privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+    return;
+  }
+  try {
+    const label = String(drawNumber);
+    // Rapier loads asynchronously, so a physics failure arrives as an event
+    // long after this call returns -- a try/catch alone would miss it and
+    // leave a frozen drum. Swap to the 2D machine on that signal too.
+    let wrapped = null;
+    const onRenderError = () => {
+      // Only the CURRENT machine may swap itself out: a later round may have
+      // replaced this one before Rapier reported, and tearing that down would
+      // blank a healthy drum.
+      if (privatePowerOrangeDispose !== wrapped) return;
+      console.error("[playtest] 3D lottery physics failed, using 2D machine");
+      try { dispose3d(); } catch (_) {}
+      canvas.dataset.lotteryRenderer = "gumball-2d";
+      privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+    };
+    canvas.addEventListener("lottery-render-error", onRenderError, { once: true });
+    const dispose3d = mountLotteryMachine(canvas, {
+      result: { ballCount: String(populationSize), drawnBall: label, drawLabel: label },
+      // Reduced motion already jumps the card straight to "world", and the
+      // machine honours the same media query internally, so no branch here.
+      startAt: null,
+    });
+    canvas.dataset.lotteryRenderer = "rapier-3d";
+    wrapped = () => {
+      canvas.removeEventListener("lottery-render-error", onRenderError);
+      dispose3d();
+    };
+    privatePowerOrangeDispose = wrapped;
+  } catch (error) {
+    // Never let a GPU/WASM failure cost the player their result. The 2D
+    // machine draws the same committed ball on a plain 2D context.
+    console.error("[playtest] 3D lottery machine unavailable, using 2D machine", error);
+    canvas.dataset.lotteryRenderer = "gumball-2d";
+    privatePowerOrangeDispose = mountGumballMachine(canvas, card, drawNumber, populationSize);
+  }
 }
 
 let privateDockObserver = null;
