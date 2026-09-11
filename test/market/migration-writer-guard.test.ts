@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -41,4 +41,29 @@ test("migration guard stops owned writers, excludes cron restarts and releases l
     assert.ok(appDir.startsWith(work + path.sep));
     await fs.rm(appDir, { recursive: true, force: true });
   }
+});
+
+// The 2026-09-11 rollout failed here, and the timestamps name the cause
+// exactly: the guard acquired the last writer lock at 04:02:40.95, the
+// migration began at 04:02:42.12, and it died at 04:02:44.19 -- a 2s
+// lock_timeout on a CREATE TRIGGER against plank_collection_tokens. The drain
+// that exists to terminate exactly that blocker takes its first sweep at
+// graceMs (30s), so the clamp pre-empted it every time and the drain never ran
+// once. The deferral path could not forgive it either: canDeferNotificationLock
+// only forgives an OTHER-role lock on plank_market_events.
+test('a drained migration is not clamped to a timeout shorter than the drain grace period', () => {
+  const source = readFileSync(new URL('../../scripts/migrate-postgres.mjs', import.meta.url), 'utf8');
+  // The clamp must be conditional on the drain being off.
+  assert.match(
+    source,
+    /if\s*\(\s*deferrable\s*&&\s*!\s*drained\s*\)\s*await\s+client\.query\("SET LOCAL lock_timeout = '2s'"\)/,
+    'the 2s clamp must not apply when the drain is armed, or the drain can never sweep'
+  );
+  // And the drained path must allow more than one sweep at graceMs = 30s.
+  const drainedTimeout = source.match(/if\s*\(\s*drained\s*\)\s*\{\s*await\s+client\.query\("SET LOCAL lock_timeout = '(\d+)s'"\)/);
+  assert.ok(drainedTimeout, 'the drained path must set its own lock_timeout');
+  assert.ok(
+    Number(drainedTimeout[1]) > 30,
+    `drained lock_timeout must exceed the 30s drain grace period, got ${drainedTimeout[1]}s`
+  );
 });
