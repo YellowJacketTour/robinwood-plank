@@ -24,6 +24,13 @@ jobs:
       DEPLOYER_PK: ${{ secrets.DEPLOYER_PK_TESTNET }}
       ROBINHOOD_TESTNET_RPC_URL: ${{ vars.ROBINHOOD_TESTNET_RPC_URL }}
       ROBINHOOD_TESTNET_CHAIN_ID: ${{ vars.ROBINHOOD_TESTNET_CHAIN_ID }}
+      # PlankGuardedCrash takes immutable, distinct guardian and governance
+      # addresses. testnet-casino-setup.ts requires them but nothing forwarded
+      # them, so this workflow could never reach its own deploy step. They may
+      # be plain EOAs here: the script enforces distinct and nonzero only, and
+      # this stack is explicitly testnet-only-no-represented-value.
+      TESTNET_SAFETY_GUARDIAN: ${{ vars.TESTNET_SAFETY_GUARDIAN }}
+      TESTNET_SAFETY_GOVERNANCE: ${{ vars.TESTNET_SAFETY_GOVERNANCE }}
       SEEDLESS: "1"
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +75,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: plankcrash-testnet-rehearsal-${{ github.run_id }}
-          path: plankcrash-testnet-deploy.log
+          # The manifest is what the hosted arcade actually loads on HTTPS, so
+          # it has to leave the runner. Reconstructing it by hand from the log
+          # would miss oracle and burnEngine, which the log never prints.
+          path: |
+            plankcrash-testnet-deploy.log
+            public/arcade/deploy-addresses.testnet.json
           if-no-files-found: warn
           retention-days: 30
 

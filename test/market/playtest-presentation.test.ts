@@ -735,21 +735,27 @@ test("the room long-poll holds long enough that a live round cannot rate-limit i
   const limit = route.match(/limit:\s*(\d+),\s*windowMs:\s*([\d_]+)/);
   assert.ok(limit, "the rate limit must be explicit");
   const perMinute = Number(limit[1]) / (Number(limit[2].replace(/_/g, "")) / 60_000);
-  // The failure was never the idle rate -- 2s idles at 30/min, comfortably
-  // under 120. It was the LIVE round: the version changes every tick, so every
-  // poll returns immediately and the client (no success-path delay) re-polls at
-  // RTT speed. What actually protects the table is the hold being long relative
-  // to a round, so a burst of instant returns is bounded by ticks rather than
-  // by network latency. A 20s round must not be able to spend the whole minute
-  // budget, so require the hold to be a meaningful fraction of a round.
+  // The hold is bounded ABOVE by the animation, not just below by traffic.
+  // PrivateLiveClock extrapolates at most maxPredictionLeadMs past the newest
+  // heartbeat and then freezes; a running round bumps no version, so this poll
+  // returning IS the only heartbeat. Hold longer than the lead and the
+  // multiplier stops dead mid-flight -- at the shipped 0.22/s growth and a
+  // 2,500ms lead that is exactly 1.73x, which is what a player reported.
+  const clock = readFileSync(
+    new URL("../../public/arcade/private-live-clock.js", import.meta.url),
+    "utf8"
+  );
+  const lead = clock.match(/maxPredictionLeadMs\s*=\s*(\d+)/);
+  assert.ok(lead, "the clock's prediction lead must be explicit");
+  assert.ok(
+    holdMs < Number(lead[1]),
+    `a ${holdMs}ms hold starves the clock's ${lead[1]}ms prediction lead: the multiplier freezes mid-flight`
+  );
+  // And bounded below by the request budget it costs at idle.
   const idleRequestsPerMinute = 60_000 / holdMs;
   assert.ok(
     idleRequestsPerMinute <= perMinute / 8,
-    `idle poll rate ${idleRequestsPerMinute}/min must sit well under the ${perMinute}/min limit`
-  );
-  assert.ok(
-    holdMs >= 10_000,
-    `a ${holdMs}ms hold lets a live round re-poll at RTT speed and rate-limit itself mid-flight`
+    `idle poll rate ${idleRequestsPerMinute}/min needs 8x headroom under the ${perMinute}/min limit`
   );
 });
 
@@ -826,4 +832,24 @@ test("playtest presents the real 3D lottery machine, not the 2D placeholder", ()
     /addEventListener\("lottery-render-error"/,
     "an async physics failure must also fall back, not just a synchronous throw"
   );
+});
+
+// Reported live: "artwork is super laggy" during the reveal. The playtest
+// result card covers the flight exactly as lottery-theatre does and mounts the
+// SAME Rapier machine -- but only the theatre was recognised as covering the
+// scene, so the flight kept rendering bloom, god-rays and lens-flare behind an
+// opaque card while the machine's own context and physics ran on top. Two
+// WebGL contexts, two composer stacks, one GPU.
+test("the reveal card gives the lottery machine exclusive animation time", () => {
+  const guard = arcadeSource.match(/const lotteryCoversScene=[^;]+;/);
+  assert.ok(guard, "the covered-scene guard must exist");
+  assert.match(
+    guard[0],
+    /private-result\[data-reveal\]/,
+    "the playtest reveal card must count as covering the flight scene, like the theatre does"
+  );
+  // It must NOT suppress the flight during the pre-machine reveal stages,
+  // where the card is still translucent and the pad is visible behind it.
+  assert.match(guard[0], /:not\(\[data-reveal="crash"\]\)/);
+  assert.match(guard[0], /:not\(\[data-reveal="personal"\]\)/);
 });

@@ -457,11 +457,22 @@ async function main(): Promise<void> {
   }
 }
 
+// casino-keeper.ts imports fetchRoundFromApis/parseG1 from this module, and
+// esbuild bundles both into ONE file. Both modules then carry an
+// "am I the entrypoint?" check, and in the bundle both compare the same
+// process.argv[1] to the same import.meta.url -- so BOTH pass, and running
+// the keeper also started the relayer's main(), which died on the relayer's
+// own required("RPC_URL") before the keeper had ticked once. Identity alone
+// cannot distinguish two mains that share a file, so the relayer additionally
+// requires its own name: PLANK_RELAYER_MAIN=1, which the relayer's cron sets
+// and the keeper's never will.
 let invokedDirectly = false;
 try {
   invokedDirectly =
-    Boolean(process.argv[1]) &&
-    realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+    process.env.PLANK_RELAYER_MAIN === "1" ||
+    (Boolean(process.argv[1]) &&
+      !process.env.PLANK_KEEPER_MAIN &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)));
 } catch {
   invokedDirectly = false;
 }
