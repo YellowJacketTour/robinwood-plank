@@ -119,21 +119,24 @@ const nextConfig: NextConfig = {
       // serves. /api/invite/* carries the whole gate: no invite, no session,
       // 401 on everything including the arcade HTML. Same shape as the
       // market-realtime rewrite above.
-      // Only /api/invite/* is proxied. The arcade's own assets keep coming
-      // from public/arcade as they already do -- crash.html carries
-      // <base href="/arcade/">, so a /table-prefixed page still resolves its
-      // scripts, art and wasm against that same path, and those files are
-      // identical either way. Proxying /arcade/* instead would have been
-      // wrong twice over: a plain rewrite never fires for a file that exists
-      // in public/, and a beforeFiles rewrite would have stolen the path from
-      // /playtest/game, which serves the very same file to a different gate.
+      // Only the invite surface is proxied. crash.html carries
+      // <base href="/arcade/">, so every asset it pulls resolves against
+      // /arcade/ regardless of where the page itself is served -- a page at
+      // /table/crash.html asks for /table/vendor/ethers.umd.min.js and 404s.
+      // So the gateway's copy is served AT /arcade/table.html: the base
+      // matches, every asset keeps coming from public/arcade as it already
+      // does, and because no such file exists in public/ the plain rewrite
+      // actually fires. Proxying /arcade/* wholesale would have been wrong
+      // twice over -- a plain rewrite never fires for a file that DOES exist
+      // in public/, and a beforeFiles rewrite would steal the path from
+      // /playtest/game, which serves the same file behind a different gate.
       //
-      // What the gateway alone can serve is the INVITE: the session, the
+      // What only the gateway can serve is the INVITE: the session, the
       // capability-filtered RPC, the funded guest wallet, and the one page it
       // stamps with <meta name="plank-invite"> to turn INVITE_TEST on.
       { source: "/api/invite/:path*", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/api/invite/:path*` },
       { source: "/table", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/` },
-      { source: "/table/crash.html", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/arcade/crash.html` },
+      { source: "/arcade/table.html", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/arcade/crash.html` },
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
     ];
