@@ -138,7 +138,11 @@ test("funding samples cannot masquerade as unpaid jackpot draws", () => {
   // No placeholder ball ("—") exists while funding: the drum / fallback
   // result sphere is rendered only for an active draw (owner fix 2026-09-03).
   assert.doesNotMatch(arcadeSource, /drawnNumber : "—"/);
-  assert.match(arcadeSource, /\$\{drawActive \? `<div class="private-powerball-drum"/);
+  // The drum is now the WebGL-less fallback, not the primary reveal: Astra's
+  // 3D machine shows the same ball as a real object that rolls, ejects and
+  // settles, so rendering both was two answers to one question. The property
+  // this test actually guards is unchanged -- no result ball while funding.
+  assert.match(arcadeSource, /\$\{drawActive && canvas3dUnavailable \? `<div class="private-powerball-drum"/);
   assert.match(arcadeSource, /powerball\.dataset\.drawActive = drawActive \? "true" : "false"/);
   assert.match(arcadeSource, /drawActive \? draw\.drawnNumber : null/);
   assert.doesNotMatch(arcadeSource, /Funding sample \$\{draw\.drawnNumber\}/);
