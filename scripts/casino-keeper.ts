@@ -336,6 +336,7 @@ function resolvedOrUndefined(p: string | undefined): string | undefined {
 }
 const thisFile = realpathSync(fileURLToPath(import.meta.url));
 const isDirectRun =
+  process.env.PLANK_KEEPER_MAIN === "1" ||
   resolvedOrUndefined(process.argv[1]) === thisFile || resolvedOrUndefined(process.argv[3]) === thisFile;
 
 if (isDirectRun) {
