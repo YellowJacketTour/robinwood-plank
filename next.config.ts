@@ -242,6 +242,57 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // MULTICHAIN READ ROUTES THAT ALREADY ASKED TO BE CACHED.
+      //
+      // Next applies next.config.ts headers AFTER a route handler's own, so a
+      // `Cache-Control` set inside the handler is silently discarded by the
+      // blanket `/api/:path*` no-store above. These four routes each set a
+      // positive header in their own code and have been getting no-store in
+      // production regardless -- the header was written, shipped, and never
+      // took effect. The hub route documents this same overwrite happening
+      // live.
+      //
+      // Each value below is copied from what the route itself asked for, so
+      // this changes nothing about the intended policy -- it only lets the
+      // policy actually apply.
+      //
+      // Deliberately NOT carved out:
+      //   - /api/market/multichain/tokens and .../listings set a positive
+      //     header on SOME return paths and no-store on others. A path-level
+      //     carve-out cannot distinguish them and would cache a response the
+      //     route explicitly marked uncacheable.
+      //   - /api/market/multichain itself (the hub index), which is
+      //     `no-store` by design and served through edgeRead instead.
+      //
+      // chain-counts' only no-store is on a 503 NOT_CONFIGURED path, which is
+      // not cached by default, so a whole-route carve-out is safe there.
+      {
+        source: "/api/market/multichain/chain-counts",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=10, s-maxage=10, stale-while-revalidate=30",
+          },
+        ],
+      },
+      {
+        source: "/api/market/multichain/collection-search",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, s-maxage=10, stale-while-revalidate=30",
+          },
+        ],
+      },
+      {
+        source: "/api/market/multichain/token-search",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, s-maxage=10, stale-while-revalidate=30",
+          },
+        ],
+      },
       {
         source: "/api/market/token",
         headers: [
