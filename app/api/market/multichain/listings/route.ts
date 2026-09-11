@@ -94,9 +94,28 @@ async function collectionEnvelope(
   collectionSlug: string,
   overrides: { name?: string | null; imageUrl?: string | null } = {}
 ) {
-  const tracked = await getTrackedCollection(chainSlug, collectionSlug).catch(() => null);
-  const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
-  const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
+  // THREE INDEPENDENT READS, NOT A CHAIN.
+  //
+  // These were three sequential `await`s. None consumes another's result --
+  // each takes only (chainSlug, collectionSlug) -- so the request paid the sum
+  // of three round trips where it owed the max of one.
+  //
+  // This runs on /api/market/multichain/listings, which the collection page
+  // calls on every load, and it is reached from four separate return paths in
+  // this route. Against PGPOOL_MAX=4 in production, serialising independent
+  // reads holds a connection for three times as long as necessary, which is
+  // how a pool that size turns a fast query into a queue.
+  //
+  // Promise.all rather than allSettled because each call keeps its own
+  // `.catch(() => null)`: a failure of one must still be null, never a
+  // rejection that takes the other two down with it. Preserving the per-call
+  // catch is what makes this a pure scheduling change -- every failure mode
+  // behaves exactly as before.
+  const [tracked, supply, marketStats] = await Promise.all([
+    getTrackedCollection(chainSlug, collectionSlug).catch(() => null),
+    getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null),
+    getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null),
+  ]);
   return {
     slug: collectionSlug,
     name: overrides.name || tracked?.name || collectionSlug,
