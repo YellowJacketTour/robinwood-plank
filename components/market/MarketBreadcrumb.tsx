@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { GLOBAL_MARKET_ENABLED } from "@/lib/constants";
 
 type Props = {
   variant: "native" | "hub" | "collection";
@@ -12,6 +13,11 @@ type Props = {
 /** Bidirectional path between RobinWood /market and global collections. Not a hover menu. */
 export default function MarketBreadcrumb({ variant, chainSlug, collectionName }: Props) {
   if (variant === "native") {
+    // While the global surface is gated, /market must not advertise a door to
+    // it. MarketMenu already hides its Global tile, chain chips and
+    // known-limitations link on this flag; this breadcrumb was the one route
+    // in that still pointed a visitor at the unopened marketplace.
+    if (!GLOBAL_MARKET_ENABLED) return null;
     return (
       <nav aria-label="Market location" className="flex flex-wrap items-center gap-2 text-xs">
         <span className="font-bold text-foreground/70">RobinWood Market</span>
