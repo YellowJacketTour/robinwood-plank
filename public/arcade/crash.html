@@ -6,6 +6,12 @@
 <script>if(location.pathname==="/")location.replace("/arcade/crash.html"+location.search);</script>
 <title>PlankCrash</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- This file is a STATIC asset and must stay publicly fetchable: the gated
+     /playtest/game route iframes it, and the invite gateway serves its own
+     stamped copy. Fetchable is not the same as listed, though -- without this
+     the unreleased arcade was indexable, while /playtest (which gates on a
+     passkey) already declares robots noindex. Match it. -->
+<meta name="robots" content="noindex, nofollow, noarchive" />
 <meta name="description" content="An on-chain pari-mutuel crash game with a never-zero prize Vault, a real rolling Powerboard jackpot, and instant popup-free play." />
 <meta name="theme-color" content="#07100c" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E" />
