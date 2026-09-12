@@ -895,28 +895,104 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     void loadOffers();
   }, [loadOffers]);
 
-  const loadActivity = useCallback(async () => {
-    try {
+  /**
+   * TWO STAGES, BECAUSE FIRST PAINT AND THE FULL HISTORY WANT DIFFERENT SIZES.
+   *
+   * This fetched `limit=500` unconditionally on every page load. The Activity
+   * panel that displays those rows is tab-gated (`active={tab === "activity"}`)
+   * and the default tab is "buy-sell", so on first paint almost none of them
+   * are rendered -- but the request still competes with the token grid and the
+   * book for the same PGPOOL_MAX=4 pool.
+   *
+   * It cannot simply be deferred to the tab: `saleEvents` derives the
+   * always-visible stat bar from it (volume in the loaded window, highest
+   * sale, and the wash-trade signal), so a page with no activity would render
+   * those as empty rather than as loading.
+   *
+   * So: a small page first, which is enough for the stat bar to be truthful
+   * about "the loaded window", then the full 500 once the browser is idle.
+   * The second response supersedes the first, so every derived number ends up
+   * exactly where it was before -- this changes WHEN the tail arrives, never
+   * WHAT it contains.
+   *
+   * Both requests are cached independently: activity/route.ts keys its
+   * edgeRead on `variant: { limit }`, so the head request is not a wasted
+   * round trip that the full one then repeats.
+   */
+  const ACTIVITY_HEAD = 50;
+  const ACTIVITY_FULL = 500;
+
+  const fetchActivityPage = useCallback(
+    async (limit: number) => {
       // Sale/transfer history is inherently append-only for anything already
       // recorded -- a long swr window is correct, the only "freshness" that
       // matters is whether a NEW event has landed.
-      const data = await swrJson<{ events: ForeignActivityEvent[]; coverage?: { source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } }>(
-        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=500`,
+      return swrJson<{ events: ForeignActivityEvent[]; coverage?: { source: string; scope?: string; indexedEvents: number; timestampedEvents: number; oldestTimestamp: string | null; newestTimestamp: string | null; completeThroughGenesis: boolean; completeMarketHistory?: boolean; genesisBackfillBlock?: number | null; liveIndexedBlock?: number | null } }>(
+        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${limit}`,
         { ttlMs: 30_000, swrMs: 300_000, session: true }
       );
-      setActivity(data.events ?? []);
-      setHistoryCoverage(data.coverage ?? null);
+    },
+    [chainSlug, collectionSlug]
+  );
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const head = await fetchActivityPage(ACTIVITY_HEAD);
+      setActivity(head.events ?? []);
+      setHistoryCoverage(head.coverage ?? null);
     } catch {
       setActivity([]);
       setHistoryCoverage(null);
     } finally {
+      // The stat bar has real rows now; the page is usable while the tail
+      // loads. Flipping this here rather than after the full page is the
+      // whole point of the split.
       setActivityLoading(false);
     }
-  }, [chainSlug, collectionSlug]);
+  }, [fetchActivityPage]);
 
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
+
+  /**
+   * The tail. Requested only after the browser reports idle, so it never
+   * competes with first paint. A failure here is deliberately silent: the head
+   * page is already rendered and still correct, just shorter.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      void fetchActivityPage(ACTIVITY_FULL)
+        .then((full) => {
+          if (cancelled) return;
+          const events = full.events ?? [];
+          // Never replace a longer window with a shorter one -- a cached head
+          // response arriving late must not shrink what is already shown.
+          setActivity((prev) => (events.length >= prev.length ? events : prev));
+          if (full.coverage) setHistoryCoverage(full.coverage);
+        })
+        .catch(() => {});
+    };
+    // requestIdleCallback is not in Safari's older baseline; the timeout
+    // fallback keeps the tail arriving there too rather than never.
+    const ric = (window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    }).requestIdleCallback;
+    if (typeof ric === "function") {
+      const handle = ric(run, { timeout: 3_000 });
+      return () => {
+        cancelled = true;
+        (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback?.(handle);
+      };
+    }
+    const timer = window.setTimeout(run, 1_200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [fetchActivityPage]);
 
   const loadMyListings = useCallback(async () => {
     if (!account) {
