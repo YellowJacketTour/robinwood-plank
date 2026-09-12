@@ -641,21 +641,96 @@ export async function correctKnownSupplyFromChain(chainSlug: string, collectionK
 }
 
 /**
- * Single-collection lookup for the collection-detail route -- one indexed
- * read (chain_slug, collection_key is this table's real primary key) plus,
- * cheaply, a real "is a job processing this collection right now" check
- * against plank_data_jobs.status = 'running' (the same table/status
- * control-plane.ts's own claimDataJob/finishDataJob use). Both queries are
- * trivial on a single-collection page; batching this same jobProcessing
- * check across a 5000-row rankings response would not be (see
- * getArchivalStatsBatch's own header for why that route skips it).
+ * Single-collection lookup for the collection-detail route.
+ *
+ * This header used to say "one indexed read ... plus, cheaply, a real 'is a
+ * job processing this collection right now' check ... Both queries are
+ * trivial." That stopped being true as the function grew: it now issues
+ * SEVEN reads, four of which touch plank_collection_tokens (19.4M rows /
+ * 16GB in production) and three of which are per-collection AGGREGATES over
+ * it -- max(token_id::int), a COUNT(*), and a five-way FILTER count.
+ *
+ * Their cost depends entirely on how large the collection is relative to the
+ * table, and the two regimes are very different. EXPLAIN (ANALYZE, BUFFERS)
+ * against a real local Postgres:
+ *
+ *   10,000 tokens inside a 2.4M-row table (0.4% -- the production ratio for
+ *   CryptoPunks, which is 10,000 of 19.4M)
+ *     Index Scan using plank_collection_tokens_rank_idx
+ *     4.0ms / 1.7ms / 3.1ms, 328 buffers each -- genuinely cheap.
+ *
+ *   400,000 tokens inside the same 2.4M-row table (17%)
+ *     Parallel Seq Scan -- the planner correctly abandons the index
+ *     491ms / 319ms / 408ms, ~60,000 buffers each.
+ *
+ * So this is cheap for a typical collection and expensive for a very large
+ * one, and it is the most expensive thing the collection route does either
+ * way. Two consequences, both implemented:
+ *
+ *   - The reads are issued as ONE parallel batch rather than three
+ *     sequential stages (see the comment at the top of the body).
+ *   - The route starts this function concurrently with its other reads
+ *     instead of awaiting it last (see app/api/market/multichain/
+ *     collection/route.ts).
+ *
+ * Batching the jobProcessing check across a 5000-row rankings response would
+ * still not be trivial -- see getArchivalStatsBatch's own header for why that
+ * route skips it.
  */
 export async function getArchivalStatsForCollection(
   chainSlug: string,
   collectionKey: string
 ): Promise<ArchivalApiShape | null> {
   const normalized = normalizeCollectionKey(collectionKey);
-  const [statsResult, jobResult, liveResult, maxIdResult] = await Promise.all([
+  // THREE SERIAL ROUND-TRIP BATCHES, ALL WITH THE SAME TWO INPUTS.
+  //
+  // This function used to await in three separate stages:
+  //
+  //   1. Promise.all([stats, job, projected_count, max(token_id)])
+  //   2. await getCollectionSupplyStats(...)          -- for the mall ratchet
+  //   3. Promise.all([metadata COUNT(*), coverage counters])
+  //
+  // Every query in all three stages takes exactly (chainSlug, normalized) and
+  // nothing else. Stage 2 does not read anything stage 1 returned, and stage 3
+  // does not read anything stage 1 or 2 returned -- only the JavaScript AFTER
+  // them combines the values. The staging was an artifact of the order the
+  // statements were written in, not a data dependency.
+  //
+  // That cost three sequential network round trips to Postgres where one
+  // would do, on a connection pool capped at PGPOOL_MAX=4, on the route
+  // behind every collection page. Production, plank.love 2026-09-12:
+  // /api/market/multichain/collection took 17.7s cold and 6.6s warm, while
+  // /api/market/multichain/listings on the same page took 0.2s.
+  //
+  // They are now issued as ONE parallel batch. The decision logic below is
+  // unchanged and still runs in exactly the same order over exactly the same
+  // values -- only the waiting is shared. Note this cannot change the mall
+  // ratchet's verdict: getCollectionSupplyStats reads
+  // plank_multichain_snapshots, which none of these other statements write.
+  //
+  // THE ONE HONEST COST OF DOING THIS. There is an early `return null` below,
+  // for a collection with no collection_archival_stats row at all. Batching
+  // means the three former stage-2/stage-3 reads are now ISSUED before that
+  // check, where previously they were skipped. That is a genuine trade, and
+  // it is worth making for two reasons:
+  //
+  //   - The early return never avoided the EXPENSIVE work anyway. The
+  //     max(token_id::int) aggregate -- the single costliest read here, and
+  //     the one that seq-scans on a large collection -- was already in stage
+  //     1, issued before the check. What is newly spent is one
+  //     plank_multichain_snapshots point lookup plus two more aggregates over
+  //     rows the stage-1 aggregate had already read into cache.
+  //   - It applies only to collections with no ledger row, which is the cold
+  //     path; every collection the ledger knows about (the ones people
+  //     actually open) pays strictly less than before.
+  //
+  // Stated rather than hidden: if the un-ledgered path ever becomes hot, the
+  // fix is to split the stats lookup out and await it first, not to put the
+  // three sequential stages back.
+  const [
+    statsResult, jobResult, liveResult, maxIdResult,
+    venueSupplyForRatchet, metadataResult, rawCounters,
+  ] = await Promise.all([
     postgresQuery<RawArchivalStatsRow & { known_supply_chain_confirmed: boolean }>(
       `SELECT chain_slug, collection_key, known_supply::text, tokens_ever_hydrated::text,
               archival_score::text, score_method, last_archived_at, known_supply_chain_confirmed
@@ -704,6 +779,21 @@ export async function getArchivalStatsForCollection(
        WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id ~ '^[0-9]+$'`,
       [chainSlug, normalized]
     ).catch(() => ({ rows: [] as Array<{ max_id: number | null }> })),
+    // Was stage 2: the mall ratchet's cross-check. Reads
+    // plank_multichain_snapshots, which nothing else in this batch touches,
+    // so hoisting it here cannot change what it observes.
+    getCollectionSupplyStats(chainSlug, normalized)
+      .then((s) => s?.totalSupply ?? null)
+      .catch(() => null),
+    // Was stage 3: the separate metadata (L3) signal. See ArchivalApiShape's
+    // own header for why this must never be conflated with membership.
+    postgresQuery<{ metadata_count: string }>(
+      `SELECT COUNT(*)::text AS metadata_count FROM plank_collection_tokens
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND (name IS NOT NULL OR image_url IS NOT NULL)`,
+      [chainSlug, normalized]
+    ).catch(() => ({ rows: [{ metadata_count: "0" }] })),
+    // AUDIT lens 4 #5 (Batch F5): the three honest counters.
+    readMetadataCoverageCounters(chainSlug, normalized).catch(() => null),
   ]);
   const shape = toArchivalApiShape(statsResult.rows[0] ?? null);
   if (!shape) return null;
@@ -742,9 +832,9 @@ export async function getArchivalStatsForCollection(
   // denominator alone -- an unknown supply renders honestly as
   // 'unknown_supply' with no percentage, which is strictly better than a
   // confident 2%.
-  const venueSupplyForRatchet = await getCollectionSupplyStats(chainSlug, normalized)
-    .then((s) => s?.totalSupply ?? null)
-    .catch(() => null);
+  // (venueSupplyForRatchet is read in the single parallel batch at the top of
+  // this function -- see the comment there. It used to be awaited here, on its
+  // own round trip, for no reason other than statement order.)
   const inferred = observedMaxId != null ? observedMaxId + 1 : null;
   const haveVenueForRatchet =
     venueSupplyForRatchet != null &&
@@ -788,17 +878,10 @@ export async function getArchivalStatsForCollection(
   shape.archivalScore = archivalScore;
   shape.scoreMethod = scoreMethod;
 
-  // Real, separate metadata (L3) signal -- see ArchivalApiShape's own
-  // header for why this must never be conflated with membership above.
-  const [metadataResult, rawCounters] = await Promise.all([
-    postgresQuery<{ metadata_count: string }>(
-      `SELECT COUNT(*)::text AS metadata_count FROM plank_collection_tokens
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND (name IS NOT NULL OR image_url IS NOT NULL)`,
-      [chainSlug, normalized]
-    ).catch(() => ({ rows: [{ metadata_count: "0" }] })),
-    // AUDIT lens 4 #5 (Batch F5): the three honest counters.
-    readMetadataCoverageCounters(chainSlug, normalized).catch(() => null),
-  ]);
+  // (metadataResult and rawCounters are read in the single parallel batch at
+  // the top of this function -- see the comment there. They used to be a third
+  // sequential round trip, issued only after the mall ratchet had finished,
+  // though neither reads anything the ratchet produces.)
   const metadataTokens = Number(metadataResult.rows[0]?.metadata_count ?? 0);
   const metadataDenominator = liveCount ?? shape.knownSupply ?? null;
   const metadataCoverage = metadataDenominator != null && metadataDenominator > 0
