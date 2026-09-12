@@ -405,9 +405,21 @@ export async function fetchForeignAllListings(input: {
   chainSlug: string;
   collectionSlug: string;
   limit?: number;
+  cursor?: string | null;
 }): Promise<ForeignSeaportOrder[]> {
   return (await fetchForeignAllListingsPaged(input)).orders;
 }
+
+/**
+ * OpenSea pages this endpoint at 100 listings. This is how many of those pages
+ * ONE call will walk before handing its cursor back.
+ *
+ * It paces a single request -- keeping it inside its own deadline and inside
+ * the per-key quota that `reserveOpenSeaKey` enforces -- and it caps nothing,
+ * because the cursor is returned. A caller that wants the whole book calls
+ * again with `nextCursor` until it comes back null.
+ */
+export const PAGES_PER_CALL = 25;
 
 /**
  * Same endpoint, walked through OpenSea's `next` cursor (pages of at most
@@ -420,13 +432,41 @@ export async function fetchForeignAllListingsPaged(input: {
   chainSlug: string;
   collectionSlug: string;
   limit?: number;
-}): Promise<{ orders: ForeignSeaportOrder[]; complete: boolean; pages: number }> {
+  /** Resume from a previous call's `nextCursor`. */
+  cursor?: string | null;
+}): Promise<{
+  orders: ForeignSeaportOrder[];
+  complete: boolean;
+  pages: number;
+  /**
+   * OpenSea's own keyset cursor, when the walk stopped with more book behind
+   * it. Pass it back as `cursor` to continue.
+   *
+   * THIS USED TO BE THROWN AWAY, AND THAT WAS THE CEILING.
+   *
+   * `cursor` was computed on every page and used internally, then discarded at
+   * return -- so a collection with more distinct tokens than one call could
+   * gather had listings that NO REQUEST COULD EVER REACH. `complete: false`
+   * reported the truncation honestly, which made it visible but not
+   * recoverable: there was no parameter that continued the walk.
+   *
+   * Returning it converts the page budget from a ceiling into pacing. The walk
+   * still stops at a bounded number of pages per call -- that is what keeps one
+   * request inside its deadline and inside OpenSea's quota -- but the caller
+   * can now ask for the next slice, and the one after, to exhaustion.
+   */
+  nextCursor: string | null;
+}> {
   const chain = foreignChainByChainSlug(input.chainSlug);
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
-  if (!chain.openSeaChain) return { orders: [], complete: true, pages: 0 };
-  const target = Math.max(1, Math.min(input.limit ?? 100, 1_000));
+  if (!chain.openSeaChain) return { orders: [], complete: true, pages: 0, nextCursor: null };
+  // No invented ceiling on what a caller may ask for. `limit` is how many
+  // DISTINCT tokens this call should try to gather; the page budget below is
+  // what bounds the work, and the returned cursor is what makes any target
+  // reachable across calls.
+  const target = Math.max(1, input.limit ?? 100);
   const orders: ForeignSeaportOrder[] = [];
   // PAGE BY DISTINCT TOKENS, NOT BY RAW ORDER COUNT.
   //
@@ -446,13 +486,20 @@ export async function fetchForeignAllListingsPaged(input: {
   // tokens from 50 orders, so the bug looked collection-specific rather than
   // like the wrong stopping condition.
   const distinct = new Set<string>();
-  let cursor: string | null = null;
+  let cursor: string | null = input.cursor ?? null;
   let pages = 0;
-  // Page cap raised with the rule change: rotations mean a page can contribute
-  // ZERO new tokens, so a walk that must reach `target` DISTINCT ids needs more
-  // room than one that just counted rows. Still bounded -- an unbounded walk on
-  // a big collection is its own outage.
-  while (distinct.size < target && pages < 25) {
+  // PAGES PER CALL IS PACING, NOT A CEILING.
+  //
+  // Rotations mean a page can contribute ZERO new tokens, so a walk that must
+  // reach `target` DISTINCT ids needs room. This bound exists so ONE request
+  // finishes inside its deadline and inside OpenSea's per-key quota -- an
+  // unbounded walk on a large collection is its own outage, and the rate
+  // limiter would jail the key besides.
+  //
+  // What makes it pacing rather than a ceiling is that the walk now RETURNS
+  // its cursor: stopping here no longer means the remaining book is
+  // unreachable, it means the next call continues from exactly this point.
+  while (distinct.size < target && pages < PAGES_PER_CALL) {
     // Always ask for a full page. Asking for `target - orders.length` shrank
     // the request as rotations accumulated, so the walk got slower exactly
     // when it needed more data.
@@ -474,7 +521,11 @@ export async function fetchForeignAllListingsPaged(input: {
       // `bookCoverage: null` with zero listings. Either way the visitor saw
       // an empty grid. Whatever we have so far is now reported as an
       // explicitly INCOMPLETE book instead.
-      return { orders, complete: false, pages };
+      // Hand back the cursor we were ABOUT to use. A transient 429 or timeout
+      // must not cost the caller its place in the book -- retrying with this
+      // resumes exactly where the failure happened instead of re-walking from
+      // the start (or, worse, being unable to).
+      return { orders, complete: false, pages, nextCursor: cursor };
     }
     pages += 1;
     for (const l of result?.listings ?? []) {
@@ -496,11 +547,18 @@ export async function fetchForeignAllListingsPaged(input: {
     //
     // A null page now ends the walk as INCOMPLETE, so the caller reports a
     // partial book rather than certifying an empty one.
-    if (result == null) return { orders, complete: false, pages };
+    // Same reasoning as the throw above: a 404'd page is not an exhausted
+    // book, so the cursor that would retry it is returned rather than lost.
+    if (result == null) return { orders, complete: false, pages, nextCursor: cursor };
     cursor = result.next ?? null;
-    if (!cursor || result.listings.length === 0) return { orders, complete: true, pages };
+    // A genuinely exhausted cursor is the ONE case where null is the truth:
+    // there is no next page, so there is nothing to resume.
+    if (!cursor || result.listings.length === 0) return { orders, complete: true, pages, nextCursor: null };
   }
-  return { orders, complete: cursor == null, pages };
+  // Stopped on the page budget or on `target` with book still behind us. This
+  // is the case that used to be a dead end; `cursor` is non-null here and is
+  // now what makes the rest reachable.
+  return { orders, complete: cursor == null, pages, nextCursor: cursor };
 }
 
 // priceForeignOrder / OrderPricing moved to order-pricing.ts (2026-09-06): it
