@@ -23,10 +23,21 @@ import { recordProviderCall, readProviderBudget } from "../../lib/market/multich
 
 async function deleteCacheEntry(cacheKey: string): Promise<void> {
   const fullKey = `plank:singleflight:${cacheKey}`;
-  await postgresQuery(`DELETE FROM plank_kv_values WHERE key_name = $1 OR key_name = $2`, [
-    fullKey,
-    `${fullKey}:lease`,
-  ]);
+  // Delete the two rows in SEPARATE statements, value first, then lease.
+  //
+  // A single `WHERE key_name = $1 OR key_name = $2` takes both row locks in
+  // whatever order the scan returns them. The widening test deliberately
+  // leaves a stale-while-revalidate refresh running (its own comment says a
+  // background refresh may still be kicked off), and that refresh writes the
+  // same two rows in the opposite order -- so cleanup and the background
+  // write could each hold one row and wait for the other. CI caught it as
+  // `deadlock detected` (40P01) raised from inside this helper, with the
+  // test's own assertions already passed.
+  //
+  // Two statements in a fixed order cannot invert against a writer that also
+  // touches value before lease, and each commits before the next begins.
+  await postgresQuery(`DELETE FROM plank_kv_values WHERE key_name = $1`, [fullKey]);
+  await postgresQuery(`DELETE FROM plank_kv_values WHERE key_name = $1`, [`${fullKey}:lease`]);
 }
 
 async function cleanup(provider: string, cacheKey: string) {
