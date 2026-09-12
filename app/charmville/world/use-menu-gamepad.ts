@@ -11,7 +11,7 @@ export function useMenuGamepad(root:RefObject<HTMLElement|null>,enabled:boolean,
    const active=!!scope&&document.hasFocus()&&!document.hidden&&focused?.tagName!=='IFRAME'&&document.fullscreenElement?.tagName!=='IFRAME';
    const pad=Array.from(navigator.getGamepads?.()??[]).find(p=>p?.connected&&p.mapping==='standard');
    const pressed=new Set<number>();if(pad){pad.buttons.forEach((b,i)=>{if(b.pressed)pressed.add(i);});if((pad.axes[1]??0)<-.35)pressed.add(12);if((pad.axes[1]??0)>.35)pressed.add(13);if((pad.axes[0]??0)<-.35)pressed.add(14);if((pad.axes[0]??0)>.35)pressed.add(15);}
-   const modal=scope?.querySelector('dialog[open],[role="dialog"]')??scope;
+   const modal=Array.from(scope?.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"]')??[]).find(element=>element.getClientRects().length>0&&!element.closest('[hidden],[inert]'))??scope;
    if(modal!==context){context=modal??null;neutral=true;}
    if(!active||!pad)neutral=true;
    else if(!pressed.size)neutral=false;

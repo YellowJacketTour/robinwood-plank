@@ -1,6 +1,6 @@
 # Charmville feature map and evidence tracker
 
-Snapshot: 2026-09-09. Names are placeholders. This tracks the requested synthesis, not a claim to inventory every mechanic in every edition of every source game. No feature is certified production-ready. Bars show integration maturity, not percent complete, effort remaining or artistic quality. Separate source games working on their own do not count as a unified MMORPG.
+Snapshot: 2026-09-12 (local working tree; latest checkpoint below). Names are placeholders. This tracks the requested synthesis, not a claim to inventory every mechanic in every edition of every source game. No feature is certified production-ready. Bars show integration maturity, not percent complete, effort remaining or artistic quality. Separate source games working on their own do not count as a unified MMORPG.
 
 Legend: `░░░░░` not built; `█░░░░` specified; `██░░░` isolated implementation/reference; `███░░` connected locally; `████░` verified end-to-end in the stated scope; `█████` release quality demonstrated. A row must meet every earlier gate to advance. Source fidelity, multiplayer and performance still need separate acceptance evidence.
 
@@ -17,7 +17,7 @@ Legend: `░░░░░` not built; `█░░░░` specified; `██░░�
 | Account-owned map instances | ██░░░ | Private account region and three-bed resource authority exist; distinct authored home geography and native routing remain missing |
 | Friend invitations / revoke / expiry | ███░░ | Invitation API and private resource revoke checks verified; playable native home-to-home visits remain missing |
 | Help versus harvest/build/storage rights | ███░░ | Durable garden tending checks grants transactionally; other native actions not connected |
-| Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions |
+| Player movement replication | ███░░ | Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; authenticated local socket targets 10Hz with HTTP recovery; adjacent peer positions interpolate over 100ms. Standing remote poses, bounded peer query and no shared hit collisions remain |
 | Shared resource replication | ███░░ | Two authenticated native clients in one granted home render Oran stages 0→1→2→3→4→1; owner-only yield and unchanged visitor balances verified. One crop/map; permission-aware native prompts verified; remote tool animations remain missing. See NATIVE-RESOURCE-REPLICATION.md. |
 | Reconnect / crash recovery | ██░░░ | Native actor reconnect and Oran inventory reload verified; interrupted action/full world crash recovery remains incomplete |
 | Party and region shard routing | █░░░░ | Keep party together, separate region capacity from economic identity |
@@ -315,3 +315,20 @@ The native view now receives authenticated encounter snapshots over the existing
 ## Remote position presentation
 
 Adjacent saved peer positions now interpolate over100ms, remain identity-stable across reordering, and never extrapolate. Native reads occur everytwoframes. Four bridge tests and an authenticated two-account browser step pass; the loaded scene was inspected. Standing sprites remain. This is presentation work, not scalable shared persistence; the region-authority, durable recovery and interest-management gates are explicitly recorded in REMOTE-MOVEMENT-PRESENTATION.md.
+
+
+## 2026-09-12 viewport, party and test-account checkpoint
+
+This checkpoint describes local working-tree changes, not a release or a completed visual overhaul. No maturity bars advance. Earlier dated sections are historical evidence; their then-missing features must be read alongside later checkpoints rather than treated as the current implementation inventory.
+
+The signed-in world shell now uses one viewport-height stage. Account panels overlay the mounted native adventure instead of shrinking it into a side-by-side dashboard. Journey information is collapsed, runtime settings are consolidated, and nearby encounter controls are placed in an expandable drawer to protect the play area's height. The party has six artwork-led slots, source-derived health information and explicit individual follow/stop actions. The Charmdex catalogue uses an icon selection grid with a persistent detail area instead of repeated text cards. Home invitations are reachable in Friends. These are layout and access improvements: native equipment still has separate ownership semantics, the complete illustrated menu system and editable theme packs are unfinished, and broad mobile/controller/focus acceptance must be rerun after these changes.
+
+A fresh isolated local account was created through the actual playtest UI, claimed a home, selected Treecko, loaded the existing six-member test entitlement and entered its home. The six species are Treecko, Torchic, Mudkip, Pikachu, Eevee and Poochyena. A route cleanup bug had cleared the tab-scoped local identity before the world consumed it; preserving that identity across navigation now allows entry and reload. Existing server token and local-route guards remain required. This grants no new production entitlement and does not alter the user's account. A transient blocked native frame recovered after reload; no durable root-cause fix is claimed.
+
+The latest local checks reported TypeScript success and 1,381 passing application tests with 69 skipped (1,450 total). Skipped database coverage is not a pass. A production build and final browser layout/focus acceptance were still pending when this checkpoint was written; consult newer execution evidence before shipping. Separate focused native-actor database and two-account socket checks passed for avoiding unchanged snapshot writes and rejecting primitive socket messages.
+
+The game is not yet a general shared combat simulation. Native Zelda weapons/enemies remain local; the bounded account-backed companion encounter, capture and assist services do not make arbitrary Zelda combat authoritative. The socket gateway is still per-connection HTTP/database polling, not a region simulation worker. No large-player capacity, mobile-device performance, seamless authored multi-map world or production friends-access proof has been established. Distinct homesteads, full tutorial progression, remote creature AI, complete moves/statuses/party rewards, farming/crafting/skills breadth, shared equipment/economy, creator tools and the remaining rows above stay in scope.
+
+### September 12 verification follow-through
+
+Production build passed after the viewport, party and input ownership changes. TypeScript and targeted UI ESLint passed; the full suite reported 1,381 passes, 69 skips and zero failures. In-browser testing used a separate local test profile: all six unique party members fit the desktop roster, Treecko and Torchic independently retained walking settings, and Escape returned focus from Party to the mounted iframe. Hidden gameplay controls are inert while account panels are open. A state-backed session token replaced render-time ref reads; local identity survives navigation from the launcher. Physical gamepad and mobile device testing remain unverified. These checks do not establish completion of MMO combat, content scope or capacity.

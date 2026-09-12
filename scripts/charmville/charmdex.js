@@ -4,6 +4,20 @@ document.querySelector('header').append(trigger);
 const dialog=document.createElement('dialog');dialog.className='charmdex';
 dialog.innerHTML='<form method="dialog"><strong>Charmdex</strong><button aria-label="Close Charmdex">Close</button></form><p>Discover the Charm universe. Catalogue entries are design references, not owned items.</p><div class="charmdex-filters"><input type="search" aria-label="Search Charmdex" placeholder="Search cow, berries, tools…"><select aria-label="Charm category"><option value="">All categories</option></select></div><p role="status">Loading catalogue…</p><div class="charmdex-grid"></div><button type="button" class="charmdex-more">Show more</button>';
 document.body.append(dialog);
+dialog.setAttribute('aria-label','Charmdex catalogue');
+const layout=document.createElement('div');layout.className='charmdex-layout';
+const detail=document.createElement('section');detail.className='charmdex-detail';detail.setAttribute('aria-label','Selected charm');
+const existingGrid=dialog.querySelector('.charmdex-grid');existingGrid.before(layout);layout.append(existingGrid,detail);
+function selectEntry(entry,button){
+ for(const item of grid.querySelectorAll('button'))item.setAttribute('aria-pressed',String(item===button));
+ detail.replaceChildren();
+ const art=document.createElement('div');art.className='charmdex-portrait';art.textContent=entry.glyph;art.setAttribute('aria-hidden','true');
+ const title=document.createElement('h2');title.textContent=entry.name;
+ const group=document.createElement('p');group.className='charmdex-class';group.textContent=entry.group+' / '+entry.subgroup;
+ const description=document.createElement('p');description.textContent=entry.proposal;
+ const state=document.createElement('p');state.className='charmdex-reference';state.textContent='Catalogue reference · Not an owned item. Gameplay and source artwork are not yet mapped.';
+ detail.append(art,title,group,description,state);
+}
 const close=dialog.querySelector('[aria-label="Close Charmdex"]');close.type='button';close.onclick=()=>dialog.close();
 const voice=document.createElement('button');voice.type='button';voice.textContent='Voice note';voice.onclick=()=>{dialog.close();document.querySelector('[data-voice-notes-open]').click();};dialog.querySelector('form').after(voice);
 let entries=[],limit=48,loaded=false;
@@ -11,9 +25,13 @@ const search=dialog.querySelector('input'),category=dialog.querySelector('select
 function render(){
  const term=search.value.trim().toLocaleLowerCase();const matches=entries.filter(e=>(!category.value||e.group===category.value)&&(!term||(e.name+' '+e.glyph+' '+e.subgroup).toLocaleLowerCase().includes(term)));
  grid.replaceChildren();for(const entry of matches.slice(0,limit)){
-  const card=document.createElement('article'),title=document.createElement('h3'),description=document.createElement('p'),state=document.createElement('small');
-  title.textContent=entry.glyph+' '+entry.name;description.textContent=entry.proposal;state.textContent=entry.group+' · Gameplay & artwork mapping pending';card.append(title,description,state);grid.append(card);
+  const card=document.createElement('button'),art=document.createElement('span'),title=document.createElement('span');
+  card.type='button';card.className='charmdex-entry';card.setAttribute('aria-pressed','false');
+  art.className='charmdex-entry-art';art.textContent=entry.glyph;art.setAttribute('aria-hidden','true');title.textContent=entry.name;
+  card.append(art,title);card.onclick=()=>selectEntry(entry,card);grid.append(card);
+  if(grid.children.length===1)selectEntry(entry,card);
  }
+ if(!matches.length){detail.textContent='No matching charms. Try another name or category.';}
  status.textContent=`${matches.length.toLocaleString()} entries · Showing ${Math.min(limit,matches.length)} · Unicode 17.0`;
  more.hidden=matches.length<=limit;
 }

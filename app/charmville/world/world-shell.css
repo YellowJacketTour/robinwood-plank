@@ -1,0 +1,35 @@
+/* The world keeps one mounted renderer. Menus occupy its stage, never a second column. */
+.charm-world[data-playing=true] { height:100dvh; min-height:0; display:flex; flex-direction:column; gap:8px; overflow:hidden; padding:12px; }
+.charm-world > header { flex:none; margin:0; }
+.charm-world .world-help { position:absolute; right:16px; top:64px; z-index:30; max-width:min(520px,90vw); }
+.charm-world .world-help details[open] { max-height:65dvh; overflow:auto; background:var(--color-wood-950); }
+.charm-world .world-navigation { flex:none; margin:0; padding:6px; border-radius:8px; background:var(--color-forest-900); }
+.charm-world .world-navigation [role=tablist] { padding-right:90px; }
+.charm-world .world-navigation > p { margin-top:4px; padding-top:4px; }
+.charm-world .world-navigation > div:last-child:not([role=tablist]) { position:absolute; right:8px; bottom:5px; margin:0; }
+.charm-world .world-navigation > div:last-child:not([role=tablist]) button { min-height:28px; font-size:12px; }
+.charm-world .world-journal { flex:none; font-size:12px; }
+.charm-world .world-journal > summary { cursor:pointer; padding:6px 12px; color:var(--color-gold-300); }
+.charm-world .world-journal[open] { max-height:35dvh; overflow:auto; }
+.charm-world .world-stage { position:relative; display:block; flex:1; min-height:0; }
+.charm-world .world-adventure { display:flex; flex-direction:column; height:100%; min-height:0; padding:0; overflow:hidden; border-radius:8px; }
+.charm-world .world-adventure > div:first-child { display:none; }
+.charm-world .world-adventure > details { margin:0; padding:0 12px; flex:none; }
+.charm-world .world-adventure > p { margin:0; padding:0 12px; flex:none; }
+.charm-world .world-adventure > iframe { flex:1; width:100%; height:0; min-height:0; border:0; border-radius:0; }
+.charm-world .world-adventure > section { flex:none; max-height:38%; overflow:auto; margin:0; }
+.charm-world .world-adventure > .world-encounter-drawer { flex:none; padding:8px 12px; background:var(--color-forest-900); color:var(--color-cream); }
+.world-encounter-drawer > summary { cursor:pointer; min-height:28px; }
+.world-encounter-drawer[open] { max-height:50%; overflow:auto; }
+.charm-world .world-menu { position:absolute; inset:0; z-index:20; overflow:auto; border:4px double var(--color-gold-300); border-radius:12px; padding:16px; background:var(--color-wood-900); box-shadow:inset 0 0 0 4px var(--color-wood-950); }
+.charm-world .world-menu > div:first-child { position:sticky; top:-16px; z-index:2; background:var(--color-wood-900); padding:8px; }
+.charm-world > p[role=status] { flex:none; max-height:15dvh; overflow:auto; margin:0; padding:8px; }
+@media(max-width:600px) {
+ .charm-world[data-playing=true] { padding:6px; gap:4px; }
+ .charm-world > header h1 { font-size:16px; }
+ .charm-world > header nav button,.charm-world > header nav a { min-height:36px; padding:6px; font-size:11px; }
+ .charm-world .world-help { top:55px; right:10px; }
+ .charm-world .world-navigation [role=tablist] { padding-right:0; padding-top:30px; }
+ .charm-world .world-navigation > div:last-child:not([role=tablist]) { position:static; }
+ .charm-world .world-menu { padding:8px; }
+}

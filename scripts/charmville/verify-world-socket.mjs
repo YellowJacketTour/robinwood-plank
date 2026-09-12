@@ -16,6 +16,14 @@ function connect(token){
  return {socket,messages,until};
 }
 try{
+ // Valid JSON primitives must reject only that connection, never crash the gateway.
+ for(const payload of ['null','[]','42','"hello"'])await new Promise((resolve,reject)=>{
+  const malformed=new WebSocket('ws://127.0.0.1:3023',{origin:base});sockets.push(malformed);
+  const timer=setTimeout(()=>{malformed.terminate();reject(Error('Malformed message remained open'));},7000);
+  malformed.on('open',()=>malformed.send(payload));
+  malformed.on('error',reject);
+  malformed.on('close',code=>{clearTimeout(timer);try{assert.equal(code,1008);resolve();}catch(e){reject(e);}});
+ });
  const a=await account(),b=await account();const first=connect(a.token),second=connect(b.token);
  const initial=(await first.until(m=>m.type==='ready')).state;
  await second.until(m=>m.type==='ready');

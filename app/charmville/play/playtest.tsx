@@ -41,7 +41,9 @@ export default function LocalPlaytest() {
         }
       } catch { sessionStorage.removeItem(storageKey); }
     }
-    return () => { cancelled = true; detach.current?.(); };
+    // The local identity is tab-scoped and route-gated by localPlaytestWallet.
+    // Preserve it when navigating into the world; APIs still validate its token.
+    return () => { cancelled = true; };
   }, [activate]);
   async function enter() {
     if (busy) return;

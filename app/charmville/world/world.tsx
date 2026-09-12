@@ -1,13 +1,15 @@
 "use client";
+import './world-shell.css';
 import {createCaptureStream} from "./capture-stream";
 
 import Link from "next/link";
 import ControlGuide from "./control-guide";
 import FirstSteps from "./first-steps";
+import HomePermissions from "../start/home-permissions";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
 import { connectPlankLoveWallet, subscribePlankLoveWalletState } from "@/integrations/plankspace-app/app/plank-love-wallet";
 import { createGameAccountClient, type GameIdentity } from "@/lib/charmville/account-client";
@@ -43,6 +45,22 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const menuRoot=useRef<HTMLElement|null>(null);
   const returnToPlay=useCallback(()=>{setTab('play');requestAnimationFrame(()=>frame.current?.focus());},[]);
   useMenuGamepad(menuRoot,Boolean(identity),returnToPlay,tab);
+  // Keep the live world mounted, but give the account pages exclusive input.
+  // Moving focus also makes the native controller release held inputs on blur.
+  useLayoutEffect(()=>{
+    if(tab==='play')return;
+    const focused=document.activeElement;
+    if(focused===frame.current||focused===document.body||focused instanceof Element&&focused.closest('[inert]')){
+      document.getElementById(`tab-${tab}`)?.focus({preventScroll:true});
+    }
+    const back=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape'||event.defaultPrevented||menuRoot.current?.querySelector('dialog[open]'))return;
+      event.preventDefault();
+      returnToPlay();
+    };
+    window.addEventListener('keydown',back);
+    return()=>window.removeEventListener('keydown',back);
+  },[tab,returnToPlay]);
   useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
@@ -85,6 +103,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   },[]);
   const pendingPanel=useRef<'charmdex'|'voice'|null>(null);
   const session=useRef<Session|null>(null);
+  const [sessionToken,setSessionToken]=useState<string|null>(null);
   const wallet=useRef<string|null>(null);
   const generation=useRef(0);
   const inFlight=useRef<AbortController|null>(null);
@@ -97,7 +116,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const clear=useCallback(()=>{
     socketEncounterAt.current=0;
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
-    accountClient.disconnect(); session.current=null; location.current=null;updateCaptureAvailability(false);
+    accountClient.disconnect(); session.current=null;setSessionToken(null); location.current=null;updateCaptureAvailability(false);
     frame.current?.contentWindow?.postMessage({type:'charmville:capture-event',active:false},'http://localhost:3021');
     updateEncounter(null);
     updateFollower(0);
@@ -155,7 +174,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     localStorage.setItem(`plankspace-session:${test.wallet}`,test.token);
     localStorage.setItem('plankspace-last-verified-wallet',test.wallet);
     attachLocalPlaytestWallet(test.wallet);
-    wallet.current=test.wallet;session.current={identity:verified,token:test.token};
+    wallet.current=test.wallet;session.current={identity:verified,token:test.token};setSessionToken(test.token);
     setAddress(test.wallet);setIdentity(verified);setPresence(null);setInventory(null);setCamera(true);setTab('companions');
     await load();
   },[localRuntime,accountClient,clear,load]);
@@ -165,7 +184,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     if(version!==generation.current)return;
     const account=await accountClient.connect(token);
     if(version!==generation.current)return;
-    session.current={identity:account,token};setIdentity(account);
+    session.current={identity:account,token};setSessionToken(token);setIdentity(account);
     setAddress(wallet.current??"");
     if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);
     await load();
@@ -268,15 +287,15 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     if(camera)sendPanel();else {frameReady.current=false;setCamera(true);}
   }
 
-  return <main ref={menuRoot} data-market-shell className="min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
+  return <main ref={menuRoot} data-market-shell data-playing={identity?'true':'false'} data-world-tab={tab} className="charm-world min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
     <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div><p className="text-xs font-bold tracking-widest text-cream-muted">CHARMVILLE</p><h1 className="font-display text-xl text-gold-300">Charmdex</h1></div>
       <nav aria-label="World shortcuts" className="flex flex-wrap gap-2"><button className={button} aria-pressed={fullscreen} onClick={toggleFullscreen}>Toggle fullscreen</button><Link className={button} href="/plankspace">Lumberyard</Link></nav>
     </header>
-    <ControlGuide />
+    <div className="world-help"><ControlGuide /></div>
     {!identity?<section className="rounded-xl border border-line bg-panel p-5"><h2 className="font-display text-xl">Bring your account into the world</h2><p className="my-3 text-cream-muted">Sign in with your approved PlankSpace profile. Your saved inventory stays with your account.</p><button className={button} disabled={busy} onClick={enter}>{busy?"Signing in…":"Connect and sign in"}</button><Link className="ml-4 text-gold-300" href="/charmville/start">Create or finish your profile</Link></section>:
     <>
-    <div className="sticky top-0 z-10 mb-3 overflow-hidden rounded-2xl border-2 border-line-strong bg-wood-900 p-2 shadow-lg">
+    <div className="world-navigation sticky top-0 z-10 mb-3 overflow-hidden rounded-2xl border-2 border-line-strong bg-wood-900 p-2 shadow-lg">
       <div role="tablist" aria-label="Game and account" className="flex gap-1 overflow-x-auto">
         {tabs.map(([id,label],index)=><button key={id} id={`tab-${id}`} role="tab" aria-selected={tab===id} aria-controls={`panel-${id}`} tabIndex={tab===id?0:-1}
           className={`min-h-12 min-w-16 flex-1 rounded-lg px-2 py-2 text-xs font-bold focus-visible:outline-2 focus-visible:outline-gold-300 sm:text-sm ${tab===id?'bg-gold-500 text-wood-950':'text-gold-300 hover:bg-panel-soft'}`}
@@ -285,9 +304,9 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       <p className="mt-2 truncate border-t border-line px-2 pt-2 text-xs text-cream-muted">@{identity.handle} · {presence?.active?(presence.ownerHandle?`Home of @${presence.ownerHandle}`:'Public meadow'):'Choose a location in Friends'}</p>
       {localRuntime&&<div className="mt-2 flex flex-wrap gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Discover charms</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
     </div>
-    {tab==='play'&&session.current&&<FirstSteps key={identity.profileId} token={session.current.token} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/>}
-    <div className={`grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
-      <section id="panel-play" role="tabpanel" aria-labelledby="tab-play" className={`min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
+    {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
+    <div className={`world-stage grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
+      <section id="panel-play" inert={tab!=='play'} aria-hidden={tab!=='play'} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-2 flex items-center justify-between gap-2"><h2 className="font-display text-xl text-gold-300">Adventure</h2><span className="text-xs text-cream-muted">Enter · Game menus</span></div>
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
         <details className="mb-2 text-xs text-cream-muted"><summary className="cursor-pointer py-2">What saves with your account</summary><p className="py-2">{presence?.active?'Your movement, Oran harvests, companion health and captured creatures save to your account. Supported encounter victories award experience. The native equipment menu remains a separate test loadout.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p></details>
@@ -295,13 +314,14 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
         {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter} onCaptureReceipt={showCapture} onCaptureAvailability={updateCaptureAvailability}/>}
       </section>
-      <aside className={tab==='play'?'hidden':'space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={()=>{setTab('play');requestAnimationFrame(()=>frame.current?.focus());}}>Return to play</button></div>
+      <aside className={tab==='play'?'hidden':'world-menu space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={returnToPlay}>Return to play</button></div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
         <section className="rounded-xl border border-line bg-panel p-4"><h2 className="font-display text-xl">@{identity.handle}</h2><p className="mt-2 text-cream-muted">{presence?.active?(presence.ownerHandle?`At @${presence.ownerHandle}’s home`:"In the public meadow"):"Choose where to join"}</p>
           <div className="my-3 flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>void load({destination:"home",handle:identity.handle})}>Go home</button><button className={button} disabled={busy} onClick={()=>void load({destination:"public"})}>Public meadow</button></div>
           <form onSubmit={e=>{e.preventDefault();visit();}}><label className="block text-sm" htmlFor="visit-handle">Visit a friend</label><input id="visit-handle" value={visitor} maxLength={visitor.startsWith("@")?41:40} onChange={e=>setVisitor(e.target.value)} className="my-2 min-h-11 w-full rounded-lg border border-line bg-panel-soft px-3" placeholder="Their player handle"/><button className={button} disabled={busy||!visitor.trim()}>Visit home</button></form>
           <p className="mt-3 text-sm text-cream-muted">Your friend must invite you. Visiting does not grant permission to take items or build.</p>
         </section>
+        {address&&tab==='friends'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
         <section className="rounded-xl border border-line bg-panel p-4" aria-label="Players here"><h2 className="font-display text-xl">Players here</h2>{presence?.active?<><p className="my-2 text-sm text-cream-muted">Account presence · refreshed every 30 seconds</p><ul className="space-y-2"><li>You · @{identity.handle}</li>{presence.peers.filter(peer=>peer.profileId!==identity.profileId).map(peer=><li key={peer.profileId}>@{peer.handle}</li>)}</ul></>:<p className="mt-2 text-cream-muted">Join a location to meet other signed-in players.</p>}</section>
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>

@@ -14,16 +14,24 @@ test("persistent movement isolates identities, replays, collision, renewal and r
   const tokens=["a".repeat(64),"b".repeat(64)];
   for(let i=0;i<2;i++){const wallet=`0x${i+1}`.padEnd(42,String(i+1));const p=await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,$2,$2,'approved') RETURNING id",[wallet,`p${i}`]);await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,clock_timestamp()+interval '1 hour')",[createHash("sha256").update(tokens[i]).digest("hex"),wallet]);await pool.query("INSERT INTO charmville_yards(profile_id) VALUES($1)",[p.rows[0].id]);await worldPresence(pool,tokens[i],{destination:"public",revision:"0"});}
   const a=await nativeActor(pool,tokens[0]),b=await nativeActor(pool,tokens[1]);assert.notEqual(a.profileId,b.profileId);assert.deepEqual((await nativeActor(pool,tokens[0])).peers?.map(p=>p.profileId),[b.profileId]);
+  const stored=async()=> (await pool.query('SELECT xmin::text AS xmin,ctid::text AS ctid,region_id,x,y,sequence::text,region_epoch::text FROM charmville_native_actors WHERE profile_id=$1',[a.profileId])).rows[0];
+  const spawned=await stored();assert.ok(spawned);assert.equal(spawned.region_id,a.regionId);assert.equal(spawned.x,a.cell.x);assert.equal(spawned.y,a.cell.y);
+  await nativeActor(pool,tokens[0]);await nativeActor(pool,tokens[0]);
+  assert.deepEqual(await stored(),spawned,'unchanged snapshots must not create a new PostgreSQL actor tuple');
   const next=[{x:a.cell.x+1,y:a.cell.y},{x:a.cell.x-1,y:a.cell.y},{x:a.cell.x,y:a.cell.y+1},{x:a.cell.x,y:a.cell.y-1}].find(p=>p.x>=0&&p.y>=0&&!actorGeometry.blocked.has(`${p.x},${p.y}`))!;assert.ok(next);
   const move={...next,sequence:1,regionEpoch:a.regionEpoch,presenceRevision:a.presenceRevision,geometryId:a.geometryId};
   await pool.query("UPDATE charmville_native_actors SET last_move_at=last_move_at-1000");
   const results=await Promise.all([nativeActor(pool,tokens[0],move),nativeActor(pool,tokens[0],move)]);assert.deepEqual(results[0],results[1]);assert.equal(results[0].version,1);assert.deepEqual((await nativeActor(pool,tokens[1])).cell,b.cell);
+  const moved=await stored();assert.equal(moved.x,next.x);assert.equal(moved.y,next.y);assert.equal(moved.sequence,'1');assert.notEqual(moved.xmin,spawned.xmin);
+  await nativeActor(pool,tokens[0]);assert.deepEqual(await stored(),moved,'movement snapshot must preserve the committed tuple');
   await assert.rejects(nativeActor(pool,tokens[0],{...move,sequence:2,x:0,y:0}),/Blocked/);
   await assert.rejects(nativeActor(pool,tokens[0],{...move,geometryId:"invented"}),/Unsupported/);
   await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds'");
   const renewed=await worldPresence(pool,tokens[0],{destination:"public",revision:a.presenceRevision});const after=await nativeActor(pool,tokens[0]);assert.equal(after.regionEpoch,a.regionEpoch);assert.deepEqual(after.cell,next);
   await assert.rejects(nativeActor(pool,tokens[0],move),/admission changed/);
   await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds'");await worldPresence(pool,tokens[0],{destination:"home",handle:"p0",revision:renewed.revision});const home=await nativeActor(pool,tokens[0]);assert.equal(home.regionEpoch,a.regionEpoch+1);assert.equal(home.sequence,0);assert.deepEqual(home.cell,a.cell);
+  const travelled=await stored();assert.equal(travelled.region_id,home.regionId);assert.equal(travelled.region_epoch,String(home.regionEpoch));assert.equal(travelled.sequence,'0');assert.notEqual(travelled.xmin,moved.xmin);
+  await nativeActor(pool,tokens[0]);assert.deepEqual(await stored(),travelled,'home snapshots must preserve the respawn tuple');
   assert.deepEqual(home.peers,[]);assert.deepEqual((await nativeActor(pool,tokens[1])).peers,[]);
   await homeAccess(pool,"p0",tokens[0],parseHomeGrant({visitor:"p1",revision:"0",revoke:false,rights:["visit"],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));
   await worldPresence(pool,tokens[1],{destination:"home",handle:"p0",revision:b.presenceRevision});await nativeActor(pool,tokens[1]);

@@ -117,6 +117,19 @@ export function mountRuntimeShell(root = document) {
   help.className = 'charm-runtime-help';
   help.innerHTML = '<summary>How to play</summary><div class="charm-runtime-controls"><p>Default keyboard controls. Use the game’s native menu to change keys.</p><dl><div data-kind="move"><dt>Explore</dt><dd><kbd>Arrow keys</kbd> Move</dd></div><div data-kind="combat"><dt>Adventure</dt><dd><kbd>Z</kbd> Sword · hold and release to spin<br><kbd>X</kbd> Equipped item</dd></div><div data-kind="grow"><dt>Homestead</dt><dd><kbd>D</kbd> Work the garden when nearby</dd></div><div data-kind="power"><dt>Power</dt><dd><kbd>C</kbd> Toggle aura</dd></div><div><dt>Equipment</dt><dd><kbd>Enter</kbd> Game menu · Gear opens adventure equipment<br><kbd>Q</kbd> / <kbd>W</kbd> Cycle items</dd></div></dl><p>On touchscreens, use the on-screen buttons. Display adjusts zoom; Controller changes gamepad buttons.</p><p>The town includes NPCs. The in-game Guests count shows other connected guests on your screen; it is not a public player count.</p></div>';
   header.append(help);
+  // Keep advanced runtime controls reachable without consuming the play area.
+  const settings = root.createElement('details');
+  settings.className = 'charm-runtime-settings';
+  const settingsSummary = root.createElement('summary');
+  settingsSummary.textContent = 'Settings & help';
+  const settingsBody = root.createElement('div');
+  settingsBody.className = 'charm-runtime-settings-body';
+  settings.append(settingsSummary, settingsBody);
+  for (const control of [...header.children]) {
+    if (control !== brand && control !== accountMenu) settingsBody.append(control);
+  }
+  header.append(settings);
+  for (const startButton of settingsBody.querySelectorAll('button.charm-runtime-enter')) header.insertBefore(startButton,settings);
   header.querySelector('button.charm-runtime-enter')?.addEventListener('click',()=>{for(const detail of header.querySelectorAll('details[open]'))detail.open=false;});
   header.addEventListener('toggle', event => {
     const opened = event.target;

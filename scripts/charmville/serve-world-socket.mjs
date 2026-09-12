@@ -18,6 +18,7 @@ server.on('connection',socket=>{
  const deadline=setTimeout(()=>socket.close(1008,'Authentication required'),5000);
  socket.on('message',async bytes=>{
   let message;try{message=JSON.parse(bytes.toString());}catch{socket.close(1008,'Invalid message');return;}
+  if(!message||typeof message!=='object'||Array.isArray(message)){socket.close(1008,'Invalid message');return;}
   if(!authenticated){
    if(reading||message.type!=='authenticate'||typeof message.token!=='string'||message.token.length>512){socket.close(1008,'Authentication required');return;}
    reading=true;token=message.token;
