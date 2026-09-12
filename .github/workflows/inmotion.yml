@@ -236,8 +236,8 @@ jobs:
           mkdir -p .next/standalone/ops/plankcrash-table
           /tmp/foundry/anvil --port 8545 --host 127.0.0.1 --chain-id 31337 \
             --accounts 20 --balance 10000 --order fifo \
-            --state .next/standalone/ops/plankcrash-table/anvil-seed.json \
-            --state-interval 2 --preserve-historical-states \
+            --state /tmp/anvil-live-state.json \
+            --preserve-historical-states \
             --transaction-block-keeper 100000 \
             --block-time 0.1 --mixed-mining --silent &
           for _ in $(seq 1 60); do
@@ -264,9 +264,34 @@ jobs:
             sleep 1
           done
           pgrep -f 'anvil --port 8545' >/dev/null && { echo 'anvil did not exit' >&2; exit 1; }
-          # And prove the file is complete JSON, not a truncated snapshot.
-          node -e "JSON.parse(require('fs').readFileSync('.next/standalone/ops/plankcrash-table/anvil-seed.json','utf8'))"
+          # Only NOW is the dump complete and nobody is writing it, so copy the
+          # single clean snapshot to the path that ships.
+          cp /tmp/anvil-live-state.json .next/standalone/ops/plankcrash-table/anvil-seed.json
           test -s .next/standalone/ops/plankcrash-table/anvil-seed.json
+          # Validate it the way ANVIL parses it, not just as JSON. A periodic
+          # dump caught mid-write stayed syntactically valid while one VALUE was
+          # truncated, so JSON.parse passed and the host then refused to boot:
+          #   invalid value: string "0x166b69...", expected a 32 byte hex string
+          # Check every hex string is a whole number of bytes and that the
+          # 32-byte fields really are 32 bytes.
+          node -e "
+            const fs=require('fs');
+            const raw=fs.readFileSync('.next/standalone/ops/plankcrash-table/anvil-seed.json','utf8');
+            const state=JSON.parse(raw);
+            let checked=0;
+            const walk=(v)=>{
+              if(typeof v==='string'){
+                if(/^0x[0-9a-fA-F]*\$/.test(v)){
+                  const body=v.slice(2);
+                  if(body.length%2)throw new Error('odd-length hex, dump is truncated: '+v.slice(0,24)+'...');
+                  checked++;
+                }
+              } else if(Array.isArray(v)) v.forEach(walk);
+              else if(v&&typeof v==='object') Object.values(v).forEach(walk);
+            };
+            walk(state);
+            console.log('seed validated:',(raw.length/1e6).toFixed(1),'MB,',checked,'hex values, none truncated');
+          "
         env:
           FOUNDRY_VERSION: v1.8.1
 
