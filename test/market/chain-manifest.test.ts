@@ -7,6 +7,7 @@ import { ALCHEMY_NETWORK_SUBDOMAIN } from "../../lib/market/multichain/adapters/
 import { MESH_LANES } from "../../lib/market/multichain/mesh/matrix";
 import { allChainPlugins } from "../../lib/market/multichain/chain-plugin";
 import { CHAIN_VINES } from "../../lib/market/multichain/chain-vines";
+import { publicProvidersFor } from "../../lib/market/multichain/discovery/rpc-provider-pool";
 
 /**
  * "Adding a chain must be one file plus a test." These assertions fail the
@@ -70,4 +71,48 @@ test("chain-plugin and chain-vines cover every manifest chain and nothing else",
   assert.deepEqual(allChainPlugins().map((p) => p.chainSlug).sort(), [...slugs].sort());
   for (const v of CHAIN_VINES) assert.ok(slugs.has(v.chainSlug), `vine ${v.chainSlug} is not in the manifest`);
   for (const s of slugs) assert.ok(CHAIN_VINES.some((v) => v.chainSlug === s), `manifest chain ${s} has no vine`);
+});
+
+/**
+ * THE HOLE IN "ONE FILE PLUS A TEST".
+ *
+ * Every registry above is either derived from the manifest or asserted against
+ * it. FREE_PUBLIC_RPC in discovery/rpc-provider-pool.ts is neither: it is a
+ * hand-maintained literal map, and `loadProviders` reads it as
+ * `FREE_PUBLIC_RPC[chainSlug] ?? []`.
+ *
+ * A manifest chain missing from that map therefore has NO keyless provider.
+ * rpcCall does throw ("no RPC provider configured for chain"), so this is not
+ * a silent-success bug -- but it is discovered at RUNTIME, on the deployed
+ * host, by the first lane that tries to read the chain. Every other per-chain
+ * registry drift fails in CI instead, and this one should too.
+ *
+ * Scoped to EVM chains on purpose. Solana and Ordinals do not use the EVM
+ * JSON-RPC pool at all -- they have their own source paths (Helius DAS,
+ * Esplora) -- so requiring an entry for them would assert a false claim about
+ * how those chains are read.
+ *
+ * Alchemy is excluded by publicProvidersFor: a chain whose ONLY provider is
+ * the keyed vendor is exactly the state the keyless pool exists to prevent,
+ * and CHAIN_VINES lists Alchemy under `never` for every chain.
+ */
+test("every EVM manifest chain has at least one keyless public RPC provider", () => {
+  const evm = CHAIN_MANIFESTS.filter((m) => m.kind === "evm" || m.kind === "custom-evm");
+  assert.ok(evm.length > 0, "the manifest must contain EVM chains for this assertion to mean anything");
+  for (const m of evm) {
+    const providers = publicProvidersFor(m.chainSlug);
+    assert.ok(
+      providers.length > 0,
+      `manifest chain ${m.chainSlug} has no keyless public RPC provider: add it to ` +
+        `FREE_PUBLIC_RPC in lib/market/multichain/discovery/rpc-provider-pool.ts, ` +
+        `or every rpcCall for this chain throws "no RPC provider configured" on the deployed host`
+    );
+    for (const p of providers) {
+      assert.match(
+        p.url,
+        /^https:\/\//,
+        `${m.chainSlug} provider ${p.id} must be https -- a plaintext RPC leaks every query it carries`
+      );
+    }
+  }
 });
