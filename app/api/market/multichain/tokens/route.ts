@@ -153,43 +153,76 @@ export async function GET(req: NextRequest) {
         }
         const missing = indexed.filter((t) => !t.imageUrl).length;
         if (missing > 0) {
-          let extras: CollectionToken[] = [];
-          if (isBitcoinChainSlug(chainSlug)) extras = await bitcoinTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
-          else if (isSolanaChainSlug(chainSlug)) extras = await solanaTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
-          else {
-            const chain = foreignChainByChainSlug(chainSlug);
-            if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 200)).catch(() => []);
-          }
-          const byId = new Map(extras.map((t) => [t.tokenId, t.imageUrl]));
-          const filled: Array<{ tokenId: string; imageUrl: string }> = [];
-          for (const t of indexed) {
-            if (t.imageUrl) continue;
-            const img = byId.get(t.tokenId);
-            if (img) {
-              t.imageUrl = img;
-              filled.push({ tokenId: t.tokenId, imageUrl: img });
+          // TWO VENDOR PASSES USED TO RUN INSIDE THE VISITOR'S REQUEST.
+          //
+          // Templating above is free -- a pure string build -- and fills the
+          // whole page for any collection that has a template. What follows
+          // did not: a catalog fetch (up to 200 rows from OpenSea / 80 from
+          // UniSat or Helius) and then up to 16 per-token image lookups, both
+          // awaited before the response was written, on a route that answers
+          // `Cache-Control: no-store`.
+          //
+          // So every visitor paid both passes again, and the page could not
+          // paint until vendors that are rate-limited by design had answered.
+          // Measured shape, not theory: token-art.ts's own comment records the
+          // budget as "16 against a grid of 400 tiles" -- the page was never
+          // going to be complete from this path anyway.
+          //
+          // The work itself is worth doing: updateForeignRarityImages writes
+          // the resolved URLs into plank_foreign_rarity DURABLY, so whatever
+          // this resolves is free for every later visitor. That is exactly why
+          // it does not need to block THIS one.
+          //
+          // So it is detached. The response ships the rows already indexed --
+          // including everything templating just filled -- and the vendor
+          // passes run after, writing their results to the store for the next
+          // read. A tile without an image is a typed hole the client already
+          // handles (it calls hydrate-token), not a broken render.
+          const runVendorBackfill = async () => {
+            let extras: CollectionToken[] = [];
+            if (isBitcoinChainSlug(chainSlug)) extras = await bitcoinTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+            else if (isSolanaChainSlug(chainSlug)) extras = await solanaTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+            else {
+              const chain = foreignChainByChainSlug(chainSlug);
+              if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 200)).catch(() => []);
             }
-          }
-          if (filled.length > 0) {
+            const byId = new Map(extras.map((t) => [t.tokenId, t.imageUrl]));
+            const filled: Array<{ tokenId: string; imageUrl: string }> = [];
+            // Work against a COPY of the page's shape, never the `indexed`
+            // array itself: that array has already been serialised into the
+            // response by the time this runs, and mutating it afterwards would
+            // be a write to state nobody reads -- harmless today, and exactly
+            // the kind of thing that becomes a bug when the response is later
+            // built lazily.
+            const pending = indexed
+              .filter((t) => !t.imageUrl)
+              .map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: t.imageUrl }));
+            for (const t of pending) {
+              const img = byId.get(t.tokenId);
+              if (img) {
+                t.imageUrl = img;
+                filled.push({ tokenId: t.tokenId, imageUrl: img });
+              }
+            }
             const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
-            void updateForeignRarityImages(chainSlug, collectionSlug, filled).catch(() => {});
-          }
-          const stillMissing = indexed.filter((t) => !t.imageUrl);
-          if (stillMissing.length > 0) {
-            const chain = foreignChainByChainSlug(chainSlug);
-            const contract = contractHint;
-            const { resolveTokenImagesForPage } = await import("@/lib/market/multichain/token-art");
-            const more = await resolveTokenImagesForPage({
-              openSeaChain: chain?.openSeaChain ?? null,
-              contractAddress: contract,
-              tokens: indexed,
-              maxRemote: 16,
-            });
-            if (more.length > 0) {
-              const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
-              void updateForeignRarityImages(chainSlug, collectionSlug, more).catch(() => {});
+            if (filled.length > 0) {
+              await updateForeignRarityImages(chainSlug, collectionSlug, filled).catch(() => {});
             }
-          }
+            if (pending.some((t) => !t.imageUrl)) {
+              const chain = foreignChainByChainSlug(chainSlug);
+              const { resolveTokenImagesForPage } = await import("@/lib/market/multichain/token-art");
+              const more = await resolveTokenImagesForPage({
+                openSeaChain: chain?.openSeaChain ?? null,
+                contractAddress: contractHint,
+                tokens: pending,
+                maxRemote: 16,
+              });
+              if (more.length > 0) {
+                await updateForeignRarityImages(chainSlug, collectionSlug, more).catch(() => {});
+              }
+            }
+          };
+          void runVendorBackfill().catch(() => {});
         }
         return NextResponse.json(
           { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: t.imageUrl })) },
