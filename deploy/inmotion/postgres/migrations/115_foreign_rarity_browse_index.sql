@@ -1,0 +1,97 @@
+-- The /tokens fallback catalog read was a full sequential scan of
+-- plank_foreign_rarity, on the highest-traffic surface in the app.
+--
+-- WHAT RUNS
+-- ---------
+-- listForeignRarityTokens (lib/market/multichain/foreign-rarity-store.ts) is
+-- the fallback the collection grid falls back to whenever a collection has
+-- rarity rows but no projection row yet. It filters with COLLECTION_MATCH_SQL
+-- (lib/market/multichain/collection-key-sql.ts), which for every EVM chain
+-- reduces to:
+--
+--     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+--
+-- plank_foreign_rarity (migration 014) has exactly ONE index: its primary key
+--
+--     (chain_slug, collection_slug, token_id)
+--
+-- which is CASE SENSITIVE. The `lower()` wrapper makes it unusable, exactly
+-- the way migration 105 documented for plank_collection_tokens' point lookup.
+-- Unlike plank_collection_tokens, which at least has a
+-- (chain_slug, lower(collection_slug), ...) browse index to fall back on,
+-- this table has NOTHING that matches the predicate. There is no second-best
+-- plan here -- the only option is to read the whole table.
+--
+-- MEASURED EVIDENCE
+-- -----------------
+-- EXPLAIN (ANALYZE, BUFFERS) against a real local Postgres seeded with
+-- 2,000,000 rows (400 collections x 5,000 tokens, 601 MB), asking for the
+-- first 49 tokens of one collection -- the exact shape of a collection page's
+-- opening grid request:
+--
+--   BEFORE (primary key only)
+--     Limit (actual time=301.076..304.978 rows=49)
+--       -> Gather Merge  Workers Launched: 2
+--          -> Sort  Sort Method: top-N heapsort
+--             -> Parallel Seq Scan on plank_foreign_rarity
+--                  Filter: chain_slug = ... AND lower(collection_slug) = ...
+--                  Rows Removed by Filter: 665000   (x3 workers = 1,995,000)
+--                  Buffers: shared hit=8707 read=32110
+--     Execution Time: 305.037 ms
+--
+--   AFTER (this index)
+--     Limit (actual time=0.079..0.117 rows=49)
+--       -> Index Scan using plank_foreign_rarity_browse_idx
+--            Index Cond: chain_slug = ... AND lower(collection_slug) = ...
+--            Buffers: shared read=7
+--     Execution Time: 0.134 ms
+--
+-- 40,907 buffers -> 7 buffers (2,275x fewer), 305 ms -> 0.134 ms, and the
+-- top-N sort over the whole table disappears entirely because the index is
+-- already in the ORDER BY's order.
+--
+-- The 305 ms figure is the floor, not the ceiling. It was measured on a 601 MB
+-- table that fits in page cache; production's catalog is far larger, the scan
+-- cost grows with TOTAL table size rather than with the requested collection,
+-- and PGPOOL_MAX=4 means a handful of concurrent collection-page visitors can
+-- hold every connection in the pool doing this. Production measurement of the
+-- route this feeds, 2026-09-12 against CryptoPunks on plank.love:
+-- /api/market/multichain/tokens took 41.8s cold and 7.0s warm, while
+-- /api/market/multichain/listings on the same page took 0.2s.
+--
+-- WHY THIS COLUMN LIST
+-- --------------------
+-- Deliberately identical in shape to plank_collection_tokens_browse_idx
+-- (migration 034), because listForeignRarityTokens' default ORDER BY is
+-- character-for-character the same expression:
+--
+--     CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END ASC NULLS LAST,
+--     token_id
+--
+-- Putting that expression in the index as the third column means the LIMIT is
+-- satisfied by reading 49 index entries in order, with no sort at all. An
+-- index on just (chain_slug, lower(collection_slug)) would still have to sort
+-- every row of the collection before it could honour the LIMIT.
+--
+-- The rank-sorted variants (`sort=rank` / `sort=rank-desc`) order by
+-- `rank ASC|DESC, token_id`, so they get their own index below for the same
+-- reason -- otherwise a rank-sorted grid page keeps the old sort-everything
+-- plan even after the id-sorted one is fixed.
+--
+-- SAFETY
+-- ------
+-- Purely additive: CREATE INDEX IF NOT EXISTS, no table rewrite, no column
+-- change, nothing dropped, no existing plan forced to change. Existing queries
+-- keep their current plans unless the planner finds one of these cheaper.
+--
+-- NOT CONCURRENTLY: this runner wraps each migration in a transaction and
+-- CREATE INDEX CONCURRENTLY cannot run inside one -- same constraint and same
+-- escape hatch migration 105 documents. If the lock window matters on the live
+-- host, build these by hand with CONCURRENTLY first and these statements
+-- become no-ops.
+CREATE INDEX IF NOT EXISTS plank_foreign_rarity_browse_idx
+  ON plank_foreign_rarity (chain_slug, lower(collection_slug),
+    (CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END), token_id);
+
+CREATE INDEX IF NOT EXISTS plank_foreign_rarity_rank_idx
+  ON plank_foreign_rarity (chain_slug, lower(collection_slug), rank, token_id);
