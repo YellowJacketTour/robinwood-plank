@@ -148,35 +148,72 @@ async function buildHubIndex(req: Request) {
     // (2026-09-07): the old top-500-per-chain map left most rows at 0.
     const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
     const { getActivityForContracts } = await import("@/lib/market/multichain/store");
-    const activityByContract = await getActivityForContracts([
-      ...collections.map((c) => ({ chainSlug: c.chainSlug, contractAddress: c.contractAddress })),
-      { chainSlug: "robinhood", contractAddress: NFT_CONTRACT_ADDRESS },
-    ]).catch(() => new Map<string, number>());
-
-    // One book, one floor (2026-09-06): the same merged, liveness-checked
-    // book the /market page renders (our Seaport rows + OpenSea + Pulp),
-    // so this row's floor, listed count and grade agree with the
-    // collection's own page. See lib/market/native-book.ts.
     const { readNativeRobinwoodBook, NATIVE_BOOK_OBSERVATION_KEY } = await import("@/lib/market/native-book");
-    const nativeBook = await readNativeRobinwoodBook({ hostHeader: req.headers.get("host") }).catch(() => null);
+    const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
+
+    // FOUR INDEPENDENT READS, RUN AS ONE.
+    //
+    // These were four sequential `await`s. Only the first depends on anything
+    // computed above (the page's `collections`); the other three read the home
+    // collection's own book and ledger and depend on nothing but
+    // NFT_CONTRACT_ADDRESS, which is a compile-time constant. So this stage
+    // paid the SUM of four latencies where it owed the MAX of one.
+    //
+    // That matters more here than anywhere else in the app. This is
+    // buildHubIndex, whose own header records it taking 96 SECONDS live on a
+    // saturated PGPOOL_MAX=4 pool, and measured again on production
+    // 2026-09-12 after the read-path fixes at 4.5-28.1 s for a COLD build. A
+    // cold build is paid by whichever visitor arrives first, and until the
+    // edge cache fills, by every one of them.
+    //
+    // `readNativeRobinwoodBook` is the expensive member: it merges the native
+    // Seaport rows with OpenSea and Pulp, and on a non-canonical host it can
+    // fall through to `fetchCanonicalRobinwoodStats`, which is an outbound
+    // HTTP call. Serialising a network round trip behind two database reads
+    // that could have run alongside it is the clearest waste in this function.
+    //
+    // Promise.all rather than allSettled because every member keeps the exact
+    // error posture it had before -- see the per-member notes below. Nothing
+    // here changes WHAT is read or HOW a failure is treated; only when.
+    const [activityByContract, nativeBook, nativeLedgerActivity7d, nativeSales] = await Promise.all([
+      getActivityForContracts([
+        ...collections.map((c) => ({ chainSlug: c.chainSlug, contractAddress: c.contractAddress })),
+        { chainSlug: "robinhood", contractAddress: NFT_CONTRACT_ADDRESS },
+      ]).catch(() => new Map<string, number>()),
+
+      // One book, one floor (2026-09-06): the same merged, liveness-checked
+      // book the /market page renders (our Seaport rows + OpenSea + Pulp),
+      // so this row's floor, listed count and grade agree with the
+      // collection's own page. See lib/market/native-book.ts.
+      readNativeRobinwoodBook({ hostHeader: req.headers.get("host") }).catch(() => null),
+
+      hasPostgresConfig()
+        ? postgresQuery<{ n: string }>(
+            `SELECT COUNT(*)::text AS n FROM plank_chain_events
+              WHERE lower(contract) = lower($1) AND kind IN ('transfer','sale','mint')
+                AND block_timestamp >= NOW() - INTERVAL '7 days'`,
+            [NFT_CONTRACT_ADDRESS]
+          ).then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0)
+        : Promise.resolve(0),
+
+      // A failed read is not an empty ledger. Let the shared edge retain its
+      // last-good index rather than caching fabricated missing statistics.
+      //
+      // This one RE-THROWS on the first page of an unfiltered (or
+      // robinhood-including) request, and that behaviour is preserved exactly:
+      // Promise.all rejects when it rejects, which is the same outcome the
+      // sequential form produced. The three siblings above each swallow their
+      // own failure, so none of them can take this one down or be taken down
+      // by it.
+      salesStatsFromLedger().catch((error) => {
+        if (offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"))) throw error;
+        return null;
+      }),
+    ]);
+
     let nativeFloor: bigint | null = nativeBook?.floorWei ?? null;
     let nativeListed = nativeBook?.listedCount ?? 0;
     const nativeFloorVenue = nativeBook?.floorVenue ?? "marketplank";
-    const { salesStatsFromLedger } = await import("@/lib/market/chain-events");
-    const nativeLedgerActivity7d = hasPostgresConfig()
-      ? await postgresQuery<{ n: string }>(
-          `SELECT COUNT(*)::text AS n FROM plank_chain_events
-            WHERE lower(contract) = lower($1) AND kind IN ('transfer','sale','mint')
-              AND block_timestamp >= NOW() - INTERVAL '7 days'`,
-          [NFT_CONTRACT_ADDRESS]
-        ).then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0)
-      : 0;
-    // A failed read is not an empty ledger. Let the shared edge retain its
-    // last-good index rather than caching fabricated missing statistics.
-    const nativeSales = await salesStatsFromLedger().catch((error) => {
-      if (offset === 0 && (!chainSlugFilter || chainSlugFilter.includes("robinhood"))) throw error;
-      return null;
-    });
     let canonical: Awaited<
       ReturnType<typeof import("@/lib/market/canonical-robinwood")["fetchCanonicalRobinwoodStats"]>
     > = null;
