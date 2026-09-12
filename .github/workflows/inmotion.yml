@@ -1497,8 +1497,47 @@ jobs:
           if curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ 2>/dev/null; then
             echo "[provision] table is live; keeping its existing chain state"
           else
-            echo "[provision] table is not serving; seeding a fresh chain"
+            # Nothing is SERVING, but that does not mean nothing is RUNNING. The
+            # supervisor starts anvil with --state-interval 10, so an anvil that
+            # failed to load the state and a stale one from an earlier cron tick
+            # both keep rewriting this exact file every ten seconds. Copying a
+            # fresh seed underneath a live writer is how a 24MB seed became an
+            # 89MB file that anvil rejected with "trailing characters at line 1
+            # column 89305291" -- two states interleaved in one file.
+            #
+            # So take the table down first, and take the lock with it, or the
+            # once-a-minute cron simply starts another writer mid-copy.
+            echo "[provision] table is not serving; stopping any stale processes"
+            # Hold the cron's own lock for the whole kill-and-seed. Without it
+            # the once-a-minute tick can start a fresh supervisor between the
+            # kill and the copy, and we are back to writing under a live anvil.
+            seed_lock="$app_dir/shared/plankcrash-table.lock"
+            exec 9>"$seed_lock"
+            flock -w 90 9 || { echo "[provision] could not take the table lock" >&2; exit 1; }
+            pkill -f "plankcrash-table.sh" 2>/dev/null || true
+            pkill -f "ops/plankcrash-table/arcade-preview.mjs" 2>/dev/null || true
+            pkill -f "ops/plankcrash-table/invite-gateway.mjs" 2>/dev/null || true
+            pkill -f "plankcrash/bin/anvil" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+              pgrep -f "plankcrash/bin/anvil" >/dev/null 2>&1 || break
+              sleep 1
+            done
+            if pgrep -f "plankcrash/bin/anvil" >/dev/null 2>&1; then
+              echo "[provision] anvil would not stop; forcing" >&2
+              pkill -9 -f "plankcrash/bin/anvil" 2>/dev/null || true
+              sleep 2
+            fi
+            echo "[provision] seeding a fresh chain"
+            rm -f "$table_dir/anvil-state.json"
             cp "$seed" "$table_dir/anvil-state.json"
+            # Prove the copy is the seed and nothing has grown it since.
+            seed_bytes=$(wc -c < "$seed")
+            live_bytes=$(wc -c < "$table_dir/anvil-state.json")
+            echo "[provision] seed ${seed_bytes} bytes -> state ${live_bytes} bytes"
+            [ "$seed_bytes" = "$live_bytes" ] || { echo "[provision] state changed during the copy; a writer is still alive" >&2; exit 1; }
+            # Released here: the supervisor started below takes it again under
+            # flock -n, exactly as the cron does.
+            exec 9>&-
           fi
           chmod 600 "$table_dir/anvil-state.json"
 
