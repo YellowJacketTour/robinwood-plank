@@ -104,3 +104,42 @@ test('lost native placement is retried without accepting movement before acknowl
  await client.observe({...pos,sequence:3,x:24,appliedCorrectionSequence:2});
  assert.equal(posts,1);client.dispose();
 });
+
+
+test('explicit admission reconnect places a grounded player from another screen without posting movement',async()=>{
+ const corrections:Record<string,unknown>[]=[];let gets=0,posts=0;
+ const client=createNativeMovementClient({allowArrivalWarp:true,request:async body=>{if(body)posts++;else gets++;return {...saved,regionId:'home:1',regionEpoch:2};},correct:p=>corrections.push(p as Record<string,unknown>),status:()=>{}});
+ await client.observe({...pos,screen:62,z:8,appliedCorrectionSequence:9});
+ assert.equal(gets,0,'Arrival waits for landing');
+ await client.observe({...pos,sequence:2,screen:62,appliedCorrectionSequence:9});
+ assert.equal(gets,1);assert.equal(posts,0);
+ assert.deepEqual(corrections[0],{type:'charmville:position-correction',sessionId:pos.sessionId,sequence:10,dmap:4,screen:63,x:16,y:72,direction:1,reason:'spawn'});
+ await client.observe({...pos,sequence:3,appliedCorrectionSequence:10});
+ await client.observe({...pos,sequence:4,screen:62,appliedCorrectionSequence:10});
+ assert.equal(corrections.length,1,'Ordinary exploration must not trigger another arrival warp');
+ assert.equal(posts,0);client.dispose();
+});
+
+test('new admission controller can return an existing native session while default callers cannot warp',async()=>{
+ let gets=0;const corrections:object[]=[];
+ const options={request:async()=>{gets++;return saved;},correct:(p:object)=>corrections.push(p),status:()=>{}};
+ const passive=createNativeMovementClient(options);
+ await passive.observe({...pos,dmap:5});passive.dispose();assert.equal(gets,0);
+ const admitted=createNativeMovementClient({...options,allowArrivalWarp:true});
+ await admitted.observe({...pos,dmap:5});
+ assert.equal(gets,1);assert.equal(corrections.length,1);admitted.dispose();
+});
+
+
+test('lost cross-screen arrival retries only until acknowledged on the supported map',async()=>{
+ const corrections:Record<string,unknown>[]=[];let posts=0;
+ const client=createNativeMovementClient({allowArrivalWarp:true,request:async body=>{if(body)posts++;return saved;},correct:p=>corrections.push(p as Record<string,unknown>),status:()=>{}});
+ await client.observe({...pos,screen:62});
+ await client.observe({...pos,sequence:2,screen:62});assert.equal(corrections.length,1);
+ await new Promise(resolve=>setTimeout(resolve,1510));
+ await client.observe({...pos,sequence:3,screen:62});
+ assert.equal(corrections.length,2);assert.equal(corrections[1].reason,'spawn');assert.equal(corrections[1].sequence,2);
+ await client.observe({...pos,sequence:4,appliedCorrectionSequence:2});
+ await client.observe({...pos,sequence:5,screen:62,appliedCorrectionSequence:2});
+ assert.equal(corrections.length,2);assert.equal(posts,0);client.dispose();
+});

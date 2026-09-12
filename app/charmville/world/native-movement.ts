@@ -19,7 +19,7 @@ export function useNativeMovement(frame:RefObject<HTMLIFrameElement|null>,sessio
    if(!disposed&&Array.isArray(data.peers))sendPeers(data.peers.map((p:{profileId:string;handle:string;cell:{x:number;y:number}})=>({profileId:p.profileId,handle:p.handle,x:p.cell.x*data.tilePixels,y:p.cell.y*data.tilePixels})));
    return data as SavedActor;
   };
-  const client=createNativeMovementClient({request,correct(payload){if(!disposed)frame.current?.contentWindow?.postMessage(payload,'http://localhost:3021');},status(message){if(!disposed)setStatus(message);}});
+  const client=createNativeMovementClient({allowArrivalWarp:true,request,correct(payload){if(!disposed)frame.current?.contentWindow?.postMessage(payload,'http://localhost:3021');},status(message){if(!disposed)setStatus(message);}});
   if(['localhost','127.0.0.1'].includes(window.location.hostname))wire=createWorldSocket(token,snapshot=>{
    if(disposed)return;
    client.synchronize(snapshot);
