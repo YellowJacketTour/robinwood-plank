@@ -160,7 +160,17 @@ function show(result,scheduled=false){
 
       // Finish the presentation; never place the next bet automatically.
 
-      if(!result.isWinner)returnTimer=setTimeout(close,2500);
+      // A loser's card returns to the pad on its own. A WINNER's card used to
+      // wait for a click that a spectating or idle player never makes -- and
+      // because closing is what fires plank:lottery-closed, the round story
+      // stayed in 'lottery' forever, pollScoreboard stayed gated, and the whole
+      // table froze on that round: no countdown, no ignition, no liftoff, ever
+      // again. On the test rig (oddsOneIn 4) that is roughly every fourth round.
+      // The prize is NOT lost by closing -- it is already credited on-chain and
+      // Collect stays available from the result card -- so the card returns on a
+      // longer beat that leaves time to read and click, and any pointer or key
+      // press cancels it (stopReturn) for a player who is actually looking.
+      returnTimer=setTimeout(close,result.isWinner?12000:2500);
 
     }
 
