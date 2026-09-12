@@ -1076,6 +1076,36 @@ export async function writeSnapshotError(collectionId: number, error: string): P
   );
 }
 
+/**
+ * The three USD volume columns, selected as text.
+ *
+ * `numeric` comes back from node-postgres as a STRING already, but spelling
+ * the cast makes that explicit and matches how every other numeric column on
+ * this row is carried (`::text`), so a driver-level type-parser change can
+ * never quietly turn these into lossy floats.
+ *
+ * Kept as one shared constant because TWO queries return
+ * CollectionWithSnapshot. The whole reason these columns were invisible for
+ * so long is that a writer and a reader lived in different places; a second
+ * hand-copied SELECT list is how the next half of this bug would be
+ * reintroduced.
+ */
+const USD_VOLUME_SELECT =
+  "s.volume_24h_usd::text AS volume_24h_usd, s.volume_7d_usd::text AS volume_7d_usd, s.volume_30d_usd::text AS volume_30d_usd";
+
+/** The matching row -> field mapping for USD_VOLUME_SELECT. One definition, both queries. */
+function usdVolumeFields(row: {
+  volume_24h_usd: string | null;
+  volume_7d_usd: string | null;
+  volume_30d_usd: string | null;
+}): { volume24hUsd: string | null; volume7dUsd: string | null; volume30dUsd: string | null } {
+  return {
+    volume24hUsd: row.volume_24h_usd,
+    volume7dUsd: row.volume_7d_usd,
+    volume30dUsd: row.volume_30d_usd,
+  };
+}
+
 export type CollectionWithSnapshot = TrackedCollection & {
   floorPriceWei: string | null;
   floorPriceCurrency: string | null;
@@ -1091,6 +1121,26 @@ export type CollectionWithSnapshot = TrackedCollection & {
   sales7d: number | null;
   volume30dWei: string | null;
   sales30d: number | null;
+  /**
+   * THE USD HALF OF THE SAME AGGREGATION, WHICH NOTHING HAS EVER READ.
+   *
+   * updateVolumeFromMarketEvents computes `SUM(amount_usd)` over EVERY sale
+   * in the window alongside `SUM(native_wei)`, and updateCollectionMarketStats
+   * writes both into plank_multichain_snapshots. Grepping the repo for
+   * `volume_24h_usd` on 2026-09-12 found four hits, all in store.ts, all
+   * writes -- no SELECT, no API field, no render. The number was computed and
+   * thrown away.
+   *
+   * It is the ONLY honest volume figure for a collection that settles in a
+   * non-native currency. `native_wei` is deliberately NULL for such a fill
+   * (summing USDC atomic units into a wei total would fabricate a number), so
+   * "Beezie - Base" showed 1,587 sales in 24 h and 11,179 in 30 d with NULL
+   * volume in every window -- and the hub rendered that as `unfetched`
+   * ("not yet"), claiming we had never looked at data we had already summed.
+   */
+  volume24hUsd: string | null;
+  volume7dUsd: string | null;
+  volume30dUsd: string | null;
   previousFloorPriceWei: string | null;
   /** Real distinct-owner count (Alchemy getOwnersForContract, EVM chains only) -- null, never a fabricated 0. */
   holderCount: number | null;
@@ -1117,6 +1167,9 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
       sales_7d: number | null;
       volume_30d_wei: string | null;
       sales_30d: number | null;
+      volume_24h_usd: string | null;
+      volume_7d_usd: string | null;
+      volume_30d_usd: string | null;
       previous_floor_price_wei: string | null;
       holder_count: number | null;
       floor_change_pct: number | null;
@@ -1126,6 +1179,7 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            ${USD_VOLUME_SELECT},
             s.holder_count, s.floor_change_pct
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
@@ -1146,6 +1200,7 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     sales7d: row.sales_7d,
     volume30dWei: row.volume_30d_wei,
     sales30d: row.sales_30d,
+    ...usdVolumeFields(row),
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
@@ -1299,6 +1354,9 @@ export async function listCollectionsWithSnapshotsPage(input: {
       sales_7d: number | null;
       volume_30d_wei: string | null;
       sales_30d: number | null;
+      volume_24h_usd: string | null;
+      volume_7d_usd: string | null;
+      volume_30d_usd: string | null;
       previous_floor_price_wei: string | null;
       holder_count: number | null;
       floor_change_pct: number | null;
@@ -1309,6 +1367,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            ${USD_VOLUME_SELECT},
             s.holder_count, s.floor_change_pct, s.floor_observed_at
      FROM plank_market_hub_rank r
      JOIN plank_multichain_collections c ON c.id = r.collection_id
@@ -1356,6 +1415,7 @@ export async function listCollectionsWithSnapshotsPage(input: {
     sales7d: row.sales_7d,
     volume30dWei: row.volume_30d_wei,
     sales30d: row.sales_30d,
+    ...usdVolumeFields(row),
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
@@ -1457,6 +1517,9 @@ export async function searchTrackedCollectionsByName(
       sales_7d: number | null;
       volume_30d_wei: string | null;
       sales_30d: number | null;
+      volume_24h_usd: string | null;
+      volume_7d_usd: string | null;
+      volume_30d_usd: string | null;
       previous_floor_price_wei: string | null;
       holder_count: number | null;
       floor_change_pct: number | null;
@@ -1466,6 +1529,7 @@ export async function searchTrackedCollectionsByName(
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            ${USD_VOLUME_SELECT},
             s.holder_count, s.floor_change_pct
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
@@ -1494,6 +1558,7 @@ export async function searchTrackedCollectionsByName(
     sales7d: row.sales_7d,
     volume30dWei: row.volume_30d_wei,
     sales30d: row.sales_30d,
+    ...usdVolumeFields(row),
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
@@ -1526,13 +1591,15 @@ export async function listCollectionFeed(input: {
     total_supply: string | null; listed_count: number | null; synced_at: string | null; sync_error: string | null;
     volume_24h_wei: string | null; sales_24h: number | null; volume_7d_wei: string | null; sales_7d: number | null;
     volume_30d_wei: string | null; sales_30d: number | null; previous_floor_price_wei: string | null;
+    volume_24h_usd: string | null; volume_7d_usd: string | null; volume_30d_usd: string | null;
     holder_count: number | null; floor_change_pct: number | null;
   }>(
     `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url,
             c.is_vault_backed, c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count,
             s.synced_at, s.sync_error, s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d,
-            s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei, s.holder_count, s.floor_change_pct
+            s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei, ${USD_VOLUME_SELECT},
+            s.holder_count, s.floor_change_pct
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE ${clauses.join(" AND ")}
@@ -1557,6 +1624,7 @@ export async function listCollectionFeed(input: {
     sales7d: row.sales_7d,
     volume30dWei: row.volume_30d_wei,
     sales30d: row.sales_30d,
+    ...usdVolumeFields(row),
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
