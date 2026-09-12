@@ -74,7 +74,18 @@ chain_up() {
 }
 
 # ── the binary ───────────────────────────────────────────────────────────────
-if [ ! -x "$anvil_bin" ]; then
+# "Is it installed?" is the wrong question -- `-x` was true for a binary that
+# could not run. An earlier attempt cached the GLIBC build here, and because a
+# non-executable file was never the failure mode, every later run skipped the
+# download and started a binary that died instantly with
+# `/lib64/libc.so.6: version GLIBC_2.29 not found`. The table could not fix
+# itself. Ask whether it RUNS, and replace it when it does not.
+anvil_runs() { [ -x "$anvil_bin" ] && "$anvil_bin" --version >/dev/null 2>&1; }
+if ! anvil_runs; then
+  if [ -e "$anvil_bin" ]; then
+    log "anvil present but will not run here; replacing it"
+    rm -f "$anvil_bin"
+  fi
   log "anvil missing; fetching foundry $foundry_version"
   tarball="$table_dir/foundry.tar.gz"
   # The ALPINE asset, not linux_amd64: it is musl-static, with no ELF
