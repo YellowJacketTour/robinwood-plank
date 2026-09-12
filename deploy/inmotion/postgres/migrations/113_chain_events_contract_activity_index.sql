@@ -1,0 +1,66 @@
+-- The home collection's 7-day activity tally had no index to stand on.
+--
+-- WHAT RUNS, AND HOW OFTEN
+-- ------------------------
+-- app/api/market/multichain/route.ts (the hub index, the hottest read in the
+-- app) computes `nativeLedgerActivity7d` on every index build:
+--
+--     SELECT COUNT(*) FROM plank_chain_events
+--      WHERE lower(contract) = lower($1)
+--        AND kind IN ('transfer','sale','mint')
+--        AND block_timestamp >= NOW() - INTERVAL '7 days'
+--
+-- Every index that exists on this table leads with something else:
+--
+--     (block_number DESC, log_index DESC)
+--     (source, block_number DESC)
+--     (token_id, block_number DESC)   -- partial
+--     (kind, block_number DESC)
+--
+-- Nothing leads with `contract`, and nothing indexes `block_timestamp` at all.
+-- So the planner's best option is the `kind` index -- which selects the three
+-- commonest kinds in an append-only ledger, i.e. very nearly all of it -- and
+-- then filters every row by contract and timestamp. On an append-only table
+-- that grows with real chain activity forever, that cost grows forever too.
+--
+-- The hub route's own header records this endpoint taking 96 SECONDS live on a
+-- saturated PGPOOL_MAX=4 pool. This COUNT is one of the reads inside that
+-- build.
+--
+-- WHY FUNCTIONAL, AND NOT A PLAIN (contract, ...) INDEX
+-- ----------------------------------------------------
+-- Migration 001 documents `contract` as "lowercased address", but nothing
+-- enforces it: the INSERT in lib/market/chain-events.ts passes the value
+-- straight through with no toLowerCase(), and no CHECK constraint exists. The
+-- query therefore wraps it in lower() -- correctly, because it cannot trust the
+-- column -- and a plain b-tree on `contract` would be UNUSABLE for that
+-- predicate.
+--
+-- Indexing the expression the query actually writes is the honest fix. It
+-- costs one extra expression evaluation per insert and removes the assumption
+-- entirely. Adding a lowercase CHECK instead would be a bigger, riskier change
+-- to a live append-only ledger, and would still need this index.
+--
+-- WHY PARTIAL ON kind
+-- -------------------
+-- The three kinds in the predicate are what "activity" means here. Excluding
+-- everything else keeps the index smaller than the table it serves and means
+-- rows the query can never match cost nothing to carry.
+--
+-- block_timestamp is the trailing column so the 7-day window is a range scan
+-- within one contract's entries, and it is DESC because every reader of this
+-- ledger wants recent rows first.
+--
+-- CONCURRENTLY IS DELIBERATELY NOT USED
+-- -------------------------------------
+-- scripts/migrate-postgres.mjs wraps each migration in a transaction, and
+-- CREATE INDEX CONCURRENTLY cannot run inside one. A plain CREATE INDEX takes a
+-- SHARE lock: concurrent SELECTs are unaffected, INSERTs block for the build.
+-- This table is written by the chain indexers, which are bounded-pass workers
+-- that retry -- a brief block is a delayed pass, not lost data. Migration 108
+-- made the same tradeoff for the same reason, and 111 documents the
+-- lock_timeout the runner now sets after a 2026-09-07 incident.
+
+CREATE INDEX IF NOT EXISTS plank_chain_events_contract_activity_idx
+  ON plank_chain_events (lower(contract), block_timestamp DESC)
+  WHERE kind IN ('transfer', 'sale', 'mint');
