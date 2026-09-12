@@ -4515,7 +4515,19 @@ function startPolling() {
   // this at the same cadence as local (cheap now that CORS/rate-limit
   // issues are actually fixed) avoids that.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshPowerboardUI(); pollLiveBoard(); }, 600);
+  // pollScoreboard is what ARMS the flight replay, and the replay can only
+  // show Astra's full sequence if it is armed more than 1400ms before the
+  // chain's scheduled liftoff -- that 1400ms IS the ignition burn, and the
+  // countdown needs whatever is left over. Measured at 600ms, the lead left
+  // at arming time swung between +3809ms (full countdown -> ignition ->
+  // flight) and -1805ms, i.e. armed almost two seconds AFTER the ship should
+  // already have lifted. A late replay starts at elapsed>1400, so the stage
+  // jumps 'sealed' straight to 'flight' and the rocket never appears to
+  // launch at all -- exactly the failure the comment above `refresh` warns
+  // about, reintroduced by polling the SETTLEMENT slower than the phase.
+  // Discovery is the whole cost here (four cheap local reads total ~27ms),
+  // so this matches refresh's 400ms rather than lagging it.
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshPowerboardUI(); pollLiveBoard(); }, 400);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
