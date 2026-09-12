@@ -272,25 +272,29 @@ jobs:
           # dump caught mid-write stayed syntactically valid while one VALUE was
           # truncated, so JSON.parse passed and the host then refused to boot:
           #   invalid value: string "0x166b69...", expected a 32 byte hex string
-          # Check every hex string is a whole number of bytes and that the
-          # 32-byte fields really are 32 bytes.
+          #
+          # Check the FIXED-WIDTH fields only. Storage keys and slot values are
+          # exactly 32 bytes and code hashes 32 bytes; the offender was 39.5.
+          # Quantities (balance, nonce) are minimally-encoded and legitimately
+          # odd-length -- 0x2ef is 751 -- so a blanket even-length rule is wrong
+          # and rejected a perfectly good dump on the first run.
           node -e "
             const fs=require('fs');
             const raw=fs.readFileSync('.next/standalone/ops/plankcrash-table/anvil-seed.json','utf8');
             const state=JSON.parse(raw);
-            let checked=0;
-            const walk=(v)=>{
-              if(typeof v==='string'){
-                if(/^0x[0-9a-fA-F]*\$/.test(v)){
-                  const body=v.slice(2);
-                  if(body.length%2)throw new Error('odd-length hex, dump is truncated: '+v.slice(0,24)+'...');
-                  checked++;
-                }
-              } else if(Array.isArray(v)) v.forEach(walk);
-              else if(v&&typeof v==='object') Object.values(v).forEach(walk);
-            };
-            walk(state);
-            console.log('seed validated:',(raw.length/1e6).toFixed(1),'MB,',checked,'hex values, none truncated');
+            const bad=[]; let slots=0;
+            const is32=(x)=>typeof x==='string'&&/^0x[0-9a-fA-F]{64}\$/.test(x);
+            const accounts=state.accounts||{};
+            for(const [addr,acct] of Object.entries(accounts)){
+              const storage=(acct&&acct.storage)||{};
+              for(const [k,v] of Object.entries(storage)){
+                slots++;
+                if(!is32(k))bad.push(addr+' key '+String(k).slice(0,20));
+                if(!is32(v))bad.push(addr+' value '+String(v).slice(0,20));
+              }
+            }
+            if(bad.length)throw new Error('seed is truncated, '+bad.length+' bad 32-byte fields, first: '+bad[0]);
+            console.log('seed validated:',(raw.length/1e6).toFixed(1),'MB,',Object.keys(accounts).length,'accounts,',slots,'storage slots, all 32-byte fields intact');
           "
         env:
           FOUNDRY_VERSION: v1.8.1
