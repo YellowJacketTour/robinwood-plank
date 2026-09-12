@@ -1459,7 +1459,16 @@ jobs:
           # First run only: seed the chain from the state CI deployed against
           # the identical anvil. Never overwrite a live table's own state --
           # that would erase every guest's wallet and the round counter.
-          if [ ! -s "$table_dir/anvil-state.json" ]; then
+          # Re-seed when the table is not actually running. The guard below used
+          # to keep ANY existing state, which meant a state written by a failed
+          # run -- possibly truncated, possibly from an older contract set --
+          # was preserved forever and the table could never recover by itself.
+          # A live table still keeps its state: if the gateway answers, there are
+          # guest wallets and a round counter worth protecting, so leave it alone.
+          if curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ 2>/dev/null; then
+            echo "[provision] table is live; keeping its existing chain state"
+          else
+            echo "[provision] table is not serving; seeding a fresh chain"
             cp "$seed" "$table_dir/anvil-state.json"
           fi
           chmod 600 "$table_dir/anvil-state.json"

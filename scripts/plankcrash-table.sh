@@ -124,7 +124,18 @@ log "starting anvil"
   >> "$table_dir/anvil.log" 2>&1 &
 anvil_pid=$!
 for _ in $(seq 1 40); do chain_up && break; sleep 1; done
-chain_up || { log "FATAL: anvil did not come up"; exit 1; }
+if ! chain_up; then
+  # anvil writes its own reason to anvil.log and nothing ever read it, so a
+  # failure here looked identical whether the binary could not run, the port
+  # was taken, or the state file was rejected. Print it.
+  log "FATAL: anvil did not come up. Its own output follows:"
+  tail -n 25 "$table_dir/anvil.log" 2>/dev/null | while read -r line; do log "  anvil| $line"; done
+  log "  probe| exec test:"
+  "$anvil_bin" --version 2>&1 | head -3 | while read -r line; do log "  probe| $line"; done
+  log "  probe| port ${anvil_port} holders:"
+  (command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ":${anvil_port}" || netstat -ltnp 2>/dev/null | grep ":${anvil_port}" || echo "none") | while read -r line; do log "  probe| $line"; done
+  exit 1
+fi
 log "anvil up (pid $anvil_pid)"
 
 # ── the casino ───────────────────────────────────────────────────────────────
