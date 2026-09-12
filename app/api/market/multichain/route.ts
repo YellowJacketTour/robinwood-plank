@@ -416,6 +416,27 @@ async function buildHubIndex(req: Request) {
         sales7d: c.sales7d,
         volume30dWei: c.volume30dWei,
         sales30d: c.sales30d,
+        // THE USD SUM THIS ROUTE HAS NEVER SERVED (2026-09-12).
+        //
+        // updateVolumeFromMarketEvents computes SUM(amount_usd) over every
+        // sale in the window in the SAME query as SUM(native_wei), and
+        // updateCollectionMarketStats writes it to
+        // plank_multichain_snapshots.volume_24h_usd. Until now nothing ever
+        // SELECTed it, so the figure was computed on every ledger pass and
+        // discarded.
+        //
+        // Measured on plank.love the same day: "Beezie - Base" returned
+        // sales24h 1587, sales7d 11179, sales30d 11179 with volume24hWei,
+        // volume7dWei and volume30dWei ALL null. That is not a lane that
+        // never ran -- native_wei is deliberately NULL for a fill settled in
+        // a non-native currency (summing USDC atomic units into a wei total
+        // would fabricate a number), so COUNT survives and SUM does not. The
+        // grid then rendered the `unfetched` hole, "not yet", over a sum we
+        // had already taken. Serving it lets the cell state the real figure
+        // in the currency it was actually measured in.
+        volume24hUsd: c.volume24hUsd,
+        volume7dUsd: c.volume7dUsd,
+        volume30dUsd: c.volume30dUsd,
         // Real distinct-owner count (Alchemy getOwnersForContract, EVM
         // chains only) -- null for chains/collections without a fetched
         // count yet, never a fabricated 0.

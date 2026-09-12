@@ -1,6 +1,14 @@
 "use client";
 
 import { TypedHole, classifyHole, chainHasNoSource } from "@/components/market/TypedHole";
+import {
+  changeHoleKindFor,
+  resolveHoleKind,
+  volumeHoleKindFor,
+  windowSalesDisplay,
+  windowVolumeDisplay,
+  type WindowActivityInput,
+} from "@/lib/market/multichain/window-activity";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -143,6 +151,15 @@ type TrackedCollection = {
   sales7d: number | null;
   volume30dWei: string | null;
   sales30d: number | null;
+  /**
+   * The SAME aggregation's USD sum, over every sale in the window whatever it
+   * settled in -- not a conversion of the wei figure above. Optional because
+   * the synthetic RobinWood home row is built from the native ledger, which
+   * records wei only; a missing field there is honestly absent, never zero.
+   */
+  volume24hUsd?: string | null;
+  volume7dUsd?: string | null;
+  volume30dUsd?: string | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
   floorChangeStatus?: "observed-24h" | "collecting-baseline" | null;
@@ -205,10 +222,34 @@ function windowSales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number
   if (window === "30d") return c.sales30d;
   return c.sales24h;
 }
+/** The USD sum for the chosen window -- the same aggregation's other output, never a conversion of the wei figure. */
+function windowVolumeUsd(c: TrackedCollection, window: "24h" | "7d" | "30d"): string | null {
+  if (window === "7d") return c.volume7dUsd ?? null;
+  if (window === "30d") return c.volume30dUsd ?? null;
+  return c.volume24hUsd ?? null;
+}
+/** The three activity numbers for one window, in the shape windowVolumeDisplay/volumeHoleKindFor take. */
+function windowActivity(c: TrackedCollection, window: "24h" | "7d" | "30d"): WindowActivityInput {
+  return {
+    volumeWei: windowVolumeWei(c, window),
+    volumeUsd: windowVolumeUsd(c, window),
+    sales: windowSales(c, window),
+  };
+}
+/**
+ * The sales figure to render, or null when there is nothing to render.
+ *
+ * A MEASURED ZERO IS NOT NULL. This used to fold `0` into `null`, which sent
+ * the cell to the `unfetched` hole -- literally "not yet fetched" -- over a
+ * count we had taken. Confirmed live on plank.love 2026-09-12: the RobinWood
+ * home row returned `sales24h: 0` from salesStatsFromLedger() reading our own
+ * plank_chain_events, and the grid reported that as never-fetched. `0` now
+ * reaches the render path and comes out as the `none` hole, whose text is
+ * "0" -- a real value, styled like one.
+ */
 function displaySales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number | null {
-  const n = windowSales(c, window);
-  if (n == null || n === 0) return null;
-  return n;
+  const display = windowSalesDisplay(windowSales(c, window));
+  return display.kind === "count" ? display.sales : null;
 }
 function isZeroWei(wei: string | null | undefined): boolean {
   if (wei == null || wei === "" || wei === "0") return true;
@@ -487,10 +528,35 @@ function shortCollectionId(address: string): string {
  * it's making every "—" explain itself instead of looking unexplained.
  * Real per-chain reasoning, not a generic apology.
  */
-function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sales" | "listed" | "holders"): string {
+function emptyCellReason(
+  c: TrackedCollection,
+  field: "change" | "volume" | "sales" | "listed" | "holders",
+  kind?: "unfetched" | "unsourced" | "underived" | "none",
+): string {
   const isSolana = c.chainSlug === "solana-mainnet";
   const isBitcoin = c.chainSlug === "bitcoin-mainnet";
   const isRobinhood = c.chainSlug === "robinhood";
+  // THE REASON MUST MATCH THE KIND, OR THE TOOLTIP CONTRADICTS THE CELL.
+  //
+  // Every string below this block explains an ABSENCE -- "not observed yet",
+  // "hasn't come", "a dash is unknown". Once a cell can legitimately be
+  // `none` (a measured zero) or `underived` (counted but not priced), those
+  // strings become false: they would tell a visitor we never looked at a
+  // number we are showing them. These two branches are stated first, before
+  // any chain-specific wording, because they are facts about THIS ROW rather
+  // than about the chain's sources.
+  if (kind === "none") {
+    if (field === "sales") return "Zero sales in this window -- a counted zero from our own sales ledger, not a missing value.";
+    if (field === "volume") return "No volume in this window because there were no sales -- a counted zero, not a missing value.";
+    if (field === "change") return "The floor was observed at both ends of the window and did not move -- a measured 0.0%, not a missing value.";
+    return "Observed as zero -- a real count, not a missing value.";
+  }
+  if (kind === "underived" && (field === "volume" || field === "sales")) {
+    return "Sales were counted in this window but none carried a price we can total -- these fills settled in a currency with no recorded native or USD amount, so a sum would have to be invented. Fetching again cannot change that.";
+  }
+  if (kind === "underived" && field === "change") {
+    return "The floor observations for this window are not a comparable pair yet -- what is missing is a second endpoint in time, not a request.";
+  }
   // AUDIT lens 1 fabrication (2026-09-06): these explanations used to promise
   // data that the pipeline could not deliver ("loads the first time viewed",
   // "lands on the next sync"). Each now states what is actually known.
@@ -503,6 +569,17 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
     : "No second Solana floor observation yet -- change needs two real observations about a day apart.";
   if (isBitcoin) return "UniSat/Ordiscan expose collection metadata; volume/sales/change come from CoinGecko's daily feed when this collection is listed there.";
   if (isRobinhood && field !== "listed") {
+    // THE HOME ROW IS NOT AN OPENSEA-INDEXED CONTRACT.
+    //
+    // RobinWood's numbers come from this app's OWN ledger
+    // (plank_chain_events via salesStatsFromLedger) and its OWN merged order
+    // book, on a private L3 that OpenSea does not index at all. Telling a
+    // visitor that OpenSea indexed it points them, and anyone reading a bug
+    // report, at a source that was never involved. Community Robinhood
+    // collections keep the original wording, which is accurate for them.
+    if (isHomeRow(c)) {
+      return "No priced RobinWood sale recorded in this window -- this figure comes from our own on-chain ledger for the home collection, not from any third-party index.";
+    }
     return "OpenSea indexed this Robinhood contract with no floor/volume snapshot -- a dash is unknown, not a fake zero.";
   }
   if (field === "change") return "Change needs two real floor observations about a day apart -- not yet available.";
@@ -525,14 +602,35 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
 function holeFor(
   c: TrackedCollection,
   field: "change" | "volume" | "sales" | "listed" | "holders",
+  /**
+   * The kind this particular cell has ALREADY established from the row's own
+   * numbers, overriding the generic classification.
+   *
+   * classifyHole() only sees the field name, the chain, and "are there any
+   * sales" -- it cannot see that this window's count is a measured 0, or that
+   * the floor change was observed and simply did not move. Those are the two
+   * cases that produced false `unfetched` holes on production 2026-09-12, and
+   * they are decided per cell by window-activity.ts. A `chainHasNoSource`
+   * chain still wins: no amount of row data makes a value sourceable.
+   */
+  established?: "unfetched" | "underived" | "none",
 ) {
-  const kind = classifyHole({
-    field,
-    chainSlug: c.chainSlug,
+  // The join lives in resolveHoleKind(), not here. A mutation that deleted
+  // this precedence rule from an inline expression reverted the entire
+  // user-visible fix with the suite still green -- holeFor() returns JSX from
+  // a "use client" module and cannot be driven by a node:test, so the rule
+  // was untestable where it sat. See resolveHoleKind's own header.
+  const kind = resolveHoleKind({
     chainHasNoSource: chainHasNoSource(c.chainSlug, field),
-    hasSales: (c.sales24h ?? 0) > 0,
+    established,
+    fallback: classifyHole({
+      field,
+      chainSlug: c.chainSlug,
+      chainHasNoSource: false,
+      hasSales: (c.sales24h ?? 0) > 0,
+    }),
   });
-  return <TypedHole kind={kind} reason={emptyCellReason(c, field)} field={field} />;
+  return <TypedHole kind={kind} reason={emptyCellReason(c, field, kind)} field={field} />;
 }
 
 function isHomeRow(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): boolean {
@@ -2691,24 +2789,81 @@ export default function GlobalMarketHub() {
                             reason="No complete, comparable 24-hour floor observation exists yet. Tracking is active; no change is shown until both endpoints are evidenced."
                           />
                         ) : (
-                          holeFor(c, "change")
+                          // THE FALL-THROUGH THAT MADE THE HOME ROW LIE.
+                          //
+                          // `change` is null here for two very different
+                          // reasons, and this branch used to treat both as
+                          // "never fetched". Measured live 2026-09-12: the
+                          // RobinWood row returned floorChangeStatus
+                          // "observed-24h" with floorChangePct 0 -- two real
+                          // floor observations 24 h apart, both 0.009 ETH, a
+                          // genuinely flat tape. displayChangePct() then
+                          // suppressed that 0 (correct: a stored 0 with no
+                          // trades behind it is not a measured flat move),
+                          // the "collecting-baseline" branch above did not
+                          // apply because the baseline WAS collected, and the
+                          // cell landed here claiming nobody had looked. That
+                          // is why RobinWood alone showed "not yet" while
+                          // every other row showed "collecting baseline".
+                          //
+                          // changeHoleKindFor reads the server's own status
+                          // field, which is the only thing that actually
+                          // knows whether an observation happened.
+                          holeFor(
+                            c,
+                            "change",
+                            changeHoleKindFor({
+                              floorChangeStatus: c.floorChangeStatus,
+                              rawChangePct: c.floorChangePct,
+                              sales: windowSales(c, rankingsWindow),
+                            }),
+                          )
                         )}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
                         {(() => {
-                          const vol = windowVolumeWei(c, rankingsWindow);
-                          if (!vol || vol === "0") return holeFor(c, "volume");
-                          const usd = toUsd(vol, chainNativeAsset(c.chainSlug));
-                          return (
-                            <span className="inline-flex items-center justify-end gap-1">
-                              <NativeAmount wei={vol} usdLabel={usd != null ? formatUsdCompact(usd) : null} />
-                              <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
-                            </span>
-                          );
+                          const activity = windowActivity(c, rankingsWindow);
+                          const display = windowVolumeDisplay(activity);
+                          if (display.kind === "native") {
+                            const usd = toUsd(display.wei, chainNativeAsset(c.chainSlug));
+                            return (
+                              <span className="inline-flex items-center justify-end gap-1">
+                                <NativeAmount wei={display.wei} usdLabel={usd != null ? formatUsdCompact(usd) : null} />
+                                <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
+                              </span>
+                            );
+                          }
+                          // A REAL SUM WE ALREADY TOOK, IN THE ONLY CURRENCY
+                          // IT WAS EVER DENOMINATED IN.
+                          //
+                          // No chain icon and no NativeAmount here, deliberately:
+                          // these fills did not settle in this chain's coin, and
+                          // dressing a dollar total as ETH would be exactly the
+                          // fabrication the wei column avoids by being NULL. The
+                          // "$" and the tooltip say which currency this is.
+                          if (display.kind === "usd") {
+                            return (
+                              <span
+                                className="inline-flex items-center justify-end gap-1 text-foreground/80"
+                                title={`${formatUsdCompact(display.usd)} across ${display.sales != null ? display.sales.toLocaleString() : "the"} recorded sales, which settled in a currency other than this chain's native coin -- totalled in USD from the price recorded at each fill, never converted from a native figure.`}
+                              >
+                                {formatUsdCompact(display.usd)}
+                              </span>
+                            );
+                          }
+                          return holeFor(c, "volume", volumeHoleKindFor(activity));
                         })()}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
-                        {displaySales(c, rankingsWindow) ?? holeFor(c, "sales")}
+                        {(() => {
+                          const display = windowSalesDisplay(windowSales(c, rankingsWindow));
+                          if (display.kind === "count") return display.sales;
+                          // A counted zero renders as "0" through the `none`
+                          // hole, which is styled like a real value because it
+                          // IS one -- see windowSalesDisplay's header for the
+                          // live RobinWood measurement that forced this.
+                          return holeFor(c, "sales", display.kind === "zero" ? "none" : undefined);
+                        })()}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
                         {c.listedCount != null ? (

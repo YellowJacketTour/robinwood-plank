@@ -152,9 +152,25 @@ test("a hole never outshouts a real value", () => {
 test("every dash cell in the hub is now a typed hole", () => {
   // The five columns measured as mostly-empty on production: change, volume,
   // sales, listed, holders.
+  //
+  // UPDATED 2026-09-12. holeFor() gained a third argument -- the kind this
+  // cell has ALREADY established from the row's own numbers (see
+  // lib/market/multichain/window-activity.ts), which is how a counted zero
+  // and a counted-but-unpriced window stopped being reported as "never
+  // fetched". Three of the five columns now pass it, and the change cell's
+  // call is formatted across several lines.
+  //
+  // So the literal `holeFor(c, "field")` this test matched no longer appears
+  // for those columns. The INVARIANT is unchanged and is what is asserted:
+  // every one of the five columns must still route its empty state through
+  // holeFor, with or without an established kind. Matching the argument list
+  // loosely here is deliberate -- pinning the exact spelling is what made
+  // this assertion fail on a refactor that preserved the property it exists
+  // to protect.
   for (const field of ["change", "volume", "sales", "listed", "holders"]) {
-    assert.ok(
-      HUB.includes(`holeFor(c, "${field}")`),
+    assert.match(
+      HUB,
+      new RegExp(`holeFor\\(\\s*c,\\s*"${field}"`),
       `${field} must render a typed hole, not a dash`
     );
   }
@@ -177,7 +193,13 @@ test("no bare em-dash survives in a rankings cell", () => {
 
   // Every call site, excluding the declaration itself.
   const callSites: string[] = [];
-  const re = /emptyCellReason\(c,\s*(?:field|"[a-z]+")\)/g;
+  // UPDATED 2026-09-12: emptyCellReason now also takes the resolved hole
+  // KIND, so the reason can state a measured zero ("zero sales in this
+  // window -- a counted zero") instead of an absence ("not observed yet").
+  // A reason that contradicts the kind rendered beside it is its own lie, so
+  // the extra argument is load-bearing. The invariant -- exactly one caller,
+  // and that caller is holeFor -- is unchanged.
+  const re = /emptyCellReason\(c,\s*(?:field|"[a-z]+")(?:,\s*kind)?\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(HUB)) !== null) {
     if (m.index === HUB.indexOf("emptyCellReason", decl) && m.index < decl + 40) continue;
@@ -208,5 +230,36 @@ test("the hub classifies rather than hardcoding a kind", () => {
 test("emptyCellReason is still the source of the explanation", () => {
   // The prose was already right. This change makes it visible; it must not
   // replace it with something new and worse.
-  assert.match(HUB, /reason=\{emptyCellReason\(c, field\)\}/, "the existing reason must be used");
+  // UPDATED 2026-09-12 for emptyCellReason's third argument (the resolved
+  // kind); see the call-site test above for why it exists.
+  assert.match(HUB, /reason=\{emptyCellReason\(c, field, kind\)\}/, "the existing reason must be used");
+});
+
+/**
+ * The kind and the reason must agree.
+ *
+ * Added 2026-09-12. Before this, every string emptyCellReason could return
+ * described an ABSENCE -- "not observed yet", "its turn in the stats pass
+ * hasn't come", "a dash is unknown". Once a cell can legitimately render
+ * `none` (a measured zero, shown as "0") or `underived` (counted sales that
+ * carried no price), those strings become false in the tooltip of a cell
+ * showing a real value: the page would tell a visitor we had never looked at
+ * a number it was displaying to them.
+ *
+ * That is the same species of defect as the em-dash this file was written
+ * for -- an explanation that cannot be told apart from the truth -- so it is
+ * guarded the same way.
+ */
+test("a measured zero is explained as a measurement, not as an absence", () => {
+  const decl = HUB.indexOf("function emptyCellReason");
+  const body = HUB.slice(decl, HUB.indexOf("\nfunction ", decl + 10));
+  assert.ok(body.length > 0, "emptyCellReason must exist");
+  // The kind must actually steer the prose, not be accepted and ignored.
+  assert.match(body, /kind === "none"/, "a counted zero needs its own explanation");
+  assert.match(body, /kind === "underived"/, "so does a counted-but-unpriced window");
+  // And the honesty rule the whole file exists for: never a fabricated value.
+  assert.ok(
+    /not a missing value/.test(body),
+    "a measured zero must be described as a real count"
+  );
 });
