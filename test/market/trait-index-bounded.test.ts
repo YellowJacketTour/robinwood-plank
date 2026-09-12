@@ -131,9 +131,35 @@ test("a read that cannot finish reports incomplete, and forces partial", SKIP, a
   const { readProjectedTraitIndex } = await import("../../lib/market/multichain/collection-token-store");
   const { chainSlug, collectionSlug } = await seed(600, 20);
   try {
-    // 1ms: no real scan completes, so the LATERAL is cancelled by PostgreSQL
-    // exactly as it would be under production load.
-    await postgresQuery(`SET statement_timeout = 1`);
+    // MAKE THE FAILURE CERTAIN, NOT LIKELY.
+    //
+    // This set `statement_timeout = 1` and relied on a real scan taking longer
+    // than 1 ms. That is a RACE: on a fast, warm, unloaded database the scan
+    // can finish inside the deadline, the read SUCCEEDS, and the test fails --
+    // claiming the guard is broken when it is working. Observed once in a
+    // parallel batched run, and it is exactly the species this file exists to
+    // prevent: an assertion whose outcome depends on machine speed rather than
+    // on behaviour.
+    //
+    // A row whose `traits` column is not a JSON ARRAY makes
+    // jsonb_array_elements raise "cannot extract elements from a scalar" --
+    // deterministically, on the server, every time. The projection row is read
+    // BEFORE the fan-out and from a different table, so the function still
+    // returns its envelope: which is precisely the distinction under test --
+    // an incomplete index must not collapse into "no such collection".
+    //
+    // REVOKE was tried first and is a no-op here: `plankapp` OWNS the table,
+    // and an owner cannot revoke its own implicit privileges. Verified rather
+    // than assumed -- pg_tables.tableowner = current_user.
+    //
+    // This exercises the same catch as a cancelled scan: the try/catch around
+    // the trait fan-out cannot tell a malformed row from a statement_timeout,
+    // and must report BOTH as `incomplete` rather than as an empty index.
+    await postgresQuery(
+      `UPDATE plank_collection_tokens SET traits = '"not-an-array"'::jsonb
+        WHERE chain_slug = $1 AND collection_slug = $2 AND token_id = '0'`,
+      [chainSlug, collectionSlug]
+    );
     const result = await readProjectedTraitIndex(chainSlug, collectionSlug);
     assert.ok(result, "an incomplete read must still return an envelope -- null would read as 'no such collection'");
     assert.equal(result.incomplete, true, "the read failed, and the result must say so");
@@ -144,7 +170,9 @@ test("a read that cannot finish reports incomplete, and forces partial", SKIP, a
     );
     assert.deepEqual(result.traits, {}, "no rows were read, so no traits are claimed");
   } finally {
-    await postgresQuery(`SET statement_timeout = DEFAULT`).catch(() => {});
+    // cleanup() deletes every row this test seeded, including the malformed
+    // one, so no separate repair is needed -- and nothing outside this
+    // collection was ever touched.
     await cleanup(chainSlug, collectionSlug);
   }
 });
