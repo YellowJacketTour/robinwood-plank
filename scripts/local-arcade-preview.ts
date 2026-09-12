@@ -41,5 +41,13 @@ for (;;) {
     }
     const actions=await tick(provider,signer,{...manifest,router:manifest.rakeRouter,mockBeacon:true,mockImmediateAfterClose:true});for(const a of actions)console.log(a.step);}
   catch(err){console.error('Practice keeper:',err instanceof Error?err.message:String(err));}
-  await new Promise(resolve=>setTimeout(resolve,1000));
+  // The contract closes betting 8s before the scheduled liftoff and the
+  // browser needs the RoundSettled event BEFORE that liftoff to play the
+  // countdown and the 1400ms ignition burn. Measured, the margin between
+  // settlement and liftoff is often only tens of milliseconds, so a 1000ms
+  // tick straddles the boundary: rounds settle a few hundred ms LATE and the
+  // stage jumps straight to 'flight' with no countdown and no ignition --
+  // the rocket never appears to launch. Ticking at 250ms keeps settlement
+  // comfortably inside the lead. These are cheap local reads, not txs.
+  await new Promise(resolve=>setTimeout(resolve,250));
 }

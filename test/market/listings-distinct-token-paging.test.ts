@@ -70,9 +70,22 @@ test("the walk is still bounded", () => {
   // Rotations mean a page can contribute ZERO new tokens, so the cap has to
   // rise -- but an unbounded walk on a large collection is its own outage.
   const body = paged(SRC);
-  const m = body.match(/pages < (\d+)/);
+  // The cap may be written inline or, since #493, hoisted to a named export
+  // (`pages < PAGES_PER_CALL`). Scanning only for a numeric literal made this
+  // fail on a pure refactor that changed no behaviour, which is a test
+  // reporting on its own regex rather than on the walk. Accept either form and
+  // resolve a name to its value, so the BOUND is what is asserted.
+  const m = body.match(/pages < ([A-Za-z_$][\w$]*|\d+)/);
   assert.ok(m, "a page cap must exist");
-  const cap = Number(m![1]);
+  const token = m![1];
+  let cap: number;
+  if (/^\d+$/.test(token)) cap = Number(token);
+  else {
+    const decls = [...SRC.matchAll(/(?:export\s+)?(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(\d+)/g)];
+    const decl = decls.find((d) => d[1] === token);
+    assert.ok(decl, `${token} is the page cap but its value could not be found`);
+    cap = Number(decl![2]);
+  }
   assert.ok(cap > 10, `${cap} pages is the old order-counting budget; distinct-token paging needs more room`);
   assert.ok(cap <= 50, `${cap} pages is 5,000 orders for one page render`);
 });

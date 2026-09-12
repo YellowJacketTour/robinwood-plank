@@ -1471,10 +1471,19 @@ jobs:
           test -x "$flock_bin"
 
           # Run one real pass before trusting the schedule.
+          # The supervisor now runs in the FOREGROUND for as long as the table
+          # is healthy -- the shape market-realtime already uses here, and the
+          # only one proven on this host. So start it detached for the
+          # verification pass; the cron entry below is what owns it from then
+          # on, and flock makes the two impossible to overlap.
           PLANK_INVITE_PUBLIC_ORIGIN="$public_origin" \
-            "$flock_bin" -n "$lock_file" bash "$supervisor" "$app_dir" "$node_bin" 30 \
-            >> "$log_file" 2>&1 || true
-          tail -n 20 "$log_file"
+            nohup "$flock_bin" -n "$lock_file" bash "$supervisor" "$app_dir" "$node_bin" \
+            >> "$log_file" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ && break
+            sleep 2
+          done
+          tail -n 30 "$log_file"
 
           cron_before="$(mktemp)"; cron_after="$(mktemp)"
           trap 'rm -f "$cron_before" "$cron_after"' EXIT
@@ -1482,7 +1491,7 @@ jobs:
           awk '!/plankcrash-table/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# plankcrash-table (managed by inmotion branch)'
-            printf '* * * * * cd %s && %s -n %s /usr/bin/env PLANK_INVITE_PUBLIC_ORIGIN=%s bash %s %s %s 3300 >> %s 2>&1\n' \
+            printf '* * * * * cd %s && %s -n %s /usr/bin/env PLANK_INVITE_PUBLIC_ORIGIN=%s bash %s %s %s >> %s 2>&1\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$public_origin" \
               "$supervisor" "$app_dir" "$node_bin" "$log_file"
           } >> "$cron_after"
