@@ -9,7 +9,7 @@
  * wallet -- no shortcut exists, this IS the real approach.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
+import { fetchForeignAllListingsPaged, resolveOpenSeaCollectionSlug, type ForeignSeaportOrder } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
@@ -79,8 +79,34 @@ export async function GET(req: NextRequest) {
       chain.openSeaChain && /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
         ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
         : collectionSlug;
-    const orders = await fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit: 50 });
-    const mine = orders
+    // WALK UNTIL THE SELLER'S OWN LISTINGS ARE ACTUALLY FOUND.
+    //
+    // This fetched a fixed 50 distinct tokens and THEN filtered by maker. That
+    // is a truncation applied before the predicate that matters: a seller whose
+    // listings sit deeper than the first 50 distinct tokens of the book saw
+    // THEIR OWN LISTINGS VANISH from "my listings" -- with no error, no flag,
+    // and nothing to click to see more.
+    //
+    // The filter is the whole point of the route, so the walk continues until
+    // OpenSea's cursor is exhausted rather than stopping at an invented count.
+    // What bounds it is the per-call page budget inside
+    // fetchForeignAllListingsPaged (pacing: one request stays inside its
+    // deadline and its key quota) plus this route's own rate limit -- and
+    // because the cursor is threaded, stopping is never losing.
+    const mineRaw: ForeignSeaportOrder[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const page: Awaited<ReturnType<typeof fetchForeignAllListingsPaged>> =
+        await fetchForeignAllListingsPaged({ chainSlug, collectionSlug: openSeaSlug, limit: 1_000, cursor });
+      for (const o of page.orders) {
+        if (o.parameters.offerer.toLowerCase() === maker) mineRaw.push(o);
+      }
+      cursor = page.nextCursor;
+      // Exhausted, or the page walk failed. `complete` false with a null
+      // cursor means we cannot continue, and looping would spin forever.
+      if (!cursor) break;
+    }
+    const mine = mineRaw
       .filter((o) => o.parameters.offerer.toLowerCase() === maker)
       .map((o) => {
         const item = o.parameters.offer[0];

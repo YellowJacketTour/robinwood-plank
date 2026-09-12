@@ -755,7 +755,16 @@ export async function GET(req: NextRequest) {
     type OpenSeaCollectionMeta = { name?: string; image_url?: string; contracts?: Array<{ address: string; chain: string }> };
     const { getOrRefresh } = await import("@/lib/market/multichain/singleflight-cache");
     const [paged, collectionMeta] = await Promise.all([
-      fetchForeignAllListingsPaged({ chainSlug, collectionSlug: openSeaSlug, limit }),
+      fetchForeignAllListingsPaged({
+        chainSlug,
+        collectionSlug: openSeaSlug,
+        limit,
+        // Resume where a previous request stopped. Without this the walk always
+        // restarted at page one, so anything past one call's page budget was
+        // unreachable at any URL -- a book with 5,000 listings had 4,000 of
+        // them permanently invisible.
+        cursor: searchParams.get("cursor"),
+      }),
       getOrRefresh<OpenSeaCollectionMeta | null>(
         `opensea-collection-meta:${chain.openSeaChain}:${openSeaSlug}`,
         { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
@@ -991,9 +1000,21 @@ export async function GET(req: NextRequest) {
       {
         collection: { ...fromIndex, contractAddress: contractAddress || fromIndex.contractAddress },
         listings,
+        // THE REST OF THE BOOK, REACHABLE.
+        //
+        // Non-null means the walk stopped with listings still behind it. Pass
+        // it back as ?cursor= to continue from exactly that point; null means
+        // OpenSea's own cursor is exhausted and there is nothing left.
+        //
+        // Before this existed, `bookCoverage.complete: false` told the caller
+        // the book was partial and gave it no way to fix that. Honest, and
+        // useless.
+        nextCursor: paged.nextCursor,
         bookCoverage: {
           complete: pagedComplete,
           partial: !pagedComplete,
+          // "truncated-at-limit" now means "more is available via nextCursor",
+          // not "this is all you may ever have".
           sources: { opensea: pagedComplete ? "cursor-exhausted" : "truncated-at-limit" },
           excludedNonNativeCurrency: excludedNonNative,
           // WHERE the book stopped, not just THAT it stopped.
