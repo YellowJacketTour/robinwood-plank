@@ -48,9 +48,18 @@ test("the live vendor fetch runs ONLY for tokens the archive lacks", () => {
     /missingFromArchive\.map\(async \(tokenId\)/.test(SRC),
     "the vendor path must be scoped to the genuine gaps",
   );
+  // The gap set must be derived from what the archive actually returned.
+  // (It is now produced by planArtLookups, which takes the archive's own
+  // answer as its predicate -- see lib/market/multichain/art-lookup-plan.ts
+  // and test/market/art-lookup-budget.test.ts, which drive that split for
+  // real instead of reading it out of this file.)
   assert.ok(
-    /const missingFromArchive = distinctTokenIds\.filter\(/.test(SRC),
-    "the gap set is derived from what the archive actually returned",
+    /const missingFromArchive = artPlan\.remoteIds;/.test(SRC),
+    "the vendor set must be the planner's remote leg, not the whole page",
+  );
+  assert.ok(
+    /planArtLookups\(\s*distinctTokenIds,/.test(SRC),
+    "the planner must be handed every distinct token, not a truncated prefix",
   );
 });
 
@@ -58,8 +67,11 @@ test("an archived row with no art is treated as a gap, not as an answer", () => 
   // An empty row must not silently render a blank card: that would be the
   // archive certifying "nothing" the same way a 404 page once certified an
   // empty book.
+  // Written as the POSITIVE predicate planArtLookups asks for ("does the
+  // archive hold a usable row"), which is the De Morgan twin of the
+  // original `!row || (!row.imageUrl && !row.name)`.
   assert.ok(
-    /!row \|\| \(!row\.imageUrl && !row\.name\)/.test(SRC),
+    /!!row && \(!!row\.imageUrl \|\| !!row\.name\)/.test(SRC),
     "a row with neither name nor image is not a usable answer",
   );
 });
