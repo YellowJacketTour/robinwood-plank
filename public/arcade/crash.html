@@ -2435,6 +2435,12 @@ function frame() {
     document.querySelector(".stage").dataset.presentation=publicStory.phase==='lottery'&&performance.now()>=publicCrashUntil?'lottery':'crash';
     $("substatus").textContent=performance.now()<publicCrashUntil?'Flight ended':publicStory.phase==='lottery'?'Lottery':scoreboardReadFailed?'Reconnecting to verify result…':'Preparing lottery…';
   }
+  // The intermission clock counts the gap to the next liftoff and keeps
+  // counting right down to it. The handover is structural, not timed: the
+  // moment the replay is armed `publicFlightReplay` is truthy and this whole
+  // block stops running, so the replay's own countdown takes over mid-number
+  // with no gap. Blanking this early instead produced a dead pause reading
+  // "Verifying launch…" where the count should have continued.
   if(publicPresentationLeadMs&&!publicFlightReplay&&!publicStory.active&&performance.now()>=publicCrashUntil&&publicScheduledLiftoffMs!==null){
     const remaining=Math.ceil((publicScheduledLiftoffMs-performance.now())/1000);
     $("substatus").textContent=remaining>0?`Launch in ${remaining}`:"Verifying launch…";
@@ -3942,6 +3948,11 @@ async function pollScoreboard() {
     if (rid > lastScoreboardRound) {
       const rd = await crash.rounds(rid);
       const scheduledLiftoff=publicPresentationLeadMs?Number(await scoreCrash.practiceLiftoffAtMs(rid))-publicServerOffsetMs:null;
+      // The moment the flight ACTUALLY lifts off. Equal to scheduledLiftoff
+      // normally; later when a late round is re-anchored below. Everything
+      // derived from liftoff (the crash card, the lottery beat) must use this,
+      // or it computes a moment that has already passed.
+      let effectiveLiftoff = scheduledLiftoff;
       if(!scoreIsCurrent())return;
       // Resolve receipt and lottery I/O during countdown/flight, not after
       // the crash card. Capture failures immediately; consume/retry normally.
@@ -4004,6 +4015,7 @@ async function pollScoreboard() {
             const startedAt = publicPresentationLeadMs
               ? (anchoredStart > performance.now() ? anchoredStart : performance.now() + 1600)
               : performance.now() + 1600;
+            effectiveLiftoff = startedAt + 1400;
             const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt, durationMs, complete };
             timeout = setTimeout(() => { if(publicFlightReplay===replay)publicFlightReplay = null; complete(); },
               Math.max(0, startedAt - performance.now()) + 1400 + durationMs + 4900);
@@ -4018,7 +4030,11 @@ async function pollScoreboard() {
         publicStory.crash(rid);
         lastFlightPresentedRound=rid;
         showScoreboardForRound(rid, rd);
-        crashedAt = publicPresentationLeadMs?scheduledLiftoff+publicFlightDuration(Number(rd.crashBps)):performance.now();
+        // Was scheduledLiftoff. On a re-anchored round the flight starts LATER,
+        // so that put crashedAt in the past, publicCrashUntil already expired,
+        // and the 2.6s multiplier card never rendered -- the crash cut straight
+        // to the lottery.
+        crashedAt = publicPresentationLeadMs?effectiveLiftoff+publicFlightDuration(Number(rd.crashBps)):performance.now();
         publicCrashUntil=crashedAt+(publicPresentationLeadMs?CRASH_FINALE_MS:prefersReducedMotion?REDUCED_CRASH_FINALE_MS:CRASH_FINALE_MS);
         publicCrashX=bpsToXStr(rd.crashBps);
         if(performance.now()-crashedAt<500){
