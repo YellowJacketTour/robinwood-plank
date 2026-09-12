@@ -3,13 +3,29 @@ import {createServer, IncomingMessage} from 'node:http';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
-import {Wallet,JsonRpcProvider,Contract,parseEther} from 'ethers';
+import {Wallet,JsonRpcProvider,Contract,parseEther,formatEther} from 'ethers';
 import {invitePolicy} from './lib/invite-rpc-policy.js';
 
-const root=resolve('public'), rpc=new JsonRpcProvider('http://127.0.0.1:8545');
-if((await rpc.getNetwork()).chainId!==31337n)throw new Error('Invite test requires local chain 31337');
-const source=JSON.parse(await readFile(resolve(root,'arcade/deploy-addresses.local.json'),'utf8'));
-if(!source.testRig || !['30-second-window-local-mock','30-second-lottery-to-launch-local-mock'].includes(source.practiceTiming))throw new Error('Local test manifest required');
+// The chain is a parameter, not a constant. Everything below works the same
+// against a dev node on loopback and against a public TEST network, because
+// the gateway never actually needed a dev node -- it needed an RPC, a funded
+// signer, and a manifest of test-only contracts. Defaults are unchanged, so
+// the documented local workflow (FRIEND-INVITE-TEST.md) behaves exactly as
+// before; the hosted deployment supplies these three.
+const root=resolve('public');
+const rpcUrl=process.env.PLANK_INVITE_RPC_URL?.trim()||'http://127.0.0.1:8545';
+const expectedChainId=BigInt(process.env.PLANK_INVITE_CHAIN_ID?.trim()||'31337');
+const manifestName=process.env.PLANK_INVITE_MANIFEST?.trim()||'deploy-addresses.local.json';
+const rpc=new JsonRpcProvider(rpcUrl);
+const actualChainId=(await rpc.getNetwork()).chainId;
+if(actualChainId!==expectedChainId)throw new Error(`Invite test expects chain ${expectedChainId}, got ${actualChainId} from ${rpcUrl}`);
+const source=JSON.parse(await readFile(resolve(root,'arcade/'+manifestName),'utf8'));
+// The whole point of this gate is that nothing here has value. A manifest
+// must say so out loud: either the local test rig, or a network the deploy
+// script itself marked test-only. Mainnet can never satisfy this.
+const localRig=source.testRig&&['30-second-window-local-mock','30-second-lottery-to-launch-local-mock'].includes(source.practiceTiming);
+const declaredTestnet=source.network==='robinhood-testnet'&&source.chainId===46630;
+if(!localRig&&!declaredTestnet)throw new Error('Refusing a manifest that is not a declared test deployment');
 const manifest={...source,inviteTest:true};delete manifest.simulateKey;delete manifest.rpcUrl;
 // Locate this deployment, not every prior audit fixture on the same dev node.
 // The deploy records the answer (deployedAtBlock). The binary search below is
@@ -20,7 +36,27 @@ const manifest={...source,inviteTest:true};delete manifest.simulateKey;delete ma
 // getCode returns '0x' for the deployment's own early blocks -- or throws
 // BlockOutOfRangeError and the gateway cannot boot at all -- so the search
 // lands too high and the arcade filters out its own logs.
-if(Number.isSafeInteger(source.deployedAtBlock)&&source.deployedAtBlock>=0){
+// A PUBLIC test network is not a fresh dev node, and the difference decides
+// what this number may be. The stats scan walks inviteStartBlock -> tip in
+// 4,000-block pages, which is 'genuinely fine at local/testnet scale' only
+// because a dev node starts at block 0 and lives for minutes. Measured on
+// Robinhood testnet: 0.158s blocks, the deployment already 208,646 blocks
+// back after nine hours -- 53 sequential getLogs pages, 4.6s of blocking RPC
+// on load, growing ~6,500 blocks (1.6 pages) every hour, forever.
+//
+// The deploy block is also unreachable: this RPC serves state for only about
+// 6,200 blocks (~16 minutes), so the binary-search fallback below sees every
+// deep probe THROW, treats each as 'not deployed yet', and walks to the head
+// -- the arcade would then filter out its own rounds and show an empty table.
+//
+// So on a declared testnet we anchor to a recent block. Nothing is lost: the
+// live scoreboard already anchors to the current block and walks FORWARD
+// (scoreboardFromBlock), and a shared testnet's older rounds are other
+// people's fixtures, not this table's history.
+const anchorWindow=Number(process.env.PLANK_INVITE_ANCHOR_BLOCKS?.trim()||'5000');
+if(declaredTestnet&&!Number.isSafeInteger(source.deployedAtBlock)){
+  manifest.inviteStartBlock=Math.max(0,await rpc.getBlockNumber()-anchorWindow);
+}else if(Number.isSafeInteger(source.deployedAtBlock)&&source.deployedAtBlock>=0){
   manifest.inviteStartBlock=source.deployedAtBlock;
 }else{
   let low=0,high=await rpc.getBlockNumber();
@@ -67,7 +103,16 @@ const persistSessions=()=>{
   return persisting;
 };
 let funding=Promise.resolve();let inflight=0;let joins=0;let joinWindow=Date.now();
-const funder=await rpc.getSigner(8);
+// A dev node hands out unlocked accounts; a public network does not. The
+// funder only ever sends ETH and mints test PLANK, and a keyed Wallet does
+// both identically -- the unlocked account was a convenience, never a
+// requirement. PLANK_INVITE_FUNDER_PK is gas-only and testnet-only.
+const funderPk=process.env.PLANK_INVITE_FUNDER_PK?.trim();
+const funder=funderPk?new Wallet(funderPk,rpc):await rpc.getSigner(8);
+// Grants are sized for the network. On a fake chain ETH is free; on a
+// testnet it is faucet-limited, and at 0.01 gwei a 0.002 grant is ~800 bets.
+const guestGrant=parseEther(process.env.PLANK_INVITE_GRANT_ETH?.trim()||'0.05');
+const refillFloor=guestGrant/10n;
 const plank=new Contract(manifest.plank,['function mint(address,uint256)'],funder);
 const json=(res:any,status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
 async function body(req:IncomingMessage){let data='';for await(const chunk of req){data+=chunk;if(data.length>65536)throw new Error('Request too large');}return JSON.parse(data||'{}');}
@@ -111,7 +156,7 @@ createServer(async(req,res)=>{
       const wallet=Wallet.createRandom(),id=randomBytes(32).toString('base64url');
       guest={key:wallet.privateKey,address:wallet.address,expires:Date.now()+86400000,refilled:Date.now(),count:0,window:Date.now(),writes:0};
       const g=guest;
-      const funded=funding.then(async()=>{await(await funder.sendTransaction({to:g.address,value:parseEther('0.05')})).wait();await(await plank.mint(g.address,parseEther('5000'))).wait();});
+      const funded=funding.then(async()=>{await(await funder.sendTransaction({to:g.address,value:guestGrant})).wait();await(await plank.mint(g.address,parseEther('5000'))).wait();});
       funding=funded.catch(()=>{});
       // Funding needs the local node. When it is down the generic catch-all
       // reported an indistinguishable 400 and the guest was told the test was
@@ -130,9 +175,9 @@ createServer(async(req,res)=>{
       json(res,200,{address:guest!.address,key:guest!.key,invite:token,simulated:true});return;
     }
     if(url.pathname==='/api/invite/refill'&&req.method==='POST'){
-      if(Date.now()-guest!.refilled<600000 || await rpc.getBalance(guest!.address)>parseEther('0.005')){json(res,409,{error:'Refill available below Ξ 0.005, once every ten minutes'});return;}
+      if(Date.now()-guest!.refilled<600000 || await rpc.getBalance(guest!.address)>refillFloor){json(res,409,{error:`Refill available below Ξ ${formatEther(refillFloor)}, once every ten minutes`});return;}
       guest!.refilled=Date.now();const to=guest!.address;
-      const funded=funding.then(async()=>{await(await funder.sendTransaction({to,value:parseEther('0.05')})).wait();});funding=funded.catch(()=>{});await funded;json(res,200,{ok:true});return;
+      const funded=funding.then(async()=>{await(await funder.sendTransaction({to,value:guestGrant})).wait();});funding=funded.catch(()=>{});await funded;json(res,200,{ok:true});return;
     }
     if(url.pathname==='/api/invite/rpc'&&req.method==='POST'){
       const input=await body(req),batch=Array.isArray(input)?input:[input];
