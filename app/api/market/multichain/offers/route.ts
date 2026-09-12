@@ -31,13 +31,27 @@ import { getOffers } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isNonEvmChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { readProjectedTokensByIds } from "@/lib/market/multichain/collection-token-store";
+import { planArtLookups } from "@/lib/market/multichain/art-lookup-plan";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENSEA = "https://api.opensea.io/api/v2";
-/** Same bound listings/route.ts uses for its per-token art fan-out. */
-const MAX_ART_LOOKUPS = 30;
+/**
+ * Same bound listings/route.ts uses -- and, since that route was corrected,
+ * the same MEANING: this budgets the VENDOR leg only. It used to be applied
+ * to the whole distinct-token list here, so the thirty-first token-specific
+ * offer rendered as a text row with `imageUrl: null` and nothing said why.
+ *
+ * Unlike listings, this route had no archive leg at all: every single one of
+ * those thirty was a cold OpenSea NFT round trip on the request path, even
+ * for a collection whose every token's name and image is already in
+ * `plank_collection_tokens`. The archive read added below is one indexed
+ * `token_id = ANY($3)` query for the whole page, so it takes every id and
+ * this number bounds only the genuine gaps it leaves.
+ */
+const MAX_REMOTE_ART_LOOKUPS = 30;
 
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-offers", limit: 60, windowMs: 60_000 });
@@ -158,16 +172,59 @@ export async function GET(req: NextRequest) {
       .filter((o): o is NonNullable<typeof o> => o !== null)
       .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? 1 : -1));
 
-    // Real art for token-specific offers only -- same per-distinct-token,
-    // bounded lookup listings/route.ts already does, so a single-token
-    // offer renders as a real ListingCard instead of a text row.
-    const specificTokenIds = [...new Set(rawOffers.filter((o) => o.tokenId).map((o) => o.tokenId!))].slice(
-      0,
-      MAX_ART_LOOKUPS
-    );
+    // Real art for token-specific offers only -- same per-distinct-token
+    // lookup listings/route.ts does, so a single-token offer renders as a
+    // real ListingCard instead of a text row.
+    //
+    // UNCAPPED: this list used to end in `.slice(0, 30)`. That threw away
+    // every token past the thirtieth before anything had even looked at
+    // what it would cost to resolve it -- and, as the archive read below
+    // shows, for a hydrated collection it costs nothing at all.
+    const specificTokenIds = [...new Set(rawOffers.filter((o) => o.tokenId).map((o) => o.tokenId!))];
+
+    // READ THE ARCHIVE FIRST -- the leg this route never had.
+    //
+    // listings/route.ts got this on 2026-09-08 and measured the difference:
+    // per-token OpenSea calls on the request path ran 9s typical and past
+    // 120s in samples, for collections simultaneously reporting
+    // metadataCoverage 1 -- i.e. the archive already held every one of those
+    // tokens' name and image. This route kept paying the vendor for exactly
+    // the same rows, on the same page load, out of the same key pool.
+    //
+    // `plank_collection_tokens` is keyed (chain_slug, collection_slug,
+    // token_id), so this is ONE indexed query regardless of how many ids go
+    // in. `.catch` because the archive is an optimisation over a working
+    // path, never a new hard dependency: Postgres being slow must degrade
+    // to the vendor, not 500 the Offers tab.
+    const archivedArt = specificTokenIds.length
+      ? await readProjectedTokensByIds(chainSlug, collectionSlug, specificTokenIds).catch(
+          () => new Map<string, { name: string | null; imageUrl: string | null }>()
+        )
+      : new Map<string, { name: string | null; imageUrl: string | null }>();
+
     const key = (await pickOpenSeaKey("live"))?.apiKey ?? null;
     const artByToken = new Map<string, { imageUrl: string | null; name: string | null }>();
-    if (key && specificTokenIds.length > 0) {
+    for (const [tokenId, row] of archivedArt) {
+      // A row with neither name nor image is a gap wearing a row's clothes;
+      // planArtLookups treats it as unanswered, so it must not be seeded
+      // here either or the vendor would be asked and then overruled by the
+      // empty row it was asked to replace.
+      if (!row.imageUrl && !row.name) continue;
+      artByToken.set(tokenId, { imageUrl: row.imageUrl ?? null, name: row.name ?? null });
+    }
+
+    // The budget applies to the gaps only. `unresolvedIds` is what neither
+    // leg will reach -- reported below rather than left as silently null art.
+    const artPlan = planArtLookups(
+      specificTokenIds,
+      (id) => artByToken.has(id),
+      // No key means no vendor leg exists at all; a budget of 0 makes that
+      // an honest zero in artCoverage instead of a lookup that never ran.
+      key ? MAX_REMOTE_ART_LOOKUPS : 0
+    );
+    const missingFromArchive = artPlan.remoteIds;
+
+    if (key && missingFromArchive.length > 0) {
       const firstWithContract = rawOffers.find((o) => o.contractAddress);
       const contractAddress = firstWithContract?.contractAddress;
       if (contractAddress) {
@@ -180,7 +237,7 @@ export async function GET(req: NextRequest) {
         type OpenSeaNft = { nft?: { name?: string; image_url?: string } };
         const lowerContract = contractAddress.toLowerCase();
         await Promise.all(
-          specificTokenIds.map(async (tokenId) => {
+          missingFromArchive.map(async (tokenId) => {
             const data = await getOrRefresh<OpenSeaNft | null>(
               `opensea-nft-art:${chain.openSeaChain}:${lowerContract}:${tokenId}`,
               { softTtlMs: 5 * 60_000, hardTtlMs: 60 * 60_000, provider: "opensea" },
@@ -237,7 +294,29 @@ export async function GET(req: NextRequest) {
       traits: o.traits ?? null,
     }));
 
-    return NextResponse.json({ offers: [...mappedNative, ...openSeaOffers] }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      {
+        offers: [...mappedNative, ...openSeaOffers],
+        // A ROW WITH NO ART MUST BE DISTINGUISHABLE FROM A ROW WHOSE ART
+        // WAS NEVER LOOKED UP.
+        //
+        // `imageUrl: null` previously meant either "this token genuinely has
+        // no art", "the vendor call failed", or "you are past the
+        // thirtieth token and we never asked" -- and the caller could not
+        // tell which. Only the last of those is a truncation, and only it
+        // is fixable by asking again; now it carries a number.
+        artCoverage: {
+          complete: !artPlan.artIncomplete,
+          distinctTokens: artPlan.archiveIds.length,
+          fromArchive: artPlan.archiveIds.length - artPlan.remoteIds.length - artPlan.unresolvedIds.length,
+          remoteLookups: artPlan.remoteIds.length,
+          unresolvedTokens: artPlan.unresolvedIds.length,
+          reason: artPlan.artIncomplete ? (key ? "remote-budget-exhausted" : "no-vendor-key") : null,
+          remoteBudget: key ? MAX_REMOTE_ART_LOOKUPS : 0,
+        },
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     return publicError(error, "Failed to load multichain offers");
   }
