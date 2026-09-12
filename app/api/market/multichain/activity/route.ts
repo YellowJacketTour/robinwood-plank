@@ -447,15 +447,46 @@ export async function GET(req: NextRequest) {
     const url =
       `${OPENSEA}/events/collection/${encodeURIComponent(openSeaSlug)}` +
       `?event_type=sale&event_type=transfer&limit=${Math.min(limit, 50)}`;
-    const { value: data } = await edgeRead<{ asset_events?: OpenSeaEvent[] }>(
-      { kind: "activity", chainSlug, subject: openSeaSlug, variant: { limit: Math.min(limit, 50), src: "opensea" } },
-      async () => {
-        const res = await meteredFetch(url, { headers: { "x-api-key": key, accept: "application/json" } }, { source: "opensea", keyId: keyEntry?.id ?? null, chainSlug });
-        if (!res.ok) throw new Error(`OpenSea ${res.status}`);
-        return (await res.json()) as { asset_events?: OpenSeaEvent[] };
-      },
-      { provider: "opensea" }
-    );
+    // A VENDOR FAILURE IS NOT AN OUTAGE.
+    //
+    // This `throw` propagated to the handler's outer catch, which calls
+    // publicError -- so an OpenSea 429 or timeout became a 500 from OUR api,
+    // on a route the collection page calls on every load.
+    //
+    // Measured on production 2026-09-12, CryptoPunks on eth-mainnet:
+    //   try1  500  25.4s
+    //   try2  200  37.6s
+    //   try3  500  19.1s
+    // and Base: 500 @ 20.6s. Failing two times in three, taking 20-40s to do
+    // it. The page cannot render its Activity tab, and the visitor is told
+    // the site is broken when what actually happened is that a third party
+    // rate-limited us.
+    //
+    // The fix is not a retry and not a longer timeout. It is that THIS ROUTE
+    // MUST NOT 500 BECAUSE A VENDOR DID. An empty feed that says why is a
+    // usable page; a 500 is not. The `coverage` object below already exists to
+    // carry exactly this kind of statement, so the failure is reported there
+    // rather than swallowed -- a miss must never be indistinguishable from
+    // "this collection has no activity".
+    let data: { asset_events?: OpenSeaEvent[] } = {};
+    let vendorError: string | null = null;
+    try {
+      const read = await edgeRead<{ asset_events?: OpenSeaEvent[] }>(
+        { kind: "activity", chainSlug, subject: openSeaSlug, variant: { limit: Math.min(limit, 50), src: "opensea" } },
+        async () => {
+          const res = await meteredFetch(url, { headers: { "x-api-key": key, accept: "application/json" } }, { source: "opensea", keyId: keyEntry?.id ?? null, chainSlug });
+          if (!res.ok) throw new Error(`OpenSea ${res.status}`);
+          return (await res.json()) as { asset_events?: OpenSeaEvent[] };
+        },
+        { provider: "opensea" }
+      );
+      data = read.value;
+    } catch (error) {
+      // Keep the real reason. "unavailable" with no cause is the shape that
+      // made this take a day to find: a 429 and a DNS failure and a bad slug
+      // all looked identical from outside.
+      vendorError = error instanceof Error ? error.message : String(error);
+    }
     const events = await Promise.all((data.asset_events ?? []).map(async (e) => ({
       type: e.event_type,
       timestamp: new Date(e.event_timestamp * 1000).toISOString(),
@@ -486,6 +517,15 @@ export async function GET(req: NextRequest) {
         newestTimestamp: events[0]?.timestamp ?? null,
         completeThroughGenesis: false,
         completeMarketHistory: false,
+        // WHY THE FEED IS EMPTY, WHEN IT IS.
+        //
+        // `vendorUnavailable` is the difference between "OpenSea would not
+        // answer us" and "this collection genuinely has no recent activity".
+        // Without it those are the same empty array, and the caller renders a
+        // confident "no activity" over a failure -- the exact species of lie
+        // this codebase refuses everywhere else.
+        vendorUnavailable: vendorError !== null,
+        vendorError,
       },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
