@@ -1550,8 +1550,30 @@ jobs:
           done
           test "$cron_observed" = "true"
 
-          # And not until the table actually answers.
-          curl -sf --max-time 5 -o /dev/null "http://127.0.0.1:8766/"
+          # And not until the table actually answers. One curl at one instant
+          # was too strict: the cron had just restarted the stack, so the probe
+          # landed in the few seconds before the gateway bound its port and the
+          # whole provision reported failure while the table was in fact coming
+          # up fine. Give it the same 60s the services themselves get.
+          table_up=false
+          for _ in $(seq 1 30); do
+            if curl -sf --max-time 3 -o /dev/null "http://127.0.0.1:8766/"; then table_up=true; break; fi
+            sleep 2
+          done
+          if [ "$table_up" != "true" ]; then
+            echo "the table never answered on 8766; last log lines:" >&2
+            tail -n 30 "$log_file" >&2
+            exit 1
+          fi
+          # The invite token is the gate, so it is never written to a log. Print
+          # only the LINK, which is what the operator actually needs to share,
+          # and read it from the state dir the gateway owns.
+          token_file="$table_dir/state/invite-token.txt"
+          if [ -s "$token_file" ]; then
+            echo "PLANKCRASH_INVITE_URL=${public_origin}/table#invite=$(cat "$token_file")"
+          else
+            echo "PLANKCRASH_INVITE_URL=(token not found at $token_file)"
+          fi
           echo "PLANKCRASH_TABLE_PROVISIONED={\"managedEntries\":$managed_count}"
           tail -n 10 "$log_file"
           REMOTE
