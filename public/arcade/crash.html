@@ -3975,9 +3975,38 @@ async function pollScoreboard() {
             const durationMs = publicFlightDuration(Number(rd.crashBps));
             let finished = false;
             const complete = () => { if (finished) return; finished = true; clearTimeout(timeout); resolve(); };
-            const timeout = setTimeout(() => { if(publicFlightReplay===replay)publicFlightReplay = null; complete(); }, durationMs + 4900 + (publicPresentationLeadMs?Math.max(0,scheduledLiftoff-performance.now()):0));
+            // The safety timeout must wait for the presentation we are ACTUALLY
+            // about to play. It used to derive its wait from scheduledLiftoff; a
+            // re-anchored late round starts after that, so the timeout could fire
+            // mid-flight and tear the replay down early. startedAt covers both
+            // cases because it IS the start of the burn either way.
+            let timeout;
             document.dispatchEvent(new CustomEvent("plank:flight-replay-start",{detail:{roundId:rid.toString()}}));
-            const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt: publicPresentationLeadMs ? scheduledLiftoff-1400 : performance.now()+1600, durationMs, complete };
+            // Anchor the burn to the chain's schedule when there is still time
+            // for it, and to NOW when there is not.
+            //
+            // startedAt is the moment the ignition burn begins; the stage reads
+            // elapsed against it (<0 countdown, <1400 ignition, else flight). The
+            // anchor scheduledLiftoff-1400 is right whenever this round is
+            // discovered early enough. But settlement lead varies with the crash
+            // multiplier -- measured across ten rounds it ranged from 4977ms down
+            // to 380ms, and once went negative -- and the client still has to spend
+            // a 400ms poll plus a few reads on top. When the anchor is already in
+            // the past the burn is simply skipped: the stage opens mid-flight and
+            // the rocket never appears to launch.
+            //
+            // A late round is still a real round, so present it on a fresh clock
+            // instead of a stale anchor: the same 1600ms pre-roll the no-lead path
+            // has always used, which yields countdown then the full 1400ms burn.
+            // It runs slightly behind the chain's wall clock, which is invisible,
+            // where a missing launch is not.
+            const anchoredStart = scheduledLiftoff - 1400;
+            const startedAt = publicPresentationLeadMs
+              ? (anchoredStart > performance.now() ? anchoredStart : performance.now() + 1600)
+              : performance.now() + 1600;
+            const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt, durationMs, complete };
+            timeout = setTimeout(() => { if(publicFlightReplay===replay)publicFlightReplay = null; complete(); },
+              Math.max(0, startedAt - performance.now()) + 1400 + durationMs + 4900);
             publicFlightReplay = replay;
             const resumedMultiplier=publicFlightAt(performance.now()-replay.startedAt,replay.endBps).multiplier;
             flightProgress=targetFlightProgress=1-1/(1+(resumedMultiplier-1)/2.5);flightVel=0;
