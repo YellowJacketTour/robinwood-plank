@@ -402,28 +402,129 @@ export type GlobalTokenSearchHit = ProjectedCollectionToken & {
   collectionSlug: string;
 };
 
+/** One page of a global token search. `nextCursor` is non-null EXACTLY when
+ * more matching rows exist beyond this page -- so a caller can always tell a
+ * finished search from a truncated one, and can always continue a truncated
+ * one. */
+export type GlobalTokenSearchPage = {
+  tokens: GlobalTokenSearchHit[];
+  nextCursor: string | null;
+};
+
+/** Opaque resume key for searchProjectedTokens. Carries the FULL sort tuple,
+ * not just the row identity: the search ORDER BY leads with three non-unique
+ * keys (relevance bucket, enriched-first, recency), and a keyset predicate can
+ * only skip what it can compare. The tuple therefore ends in the row's own
+ * primary key (chain, collection, token), which is unique by definition --
+ * without it, a page boundary landing inside a tie either loops on the same
+ * rows or drops the rest of the tie. */
+type TokenSearchCursor = {
+  /** 0 = exact token_id, 1 = prefix, 2 = name/other -- the relevance bucket. */
+  bucket: number;
+  /** true when image_url IS NULL; unenriched rows sort after enriched ones. */
+  unenriched: boolean;
+  /** projected_at DESC. Carried as Postgres's OWN microsecond text rendering,
+   * NOT as a JS ISO string.
+   *
+   * MEASURED, 2026-09-11: `new Date(row.projected_at).toISOString()` turns
+   * `2026-09-12T01:20:55.210307` into `2026-09-12T01:20:55.210Z` -- JS Date has
+   * millisecond resolution and silently drops the remaining microseconds. The
+   * keyset's tie branch compares `projected_at = $cursor`, and that equality
+   * then NEVER held, so the branch was dead code: the walk returned page one
+   * and then stopped, reporting an empty page two as a finished search. 20 of
+   * 137 seeded rows were reachable. That is the original defect -- an
+   * unreachable tail -- recreated by its own fix, and it is invisible unless a
+   * test walks to exhaustion and counts. */
+  projectedAt: string;
+  chainSlug: string;
+  collectionSlug: string;
+  tokenId: string;
+};
+
+/** Postgres's own `to_char(..., 'YYYY-MM-DD"T"HH24:MI:SS.USOF')` rendering:
+ * microseconds, and a 2-to-6 character numeric UTC offset. Anchored so a
+ * cursor cannot smuggle arbitrary text into a ::timestamptz cast. */
+const TIMESTAMP_KEY_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}[+-]\d{2}(:\d{2}){0,2}$/;
+
+export function encodeTokenSearchCursor(c: TokenSearchCursor): string {
+  return Buffer.from(JSON.stringify(c), "utf8").toString("base64url");
+}
+
+export function decodeTokenSearchCursor(cursor: string | null | undefined): TokenSearchCursor | null {
+  if (!cursor) return null;
+  try {
+    const p = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Partial<TokenSearchCursor>;
+    if (!Number.isFinite(p.bucket) || typeof p.unenriched !== "boolean") return null;
+    // Validated by SHAPE, not by Date.parse. Postgres renders its offset as
+    // `+00`, and Date.parse rejects that (it wants `+00:00` or `Z`) -- so the
+    // first version of this guard threw away every cursor the store had just
+    // emitted, and the walk restarted at page one forever while looking
+    // perfectly healthy. The value is only ever read back by Postgres, so JS
+    // date semantics have no business gating it.
+    if (typeof p.projectedAt !== "string" || !TIMESTAMP_KEY_RE.test(p.projectedAt)) return null;
+    if (typeof p.chainSlug !== "string" || typeof p.collectionSlug !== "string" || typeof p.tokenId !== "string") return null;
+    return {
+      bucket: Number(p.bucket), unenriched: p.unenriched, projectedAt: p.projectedAt,
+      chainSlug: p.chainSlug, collectionSlug: p.collectionSlug, tokenId: p.tokenId,
+    };
+  } catch { return null; }
+}
+
+/** Page size for one global token search. This is a TRANSPORT bound -- how
+ * many rows one response carries -- never a ceiling on how many rows the
+ * caller may reach, because every page that fills emits a nextCursor. */
+export const TOKEN_SEARCH_MAX_PAGE = 500;
+
 /**
  * Searches the shared token projection, never an upstream provider. Exact
  * token ids rank first, then names and ids by prefix; within each relevance
  * bucket, rows with a real image_url sort ahead of not-yet-enriched rows
  * (still indexed columns, no extra computation) so a wall of "ART PENDING"
  * cards doesn't bury real enriched matches -- unenriched rows are never
- * hidden, only deprioritized. The bounded result set makes this safe for the
- * global market while the projection grows to many millions of rows; empty
- * queries are intentionally rejected by the route.
+ * hidden, only deprioritized. Empty queries are intentionally rejected by the
+ * route.
+ *
+ * THE CEILING THIS REMOVED (2026-09-11)
+ * -------------------------------------
+ * This function used to clamp with `Math.min(Math.max(input.limit ?? 40, 1), 60)`
+ * and return a bare array -- no cursor, no offset, no total. The route above it
+ * hardcoded `limit: 40` and never read `?limit`, so the store's own 60 was
+ * unreachable and the EFFECTIVE result of a global search over a 19.4M-row
+ * projection was a flat 40 rows. Match number 41 could not be reached by any
+ * request: not with a different limit, not at a different URL, not by any
+ * sequence of calls. That is a ceiling, not pacing -- the same species of
+ * defect as the unreachable listings tail (see
+ * test/market/listings-cursor-uncapped.test.ts).
+ *
+ * The page bound stays, because one response must fit in one response. What
+ * changed is that stopping no longer means losing: a page that fills hands
+ * back the sort tuple it stopped on, and passing that back resumes from
+ * exactly there. `readCollectionTokenProjection` in this same file has done
+ * this since it was written; this is the same pattern applied to search.
+ *
+ * WHY A KEYSET AND NOT AN OFFSET: the projection is written to continuously by
+ * the metadata/enrichment passes, so `projected_at` and `image_url` -- two of
+ * the three leading sort keys -- change under a paging reader. OFFSET 40 on a
+ * shifted result set silently skips and repeats rows; a keyset compares against
+ * values the caller actually saw, so a row it already received is the only kind
+ * of row it can miss.
  */
 export async function searchProjectedTokens(input: {
   query: string;
   chainSlugs?: string[];
   limit?: number;
+  /** Resume key from a previous page's `nextCursor`. Invalid/stale values decode
+   * to null and simply start from the beginning -- never an error, never silent
+   * truncation. */
+  cursor?: string | null;
   /** Real faceted drill-down, all backed by columns/indexes this store already has -- never a parallel query system. */
   rarityTier?: string | null;
   /** { traitType, value } -- matches the same jsonb shape readProjectedTraitIndex already indexes via CROSS JOIN LATERAL jsonb_array_elements(traits). */
   trait?: { traitType: string; value: string } | null;
-}): Promise<GlobalTokenSearchHit[]> {
+}): Promise<GlobalTokenSearchPage> {
   const query = input.query.trim();
-  if (!query) return [];
-  const limit = Math.min(Math.max(Math.trunc(input.limit ?? 40), 1), 60);
+  if (!query) return { tokens: [], nextCursor: null };
+  const limit = Math.min(Math.max(Math.trunc(input.limit ?? 40), 1), TOKEN_SEARCH_MAX_PAGE);
   const chains = [...new Set((input.chainSlugs ?? []).map((v) => v.trim()).filter(Boolean))];
   const params: unknown[] = [query, `${query}%`];
   let where = "(token_id = $1 OR token_id ILIKE $2 OR lower(name) LIKE lower($2))";
@@ -444,26 +545,76 @@ export async function searchProjectedTokens(input: {
       WHERE lower(t->>'traitType') = lower($${params.length - 1}) AND lower(t->>'value') = lower($${params.length})
     )`;
   }
-  params.push(limit);
-  const result = await postgresQuery<TokenRow & { chain_slug: string; collection_slug: string }>(
+  // The relevance bucket appears in the SELECT list, the ORDER BY and the
+  // keyset predicate. Written once so those three can never drift apart --
+  // a keyset that compares a different expression than the one it orders by
+  // skips rows, and skipped rows look exactly like an empty tail.
+  const bucketExpr = `CASE WHEN token_id = $1 THEN 0 WHEN token_id ILIKE $2 THEN 1 ELSE 2 END`;
+
+  // A keyset needs a TOTAL order. The three ranking keys are all non-unique
+  // (many rows share a bucket, an enriched flag, and even a projected_at from
+  // the same batch write), so the tuple is completed by the row's own primary
+  // key -- chain_slug, collection_slug, token_id -- which is unique by
+  // definition. Without that tail a page boundary landing inside a tie would
+  // either loop forever on the same rows or skip the rest of the tie.
+  const cursor = decodeTokenSearchCursor(input.cursor);
+  if (cursor) {
+    params.push(cursor.bucket, cursor.unenriched, cursor.projectedAt, cursor.chainSlug, cursor.collectionSlug, cursor.tokenId);
+    const b = `$${params.length - 5}`, u = `$${params.length - 4}`, pa = `$${params.length - 3}`;
+    const cs = `$${params.length - 2}`, col = `$${params.length - 1}`, tid = `$${params.length}`;
+    // Lexicographic "strictly after" over (bucket ASC, unenriched ASC,
+    // projected_at DESC, chain ASC, collection ASC, token ASC). Spelled out
+    // term by term rather than as a row comparison because the directions are
+    // mixed, and ROW(...) > ROW(...) cannot express a DESC member.
+    where += ` AND (
+      (${bucketExpr}) > ${b}::int
+      OR ((${bucketExpr}) = ${b}::int AND (image_url IS NULL) > ${u}::boolean)
+      OR ((${bucketExpr}) = ${b}::int AND (image_url IS NULL) = ${u}::boolean AND projected_at < ${pa}::timestamptz)
+      OR ((${bucketExpr}) = ${b}::int AND (image_url IS NULL) = ${u}::boolean AND projected_at = ${pa}::timestamptz
+          AND (chain_slug, collection_slug, token_id) > (${cs}, ${col}, ${tid}))
+    )`;
+  }
+
+  // limit + 1: the extra row is how a full page is distinguished from the last
+  // page. Without it, a final page that happens to be exactly `limit` rows long
+  // would emit a cursor pointing at nothing -- honest-looking and wrong.
+  params.push(limit + 1);
+  const result = await postgresQuery<TokenRow & { chain_slug: string; collection_slug: string; bucket: number; unenriched: boolean; projected_at_key: string }>(
     `SELECT chain_slug, collection_slug, token_id, name, image_url, animation_url,
-       media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier
+       media_type, traits, rarity_score, rarity_rank, rarity_percentile, rarity_tier,
+       to_char(projected_at, 'YYYY-MM-DD"T"HH24:MI:SS.USOF') AS projected_at_key,
+       (${bucketExpr}) AS bucket, (image_url IS NULL) AS unenriched
      FROM plank_collection_tokens
      WHERE ${where}
-     ORDER BY CASE WHEN token_id = $1 THEN 0 WHEN token_id ILIKE $2 THEN 1 ELSE 2 END,
+     ORDER BY ${bucketExpr},
        (image_url IS NULL),
-       projected_at DESC
+       projected_at DESC,
+       chain_slug, collection_slug, token_id
      LIMIT $${params.length}`,
     params
   );
-  return result.rows.map((row) => ({
-    chainSlug: row.chain_slug, collectionSlug: row.collection_slug,
-    tokenId: row.token_id, name: row.name, imageUrl: row.image_url,
-    animationUrl: row.animation_url, mediaType: row.media_type,
-    traits: normalizeTraits(row.traits), rarityScore: row.rarity_score,
-    rarityRank: row.rarity_rank, rarityPercentile: row.rarity_percentile,
-    rarityTier: row.rarity_tier,
-  }));
+  const page = result.rows.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    tokens: page.map((row) => ({
+      chainSlug: row.chain_slug, collectionSlug: row.collection_slug,
+      tokenId: row.token_id, name: row.name, imageUrl: row.image_url,
+      animationUrl: row.animation_url, mediaType: row.media_type,
+      traits: normalizeTraits(row.traits), rarityScore: row.rarity_score,
+      rarityRank: row.rarity_rank, rarityPercentile: row.rarity_percentile,
+      rarityTier: row.rarity_tier,
+    })),
+    nextCursor: result.rows.length > limit && last
+      ? encodeTokenSearchCursor({
+        bucket: Number(last.bucket), unenriched: Boolean(last.unenriched),
+        // Postgres's own text, straight through. Never re-serialised via Date:
+        // see TokenSearchCursor.projectedAt for the microseconds that trip off
+        // when it is.
+        projectedAt: last.projected_at_key,
+        chainSlug: last.chain_slug, collectionSlug: last.collection_slug, tokenId: last.token_id,
+      })
+      : null,
+  };
 }
 
 export async function readTokenMetadataWork(

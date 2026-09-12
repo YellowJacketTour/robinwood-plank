@@ -50,14 +50,34 @@ import { refreshPulpListings } from "@/lib/market/pulp";
 import { mergeBook } from "@/lib/market/book";
 import { fetchOrdNetListings, isOrdNetConfigured, ordNetSatsToPriceWei } from "@/lib/market/multichain/adapters/ordnet";
 import { readProjectedTokensByIds } from "@/lib/market/multichain/collection-token-store";
+import { planArtLookups, distinctTokenIds as distinctIds } from "@/lib/market/multichain/art-lookup-plan";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENSEA = "https://api.opensea.io/api/v2";
 
-/** Bounds the per-token art fan-out. Distinct tokens are usually few (see header); this only guards a pathological case. */
-const MAX_ART_LOOKUPS = 30;
+/**
+ * THIS BUDGET BELONGS TO THE VENDOR LEG, NOT TO THE PAGE.
+ *
+ * It used to be called MAX_ART_LOOKUPS and it was applied to
+ * `distinctTokenIds` -- i.e. to the whole page -- so the thirty-first card
+ * rendered with `tokenName: undefined` and `imageUrl: undefined` and
+ * nothing said why. Written when art resolution meant one cold OpenSea
+ * call per token, that bound was real pacing. The 2026-09-08 archive-first
+ * change below put a single indexed Postgres read in front of the vendor,
+ * and the cap then sat in front of THAT -- throttling one `token_id =
+ * ANY($3)` query that costs the same whether the array holds 5 ids or
+ * 5,000, and whose only honest bound is the pool statement_timeout
+ * lib/postgres.ts already sets (the instrument PR #483 chose over a row
+ * cap for the trait index, for exactly this reason).
+ *
+ * So the archive read now gets every distinct id, and this number bounds
+ * only what the archive could not answer -- the leg where a rate-limited
+ * vendor and a request deadline are real hazards. See
+ * lib/market/multichain/art-lookup-plan.ts.
+ */
+const MAX_REMOTE_ART_LOOKUPS = 30;
 
 function mapBitcoinListings(
   collectionSlug: string,
@@ -892,15 +912,22 @@ export async function GET(req: NextRequest) {
       "";
 
     // Resolve each DISTINCT token's own art once (see header on why dedup matters).
-    const distinctTokenIds = [
-      ...new Set(orders.map((o) => o.parameters.offer[0]?.identifierOrCriteria).filter(Boolean) as string[]),
-    ].slice(0, MAX_ART_LOOKUPS);
+    //
+    // UNCAPPED ON PURPOSE. This list used to end in `.slice(0, 30)`, which
+    // meant the thirty-first card of the page got no art at all and no flag
+    // saying so -- a blank tile indistinguishable from a broken one. The
+    // only consumer of this list that costs anything per id is the vendor
+    // leg below, and that is where the bound now lives
+    // (MAX_REMOTE_ART_LOOKUPS). The archive read takes the whole list.
+    const distinctTokenIds = distinctIds(
+      orders.map((o) => o.parameters.offer[0]?.identifierOrCriteria)
+    );
 
     // READ THE ARCHIVE FIRST.
     //
     // This route re-fetched from OpenSea what the archive already stores. For
-    // a fully hydrated collection that is up to MAX_ART_LOOKUPS cold per-token
-    // calls, every one awaited before any bytes reach the visitor -- measured
+    // a fully hydrated collection that is one cold per-token call per token,
+    // every one awaited before any bytes reach the visitor -- measured
     // 2026-09-08: 9s typical on Milady, samples past 120s. Meanwhile the same
     // collection reports metadataCoverage 1 and traitsCoverage 1, i.e. the
     // archive holds every one of those tokens' name, image and traits.
@@ -920,12 +947,24 @@ export async function GET(req: NextRequest) {
       distinctTokenIds
     ).catch(() => new Map<string, { name: string | null; imageUrl: string | null; traits: Array<{ traitType: string; value: string }> }>());
 
-    const missingFromArchive = distinctTokenIds.filter((id) => {
-      const row = archivedArt.get(id);
-      // A row with no image is not a usable answer: fall through and ask, so
-      // an archived-but-empty row cannot silently render a blank card.
-      return !row || (!row.imageUrl && !row.name);
-    });
+    // THE BUDGET APPLIES HERE, AND ONLY HERE.
+    //
+    // planArtLookups takes the whole distinct list and the archive's own
+    // answer and splits it: what the archive covered (free), what the
+    // vendor must be asked for (paced at MAX_REMOTE_ART_LOOKUPS), and what
+    // neither leg will reach. That last set used to be produced silently by
+    // the `.slice(0, 30)` above; now it is a number the response carries.
+    const artPlan = planArtLookups(
+      distinctTokenIds,
+      (id) => {
+        const row = archivedArt.get(id);
+        // A row with no image is not a usable answer: fall through and ask, so
+        // an archived-but-empty row cannot silently render a blank card.
+        return !!row && (!!row.imageUrl || !!row.name);
+      },
+      MAX_REMOTE_ART_LOOKUPS
+    );
+    const missingFromArchive = artPlan.remoteIds;
 
     // Per-token art was fetched live on every page render with no caching --
     // a token's name/image/traits are effectively immutable (metadata
@@ -1048,6 +1087,29 @@ export async function GET(req: NextRequest) {
           // and listings is small, exactly one of these numbers now says why.
           excludedNoTokenId,
           excludedMultiOffer,
+        },
+        // ART THAT IS MISSING MUST SAY SO.
+        //
+        // Before this, a card past the thirtieth distinct token carried
+        // `tokenName: undefined` and `imageUrl: undefined` and the response
+        // said nothing at all. A blank tile read as a broken image, a dead
+        // CDN, or a token with genuinely no art -- three different bugs,
+        // one indistinguishable symptom, which is the same failure the
+        // bookCoverage counters above exist to prevent for the book itself.
+        //
+        // `complete: true` is now the overwhelmingly common case, because
+        // the archive read is uncapped and a hydrated collection is fully
+        // answered by it. When it is false, `unresolvedTokens` is the exact
+        // count of cards that will render without art and `reason` names
+        // the leg that ran out.
+        artCoverage: {
+          complete: !artPlan.artIncomplete,
+          distinctTokens: artPlan.archiveIds.length,
+          fromArchive: artPlan.archiveIds.length - artPlan.remoteIds.length - artPlan.unresolvedIds.length,
+          remoteLookups: artPlan.remoteIds.length,
+          unresolvedTokens: artPlan.unresolvedIds.length,
+          reason: artPlan.artIncomplete ? "remote-budget-exhausted" : null,
+          remoteBudget: MAX_REMOTE_ART_LOOKUPS,
         },
       },
       { headers: { "Cache-Control": "no-store" } }

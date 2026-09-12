@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+// Read the exported bound itself rather than scraping a literal out of the
+// call site -- see "the walk is still bounded" below for why.
+import { PAGES_PER_CALL } from "../../lib/market/multichain/trading/foreign-orders";
 
 /**
  * "117 listed of 9,976" in the header, ONE card in the grid.
@@ -67,27 +70,40 @@ test("each request asks for a FULL page", () => {
 });
 
 test("the walk is still bounded", () => {
-  // Rotations mean a page can contribute ZERO new tokens, so the cap has to
-  // rise -- but an unbounded walk on a large collection is its own outage.
+  // Rotations mean a page can contribute ZERO new tokens, so the bound has to
+  // be generous -- but an unbounded walk on a large collection is its own
+  // outage, and it would blow the per-key quota besides.
+  //
+  // THIS TEST READ AN INLINE LITERAL AND BROKE ON A CORRECT CHANGE.
+  //
+  // It matched /pages < (\d+)/. PR #493 replaced the literal with a named,
+  // exported constant -- `pages < PAGES_PER_CALL` -- as part of converting the
+  // budget from a CEILING into PACING (the walk now returns its cursor, so
+  // stopping no longer means the rest of the book is unreachable). The bound
+  // did not move; it is still 25. Only its spelling changed, and this
+  // assertion could not see it.
+  //
+  // Reading the exported value rather than the call site fixes that properly:
+  // it pins the real number, survives the constant being moved or reused, and
+  // fails for the reason it claims to (no bound) instead of for a rename.
   const body = paged(SRC);
-  // The cap may be written inline or, since #493, hoisted to a named export
-  // (`pages < PAGES_PER_CALL`). Scanning only for a numeric literal made this
-  // fail on a pure refactor that changed no behaviour, which is a test
-  // reporting on its own regex rather than on the walk. Accept either form and
-  // resolve a name to its value, so the BOUND is what is asserted.
-  const m = body.match(/pages < ([A-Za-z_$][\w$]*|\d+)/);
-  assert.ok(m, "a page cap must exist");
-  const token = m![1];
-  let cap: number;
-  if (/^\d+$/.test(token)) cap = Number(token);
-  else {
-    const decls = [...SRC.matchAll(/(?:export\s+)?(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(\d+)/g)];
-    const decl = decls.find((d) => d[1] === token);
-    assert.ok(decl, `${token} is the page cap but its value could not be found`);
-    cap = Number(decl![2]);
-  }
-  assert.ok(cap > 10, `${cap} pages is the old order-counting budget; distinct-token paging needs more room`);
-  assert.ok(cap <= 50, `${cap} pages is 5,000 orders for one page render`);
+  assert.match(
+    body,
+    /pages < PAGES_PER_CALL/,
+    "the walk must still be bounded by the paging budget"
+  );
+  assert.ok(
+    Number.isInteger(PAGES_PER_CALL) && PAGES_PER_CALL > 0,
+    "the budget must be a real positive bound"
+  );
+  assert.ok(
+    PAGES_PER_CALL > 10,
+    `${PAGES_PER_CALL} pages is the old order-counting budget; distinct-token paging needs more room`
+  );
+  assert.ok(
+    PAGES_PER_CALL <= 50,
+    `${PAGES_PER_CALL} pages is 5,000 orders for one page render`
+  );
 });
 
 /** The stopping rule as a pure predicate, so the boundary is exercised. */

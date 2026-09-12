@@ -13,11 +13,37 @@
  * a slug -> fetch that collection's offers + this wallet's own listings.
  *
  * BOUNDED, LOGGED-IN-COMMENT, NOT SILENT: a wallet that touches many
- * foreign collections would otherwise fan out unboundedly. Capped to the
- * first MAX_COLLECTIONS distinct collections (by owned-token order) --
+ * foreign collections would otherwise fan out unboundedly. Capped to
+ * MAX_COLLECTIONS distinct collections per request (by owned-token order) --
  * same bounding discipline as listings/route.ts's MAX_ART_LOOKUPS. If a
  * wallet is truncated, `truncated: true` is returned so the UI can say so
  * rather than silently showing a partial picture as if it were complete.
+ *
+ * THE CEILING BEHIND THAT HONEST FLAG, REMOVED 2026-09-11
+ * ------------------------------------------------------
+ * `truncated: true` was true and useless. There was no continuation
+ * parameter of any kind, so a wallet holding NFTs across 11+ collections saw
+ * offers and listings for its first 10 and collections 11..N were unreachable
+ * FOREVER -- not with a different query, not at a different URL, not by any
+ * sequence of calls. Honest and unrecoverable is still a ceiling; this repo
+ * already paid for the identical mistake in the foreign listings book (see
+ * test/market/listings-cursor-uncapped.test.ts, which says "Honest and useless
+ * is still useless" about `complete: false`).
+ *
+ * MAX_COLLECTIONS survives untouched, because it IS pacing: each collection in
+ * the window costs one OpenSea contract->slug lookup plus a listings call plus
+ * an offers call, and the wallet-summary rate limit is 15/min. What changed is
+ * that the window now MOVES. `?offset=N` starts the fan-out at the Nth distinct
+ * collection, and the response reports `collectionOffset`, `nextOffset` (null
+ * iff this window reached the end) and `distinctCollectionCount`, so a client
+ * can walk every collection it holds.
+ *
+ * The offset applies to the DISTINCT-COLLECTION list, which is derived from
+ * owned tokens in a stable order (chain registry order, then Alchemy's own
+ * per-chain ordering, then the tracked-collection list for Robinhood Chain).
+ * Ownership changes between calls can shift that list, exactly as it can for
+ * any offset pager over live data; the alternative -- no continuation at all --
+ * was strictly worse.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { FOREIGN_CHAINS, foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -37,6 +63,10 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENSEA = "https://api.opensea.io/api/v2";
+/** PACING, not a ceiling: the per-request fan-out width. Each unit of this is
+ * ~3 vendor round trips (OpenSea slug resolve + listings + offers), so this
+ * keeps one request inside its deadline and inside the key pool's quota. The
+ * result set it pages over is unbounded -- see ?offset in the header. */
 const MAX_COLLECTIONS = 10;
 
 const ALCHEMY_SUBDOMAIN: Record<string, string> = {
@@ -101,15 +131,26 @@ async function fetchOwnedAll(owner: string): Promise<OwnedItem[]> {
  * (plank_multichain_collections, via listTrackedCollections), bounded to
  * MAX_COLLECTIONS same as the foreign fan-out -- a wallet touching many
  * auto-discovered collections still can't blow up one request.
+ *
+ * WINDOWED, NOT CAPPED (2026-09-11): this slice used to start at 0 on every
+ * call, so a deployment tracking more than MAX_COLLECTIONS Robinhood-Chain
+ * collections could never report ownership in the ones past the tenth. It now
+ * takes the same `?offset` the foreign fan-out takes, and reports
+ * `trackedCount` so the caller can see the size of the list it is walking
+ * rather than inferring it from a boolean.
  */
-async function fetchOwnedRobinhood(owner: string): Promise<{ owned: OwnedItem[]; truncated: boolean }> {
+async function fetchOwnedRobinhood(
+  owner: string,
+  offset: number
+): Promise<{ owned: OwnedItem[]; truncated: boolean; trackedCount: number; scannedThrough: number }> {
   const rpcUrl = ROBINHOOD_RPC_URLS[0];
-  if (!rpcUrl) return { owned: [], truncated: false };
+  if (!rpcUrl) return { owned: [], truncated: false, trackedCount: 0, scannedThrough: offset };
 
   const tracked = await listTrackedCollections().catch(() => []);
   const robinhoodCollections = tracked.filter((c) => isRobinhoodChainSlug(c.chainSlug));
-  const truncated = robinhoodCollections.length > MAX_COLLECTIONS;
-  const bounded = robinhoodCollections.slice(0, MAX_COLLECTIONS);
+  const bounded = robinhoodCollections.slice(offset, offset + MAX_COLLECTIONS);
+  const scannedThrough = offset + bounded.length;
+  const truncated = scannedThrough < robinhoodCollections.length;
 
   const results = await Promise.all(
     bounded.map(async (c): Promise<OwnedItem[]> => {
@@ -126,7 +167,7 @@ async function fetchOwnedRobinhood(owner: string): Promise<{ owned: OwnedItem[];
       }
     })
   );
-  return { owned: results.flat(), truncated };
+  return { owned: results.flat(), truncated, trackedCount: robinhoodCollections.length, scannedThrough };
 }
 
 /**
@@ -183,10 +224,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "owner is required" }, { status: 400 });
   }
 
+  // The continuation the old `truncated: true` had no answer for. Absent or
+  // junk means 0, so every existing caller gets byte-compatible behaviour for
+  // the first window.
+  const requestedOffset = Number(searchParams.get("offset"));
+  const offset = Number.isFinite(requestedOffset) && requestedOffset > 0 ? Math.trunc(requestedOffset) : 0;
+
   try {
     const keyEntry = await pickOpenSeaKey("live");
     const key = keyEntry?.apiKey ?? null;
-    const [foreignOwned, robinhoodOwned] = await Promise.all([fetchOwnedAll(owner), fetchOwnedRobinhood(owner)]);
+    const [foreignOwned, robinhoodOwned] = await Promise.all([fetchOwnedAll(owner), fetchOwnedRobinhood(owner, offset)]);
     const owned = [...foreignOwned, ...robinhoodOwned.owned];
 
     const distinctCollections = new Map<string, { chainSlug: string; contractAddress: string; collectionName: string | null }>();
@@ -198,15 +245,43 @@ export async function GET(req: NextRequest) {
       }
     }
     const collectionEntries = [...distinctCollections.values()];
-    const truncated = collectionEntries.length > MAX_COLLECTIONS || robinhoodOwned.truncated;
-    const bounded = collectionEntries.slice(0, MAX_COLLECTIONS);
+
+    // TWO LANES, ONE OFFSET -- and the offset must be applied to each lane
+    // EXACTLY ONCE.
+    //
+    // fetchOwnedRobinhood already windowed its own lane: `owned` contains only
+    // the tracked Robinhood-Chain collections in [offset, offset+MAX), because
+    // that lane is bounded at ownership-resolution time (one raw-RPC scan per
+    // tracked collection). The foreign lane is NOT pre-windowed: fetchOwnedAll
+    // returns every collection Alchemy reports across all chains, and the bound
+    // is applied here, at the vendor fan-out.
+    //
+    // So the foreign window must be taken over the FOREIGN entries alone. The
+    // first draft of this fix sliced the merged list, which skipped the
+    // Robinhood rows a second time -- the tail-eating bug the offset exists to
+    // remove, reintroduced by the fix for it.
+    const foreignEntries = collectionEntries.filter((c) => !isRobinhoodChainSlug(c.chainSlug));
+    const foreignWindow = foreignEntries.slice(offset, offset + MAX_COLLECTIONS);
+    const foreignScannedThrough = offset + foreignWindow.length;
+    const foreignTruncated = foreignScannedThrough < foreignEntries.length;
+    const bounded = foreignWindow;
+
+    // Truncated iff EITHER lane has more behind it. A caller that stopped when
+    // only one lane ran out would silently skip the other lane's tail.
+    const truncated = foreignTruncated || robinhoodOwned.truncated;
+    // Where to resume. Both lanes advance by at most MAX_COLLECTIONS per call
+    // and share the one offset, so the next window starts one page on -- but
+    // never before a lane that is already exhausted would have it, which is why
+    // this is a max over the two scan positions rather than `offset + MAX`.
+    const nextOffset = truncated
+      ? Math.max(foreignScannedThrough, robinhoodOwned.scannedThrough, offset + 1)
+      : null;
     // Robinhood-Chain collections are bounded independently by
-    // fetchOwnedRobinhood itself (its own MAX_COLLECTIONS pass over
-    // listTrackedCollections) -- re-derive the maker-activity input from
-    // THAT same bounded set rather than `bounded` above, since `bounded`
-    // mixes both chains' entries under one shared cap and could otherwise
-    // starve Robinhood Chain out entirely on a wallet with many foreign
-    // holdings.
+    // fetchOwnedRobinhood itself (its own offset+MAX_COLLECTIONS window over
+    // listTrackedCollections), so every Robinhood entry that reached `owned`
+    // is already inside this request's window and all of them belong here.
+    // `bounded` above is deliberately NOT the source: it is the foreign lane's
+    // window and contains no Robinhood rows at all.
     const robinhoodMakerCollections = [...distinctCollections.values()]
       .filter((c) => isRobinhoodChainSlug(c.chainSlug))
       .map((c) => ({ contractAddress: c.contractAddress, name: c.collectionName }));
@@ -290,6 +365,19 @@ export async function GET(req: NextRequest) {
         ownedItems: owned,
         distinctCollectionCount: collectionEntries.length,
         truncated,
+        // WHAT MAKES `truncated` ACTIONABLE. Before these three fields it was a
+        // statement with no follow-up question the caller could ask.
+        collectionOffset: offset,
+        // Non-null means "more collections remain, call again with this".
+        // Null means every collection this wallet touches has been covered.
+        nextOffset,
+        // The fan-out width this response used, so a caller sees the pacing
+        // bound rather than guessing it from the row counts.
+        collectionPageSize: MAX_COLLECTIONS,
+        // Size of the tracked Robinhood-Chain roster being walked, for the same
+        // reason collection-search returns totalCount: a bounded scan over an
+        // unknown-sized list cannot be interpreted.
+        robinhoodTrackedCount: robinhoodOwned.trackedCount,
         myListings,
         offers,
       },
