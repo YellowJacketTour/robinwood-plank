@@ -1159,9 +1159,13 @@ export default function GlobalMarketHub() {
   const GRID_PAGE_SIZE = 60;
   const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
   const [storedTokenHits, setTokenHits] = useState<GlobalTokenHit[]>([]);
+  /** True when /token-search returned a nextCursor -- i.e. the page shown is a
+   * page, not the whole match set. Drives the "N+" vs "N" count label. */
+  const [storedTokenHitsHaveMore, setTokenHitsHaveMore] = useState(false);
   const [storedTokenSearchLoading, setTokenSearchLoading] = useState(false);
   const [storedRelatedByCreator, setRelatedByCreator] = useState<RelatedCreatorHit[]>([]);
   const tokenHits = search.trim().length >= 2 ? storedTokenHits : [];
+  const tokenHitsHaveMore = search.trim().length >= 2 && storedTokenHitsHaveMore;
   const tokenSearchLoading = search.trim().length >= 2 && storedTokenSearchLoading;
   const relatedByCreator = search.trim().length >= 2 ? storedRelatedByCreator : [];
   // Real, full-catalog search results (/api/market/multichain/collection-
@@ -1171,7 +1175,12 @@ export default function GlobalMarketHub() {
   // catalog, so a real tracked collection could return "no matches" purely
   // for not having been scrolled to yet.
   const [storedServerCollectionHits, setServerCollectionHits] = useState<TrackedCollection[]>([]);
+  /** How many collections the server says match in full, vs the page it sent.
+   * Null when unknown (pre-response, or an older server). The route grew this
+   * when its hardcoded 60-row ceiling was removed -- see collection-search. */
+  const [storedServerCollectionTotal, setServerCollectionTotal] = useState<number | null>(null);
   const serverCollectionHits = search.trim().length >= 2 ? storedServerCollectionHits : [];
+  const serverCollectionTotal = search.trim().length >= 2 ? storedServerCollectionTotal : null;
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -1615,13 +1624,17 @@ export default function GlobalMarketHub() {
       if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
       try {
         const response = await fetch(`/api/market/multichain/token-search?${qs}`, { signal: controller.signal });
-        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[]; relatedByCreator?: RelatedCreatorHit[] } : null;
+        const body = response.ok ? await response.json() as { tokens?: GlobalTokenHit[]; relatedByCreator?: RelatedCreatorHit[]; nextCursor?: string | null } : null;
         if (!controller.signal.aborted) {
           setTokenHits(body?.tokens ?? []);
           setRelatedByCreator(body?.relatedByCreator ?? []);
+          // Non-null nextCursor = the projection has more matches than this
+          // page. Kept so the count label can say "40+" instead of claiming 40
+          // is the whole answer.
+          setTokenHitsHaveMore(Boolean(body?.nextCursor));
         }
       } catch {
-        if (!controller.signal.aborted) { setTokenHits([]); setRelatedByCreator([]); }
+        if (!controller.signal.aborted) { setTokenHits([]); setRelatedByCreator([]); setTokenHitsHaveMore(false); }
       } finally {
         if (!controller.signal.aborted) setTokenSearchLoading(false);
       }
@@ -1640,10 +1653,17 @@ export default function GlobalMarketHub() {
       if (chainFilter.size) qs.set("chains", [...chainFilter].join(","));
       try {
         const response = await fetch(`/api/market/multichain/collection-search?${qs}`, { signal: controller.signal });
-        const body = response.ok ? (await response.json() as { collections?: TrackedCollection[] }) : null;
-        if (!controller.signal.aborted) setServerCollectionHits(body?.collections ?? []);
+        // totalCount/nextOffset are read but not yet paged through here: this
+        // box shows the top matches, and the route now makes the rest
+        // REACHABLE, which is the property that was missing. A "showing N of
+        // TOTAL" affordance is a UI change, not a reachability one.
+        const body = response.ok ? (await response.json() as { collections?: TrackedCollection[]; totalCount?: number }) : null;
+        if (!controller.signal.aborted) {
+          setServerCollectionHits(body?.collections ?? []);
+          setServerCollectionTotal(typeof body?.totalCount === "number" ? body.totalCount : null);
+        }
       } catch {
-        if (!controller.signal.aborted) setServerCollectionHits([]);
+        if (!controller.signal.aborted) { setServerCollectionHits([]); setServerCollectionTotal(null); }
       }
     }, 220);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -2919,8 +2939,18 @@ export default function GlobalMarketHub() {
             <section className="mb-4 space-y-2" aria-label="Matching pieces">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Individual pieces</h3>
+                {/* "N matches" used to print the response's row count, which
+                  * was the route's own hardcoded 40-row ceiling -- so a query
+                  * with 5,000 matches said "40 matches" and looked complete.
+                  * The route now returns nextCursor; a non-null one means the
+                  * count shown is a floor, and the label says so instead of
+                  * asserting a total it does not have. */}
                 <span className="text-[0.65rem] text-foreground/45">
-                  {tokenSearchLoading ? "Searching indexed pieces…" : `${tokenHits.length} matches`}
+                  {tokenSearchLoading
+                    ? "Searching indexed pieces…"
+                    : tokenHitsHaveMore
+                      ? `${tokenHits.length}+ matches`
+                      : `${tokenHits.length} matches`}
                 </span>
               </div>
               {tokenHits.length > 0 && (
@@ -3146,9 +3176,16 @@ export default function GlobalMarketHub() {
                   Loading more…
                 </span>
               )}
+              {/* During a search the denominator is the number of collections
+                * that MATCH, not the size of the catalog -- serverCollectionTotal
+                * is the route's own totalCount, added when its 60-row ceiling
+                * was removed. Printing the catalog total under a search read as
+                * "showing 60 of 300,304", which is true of neither number. */}
               <p className="text-[0.65rem] text-foreground/40">
                 Showing {Math.min(gridVisibleCount, filtered.length)} of{" "}
-                {(activeChainSlug ? chainCounts?.[activeChainSlug] : totalTrackedCount) ?? filtered.length}
+                {(search.trim().length >= 2 ? serverCollectionTotal : null)
+                  ?? (activeChainSlug ? chainCounts?.[activeChainSlug] : totalTrackedCount)
+                  ?? filtered.length}
               </p>
             </div>
           )}

@@ -335,6 +335,11 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   return filled;
 }
 
+/** Write-side batch width. Each job is a live vendor round trip plus catalog
+ * writes; this paces one request, and the response reports it so a caller with
+ * more work than this knows precisely how much was left undone. */
+const MAX_JOBS = 10;
+
 export async function POST(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-hydrate-stats", limit: 8, windowMs: 60_000 });
   if (limited) return limited;
@@ -351,12 +356,30 @@ export async function POST(req: NextRequest) {
     .filter((a) => typeof a === "string" && a.length > 8)
     .map((contractAddress) => ({ chainSlug: body!.chainSlug as string, contractAddress }));
   const seen = new Set<string>();
-  const jobs = [...fromRows, ...fromLegacy].filter((j) => {
+  const deduped = [...fromRows, ...fromLegacy].filter((j) => {
     const k = `${j.chainSlug}:${j.contractAddress}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
-  }).slice(0, 10);
+  });
+  // MAX_JOBS is a legitimate WRITE-SIDE bound: each job is a live vendor
+  // round trip plus catalog writes, and this route is rate limited to 8/min.
+  // Pacing a batch of writes is allowed; what was not allowed is what this
+  // line used to do SILENTLY.
+  //
+  // THE DEFECT, FIXED 2026-09-11: the cap was `.slice(0, 10)` and the response
+  // was `{ hydrated, attempted }` where `attempted` counted only the surviving
+  // 10. A caller that posted 40 rows got back `attempted: 10` and could not
+  // distinguish that from having posted 10 -- rows 11..40 were dropped with no
+  // signal of any kind. The house rule is that a miss must never be
+  // indistinguishable from "nothing happened", and this was exactly that: the
+  // client re-posted the same 40 rows every scroll tick and the last 30 were
+  // quietly discarded forever.
+  //
+  // The cap stays. The silence does not. `submitted`/`accepted`/`rejected`
+  // mirror visibility-demand/route.ts, which already reports
+  // `accepted: Math.min(merged.length, MAX_KEYS)` for the same class of bound.
+  const jobs = deduped.slice(0, MAX_JOBS);
   if (jobs.length === 0) {
     return NextResponse.json({ error: "rows[] or chainSlug+contracts[] required" }, { status: 400 });
   }
@@ -366,7 +389,18 @@ export async function POST(req: NextRequest) {
     for (const job of jobs) {
       if (await refreshOne(job.chainSlug, job.contractAddress)) ok += 1;
     }
-    return NextResponse.json({ hydrated: ok, attempted: jobs.length }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({
+      hydrated: ok,
+      attempted: jobs.length,
+      // How many distinct jobs the caller actually handed us, AFTER dedupe --
+      // so `submitted > accepted` is the caller's cue to send the remainder.
+      submitted: deduped.length,
+      accepted: jobs.length,
+      rejected: deduped.length - jobs.length,
+      // The bound itself, named in the response. A client that knows the batch
+      // width can chunk correctly on the first try instead of discovering it.
+      maxPerRequest: MAX_JOBS,
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to hydrate collection stats");
   }
