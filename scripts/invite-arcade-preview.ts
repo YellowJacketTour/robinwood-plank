@@ -121,7 +121,14 @@ const landing=`<!doctype html><html><head><meta name="viewport" content="width=d
 async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+  // base-uri is 'self', not 'none': crash.html carries <base href="/arcade/">
+  // so every relative asset and module import resolves under that path. With
+  // 'none' the browser BLOCKS the base tag and logs a CSP violation --
+  // harmless when the gateway serves the page from /arcade/ itself, but the
+  // hosted table is proxied at /arcade/table.html, where losing the base tag
+  // repoints every relative URL and 404s the assets. 'self' still blocks an
+  // injected base pointing at another origin, which is the real threat.
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'");
   try{
     const url=new URL(req.url||'/','http://localhost');
     const sid=/\bplank_guest=([A-Za-z0-9_-]{43})\b/.exec(req.headers.cookie||'')?.[1];
