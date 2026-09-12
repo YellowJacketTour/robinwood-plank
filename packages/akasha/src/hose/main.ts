@@ -27,7 +27,7 @@ import { BitcoinAdapter } from "./adapters/bitcoin.ts";
 import { HttpTickStream, JsonRpcEvm } from "./rpc/evm.ts";
 import { EsploraBitcoinRpc } from "./rpc/bitcoin.ts";
 import { GapWorker } from "./gap.ts";
-import { BackfillWorker } from "./backfill.ts";
+import { BackfillWorker, DEFAULT_TAPE_BUDGET_BYTES } from "./backfill.ts";
 import { planShards, outstandingShards, type Shard } from "./shard.ts";
 import { claimShards, enqueueShards, releaseShard, retireShard } from "./claim.ts";
 import { EVM_CHAINS, FINALITY_LAG, type ChainId } from "../shared/types.ts";
@@ -54,6 +54,20 @@ export class Hose {
   private backfill: BackfillWorker | undefined;
   private cfg: HoseConfig;
   private started = false;
+
+  /**
+   * Last measured on-disk size of the akasha_* tables, refreshed once per tick.
+   *
+   * Held as a field because `tapeUsage` must be SYNCHRONOUS -- the backfill's
+   * budget gate runs before any await, so a full tape costs nothing, and an
+   * async probe there would put a Postgres round-trip in front of every step
+   * on a worker that holds 2 of PGPOOL_MAX=4 connections.
+   *
+   * `undefined` means "not measured yet" or "cannot measure", and is NOT
+   * treated as an empty tape -- the budget simply does not apply until a real
+   * measurement lands.
+   */
+  private tapeBytesCached: number | undefined;
 
   constructor(cfg: HoseConfig) {
     this.cfg = cfg;
@@ -107,6 +121,19 @@ export class Hose {
       const pg = this.pg;
       this.backfill = new BackfillWorker({
         store: pg,
+        // THE TAPE'S ONLY CEILING. Wired here because this is the one branch
+        // that has a Postgres store, and therefore the one that can measure
+        // itself -- the in-memory store deliberately reports `undefined` and
+        // is not subject to the budget.
+        //
+        // Read from a short-lived cache inside tapeBytes(), so calling this on
+        // every step costs one catalog scan a minute rather than one per tick.
+        // The value is a fraction of budget so the worker never has to know
+        // what the budget is.
+        tapeUsage: () => {
+          const bytes = this.tapeBytesCached;
+          return bytes === undefined ? undefined : bytes / DEFAULT_TAPE_BUDGET_BYTES;
+        },
         ingestRange: async (chain, from, to, deadline) => {
           // BITCOIN WALKS LEFT TOO.
           //
@@ -612,6 +639,11 @@ export class Hose {
       });
       return undefined;
     }
+    // Refresh the tape measurement once per backfill phase, before the first
+    // step. tapeBytes() caches internally, so this is one catalog scan a
+    // minute, not one per step. A failure here leaves the value undefined,
+    // which disables the budget rather than guessing at it.
+    this.tapeBytesCached = await this.pg?.tapeBytes().catch(() => undefined);
     const first = await this.backfill.step(this.cfg.chains, budgetMs > 0 ? until : undefined).catch((e: unknown) => {
       // A THROW HERE USED TO VANISH.
       //

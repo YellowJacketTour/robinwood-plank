@@ -5,7 +5,14 @@ export function eq<T>(actual: T, expected: T, msg?: string): void {
   assert.deepStrictEqual(actual, expected, msg);
 }
 
-export function ok(value: unknown, msg?: string): void {
+/**
+ * Declared as an assertion signature so the compiler narrows after it. Without
+ * `asserts value`, `ok(progress)` proves nothing to TypeScript and every
+ * subsequent `progress.reason` is an error on a value the test has already
+ * established is present -- which pushes tests toward `!` and silences the
+ * very checks that catch a missing result.
+ */
+export function ok(value: unknown, msg?: string): asserts value {
   assert.ok(value, msg);
 }
 

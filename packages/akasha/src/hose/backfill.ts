@@ -87,6 +87,13 @@ export interface BackfillDeps {
   ingestRange: (chain: ChainId, from: number, to: number, deadline?: number) => Promise<Header | undefined>;
   /** Gaze pressure per chain, 0..1. Absent means no attention. */
   gaze?: (chain: ChainId) => number;
+  /**
+   * Fraction of the tape size budget already consumed, 0..1. Absent means the
+   * store cannot measure itself, and the budget is not enforced -- which is
+   * correct for the in-memory store, and is why this is optional rather than
+   * defaulting to 0 (a default of 0 would claim an empty tape it never read).
+   */
+  tapeUsage?: TapeUsage;
 }
 
 /**
@@ -106,6 +113,60 @@ export function needPast(store: Pick<ArchiveStore, "getCursor">, chain: ChainId,
 
 /** A chain with no attention still gets this share of the scheduler's regard. */
 export const FAIRNESS_FLOOR = 0.15;
+
+/**
+ * THE SIZE BUDGET. The tape's only ceiling.
+ *
+ * WHY THE PAST NEEDS A STOP AND THE TIP DOES NOT
+ * ----------------------------------------------
+ * `finalized_head` advances at the rate real blocks are produced -- slow, and
+ * bounded by physics. `backfill_tail` has no such governor: it walks LEFTWARD
+ * as fast as the host can drink, across eleven chains, and nothing in this
+ * package or in 112 migrations ever told it to stop. A grep of every migration
+ * for DELETE/retention/prune/TTL finds exactly one prune in the whole schema
+ * (plank_prune_floor_observations, migration 108) and it does not cover the
+ * tape.
+ *
+ * Bitcoin alone is ~191k blocks of remaining past; akasha_event carries a
+ * `raw JSONB` per row plus two indexes. The failure mode is not a slow query,
+ * it is a full disk on a shared cPanel host -- which takes the web role and
+ * the mesh down with it, because they share the same volume and the same
+ * PGPOOL_MAX=4.
+ *
+ * WHY A BUDGET AND NOT A PRUNE
+ * ----------------------------
+ * Deleting old events is the obvious move and it is WRONG here. The tape's one
+ * real reader, lib/market/multichain/discovery/akasha-bridge.ts, aggregates
+ * over ALL `envelope` events with no time predicate:
+ *
+ *     SELECT e.raw->>'parent', COUNT(DISTINCT e.token_or_inscription)
+ *       FROM akasha_event e WHERE e.chain='bitcoin' AND e.kind='envelope'
+ *
+ * Those counts ARE collection membership. A time-based prune would silently
+ * shrink every Bitcoin collection's size -- a wrong number that reports itself
+ * as fine, which is the exact failure species this package exists to refuse.
+ *
+ * So the budget stops the tape GROWING rather than throwing away what it
+ * holds. The past stops advancing; nothing already proven is surrendered.
+ *
+ * WHY IT REPORTS RATHER THAN SILENTLY HALTING
+ * -------------------------------------------
+ * A backfill that quietly stops is indistinguishable from one that finished.
+ * `step()` returns a progress record whose `reason` names the budget, so the
+ * worker's own telemetry shows "held by size budget" instead of the silence
+ * that a completed past would produce.
+ */
+export const DEFAULT_TAPE_BUDGET_BYTES = 60 * 1024 * 1024 * 1024; // 60 GiB
+
+/**
+ * How much of the budget is already spent, 0..1, or undefined when the store
+ * cannot measure itself (an in-memory store under test).
+ *
+ * Deliberately a callback rather than a direct query: measuring size is a
+ * Postgres-specific act, and the worker must keep running against stores that
+ * cannot do it. An unmeasurable tape is NOT treated as an empty one.
+ */
+export type TapeUsage = () => number | undefined;
 
 /**
  * Pick the chain whose past to walk next.
@@ -149,6 +210,29 @@ export class BackfillWorker {
     const { store } = this.deps;
     const chain = pickChain(store, chains, this.deps.gaze);
     if (!chain) return undefined;
+
+    // THE BUDGET GATE. Checked after a chain is picked so the refusal can name
+    // one, and BEFORE any network call so a full tape costs nothing to hold.
+    //
+    // `undefined` means the store cannot measure itself and the budget does
+    // not apply. That is deliberately NOT the same as 0: an unmeasurable tape
+    // must not be reported as an empty one.
+    const used = this.deps.tapeUsage?.();
+    if (used !== undefined && used >= 1) {
+      return {
+        chain,
+        from: store.getBackfillTail(chain)!,
+        to: store.getBackfillTail(chain)!,
+        linked: true,
+        tailMoved: false,
+        // Say it plainly. A backfill that stops silently is indistinguishable
+        // from one that finished, and those are opposite facts.
+        reason:
+          `held by tape size budget: ${(used * 100).toFixed(1)}% of ` +
+          `DEFAULT_TAPE_BUDGET_BYTES consumed -- the past is NOT closed, it is ` +
+          `paused. Raise the budget or move the tape off this volume.`,
+      };
+    }
 
     const tail = store.getBackfillTail(chain)!;
     const t0 = protocolT0(chain);
