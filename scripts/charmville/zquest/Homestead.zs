@@ -176,12 +176,12 @@ global script Active
                     line[0]=0;correction->ReadString(line);correction->Close();
                     int request=field(line,0);int map=field(line,1);int screen=field(line,2);int x=field(line,3);int y=field(line,4);int facing=field(line,5);
                     if(request>lastCorrection){
-                        lastCorrection=request;
                         if(map==4 && screen==63 && Game->GetCurDMap()==map && Game->GetCurScreen()==screen && x>=0 && x<=240 && y>=0 && y<=160 && x%8==0 && y%8==0 && facing>=0 && facing<=3 && Hero->Z==0 && Hero->FakeZ==0){
                             if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}
                             activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;Hero->X=x;Hero->Y=y;Hero->Dir=facing;
                             trailCount=0;trailHead=0;lastHeroX=x;lastHeroY=y;farmSpawned=true;
-                            appliedCorrection=request;
+                            // A deferred airborne placement must remain retryable.
+                            lastCorrection=request;appliedCorrection=request;
                             printf("CHARMVILLE_POSITION_CORRECTED %d X %d Y %d\n",request,x,y);
                         }
                     }

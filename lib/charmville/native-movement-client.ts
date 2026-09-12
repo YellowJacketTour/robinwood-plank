@@ -9,7 +9,7 @@ export function readNativePosition(raw:unknown):NativePosition|null {
 }
 export function createNativeMovementClient(options:{request:(body?:object,signal?:AbortSignal)=>Promise<SavedActor>;correct:(payload:object)=>void;status:(message:string)=>void}) {
  let disposed=false,session='',seen=0,correction=0,waiting=0,actor:SavedActor|null=null;
- let pending:NativePosition[]=[],draining:Promise<void>|null=null,lastStepAt=0;
+ let pending:NativePosition[]=[],draining:Promise<void>|null=null,lastStepAt=0,correctedAt=0;
  const sameContext=(a:SavedActor,b:SavedActor)=>a.profileId===b.profileId&&a.regionId===b.regionId&&a.regionEpoch===b.regionEpoch&&a.geometryId===b.geometryId&&a.geometryRevision===b.geometryRevision;
  const synchronize=(snapshot:SavedActor)=>{
   if(actor&&sameContext(actor,snapshot)&&BigInt(snapshot.presenceRevision)>BigInt(actor.presenceRevision))actor={...actor,presenceRevision:snapshot.presenceRevision};
@@ -22,12 +22,19 @@ export function createNativeMovementClient(options:{request:(body?:object,signal
  const correct=(position:NativePosition,reason:'spawn'|'rejected')=>{
   if(!actor||disposed)return;
   pending=[];
-  waiting=++correction;
+  // A controller may reconnect while the native runtime keeps its receipt counter.
+  correction=Math.max(correction,position.appliedCorrectionSequence)+1;
+  waiting=correction;correctedAt=Date.now();
   options.correct({type:'charmville:position-correction',sessionId:position.sessionId,sequence:correction,dmap:4,screen:63,x:actor.cell.x*actor.tilePixels,y:actor.cell.y*actor.tilePixels,direction:position.direction,reason});
  };
  async function process(position:NativePosition){
   if(position.dmap!==4||position.screen!==63||position.z!==0||position.fakeZ!==0){options.status('This area or movement is not connected to saved positioning yet.');return;}
-  if(waiting&&position.appliedCorrectionSequence<waiting)return;
+  if(waiting&&position.appliedCorrectionSequence<waiting){
+   // Native scripts can defer/drop placement during jumps or scripted actions.
+   // Retry at a bounded rate once grounded instead of waiting forever.
+   if(Date.now()-correctedAt>=1500)correct(position,'rejected');
+   return;
+  }
   const run=session;
   try {
    if(!actor){const snapshot=await options.request(undefined,abort.signal);if(disposed||run!==session)return;accept(snapshot);correct(position,'spawn');options.status('Your position is connected. Combat remains local.');return;}

@@ -81,3 +81,26 @@ test('rejected inflight movement clears queued pre-correction positions',async()
  assert.equal(posts,1);assert.equal(corrections.length,2);
  await client.observe({...pos,sequence:4,x:32,appliedCorrectionSequence:1});assert.equal(posts,1);client.dispose();
 });
+
+
+test('reconnected controller advances past the running native correction receipt',async()=>{
+ const corrections:Record<string,unknown>[]=[];let posts=0;
+ const client=createNativeMovementClient({request:async body=>{if(body)posts++;return saved;},correct:p=>corrections.push(p as Record<string,unknown>),status:()=>{}});
+ await client.observe({...pos,appliedCorrectionSequence:7});
+ assert.equal(corrections[0].sequence,8);
+ await client.observe({...pos,sequence:2,x:24,appliedCorrectionSequence:7});
+ assert.equal(posts,0);
+ await client.observe({...pos,sequence:3,x:24,appliedCorrectionSequence:8});
+ assert.equal(posts,1);client.dispose();
+});
+
+test('lost native placement is retried without accepting movement before acknowledgment',async()=>{
+ const corrections:Record<string,unknown>[]=[];let posts=0;
+ const client=createNativeMovementClient({request:async body=>{if(body)posts++;return saved;},correct:p=>corrections.push(p as Record<string,unknown>),status:()=>{}});
+ await client.observe(pos);
+ await new Promise(resolve=>setTimeout(resolve,1510));
+ await client.observe({...pos,sequence:2,x:24});
+ assert.equal(corrections.length,2);assert.equal(corrections[1].sequence,2);assert.equal(posts,0);
+ await client.observe({...pos,sequence:3,x:24,appliedCorrectionSequence:2});
+ assert.equal(posts,1);client.dispose();
+});
