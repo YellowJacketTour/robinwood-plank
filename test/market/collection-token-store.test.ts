@@ -49,7 +49,7 @@ test("search ranks an enriched match ahead of an unenriched match of equal relev
   );
   try {
     const hits = await searchProjectedTokens({ query: "zztest-", chainSlugs: [chainSlug], limit: 10 });
-    const ids = hits.map((h) => h.tokenId);
+    const ids = hits.tokens.map((h) => h.tokenId);
     assert.ok(ids.includes(unenrichedTokenId) && ids.includes(enrichedTokenId), "both synthetic rows should match");
     assert.ok(
       ids.indexOf(enrichedTokenId) < ids.indexOf(unenrichedTokenId),

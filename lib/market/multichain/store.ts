@@ -1378,22 +1378,70 @@ export async function listCollectionsWithSnapshotsPage(input: {
  * because it doesn't exist. This function is the real fix: it queries the
  * full table directly, independent of whatever page the infinite scroll
  * happens to have loaded client-side.
+ *
+ * SECOND CEILING, REMOVED 2026-09-11. The 2026-08-23 fix reached the full
+ * table but still handed back a bare array with no offset and no total, and
+ * the route above it passed a hardcoded `limit: 60` it never let the caller
+ * override. So searching a common substring across the 300,000-row catalog
+ * returned 60 rows and said nothing -- match 61 was unreachable by any request,
+ * and the response for "exactly 60 matches exist" was byte-identical to the
+ * one for "8,000 matches exist, here are 60 of them". The first bug made real
+ * collections invisible because they had not been scrolled to; this one made
+ * them invisible because they sorted 61st.
+ *
+ * Now: LIMIT/OFFSET with a real `totalCount` and a `nextOffset`, mirroring
+ * listCollectionsWithSnapshotsPage, which has paged the hub grid this way all
+ * along. OFFSET is the right tool here and a keyset is not: this ORDER BY leads
+ * with three expressions over the SEARCH TERM itself (ILIKE match, ILIKE
+ * prefix, vault-backed), which no index can serve as a keyset comparison, and
+ * unlike the token projection the catalog is not rewritten under the reader on
+ * a per-second cadence.
  */
+export const COLLECTION_SEARCH_MAX_PAGE = 200;
+
+/** One page of a catalog search, plus the size of the thing being paged.
+ * `totalCount` is what makes a short page interpretable: without it, 60 rows
+ * back from a 300,000-row catalog could equally mean "60 matches exist" or
+ * "60 is all we felt like sending", and the caller cannot tell. */
+export type TrackedCollectionSearchPage = {
+  collections: CollectionWithSnapshot[];
+  totalCount: number;
+  nextOffset: number | null;
+};
+
 export async function searchTrackedCollectionsByName(
   query: string,
-  input: { limit?: number; chainSlugs?: string[] | null } = {}
-): Promise<CollectionWithSnapshot[]> {
+  input: { limit?: number; offset?: number; chainSlugs?: string[] | null } = {}
+): Promise<TrackedCollectionSearchPage> {
   const q = query.trim();
-  if (q.length < 2) return [];
-  const limit = Math.min(Math.max(input.limit ?? 60, 1), 200);
+  if (q.length < 2) return { collections: [], totalCount: 0, nextOffset: null };
+  const limit = Math.min(Math.max(input.limit ?? 60, 1), COLLECTION_SEARCH_MAX_PAGE);
+  const offset = Math.max(Math.trunc(input.offset ?? 0) || 0, 0);
+  // $1 is the ILIKE pattern, $2 the bare term -- $2 is used only by the ORDER BY
+  // (exact-match and prefix-match boosts), never by the predicate.
   const params: unknown[] = [`%${q}%`, q];
   const whereClauses = [`(c.name ILIKE $1 OR c.contract_address ILIKE $1)`];
+  // The COUNT runs the same predicate but is a DIFFERENT statement with its own
+  // placeholder numbering, so it gets its own clauses and its own params. The
+  // first version of this reused the page's arrays and passed both $1 and $2 to
+  // a statement that references only $1 -- Postgres rejected it outright ("bind
+  // message supplies 2 parameters, but prepared statement requires 1"), which
+  // is the good failure mode; the bad one would have been a silently misaligned
+  // chain filter counting a different set than the page returned.
+  const countClauses = [`(c.name ILIKE $1 OR c.contract_address ILIKE $1)`];
+  const countParams: unknown[] = [`%${q}%`];
   const chainSlugs = (input.chainSlugs ?? []).filter(Boolean);
   if (chainSlugs.length > 0) {
     params.push(chainSlugs);
     whereClauses.push(`c.chain_slug = ANY($${params.length}::text[])`);
+    countParams.push(chainSlugs);
+    countClauses.push(`c.chain_slug = ANY($${countParams.length}::text[])`);
   }
-  params.push(limit);
+  // countMatchingCollections caches by (where, params) and skips the snapshot
+  // join when no clause mentions `s.` -- so a repeated search costs one
+  // aggregate per COUNT_TTL_MS window, not one per keystroke.
+  const totalCount = await countMatchingCollections(countClauses, countParams);
+  params.push(limit, offset);
   const result = await postgresQuery<
     CollectionRow & {
       floor_price_wei: string | null;
@@ -1428,10 +1476,10 @@ export async function searchTrackedCollectionsByName(
        (c.is_vault_backed IS TRUE) DESC,
        s.sales_24h DESC NULLS LAST,
        c.chain_slug, c.contract_address
-     LIMIT $${params.length}`,
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
-  return result.rows.map((row) => ({
+  const collections = result.rows.map((row) => ({
     ...rowToCollection(row),
     floorPriceWei: row.floor_price_wei,
     floorPriceCurrency: row.floor_price_currency,
@@ -1450,6 +1498,12 @@ export async function searchTrackedCollectionsByName(
     holderCount: row.holder_count,
     floorChangePct: row.floor_change_pct,
   }));
+  // nextOffset is null ONLY when this page reached the end of the match set.
+  // Derived from the count rather than from `collections.length < limit`,
+  // because a page that happens to be exactly `limit` long with more behind it
+  // is the case the length check gets wrong -- and gets wrong SILENTLY.
+  const consumed = offset + collections.length;
+  return { collections, totalCount, nextOffset: consumed < totalCount && collections.length > 0 ? consumed : null };
 }
 
 /** Bounded keyset page for edge-cached market feeds. Unlike the legacy hub
