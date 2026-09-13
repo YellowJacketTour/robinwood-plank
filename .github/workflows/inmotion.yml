@@ -1538,7 +1538,7 @@ jobs:
             cp "$seed" "$table_dir/anvil-state.json"
             # Record which release this state was born from, or the supervisor
             # reseeds again on its next start.
-            rm -f "$table_dir/state/sessions.json"
+            rm -f "$table_dir/state/invite-sessions.json"
             "$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).generatedAt||'')}catch{}" \
               "$app_dir/current/public/arcade/deploy-addresses.local.json" > "$table_dir/state/seed.generatedAt"
             # Prove the copy is the seed and nothing has grown it since.

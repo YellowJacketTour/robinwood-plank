@@ -113,7 +113,7 @@ const funder=funderPk?new Wallet(funderPk,rpc):await rpc.getSigner(8);
 // testnet it is faucet-limited, and at 0.01 gwei a 0.002 grant is ~800 bets.
 const guestGrant=parseEther(process.env.PLANK_INVITE_GRANT_ETH?.trim()||'0.05');
 const refillFloor=guestGrant/10n;
-const plank=new Contract(manifest.plank,['function mint(address,uint256)'],funder);
+const plank=new Contract(manifest.plank,['function mint(address,uint256)','function balanceOf(address) view returns (uint256)'],funder);
 const json=(res:any,status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
 async function body(req:IncomingMessage){let data='';for await(const chunk of req){data+=chunk;if(data.length>65536)throw new Error('Request too large');}return JSON.parse(data||'{}');}
 const types:Record<string,string>={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.jpg':'image/jpeg','.webp':'image/webp','.woff2':'font/woff2','.ttf':'font/ttf','.wasm':'application/wasm','.mp3':'audio/mpeg'};
@@ -154,7 +154,26 @@ createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/invite/join'&&req.method==='POST'){
       const input=await body(req);
-      if(guest){json(res,200,{ok:true});return;}
+      if(guest){
+        // A returning guest may be returning to a DIFFERENT chain: a redeploy
+        // reseeds the table, and the wallet the session remembers has nothing on
+        // it. Measured on plank.love: the dock read 0.0000, Repeat could not bet,
+        // no result card ever showed, and a manual Refill was the only way back.
+        // The invite link is the whole promise, so a rejoin below the floor is
+        // funded like a first join, including the PLANK the fuel gauge burns.
+        const g=guest;
+        const [eth,plankBal]=await Promise.all([rpc.getBalance(g.address),plank.balanceOf(g.address).catch(()=>0n)]);
+        if(eth<refillFloor||plankBal===0n){
+          const topUp=funding.then(async()=>{
+            if(eth<refillFloor)await(await funder.sendTransaction({to:g.address,value:guestGrant})).wait();
+            if(plankBal===0n)await(await plank.mint(g.address,parseEther('5000'))).wait();
+          });
+          funding=topUp.catch(()=>{});
+          try{await topUp;}catch{json(res,503,{error:'Test chain unavailable. Ask the host to restart it.'});return;}
+          g.refilled=Date.now();void persistSessions();
+        }
+        json(res,200,{ok:true});return;
+      }
       const proposed=Buffer.from(typeof input.token==='string'?input.token:'');const expected=Buffer.from(token);
       if(proposed.length!==expected.length||!timingSafeEqual(proposed,expected)){json(res,403,{error:'Invite required'});return;}
       let evicted=false;for(const [id,g]of sessions)if(g.expires<Date.now()){sessions.delete(id);evicted=true;}if(evicted)void persistSessions();

@@ -151,7 +151,7 @@ have_seed="$(cat "$seed_marker" 2>/dev/null || true)"
 if [ -s "$seed" ] && [ -n "$want_seed" ] && [ "$want_seed" != "$have_seed" ]; then
   log "release seed $want_seed is newer than the running state (${have_seed:-none}); reseeding"
   cp "$seed" "$state_file" && chmod 600 "$state_file"
-  rm -f "$table_dir/state/sessions.json"
+  rm -f "$table_dir/state/invite-sessions.json"
   printf '%s' "$want_seed" > "$seed_marker"
 fi
 
