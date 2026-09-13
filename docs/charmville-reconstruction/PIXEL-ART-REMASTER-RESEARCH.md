@@ -1,5 +1,9 @@
 # Pixel art remastering for a continuous world
 
+## Scheduling decision
+
+Deferred by product direction: finish playability and advance into live public play before remaster production. Retain current source art. The eventual remaster will roll out gradually per reviewed asset, with gameplay compatibility preserved. This document is a later-phase reference, not the current build priority.
+
 ## Decision
 
 Preserve source pixels as the immutable reference, then compile reviewed presentation variants per asset and animation family. Render those variants at the actual world-camera resolution, with a separate screen-space interface. Retain exact pixel presentation as a selectable baseline and fallback. Smooth vector reconstruction is an artistic interpretation; it cannot simultaneously preserve every square pixel boundary and replace those boundaries with curves.
