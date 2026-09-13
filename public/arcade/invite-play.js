@@ -13,7 +13,12 @@ export function mountInvitePlay({connect}) {
   repeat.onclick=()=>{auto.click();paintRepeat();};
   copy.onclick=async()=>{
     if(!invite)return;
-    const link=new URL('/',location.origin);link.hash=new URLSearchParams({invite}).toString();
+    // The join page is the gateway's root, but behind the plank.love proxy that
+    // root is served at /table -- '/' there is the marketplace home, which
+    // ignores the hash. Copying '/#invite=...' handed friends a dead link. The
+    // gateway stamps where its join page lives; direct/tunnel use still gets '/'.
+    const joinPath=document.querySelector('meta[name="plank-invite-join"]')?.content||'/';
+    const link=new URL(joinPath,location.origin);link.hash=new URLSearchParams({invite}).toString();
     try{await navigator.clipboard.writeText(link.href);copy.textContent='✓ Copied';setTimeout(()=>copy.textContent='↗ Invite',2000);}
     catch{const input=document.createElement('input');input.value=link.href;input.readOnly=true;input.setAttribute('aria-label','Friend invite link');bar.append(input);input.select();}
   };

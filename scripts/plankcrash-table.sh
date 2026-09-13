@@ -246,6 +246,7 @@ PLANK_INVITE_STATE_DIR="$table_dir/state" \
 PLANK_INVITE_PORT="$gateway_port" \
 PLANK_INVITE_PUBLIC_ORIGIN="${PLANK_INVITE_PUBLIC_ORIGIN:-https://plank.love}" \
 PLANK_INVITE_TABLE_PATH="/arcade/table.html" \
+PLANK_INVITE_JOIN_PATH="/table" \
 "$node_bin" ops/plankcrash-table/invite-gateway.mjs >> "$table_dir/gateway.log" 2>&1 &
 gateway_pid=$!
 for _ in $(seq 1 40); do listening "$gateway_port" && break; sleep 1; done

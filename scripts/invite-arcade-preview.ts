@@ -79,6 +79,10 @@ const port=Number(process.env.PLANK_INVITE_PORT||8766);
 // landing there silently drops INVITE_TEST and the green dock never mounts.
 // The proxied deployment points this at the route only the gateway answers.
 const TABLE_PATH=process.env.PLANK_INVITE_TABLE_PATH?.trim()||'/arcade/crash.html';
+// Where the join page (this server's '/') is reachable by the public. Behind
+// the plank.love proxy that is /table; the arcade's Invite button builds the
+// shareable link from it.
+const JOIN_PATH=process.env.PLANK_INVITE_JOIN_PATH?.trim()||'/';
 if(!Number.isInteger(port)||port<1||port>65535)throw new Error('PLANK_INVITE_PORT must be a valid port');
 let token='';
 try{token=(await readFile(resolve(stateDir,'invite-token.txt'),'utf8')).trim();}catch{}
@@ -234,7 +238,7 @@ createServer(async(req,res)=>{
     const path=resolve(root,'.'+pathname);
     if(!path.startsWith(resolve(root,'arcade')+sep)||!types[extname(path)]||/\.json$/i.test(path)&&!pathname.startsWith('/arcade/abi/')||/\.html$/i.test(path)&&pathname!=='/arcade/crash.html'){json(res,404,{error:'Not found'});return;}
     let data=await readFile(path);
-    if(pathname==='/arcade/crash.html')data=Buffer.from(data.toString().replace('<head>','<head><meta name="plank-invite" content="simulated"><link rel="stylesheet" href="invite-play.css">'));
+    if(pathname==='/arcade/crash.html')data=Buffer.from(data.toString().replace('<head>','<head><meta name="plank-invite" content="simulated"><meta name="plank-invite-join" content="'+JOIN_PATH+'"><link rel="stylesheet" href="invite-play.css">'));
     res.setHeader('Content-Type',types[extname(path)]);res.end(data);
   }catch{if(!res.headersSent)json(res,400,{error:'Request could not be completed'});else res.end();}
 // Loopback stays mandatory; only the port is configurable, so a supervised
