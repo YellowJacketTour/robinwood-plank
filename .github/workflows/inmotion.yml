@@ -1867,6 +1867,9 @@ jobs:
           chmod 700 "\$dst/ops/plankcrash-table/plankcrash-table.sh"
           rm -rf "\$tmp" "\$app_dir/incoming/table-$sha.tgz"
           echo "table files swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
+          # Next lists public/ once at boot: a NEW arcade file (guide.html) is a
+          # 404 until Passenger restarts the app. Edited files never needed this.
+          touch "\$app_dir/tmp/restart.txt"
           # Restart so the every-minute cron starts the new code. The supervisor
           # keeps the chain unless the shipped seed fingerprint differs.
           pkill -f 'plankcrash-table.sh' || true
