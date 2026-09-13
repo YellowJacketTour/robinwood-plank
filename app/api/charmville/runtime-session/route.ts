@@ -1,13 +1,13 @@
 import {postgresPool} from "@/lib/postgres";
 import {issueRuntimeSession,runtimeSessionCookie} from "@/lib/charmville/runtime-session";
 import {YardError} from "@/lib/charmville/errors";
+import {requireRuntimeRequestOrigin} from "@/lib/charmville/runtime-request-origin";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 const headers={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer"};
 export async function POST(request:Request) {
   try {
-    const origin=request.headers.get("origin");
-    if(origin&&origin!==new URL(request.url).origin)throw new YardError("Open the game through PlankSpace",403);
+    requireRuntimeRequestOrigin(request,{allowMissing:true});
     const token=request.headers.get("authorization")?.replace(/^Bearer\s+/i,"")??"";
     const result=await issueRuntimeSession(postgresPool(),token);
     return Response.json({expiresAt:result.expiresAt},{headers:{...headers,"Set-Cookie":runtimeSessionCookie(result.ticket)}});

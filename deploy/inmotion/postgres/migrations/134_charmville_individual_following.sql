@@ -13,7 +13,7 @@ BEGIN
  RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS charmville_following_compat ON charmville_creature_entities;
-CREATE TRIGGER charmville_following_compat BEFORE INSERT ON charmville_creature_entities FOR EACH ROW EXECUTE FUNCTION charmville_import_following();
+CREATE TRIGGER charmville_following_compat BEFORE INSERT ON charmville_creature_entities FOR EACH ROW EXECUTE PROCEDURE charmville_import_following();
 -- Older clients can still change their starter, never the rest of the roster.
 CREATE OR REPLACE FUNCTION charmville_sync_starter_following() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -24,4 +24,4 @@ BEGIN
  RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS charmville_starter_following_compat ON charmville_companions;
-CREATE TRIGGER charmville_starter_following_compat AFTER UPDATE OF following ON charmville_companions FOR EACH ROW EXECUTE FUNCTION charmville_sync_starter_following();
+CREATE TRIGGER charmville_starter_following_compat AFTER UPDATE OF following ON charmville_companions FOR EACH ROW EXECUTE PROCEDURE charmville_sync_starter_following();

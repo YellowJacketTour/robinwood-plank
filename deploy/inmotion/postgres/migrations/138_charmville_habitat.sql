@@ -8,5 +8,5 @@ CREATE OR REPLACE FUNCTION charmville_encounter_history() RETURNS trigger LANGUA
  IF (NEW.hp=0 OR NEW.captured) AND NEW.terminal_at IS NULL THEN NEW.terminal_at=clock_timestamp(); END IF;
  RETURN NEW;END $$;
 DROP TRIGGER IF EXISTS charmville_encounter_history_trigger ON charmville_encounters;
-CREATE TRIGGER charmville_encounter_history_trigger BEFORE INSERT OR UPDATE ON charmville_encounters FOR EACH ROW EXECUTE FUNCTION charmville_encounter_history();
+CREATE TRIGGER charmville_encounter_history_trigger BEFORE INSERT OR UPDATE ON charmville_encounters FOR EACH ROW EXECUTE PROCEDURE charmville_encounter_history();
 CREATE TABLE IF NOT EXISTS charmville_habitat_budget(region_id text PRIMARY KEY,window_started_at timestamptz NOT NULL DEFAULT clock_timestamp(),spawn_count integer NOT NULL DEFAULT 1 CHECK(spawn_count BETWEEN 1 AND 3));
