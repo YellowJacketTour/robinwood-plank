@@ -33,3 +33,6 @@
  .charm-world .world-navigation > div:last-child:not([role=tablist]) { position:static; }
  .charm-world .world-menu { padding:8px; }
 }
+
+.charm-world .world-arrival { position:absolute; inset:0; z-index:19; display:grid; align-items:center; overflow:auto; padding:clamp(16px,4vw,48px); border:3px double var(--color-gold-300); border-radius:12px; background:var(--color-forest-900); color:var(--color-cream); }
+.charm-world .world-arrival > div { max-width:760px; margin:auto; }

@@ -7,6 +7,7 @@ export function useTutorialBridge(frame:RefObject<HTMLIFrameElement|null>,token:
   if(!token)return;
   const controller=new AbortController(),context=crypto.randomUUID();
   let completed:boolean|undefined,busy=false,lastAttempt=0;
+  let runtimeWindow:Window|null=null;
   const send=()=>{if(completed!==undefined)frame.current?.contentWindow?.postMessage({type:'charmville:tutorial-state',context,completed},'http://localhost:3021');};
   const request=async(save=false)=>{
    if(busy||Date.now()-lastAttempt<1000)return;
@@ -21,11 +22,12 @@ export function useTutorialBridge(frame:RefObject<HTMLIFrameElement|null>,token:
   };
   const receive=(event:MessageEvent)=>{
    if(event.source!==frame.current?.contentWindow||event.origin!=='http://localhost:3021')return;
+   runtimeWindow=frame.current.contentWindow;
    if(event.data?.type==='charmville:tutorial-ready'){if(completed===undefined)void request();else send();}
    if(event.data?.type==='charmville:tutorial-completed'&&event.data.context===context&&!completed)void request(true);
   };
   window.addEventListener('message',receive);void request();
-  return()=>{controller.abort();window.removeEventListener('message',receive);};
+  return()=>{controller.abort();window.removeEventListener('message',receive);runtimeWindow?.postMessage({type:'charmville:tutorial-reset',context},'http://localhost:3021');};
  },[frame,token]);
  return token?status:'';
 }

@@ -101,3 +101,5 @@ body.charm-runtime {
 .voice-notes audio { display:block; width:100%; margin:16px 0; }
 .voice-notes label { display:block; }
 .voice-notes textarea { display:block; box-sizing:border-box; width:100%; padding:12px; background:var(--color-wood-900); color:var(--color-cream); border:1px solid var(--color-line); }
+
+.charm-runtime .charm-tutorial-continue[hidden] { display:none!important; }

@@ -23,6 +23,16 @@ test("encounter lifecycle preserves identity HP status and isolates control acro
   await pool.query("UPDATE charmville_encounters SET hp=hp-1,statuses=ARRAY['poison'] WHERE id=$1",[initial.encounter.id]);
   const act=async(action:string)=>{const s=await worldEncounter(pool,tokens[0]);return worldEncounter(pool,tokens[0],{...command,requestId:randomUUID(),action,revision:s.encounter.revision});};
   const inspected=await act('enter-turn');assert.equal(inspected.encounter.mode,'turn');assert.equal(inspected.encounter.hp,initial.encounter.hp-1);assert.deepEqual(inspected.encounter.statuses,['poison']);const returned=await act('return-world');assert.equal(returned.encounter.hp,inspected.encounter.hp);assert.deepEqual(returned.encounter.statuses,inspected.encounter.statuses);
+  // Walking away must allow relinquishing control without granting remote attacks.
+  const originalPosition=(await pool.query("SELECT x,y FROM charmville_native_actors WHERE profile_id=$1",[claimed.profileId])).rows[0];
+  await pool.query("UPDATE charmville_native_actors SET x=30,y=20 WHERE profile_id=$1",[claimed.profileId]);
+  const distant=await worldEncounter(pool,tokens[0]);assert.equal(distant.inRange,false);assert.deepEqual(distant.legalActions,['release']);
+  await assert.rejects(act('enter-turn'),/Move closer/);
+  await assert.rejects(worldEncounter(pool,tokens[1],{...command,requestId:randomUUID(),action:'release',revision:distant.encounter.revision}),/Approach/);
+  const released=await act('release');assert.equal(released.encounter.controllerId,null);assert.equal(released.encounter.hp,returned.encounter.hp);assert.deepEqual(released.encounter.statuses,returned.encounter.statuses);
+  assert.deepEqual((await worldEncounter(pool,tokens[1])).legalActions,['claim']);
+  await pool.query("UPDATE charmville_native_actors SET x=$2,y=$3 WHERE profile_id=$1",[claimed.profileId,originalPosition.x,originalPosition.y]);
+  await act('claim');
   await pool.query("UPDATE charmville_encounters SET lease_until=clock_timestamp()-interval '1 second'");const expired=await worldEncounter(pool,tokens[1]);assert.equal(expired.encounter.controllerId,null);assert.equal(expired.encounter.id,initial.encounter.id);
   await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds'");const p=await worldPresence(pool,tokens[0]);await worldPresence(pool,tokens[0],{destination:'home',handle:'p0',revision:p.revision});await nativeActor(pool,tokens[0]);
   await homeAccess(pool,'p0',tokens[0],parseHomeGrant({visitor:'p1',revision:'0',revoke:false,rights:['visit'],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));const pv=await worldPresence(pool,tokens[1]);await worldPresence(pool,tokens[1],{destination:'home',handle:'p0',revision:pv.revision});await nativeActor(pool,tokens[1]);const home=await worldEncounter(pool,tokens[1]);assert.notEqual(home.encounter.id,initial.encounter.id);assert.equal(home.participants.length,2);await worldEncounter(pool,tokens[1],{...command,requestId:randomUUID(),encounterId:home.encounter.id,revision:home.encounter.revision,actorEpoch:home.actorEpoch});

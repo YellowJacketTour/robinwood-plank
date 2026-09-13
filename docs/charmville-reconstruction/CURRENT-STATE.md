@@ -1,3 +1,15 @@
+# September 12 recovery status
+
+Baseline committed state inspected: `48124b5`. Read [REQUIREMENT-COVERAGE-AUDIT.md](REQUIREMENT-COVERAGE-AUDIT.md) for the full title/requirement mapping, queue inconsistencies and dependency gates. Current playable entry is `/charmville/world?panel=play`; the standalone garden remains retired.
+
+Latest committed work covers the unified viewport/party shell and test-login continuity, native placement retry/reconnect handling, arrival recovery and persisted introduction presentation preference. These are bounded local integrations. Tutorial dismissal is not a completed harvest/quest milestone; ownership of berries is not proof of earning a tutorial receipt. Distinct authored home/public geography, general shared weapon/creature simulation and externally accessible friends MMO remain unfinished.
+
+Integrated during this audit: admission overlay/input gating and home/public/friend entry controls; native introduction Continue control; authority correction for controller release when distant. Live fresh-account testing verified the arrival gate, public admission, both introduction pages, completion save and returning-player reload without replaying the introduction. The distant-release PostgreSQL regression passed. These checks establish bounded behavior, not a completed tutorial campaign or multiplayer world. See FEATURE-PROGRESS.md for validation evidence.
+
+The historical integration checkpoint and snapshots below remain for provenance. Later dated checkpoints and actual source/tests supersede conflicting old descriptions (including two-second peer polling, no interpolation and no authenticated gameplay). Do not regenerate the work queue expecting it to incorporate appended checkpoints automatically.
+
+---
+
 # Current integration checkpoint
 
 Updated 2026-09-09. This section supersedes the historical snapshots below. Read FEATURE-PROGRESS.md and the latest Git history for evidence; the older garden/frontier descriptions are not the current product direction.
@@ -79,4 +91,3 @@ The handoff checkpoint passed lint:inmotion, TypeScript, 212 contract tests, 1,3
 Local reference server binds 127.0.0.1:3021 and needs COOP/COEP headers for SharedArrayBuffer. Do not remove them. Development app 3017 is a preexisting process: do not kill unrelated servers. Runtime acquisition redownloads upstream current bytes; use archived snapshot for exact recovery. Main app live reload covers application edits; standalone upstream runtime edits require refreshing that page. No production deployment has been performed as part of this account-transition checkpoint.
 
 Latest correction: enabled native sword slashing and spin/super-spin scrolls, then expanded the test kit to high-tier gear. See ENDGAME-AND-CROSSOVER-ABILITIES.md. Custom crossover powers remain planned, not implemented.
-

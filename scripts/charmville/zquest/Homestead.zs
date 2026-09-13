@@ -131,6 +131,7 @@ global script Active
         int stages[3];int selectedPlot=0;
         int plotXs[]={24,56,88};int plotY=88;int plotX=plotXs[0];int plotCenterX=plotX+8;int plotCenterY=plotY+8;int plotFootY=plotY+16;bool farmSpawned=false;bool clearingReady=false;
         int welcome = 0;
+        int tutorialContext=0;int tutorialAck=0;
 
         int wateredTimes[3];
         int ticks = 0;
@@ -262,10 +263,26 @@ global script Active
                 plotX=plotXs[selectedPlot];plotCenterX=plotX+8;
                 for(int bed=0;bed<3;bed++){Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;dirt->Blit(2,RT_SCREEN,0,0,16,16,plotXs[bed],plotY+56,16,16);Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;}
 
-                if(welcome<2){
-                    file preference=new file("/charmville/tutorial-state.txt","r");
-                    if(preference->isValid()){line[0]=0;preference->ReadString(line);preference->Close();if(atoi(line)==1)welcome=2;}
+                // Presentation-only requests: context + sequence + expected page.
+                // No synthetic combat input and no reward authority.
+                file preference=new file("/charmville/tutorial-state.txt","r");
+                if(preference->isValid()){
+                    line[0]=0;preference->ReadString(line);preference->Close();
+                    int context=field(line,1);
+                    if(context!=tutorialContext){tutorialContext=context;tutorialAck=0;welcome=0;}
+                    if(field(line,0)==1)welcome=2;
                 }
+                bool tutorialAdvance=false;
+                file request=new file("/charmville/tutorial-request.txt","r");
+                if(request->isValid()){
+                    line[0]=0;request->ReadString(line);request->Close();
+                    int sequence=field(line,1);
+                    if(field(line,0)==tutorialContext && sequence>tutorialAck){
+                        tutorialAck=sequence;tutorialAdvance=field(line,2)==welcome;
+                    }
+                }
+                file progress=new file("/charmville/tutorial-progress.txt","w");
+                if(progress->isValid()){sprintf(line,"%d|%d|%d",tutorialContext,welcome,tutorialAck);progress->WriteString(line);progress->Close();}
                 if(welcome<2)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -280,7 +297,7 @@ global script Active
                         if(resourceMode)sprintf(line,"Harvest Oran into your satchel.");else sprintf(line,"First crop opens guest play.");Screen->DrawString(6,4,141,0,1,-1,0,line);
                     }
                     sprintf(line,"E / D / Interact: continue");Screen->DrawString(6,4,160,0,1,-1,0,line);
-                    if(Input->KeyPress[KEY_E] || Hero->PressEx3){
+                    if(tutorialAdvance || Input->KeyPress[KEY_E] || Hero->PressEx3){
                         welcome++;
                         if(welcome==2){file completed=new file("/charmville/tutorial-completed.txt","w");if(completed->isValid()){sprintf(line,"1");completed->WriteString(line);completed->Close();}}
                     }

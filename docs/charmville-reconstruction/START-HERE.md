@@ -1,8 +1,6 @@
-Latest working build (2026-09-09): read [HOMESTEAD-PLAYTEST.md](HOMESTEAD-PLAYTEST.md). Native-212 authored quest now runs a till/plant/water/harvest loop, prototype XP, moving gold aura and two-player guest sprite presence after harvest. Real browser WebSocket traffic is verified. Earlier invalid-quest results included an HTTP compression mistake; native 219 still gives Version not supported after correcting it. Progress remains session-only and unauthenticated; Pokemon, account inventory/economy and full source animation fidelity remain missing. Continue from the working native tutorial and transport.
-
 # Charmville: context-free recovery and continuation
 
-Last updated: 2026-09-09. This directory is the durable handoff; chat history is not required.
+Recovery opening updated: 2026-09-12. This directory is the durable handoff; chat history is not required.
 
 ## Read this before changing anything
 
@@ -25,7 +23,7 @@ The main repository is public. Third-party source snapshots and the large editab
 
 ## Required reading order
 
-1. This document, `CURRENT-STATE.md`, `NEXT-STEPS.md`, `CONTINUE-PROMPT.md`.
+1. This document, `CURRENT-STATE.md`, `REQUIREMENT-COVERAGE-AUDIT.md`, `NEXT-STEPS.md`, `CONTINUE-PROMPT.md`; then the latest dated `FEATURE-PROGRESS.md` checkpoint and Git history.
 2. `../CHARMVILLE-FULL-PRODUCT-VISION-2026-09-09.md` — full cross-product vision.
 3. `../CHARMVILLE-RECONSTRUCTION-BLUEPRINT-2026-09-09.md` — source fidelity, binding choices, architecture, behavior contracts, staged acceptance.
 4. `../CHARMVILLE-EXISTING-GAME-FOUNDATION-AUDIT-2026-09-09.md` and the research documents copied into `research/`.
@@ -56,17 +54,13 @@ Archive exclusions: `.env*`, `node_modules`, `.next`, and `__pycache__`. Do not 
 
 ## Running locally
 
-Use the repository's supported Node version and `npm ci`. Check existing services before starting duplicates. The main app has been running with `npx next dev -p 3017`. Open `/charmville/frontier` for the development shell and source launch links, `/charmville/play` for the prior garden. Both are experimental; neither is an accepted realization of the game.
+Use the repository's supported Node version and installed dependency lock. Inspect running services first. The current unified entry is `http://localhost:3017/charmville/world?panel=play`, with native runtime on port 3021 and local authenticated socket gateway on port 3023. The standalone garden is retired; do not restore `/charmville/frontier` or the old garden as the product.
 
-The local synthetic garden entry is explicitly development-only and requires the existing isolated local PostgreSQL configuration. Read `lib/charmville/local-playtest-policy.ts` and `scripts/charmville/README.md`. Do not weaken its host/environment checks or expose it through a public tunnel. Read environment files only when necessary; never print their values. Production secrets are deliberately not part of recovery.
+For an isolated local test profile use `/charmville/play`, the development-only account launcher. It requires the existing isolated PostgreSQL configuration and local-playtest environment guards. Read `lib/charmville/local-playtest-policy.ts` and `scripts/charmville/README.md`; preserve host/environment checks and never expose synthetic credentials through a public tunnel. Local test login survives navigation into the world. This is not production account provisioning.
 
-The source adventure uses a separate local origin:
+Native and socket startup commands are `node scripts/charmville/serve-reference-runtime.mjs` and `node scripts/charmville/serve-world-socket.mjs`. The native server uses the restored sibling reference collection and authored Homestead quest. Use the integrated world launcher rather than manually opening the original Hero of Dreams introduction. Native source-quest links and endgame equipment laboratories remain diagnostics, not the ordinary first-player experience. Consult current scripts for their exact environment requirements; do not print secret environment values.
 
-```powershell
-node scripts/charmville/serve-reference-runtime.mjs
-```
-
-Open `http://localhost:3021/play/?open=quests/purezc/139&name=Charmville&storage=idb`. The server expects restored sibling `charmville-references/zquest-web-runtime`. On a new name screen: Tab switches to keyboard entry, type a name, Enter confirms. Arrow keys move; Z/X are action buttons; Enter is Start/menu. The story intro belongs to the source quest. Engine/quest startup has been observed; a complete playthrough has not been certified.
+Current local integration includes authenticated movement, bounded peers, Oran settlement and companion encounter/capture systems. It still lacks the complete distinct-map tutorial-to-public-world MMO experience. Read the coverage audit before choosing work; do not repeat the original unauthenticated transport prototype.
 
 `http://localhost:3021/create/` is the upstream quest editor, not a custom Charmville editor. Editor boot has only had a basic check. Protected authored quests may not expose unrestricted editing; do not promise that every downloaded quest is an editable tileset. Preserve original copies and author credits.
 
@@ -89,4 +83,4 @@ Before shipping, run the repository-mandated lint, typecheck, tests and build. U
 Commit explicit paths, preserve unrelated work, and push the work branch. Update `CURRENT-STATE.md` with exact changes, verified links, failures and next task. Add source acquisitions to version/hash manifests and append a new private release/checkpoint; never silently replace an old checksummed archive. Keep the continuation prompt pointing to the latest committed state so it remains useful after further work.
 
 
-Latest audit (2026-09-09): [ANIMATION-AND-INTEGRATION-AUDIT.md](ANIMATION-AND-INTEGRATION-AUDIT.md) records native animation evidence and new source acquisitions. The actual browser editor is version 212 and rejects the `websocket` type with T047. Native version 219 compiles the probe, but its saved quest is rejected by this browser player. No network frames or combined farming/creature/skills gameplay have been demonstrated. First integration gate: use a matched editor/compiler/player build, then verify one authoritative planted plot and harvested inventory/XP transaction in the native world. The existing adventure remains an unmodified source quest in nonpersistent test mode.
+Historical audit (2026-09-09; superseded by subsequent checkpoints): [ANIMATION-AND-INTEGRATION-AUDIT.md](ANIMATION-AND-INTEGRATION-AUDIT.md) records native animation evidence and new source acquisitions. The actual browser editor is version 212 and rejects the `websocket` type with T047. Native version 219 compiles the probe, but its saved quest is rejected by this browser player. No network frames or combined farming/creature/skills gameplay have been demonstrated. First integration gate: use a matched editor/compiler/player build, then verify one authoritative planted plot and harvested inventory/XP transaction in the native world. The existing adventure remains an unmodified source quest in nonpersistent test mode.

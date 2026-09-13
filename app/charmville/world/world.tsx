@@ -44,15 +44,15 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const [tab,setTab]=useState<WorldTab>('play');
   const frame=useRef<HTMLIFrameElement|null>(null);
   const menuRoot=useRef<HTMLElement|null>(null);
-  const returnToPlay=useCallback(()=>{setTab('play');requestAnimationFrame(()=>frame.current?.focus());},[]);
+  const returnToPlay=useCallback(()=>{setTab('play');requestAnimationFrame(()=>{if(presence?.active)frame.current?.focus();else document.getElementById('arrival-primary')?.focus();});},[presence?.active]);
   useMenuGamepad(menuRoot,Boolean(identity),returnToPlay,tab);
   // Keep the live world mounted, but give the account pages exclusive input.
   // Moving focus also makes the native controller release held inputs on blur.
   useLayoutEffect(()=>{
-    if(tab==='play')return;
+    if(tab==='play'&&presence?.active)return;
     const focused=document.activeElement;
     if(focused===frame.current||focused===document.body||focused instanceof Element&&focused.closest('[inert]')){
-      document.getElementById(`tab-${tab}`)?.focus({preventScroll:true});
+      document.getElementById(tab==='play'?'arrival-primary':`tab-${tab}`)?.focus({preventScroll:true});
     }
     const back=(event:KeyboardEvent)=>{
       if(event.key!=='Escape'||event.defaultPrevented||menuRoot.current?.querySelector('dialog[open]'))return;
@@ -61,7 +61,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     };
     window.addEventListener('keydown',back);
     return()=>window.removeEventListener('keydown',back);
-  },[tab,returnToPlay]);
+  },[tab,returnToPlay,presence?.active]);
   useNativeContactObserver(frame);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
@@ -309,7 +309,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     {tutorialStatus&&<p role="status">{tutorialStatus}</p>}
     {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps inventory={inventory} onSatchel={()=>setTab('inventory')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
     <div className={`world-stage grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
-      <section id="panel-play" inert={tab!=='play'} aria-hidden={tab!=='play'} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
+      <section id="panel-play" inert={tab!=='play'||!presence?.active} aria-hidden={tab!=='play'||!presence?.active} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-2 flex items-center justify-between gap-2"><h2 className="font-display text-xl text-gold-300">Adventure</h2><span className="text-xs text-cream-muted">Enter · Game menus</span></div>
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
         <details className="mb-2 text-xs text-cream-muted"><summary className="cursor-pointer py-2">What saves with your account</summary><p className="py-2">{presence?.active?'Your movement, Oran harvests, companion health and captured creatures save to your account. Supported encounter victories award experience. The native equipment menu remains a separate test loadout.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p></details>
@@ -317,6 +317,15 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
           <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
         {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter} onCaptureReceipt={showCapture} onCaptureAvailability={updateCaptureAvailability}/>}
       </section>
+      {tab==='play'&&!presence?.active&&<section className="world-arrival" aria-label="Choose your arrival">
+        <div><p className="text-xs font-bold tracking-wide text-gold-300">CHARMVILLE · YOUR JOURNEY</p>
+        <h2 className="my-3 font-display text-2xl">{inventory?'Welcome back, '+identity.handle:'A home. A companion. A world to explore.'}</h2>
+        <p className="mb-5 max-w-xl text-cream-muted">{inventory?'Enter your homestead to tend your crops and prepare your party, or meet other players in the meadow.':'Begin in Party to claim your home and choose your first companion. Your supplies and companions stay with your account.'}</p>
+        <div className="flex flex-wrap gap-3"><button id="arrival-primary" className={`${button} bg-gold-500 text-wood-950`} disabled={busy} onClick={()=>{if(inventory)void load({destination:'home',handle:identity.handle});else setTab('companions');}}>{busy?'Checking your arrival…':inventory?'Enter my home':'Begin my journey'}</button>
+        <button className={button} disabled={busy} onClick={()=>void load({destination:'public'})}>Visit the public meadow</button>
+        <button className={button} disabled={busy} onClick={()=>setTab('friends')}>Visit a friend</button></div>
+        <p className="mt-5 text-sm text-cream-muted">{presence?.reason==='permission-revoked'?'Your invitation has changed. Choose an available destination.':'Gameplay connects after your destination accepts your account.'}</p></div>
+      </section>}
       <aside className={tab==='play'?'hidden':'world-menu space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={returnToPlay}>Return to play</button></div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
         <section className="rounded-xl border border-line bg-panel p-4"><h2 className="font-display text-xl">@{identity.handle}</h2><p className="mt-2 text-cream-muted">{presence?.active?(presence.ownerHandle?`At @${presence.ownerHandle}’s home`:"In the public meadow"):"Choose where to join"}</p>

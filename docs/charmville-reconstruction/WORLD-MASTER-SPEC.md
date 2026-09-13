@@ -1,6 +1,6 @@
 # Charmville: persistent world master specification
 
-Status: target design, not a claim of completed implementation. This specification governs subsequent work. The native reference runtime currently has temporary local farming and guest poses; it does not implement the authenticated universe below.
+Status: target design, not a claim of completed implementation. This specification governs subsequent work. This is not a current implementation inventory. Bounded authenticated farming, movement and companion systems now exist; consult REQUIREMENT-COVERAGE-AUDIT.md and the latest FEATURE-PROGRESS.md checkpoint for verified scope and gaps. The full universe below remains the target.
 
 ## Product contract
 
