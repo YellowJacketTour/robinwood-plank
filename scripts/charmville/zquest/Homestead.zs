@@ -49,6 +49,7 @@ global script Active
         file lifecycle=new file("/charmville/lifecycle-sequence.txt","w");if(lifecycle->isValid()){lifecycle->WriteString(text);lifecycle->Close();}
         file auth=new file("/charmville/resource-authorization.txt","w");if(auth->isValid())auth->Close();
         file position=new file("/charmville/position.txt","w");if(position->isValid())position->Close();
+        file arrival=new file("/charmville/arrival-ready.txt","w");if(arrival->isValid())arrival->Close();
         file introState=new file("/charmville/tutorial-state.txt","w");if(introState->isValid()){introState->WriteString(text);introState->Close();}
         file tutorial=new file("/charmville/tutorial-completed.txt","w");if(tutorial->isValid()){tutorial->WriteString(text);tutorial->Close();}
         file correction=new file("/charmville/position-correction.txt","w");if(correction->isValid())correction->Close();
@@ -363,7 +364,17 @@ global script Active
                     }
                     clearingReady=prepared;if(prepared){printf("CHARMVILLE_FARM_CLEARING READY SOLID %d\n",solid);printf("CHARMVILLE_FARM_GROUND_LAYER %d ORIGIN %d BG2 %d MEADOW_BG2 %d\n",farmGroundLayer,Game->GetCurScreen(),IsBackgroundLayer(2)?1:0,IsBackgroundLayer(2,meadow)?1:0);}
                 }
-                if(!farmSpawned && farmHere && clearingReady){Hero->X=farmOffsetX+16;Hero->Y=farmOffsetY+72;Hero->Dir=DIR_DOWN;farmSpawned=true;}
+                if(!farmSpawned && farmHere && clearingReady){
+                    Hero->X=farmOffsetX+16;Hero->Y=farmOffsetY+72;Hero->Dir=DIR_DOWN;farmSpawned=true;
+                    // Receipt belongs to this native run, not a coincidental coordinate.
+                    char32 arrivalRun[32];
+                    file generation=new file("/charmville/action-run.txt","r");
+                    if(generation->isValid()){
+                        generation->ReadString(arrivalRun);generation->Close();
+                        file arrival=new file("/charmville/arrival-ready.txt","w");
+                        if(arrival->isValid()){arrival->WriteString(arrivalRun);arrival->Close();}
+                    }
+                }
                 if(activity<0 && farmHere){
                     int nearest=100000;for(int bed=0;bed<3;bed++){int dx=plotXs[bed]+8-(Hero->X+8);int dy=plotY+8-(Hero->Y+8);int distance=dx*dx+dy*dy;if(distance<nearest){nearest=distance;selectedPlot=bed;}}
                 }
