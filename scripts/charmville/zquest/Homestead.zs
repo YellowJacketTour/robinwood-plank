@@ -29,6 +29,8 @@ global script Active
         file lifecycle=new file("/charmville/lifecycle-sequence.txt","w");if(lifecycle->isValid()){lifecycle->WriteString(text);lifecycle->Close();}
         file auth=new file("/charmville/resource-authorization.txt","w");if(auth->isValid())auth->Close();
         file position=new file("/charmville/position.txt","w");if(position->isValid())position->Close();
+        file introState=new file("/charmville/tutorial-state.txt","w");if(introState->isValid()){introState->WriteString(text);introState->Close();}
+        file tutorial=new file("/charmville/tutorial-completed.txt","w");if(tutorial->isValid()){tutorial->WriteString(text);tutorial->Close();}
         file correction=new file("/charmville/position-correction.txt","w");if(correction->isValid())correction->Close();
         file generation=new file("/charmville/action-run.txt","w");
         if(!generation->isValid())return;
@@ -260,6 +262,10 @@ global script Active
                 plotX=plotXs[selectedPlot];plotCenterX=plotX+8;
                 for(int bed=0;bed<3;bed++){Screen->DrawOrigin=DRAW_ORIGIN_SCREEN;dirt->Blit(2,RT_SCREEN,0,0,16,16,plotXs[bed],plotY+56,16,16);Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;}
 
+                if(welcome<2){
+                    file preference=new file("/charmville/tutorial-state.txt","r");
+                    if(preference->isValid()){line[0]=0;preference->ReadString(line);preference->Close();if(atoi(line)==1)welcome=2;}
+                }
                 if(welcome<2)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -274,7 +280,10 @@ global script Active
                         if(resourceMode)sprintf(line,"Harvest Oran into your satchel.");else sprintf(line,"First crop opens guest play.");Screen->DrawString(6,4,141,0,1,-1,0,line);
                     }
                     sprintf(line,"E / D / Interact: continue");Screen->DrawString(6,4,160,0,1,-1,0,line);
-                    if(Input->KeyPress[KEY_E] || Hero->PressEx3)welcome++;
+                    if(Input->KeyPress[KEY_E] || Hero->PressEx3){
+                        welcome++;
+                        if(welcome==2){file completed=new file("/charmville/tutorial-completed.txt","w");if(completed->isValid()){sprintf(line,"1");completed->WriteString(line);completed->Close();}}
+                    }
                     Waitframe();continue;
                 }
                 int reachX=plotCenterX-(Hero->X+8);int reachY=plotCenterY-(Hero->Y+8);

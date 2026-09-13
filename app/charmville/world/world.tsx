@@ -5,6 +5,7 @@ import {createCaptureStream} from "./capture-stream";
 import Link from "next/link";
 import ControlGuide from "./control-guide";
 import FirstSteps from "./first-steps";
+import {useTutorialBridge} from "./tutorial-bridge";
 import HomePermissions from "../start/home-permissions";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
@@ -104,6 +105,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const pendingPanel=useRef<'charmdex'|'voice'|null>(null);
   const session=useRef<Session|null>(null);
   const [sessionToken,setSessionToken]=useState<string|null>(null);
+  const tutorialStatus=useTutorialBridge(frame,sessionToken);
   const wallet=useRef<string|null>(null);
   const generation=useRef(0);
   const inFlight=useRef<AbortController|null>(null);
@@ -304,6 +306,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
       <p className="mt-2 truncate border-t border-line px-2 pt-2 text-xs text-cream-muted">@{identity.handle} · {presence?.active?(presence.ownerHandle?`Home of @${presence.ownerHandle}`:'Public meadow'):'Choose a location in Friends'}</p>
       {localRuntime&&<div className="mt-2 flex flex-wrap gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Discover charms</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
     </div>
+    {tutorialStatus&&<p role="status">{tutorialStatus}</p>}
     {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps inventory={inventory} onSatchel={()=>setTab('inventory')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
     <div className={`world-stage grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
       <section id="panel-play" inert={tab!=='play'} aria-hidden={tab!=='play'} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">

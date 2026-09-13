@@ -62,7 +62,7 @@ export default function LocalPlaytest() {
         <h1 className="font-display text-3xl">A little land. A world of possibility.</h1></div>
       <Link href="/charmville/frontier" className="inline-flex min-h-11 items-center text-gold-300">Explore the new frontier →</Link>
     </div>
-    {garden ? <Link href="/charmville/world?panel=play" className="inline-flex min-h-12 items-center rounded-lg bg-gold-500 px-6 text-on-gold">Enter Charmville</Link> :
+    {garden ? <button type="button" onClick={()=>window.location.assign("/charmville/world?panel=play")} className="inline-flex min-h-12 items-center rounded-lg bg-gold-500 px-6 text-on-gold">Enter Charmville</button> :
       <section className="rounded-xl border border-line bg-panel-strong p-8">
         <h2 className="font-display text-2xl">Enter Charmville</h2>
         <p className="my-4 max-w-xl text-cream-muted">Create a local testing account, then enter the unified adventure.</p>

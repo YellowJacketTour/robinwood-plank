@@ -1,3 +1,4 @@
+import './tutorial-bridge.js';
 import './voice-notes.js';
 import './charmdex.js';
 import './follower-bridge.js';
