@@ -48,10 +48,26 @@ try{
  await page.getByRole('button',{name:'Map overview',exact:true}).click();
  await page.waitForFunction(()=>window.charmvilleMapOpen===true,null,{timeout:30000});
  await page.getByRole('button',{name:'Return to world',exact:true}).waitFor();
+ await page.waitForFunction(()=>window.charmvilleMapNavigationReady===true);
+ const mapState=()=>page.evaluate(()=>window.charmvilleMapNavigation);
+ const mapBefore=await mapState();
+ await page.locator('#canvas').hover();await page.mouse.wheel(0,-100);
+ await page.waitForFunction(index=>window.charmvilleMapNavigation.scaleIndex>index,mapBefore.scaleIndex);
+ const mapZoomed=await mapState();
+ const box=await page.locator('#canvas').boundingBox();
+ await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5);await page.mouse.down();
+ await page.mouse.move(box.x+box.width*.6,box.y+box.height*.55,{steps:8});await page.mouse.up();
+ await page.waitForFunction(x=>window.charmvilleMapNavigation.panX>x,mapZoomed.panX);
+ const mapDragged=await mapState();
+ await page.keyboard.down('w');await page.waitForTimeout(200);await page.keyboard.up('w');
+ await page.waitForFunction(y=>window.charmvilleMapNavigation.panY>y,mapDragged.panY);
+ const mapKeyboard=await mapState();
+ await page.keyboard.down('ArrowRight');await page.waitForTimeout(200);await page.keyboard.up('ArrowRight');
+ await page.waitForFunction(x=>window.charmvilleMapNavigation.panX<x,mapKeyboard.panX);
  await page.screenshot({path:output+'/overview.png'});
  await page.getByRole('button',{name:'Return to world',exact:true}).click();
  await page.waitForFunction(()=>window.charmvilleMapOpen===false,null,{timeout:10000});
  assert.deepEqual(errors,[]);
- await writeFile(output+'/result.json',JSON.stringify({startup,normal,wide,restored,errors,limitations:['Existing tutorial startup relocation is not fixed by camera changes','Not multiplayer scale proof','Not a full quest replay comparison','Touch tested separately with synthetic gesture unit tests']},null,2));
+ await writeFile(output+'/result.json',JSON.stringify({startup,normal,wide,restored,mapBefore,mapZoomed,mapDragged,mapKeyboard,errors,limitations:['Not multiplayer scale proof','Not a full quest replay comparison','Touch tested separately with synthetic gesture unit tests']},null,2));
  console.log('PASS native camera changes world extent without changing canvas size');
 }finally{await browser.close();}

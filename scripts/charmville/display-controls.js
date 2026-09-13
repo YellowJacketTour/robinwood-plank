@@ -39,6 +39,7 @@ function bindDisplayNavigation(surface,host,root,readZoom,writeZoom,ready=()=>tr
   const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?surface.clientHeight:1);
   if(!Number.isFinite(delta)||delta===0)return;
   event.preventDefault();event.stopImmediatePropagation();
+  surface.focus?.({preventScroll:true});
   writeZoom(readZoom()*Math.exp(-Math.max(-500,Math.min(500,delta))*.002));
  },{passive:false,capture:true});
  const zoomKeys=new Set(['+','=','-','_','0','PageUp','PageDown']);
@@ -83,13 +84,55 @@ function bindDisplayNavigation(surface,host,root,readZoom,writeZoom,ready=()=>tr
  },{passive:false,capture:true});
 }
 // END native display navigation
+// BEGIN overview navigation
+function bindMapNavigation(surface,host,root){
+ const active=()=>host.charmvilleMapOpen===true&&host.charmvilleMapNavigationReady===true&&!root.hidden&&!root.querySelector('dialog[open], [aria-modal="true"]');
+ const consume=e=>{e.preventDefault();e.stopImmediatePropagation();};
+ const pan=(x,y)=>{host.charmvilleMapPanX=(host.charmvilleMapPanX||0)+x;host.charmvilleMapPanY=(host.charmvilleMapPanY||0)+y;};
+ let drag=null;const held=new Set();
+ const directions={ArrowUp:[0,8],w:[0,8],ArrowDown:[0,-8],s:[0,-8],ArrowLeft:[8,0],a:[8,0],ArrowRight:[-8,0],d:[-8,0]};
+ surface.addEventListener('wheel',e=>{
+  if(!active()||e.altKey||e.metaKey||!Number.isFinite(e.deltaY)||!e.deltaY)return;
+  consume(e);surface.focus({preventScroll:true});
+  host.charmvilleMapZoomDelta=Math.max(-16,Math.min(16,(host.charmvilleMapZoomDelta||0)+(e.deltaY<0?1:-1)));
+ },{capture:true,passive:false});
+ surface.addEventListener('pointerdown',e=>{
+  if(!active()||e.button!==0)return;
+  consume(e);surface.focus({preventScroll:true});surface.setPointerCapture(e.pointerId);
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY};
+ },{capture:true,passive:false});
+ surface.addEventListener('pointermove',e=>{
+  if(!drag||drag.id!==e.pointerId)return;
+  if(!active()){drag=null;return;}
+  consume(e);const r=surface.getBoundingClientRect();
+  if(r.width&&r.height)pan((e.clientX-drag.x)*256/r.width,(e.clientY-drag.y)*224/r.height);
+  drag.x=e.clientX;drag.y=e.clientY;
+ },{capture:true,passive:false});
+ for(const type of ['pointerup','pointercancel','lostpointercapture'])surface.addEventListener(type,e=>{if(drag?.id===e.pointerId){consume(e);drag=null;if(surface.hasPointerCapture?.(e.pointerId))surface.releasePointerCapture(e.pointerId);}},true);
+ host.addEventListener('keydown',e=>{
+  const key=e.key.length===1?e.key.toLowerCase():e.key;
+  if(!active()||!directions[key]||e.ctrlKey||e.altKey||e.metaKey||root.activeElement!==surface)return;
+  consume(e);held.add(key);
+ },true);
+ host.addEventListener('keyup',e=>{const key=e.key.length===1?e.key.toLowerCase():e.key;if(held.delete(key))consume(e);},true);
+ const clear=()=>{held.clear();drag=null;};host.addEventListener('blur',clear);root.addEventListener('visibilitychange',clear);
+ let last=0;function tick(now){
+  const dt=Math.min(32,Math.max(0,now-last));last=now;
+  if(!active()||root.activeElement!==surface)held.clear();
+  let x=0,y=0;for(const key of held){x+=directions[key][0];y+=directions[key][1];}
+  if(x||y){const length=Math.hypot(x,y);pan(x/length*dt*.25,y/length*dt*.25);}
+  host.requestAnimationFrame(tick);
+ }host.requestAnimationFrame(tick);
+}
+// END overview navigation
+bindMapNavigation(canvas,window,document);
 // Camera gestures never write CSS size. Only a capable native frame may accept
 // a request; legacy runtimes keep these controls hidden and gestures untouched.
 const camera=document.createElement('fieldset');camera.hidden=true;
 camera.innerHTML='<legend>World camera</legend><label>View distance <input aria-label="World camera zoom" type="range" min="50" max="100" step="5" value="100"></label><output aria-live="polite">100%</output><button type="button">Wide view</button><button type="button">Follow view</button><p>Wheel or pinch to see more land. + / − zoom; 0 resets. Window size stays fixed.</p>';
 panel.append(camera);
 const mapButton=document.createElement('button');mapButton.type='button';mapButton.hidden=true;mapButton.textContent='Map overview';panel.append(mapButton);
-const mapHelp=document.createElement('span');mapHelp.hidden=true;mapHelp.textContent='Arrows: pan · Z / X: zoom · Return to world: close';
+const mapHelp=document.createElement('span');mapHelp.hidden=true;mapHelp.textContent='Drag / arrows / WASD: pan · Wheel or Z / X: zoom · Return to world: close';
 mapButton.onclick=()=>{if(window.charmvilleMapReady===true){if(window.charmvilleMapOpen===true)window.charmvilleCloseMap=true;else window.charmvilleOpenMap=true;for(const detail of header.querySelectorAll('details[open]'))detail.open=false;canvas.focus();}};
 const cameraSlider=camera.querySelector('input'),cameraOutput=camera.querySelector('output');
 const cameraReady=()=>window.charmvilleCameraReady===true&&window.charmvilleMapOpen!==true;

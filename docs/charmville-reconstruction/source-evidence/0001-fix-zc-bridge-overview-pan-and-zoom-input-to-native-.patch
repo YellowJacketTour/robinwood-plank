@@ -1,0 +1,89 @@
+From 2f28ad275cf23c1c7ea63bdc7afbf7073e817de6 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 07:38:07 -0500
+Subject: [PATCH] fix(zc): bridge overview pan and zoom input to native map
+
+---
+ src/zc/maps.cpp | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 9e2fb79..4214b53 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -8694,6 +8694,15 @@ void ViewMap(bool test_overview)
+ 	clear_keybuf();
+ 	pause_all_sfx();
+ 	
++#ifdef __EMSCRIPTEN__
++    if (test_overview) EM_ASM({
++        window.charmvilleMapPanX = 0;
++        window.charmvilleMapPanY = 0;
++        window.charmvilleMapZoomDelta = 0;
++        window.charmvilleMapNavigationReady = true;
++    });
++#endif
++
+ 	// view it
+ 	int32_t delay = 0;
+ 	
+@@ -8790,10 +8799,46 @@ void ViewMap(bool test_overview)
+ 		if(getInput(btnP, INPUT_PRESS))
+ 			--view_map_show_mode;
+ 			
++#ifdef __EMSCRIPTEN__
++        if (test_overview)
++        {
++            const int zoom_delta = EM_ASM_INT({
++                const value = Number(window.charmvilleMapZoomDelta);
++                window.charmvilleMapZoomDelta = 0;
++                return Number.isFinite(value) ? Math.max(-16, Math.min(16, Math.trunc(value))) : 0;
++            });
++            if (zoom_delta) { sc = vbound(sc + zoom_delta, 0, 16); redraw = true; }
++            const double pan_x = EM_ASM_DOUBLE({
++                const value = Number(window.charmvilleMapPanX);
++                window.charmvilleMapPanX = 0;
++                return Number.isFinite(value) ? Math.max(-512, Math.min(512, value)) : 0;
++            });
++            const double pan_y = EM_ASM_DOUBLE({
++                const value = Number(window.charmvilleMapPanY);
++                window.charmvilleMapPanY = 0;
++                return Number.isFinite(value) ? Math.max(-512, Math.min(512, value)) : 0;
++            });
++            // map_view_coord multiplies px/py by scale/2: invert that
++            // transform so browser drag distances remain display-pixel stable.
++            if (pan_x || pan_y)
++            {
++                px += int32_t(std::round(pan_x * 2.0 / scales[sc]));
++                py += int32_t(std::round(pan_y * 2.0 / scales[sc]));
++                redraw = true;
++            }
++        }
++#endif
++
+ 		px = vbound(px,-4096,4096);
+ 		py = vbound(py,-1408,1408);
+ 		
+ 		double scale = scales[sc];
++#ifdef __EMSCRIPTEN__
++        if (test_overview) EM_ASM({
++            window.charmvilleMapNavigation = ({panX: $0, panY: $1, scale: $2, scaleIndex: $3});
++        }, px, py, scale, sc);
++#endif
++
+ 		
+ 		if(!redraw)
+ 		{
+@@ -8845,6 +8890,9 @@ void ViewMap(bool test_overview)
+ 	}
+ 	while(!done && !Quit);
+ 
++#ifdef __EMSCRIPTEN__
++    if (test_overview) EM_ASM({ window.charmvilleMapNavigationReady = false; });
++#endif
+ 	ViewingMap = false;
+ 	destroy_bitmap(mappic);
+ 	resume_all_sfx();
+-- 
+2.52.0.windows.1
+
