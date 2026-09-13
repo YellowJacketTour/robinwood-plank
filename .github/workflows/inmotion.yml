@@ -40,8 +40,14 @@ on:
           - provision-plankcrash-table
           - cutover-bitcoin-existence
           - deploy-mesh
+          - deploy-table
           - configure-plankspace-x
           - diagnose-market-locks
+      rebuild_seed:
+        description: deploy-table only -- also rebuild the chain seed (needed when contracts/ or the deploy script changed; ~4 extra minutes). The host reseeds only if the contract fingerprint differs.
+        required: false
+        type: boolean
+        default: false
       fresh_table:
         description: provision-plankcrash-table only -- wipe the chain and every guest, and rotate the invite link (old links stop working). Prints the new link.
         required: false
@@ -1754,6 +1760,124 @@ jobs:
           pkill -f "opensea-stream-standalone.mjs" || true
           pkill -f "market-realtime.mjs" || true
           echo "mesh bundles swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
+          REMOTE
+
+  # ---------------------------------------------------------------------------
+  # Table-only release. Every table fix was paying for the full Next build, the
+  # test suite and the deploy's 30-minute database backup -- none of which the
+  # table touches. Like deploy-mesh: build the two bundles in seconds, copy
+  # them plus the supervisor and the arcade files into the CURRENT release, and
+  # restart the table so the every-minute cron starts the new code. The chain
+  # is kept unless a rebuilt seed carries a different contract fingerprint.
+  # ---------------------------------------------------------------------------
+  deploy-table:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy-table'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      REBUILD_SEED: ${{ inputs.rebuild_seed }}
+      FOUNDRY_VERSION: v1.8.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      - run: npm run build:arcade-preview
+      - run: npm run build:invite-gateway
+      - name: Rebuild the chain seed (only when asked)
+        if: ${{ inputs.rebuild_seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/foundry.tar.gz \
+            "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_alpine_amd64.tar.gz"
+          mkdir -p /tmp/foundry && tar -xzf /tmp/foundry.tar.gz -C /tmp/foundry anvil
+          /tmp/foundry/anvil --port 8545 --host 127.0.0.1 --chain-id 31337 --accounts 20 --balance 10000 --order fifo \
+            --state /tmp/anvil-live-state.json --transaction-block-keeper 100000 --block-time 0.1 --mixed-mining --silent &
+          for _ in $(seq 1 60); do curl -sf --max-time 2 -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' >/dev/null && break; sleep 1; done
+          npx hardhat compile
+          LOCAL_CASINO_REAL_TIME=1 TEST_RIG=1 npx hardhat run scripts/local-casino-setup.ts --network localhost
+          pkill -TERM -f 'anvil --port 8545' || true
+          for _ in $(seq 1 30); do pgrep -f 'anvil --port 8545' >/dev/null || break; sleep 1; done
+          pgrep -f 'anvil --port 8545' >/dev/null && { echo 'anvil did not exit' >&2; exit 1; }
+          cp /tmp/anvil-live-state.json .next/standalone/ops/plankcrash-table/anvil-seed.json
+          node -e "
+            const fs=require('fs');const raw=fs.readFileSync('.next/standalone/ops/plankcrash-table/anvil-seed.json','utf8');const state=JSON.parse(raw);
+            const is32=(x)=>typeof x==='string'&&/^0x[0-9a-fA-F]{64}\$/.test(x);const bad=[];let slots=0;
+            for(const [addr,acct] of Object.entries(state.accounts||{}))for(const [k,v] of Object.entries((acct&&acct.storage)||{})){slots++;if(!is32(k)||!is32(v))bad.push(addr);}
+            if(bad.length)throw new Error('seed is truncated: '+bad[0]);console.log('seed validated:',(raw.length/1e6).toFixed(1),'MB,',slots,'slots');"
+          find contracts scripts/local-casino-setup.ts hardhat.config.ts -type f | sort | xargs sha256sum | sha256sum | cut -c1-64 \
+            > .next/standalone/ops/plankcrash-table/seed.fingerprint
+          mkdir -p .next/standalone/public/arcade
+          cp public/arcade/deploy-addresses.local.json .next/standalone/public/arcade/deploy-addresses.local.json
+          echo "seed fingerprint: $(cat .next/standalone/ops/plankcrash-table/seed.fingerprint)"
+      - name: Package the table
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/ops/plankcrash-table pkg/public
+          cp scripts/plankcrash-table.sh pkg/ops/plankcrash-table/plankcrash-table.sh
+          cp .next/standalone/ops/plankcrash-table/arcade-preview.mjs .next/standalone/ops/plankcrash-table/invite-gateway.mjs pkg/ops/plankcrash-table/
+          if [ "${REBUILD_SEED}" = "true" ]; then
+            cp .next/standalone/ops/plankcrash-table/anvil-seed.json .next/standalone/ops/plankcrash-table/seed.fingerprint pkg/ops/plankcrash-table/
+          fi
+          # The arcade itself. vendor/ and art/ are Astra's static libraries and
+          # artwork; they do not change with a fix and would dominate the upload.
+          rsync -a --exclude vendor --exclude art --exclude deploy-addresses.local.json public/arcade/ pkg/public/arcade/
+          if [ "${REBUILD_SEED}" = "true" ]; then cp .next/standalone/public/arcade/deploy-addresses.local.json pkg/public/arcade/; fi
+          tar -C pkg -czf table.tgz .
+          ls -la table.tgz; tar -tzf table.tgz | head -20
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"; test -n "$INMOTION_USER"; test -n "$INMOTION_SSH_KEY"; test -n "$INMOTION_HOST_KEY"; test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+      - name: Swap the table into the current release and restart it
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          retry() { local a; for a in 1 2 3; do if "$@"; then return 0; fi; echo "::warning::attempt $a failed"; sleep $((a * 10)); done; return 1; }
+          target="${INMOTION_USER}@${INMOTION_HOST}"
+          sha="${GITHUB_SHA}"
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" "test -d '$INMOTION_APP_DIR/current/ops/plankcrash-table' && mkdir -p '$INMOTION_APP_DIR/incoming'"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" table.tgz "$target:$INMOTION_APP_DIR/incoming/table-$sha.tgz"
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" "$target" bash -s <<REMOTE
+          set -euo pipefail
+          app_dir='$INMOTION_APP_DIR'
+          dst="\$(readlink -f "\$app_dir/current")"
+          tmp="\$app_dir/incoming/table-$sha"
+          rm -rf "\$tmp"; mkdir -p "\$tmp"; tar -xzf "\$app_dir/incoming/table-$sha.tgz" -C "\$tmp"
+          cp -R "\$tmp/ops/." "\$dst/ops/"
+          cp -R "\$tmp/public/." "\$dst/public/"
+          chmod 700 "\$dst/ops/plankcrash-table/plankcrash-table.sh"
+          rm -rf "\$tmp" "\$app_dir/incoming/table-$sha.tgz"
+          echo "table files swapped into \$dst at \$(date -u +%FT%TZ) for $sha"
+          # Restart so the every-minute cron starts the new code. The supervisor
+          # keeps the chain unless the shipped seed fingerprint differs.
+          pkill -f 'plankcrash-table.sh' || true
+          pkill -f 'ops/plankcrash-table/invite-gateway.mjs' || true
+          pkill -f 'ops/plankcrash-table/arcade-preview.mjs' || true
+          pkill -f 'plankcrash/bin/anvil' || true
+          for _ in \$(seq 1 60); do curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ && break; sleep 3; done
+          tail -n 12 "\$app_dir/logs/plankcrash-table.log"
+          tok="\$app_dir/shared/plankcrash/state/invite-token.txt"
+          if [ -s "\$tok" ]; then echo "PLANKCRASH_INVITE_URL=https://plank.love/table#invite=\$(cat "\$tok")"; fi
+          curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ && echo "TABLE_UP=true" || echo "TABLE_UP=false"
           REMOTE
 
   diagnose-market-locks:
