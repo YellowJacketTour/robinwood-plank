@@ -170,7 +170,7 @@ function show(result,scheduled=false){
       // Collect stays available from the result card -- so the card returns on a
       // longer beat that leaves time to read and click, and any pointer or key
       // press cancels it (stopReturn) for a player who is actually looking.
-      returnTimer=setTimeout(close,result.isWinner?12000:2500);
+      returnTimer=setTimeout(close,result.isWinner?7000:2500);
 
     }
 

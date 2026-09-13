@@ -2251,7 +2251,8 @@ let publicCrashUntil=0,publicCrashX="1.00";
 const publicStory=createRoundStory();
 let publicObservedRound=null,publicObservedHadSeats=false;
 document.addEventListener('plank:lottery-closed',event=>{
-  publicRepeatReviewUntil=performance.now()+8000;
+  // A beat to read the closed lottery card, not a second betting window.
+  publicRepeatReviewUntil=performance.now()+1500;
   if(publicStory.close(event.detail?.roundId)){publicCrashUntil=0;phaseState="betting";void refresh();}
 });
 let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
