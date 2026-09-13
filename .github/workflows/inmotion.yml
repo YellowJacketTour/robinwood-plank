@@ -1543,6 +1543,7 @@ jobs:
           log_file="$logs_dir/plankcrash-table.log"
           touch "$log_file"; chmod 600 "$log_file"
           lock_file="$app_dir/shared/plankcrash-table.lock"
+          tick_file="$app_dir/shared/plankcrash-table.tick"
           flock_bin="$(command -v flock)"
           test -x "$flock_bin"
 
@@ -1567,9 +1568,12 @@ jobs:
           awk '!/plankcrash-table/' "$cron_before" > "$cron_after"
           {
             printf '%s\n' '# plankcrash-table (managed by inmotion branch)'
-            printf '* * * * * cd %s && %s -n %s /usr/bin/env PLANK_INVITE_PUBLIC_ORIGIN=%s bash %s %s %s >> %s 2>&1\n' \
+            # The trailing touch is the heartbeat: it runs whether flock started a
+            # supervisor or found the lock held, so a HEALTHY table still proves
+            # every minute that cron is alive.
+            printf '* * * * * cd %s && %s -n %s /usr/bin/env PLANK_INVITE_PUBLIC_ORIGIN=%s bash %s %s %s >> %s 2>&1; touch %s\n' \
               "$app_dir/current" "$flock_bin" "$lock_file" "$public_origin" \
-              "$supervisor" "$app_dir" "$node_bin" "$log_file"
+              "$supervisor" "$app_dir" "$node_bin" "$log_file" "$tick_file"
           } >> "$cron_after"
           crontab "$cron_after"
           # Count the tag comment only: the supervisor's own path contains
@@ -1579,12 +1583,19 @@ jobs:
           test "$managed_count" -eq 1
 
           # Do not declare success until the cron has been observed firing.
-          lines_before="$(wc -l < "$log_file")"
+          #
+          # This used to watch the supervisor LOG for growth. That only ever
+          # passed because the table was crash-looping and logging every
+          # minute; a healthy supervisor is silent, and a cron tick that finds
+          # the lock held exits without a word. So a table that finally
+          # stayed up made this check fail -- the run reported failure while
+          # the chain had been stable for six minutes. Watch the heartbeat
+          # file the cron line touches instead: it moves on every tick.
+          installed_at=$(date +%s)
           cron_observed=false
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 36); do
             sleep 5
-            lines_after="$(wc -l < "$log_file")"
-            if [ "$lines_after" -gt "$lines_before" ]; then cron_observed=true; break; fi
+            if [ -f "$tick_file" ] && [ "$(stat -c %Y "$tick_file")" -ge "$installed_at" ]; then cron_observed=true; break; fi
           done
           test "$cron_observed" = "true"
 
