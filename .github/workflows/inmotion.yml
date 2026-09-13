@@ -42,6 +42,11 @@ on:
           - deploy-mesh
           - configure-plankspace-x
           - diagnose-market-locks
+      fresh_table:
+        description: provision-plankcrash-table only -- wipe the chain and every guest, and rotate the invite link (old links stop working). Prints the new link.
+        required: false
+        type: boolean
+        default: false
       cutover_direction:
         description: >-
           For cutover-bitcoin-existence only. `arm` hands Bitcoin EXISTENCE to
@@ -1448,6 +1453,7 @@ jobs:
       INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
       INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
       PLANK_INVITE_PUBLIC_ORIGIN: ${{ vars.PLANK_INVITE_PUBLIC_ORIGIN }}
+      PLANK_FRESH_TABLE: ${{ inputs.fresh_table }}
     steps:
       - name: Validate SSH inputs
         shell: bash
@@ -1477,11 +1483,12 @@ jobs:
           port="${INMOTION_PORT:-2222}"
           ssh -o ConnectTimeout=15 -o BatchMode=yes -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "${PLANK_INVITE_PUBLIC_ORIGIN:-https://plank.love}" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "${PLANK_INVITE_PUBLIC_ORIGIN:-https://plank.love}" "${PLANK_FRESH_TABLE:-false}" <<'REMOTE'
           set -euxo pipefail
           app_dir="$1"
           node_bin="$2"
           public_origin="$3"
+          fresh_table="${4:-false}"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
@@ -1509,7 +1516,7 @@ jobs:
           # was preserved forever and the table could never recover by itself.
           # A live table still keeps its state: if the gateway answers, there are
           # guest wallets and a round counter worth protecting, so leave it alone.
-          if curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ 2>/dev/null; then
+          if [ "$fresh_table" != "true" ] && curl -sf --max-time 3 -o /dev/null http://127.0.0.1:8766/ 2>/dev/null; then
             echo "[provision] table is live; keeping its existing chain state"
           else
             # Nothing is SERVING, but that does not mean nothing is RUNNING. The
@@ -1545,6 +1552,13 @@ jobs:
             # A stopped table is not a reason to throw its economy away. Reseed
             # only when there is no state, or the release ships a seed built from
             # a DIFFERENT contract set (fingerprint), never merely a newer one.
+            if [ "$fresh_table" = "true" ]; then
+              # A fresh table is a new chain, new guests and a NEW invite link: the
+              # gateway mints a token when none exists, so removing it rotates the
+              # link and every old link stops working at the gate.
+              echo "[provision] FRESH TABLE requested: wiping chain state, guest sessions and the invite token"
+              rm -f "$table_dir/anvil-state.json" "$table_dir/state/invite-sessions.json" "$table_dir/state/invite-token.txt" "$table_dir/state/seed.fingerprint"
+            fi
             want_fp="$(cat "$app_dir/current/ops/plankcrash-table/seed.fingerprint" 2>/dev/null || true)"
             have_fp="$(cat "$table_dir/state/seed.fingerprint" 2>/dev/null || true)"
             if [ -s "$table_dir/anvil-state.json" ] && [ -n "$want_fp" ] && [ "$want_fp" = "$have_fp" ]; then
