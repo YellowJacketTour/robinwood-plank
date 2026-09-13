@@ -1836,7 +1836,7 @@ jobs:
           rsync -a --exclude vendor --exclude art --exclude deploy-addresses.local.json public/arcade/ pkg/public/arcade/
           if [ "${REBUILD_SEED}" = "true" ]; then cp .next/standalone/public/arcade/deploy-addresses.local.json pkg/public/arcade/; fi
           tar -C pkg -czf table.tgz .
-          ls -la table.tgz; tar -tzf table.tgz | head -20
+          ls -la table.tgz; tar -tzf table.tgz > table.list; wc -l < table.list; head -20 table.list
       - name: Configure trusted SSH host
         shell: bash
         run: |
