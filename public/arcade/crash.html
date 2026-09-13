@@ -1169,7 +1169,14 @@ async function loadDeployAddresses() {
     // avoids the brittle deploy-time file-copy that previously left the
     // hosted UI silently pointed at local addresses.
     const hosted = location.protocol === "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1";
-    const manifestName = hosted ? "deploy-addresses.testnet.json" : "deploy-addresses.local.json";
+    // An INVITE table is served by its own gateway in front of its own chain,
+    // on whatever host it lives. Choosing by hostname sent the hosted invite
+    // table to the Robinhood-testnet manifest: every read then hit an address
+    // with no code on the anvil behind the gateway ("missing revert data"),
+    // the clock never anchored, and plank.love showed "ROUND --" / "Joining..."
+    // forever while 127.0.0.1 played perfectly. The gateway stamps this copy
+    // (inviteTest, inviteStartBlock) so it is the one an invite must read.
+    const manifestName = INVITE_TEST ? "deploy-addresses.local.json" : hosted ? "deploy-addresses.testnet.json" : "deploy-addresses.local.json";
     const res = await fetch(manifestName, { cache: "no-store" });
     if (!res.ok) throw new Error(`Unable to load ${manifestName} (${res.status})`);
     const m = await res.json();

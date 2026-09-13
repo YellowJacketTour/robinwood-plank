@@ -933,6 +933,13 @@ jobs:
           pkill -f "opensea-stream-standalone.mjs" || true
           pkill -f "market-realtime.mjs" || true
           pkill -f "akasha-hose-standalone.mjs" || true
+          # The PlankCrash table too: its supervisor reseeds from the new
+          # release on its next start, so the chain always matches the
+          # manifest this release ships. Down for ~1 minute (next cron tick).
+          pkill -f "plankcrash-table.sh" || true
+          pkill -f "ops/plankcrash-table/invite-gateway.mjs" || true
+          pkill -f "ops/plankcrash-table/arcade-preview.mjs" || true
+          pkill -f "plankcrash/bin/anvil" || true
           REMOTE
 
       - name: Verify public health or roll back
@@ -1529,6 +1536,11 @@ jobs:
             echo "[provision] seeding a fresh chain"
             rm -f "$table_dir/anvil-state.json"
             cp "$seed" "$table_dir/anvil-state.json"
+            # Record which release this state was born from, or the supervisor
+            # reseeds again on its next start.
+            rm -f "$table_dir/state/sessions.json"
+            "$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).generatedAt||'')}catch{}" \
+              "$app_dir/current/public/arcade/deploy-addresses.local.json" > "$table_dir/state/seed.generatedAt"
             # Prove the copy is the seed and nothing has grown it since.
             seed_bytes=$(wc -c < "$seed")
             live_bytes=$(wc -c < "$table_dir/anvil-state.json")

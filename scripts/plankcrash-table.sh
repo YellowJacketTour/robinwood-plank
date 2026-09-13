@@ -131,8 +131,31 @@ fi
 #     anvil defaults to 10, leaving no headroom.
 #   --order fifo                      EDR mines in nonce order; anvil defaults
 #     to fee order, which reorders across the keeper, funder and crew senders.
-log "starting anvil"
-"$anvil_bin" \
+# ── a newer release means a newer seed ───────────────────────────────────────
+# CI deploys the casino fresh on every build and ships that chain as the seed,
+# and the release also ships the manifest the arcade reads. The state on disk
+# came from SOME earlier seed. Keeping it across a deploy leaves the table
+# fronting a chain the new manifest does not describe -- deterministic
+# addresses hid most of it, but not all, and a table that "keeps its state"
+# then never matches its own release again. So a seed whose manifest is newer
+# than the one the state was born from replaces the state. Guest wallets die
+# with the chain, so the gateway sessions go too; the invite TOKEN stays, and
+# the same link re-joins everyone with a fresh funded wallet.
+seed="$release/ops/plankcrash-table/anvil-seed.json"
+seed_marker="$table_dir/state/seed.generatedAt"
+want_seed=""
+if [ -s "$manifest" ]; then
+  want_seed="$("$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).generatedAt||'')}catch{}" "$manifest")"
+fi
+have_seed="$(cat "$seed_marker" 2>/dev/null || true)"
+if [ -s "$seed" ] && [ -n "$want_seed" ] && [ "$want_seed" != "$have_seed" ]; then
+  log "release seed $want_seed is newer than the running state (${have_seed:-none}); reseeding"
+  cp "$seed" "$state_file" && chmod 600 "$state_file"
+  rm -f "$table_dir/state/sessions.json"
+  printf '%s' "$want_seed" > "$seed_marker"
+fi
+
+log "starting anvil""$anvil_bin" \
   --port "$anvil_port" --host 127.0.0.1 --chain-id 31337 \
   --accounts 20 --balance 10000 --order fifo \
   --state "$state_file" --state-interval 60 \
@@ -154,6 +177,25 @@ if ! chain_up; then
   exit 1
 fi
 log "anvil up (pid $anvil_pid)"
+
+# ── the clock ────────────────────────────────────────────────────────────────
+# anvil resumes from the saved state's timestamp, so every restart gap pushes
+# the chain further behind the wall; measured 26.6 hours behind after two days
+# of rebuilds, and a CI seed is hours old on arrival. The contracts schedule
+# rounds in chain time and the arcade anchors its countdown to it, so bring the
+# next block to now. Forward only: anvil refuses a timestamp in its past. The
+# practice contract already guards a jump (a liftoff less than 23s out is
+# rescheduled to +38s), so the in-flight round simply closes and the next one
+# starts on the real clock.
+chain_ts="$(curl --silent --max-time 5 -X POST "http://127.0.0.1:${anvil_port}" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}' \
+  | "$node_bin" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(parseInt(JSON.parse(s).result.timestamp,16)))}catch{process.stdout.write('0')}})")"
+wall_ts="$(date +%s)"
+if [ "${chain_ts:-0}" -gt 0 ] && [ $((wall_ts - chain_ts)) -gt 5 ]; then
+  curl --silent --max-time 5 -X POST "http://127.0.0.1:${anvil_port}" -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"evm_setNextBlockTimestamp\",\"params\":[$wall_ts]}" >/dev/null
+  log "chain clock was $((wall_ts - chain_ts))s behind the wall; advanced to now"
+fi
 
 # ── the casino ───────────────────────────────────────────────────────────────
 # local-casino-setup.ts imports hardhat and cannot be bundled (native .node

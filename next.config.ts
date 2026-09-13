@@ -111,7 +111,26 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION?.trim() || undefined,
   poweredByHeader: false,
   async rewrites() {
-    return [
+    const gateway = `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}`;
+    return {
+      // beforeFiles: these two exist (or not) in public/ by accident of which
+      // release the running preview started in, so a plain rewrite is not
+      // reliable for them. Both must come from the gateway:
+      //  - practice-clock.js is the preview's measured chain-vs-wall offset.
+      //    It is gitignored, so a fresh release has none; the preview writes
+      //    it into the release dir it STARTED in, and every later deploy
+      //    switches current/ to a dir without it -- a 404, and the arcade's
+      //    clock never anchors from the file.
+      //  - deploy-addresses.local.json: the gateway stamps inviteTest and
+      //    inviteStartBlock, and its copy matches the chain it fronts even
+      //    after a redeploy ships a newer seed. Only invite guests (who carry
+      //    the session cookie) are routed there; /playtest/game keeps the
+      //    static file, exactly as before.
+      beforeFiles: [
+        { source: "/arcade/practice-clock.js", destination: `${gateway}/arcade/practice-clock.js` },
+        { source: "/arcade/deploy-addresses.local.json", has: [{ type: "cookie", key: "plank_guest" }], destination: `${gateway}/arcade/deploy-addresses.local.json` },
+      ],
+      afterFiles: [
       { source: "/api/market/multichain/socket", destination: `http://127.0.0.1:${process.env.MARKET_REALTIME_PORT || "3917"}/api/market/multichain/socket` },
       // The PlankCrash friend table. The invite gateway binds loopback only --
       // it owns the guest wallets and speaks to a local chain, so it must
@@ -139,7 +158,8 @@ const nextConfig: NextConfig = {
       { source: "/arcade/table.html", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/arcade/crash.html` },
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
-    ];
+      ],
+    };
   },
   async headers() {
     return [
