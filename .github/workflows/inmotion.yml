@@ -267,6 +267,15 @@ jobs:
           # single clean snapshot to the path that ships.
           cp /tmp/anvil-live-state.json .next/standalone/ops/plankcrash-table/anvil-seed.json
           test -s .next/standalone/ops/plankcrash-table/anvil-seed.json
+          # What the seed IS, as opposed to when it was made. The supervisor
+          # replaces a running chain only when this changes -- i.e. when the
+          # contracts or the deploy script changed -- so a fix to the arcade or
+          # the gateway no longer wipes the vault, the prize pool and every
+          # guest's balance.
+          find contracts scripts/local-casino-setup.ts hardhat.config.ts -type f | sort | xargs sha256sum | sha256sum | cut -c1-64 \
+            > .next/standalone/ops/plankcrash-table/seed.fingerprint
+          test -s .next/standalone/ops/plankcrash-table/seed.fingerprint
+          echo "seed fingerprint: $(cat .next/standalone/ops/plankcrash-table/seed.fingerprint)"
           # Validate it the way ANVIL parses it, not just as JSON. A periodic
           # dump caught mid-write stayed syntactically valid while one VALUE was
           # truncated, so JSON.parse passed and the host then refused to boot:
@@ -1533,19 +1542,27 @@ jobs:
               pkill -9 -f "plankcrash/bin/anvil" 2>/dev/null || true
               sleep 2
             fi
-            echo "[provision] seeding a fresh chain"
-            rm -f "$table_dir/anvil-state.json"
-            cp "$seed" "$table_dir/anvil-state.json"
-            # Record which release this state was born from, or the supervisor
-            # reseeds again on its next start.
-            rm -f "$table_dir/state/invite-sessions.json"
-            "$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).generatedAt||'')}catch{}" \
-              "$app_dir/current/public/arcade/deploy-addresses.local.json" > "$table_dir/state/seed.generatedAt"
-            # Prove the copy is the seed and nothing has grown it since.
+            # A stopped table is not a reason to throw its economy away. Reseed
+            # only when there is no state, or the release ships a seed built from
+            # a DIFFERENT contract set (fingerprint), never merely a newer one.
+            want_fp="$(cat "$app_dir/current/ops/plankcrash-table/seed.fingerprint" 2>/dev/null || true)"
+            have_fp="$(cat "$table_dir/state/seed.fingerprint" 2>/dev/null || true)"
+            if [ -s "$table_dir/anvil-state.json" ] && [ -n "$want_fp" ] && [ "$want_fp" = "$have_fp" ]; then
+              echo "[provision] state matches this release's contracts ($want_fp); keeping the economy"
+            else
+              echo "[provision] seeding a fresh chain (contracts ${have_fp:-none} -> ${want_fp:-unknown})"
+              rm -f "$table_dir/anvil-state.json"
+              cp "$seed" "$table_dir/anvil-state.json"
+              rm -f "$table_dir/state/invite-sessions.json"
+              printf '%s' "$want_fp" > "$table_dir/state/seed.fingerprint"
+            fi
+            # Prove the state is intact and nothing is growing it.
             seed_bytes=$(wc -c < "$seed")
             live_bytes=$(wc -c < "$table_dir/anvil-state.json")
             echo "[provision] seed ${seed_bytes} bytes -> state ${live_bytes} bytes"
-            [ "$seed_bytes" = "$live_bytes" ] || { echo "[provision] state changed during the copy; a writer is still alive" >&2; exit 1; }
+            if [ "$want_fp" != "$have_fp" ]; then
+              [ "$seed_bytes" = "$live_bytes" ] || { echo "[provision] state changed during the copy; a writer is still alive" >&2; exit 1; }
+            fi
             # Released here: the supervisor started below takes it again under
             # flock -n, exactly as the cron does.
             exec 9>&-

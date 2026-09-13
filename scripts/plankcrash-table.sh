@@ -141,15 +141,17 @@ fi
 # than the one the state was born from replaces the state. Guest wallets die
 # with the chain, so the gateway sessions go too; the invite TOKEN stays, and
 # the same link re-joins everyone with a fresh funded wallet.
+# The marker is a fingerprint of the CONTRACT SET the seed was built from, not
+# the build time. Every CI build makes a new seed, and keying on newness wiped
+# the vault, the prize pool and every guest balance on every arcade or gateway
+# fix -- players kept landing on a brand-new empty casino ("Prize is building").
+# Only a changed contract set can make the running chain wrong for its release.
 seed="$release/ops/plankcrash-table/anvil-seed.json"
-seed_marker="$table_dir/state/seed.generatedAt"
-want_seed=""
-if [ -s "$manifest" ]; then
-  want_seed="$("$node_bin" -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).generatedAt||'')}catch{}" "$manifest")"
-fi
+seed_marker="$table_dir/state/seed.fingerprint"
+want_seed="$(cat "$release/ops/plankcrash-table/seed.fingerprint" 2>/dev/null || true)"
 have_seed="$(cat "$seed_marker" 2>/dev/null || true)"
-if [ -s "$seed" ] && [ -n "$want_seed" ] && [ "$want_seed" != "$have_seed" ]; then
-  log "release seed $want_seed is newer than the running state (${have_seed:-none}); reseeding"
+if [ -s "$seed" ] && [ -n "$want_seed" ] && { [ ! -s "$state_file" ] || [ "$want_seed" != "$have_seed" ]; }; then
+  log "contract set changed (${have_seed:-none} -> $want_seed) or no state; reseeding"
   cp "$seed" "$state_file" && chmod 600 "$state_file"
   rm -f "$table_dir/state/invite-sessions.json"
   printf '%s' "$want_seed" > "$seed_marker"

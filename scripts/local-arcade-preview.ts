@@ -44,7 +44,12 @@ for (;;) {
     // It follows the real contract rules and is never enabled on a real chain.
     const id=await game.currentRoundId(),round=await game.rounds(id),now=BigInt((await provider.getBlock('latest'))!.timestamp);
     if(manifest.testRig&&Number(round.phase)===0&&now<round.bettingEndsAt&&now>=round.bettingEndsAt-10n&&await game.seatCount(id)===0n){
-      await(await game.placeBetInRound(id,20000n,{value:minimumStake})).wait();
+      // At the bare minimum stake the crew's contribution rounds to zero and no
+      // lottery draw is ever funded: spectators saw 'No funded draw this round'
+      // on every empty round. Bet like a player instead (the crew signer holds
+      // dev-chain ETH), so the pot builds and the machine draws with nobody on.
+      const crewStake=minimumStake>500000000000000n?minimumStake:500000000000000n;
+      await(await game.placeBetInRound(id,20000n,{value:crewStake})).wait();
     }
     const actions=await tick(provider,signer,{...manifest,router:manifest.rakeRouter,mockBeacon:true,mockImmediateAfterClose:true});for(const a of actions)console.log(a.step);}
   catch(err){console.error('Practice keeper:',err instanceof Error?err.message:String(err));}

@@ -157,7 +157,13 @@ async function main() {
   // Prime the Vault so the first rounds seed (bounded by the bootstrap budget).
   await (await crash.fundVault({ value: ethers.parseEther("0.2") })).wait();
   // A small real test-token jackpot makes the first played draw funded.
-  await (await lottery.fund({value:100000000000n})).wait();
+  // The hit threshold is min(1/oddsOneIn, c / (kappa * W(P))): a pot near zero
+  // makes every early draw a 4-ball toss, and a round whose only stake is the
+  // crew's minimum contributes c == 0 and draws nothing at all -- the arcade
+  // then shows the 'Prize is building' card instead of the machine. On the
+  // test rig, seed the pot at roughly what a hundred rounds of rake would leave,
+  // so the first real bet already draws against a meaningful prize.
+  await (await lottery.fund({value: TEST_RIG ? ethers.parseEther("0.00005") : 100000000000n})).wait();
   await (await plank.mint(alice.address, ethers.parseEther("5000"))).wait();
   await (await plank.mint(bob.address, ethers.parseEther("5000"))).wait();
   await (await plank.mint(carol.address, ethers.parseEther("5000"))).wait();
