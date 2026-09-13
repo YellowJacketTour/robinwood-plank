@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "note": "Exact current source snapshots. Acquisition is not a runtime or behavior verification. See manifests for content hashes; submodules prefixed - are not initialized.",
+  "repositories": [
+    {
+      "id": "solarus-engine",
+      "revision": "72d81668d6902b99338bbe1926a7d048ec1d3476",
+      "submodules": "",
+      "fileCount": 3023,
+      "bytes": 87116598,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "solarus-engine.json"
+    },
+    {
+      "id": "solarus-zsdx",
+      "revision": "e904d7904d74a97a50992b1340431d5d8f341d69",
+      "submodules": "",
+      "fileCount": 1171,
+      "bytes": 44644704,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "solarus-zsdx.json"
+    },
+    {
+      "id": "solarus-trillium",
+      "revision": "9577d8c8a933547688d83db11bb904fb0f19e76e",
+      "submodules": "",
+      "fileCount": 2184,
+      "bytes": 66182623,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "solarus-trillium.json"
+    },
+    {
+      "id": "solarus-mit-starter",
+      "revision": "e92bb2a8289df106bb318cc9f1b06a4d82bbf26f",
+      "submodules": "",
+      "fileCount": 81,
+      "bytes": 703532,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "solarus-mit-starter.json"
+    },
+    {
+      "id": "solarus-online",
+      "revision": "fcf940601a1007e8dc67efc09fd5bad27aea4d51",
+      "submodules": "",
+      "fileCount": 498,
+      "bytes": 26195014,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "solarus-online.json"
+    },
+    {
+      "id": "pokeemerald",
+      "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+      "submodules": "",
+      "fileCount": 11555,
+      "bytes": 43093681,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "pokeemerald.json"
+    },
+    {
+      "id": "zelda3",
+      "revision": "fbbb3f967a51fafe642e6140d0753979e73b4090",
+      "submodules": "",
+      "fileCount": 229,
+      "bytes": 12787650,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "zelda3.json"
+    },
+    {
+      "id": "zquest-classic",
+      "revision": "b9354acc0f4bbcfda3b390f98ff5032fbf0f6eb0",
+      "submodules": "",
+      "fileCount": 5153,
+      "bytes": 969245925,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "zquest-classic.json"
+    },
+    {
+      "id": "graal-reborn-server",
+      "revision": "efb5b901fc780fbc1f2399d0cc51fd4d6c93dbda",
+      "submodules": "010c0d32c3ef1f5a2efe31c6955a09373db638af cmake/nuget (010c0d3)\n 90e930e2da74f78601bb968224ed3b15be2e36f5 dependencies/depot_tools (90e930e)\n 5275e1f50db2e546bf9e894ae8bda70489003149 dependencies/gs2compiler (5275e1f)\n b83910652213436780eee87df25978ac081cfd7c dependencies/gs2lib (b839106)\n+0b723b1531b308cd2f46e7301df577c710522970 dependencies/miniupnp (heads/master)",
+      "fileCount": 2112,
+      "bytes": 20686643,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "graal-reborn-server.json"
+    },
+    {
+      "id": "tuxemon",
+      "revision": "59a34164f442ddecbaee4c436e3f1a5ba9474e29",
+      "submodules": "",
+      "fileCount": 4819,
+      "bytes": 204216205,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "tuxemon.json"
+    },
+    {
+      "id": "memoji-market",
+      "revision": "e4a2d1440c2a283cea6cedaa1147fca49d187502",
+      "submodules": "",
+      "fileCount": 628,
+      "bytes": 83155891,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "memoji-market.json"
+    },
+    {
+      "id": "farmvillage",
+      "revision": "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+      "submodules": "",
+      "fileCount": 69,
+      "bytes": 48368549,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "farmvillage.json"
+    },
+    {
+      "id": "fv-replowed",
+      "revision": "01ece56b75ed578b62396a97705f5333831f41d7",
+      "submodules": "",
+      "fileCount": 907,
+      "bytes": 110451890,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "fv-replowed.json"
+    },
+    {
+      "id": "lincity-ng",
+      "revision": "99939d94483189b5d512732b27555cd3e2e937a1",
+      "submodules": "",
+      "fileCount": 2401,
+      "bytes": 184745874,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "lincity-ng.json"
+    },
+    {
+      "id": "unknown-horizons",
+      "revision": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+      "submodules": "",
+      "fileCount": 1034,
+      "bytes": 31897656,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "unknown-horizons.json"
+    },
+    {
+      "id": "universal-lpc",
+      "revision": "675e21e04aaff8486a3a24e09573b3d5af9d28b9",
+      "submodules": "",
+      "fileCount": 24898,
+      "bytes": 811026883,
+      "unresolvedLfs": [],
+      "status": "acquired-and-hashed; runtime-unverified",
+      "manifest": "universal-lpc.json"
+    }
+  ]
+}

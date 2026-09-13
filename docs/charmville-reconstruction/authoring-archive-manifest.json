@@ -1,0 +1,18 @@
+{
+  "repository": "YellowJacketTour/charmville-reconstruction-vault",
+  "tag": "authoring-2026-09-09",
+  "baseRelease": "checkpoint-2026-09-09",
+  "assets": [
+    {
+      "file": "upstream-windows-x64.zip",
+      "bytes": 35417913,
+      "sha256": "dc4ec2ccd3952ee7901958eee6de1f415dbb8293787778baea87fc748be2489e"
+    },
+    {
+      "file": "authoring-roundtrip-2026-09-09.tar.gz",
+      "bytes": 10741792,
+      "sha256": "a4125b9ec0c615ff91d28bec50db8482bae6b5d7783ee03175c8edec7b4825ff"
+    }
+  ],
+  "restore": "Expand upstream-windows-x64.zip into charmville-references/zquest-native-tools/runtime. Restore roundtrip archive into a separate authoring evidence directory. The original 41 base archives remain unchanged."
+}

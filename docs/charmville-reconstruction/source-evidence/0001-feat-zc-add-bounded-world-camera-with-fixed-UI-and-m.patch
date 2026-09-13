@@ -1,0 +1,576 @@
+From 0b80f9c470e06645072859f2481fbbfe2980fade Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 07:27:02 -0500
+Subject: [PATCH] feat(zc): add bounded world camera with fixed UI and map
+ overview
+
+---
+ src/zc/maps.cpp           | 212 ++++++++++++++++++++++++++++++++------
+ src/zc/maps.h             |   3 +
+ src/zc/script_drawing.cpp |  22 +++-
+ src/zc/script_drawing.h   |   3 +
+ src/zc/zelda.cpp          |   2 +
+ 5 files changed, 206 insertions(+), 36 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 849853e..9e2fb79 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -1,3 +1,8 @@
++#include "zc/presentation_bitmap_targets.h"
++#include <memory>
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include "core/combo.h"
+ #include "core/handles.h"
+ #include "base/util.h"
+@@ -4841,20 +4846,36 @@ static void for_every_nearby_screen(const nearby_screens_t& nearby_screens, cons
+ 		fn(nearby_screen.screen_handles, nearby_screen.screen, nearby_screen.offx, nearby_screen.offy);
+ }
+ 
+-static void draw_msgstr(byte layer, BITMAP* dest = nullptr)
++using scene_ui_commands = std::vector<std::function<void()>>;
++static void draw_msgstr(byte layer, BITMAP* dest = nullptr, scene_ui_commands* ui = nullptr)
+ {
+ 	if (layer != msgstr::layer)
+ 		return;
++	if (ui)
++	{
++		ui->emplace_back([layer]() { draw_msgstr(layer, framebuf); });
++		return;
++	}
+ 	if (!dest)
+ 		dest = framebuf;
+ 
+ 	msgstr::blit_str(dest, 0, 0, 0, playing_field_offset, dest->w, dest->h);
+ }
+ 
++static void draw_scene_passive_subscr(BITMAP* dest, bool dotime, scene_ui_commands* ui)
++{
++	if (ui) ui->emplace_back([dotime]() { put_passive_subscr(framebuf, 0, 0, dotime, sspUP); });
++	else put_passive_subscr(dest, 0, 0, dotime, sspUP);
++}
++
+ static void putscrdoors(const nearby_screens_t& nearby_screens, BITMAP *dest, int32_t x, int32_t y);
+ 
+ static void set_draw_screen_clip(BITMAP* bmp)
+ {
++	if (render_viewport_override && draw_screen_clip_rect_x1 == 0 && draw_screen_clip_rect_x2 == 255 &&
++		draw_screen_clip_rect_y1 == 0 && draw_screen_clip_rect_y2 == 231)
++		set_clip_rect(bmp, 0, 0, bmp->w - 1, bmp->h - 1);
++	else
+ 	set_clip_rect(bmp, draw_screen_clip_rect_x1, draw_screen_clip_rect_y1, draw_screen_clip_rect_x2, draw_screen_clip_rect_y2);
+ }
+ 
+@@ -4914,9 +4935,9 @@ struct scene_darkness_targets
+ };
+ 
+ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
+-    const scene_darkness_targets& darkness)
++    const scene_darkness_targets& darkness, scene_ui_commands* ui)
+ {
+-	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent, ui};
+ 	do_primitives(dest, SPLAYER_DARKROOM_UNDER, 0, playing_field_offset, 0, &world_lights);
+ 	set_clip_rect(dest, 0, playing_field_offset, dest->w, dest->h);
+ 	
+@@ -4996,19 +5017,19 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
+ }
+ 
+ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark,
+-    const nearby_screens_t& nearby_screens, const scene_darkness_targets& darkness)
++    const nearby_screens_t& nearby_screens, const scene_darkness_targets& darkness, scene_ui_commands* ui)
+ {
+-	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
+-	draw_msgstr(6, dest);
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent, ui};
++	draw_msgstr(6, dest, ui);
+ 
+ 	if (get_qr(qr_LAYER6_STRINGS_OVER_SUBSCREEN))
+-		draw_msgstr(6, dest);
++		draw_msgstr(6, dest, ui);
+ 
+ 	if (get_qr(qr_NEW_DARKROOM) && !get_qr(qr_NEWDARK_L6) && any_dark)
+-		draw_darkroom(dest, nearby_screens, darkness);
++		draw_darkroom(dest, nearby_screens, darkness, ui);
+ 
+ 	_do_current_ffc_layer(dest, 7, &world_lights);
+-	draw_msgstr(7, dest);
++	draw_msgstr(7, dest, ui);
+ }
+ 
+ // Explicit legacy screen-space tail. Earlier HUD-under-sprite and message
+@@ -5019,15 +5040,15 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+     const nearby_screens_t& nearby_screens, BITMAP* without_passive_subscreen,
+     const scene_darkness_targets& darkness,
+     bool drawPassiveSubscreenSeparate,
+-    bool old_layer_draw_order)
++    bool old_layer_draw_order, scene_ui_commands* ui)
+ {
+-	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent, ui};
+ 	// Draw some text on dest
+ 
+ 	set_clip_rect(dest, 0, 0, dest->w - 1, dest->h - 1);
+ 
+ 	if(!get_qr(qr_LAYER6_STRINGS_OVER_SUBSCREEN))
+-		draw_msgstr(6, dest);
++		draw_msgstr(6, dest, ui);
+ 
+ 	// Draw the subscreen, without clipping
+ 	if(get_qr(qr_SUBSCREENOVERSPRITES))
+@@ -5035,7 +5056,7 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+ 		if (drawPassiveSubscreenSeparate)
+ 			blit(dest, without_passive_subscreen, 0, 0, 0, 0, dest->w, dest->h);
+ 
+-		put_passive_subscr(dest, 0, 0, game->should_show_time(), sspUP);
++		draw_scene_passive_subscr(dest, game->should_show_time(), ui);
+ 
+ 		do_primitives(dest, 7, 0, playing_field_offset, 0, &world_lights);
+ 		if (drawPassiveSubscreenSeparate)
+@@ -5044,9 +5065,9 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+ 	else if (!old_layer_draw_order)
+ 		do_primitives(dest, 7, 0, playing_field_offset, 0, &world_lights);
+ 
+-	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens, darkness);
++	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens, darkness, ui);
+ 	if (drawPassiveSubscreenSeparate)
+-		draw_screen_post_passive_subscreen(without_passive_subscreen, any_dark, nearby_screens, darkness);
++		draw_screen_post_passive_subscreen(without_passive_subscreen, any_dark, nearby_screens, darkness, ui);
+ }
+ 
+ // Explicit destinations for the single legacy scene composition pass. They are
+@@ -5063,9 +5084,10 @@ struct scene_composition_targets
+ 
+ static void compose_scene(const scene_composition_targets& targets,
+     bool showhero, bool runGeneric, bool drawPassiveSubscreenSeparate,
+-    bool classic_draw, bool old_layer_draw_order, presentation_frame_effects* effects)
++    bool classic_draw, bool old_layer_draw_order, presentation_frame_effects* effects,
++    scene_ui_commands* ui = nullptr, const std::function<void()>& present = {})
+ {
+-	const script_world_light_targets world_lights{targets.darkness.opaque, targets.darkness.translucent};
++	const script_world_light_targets world_lights{targets.darkness.opaque, targets.darkness.translucent, ui};
+ 	BITMAP* dest = targets.scene;
+ 	BITMAP* background = targets.background;
+ 	clear_bitmap(dest);
+@@ -5105,7 +5127,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		}
+ 		_do_current_ffc_layer(background, -2, &world_lights);
+ 		if (l2bg)
+-			draw_msgstr(2, background);
++			draw_msgstr(2, background, ui);
+ 	}
+ 	
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+@@ -5121,7 +5143,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 	_do_current_ffc_layer(background, -3, &world_lights);
+ 	if (XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+-		draw_msgstr(3, background);
++		draw_msgstr(3, background, ui);
+ 	
+ 	if (!old_layer_draw_order)
+ 	{
+@@ -5141,7 +5163,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		}
+ 		_do_current_ffc_layer(background, -2, &world_lights);
+ 		if (l2bg)
+-			draw_msgstr(2, background);
++			draw_msgstr(2, background, ui);
+ 		
+ 		do_primitives(background, -2, 0, playing_field_offset, 0, &world_lights);
+ 		
+@@ -5176,7 +5198,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		do_primitives(background, 0, 0, playing_field_offset, 0, &world_lights);
+ 	particles.draw(background, true, 0);
+ 	_do_current_ffc_layer(background, 0, &world_lights);
+-	draw_msgstr(0, background);
++	draw_msgstr(0, background, ui);
+ 
+ 	set_draw_screen_clip(background);
+ 
+@@ -5229,7 +5251,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	do_layer_primitives(background, 1, &world_lights);
+ 	particles.draw(background, true, 1);
+ 	_do_current_ffc_layer(background, 1, &world_lights);
+-	draw_msgstr(1, background);
++	draw_msgstr(1, background, ui);
+ 
+ 	// Handle layer 2 NOT being used as background layers.
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+@@ -5245,7 +5267,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 	_do_current_ffc_layer(background, 2, &world_lights);
+ 	if(!XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+-		draw_msgstr(2, background);
++		draw_msgstr(2, background, ui);
+ 
+ 	do_primitives(background, SPLAYER_FFC_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+@@ -5340,7 +5362,10 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	if(!(pricesdisplaybuf->clip))
+ 	{
+-		masked_blit(pricesdisplaybuf,dest,0,0,0,playing_field_offset,dest->w,dest->h);
++		if (ui) ui->emplace_back([]() {
++			masked_blit(pricesdisplaybuf, framebuf, 0, 0, 0, playing_field_offset, framebuf->w, framebuf->h);
++		});
++		else masked_blit(pricesdisplaybuf,dest,0,0,0,playing_field_offset,dest->w,dest->h);
+ 	}
+ 
+ 	if (!is_extended_height_mode() && is_in_scrolling_region() && !get_qr(qr_SUBSCREENOVERSPRITES))
+@@ -5625,7 +5650,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 	_do_current_ffc_layer(dest, 3, &world_lights);
+ 	if(!XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+-		draw_msgstr(3, dest);
++		draw_msgstr(3, dest, ui);
+ 	
+ 	
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+@@ -5638,7 +5663,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	do_layer_primitives(dest, 4, &world_lights);
+ 	particles.draw(dest, true, 4);
+ 	_do_current_ffc_layer(dest, 4, &world_lights);
+-	draw_msgstr(4, dest);
++	draw_msgstr(4, dest, ui);
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		do_layer(dest, -1, screen_handles[0], offx, offy, &world_lights);
+@@ -5655,7 +5680,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		bool dotime = false;
+ 		if (replay_version_check(22)) dotime = game->should_show_time();
+-		put_passive_subscr(dest, 0, 0, dotime, sspUP);
++		draw_scene_passive_subscr(dest, dotime, ui);
+ 	}
+ 
+ 	// Draw some flying sprites onto dest
+@@ -5739,7 +5764,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	do_layer_primitives(dest, 5, &world_lights);
+ 	particles.draw(dest, true, 5);
+ 	_do_current_ffc_layer(dest, 5, &world_lights);
+-	draw_msgstr(5, dest);
++	draw_msgstr(5, dest, ui);
+ 	
+ 	_do_current_ffc_layer(dest, -1000, &world_lights); // 'overhead' freeform combos
+ 
+@@ -5788,7 +5813,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	//Darkroom if under the subscreen
+ 	if(get_qr(qr_NEW_DARKROOM) && get_qr(qr_NEWDARK_L6) && any_dark)
+-		draw_darkroom(dest, nearby_screens, targets.darkness);
++		draw_darkroom(dest, nearby_screens, targets.darkness, ui);
+ 
+ 	if (is_in_scrolling_region() && lensclk && !FFCore.system_suspend[susptLENS])
+ 	{
+@@ -5800,15 +5825,88 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 
+ 	compose_screen_overlay_tail(dest, any_dark, nearby_screens,
+-		targets.without_passive_subscreen, targets.darkness, drawPassiveSubscreenSeparate, old_layer_draw_order);
++		targets.without_passive_subscreen, targets.darkness, drawPassiveSubscreenSeparate, old_layer_draw_order, ui);
+ 
+ 	set_clip_rect(background, 0, 0, background->w, background->h);
++	if (present) present(); // Projection/UI complete before POST_DRAW observes framebuf.
+ 	if(runGeneric) FFCore.runGenericPassiveEngine(SCR_TIMING_POST_DRAW);
+ 	
+ 	for(sprite* spr : temp_sprites)
+ 		delete spr;
+ }
+ 
++struct world_camera_frame
++{
++    presentation_camera::bitmap_scratch_targets targets{presentation_camera::bitmap_scratch_backend()};
++    scene_ui_commands ui;
++    bool prepared = false;
++    double zoom = 1.0;
++    int map = -1, screen = -1, offset = 0;
++};
++static std::unique_ptr<world_camera_frame> camera_frame;
++
++void release_world_camera_frame() { camera_frame.reset(); }
++
++void begin_world_camera_frame()
++{
++    double requested = 1.0;
++#ifdef __EMSCRIPTEN__
++    requested = EM_ASM_DOUBLE({
++        window.charmvilleCameraReady = true;
++        const z = Number(window.charmvilleCameraZoom);
++        return Number.isFinite(z) ? z : 1;
++    });
++#endif
++    if (camera_frame) camera_frame->prepared = false;
++#ifdef __EMSCRIPTEN__
++    const bool open_overview = EM_ASM_INT({
++        const test = new URLSearchParams(location.search).get('test') || '';
++        const allowed = test.startsWith('/quests/charmville/homestead-region/');
++        window.charmvilleMapReady = allowed;
++        const requested = window.charmvilleOpenMap === true;
++        window.charmvilleOpenMap = false;
++        return allowed && requested;
++    });
++    if (open_overview && Playing && cur_screen < 128 && !screenscrolling)
++    {
++        EM_ASM({ window.charmvilleMapOpen = true; window.charmvilleCloseMap = false; });
++        ViewMap(true);
++        EM_ASM({ window.charmvilleMapOpen = false; });
++    }
++#endif
++    if (requested >= 1 || requested < .5 || !std::isfinite(requested) ||
++        !game || !is_in_scrolling_region() || screenscrolling || lensclk ||
++        is_extended_height_mode() || !framebuf) return;
++    auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, requested);
++    if (!geometry) return;
++    const auto r = geometry->world;
++    if (r.h + playing_field_offset + 8 > 464) return;
++    if (!camera_frame) camera_frame = std::make_unique<world_camera_frame>();
++    auto& frame = *camera_frame;
++    auto result = frame.targets.ensure({{r.w, r.h + playing_field_offset},
++        {r.w, r.h + playing_field_offset + 8}, {r.w, r.h + playing_field_offset}, {r.w, r.h}});
++    if (result == presentation_camera::scratch_resize_result::invalid ||
++        result == presentation_camera::scratch_resize_result::allocation_failed) return;
++    // Same phase as the legacy clear: before START_FRAME and script accumulation.
++    clear_darkroom_bitmaps(frame.targets.get(presentation_camera::scratch_plane::darkness),
++        frame.targets.get(presentation_camera::scratch_plane::translucent_darkness));
++    frame.ui.clear();
++    frame.zoom = requested;
++    frame.map = cur_map; frame.screen = cur_screen; frame.offset = playing_field_offset;
++    frame.prepared = true;
++}
++
++static void publish_world_camera(const presentation_camera::geometry* geometry)
++{
++#ifdef __EMSCRIPTEN__
++    const auto r = geometry ? geometry->world : presentation_camera::rectangle{viewport.x, viewport.y, viewport.w, viewport.h};
++    EM_ASM({
++        window.charmvilleCameraActualZoom = $0;
++        window.charmvilleCameraViewport = ({x:$1,y:$2,width:$3,height:$4,targetX:0,targetY:$5,targetWidth:256,targetHeight:$6});
++    }, geometry ? geometry->requested_zoom : 1.0, r.x,r.y,r.w,r.h,playing_field_offset,viewport.h);
++#endif
++}
++
+ // Draws to framebuf.
+ //
+ // But if drawPassiveSubscreenSeparate is true: framebuf_no_passive_subscreen will also contain all
+@@ -5830,6 +5928,39 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 
+ 	if(runGeneric) FFCore.runGenericPassiveEngine(SCR_TIMING_PRE_DRAW);
+ 
++	// Consume only the transaction prepared by the main game loop. Cutscene/map
++	// captures retain their legacy path; there is still exactly one compose call.
++	if (camera_frame && camera_frame->prepared && runGeneric && !drawPassiveSubscreenSeparate &&
++		!screenscrolling && !lensclk && camera_frame->map == cur_map && camera_frame->screen == cur_screen &&
++		camera_frame->offset == playing_field_offset && draw_screen_clip_rect_x1 == 0 &&
++		draw_screen_clip_rect_x2 == 255 && draw_screen_clip_rect_y1 == 0 && draw_screen_clip_rect_y2 == 231)
++	{
++		auto& frame = *camera_frame;
++		frame.prepared = false;
++		auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, frame.zoom);
++		if (geometry && frame.targets.extent(presentation_camera::scratch_plane::world) ==
++			presentation_camera::surface_extent{geometry->world.w, geometry->world.h + playing_field_offset})
++		{
++			render_viewport_scope render_scope(*geometry);
++			using presentation_camera::scratch_plane;
++			auto* scene = frame.targets.get(scratch_plane::world);
++			auto* lights = frame.targets.get(scratch_plane::light);
++			if (!Hero.reprojectSpotlights(lights, get_render_viewport())) clear_bitmap(lights);
++			compose_scene({scene, frame.targets.get(scratch_plane::background), nullptr,
++				{frame.targets.get(scratch_plane::darkness), frame.targets.get(scratch_plane::translucent_darkness)}, lights},
++				showhero, runGeneric, false, classic_draw, old_layer_draw_order, effects, &frame.ui, [&]() {
++					clear_bitmap(framebuf);
++					stretch_blit(scene, framebuf, 0, playing_field_offset, geometry->world.w, geometry->world.h,
++						0, playing_field_offset, 256, viewport.h);
++					auto legacy_geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, 1.0);
++					render_viewport_scope ui_scope(*legacy_geometry);
++					for (auto& command : frame.ui) command();
++				});
++			publish_world_camera(&*geometry);
++			return;
++		}
++	}
++	publish_world_camera(nullptr);
+ 	// Resolve the actual destinations after PRE_DRAW, preserving legacy timing.
+ 	compose_scene({framebuf, scrollbuf, framebuf_no_passive_subscreen,
+ 		{darkscr_bmp, darkscr_bmp_trans}, lightbeam_bmp},
+@@ -8229,6 +8360,11 @@ static int32_t map_view_coord(int32_t span, int64_t pos, double scale)
+ }
+ 
+ void ViewMap()
++{
++	ViewMap(false);
++}
++
++void ViewMap(bool test_overview)
+ {
+ 	ViewingMap = true;
+ 	static double scales[17] =
+@@ -8256,7 +8392,8 @@ void ViewMap()
+ 		py = ((4-(cur_screen>>4)) * 352) - 176;
+ 	}
+ 
+-	int32_t sc = 6;
++	int32_t sc = test_overview ? 2 : 6;
++	if (test_overview) px = py = 0;
+ 	
+ 	bool done=false, redraw=true;
+ 	
+@@ -8314,7 +8451,7 @@ void ViewMap()
+ 	{
+ 		for(int32_t x=0; x<16; x++)
+ 		{
+-			if (!displayOnMap(x, y))
++			if (!test_overview && !displayOnMap(x, y))
+ 			{
+ 				if (do_dark && do_new_dark)
+ 				{
+@@ -8503,7 +8640,7 @@ void ViewMap()
+ 		{
+ 			for(int32_t x=0; x<16; x++)
+ 			{
+-				if (!displayOnMap(x, y))
++				if (!test_overview && !displayOnMap(x, y))
+ 					continue;
+ 
+ 				int screen = map_scr_xy_to_index(x, y);
+@@ -8526,7 +8663,7 @@ void ViewMap()
+ 			{
+ 				for(int32_t x=0; x<16; x++)
+ 				{
+-					if (!displayOnMap(x, y))
++					if (!test_overview && !displayOnMap(x, y))
+ 						continue;
+ 
+ 					int screen = map_scr_xy_to_index(x, y);
+@@ -8697,6 +8834,13 @@ void ViewMap()
+ 		
+ 		if (getInput(btnS, INPUT_PRESS | INPUT_IGNORE_DISABLE))
+ 			done = true;
++#ifdef __EMSCRIPTEN__
++        if (test_overview && EM_ASM_INT({
++            const close = window.charmvilleCloseMap === true;
++            window.charmvilleCloseMap = false;
++            return close;
++        })) done = true;
++#endif
+ 			
+ 	}
+ 	while(!done && !Quit);
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index 3f39e9a..90925d1 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -532,6 +532,8 @@ void showbombeddoor(mapscr* scr, BITMAP *dest, int32_t side, int32_t offx, int32
+ void openshutters(mapscr* scr);
+ void loadscr(int32_t destdmap, int32_t screen, int32_t ldir, bool origin_screen_overlay=false, bool no_x80_dir=false);
+ // Frame/transition reset: preserve the caller's phase and configured dark color.
++void begin_world_camera_frame();
++void release_world_camera_frame();
+ void clear_darkroom_bitmaps(BITMAP* darkness = nullptr, BITMAP* translucent_darkness = nullptr);
+ bool is_dark(const mapscr* scr);
+ bool scrolling_is_dark(const mapscr* scr);
+@@ -568,6 +570,7 @@ void onload_gswitch_timers();
+ /****  View Map  ****/
+ bool displayOnMap(int32_t x, int32_t y);
+ void ViewMap();
++void ViewMap(bool test_overview);
+ int32_t onViewMap();
+ 
+ bool is_push(mapscr* m, int32_t pos);
+diff --git a/src/zc/script_drawing.cpp b/src/zc/script_drawing.cpp
+index bd06b69..abcf4ac 100644
+--- a/src/zc/script_drawing.cpp
++++ b/src/zc/script_drawing.cpp
+@@ -11995,7 +11995,7 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 	do_primitives(targetBitmap, type, xoff, yoff, target_sprite_uid, nullptr);
+ }
+ 
+-void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yoff, int32_t target_sprite_uid, const script_world_light_targets* world_lights)
++static void do_primitives_impl(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yoff, int32_t target_sprite_uid, const script_world_light_targets* world_lights, int only_command)
+ {
+ 	if(type > 7)
+ 		return;
+@@ -12026,7 +12026,8 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 	refInfo* oldRi = ri;
+ 
+ 	bool use_target_sprite = layer_uses_sprite(type);
+-	for (int i = 0; i < numDrawCommandsToProcess; i++)
++	for (int i = only_command >= 0 ? only_command : 0;
++		i < numDrawCommandsToProcess && (only_command < 0 || i == only_command); i++)
+ 	{
+ 		auto& command = script_drawing_commands[i];
+ 		int32_t *sdci = &script_drawing_commands[i][0];
+@@ -12064,6 +12065,18 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 		BITMAP* light_opaque = use_world_lights ? world_lights->opaque : darkscr_bmp;
+ 		BITMAP* light_translucent = use_world_lights ? world_lights->translucent : nullptr;
+ 
++		// Defer fixed UI rasterization, not script execution. The command index is
++		// stable throughout this single compose pass; every deferred command is
++		// rendered exactly once to the final frame, preserving palette color zero.
++		if (world_lights && world_lights->fixed_commands && !isTargetOffScreenBmp &&
++			(draw_origin == DrawOrigin::Screen || draw_origin == DrawOrigin::PlayingField))
++		{
++			world_lights->fixed_commands->push_back([type, xoff, yoff, target_sprite_uid, i]() {
++				do_primitives_impl(framebuf, type, xoff, yoff, target_sprite_uid, nullptr, i);
++			});
++			continue;
++		}
++
+ 		current_target_bmp = bmp;
+ 
+ 		int xoffset, yoffset;
+@@ -12525,3 +12538,8 @@ void do_script_draws(BITMAP *targetBitmap, mapscr* scr, int32_t xoff, int32_t yo
+ 	do_primitives(targetBitmap, 6, xoff, yoff);
+ 	if(!hideLayer7) do_primitives(targetBitmap, 7, xoff, yoff);
+ }
++
++void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yoff, int32_t target_sprite_uid, const script_world_light_targets* world_lights)
++{
++	do_primitives_impl(targetBitmap, type, xoff, yoff, target_sprite_uid, world_lights, -1);
++}
+diff --git a/src/zc/script_drawing.h b/src/zc/script_drawing.h
+index e509cef..570c5d2 100644
+--- a/src/zc/script_drawing.h
++++ b/src/zc/script_drawing.h
+@@ -6,6 +6,7 @@
+ #include <vector>
+ #include <string>
+ #include <set>
++#include <functional>
+ 
+ #define MAX_SCRIPT_DRAWING_COMMANDS 10000
+ #define SCRIPT_DRAWING_COMMAND_VARIABLES 20
+@@ -22,6 +23,8 @@ struct script_world_light_targets
+ {
+     BITMAP* opaque;
+     BITMAP* translucent;
++    // Optional ordered final-frame UI commands; offscreen targets stay independent.
++    std::vector<std::function<void()>>* fixed_commands = nullptr;
+ };
+ 
+ void do_primitives(BITMAP *bmp, int32_t type, int32_t target_sprite_uid = 0);
+diff --git a/src/zc/zelda.cpp b/src/zc/zelda.cpp
+index 26b734c..886f2d7 100644
+--- a/src/zc/zelda.cpp
++++ b/src/zc/zelda.cpp
+@@ -3015,6 +3015,7 @@ void game_loop()
+ 
+ 		runDrunkRNG();
+ 		clear_darkroom_bitmaps();
++		begin_world_camera_frame();
+ 		Hero.check_platform_ffc();
+ 		
+ 		// Three kinds of freezes: freeze, freeze_message, freeze_ffc
+@@ -4856,6 +4857,7 @@ void quit_game()
+ 	quest_sounds.clear();
+ 
+ 	script_drawing_commands.Dispose(); //for allegro bitmaps
++	release_world_camera_frame();
+ 	
+ 	remove_installed_timers();
+ 	
+-- 
+2.52.0.windows.1
+

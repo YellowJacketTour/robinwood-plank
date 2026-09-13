@@ -1,0 +1,1556 @@
+{
+  "source": "https://github.com/pret/pokeemerald",
+  "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+  "files": {
+    "include/constants/species.h": "a1867c83e78fb767b16a9c95c4c06d51d56c986fd48d713b98dbf01c8305089d",
+    "src/data/pokemon/species_info.h": "1aac881bb02361339dc4dd33c7a5804a7127c0367426b77b982ee213a713e0af",
+    "src/data/pokemon/experience_tables.h": "52bb33d1139d2b05af6d66fe622b09cf913540d43e9eabc48b8e6c97dd20dae0",
+    "src/battle_script_commands.c": "e0847cd2aa83ee5e18134c32baad348b7c763095cf59efa33da67c4a4e90120c"
+  },
+  "species": {
+    "1": {
+      "name": "BULBASAUR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "2": {
+      "name": "IVYSAUR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "3": {
+      "name": "VENUSAUR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "4": {
+      "name": "CHARMANDER",
+      "growth": "MEDIUM_SLOW"
+    },
+    "5": {
+      "name": "CHARMELEON",
+      "growth": "MEDIUM_SLOW"
+    },
+    "6": {
+      "name": "CHARIZARD",
+      "growth": "MEDIUM_SLOW"
+    },
+    "7": {
+      "name": "SQUIRTLE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "8": {
+      "name": "WARTORTLE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "9": {
+      "name": "BLASTOISE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "10": {
+      "name": "CATERPIE",
+      "growth": "MEDIUM_FAST"
+    },
+    "11": {
+      "name": "METAPOD",
+      "growth": "MEDIUM_FAST"
+    },
+    "12": {
+      "name": "BUTTERFREE",
+      "growth": "MEDIUM_FAST"
+    },
+    "13": {
+      "name": "WEEDLE",
+      "growth": "MEDIUM_FAST"
+    },
+    "14": {
+      "name": "KAKUNA",
+      "growth": "MEDIUM_FAST"
+    },
+    "15": {
+      "name": "BEEDRILL",
+      "growth": "MEDIUM_FAST"
+    },
+    "16": {
+      "name": "PIDGEY",
+      "growth": "MEDIUM_SLOW"
+    },
+    "17": {
+      "name": "PIDGEOTTO",
+      "growth": "MEDIUM_SLOW"
+    },
+    "18": {
+      "name": "PIDGEOT",
+      "growth": "MEDIUM_SLOW"
+    },
+    "19": {
+      "name": "RATTATA",
+      "growth": "MEDIUM_FAST"
+    },
+    "20": {
+      "name": "RATICATE",
+      "growth": "MEDIUM_FAST"
+    },
+    "21": {
+      "name": "SPEAROW",
+      "growth": "MEDIUM_FAST"
+    },
+    "22": {
+      "name": "FEAROW",
+      "growth": "MEDIUM_FAST"
+    },
+    "23": {
+      "name": "EKANS",
+      "growth": "MEDIUM_FAST"
+    },
+    "24": {
+      "name": "ARBOK",
+      "growth": "MEDIUM_FAST"
+    },
+    "25": {
+      "name": "PIKACHU",
+      "growth": "MEDIUM_FAST"
+    },
+    "26": {
+      "name": "RAICHU",
+      "growth": "MEDIUM_FAST"
+    },
+    "27": {
+      "name": "SANDSHREW",
+      "growth": "MEDIUM_FAST"
+    },
+    "28": {
+      "name": "SANDSLASH",
+      "growth": "MEDIUM_FAST"
+    },
+    "29": {
+      "name": "NIDORAN_F",
+      "growth": "MEDIUM_SLOW"
+    },
+    "30": {
+      "name": "NIDORINA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "31": {
+      "name": "NIDOQUEEN",
+      "growth": "MEDIUM_SLOW"
+    },
+    "32": {
+      "name": "NIDORAN_M",
+      "growth": "MEDIUM_SLOW"
+    },
+    "33": {
+      "name": "NIDORINO",
+      "growth": "MEDIUM_SLOW"
+    },
+    "34": {
+      "name": "NIDOKING",
+      "growth": "MEDIUM_SLOW"
+    },
+    "35": {
+      "name": "CLEFAIRY",
+      "growth": "FAST"
+    },
+    "36": {
+      "name": "CLEFABLE",
+      "growth": "FAST"
+    },
+    "37": {
+      "name": "VULPIX",
+      "growth": "MEDIUM_FAST"
+    },
+    "38": {
+      "name": "NINETALES",
+      "growth": "MEDIUM_FAST"
+    },
+    "39": {
+      "name": "JIGGLYPUFF",
+      "growth": "FAST"
+    },
+    "40": {
+      "name": "WIGGLYTUFF",
+      "growth": "FAST"
+    },
+    "41": {
+      "name": "ZUBAT",
+      "growth": "MEDIUM_FAST"
+    },
+    "42": {
+      "name": "GOLBAT",
+      "growth": "MEDIUM_FAST"
+    },
+    "43": {
+      "name": "ODDISH",
+      "growth": "MEDIUM_SLOW"
+    },
+    "44": {
+      "name": "GLOOM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "45": {
+      "name": "VILEPLUME",
+      "growth": "MEDIUM_SLOW"
+    },
+    "46": {
+      "name": "PARAS",
+      "growth": "MEDIUM_FAST"
+    },
+    "47": {
+      "name": "PARASECT",
+      "growth": "MEDIUM_FAST"
+    },
+    "48": {
+      "name": "VENONAT",
+      "growth": "MEDIUM_FAST"
+    },
+    "49": {
+      "name": "VENOMOTH",
+      "growth": "MEDIUM_FAST"
+    },
+    "50": {
+      "name": "DIGLETT",
+      "growth": "MEDIUM_FAST"
+    },
+    "51": {
+      "name": "DUGTRIO",
+      "growth": "MEDIUM_FAST"
+    },
+    "52": {
+      "name": "MEOWTH",
+      "growth": "MEDIUM_FAST"
+    },
+    "53": {
+      "name": "PERSIAN",
+      "growth": "MEDIUM_FAST"
+    },
+    "54": {
+      "name": "PSYDUCK",
+      "growth": "MEDIUM_FAST"
+    },
+    "55": {
+      "name": "GOLDUCK",
+      "growth": "MEDIUM_FAST"
+    },
+    "56": {
+      "name": "MANKEY",
+      "growth": "MEDIUM_FAST"
+    },
+    "57": {
+      "name": "PRIMEAPE",
+      "growth": "MEDIUM_FAST"
+    },
+    "58": {
+      "name": "GROWLITHE",
+      "growth": "SLOW"
+    },
+    "59": {
+      "name": "ARCANINE",
+      "growth": "SLOW"
+    },
+    "60": {
+      "name": "POLIWAG",
+      "growth": "MEDIUM_SLOW"
+    },
+    "61": {
+      "name": "POLIWHIRL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "62": {
+      "name": "POLIWRATH",
+      "growth": "MEDIUM_SLOW"
+    },
+    "63": {
+      "name": "ABRA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "64": {
+      "name": "KADABRA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "65": {
+      "name": "ALAKAZAM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "66": {
+      "name": "MACHOP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "67": {
+      "name": "MACHOKE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "68": {
+      "name": "MACHAMP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "69": {
+      "name": "BELLSPROUT",
+      "growth": "MEDIUM_SLOW"
+    },
+    "70": {
+      "name": "WEEPINBELL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "71": {
+      "name": "VICTREEBEL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "72": {
+      "name": "TENTACOOL",
+      "growth": "SLOW"
+    },
+    "73": {
+      "name": "TENTACRUEL",
+      "growth": "SLOW"
+    },
+    "74": {
+      "name": "GEODUDE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "75": {
+      "name": "GRAVELER",
+      "growth": "MEDIUM_SLOW"
+    },
+    "76": {
+      "name": "GOLEM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "77": {
+      "name": "PONYTA",
+      "growth": "MEDIUM_FAST"
+    },
+    "78": {
+      "name": "RAPIDASH",
+      "growth": "MEDIUM_FAST"
+    },
+    "79": {
+      "name": "SLOWPOKE",
+      "growth": "MEDIUM_FAST"
+    },
+    "80": {
+      "name": "SLOWBRO",
+      "growth": "MEDIUM_FAST"
+    },
+    "81": {
+      "name": "MAGNEMITE",
+      "growth": "MEDIUM_FAST"
+    },
+    "82": {
+      "name": "MAGNETON",
+      "growth": "MEDIUM_FAST"
+    },
+    "83": {
+      "name": "FARFETCHD",
+      "growth": "MEDIUM_FAST"
+    },
+    "84": {
+      "name": "DODUO",
+      "growth": "MEDIUM_FAST"
+    },
+    "85": {
+      "name": "DODRIO",
+      "growth": "MEDIUM_FAST"
+    },
+    "86": {
+      "name": "SEEL",
+      "growth": "MEDIUM_FAST"
+    },
+    "87": {
+      "name": "DEWGONG",
+      "growth": "MEDIUM_FAST"
+    },
+    "88": {
+      "name": "GRIMER",
+      "growth": "MEDIUM_FAST"
+    },
+    "89": {
+      "name": "MUK",
+      "growth": "MEDIUM_FAST"
+    },
+    "90": {
+      "name": "SHELLDER",
+      "growth": "SLOW"
+    },
+    "91": {
+      "name": "CLOYSTER",
+      "growth": "SLOW"
+    },
+    "92": {
+      "name": "GASTLY",
+      "growth": "MEDIUM_SLOW"
+    },
+    "93": {
+      "name": "HAUNTER",
+      "growth": "MEDIUM_SLOW"
+    },
+    "94": {
+      "name": "GENGAR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "95": {
+      "name": "ONIX",
+      "growth": "MEDIUM_FAST"
+    },
+    "96": {
+      "name": "DROWZEE",
+      "growth": "MEDIUM_FAST"
+    },
+    "97": {
+      "name": "HYPNO",
+      "growth": "MEDIUM_FAST"
+    },
+    "98": {
+      "name": "KRABBY",
+      "growth": "MEDIUM_FAST"
+    },
+    "99": {
+      "name": "KINGLER",
+      "growth": "MEDIUM_FAST"
+    },
+    "100": {
+      "name": "VOLTORB",
+      "growth": "MEDIUM_FAST"
+    },
+    "101": {
+      "name": "ELECTRODE",
+      "growth": "MEDIUM_FAST"
+    },
+    "102": {
+      "name": "EXEGGCUTE",
+      "growth": "SLOW"
+    },
+    "103": {
+      "name": "EXEGGUTOR",
+      "growth": "SLOW"
+    },
+    "104": {
+      "name": "CUBONE",
+      "growth": "MEDIUM_FAST"
+    },
+    "105": {
+      "name": "MAROWAK",
+      "growth": "MEDIUM_FAST"
+    },
+    "106": {
+      "name": "HITMONLEE",
+      "growth": "MEDIUM_FAST"
+    },
+    "107": {
+      "name": "HITMONCHAN",
+      "growth": "MEDIUM_FAST"
+    },
+    "108": {
+      "name": "LICKITUNG",
+      "growth": "MEDIUM_FAST"
+    },
+    "109": {
+      "name": "KOFFING",
+      "growth": "MEDIUM_FAST"
+    },
+    "110": {
+      "name": "WEEZING",
+      "growth": "MEDIUM_FAST"
+    },
+    "111": {
+      "name": "RHYHORN",
+      "growth": "SLOW"
+    },
+    "112": {
+      "name": "RHYDON",
+      "growth": "SLOW"
+    },
+    "113": {
+      "name": "CHANSEY",
+      "growth": "FAST"
+    },
+    "114": {
+      "name": "TANGELA",
+      "growth": "MEDIUM_FAST"
+    },
+    "115": {
+      "name": "KANGASKHAN",
+      "growth": "MEDIUM_FAST"
+    },
+    "116": {
+      "name": "HORSEA",
+      "growth": "MEDIUM_FAST"
+    },
+    "117": {
+      "name": "SEADRA",
+      "growth": "MEDIUM_FAST"
+    },
+    "118": {
+      "name": "GOLDEEN",
+      "growth": "MEDIUM_FAST"
+    },
+    "119": {
+      "name": "SEAKING",
+      "growth": "MEDIUM_FAST"
+    },
+    "120": {
+      "name": "STARYU",
+      "growth": "SLOW"
+    },
+    "121": {
+      "name": "STARMIE",
+      "growth": "SLOW"
+    },
+    "122": {
+      "name": "MR_MIME",
+      "growth": "MEDIUM_FAST"
+    },
+    "123": {
+      "name": "SCYTHER",
+      "growth": "MEDIUM_FAST"
+    },
+    "124": {
+      "name": "JYNX",
+      "growth": "MEDIUM_FAST"
+    },
+    "125": {
+      "name": "ELECTABUZZ",
+      "growth": "MEDIUM_FAST"
+    },
+    "126": {
+      "name": "MAGMAR",
+      "growth": "MEDIUM_FAST"
+    },
+    "127": {
+      "name": "PINSIR",
+      "growth": "SLOW"
+    },
+    "128": {
+      "name": "TAUROS",
+      "growth": "SLOW"
+    },
+    "129": {
+      "name": "MAGIKARP",
+      "growth": "SLOW"
+    },
+    "130": {
+      "name": "GYARADOS",
+      "growth": "SLOW"
+    },
+    "131": {
+      "name": "LAPRAS",
+      "growth": "SLOW"
+    },
+    "132": {
+      "name": "DITTO",
+      "growth": "MEDIUM_FAST"
+    },
+    "133": {
+      "name": "EEVEE",
+      "growth": "MEDIUM_FAST"
+    },
+    "134": {
+      "name": "VAPOREON",
+      "growth": "MEDIUM_FAST"
+    },
+    "135": {
+      "name": "JOLTEON",
+      "growth": "MEDIUM_FAST"
+    },
+    "136": {
+      "name": "FLAREON",
+      "growth": "MEDIUM_FAST"
+    },
+    "137": {
+      "name": "PORYGON",
+      "growth": "MEDIUM_FAST"
+    },
+    "138": {
+      "name": "OMANYTE",
+      "growth": "MEDIUM_FAST"
+    },
+    "139": {
+      "name": "OMASTAR",
+      "growth": "MEDIUM_FAST"
+    },
+    "140": {
+      "name": "KABUTO",
+      "growth": "MEDIUM_FAST"
+    },
+    "141": {
+      "name": "KABUTOPS",
+      "growth": "MEDIUM_FAST"
+    },
+    "142": {
+      "name": "AERODACTYL",
+      "growth": "SLOW"
+    },
+    "143": {
+      "name": "SNORLAX",
+      "growth": "SLOW"
+    },
+    "144": {
+      "name": "ARTICUNO",
+      "growth": "SLOW"
+    },
+    "145": {
+      "name": "ZAPDOS",
+      "growth": "SLOW"
+    },
+    "146": {
+      "name": "MOLTRES",
+      "growth": "SLOW"
+    },
+    "147": {
+      "name": "DRATINI",
+      "growth": "SLOW"
+    },
+    "148": {
+      "name": "DRAGONAIR",
+      "growth": "SLOW"
+    },
+    "149": {
+      "name": "DRAGONITE",
+      "growth": "SLOW"
+    },
+    "150": {
+      "name": "MEWTWO",
+      "growth": "SLOW"
+    },
+    "151": {
+      "name": "MEW",
+      "growth": "MEDIUM_SLOW"
+    },
+    "152": {
+      "name": "CHIKORITA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "153": {
+      "name": "BAYLEEF",
+      "growth": "MEDIUM_SLOW"
+    },
+    "154": {
+      "name": "MEGANIUM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "155": {
+      "name": "CYNDAQUIL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "156": {
+      "name": "QUILAVA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "157": {
+      "name": "TYPHLOSION",
+      "growth": "MEDIUM_SLOW"
+    },
+    "158": {
+      "name": "TOTODILE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "159": {
+      "name": "CROCONAW",
+      "growth": "MEDIUM_SLOW"
+    },
+    "160": {
+      "name": "FERALIGATR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "161": {
+      "name": "SENTRET",
+      "growth": "MEDIUM_FAST"
+    },
+    "162": {
+      "name": "FURRET",
+      "growth": "MEDIUM_FAST"
+    },
+    "163": {
+      "name": "HOOTHOOT",
+      "growth": "MEDIUM_FAST"
+    },
+    "164": {
+      "name": "NOCTOWL",
+      "growth": "MEDIUM_FAST"
+    },
+    "165": {
+      "name": "LEDYBA",
+      "growth": "FAST"
+    },
+    "166": {
+      "name": "LEDIAN",
+      "growth": "FAST"
+    },
+    "167": {
+      "name": "SPINARAK",
+      "growth": "FAST"
+    },
+    "168": {
+      "name": "ARIADOS",
+      "growth": "FAST"
+    },
+    "169": {
+      "name": "CROBAT",
+      "growth": "MEDIUM_FAST"
+    },
+    "170": {
+      "name": "CHINCHOU",
+      "growth": "SLOW"
+    },
+    "171": {
+      "name": "LANTURN",
+      "growth": "SLOW"
+    },
+    "172": {
+      "name": "PICHU",
+      "growth": "MEDIUM_FAST"
+    },
+    "173": {
+      "name": "CLEFFA",
+      "growth": "FAST"
+    },
+    "174": {
+      "name": "IGGLYBUFF",
+      "growth": "FAST"
+    },
+    "175": {
+      "name": "TOGEPI",
+      "growth": "FAST"
+    },
+    "176": {
+      "name": "TOGETIC",
+      "growth": "FAST"
+    },
+    "177": {
+      "name": "NATU",
+      "growth": "MEDIUM_FAST"
+    },
+    "178": {
+      "name": "XATU",
+      "growth": "MEDIUM_FAST"
+    },
+    "179": {
+      "name": "MAREEP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "180": {
+      "name": "FLAAFFY",
+      "growth": "MEDIUM_SLOW"
+    },
+    "181": {
+      "name": "AMPHAROS",
+      "growth": "MEDIUM_SLOW"
+    },
+    "182": {
+      "name": "BELLOSSOM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "183": {
+      "name": "MARILL",
+      "growth": "FAST"
+    },
+    "184": {
+      "name": "AZUMARILL",
+      "growth": "FAST"
+    },
+    "185": {
+      "name": "SUDOWOODO",
+      "growth": "MEDIUM_FAST"
+    },
+    "186": {
+      "name": "POLITOED",
+      "growth": "MEDIUM_SLOW"
+    },
+    "187": {
+      "name": "HOPPIP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "188": {
+      "name": "SKIPLOOM",
+      "growth": "MEDIUM_SLOW"
+    },
+    "189": {
+      "name": "JUMPLUFF",
+      "growth": "MEDIUM_SLOW"
+    },
+    "190": {
+      "name": "AIPOM",
+      "growth": "FAST"
+    },
+    "191": {
+      "name": "SUNKERN",
+      "growth": "MEDIUM_SLOW"
+    },
+    "192": {
+      "name": "SUNFLORA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "193": {
+      "name": "YANMA",
+      "growth": "MEDIUM_FAST"
+    },
+    "194": {
+      "name": "WOOPER",
+      "growth": "MEDIUM_FAST"
+    },
+    "195": {
+      "name": "QUAGSIRE",
+      "growth": "MEDIUM_FAST"
+    },
+    "196": {
+      "name": "ESPEON",
+      "growth": "MEDIUM_FAST"
+    },
+    "197": {
+      "name": "UMBREON",
+      "growth": "MEDIUM_FAST"
+    },
+    "198": {
+      "name": "MURKROW",
+      "growth": "MEDIUM_SLOW"
+    },
+    "199": {
+      "name": "SLOWKING",
+      "growth": "MEDIUM_FAST"
+    },
+    "200": {
+      "name": "MISDREAVUS",
+      "growth": "FAST"
+    },
+    "201": {
+      "name": "UNOWN",
+      "growth": "MEDIUM_FAST"
+    },
+    "202": {
+      "name": "WOBBUFFET",
+      "growth": "MEDIUM_FAST"
+    },
+    "203": {
+      "name": "GIRAFARIG",
+      "growth": "MEDIUM_FAST"
+    },
+    "204": {
+      "name": "PINECO",
+      "growth": "MEDIUM_FAST"
+    },
+    "205": {
+      "name": "FORRETRESS",
+      "growth": "MEDIUM_FAST"
+    },
+    "206": {
+      "name": "DUNSPARCE",
+      "growth": "MEDIUM_FAST"
+    },
+    "207": {
+      "name": "GLIGAR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "208": {
+      "name": "STEELIX",
+      "growth": "MEDIUM_FAST"
+    },
+    "209": {
+      "name": "SNUBBULL",
+      "growth": "FAST"
+    },
+    "210": {
+      "name": "GRANBULL",
+      "growth": "FAST"
+    },
+    "211": {
+      "name": "QWILFISH",
+      "growth": "MEDIUM_FAST"
+    },
+    "212": {
+      "name": "SCIZOR",
+      "growth": "MEDIUM_FAST"
+    },
+    "213": {
+      "name": "SHUCKLE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "214": {
+      "name": "HERACROSS",
+      "growth": "SLOW"
+    },
+    "215": {
+      "name": "SNEASEL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "216": {
+      "name": "TEDDIURSA",
+      "growth": "MEDIUM_FAST"
+    },
+    "217": {
+      "name": "URSARING",
+      "growth": "MEDIUM_FAST"
+    },
+    "218": {
+      "name": "SLUGMA",
+      "growth": "MEDIUM_FAST"
+    },
+    "219": {
+      "name": "MAGCARGO",
+      "growth": "MEDIUM_FAST"
+    },
+    "220": {
+      "name": "SWINUB",
+      "growth": "SLOW"
+    },
+    "221": {
+      "name": "PILOSWINE",
+      "growth": "SLOW"
+    },
+    "222": {
+      "name": "CORSOLA",
+      "growth": "FAST"
+    },
+    "223": {
+      "name": "REMORAID",
+      "growth": "MEDIUM_FAST"
+    },
+    "224": {
+      "name": "OCTILLERY",
+      "growth": "MEDIUM_FAST"
+    },
+    "225": {
+      "name": "DELIBIRD",
+      "growth": "FAST"
+    },
+    "226": {
+      "name": "MANTINE",
+      "growth": "SLOW"
+    },
+    "227": {
+      "name": "SKARMORY",
+      "growth": "SLOW"
+    },
+    "228": {
+      "name": "HOUNDOUR",
+      "growth": "SLOW"
+    },
+    "229": {
+      "name": "HOUNDOOM",
+      "growth": "SLOW"
+    },
+    "230": {
+      "name": "KINGDRA",
+      "growth": "MEDIUM_FAST"
+    },
+    "231": {
+      "name": "PHANPY",
+      "growth": "MEDIUM_FAST"
+    },
+    "232": {
+      "name": "DONPHAN",
+      "growth": "MEDIUM_FAST"
+    },
+    "233": {
+      "name": "PORYGON2",
+      "growth": "MEDIUM_FAST"
+    },
+    "234": {
+      "name": "STANTLER",
+      "growth": "SLOW"
+    },
+    "235": {
+      "name": "SMEARGLE",
+      "growth": "FAST"
+    },
+    "236": {
+      "name": "TYROGUE",
+      "growth": "MEDIUM_FAST"
+    },
+    "237": {
+      "name": "HITMONTOP",
+      "growth": "MEDIUM_FAST"
+    },
+    "238": {
+      "name": "SMOOCHUM",
+      "growth": "MEDIUM_FAST"
+    },
+    "239": {
+      "name": "ELEKID",
+      "growth": "MEDIUM_FAST"
+    },
+    "240": {
+      "name": "MAGBY",
+      "growth": "MEDIUM_FAST"
+    },
+    "241": {
+      "name": "MILTANK",
+      "growth": "SLOW"
+    },
+    "242": {
+      "name": "BLISSEY",
+      "growth": "FAST"
+    },
+    "243": {
+      "name": "RAIKOU",
+      "growth": "SLOW"
+    },
+    "244": {
+      "name": "ENTEI",
+      "growth": "SLOW"
+    },
+    "245": {
+      "name": "SUICUNE",
+      "growth": "SLOW"
+    },
+    "246": {
+      "name": "LARVITAR",
+      "growth": "SLOW"
+    },
+    "247": {
+      "name": "PUPITAR",
+      "growth": "SLOW"
+    },
+    "248": {
+      "name": "TYRANITAR",
+      "growth": "SLOW"
+    },
+    "249": {
+      "name": "LUGIA",
+      "growth": "SLOW"
+    },
+    "250": {
+      "name": "HO_OH",
+      "growth": "SLOW"
+    },
+    "251": {
+      "name": "CELEBI",
+      "growth": "MEDIUM_SLOW"
+    },
+    "277": {
+      "name": "TREECKO",
+      "growth": "MEDIUM_SLOW"
+    },
+    "278": {
+      "name": "GROVYLE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "279": {
+      "name": "SCEPTILE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "280": {
+      "name": "TORCHIC",
+      "growth": "MEDIUM_SLOW"
+    },
+    "281": {
+      "name": "COMBUSKEN",
+      "growth": "MEDIUM_SLOW"
+    },
+    "282": {
+      "name": "BLAZIKEN",
+      "growth": "MEDIUM_SLOW"
+    },
+    "283": {
+      "name": "MUDKIP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "284": {
+      "name": "MARSHTOMP",
+      "growth": "MEDIUM_SLOW"
+    },
+    "285": {
+      "name": "SWAMPERT",
+      "growth": "MEDIUM_SLOW"
+    },
+    "286": {
+      "name": "POOCHYENA",
+      "growth": "MEDIUM_FAST"
+    },
+    "287": {
+      "name": "MIGHTYENA",
+      "growth": "MEDIUM_FAST"
+    },
+    "288": {
+      "name": "ZIGZAGOON",
+      "growth": "MEDIUM_FAST"
+    },
+    "289": {
+      "name": "LINOONE",
+      "growth": "MEDIUM_FAST"
+    },
+    "290": {
+      "name": "WURMPLE",
+      "growth": "MEDIUM_FAST"
+    },
+    "291": {
+      "name": "SILCOON",
+      "growth": "MEDIUM_FAST"
+    },
+    "292": {
+      "name": "BEAUTIFLY",
+      "growth": "MEDIUM_FAST"
+    },
+    "293": {
+      "name": "CASCOON",
+      "growth": "MEDIUM_FAST"
+    },
+    "294": {
+      "name": "DUSTOX",
+      "growth": "MEDIUM_FAST"
+    },
+    "295": {
+      "name": "LOTAD",
+      "growth": "MEDIUM_SLOW"
+    },
+    "296": {
+      "name": "LOMBRE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "297": {
+      "name": "LUDICOLO",
+      "growth": "MEDIUM_SLOW"
+    },
+    "298": {
+      "name": "SEEDOT",
+      "growth": "MEDIUM_SLOW"
+    },
+    "299": {
+      "name": "NUZLEAF",
+      "growth": "MEDIUM_SLOW"
+    },
+    "300": {
+      "name": "SHIFTRY",
+      "growth": "MEDIUM_SLOW"
+    },
+    "301": {
+      "name": "NINCADA",
+      "growth": "ERRATIC"
+    },
+    "302": {
+      "name": "NINJASK",
+      "growth": "ERRATIC"
+    },
+    "303": {
+      "name": "SHEDINJA",
+      "growth": "ERRATIC"
+    },
+    "304": {
+      "name": "TAILLOW",
+      "growth": "MEDIUM_SLOW"
+    },
+    "305": {
+      "name": "SWELLOW",
+      "growth": "MEDIUM_SLOW"
+    },
+    "306": {
+      "name": "SHROOMISH",
+      "growth": "FLUCTUATING"
+    },
+    "307": {
+      "name": "BRELOOM",
+      "growth": "FLUCTUATING"
+    },
+    "308": {
+      "name": "SPINDA",
+      "growth": "FAST"
+    },
+    "309": {
+      "name": "WINGULL",
+      "growth": "MEDIUM_FAST"
+    },
+    "310": {
+      "name": "PELIPPER",
+      "growth": "MEDIUM_FAST"
+    },
+    "311": {
+      "name": "SURSKIT",
+      "growth": "MEDIUM_FAST"
+    },
+    "312": {
+      "name": "MASQUERAIN",
+      "growth": "MEDIUM_FAST"
+    },
+    "313": {
+      "name": "WAILMER",
+      "growth": "FLUCTUATING"
+    },
+    "314": {
+      "name": "WAILORD",
+      "growth": "FLUCTUATING"
+    },
+    "315": {
+      "name": "SKITTY",
+      "growth": "FAST"
+    },
+    "316": {
+      "name": "DELCATTY",
+      "growth": "FAST"
+    },
+    "317": {
+      "name": "KECLEON",
+      "growth": "MEDIUM_SLOW"
+    },
+    "318": {
+      "name": "BALTOY",
+      "growth": "MEDIUM_FAST"
+    },
+    "319": {
+      "name": "CLAYDOL",
+      "growth": "MEDIUM_FAST"
+    },
+    "320": {
+      "name": "NOSEPASS",
+      "growth": "MEDIUM_FAST"
+    },
+    "321": {
+      "name": "TORKOAL",
+      "growth": "MEDIUM_FAST"
+    },
+    "322": {
+      "name": "SABLEYE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "323": {
+      "name": "BARBOACH",
+      "growth": "MEDIUM_FAST"
+    },
+    "324": {
+      "name": "WHISCASH",
+      "growth": "MEDIUM_FAST"
+    },
+    "325": {
+      "name": "LUVDISC",
+      "growth": "FAST"
+    },
+    "326": {
+      "name": "CORPHISH",
+      "growth": "FLUCTUATING"
+    },
+    "327": {
+      "name": "CRAWDAUNT",
+      "growth": "FLUCTUATING"
+    },
+    "328": {
+      "name": "FEEBAS",
+      "growth": "ERRATIC"
+    },
+    "329": {
+      "name": "MILOTIC",
+      "growth": "ERRATIC"
+    },
+    "330": {
+      "name": "CARVANHA",
+      "growth": "SLOW"
+    },
+    "331": {
+      "name": "SHARPEDO",
+      "growth": "SLOW"
+    },
+    "332": {
+      "name": "TRAPINCH",
+      "growth": "MEDIUM_SLOW"
+    },
+    "333": {
+      "name": "VIBRAVA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "334": {
+      "name": "FLYGON",
+      "growth": "MEDIUM_SLOW"
+    },
+    "335": {
+      "name": "MAKUHITA",
+      "growth": "FLUCTUATING"
+    },
+    "336": {
+      "name": "HARIYAMA",
+      "growth": "FLUCTUATING"
+    },
+    "337": {
+      "name": "ELECTRIKE",
+      "growth": "SLOW"
+    },
+    "338": {
+      "name": "MANECTRIC",
+      "growth": "SLOW"
+    },
+    "339": {
+      "name": "NUMEL",
+      "growth": "MEDIUM_FAST"
+    },
+    "340": {
+      "name": "CAMERUPT",
+      "growth": "MEDIUM_FAST"
+    },
+    "341": {
+      "name": "SPHEAL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "342": {
+      "name": "SEALEO",
+      "growth": "MEDIUM_SLOW"
+    },
+    "343": {
+      "name": "WALREIN",
+      "growth": "MEDIUM_SLOW"
+    },
+    "344": {
+      "name": "CACNEA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "345": {
+      "name": "CACTURNE",
+      "growth": "MEDIUM_SLOW"
+    },
+    "346": {
+      "name": "SNORUNT",
+      "growth": "MEDIUM_FAST"
+    },
+    "347": {
+      "name": "GLALIE",
+      "growth": "MEDIUM_FAST"
+    },
+    "348": {
+      "name": "LUNATONE",
+      "growth": "FAST"
+    },
+    "349": {
+      "name": "SOLROCK",
+      "growth": "FAST"
+    },
+    "350": {
+      "name": "AZURILL",
+      "growth": "FAST"
+    },
+    "351": {
+      "name": "SPOINK",
+      "growth": "FAST"
+    },
+    "352": {
+      "name": "GRUMPIG",
+      "growth": "FAST"
+    },
+    "353": {
+      "name": "PLUSLE",
+      "growth": "MEDIUM_FAST"
+    },
+    "354": {
+      "name": "MINUN",
+      "growth": "MEDIUM_FAST"
+    },
+    "355": {
+      "name": "MAWILE",
+      "growth": "FAST"
+    },
+    "356": {
+      "name": "MEDITITE",
+      "growth": "MEDIUM_FAST"
+    },
+    "357": {
+      "name": "MEDICHAM",
+      "growth": "MEDIUM_FAST"
+    },
+    "358": {
+      "name": "SWABLU",
+      "growth": "ERRATIC"
+    },
+    "359": {
+      "name": "ALTARIA",
+      "growth": "ERRATIC"
+    },
+    "360": {
+      "name": "WYNAUT",
+      "growth": "MEDIUM_FAST"
+    },
+    "361": {
+      "name": "DUSKULL",
+      "growth": "FAST"
+    },
+    "362": {
+      "name": "DUSCLOPS",
+      "growth": "FAST"
+    },
+    "363": {
+      "name": "ROSELIA",
+      "growth": "MEDIUM_SLOW"
+    },
+    "364": {
+      "name": "SLAKOTH",
+      "growth": "SLOW"
+    },
+    "365": {
+      "name": "VIGOROTH",
+      "growth": "SLOW"
+    },
+    "366": {
+      "name": "SLAKING",
+      "growth": "SLOW"
+    },
+    "367": {
+      "name": "GULPIN",
+      "growth": "FLUCTUATING"
+    },
+    "368": {
+      "name": "SWALOT",
+      "growth": "FLUCTUATING"
+    },
+    "369": {
+      "name": "TROPIUS",
+      "growth": "SLOW"
+    },
+    "370": {
+      "name": "WHISMUR",
+      "growth": "MEDIUM_SLOW"
+    },
+    "371": {
+      "name": "LOUDRED",
+      "growth": "MEDIUM_SLOW"
+    },
+    "372": {
+      "name": "EXPLOUD",
+      "growth": "MEDIUM_SLOW"
+    },
+    "373": {
+      "name": "CLAMPERL",
+      "growth": "ERRATIC"
+    },
+    "374": {
+      "name": "HUNTAIL",
+      "growth": "ERRATIC"
+    },
+    "375": {
+      "name": "GOREBYSS",
+      "growth": "ERRATIC"
+    },
+    "376": {
+      "name": "ABSOL",
+      "growth": "MEDIUM_SLOW"
+    },
+    "377": {
+      "name": "SHUPPET",
+      "growth": "FAST"
+    },
+    "378": {
+      "name": "BANETTE",
+      "growth": "FAST"
+    },
+    "379": {
+      "name": "SEVIPER",
+      "growth": "FLUCTUATING"
+    },
+    "380": {
+      "name": "ZANGOOSE",
+      "growth": "ERRATIC"
+    },
+    "381": {
+      "name": "RELICANTH",
+      "growth": "SLOW"
+    },
+    "382": {
+      "name": "ARON",
+      "growth": "SLOW"
+    },
+    "383": {
+      "name": "LAIRON",
+      "growth": "SLOW"
+    },
+    "384": {
+      "name": "AGGRON",
+      "growth": "SLOW"
+    },
+    "385": {
+      "name": "CASTFORM",
+      "growth": "MEDIUM_FAST"
+    },
+    "386": {
+      "name": "VOLBEAT",
+      "growth": "ERRATIC"
+    },
+    "387": {
+      "name": "ILLUMISE",
+      "growth": "FLUCTUATING"
+    },
+    "388": {
+      "name": "LILEEP",
+      "growth": "ERRATIC"
+    },
+    "389": {
+      "name": "CRADILY",
+      "growth": "ERRATIC"
+    },
+    "390": {
+      "name": "ANORITH",
+      "growth": "ERRATIC"
+    },
+    "391": {
+      "name": "ARMALDO",
+      "growth": "ERRATIC"
+    },
+    "392": {
+      "name": "RALTS",
+      "growth": "SLOW"
+    },
+    "393": {
+      "name": "KIRLIA",
+      "growth": "SLOW"
+    },
+    "394": {
+      "name": "GARDEVOIR",
+      "growth": "SLOW"
+    },
+    "395": {
+      "name": "BAGON",
+      "growth": "SLOW"
+    },
+    "396": {
+      "name": "SHELGON",
+      "growth": "SLOW"
+    },
+    "397": {
+      "name": "SALAMENCE",
+      "growth": "SLOW"
+    },
+    "398": {
+      "name": "BELDUM",
+      "growth": "SLOW"
+    },
+    "399": {
+      "name": "METANG",
+      "growth": "SLOW"
+    },
+    "400": {
+      "name": "METAGROSS",
+      "growth": "SLOW"
+    },
+    "401": {
+      "name": "REGIROCK",
+      "growth": "SLOW"
+    },
+    "402": {
+      "name": "REGICE",
+      "growth": "SLOW"
+    },
+    "403": {
+      "name": "REGISTEEL",
+      "growth": "SLOW"
+    },
+    "404": {
+      "name": "KYOGRE",
+      "growth": "SLOW"
+    },
+    "405": {
+      "name": "GROUDON",
+      "growth": "SLOW"
+    },
+    "406": {
+      "name": "RAYQUAZA",
+      "growth": "SLOW"
+    },
+    "407": {
+      "name": "LATIAS",
+      "growth": "SLOW"
+    },
+    "408": {
+      "name": "LATIOS",
+      "growth": "SLOW"
+    },
+    "409": {
+      "name": "JIRACHI",
+      "growth": "SLOW"
+    },
+    "410": {
+      "name": "DEOXYS",
+      "growth": "SLOW"
+    },
+    "411": {
+      "name": "CHIMECHO",
+      "growth": "FAST"
+    }
+  }
+}

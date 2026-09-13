@@ -1,0 +1,7 @@
+# Direct gameplay milestone — 2026-09-09
+
+The user rejected Hyrule/title introductions. http://localhost:3021/charmville/ now enters native ZQuest test mode at Hero of Dreams DMap 4, screen 63 (Autumn Town). Existing `/play/?open=quests/purezc/139` links also bypass the intro; append `reference=1` for the original reference flow. One Enter the world click starts the engine, avoiding the hosted SDL suspended-audio buffer mismatch before user activation.
+
+The starting kit supplies native wooden sword, eight bombs, bow/arrows, boomerang and wand, with money/ammunition/magic counters. `scripts/charmville/adventure-entry.mjs` documents source item IDs and the upstream replay identifying the start screen. Native movement, sword animation and inventory were exercised and screenshots visually inspected. `verify-direct-adventure.mjs` passed delayed-click startup, warm reload, isolation, and zero page errors/HTTP failures/external requests. Other weapons are present in the inventory but their complete combat behavior has not been regression-tested.
+
+This is an unchanged authored source map in test mode, which resets progress. It is NOT the integrated Charmville MMO: farming, creature transitions, account inventory and economy are not attached. The next substantial step remains a derived editable Charmville quest plus a live authoritative adapter. A browser overlay or direct-entry profile does not constitute that integration. Preserve exact sources and create derivatives separately. The user expects the unified game, not a launcher or another research catalog.

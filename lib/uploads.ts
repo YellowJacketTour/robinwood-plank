@@ -19,6 +19,7 @@ import path from "node:path";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // audio-sized; images far under
 
 export const UPLOAD_TYPES: Record<string, string> = {
+  weba: "audio/webm",
   mp3: "audio/mpeg",
   m4a: "audio/mp4",
   ogg: "audio/ogg",

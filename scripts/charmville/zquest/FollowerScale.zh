@@ -1,0 +1,11 @@
+// Compressed presentation envelopes; source PNGs and collision remain unchanged.
+void drawCompanionScaled(bitmap art,int species,int layer,int sx,int sy,int w,int h,int footX,int footY,int anchorX,int anchorY){
+    int target=18;int source=24;
+    if(species==277){target=20;source=21;}
+    if(species==280)source=23;
+    if(species==25)source=27;
+    if(species==133)target=16;
+    if(species==286){target=20;source=27;}
+    int dw=Round(w*target/source);int dh=Round(h*target/source);
+    art->Blit(layer,RT_SCREEN,sx,sy,w,h,footX-Round(anchorX*dw/w),footY-Round(anchorY*dh/h),dw,dh);
+}

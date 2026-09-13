@@ -1,0 +1,32 @@
+{
+  "commit": "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+  "truncated": false,
+  "paths": [
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "galery/feiok_0.png",
+    "galery/feiok_1.png",
+    "game/assets.go",
+    "game/assets/logo.png",
+    "game/assets/player_b.png",
+    "game/assets/player_l.png",
+    "game/assets/player_r.png",
+    "game/assets/tile.png",
+    "game/assets/wheat_1.png",
+    "game/assets/wheat_2.png",
+    "game/assets/wheat_3.png",
+    "game/assets/wheat_4.png",
+    "game/game.go",
+    "game/net.go",
+    "game/player.go",
+    "game/tile.go",
+    "go.mod",
+    "go.sum",
+    "main.go",
+    "packet/packet.go",
+    "server/handlers.go",
+    "server/server.go",
+    "try/try.go"
+  ]
+}
