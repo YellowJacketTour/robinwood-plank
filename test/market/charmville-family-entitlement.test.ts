@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {createHash,randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import {Pool} from "pg";
-import {acceptFamilySeeds} from "../../lib/charmville/family-entitlement";
+import {acceptFamilySeeds,familyGiftStatus} from "../../lib/charmville/family-entitlement";
 import {requireNativeCrop} from "../../lib/charmville/native-crops";
 
 test("Heart definitions need explicit server activation; old callers remain Oran-only", async () => {
@@ -36,6 +36,11 @@ test("family source is atomic, replay-stable and separate from Oran custody", {s
     await pool.query(await readFile("deploy/inmotion/postgres/migrations/147_charmville_burning_heart_foundation.sql","utf8"));
     assert.equal((await pool.query("SELECT crop_id FROM charmville_native_resources")).rows[0].crop_id,"oran-berry");
     assert.equal((await pool.query("SELECT count(*)::integer AS n FROM charmville_family_entitlements")).rows[0].n,0);
+    const unopened=await familyGiftStatus(pool,token);
+    assert.deepEqual(await familyGiftStatus(pool,token),unopened);
+    assert.equal(unopened.available&&unopened.accepted,false);
+    assert.equal(unopened.available&&unopened.seeds,"0");
+    assert.equal((await pool.query("SELECT count(*)::integer AS n FROM charmville_family_entitlements")).rows[0].n,0);
     // Force the credit to fail after entitlement insertion: both must roll back.
     await pool.query("ALTER TABLE charmville_seeds ADD CONSTRAINT test_block_heart CHECK(face_id <> 'burning-heart')");
     await assert.rejects(acceptFamilySeeds(pool,token,{enabled:true}), /test_block_heart/);
@@ -44,6 +49,9 @@ test("family source is atomic, replay-stable and separate from Oran custody", {s
     const results=await Promise.all(Array.from({length:8},()=>acceptFamilySeeds(pool,token,{enabled:true})));
     for(const result of results) assert.deepEqual(result,results[0]);
     assert.equal(results[0].seedQuantity,3);
+    const opened=await familyGiftStatus(pool,token);
+    assert.equal(opened.available&&opened.accepted,true);
+    assert.equal(opened.available&&opened.acceptedAt,results[0].acceptedAt);
     assert.equal((await pool.query("SELECT qty::text FROM charmville_seeds WHERE face_id='burning-heart'")).rows[0].qty,"3");
     // Spending later cannot make a replay mint again or rewrite the source receipt.
     await pool.query("UPDATE charmville_seeds SET qty=0 WHERE face_id='burning-heart'");
@@ -54,6 +62,7 @@ test("family source is atomic, replay-stable and separate from Oran custody", {s
     assert.equal((await pool.query("SELECT count(*)::integer AS n FROM charmville_native_seed_grants")).rows[0].n,1);
     await pool.query("UPDATE plankspace_wallet_sessions SET expires_at=clock_timestamp()-interval '1 second'");
     await assert.rejects(acceptFamilySeeds(pool,token,{enabled:true}),/expired/);
+    await assert.rejects(familyGiftStatus(pool,token),/expired/);
   } finally {
     if(oldMode===undefined)delete process.env.CHARMVILLE_ACCESS_MODE;else process.env.CHARMVILLE_ACCESS_MODE=oldMode;
     if(oldWallets===undefined)delete process.env.CHARMVILLE_ADMIN_WALLETS;else process.env.CHARMVILLE_ADMIN_WALLETS=oldWallets;

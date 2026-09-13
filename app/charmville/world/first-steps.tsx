@@ -2,6 +2,7 @@
 
 import {useEffect, useState} from "react";
 import type {YardInventory} from "@/lib/charmville/inventory";
+import FamilyGiftPanel from './family-gift-panel';
 
 type Setup = {token:string;homeClaimed:boolean; companion:boolean; completed:string[]};
 type Props = {
@@ -77,6 +78,7 @@ export default function FirstSteps({token,refreshKey,handle,busy,location,profil
       </div>
     </nav>}
     {harvested&&<p className="mt-2 text-sm text-cream-muted">Your harvest is yours to keep, use, or offer in the Exchange. Listing an item does not guarantee a buyer. Keep some supplies for your next planting.</p>}
+    {setup?.homeClaimed&&<FamilyGiftPanel key={token} token={token} onSatchel={onSatchel}/>}
     <details className="mt-2 text-xs text-cream-muted"><summary className="min-h-11 cursor-pointer py-3">Journey & location details</summary>
     {setup?.companion&&<p className="text-sm">{text}</p>}
     <p className="mt-3">{setup?'Completed lessons stay in your journal. Check each bed in the world for its current condition.':'Your saved lessons have not loaded yet.'}</p>
