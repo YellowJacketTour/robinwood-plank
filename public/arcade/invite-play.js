@@ -33,7 +33,16 @@ export function mountInvitePlay({connect}) {
     if(joining||connection)return;joining=true;balance.textContent='Joining…';
     try{
       const r=await fetch('/api/invite/session',{cache:'no-store'});
-      if(r.status===401){        // The session is gone (the chain was reseeded under this tab, or the        // host launched a fresh table). '/' is the gateway's join page only        // when the gateway serves the whole site; behind the plank.love proxy        // it is the marketplace home. Go back to the gate with the last good        // token: same table -> rejoin funded; rotated token -> the gate says so.        const joinPath=document.querySelector('meta[name="plank-invite-join"]')?.content||'/';        const last=sessionStorage.getItem('plank:invite:token')||'';        location.replace(joinPath+(last?'#invite='+last:''));return;      }
+      if(r.status===401){
+        // The session is gone (the chain was reseeded under this tab, or the
+        // host launched a fresh table). '/' is the gateway's join page only
+        // when the gateway serves the whole site; behind the plank.love proxy
+        // it is the marketplace home. Go back to the gate with the last good
+        // token: same table -> rejoin funded; rotated token -> the gate says so.
+        const joinPath=document.querySelector('meta[name="plank-invite-join"]')?.content||'/';
+        const last=sessionStorage.getItem('plank:invite:token')||'';
+        location.replace(joinPath+(last?'#invite='+last:''));return;
+      }
       if(!r.ok)throw Error('Test unavailable');const session=await r.json();
       if(session.simulated!==true)throw Error('Free test unavailable');
       invite=session.invite;connection=await connect(session.key);repeat.disabled=false;
