@@ -9,13 +9,30 @@ import path from "node:path";
 // invited player can be sent straight to it. Nothing is exposed to anyone who
 // has not already passed the passkey/PIN gate above.
 async function inviteTableUrl(): Promise<string | null> {
-  const file = process.env.PLANK_INVITE_TOKEN_FILE?.trim() || path.resolve(process.cwd(), "../shared/plankcrash/state/invite-token.txt");
-  try {
-    const token = (await readFile(file, "utf8")).trim();
-    return /^[A-Za-z0-9_-]{20,}$/.test(token) ? `/table#invite=${token}` : null;
-  } catch {
-    return null;
+  // The app is served from $app_dir/current, a symlink into $app_dir/releases/
+  // <sha>, and Passenger's working directory is the RESOLVED path -- so a fixed
+  // "../shared" pointed at releases/shared, found nothing, and the page said
+  // "restarting" forever while the table was up. Walk up from wherever we are
+  // until the state directory the supervisor owns is found.
+  const candidates: string[] = [];
+  const override = process.env.PLANK_INVITE_TOKEN_FILE?.trim();
+  if (override) candidates.push(override);
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    candidates.push(path.join(dir, "shared", "plankcrash", "state", "invite-token.txt"));
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
+  for (const file of candidates) {
+    try {
+      const token = (await readFile(file, "utf8")).trim();
+      if (/^[A-Za-z0-9_-]{20,}$/.test(token)) return `/table#invite=${token}`;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
 }
 
 export const dynamic = "force-dynamic";
