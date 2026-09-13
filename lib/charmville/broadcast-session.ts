@@ -46,7 +46,7 @@ export function createBroadcastSessions(options:{
    if(connectionId===p.connectionId)throw Error('Publisher cannot subscribe to itself');
    if(!p.viewers.has(connectionId)&&p.viewers.size>=maxViewers)throw Error('Viewer capacity reached');
    const expiresAt=Math.min(p.expiresAt,options.now()+lease);
-   p.viewers.set(connectionId,{connectionId,profileId:a.profileId,expiresAt});return {id,revision:p.revision,expiresAt};
+   p.viewers.set(connectionId,{connectionId,profileId:a.profileId,expiresAt});return {id,revision:p.revision,expiresAt,publisherConnectionId:p.connectionId,viewerConnectionId:connectionId};
   },
   async authorizeSignal(connectionId:string,id:string,targetConnectionId:string){
    const before=current(id),a=await authority(connectionId,before.ownerId),p=current(id);check(p,a);
