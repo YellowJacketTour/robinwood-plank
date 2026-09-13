@@ -534,6 +534,9 @@
   /* Reserve the line even when empty: a collapsing sub-line moved the whole
      dock 22px and resized the WebGL stage exactly at the 3-2-1 on phones. */
   .btn-sub { text-align: center; margin-top: 10px; min-height: 1.6em; font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+  /* `body #stakeValueQuote, body #btnSub, ...{min-height:0}` later zeroes it (and
+     Astra's own `body #btnSub{min-height:16px}`); this outranks both. */
+  body #btnSub.btn-sub { min-height: 1.6em; }
   .sim-btn {
     display: block; width: 100%; max-width: 520px; margin: 10px auto 0; padding: 10px;
     border-radius: 10px; border: 1px dashed var(--line); background: transparent;
