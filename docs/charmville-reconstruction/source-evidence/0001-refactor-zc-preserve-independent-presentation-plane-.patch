@@ -1,0 +1,233 @@
+From ef0096bbda0d4e86ef61a8a1e640519ceffab331 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:22:36 -0500
+Subject: [PATCH] refactor(zc): preserve independent presentation plane extents
+
+---
+ src/zc/presentation_targets.h  |  21 ++++-
+ tests/presentation_targets.cpp | 138 +++++++++++++++++++++++++++------
+ 2 files changed, 130 insertions(+), 29 deletions(-)
+
+diff --git a/src/zc/presentation_targets.h b/src/zc/presentation_targets.h
+index bff069c..30eda4e 100644
+--- a/src/zc/presentation_targets.h
++++ b/src/zc/presentation_targets.h
+@@ -13,9 +13,13 @@ struct surface_extent
+ };
+ struct scratch_spec
+ {
+-    // Explicitly separate: legacy composition/scratch and beam planes have
+-    // different heights. The caller owns HUD/playfield offset policy.
++    // Independent scene, background, darkness and light planes preserve exact
++    // legacy extents: 256x224, 256x232, 256x224 and 256x176 respectively.
++    // Both darkness planes share an extent. "world" is the composed scene;
++    // dimensions do not determine simulation visibility or HUD offset policy.
+     surface_extent world;
++    surface_extent background;
++    surface_extent darkness;
+     surface_extent light;
+ };
+ enum class scratch_plane : std::size_t { world, background, darkness, translucent_darkness, light, count };
+@@ -44,7 +48,8 @@ public:
+ 
+     scratch_resize_result ensure(scratch_spec requested)
+     {
+-        if (!valid(requested.world) || !valid(requested.light) ||
++        if (!valid(requested.world) || !valid(requested.background) ||
++            !valid(requested.darkness) || !valid(requested.light) ||
+             !api_.create || !api_.destroy || !api_.clear)
+             return scratch_resize_result::invalid;
+         std::array<Surface*, count> replacements{};
+@@ -98,7 +103,15 @@ private:
+     static bool valid(surface_extent e) { return e.w > 0 && e.h > 0 && e.w <= 512 && e.h <= 464; }
+     static surface_extent extent_for(scratch_spec s, std::size_t plane)
+     {
+-        return plane == static_cast<std::size_t>(scratch_plane::light) ? s.light : s.world;
++        switch (static_cast<scratch_plane>(plane))
++        {
++            case scratch_plane::world: return s.world;
++            case scratch_plane::background: return s.background;
++            case scratch_plane::darkness:
++            case scratch_plane::translucent_darkness: return s.darkness;
++            case scratch_plane::light: return s.light;
++            default: return {};
++        }
+     }
+     backend api_;
+     std::array<Surface*, count> surfaces_{};
+diff --git a/tests/presentation_targets.cpp b/tests/presentation_targets.cpp
+index 74fb509..2713459 100644
+--- a/tests/presentation_targets.cpp
++++ b/tests/presentation_targets.cpp
+@@ -24,55 +24,143 @@ struct allocator
+     }
+     scratch_targets<surface>::backend backend() { return {this, create, destroy, clear}; }
+ };
++constexpr std::size_t plane_count = static_cast<std::size_t>(scratch_plane::count);
++using saved_targets = std::array<surface*, plane_count>;
++const scratch_spec legacy{{256,224},{256,232},{256,224},{256,176}};
++const scratch_spec large{{512,448},{512,464},{512,448},{512,352}};
++
++saved_targets mark(scratch_targets<surface>& targets)
++{
++    saved_targets saved{};
++    for (std::size_t i=0; i<plane_count; ++i)
++    {
++        saved[i]=targets.get(static_cast<scratch_plane>(i));
++        assert(saved[i]); saved[i]->value=70+static_cast<int>(i);
++    }
++    return saved;
++}
++void preserved(scratch_targets<surface>& targets, const saved_targets& saved)
++{
++    for (std::size_t i=0; i<plane_count; ++i)
++    {
++        auto plane=static_cast<scratch_plane>(i);
++        assert(targets.get(plane)==saved[i]);
++        assert(saved[i]->value==70+static_cast<int>(i));
++        assert((targets.extent(plane)==surface_extent{saved[i]->w,saved[i]->h}));
++    }
++}
++surface_extent& group_extent(scratch_spec& spec, int group)
++{
++    switch (group)
++    {
++        case 0: return spec.world;
++        case 1: return spec.background;
++        case 2: return spec.darkness;
++        default: return spec.light;
++    }
++}
++bool belongs_to_group(std::size_t plane, int group)
++{
++    return group==0?plane==0:group==1?plane==1:group==2?(plane==2||plane==3):plane==4;
++}
+ int main()
+ {
+-    const scratch_spec normal{{256,232},{256,176}}, large{{512,464},{512,352}};
+     // Every partial initial allocation is reclaimed, with no half-ready owner.
+     for(int failure=1; failure<=5; ++failure)
+     {
+         allocator a; a.fail_at=failure;
+         scratch_targets<surface> targets(a.backend());
+-        assert(targets.ensure(normal)==scratch_resize_result::allocation_failed);
++        assert(targets.ensure(legacy)==scratch_resize_result::allocation_failed);
+         assert(a.live.empty());
+-        assert(targets.get(scratch_plane::world)==nullptr);
++        for(std::size_t i=0;i<plane_count;++i)
++        {
++            assert(targets.get(static_cast<scratch_plane>(i))==nullptr);
++            assert((targets.extent(static_cast<scratch_plane>(i))==surface_extent{}));
++        }
+     }
+-    // Every partial resize preserves all prior targets and their rendered pixels.
++    // A full resize is atomic at every allocation failure, including the final
++    // light target, after four successful temporary allocations.
+     for(int failure=1; failure<=5; ++failure)
+     {
+         allocator a;
+         {
+             scratch_targets<surface> targets(a.backend());
+-            assert(targets.ensure(normal)==scratch_resize_result::resized);
+-            auto* world=targets.get(scratch_plane::world); world->value=77;
+-            auto* light=targets.get(scratch_plane::light);
++            assert(targets.ensure(legacy)==scratch_resize_result::resized);
++            auto saved=mark(targets);
+             a.fail_at=a.calls+failure;
+             assert(targets.ensure(large)==scratch_resize_result::allocation_failed);
+-            assert(a.live.size()==5 && targets.get(scratch_plane::world)==world);
+-            assert(targets.get(scratch_plane::light)==light && world->value==77);
+-            assert(targets.extent(scratch_plane::light).h==176);
++            assert(a.live.size()==5); preserved(targets,saved);
+             a.fail_at=-1;
+             assert(targets.ensure(large)==scratch_resize_result::resized);
+-            assert(a.live.size()==5 && targets.extent(scratch_plane::world).h==464);
++            assert(a.live.size()==5);
++            assert(targets.extent(scratch_plane::world).h==448);
++            assert(targets.extent(scratch_plane::background).h==464);
++            assert(targets.extent(scratch_plane::darkness).h==448);
++            assert(targets.extent(scratch_plane::translucent_darkness).h==448);
++            assert(targets.extent(scratch_plane::light).h==352);
++        }
++        assert(a.live.empty());
++    }
++    // Each extent can change independently. The darkness pair changes together;
++    // failure on the second darkness allocation preserves its first old target.
++    for(int group=0;group<4;++group)
++    for(int failure=1;failure<=(group==2?2:1);++failure)
++    {
++        allocator a;
++        {
++            scratch_targets<surface> targets(a.backend());
++            assert(targets.ensure(legacy)==scratch_resize_result::resized);
++            auto saved=mark(targets);
++            auto requested=legacy; group_extent(requested,group)={320,240};
++            a.fail_at=a.calls+failure;
++            assert(targets.ensure(requested)==scratch_resize_result::allocation_failed);
++            assert(a.live.size()==5); preserved(targets,saved);
++            a.fail_at=-1;int calls=a.calls,clears=a.clears;
++            assert(targets.ensure(requested)==scratch_resize_result::resized);
++            assert(a.calls-calls==(group==2?2:1));
++            assert(a.clears-clears==(group==2?2:1));
++            for(std::size_t i=0;i<plane_count;++i)
++            {
++                auto plane=static_cast<scratch_plane>(i);auto* current=targets.get(plane);
++                if(belongs_to_group(i,group))
++                {
++                    assert(current!=saved[i] && current->value==0);
++                    assert((targets.extent(plane)==surface_extent{320,240}));
++                }
++                else assert(current==saved[i] && current->value==70+static_cast<int>(i));
++            }
++            saved=mark(targets);calls=a.calls;clears=a.clears;
++            assert(targets.ensure(requested)==scratch_resize_result::unchanged);
++            assert(a.calls==calls && a.clears==clears);preserved(targets,saved);
+         }
+         assert(a.live.empty());
+     }
+     allocator a;
+     {
+         scratch_targets<surface> targets(a.backend());
+-        assert(targets.ensure(normal)==scratch_resize_result::resized);
+-        auto* world=targets.get(scratch_plane::world); world->value=91;
+-        int calls=a.calls, clears=a.clears;
+-        assert(targets.ensure(normal)==scratch_resize_result::unchanged);
+-        assert(a.calls==calls && a.clears==clears && world->value==91);
+-        assert(targets.ensure({{256,232},{512,352}})==scratch_resize_result::resized);
+-        assert(a.calls==calls+1 && targets.get(scratch_plane::world)==world && world->value==91);
+-        calls=a.calls;
+-        for(auto bad : {scratch_spec{{0,232},{256,176}}, scratch_spec{{513,232},{256,176}},
+-            scratch_spec{{256,465},{256,176}}, scratch_spec{{256,232},{-1,176}}})
+-            assert(targets.ensure(bad)==scratch_resize_result::invalid);
+-        assert(a.calls==calls && a.live.size()==5);
++        assert(targets.ensure(legacy)==scratch_resize_result::resized);
++        // Verify the exact old mixed-height allocation topology, not a shared
++        // rounded height that would silently alter clipping at 1x.
++        const std::array<int,5> heights{224,232,224,224,176};
++        for(std::size_t i=0;i<plane_count;++i)
++        {
++            auto* p=targets.get(static_cast<scratch_plane>(i));
++            assert(p->w==256 && p->h==heights[i]);
++        }
++        auto saved=mark(targets);int calls=a.calls;
++        for(int group=0;group<4;++group)
++        for(auto invalid : {surface_extent{0,224},surface_extent{-1,224},surface_extent{513,224},surface_extent{256,0},surface_extent{256,-1},surface_extent{256,465}})
++        {
++            auto requested=legacy;group_extent(requested,group)=invalid;
++            assert(targets.ensure(requested)==scratch_resize_result::invalid);
++            assert(a.calls==calls && a.live.size()==5);preserved(targets,saved);
++        }
+         assert(targets.get(scratch_plane::count)==nullptr);
+-        targets.reset(); targets.reset(); assert(a.live.empty());
++        targets.reset();targets.reset();assert(a.live.empty());
+     }
+-    assert(a.live.empty());
++    auto missing=a.backend();missing.clear=nullptr;
++    scratch_targets<surface> invalid_backend(missing);
++    int calls=a.calls;
++    assert(invalid_backend.ensure(legacy)==scratch_resize_result::invalid);
++    assert(a.calls==calls && a.live.empty());
+ }
+-- 
+2.52.0.windows.1
+

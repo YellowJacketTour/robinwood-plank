@@ -1,0 +1,154 @@
+﻿[
+    {
+        "name":  "bat4blender",
+        "origin":  "https://github.com/memo33/BAT4Blender.git",
+        "commit":  "8f27d8b89ad2db85d40f80538c200b187f213066",
+        "trackedFiles":  21,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\bat4blender",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "dream-loop",
+        "origin":  "https://github.com/achimala/dream-loop.git",
+        "commit":  "d113b78bd8143d6c4e2b46840c1a881139bcc084",
+        "trackedFiles":  5,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\dream-loop",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "farmvillage",
+        "origin":  "https://github.com/AcidCaos/farmvillage.git",
+        "commit":  "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+        "trackedFiles":  69,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\farmvillage",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "farmville-clone",
+        "origin":  "https://github.com/ksc3899/Farmville-Clone.git",
+        "commit":  "ad85523aa1ebad95a39dd3f46deba3bef8067aae",
+        "trackedFiles":  148,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\farmville-clone",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "feiok",
+        "origin":  "https://github.com/dacousb/feiok.git",
+        "commit":  "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+        "trackedFiles":  26,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\feiok",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "freerct",
+        "origin":  "https://github.com/FreeRCT/FreeRCT.git",
+        "commit":  "d39154b32c9e0bd6f511da27fe112e50f6034557",
+        "trackedFiles":  4656,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\freerct",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "fv-replowed",
+        "origin":  "https://github.com/FV-Replowed/fv-replowed.git",
+        "commit":  "01ece56b75ed578b62396a97705f5333831f41d7",
+        "trackedFiles":  908,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\fv-replowed",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "isomiddleearth",
+        "origin":  "https://github.com/hasanharman/isomiddleearth.git",
+        "commit":  "9e59a127ec87b141d6d767f4ab79ac9b4c38a75c",
+        "trackedFiles":  568,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\isomiddleearth",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "lincity-ng",
+        "origin":  "https://github.com/lincity-ng/lincity-ng.git",
+        "commit":  "99939d94483189b5d512732b27555cd3e2e937a1",
+        "trackedFiles":  2401,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\lincity-ng",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "memoji-market",
+        "origin":  "https://github.com/nocktoshi/memoji-market.git",
+        "commit":  "e4a2d1440c2a283cea6cedaa1147fca49d187502",
+        "trackedFiles":  628,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\memoji-market",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "micropolis-core",
+        "origin":  "https://github.com/SimHacker/MicropolisCore.git",
+        "commit":  "69ccf87ed72d2d2950b70cf16ef1391439bd9d48",
+        "trackedFiles":  4990,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\micropolis-core",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "opengfx",
+        "origin":  "https://github.com/OpenTTD/OpenGFX.git",
+        "commit":  "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+        "trackedFiles":  848,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\opengfx",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "opengfx2",
+        "origin":  "https://github.com/OpenTTD/OpenGFX2.git",
+        "commit":  "7a17fb370440aed7f2586715d606e9fe190b9dd3",
+        "trackedFiles":  2400,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\opengfx2",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "openrct2-opengraphics",
+        "origin":  "https://github.com/OpenRCT2/OpenGraphics.git",
+        "commit":  "930b0140685f85db92147af832080e8df12d8d4e",
+        "trackedFiles":  91,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\openrct2-opengraphics",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "simcity-threejs",
+        "origin":  "https://github.com/dgreenheck/simcity-threejs-clone.git",
+        "commit":  "9116cf680f677c3476f8159d5bbc7a4cfda00654",
+        "trackedFiles":  336,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\simcity-threejs",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "simutrans-pak128",
+        "origin":  "https://github.com/simutrans/pak128.git",
+        "commit":  "e45d9f08f6aa0a08432b5312cb0d7cb93232fdc6",
+        "trackedFiles":  7705,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\simutrans-pak128",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "universal-lpc",
+        "origin":  "https://github.com/sanderfrenken/Universal-LPC-Spritesheet-Character-Generator.git",
+        "commit":  "675e21e04aaff8486a3a24e09573b3d5af9d28b9",
+        "trackedFiles":  24898,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\universal-lpc",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "unknown-horizons",
+        "origin":  "https://github.com/unknown-horizons/unknown-horizons.git",
+        "commit":  "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+        "trackedFiles":  11813,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\unknown-horizons",
+        "runtimeVerified":  false
+    },
+    {
+        "name":  "xcaster",
+        "origin":  "https://github.com/awizardxch/xCaster.git",
+        "commit":  "eb53c18e8af3f71b6d8cfe4bd9693cc7c82c0215",
+        "trackedFiles":  15,
+        "path":  "C:\\Users\\k1rby\\OneDrive\\Desktop\\SpacePoker\\charmville-references\\xcaster",
+        "runtimeVerified":  false
+    }
+]

@@ -1,0 +1,71 @@
+# Dependency execution plan: home to social world
+
+September 13, 2026. Latest user priority: finish the peaceful account-owned homestead, harvested item economy and fullscreen social sharing before expanding combat. This execution order supersedes combat-first ordering in BUILD-PRIORITIES.md and PRODUCTION-PRIORITIES.md; it preserves their retained scope. This document is a documentation audit, not new code or live acceptance.
+
+## First release journey
+
+One PlankSpace account starts a seven-year-old boy or girl hero, receives the family's first seeds, learns to grow and harvest, finds the same owned item in the Satchel, deliberately pins it on a friend's authorized post from the fullscreen Charmdex, chooses a companion, and walks to a protected shared Kakariko-inspired town. Returning home and reconnecting preserve every earned outcome. Original affectionate absurdity and lasting love guide the story; precise instructions and costs remain unambiguous.
+
+Build the economic proof initially with the existing Oran identity while the distinct Burning Heart implementation is prepared. Release the narrative claiming Burning Heart only when its seed, crop, artwork, harvest and social sink all exist. A prototype crop cannot be renamed into the promised family inheritance.
+
+## Evidence baseline
+
+Reviewed: BUILD-PRIORITIES.md, PRODUCTION-PRIORITIES.md, OPENING-TO-SHARED-TOWN.md, STORY-VOICE-AND-HERO-CONTRACT.md, FIRST-SOCIAL-CHARM-BASKET.md, PLANKSPACE-UNIFIED-SOCIAL-ARCHITECTURE.md, REQUIREMENT-COVERAGE-AUDIT.md, VERIFIED-PROGRESS.md and completion-gates.json. Existing checkpoints describe partial implementations and historical checks. No new runtime tests were performed for this plan; concurrent implementation may supersede individual observations.
+
+- Account sessions, private-home access, Oran farming, receipt-backed inventory, legacy post stamps, companion storage and bounded Exchange exist. Their existence does not demonstrate the new continuous journey.
+- The social stamp path described by the latest audit spends Stalk. A supported harvested-item pin, its receipt and the fullscreen feed are still integration gates. Pinning is a sink with a non-spendable post display; a future gift is a separately labeled inventory transfer.
+- Journey projection reads some durable historical actions. Family cinematics, full girl action art, Burning Heart inheritance and shared-town onboarding remain unaccepted.
+- Native camera work has local evidence. Authored map extent is not complete traversable geography or population-wide simulation. Current standalone 3024 local play is not proof of saved PlankSpace account transactions.
+- Spectator policy and local video components exist; neither proves remote profile footage or theatres. External OAuth helpers and scoped profile CSS do not prove universal publishing or safe arbitrary HTML.
+- The machine checklist currently has 26 entries: 13 implementing and 13 planned, none accepted. These are work states, not completion percentages. This plan adds explicit social/opening acceptance detail without marking old gates complete.
+
+## Ordered integration backlog
+
+| Order / dependency | Deliverable | Starting point and missing connection | Acceptance before dependent release |
+|---|---|---|---|
+| D0: shared baseline | Retained visible pilot, authenticated synthetic identity, runtime/content revision and one stable input owner | Existing account app and standalone runtime must be distinguished; do not silently replace the user's inventory with a fixture | Same visible module loads deliberately; identity and persistence mode are correct; sustained movement, menu close and reload do not relocate the player or clear progress. Record actual observations, not instantaneous key pulses as walking proof. |
+| D1 after D0 | Canonical item/action/custody and post-pin contract | Oran action receipts and legacy stamp settlement are starting points | Define stable item IDs, supported pin items, owned versus reserved quantity, pin sink and request ID semantics. Session, visibility, blocks and available quantity are checked server-side. Concurrent feed, market and game consumers cannot redefine balances. |
+| D2 after D1 | Harvest → Satchel → friend's post transaction | Existing farm and inventory; harvested-item pin service and presentation need wiring | Two synthetic accounts: harvest, choose a permitted friend's post, confirm one pin, refresh both sides, retry the same request and race another spend. Exactly one intended debit and stamp survive. Rejection/cancel loses nothing. Posting never happens merely by opening tutorial or piloting. |
+| D3 alongside D2, releases after D2 | Fullscreen illustrated Charmdex Social and item basket | Existing panels and source art references; default basket must prioritize owned plants/foods/items rather than face catalogue cards | Pin without fullscreen exit, renderer restart or document navigation. Freeze post ID/revision at selection despite new events. One receipt updates basket and post. Keyboard/touch/gamepad focus is exclusive while menu is open and returns without stuck movement. Keep world mounted and visibly live. |
+| D4 after D1; art can proceed alongside D2 | Distinct Burning Heart production | Contract exists; Oran must retain identity and care use | Versioned one-time family entitlement, capacity/time/effort budget, seed/soil/water/growth/harvest art and conserved social sink. Reload each boundary without replay grants. Cost estimates inform balance, never guarantee market price. World/Satchel/post art share identity and reviewed manifest. |
+| D5 after D0/D4; presentation can be authored earlier | Title → name/hero choice → family scene → farm → sharing → companion | Story and opening contracts exist; durable milestones and both hero presentations need completion | Returning users keep location/custody. Fresh boy and girl starters complete identical tutorial mechanics using actual directional/tool/gear frames. Dialogue skipping changes presentation only. Resume every scene and grant boundary; parent dialogue matches the implemented reward. Starter companion choice persists independently of menu following preferences. |
+| D6 after D0; land authoring alongside D2–D5 | Expanded family property and reciprocal travel | Account home address/access exist; actual source selection, geometry, interiors and placements are incomplete | Author shelter, visible beds, water, work area, animal-care space and gate as coherent geometry. Movement, collision, crop anchors and camera agree. Interior/floor transitions and return addresses survive reconnect. Visitor/help permissions remain distinct and revocable. |
+| D7 after D5/D6 | Kakariko-inspired first shared safe hub | Approved layout/justice concept is not an imported, working town | Two independent accounts arrive, see each other, access real town services and return to their own homes without changing story progress. Services reuse existing custody. Friend visit/assist respects owner settings. Basic tutorial route requires neither combat nor crime. |
+| D8 after D7/D1 | Proportional town security | Justice design exists; no claim of complete wanted system | One deliberate theft from bounded NPC stock, witnessed report, guard pursuit, surrender and restitution work end to end. No player escrow theft, duplicate stock, automatic companion attacks on innocents or bystander punishment. Add escalation only after this smallest loop is proven. |
+| D9 after D1/D3/D7 | Broader peaceful economy and shared discovery | Farming/profession/recipe/livestock contracts and partial services | Add flowers/bouquets, food, fishing, construction and livestock in complete acquisition→use→sink/trade chains. Each action has contact/recovery and directional art; buildings alter authoritative collision. Discovery records distinguish verified world facts, personal notes, collective discoveries and owned goods. |
+| D10 after D7/D9 foundation | Shared world, party and hybrid combat expansion | Bounded companions/encounters exist; full action/staged shared simulation does not | Complete six followers, one target's HP/status/capture across views, party/outsider allocation and safe travel before species/raid breadth. Solo, allies, competing parties and opt-in PvP have explicit separate policies. Combat remains queued, not deleted. |
+
+D2 and D3 are the next demonstrable product result. D4–D6 can advance in isolated file ownership at the same time, but cannot replace that result with more unconnected documentation or catalogue volume.
+
+## Platform branches and their prerequisites
+
+| Branch | May start in parallel | Must wait before release |
+|---|---|---|
+| Identity and passkeys | Inventory-preserving internal-account/link migration design and provider capability audit | Verify linking/recovery/revocation and last-credential removal. Wallet login establishes local session, not external-provider permission. Passkey approval binds exact intent; no seedphrases or transaction signing in current work. |
+| Outbound social publishing | Adapter capability matrix and preview design | Canonical post revision, verified per-provider OAuth grants, explicit destination approval and durable delivery outbox. Unknown delivery requires reconciliation; never blind duplicate send. Show exact media/text transformation. Preserve PlankSpace charm custody locally. |
+| Live feed and video | Independent feed-event and media transport prototypes using synthetic accounts | Authenticated visibility/block enforcement; server-checked publication/view policy; active revocation, reconnect and independent viewer footage. Use bounded WebSocket events for social/game state and suitable media transport for HD video, with separate congestion/backpressure. A WebSocket message or coordinate replay is not live footage. |
+| Profile viewing and theatres | Trusted player/widget design and permission model | Working publication transport and revocation first; theatre membership never widens source visibility. Watch-to-play uses existing admission and progress, not copied player state. |
+| Analytics and durability | Ledger-derived read models and restore plan | Transactional outbox plus reconciled item-specific issuance/sinks/escrow/holdings/stamps. Counts must distinguish current, historical and moderated data. Prove restore/rebuild; do not promise eternal retention or expose private inventories. |
+| Custom profiles and themes | Art tokens/manifests, profile layout preservation and source-editor UX | Isolated-origin sandbox for untrusted HTML; trusted account/economic controls outside it; explicit widget bridge. CSS scoping alone is insufficient. Versioned preview/reset/rollback and mobile accessibility precede arbitrary authoring. |
+| Community and AI contribution workshop | Contribution schema, manifest validation and proposal/review workflow | Authority-independent sandbox, reviewed immutable publishing, permissions and rollback. Imported maps/art/recipes cannot mint assets, impersonate accounts or alter live authority. Agent access uses scoped credentials and review, not universal master permissions. |
+| Population scale | Instrumentation, spatial subscriptions and load scenario design | Two-account correctness and recovery, then measured capacity tiers. Separate persistent global addresses from bounded simulation/render subscriptions. Publish measured tick/latency/bandwidth/device results; no unlimited-player claim. |
+| Art breadth and remaster | Catalogue reviewed provenance and missing directional frames | Reuse eligibility is asset-specific, not implied by an open code repository. Ship complete initial item/hero art before collecting thousands of disconnected files. HD remaster remains deferred until playable public operation, per user instruction. |
+
+## Parallel allocation and handoff contract
+
+Use bounded assignments within actually available workers. A task is active only when assigned; do not describe every backlog row as a running swarm.
+
+1. Integrator/pilot owns the account-runtime boundary, D0, shared IDs and visible acceptance. Keeps the existing primary tab and reports concrete runtime changes.
+2. Economy worker owns the pin/custody service slice D1–D2 and targeted transactional evidence, using the agreed item/post/request contract.
+3. Experience worker owns the fullscreen feed/basket slice D3 with illustrated item presentation and focus/control continuity; uses mocked receipts only for development and real service for acceptance.
+4. Content/journey worker owns one bounded D4–D6 slice at a time: Heart registry/art contract, durable opening, or home geometry. Do not independently edit the economy service or native coordinate contract.
+
+Every handoff names exclusive files, dependencies, request/response schema, changed runtime behavior, checks and limitations. If fewer workers are available, queue work; after a completed slice, reassign the freed worker to the earliest unblocked dependency. Reserve security-sensitive identity, migrations and social mutations for integration review rather than overlapping speculative edits.
+
+## Completion record
+
+For each row record: specified; connected code; focused correctness evidence; visible solo journey; independent-account evidence where relevant; supported device/performance evidence; release. States are descriptive and unequal in effort. No percentage or checked acceptance without evidence tied to source/content revision.
+
+Retain the GLOBAL checklist mapping: D0/D3 address GLOBAL-02/25; D6/D7 address 01/03/04/05/07/08/09; D1/D2/D4/D9 address 20; D10 addresses 06/10–14; media branches address 15–18; capacity addresses 19; creator branches address 21–24. RETAINED-VISION remains open across all later titles/features. New home/social requirements supplement rather than disappear inside those broad rows.
+
+Use focused checks after meaningful integrations. Do not rerun the entire suite after cosmetic edits; do run required repository release gates before shipping. Visual acceptance must cover real art, directional contact, occlusion, stable targets, legibility and control feel—not only endpoint success. Preserve provenance and source evidence, and update the continuation prompt when an integrated slice changes the next runnable step.

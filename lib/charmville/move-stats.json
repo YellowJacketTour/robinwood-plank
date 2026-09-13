@@ -1,0 +1,5454 @@
+{
+  "source": "https://github.com/pret/pokeemerald",
+  "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+  "files": {
+    "include/constants/moves.h": "d32746c9ad3ed1bbfbb93712f13e01ab1c43f48a78f3605ef9db5095e8d19d27",
+    "src/data/battle_moves.h": "8b3d4d143b807807af97ce7288e0cc0ccdd55b6b64ac45824e35a549836b3a0c"
+  },
+  "moves": {
+    "1": {
+      "name": "POUND",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "2": {
+      "name": "KARATE_CHOP",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "3": {
+      "name": "DOUBLE_SLAP",
+      "power": 15,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "4": {
+      "name": "COMET_PUNCH",
+      "power": 18,
+      "accuracy": 85,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "5": {
+      "name": "MEGA_PUNCH",
+      "power": 80,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "6": {
+      "name": "PAY_DAY",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_PAY_DAY",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "7": {
+      "name": "FIRE_PUNCH",
+      "power": 75,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BURN_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "8": {
+      "name": "ICE_PUNCH",
+      "power": 75,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FREEZE_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "9": {
+      "name": "THUNDER_PUNCH",
+      "power": 75,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "10": {
+      "name": "SCRATCH",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "11": {
+      "name": "VICE_GRIP",
+      "power": 55,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "12": {
+      "name": "GUILLOTINE",
+      "power": 1,
+      "accuracy": 30,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_OHKO",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "13": {
+      "name": "RAZOR_WIND",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RAZOR_WIND",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "14": {
+      "name": "SWORDS_DANCE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP_2",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "15": {
+      "name": "CUT",
+      "power": 50,
+      "accuracy": 95,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "16": {
+      "name": "GUST",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_GUST",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "17": {
+      "name": "WING_ATTACK",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "18": {
+      "name": "WHIRLWIND",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": -6,
+      "effect": "EFFECT_ROAR",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "19": {
+      "name": "FLY",
+      "power": 70,
+      "accuracy": 95,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SEMI_INVULNERABLE",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "20": {
+      "name": "BIND",
+      "power": 15,
+      "accuracy": 75,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "21": {
+      "name": "SLAM",
+      "power": 80,
+      "accuracy": 75,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "22": {
+      "name": "VINE_WHIP",
+      "power": 35,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "23": {
+      "name": "STOMP",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_MINIMIZE_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "24": {
+      "name": "DOUBLE_KICK",
+      "power": 30,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DOUBLE_HIT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "25": {
+      "name": "MEGA_KICK",
+      "power": 120,
+      "accuracy": 75,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "26": {
+      "name": "JUMP_KICK",
+      "power": 70,
+      "accuracy": 95,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECOIL_IF_MISS",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "27": {
+      "name": "ROLLING_KICK",
+      "power": 60,
+      "accuracy": 85,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "28": {
+      "name": "SAND_ATTACK",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "29": {
+      "name": "HEADBUTT",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "30": {
+      "name": "HORN_ATTACK",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "31": {
+      "name": "FURY_ATTACK",
+      "power": 15,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "32": {
+      "name": "HORN_DRILL",
+      "power": 1,
+      "accuracy": 30,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_OHKO",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "33": {
+      "name": "TACKLE",
+      "power": 35,
+      "accuracy": 95,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "34": {
+      "name": "BODY_SLAM",
+      "power": 85,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "35": {
+      "name": "WRAP",
+      "power": 15,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "36": {
+      "name": "TAKE_DOWN",
+      "power": 90,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECOIL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "37": {
+      "name": "THRASH",
+      "power": 90,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_RAMPAGE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_RANDOM",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "38": {
+      "name": "DOUBLE_EDGE",
+      "power": 120,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DOUBLE_EDGE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "39": {
+      "name": "TAIL_WHIP",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "40": {
+      "name": "POISON_STING",
+      "power": 15,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_POISON_HIT",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "41": {
+      "name": "TWINEEDLE",
+      "power": 25,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_TWINEEDLE",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "42": {
+      "name": "PIN_MISSILE",
+      "power": 14,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "43": {
+      "name": "LEER",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "44": {
+      "name": "BITE",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "45": {
+      "name": "GROWL",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "46": {
+      "name": "ROAR",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": -6,
+      "effect": "EFFECT_ROAR",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "47": {
+      "name": "SING",
+      "power": 0,
+      "accuracy": 55,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "48": {
+      "name": "SUPERSONIC",
+      "power": 0,
+      "accuracy": 55,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "49": {
+      "name": "SONIC_BOOM",
+      "power": 1,
+      "accuracy": 90,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SONICBOOM",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "50": {
+      "name": "DISABLE",
+      "power": 0,
+      "accuracy": 55,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DISABLE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "51": {
+      "name": "ACID",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN_HIT",
+      "type": "POISON",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "52": {
+      "name": "EMBER",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BURN_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "53": {
+      "name": "FLAMETHROWER",
+      "power": 95,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BURN_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "54": {
+      "name": "MIST",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MIST",
+      "type": "ICE",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "55": {
+      "name": "WATER_GUN",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "56": {
+      "name": "HYDRO_PUMP",
+      "power": 120,
+      "accuracy": 80,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "57": {
+      "name": "SURF",
+      "power": 95,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "58": {
+      "name": "ICE_BEAM",
+      "power": 95,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FREEZE_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "59": {
+      "name": "BLIZZARD",
+      "power": 120,
+      "accuracy": 70,
+      "pp": 5,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FREEZE_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "60": {
+      "name": "PSYBEAM",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "61": {
+      "name": "BUBBLE_BEAM",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "62": {
+      "name": "AURORA_BEAM",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_DOWN_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "63": {
+      "name": "HYPER_BEAM",
+      "power": 150,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECHARGE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "64": {
+      "name": "PECK",
+      "power": 35,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "65": {
+      "name": "DRILL_PECK",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "66": {
+      "name": "SUBMISSION",
+      "power": 80,
+      "accuracy": 80,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECOIL",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "67": {
+      "name": "LOW_KICK",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LOW_KICK",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "68": {
+      "name": "COUNTER",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": -5,
+      "effect": "EFFECT_COUNTER",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "69": {
+      "name": "SEISMIC_TOSS",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LEVEL_DAMAGE",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "70": {
+      "name": "STRENGTH",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "71": {
+      "name": "ABSORB",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ABSORB",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "72": {
+      "name": "MEGA_DRAIN",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ABSORB",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "73": {
+      "name": "LEECH_SEED",
+      "power": 0,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LEECH_SEED",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "74": {
+      "name": "GROWTH",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_ATTACK_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "75": {
+      "name": "RAZOR_LEAF",
+      "power": 55,
+      "accuracy": 95,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "76": {
+      "name": "SOLAR_BEAM",
+      "power": 120,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SOLAR_BEAM",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "77": {
+      "name": "POISON_POWDER",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 35,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_POISON",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "78": {
+      "name": "STUN_SPORE",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "79": {
+      "name": "SLEEP_POWDER",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "80": {
+      "name": "PETAL_DANCE",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_RAMPAGE",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_RANDOM",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "81": {
+      "name": "STRING_SHOT",
+      "power": 0,
+      "accuracy": 95,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN",
+      "type": "BUG",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "82": {
+      "name": "DRAGON_RAGE",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DRAGON_RAGE",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "83": {
+      "name": "FIRE_SPIN",
+      "power": 15,
+      "accuracy": 70,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "84": {
+      "name": "THUNDER_SHOCK",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "85": {
+      "name": "THUNDERBOLT",
+      "power": 95,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "86": {
+      "name": "THUNDER_WAVE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "87": {
+      "name": "THUNDER",
+      "power": 120,
+      "accuracy": 70,
+      "pp": 10,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_THUNDER",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "88": {
+      "name": "ROCK_THROW",
+      "power": 50,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "89": {
+      "name": "EARTHQUAKE",
+      "power": 100,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_EARTHQUAKE",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_FOES_AND_ALLY",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "90": {
+      "name": "FISSURE",
+      "power": 1,
+      "accuracy": 30,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_OHKO",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "91": {
+      "name": "DIG",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SEMI_INVULNERABLE",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "92": {
+      "name": "TOXIC",
+      "power": 0,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TOXIC",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "93": {
+      "name": "CONFUSION",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "94": {
+      "name": "PSYCHIC",
+      "power": 90,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "95": {
+      "name": "HYPNOSIS",
+      "power": 0,
+      "accuracy": 60,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "96": {
+      "name": "MEDITATE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "97": {
+      "name": "AGILITY",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_UP_2",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "98": {
+      "name": "QUICK_ATTACK",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 1,
+      "effect": "EFFECT_QUICK_ATTACK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "99": {
+      "name": "RAGE",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RAGE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "100": {
+      "name": "TELEPORT",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TELEPORT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "101": {
+      "name": "NIGHT_SHADE",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LEVEL_DAMAGE",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "102": {
+      "name": "MIMIC",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MIMIC",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "103": {
+      "name": "SCREECH",
+      "power": 0,
+      "accuracy": 85,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN_2",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "104": {
+      "name": "DOUBLE_TEAM",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_EVASION_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "105": {
+      "name": "RECOVER",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RESTORE_HP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "106": {
+      "name": "HARDEN",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "107": {
+      "name": "MINIMIZE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MINIMIZE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "108": {
+      "name": "SMOKESCREEN",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "109": {
+      "name": "CONFUSE_RAY",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "110": {
+      "name": "WITHDRAW",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP",
+      "type": "WATER",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "111": {
+      "name": "DEFENSE_CURL",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_CURL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "112": {
+      "name": "BARRIER",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP_2",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "113": {
+      "name": "LIGHT_SCREEN",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LIGHT_SCREEN",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "114": {
+      "name": "HAZE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HAZE",
+      "type": "ICE",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "115": {
+      "name": "REFLECT",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_REFLECT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "116": {
+      "name": "FOCUS_ENERGY",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FOCUS_ENERGY",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "117": {
+      "name": "BIDE",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BIDE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "118": {
+      "name": "METRONOME",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_METRONOME",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "119": {
+      "name": "MIRROR_MOVE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MIRROR_MOVE",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "120": {
+      "name": "SELF_DESTRUCT",
+      "power": 200,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_EXPLOSION",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_FOES_AND_ALLY",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "121": {
+      "name": "EGG_BOMB",
+      "power": 100,
+      "accuracy": 75,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "122": {
+      "name": "LICK",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "123": {
+      "name": "SMOG",
+      "power": 20,
+      "accuracy": 70,
+      "pp": 20,
+      "secondaryEffectChance": 40,
+      "priority": 0,
+      "effect": "EFFECT_POISON_HIT",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "124": {
+      "name": "SLUDGE",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_POISON_HIT",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "125": {
+      "name": "BONE_CLUB",
+      "power": 65,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "126": {
+      "name": "FIRE_BLAST",
+      "power": 120,
+      "accuracy": 85,
+      "pp": 5,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BURN_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "127": {
+      "name": "WATERFALL",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "128": {
+      "name": "CLAMP",
+      "power": 35,
+      "accuracy": 75,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "129": {
+      "name": "SWIFT",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "130": {
+      "name": "SKULL_BASH",
+      "power": 100,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SKULL_BASH",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "131": {
+      "name": "SPIKE_CANNON",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "132": {
+      "name": "CONSTRICT",
+      "power": 10,
+      "accuracy": 100,
+      "pp": 35,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "133": {
+      "name": "AMNESIA",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_UP_2",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "134": {
+      "name": "KINESIS",
+      "power": 0,
+      "accuracy": 80,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "135": {
+      "name": "SOFT_BOILED",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SOFTBOILED",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "136": {
+      "name": "HI_JUMP_KICK",
+      "power": 85,
+      "accuracy": 90,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECOIL_IF_MISS",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "137": {
+      "name": "GLARE",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "138": {
+      "name": "DREAM_EATER",
+      "power": 100,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DREAM_EATER",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "139": {
+      "name": "POISON_GAS",
+      "power": 0,
+      "accuracy": 55,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_POISON",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "140": {
+      "name": "BARRAGE",
+      "power": 15,
+      "accuracy": 85,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "141": {
+      "name": "LEECH_LIFE",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ABSORB",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "142": {
+      "name": "LOVELY_KISS",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "143": {
+      "name": "SKY_ATTACK",
+      "power": 140,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_SKY_ATTACK",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "144": {
+      "name": "TRANSFORM",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TRANSFORM",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "145": {
+      "name": "BUBBLE",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "146": {
+      "name": "DIZZY_PUNCH",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "147": {
+      "name": "SPORE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "148": {
+      "name": "FLASH",
+      "power": 0,
+      "accuracy": 70,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "149": {
+      "name": "PSYWAVE",
+      "power": 1,
+      "accuracy": 80,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PSYWAVE",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "150": {
+      "name": "SPLASH",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPLASH",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "151": {
+      "name": "ACID_ARMOR",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP_2",
+      "type": "POISON",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "152": {
+      "name": "CRABHAMMER",
+      "power": 90,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "153": {
+      "name": "EXPLOSION",
+      "power": 250,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_EXPLOSION",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_FOES_AND_ALLY",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "154": {
+      "name": "FURY_SWIPES",
+      "power": 18,
+      "accuracy": 80,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "155": {
+      "name": "BONEMERANG",
+      "power": 50,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DOUBLE_HIT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "156": {
+      "name": "REST",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_REST",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "157": {
+      "name": "ROCK_SLIDE",
+      "power": 75,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "158": {
+      "name": "HYPER_FANG",
+      "power": 80,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "159": {
+      "name": "SHARPEN",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "160": {
+      "name": "CONVERSION",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CONVERSION",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "161": {
+      "name": "TRI_ATTACK",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_TRI_ATTACK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "162": {
+      "name": "SUPER_FANG",
+      "power": 1,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SUPER_FANG",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "163": {
+      "name": "SLASH",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "164": {
+      "name": "SUBSTITUTE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SUBSTITUTE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "165": {
+      "name": "STRUGGLE",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 1,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECOIL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "166": {
+      "name": "SKETCH",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 1,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SKETCH",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "167": {
+      "name": "TRIPLE_KICK",
+      "power": 10,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TRIPLE_KICK",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "168": {
+      "name": "THIEF",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_THIEF",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "169": {
+      "name": "SPIDER_WEB",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MEAN_LOOK",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "170": {
+      "name": "MIND_READER",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LOCK_ON",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "171": {
+      "name": "NIGHTMARE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_NIGHTMARE",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "172": {
+      "name": "FLAME_WHEEL",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_THAW_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "173": {
+      "name": "SNORE",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_SNORE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "174": {
+      "name": "CURSE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CURSE",
+      "type": "MYSTERY",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "175": {
+      "name": "FLAIL",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FLAIL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "176": {
+      "name": "CONVERSION_2",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CONVERSION_2",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "177": {
+      "name": "AEROBLAST",
+      "power": 100,
+      "accuracy": 95,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "178": {
+      "name": "COTTON_SPORE",
+      "power": 0,
+      "accuracy": 85,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_2",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "179": {
+      "name": "REVERSAL",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FLAIL",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "180": {
+      "name": "SPITE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPITE",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "181": {
+      "name": "POWDER_SNOW",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FREEZE_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "182": {
+      "name": "PROTECT",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 3,
+      "effect": "EFFECT_PROTECT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "183": {
+      "name": "MACH_PUNCH",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 1,
+      "effect": "EFFECT_QUICK_ATTACK",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "184": {
+      "name": "SCARY_FACE",
+      "power": 0,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_2",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "185": {
+      "name": "FAINT_ATTACK",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "186": {
+      "name": "SWEET_KISS",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "187": {
+      "name": "BELLY_DRUM",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BELLY_DRUM",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "188": {
+      "name": "SLUDGE_BOMB",
+      "power": 90,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_POISON_HIT",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "189": {
+      "name": "MUD_SLAP",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN_HIT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "190": {
+      "name": "OCTAZOOKA",
+      "power": 65,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "191": {
+      "name": "SPIKES",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPIKES",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_OPPONENTS_FIELD",
+      "flags": []
+    },
+    "192": {
+      "name": "ZAP_CANNON",
+      "power": 100,
+      "accuracy": 50,
+      "pp": 5,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "193": {
+      "name": "FORESIGHT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FORESIGHT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "194": {
+      "name": "DESTINY_BOND",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DESTINY_BOND",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "195": {
+      "name": "PERISH_SONG",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PERISH_SONG",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "196": {
+      "name": "ICY_WIND",
+      "power": 55,
+      "accuracy": 95,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "197": {
+      "name": "DETECT",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 3,
+      "effect": "EFFECT_PROTECT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "198": {
+      "name": "BONE_RUSH",
+      "power": 25,
+      "accuracy": 80,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "199": {
+      "name": "LOCK_ON",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_LOCK_ON",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "200": {
+      "name": "OUTRAGE",
+      "power": 90,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_RAMPAGE",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_RANDOM",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "201": {
+      "name": "SANDSTORM",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SANDSTORM",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "202": {
+      "name": "GIGA_DRAIN",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ABSORB",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "203": {
+      "name": "ENDURE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 3,
+      "effect": "EFFECT_ENDURE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "204": {
+      "name": "CHARM",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_DOWN_2",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "205": {
+      "name": "ROLLOUT",
+      "power": 30,
+      "accuracy": 90,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ROLLOUT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "206": {
+      "name": "FALSE_SWIPE",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FALSE_SWIPE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "207": {
+      "name": "SWAGGER",
+      "power": 0,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_SWAGGER",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "208": {
+      "name": "MILK_DRINK",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SOFTBOILED",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "209": {
+      "name": "SPARK",
+      "power": 65,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "210": {
+      "name": "FURY_CUTTER",
+      "power": 10,
+      "accuracy": 95,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FURY_CUTTER",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "211": {
+      "name": "STEEL_WING",
+      "power": 70,
+      "accuracy": 90,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP_HIT",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "212": {
+      "name": "MEAN_LOOK",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MEAN_LOOK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "213": {
+      "name": "ATTRACT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTRACT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "214": {
+      "name": "SLEEP_TALK",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP_TALK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "215": {
+      "name": "HEAL_BELL",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HEAL_BELL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "216": {
+      "name": "RETURN",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RETURN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "217": {
+      "name": "PRESENT",
+      "power": 1,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PRESENT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "218": {
+      "name": "FRUSTRATION",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FRUSTRATION",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "219": {
+      "name": "SAFEGUARD",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SAFEGUARD",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "220": {
+      "name": "PAIN_SPLIT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PAIN_SPLIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "221": {
+      "name": "SACRED_FIRE",
+      "power": 100,
+      "accuracy": 95,
+      "pp": 5,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_THAW_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "222": {
+      "name": "MAGNITUDE",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MAGNITUDE",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_FOES_AND_ALLY",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "223": {
+      "name": "DYNAMIC_PUNCH",
+      "power": 100,
+      "accuracy": 50,
+      "pp": 5,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "224": {
+      "name": "MEGAHORN",
+      "power": 120,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "225": {
+      "name": "DRAGON_BREATH",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_PARALYZE_HIT",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "226": {
+      "name": "BATON_PASS",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BATON_PASS",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "227": {
+      "name": "ENCORE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ENCORE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "228": {
+      "name": "PURSUIT",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PURSUIT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "229": {
+      "name": "RAPID_SPIN",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RAPID_SPIN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "230": {
+      "name": "SWEET_SCENT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_EVASION_DOWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "231": {
+      "name": "IRON_TAIL",
+      "power": 100,
+      "accuracy": 75,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN_HIT",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "232": {
+      "name": "METAL_CLAW",
+      "power": 50,
+      "accuracy": 95,
+      "pp": 35,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP_HIT",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "233": {
+      "name": "VITAL_THROW",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": -1,
+      "effect": "EFFECT_VITAL_THROW",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "234": {
+      "name": "MORNING_SUN",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MORNING_SUN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "235": {
+      "name": "SYNTHESIS",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SYNTHESIS",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "236": {
+      "name": "MOONLIGHT",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MOONLIGHT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "237": {
+      "name": "HIDDEN_POWER",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIDDEN_POWER",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "238": {
+      "name": "CROSS_CHOP",
+      "power": 100,
+      "accuracy": 80,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "239": {
+      "name": "TWISTER",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_TWISTER",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "240": {
+      "name": "RAIN_DANCE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RAIN_DANCE",
+      "type": "WATER",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "241": {
+      "name": "SUNNY_DAY",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SUNNY_DAY",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "242": {
+      "name": "CRUNCH",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_HIT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "243": {
+      "name": "MIRROR_COAT",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": -5,
+      "effect": "EFFECT_MIRROR_COAT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": [
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "244": {
+      "name": "PSYCH_UP",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_PSYCH_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "245": {
+      "name": "EXTREME_SPEED",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 1,
+      "effect": "EFFECT_QUICK_ATTACK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "246": {
+      "name": "ANCIENT_POWER",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_ALL_STATS_UP_HIT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "247": {
+      "name": "SHADOW_BALL",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_HIT",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "248": {
+      "name": "FUTURE_SIGHT",
+      "power": 80,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FUTURE_SIGHT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "249": {
+      "name": "ROCK_SMASH",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN_HIT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "250": {
+      "name": "WHIRLPOOL",
+      "power": 15,
+      "accuracy": 70,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "251": {
+      "name": "BEAT_UP",
+      "power": 10,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BEAT_UP",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "252": {
+      "name": "FAKE_OUT",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 1,
+      "effect": "EFFECT_FAKE_OUT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "253": {
+      "name": "UPROAR",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_UPROAR",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_RANDOM",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "254": {
+      "name": "STOCKPILE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_STOCKPILE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "255": {
+      "name": "SPIT_UP",
+      "power": 100,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPIT_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "256": {
+      "name": "SWALLOW",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SWALLOW",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "257": {
+      "name": "HEAT_WAVE",
+      "power": 100,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BURN_HIT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "258": {
+      "name": "HAIL",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HAIL",
+      "type": "ICE",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "259": {
+      "name": "TORMENT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TORMENT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "260": {
+      "name": "FLATTER",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FLATTER",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "261": {
+      "name": "WILL_O_WISP",
+      "power": 0,
+      "accuracy": 75,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_WILL_O_WISP",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "262": {
+      "name": "MEMENTO",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MEMENTO",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "263": {
+      "name": "FACADE",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FACADE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "264": {
+      "name": "FOCUS_PUNCH",
+      "power": 150,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": -3,
+      "effect": "EFFECT_FOCUS_PUNCH",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "265": {
+      "name": "SMELLING_SALT",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SMELLINGSALT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "266": {
+      "name": "FOLLOW_ME",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 3,
+      "effect": "EFFECT_FOLLOW_ME",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "267": {
+      "name": "NATURE_POWER",
+      "power": 0,
+      "accuracy": 95,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_NATURE_POWER",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "268": {
+      "name": "CHARGE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CHARGE",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "269": {
+      "name": "TAUNT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TAUNT",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "270": {
+      "name": "HELPING_HAND",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 5,
+      "effect": "EFFECT_HELPING_HAND",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "271": {
+      "name": "TRICK",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TRICK",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "272": {
+      "name": "ROLE_PLAY",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ROLE_PLAY",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "273": {
+      "name": "WISH",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_WISH",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "274": {
+      "name": "ASSIST",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ASSIST",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "275": {
+      "name": "INGRAIN",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_INGRAIN",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "276": {
+      "name": "SUPERPOWER",
+      "power": 120,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SUPERPOWER",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "277": {
+      "name": "MAGIC_COAT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 4,
+      "effect": "EFFECT_MAGIC_COAT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": []
+    },
+    "278": {
+      "name": "RECYCLE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECYCLE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "279": {
+      "name": "REVENGE",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": -4,
+      "effect": "EFFECT_REVENGE",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "280": {
+      "name": "BRICK_BREAK",
+      "power": 75,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BRICK_BREAK",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "281": {
+      "name": "YAWN",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_YAWN",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "282": {
+      "name": "KNOCK_OFF",
+      "power": 20,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_KNOCK_OFF",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "283": {
+      "name": "ENDEAVOR",
+      "power": 1,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ENDEAVOR",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "284": {
+      "name": "ERUPTION",
+      "power": 150,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ERUPTION",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "285": {
+      "name": "SKILL_SWAP",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SKILL_SWAP",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "286": {
+      "name": "IMPRISON",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_IMPRISON",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "287": {
+      "name": "REFRESH",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_REFRESH",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "288": {
+      "name": "GRUDGE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_GRUDGE",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "289": {
+      "name": "SNATCH",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 4,
+      "effect": "EFFECT_SNATCH",
+      "type": "DARK",
+      "target": "MOVE_TARGET_DEPENDS",
+      "flags": [
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "290": {
+      "name": "SECRET_POWER",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_SECRET_POWER",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "291": {
+      "name": "DIVE",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SEMI_INVULNERABLE",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "292": {
+      "name": "ARM_THRUST",
+      "power": 15,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "293": {
+      "name": "CAMOUFLAGE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CAMOUFLAGE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "294": {
+      "name": "TAIL_GLOW",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_ATTACK_UP_2",
+      "type": "BUG",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "295": {
+      "name": "LUSTER_PURGE",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "296": {
+      "name": "MIST_BALL",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_ATTACK_DOWN_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "297": {
+      "name": "FEATHER_DANCE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_DOWN_2",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "298": {
+      "name": "TEETER_DANCE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TEETER_DANCE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_FOES_AND_ALLY",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED"
+      ]
+    },
+    "299": {
+      "name": "BLAZE_KICK",
+      "power": 85,
+      "accuracy": 90,
+      "pp": 10,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_BLAZE_KICK",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "300": {
+      "name": "MUD_SPORT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MUD_SPORT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "301": {
+      "name": "ICE_BALL",
+      "power": 30,
+      "accuracy": 90,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ROLLOUT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "302": {
+      "name": "NEEDLE_ARM",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_MINIMIZE_HIT",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "303": {
+      "name": "SLACK_OFF",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RESTORE_HP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "304": {
+      "name": "HYPER_VOICE",
+      "power": 90,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "305": {
+      "name": "POISON_FANG",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_POISON_FANG",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "306": {
+      "name": "CRUSH_CLAW",
+      "power": 75,
+      "accuracy": 95,
+      "pp": 10,
+      "secondaryEffectChance": 50,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_DOWN_HIT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "307": {
+      "name": "BLAST_BURN",
+      "power": 150,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECHARGE",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "308": {
+      "name": "HYDRO_CANNON",
+      "power": 150,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECHARGE",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "309": {
+      "name": "METEOR_MASH",
+      "power": 100,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP_HIT",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "310": {
+      "name": "ASTONISH",
+      "power": 30,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_MINIMIZE_HIT",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "311": {
+      "name": "WEATHER_BALL",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_WEATHER_BALL",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "312": {
+      "name": "AROMATHERAPY",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HEAL_BELL",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "313": {
+      "name": "FAKE_TEARS",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_2",
+      "type": "DARK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "314": {
+      "name": "AIR_CUTTER",
+      "power": 55,
+      "accuracy": 95,
+      "pp": 25,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "315": {
+      "name": "OVERHEAT",
+      "power": 140,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_OVERHEAT",
+      "type": "FIRE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "316": {
+      "name": "ODOR_SLEUTH",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FORESIGHT",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "317": {
+      "name": "ROCK_TOMB",
+      "power": 50,
+      "accuracy": 80,
+      "pp": 10,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "318": {
+      "name": "SILVER_WIND",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_ALL_STATS_UP_HIT",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "319": {
+      "name": "METAL_SOUND",
+      "power": 0,
+      "accuracy": 85,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SPECIAL_DEFENSE_DOWN_2",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "320": {
+      "name": "GRASS_WHISTLE",
+      "power": 0,
+      "accuracy": 55,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SLEEP",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "321": {
+      "name": "TICKLE",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_TICKLE",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "322": {
+      "name": "COSMIC_POWER",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_COSMIC_POWER",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "323": {
+      "name": "WATER_SPOUT",
+      "power": 150,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ERUPTION",
+      "type": "WATER",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "324": {
+      "name": "SIGNAL_BEAM",
+      "power": 75,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "BUG",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "325": {
+      "name": "SHADOW_PUNCH",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "GHOST",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "326": {
+      "name": "EXTRASENSORY",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_FLINCH_MINIMIZE_HIT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "327": {
+      "name": "SKY_UPPERCUT",
+      "power": 85,
+      "accuracy": 90,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_SKY_UPPERCUT",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "328": {
+      "name": "SAND_TOMB",
+      "power": 15,
+      "accuracy": 70,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_TRAP",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "329": {
+      "name": "SHEER_COLD",
+      "power": 1,
+      "accuracy": 30,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_OHKO",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "330": {
+      "name": "MUDDY_WATER",
+      "power": 95,
+      "accuracy": 85,
+      "pp": 10,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_ACCURACY_DOWN_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_BOTH",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "331": {
+      "name": "BULLET_SEED",
+      "power": 10,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "332": {
+      "name": "AERIAL_ACE",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "333": {
+      "name": "ICICLE_SPEAR",
+      "power": 10,
+      "accuracy": 100,
+      "pp": 30,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "ICE",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "334": {
+      "name": "IRON_DEFENSE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DEFENSE_UP_2",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "335": {
+      "name": "BLOCK",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MEAN_LOOK",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MAGIC_COAT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "336": {
+      "name": "HOWL",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 40,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ATTACK_UP",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "337": {
+      "name": "DRAGON_CLAW",
+      "power": 80,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIT",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "338": {
+      "name": "FRENZY_PLANT",
+      "power": 150,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_RECHARGE",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "339": {
+      "name": "BULK_UP",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_BULK_UP",
+      "type": "FIGHTING",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "340": {
+      "name": "BOUNCE",
+      "power": 85,
+      "accuracy": 85,
+      "pp": 5,
+      "secondaryEffectChance": 30,
+      "priority": 0,
+      "effect": "EFFECT_SEMI_INVULNERABLE",
+      "type": "FLYING",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "341": {
+      "name": "MUD_SHOT",
+      "power": 55,
+      "accuracy": 95,
+      "pp": 15,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_SPEED_DOWN_HIT",
+      "type": "GROUND",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "342": {
+      "name": "POISON_TAIL",
+      "power": 50,
+      "accuracy": 100,
+      "pp": 25,
+      "secondaryEffectChance": 10,
+      "priority": 0,
+      "effect": "EFFECT_POISON_TAIL",
+      "type": "POISON",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "343": {
+      "name": "COVET",
+      "power": 40,
+      "accuracy": 100,
+      "pp": 40,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_THIEF",
+      "type": "NORMAL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    "344": {
+      "name": "VOLT_TACKLE",
+      "power": 120,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DOUBLE_EDGE",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "345": {
+      "name": "MAGICAL_LEAF",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "346": {
+      "name": "WATER_SPORT",
+      "power": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_WATER_SPORT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_USER",
+      "flags": []
+    },
+    "347": {
+      "name": "CALM_MIND",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_CALM_MIND",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "348": {
+      "name": "LEAF_BLADE",
+      "power": 70,
+      "accuracy": 100,
+      "pp": 15,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_HIGH_CRITICAL",
+      "type": "GRASS",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_MAKES_CONTACT",
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "349": {
+      "name": "DRAGON_DANCE",
+      "power": 0,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_DRAGON_DANCE",
+      "type": "DRAGON",
+      "target": "MOVE_TARGET_USER",
+      "flags": [
+        "FLAG_SNATCH_AFFECTED"
+      ]
+    },
+    "350": {
+      "name": "ROCK_BLAST",
+      "power": 25,
+      "accuracy": 80,
+      "pp": 10,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_MULTI_HIT",
+      "type": "ROCK",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "351": {
+      "name": "SHOCK_WAVE",
+      "power": 60,
+      "accuracy": 0,
+      "pp": 20,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_ALWAYS_HIT",
+      "type": "ELECTRIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "352": {
+      "name": "WATER_PULSE",
+      "power": 60,
+      "accuracy": 100,
+      "pp": 20,
+      "secondaryEffectChance": 20,
+      "priority": 0,
+      "effect": "EFFECT_CONFUSE_HIT",
+      "type": "WATER",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    },
+    "353": {
+      "name": "DOOM_DESIRE",
+      "power": 120,
+      "accuracy": 85,
+      "pp": 5,
+      "secondaryEffectChance": 0,
+      "priority": 0,
+      "effect": "EFFECT_FUTURE_SIGHT",
+      "type": "STEEL",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": []
+    },
+    "354": {
+      "name": "PSYCHO_BOOST",
+      "power": 140,
+      "accuracy": 90,
+      "pp": 5,
+      "secondaryEffectChance": 100,
+      "priority": 0,
+      "effect": "EFFECT_OVERHEAT",
+      "type": "PSYCHIC",
+      "target": "MOVE_TARGET_SELECTED",
+      "flags": [
+        "FLAG_PROTECT_AFFECTED",
+        "FLAG_MIRROR_MOVE_AFFECTED",
+        "FLAG_KINGS_ROCK_AFFECTED"
+      ]
+    }
+  }
+}

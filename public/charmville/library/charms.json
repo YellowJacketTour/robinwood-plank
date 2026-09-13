@@ -1,0 +1,786 @@
+{
+  "version": 1,
+  "scope": "Imported testnet source snapshot; not a complete live catalog or ownership record",
+  "charms": [
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ualien",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ualien",
+      "name": "ualien",
+      "emoji": "👽",
+      "poolId": "1175",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubear",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubear",
+      "name": "ubear",
+      "emoji": "🐻",
+      "poolId": "1176",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubearhearth",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubearhearth",
+      "name": "ubearhearth",
+      "emoji": "🐻❤️",
+      "poolId": "1177",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubitjaks",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubitjaks",
+      "name": "ubitjaks",
+      "emoji": "🏳️‍⚧️",
+      "poolId": "1171",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublackflag",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublackflag",
+      "name": "ublackflag",
+      "emoji": "🏴",
+      "poolId": "1178",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublissful",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublissful",
+      "name": "ublissful",
+      "emoji": "(｡◕‿‿◕｡)",
+      "poolId": "1179",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublowfish",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ublowfish",
+      "name": "ublowfish",
+      "emoji": "🐡",
+      "poolId": "1180",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubrainlet",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubrainlet",
+      "name": "ubrainlet",
+      "emoji": "🧠🤏",
+      "poolId": "1181",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubugjuice",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ubugjuice",
+      "name": "ubugjuice",
+      "emoji": "🪲🧃",
+      "poolId": "1182",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucash",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucash",
+      "name": "ucash",
+      "emoji": "💸",
+      "poolId": "1183",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucat",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucat",
+      "name": "ucat",
+      "emoji": "🐱",
+      "poolId": "1184",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchains",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchains",
+      "name": "uchains",
+      "emoji": "🙍⛓️",
+      "poolId": "1185",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchick",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchick",
+      "name": "uchick",
+      "emoji": "🐤",
+      "poolId": "1186",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchina",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchina",
+      "name": "uchina",
+      "emoji": "🇨🇳",
+      "poolId": "1187",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchurchcrown",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uchurchcrown",
+      "name": "uchurchcrown",
+      "emoji": "👑",
+      "poolId": "1234",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uclown",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uclown",
+      "name": "uclown",
+      "emoji": "🤡",
+      "poolId": "1188",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucoconutdoggy",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucoconutdoggy",
+      "name": "ucoconutdoggy",
+      "emoji": "🥥🐶",
+      "poolId": "1238",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucorn",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucorn",
+      "name": "ucorn",
+      "emoji": "🌽",
+      "poolId": "1189",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucrown",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucrown",
+      "name": "ucrown",
+      "emoji": "👑",
+      "poolId": "1174",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucrystalball",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ucrystalball",
+      "name": "ucrystalball",
+      "emoji": "🔮",
+      "poolId": "1190",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udiamond",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udiamond",
+      "name": "udiamond",
+      "emoji": "💎",
+      "poolId": "1191",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udice",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udice",
+      "name": "udice",
+      "emoji": "🎲",
+      "poolId": "1192",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udog",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udog",
+      "name": "udog",
+      "emoji": "🐶",
+      "poolId": "1193",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udogwifgun",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/udogwifgun",
+      "name": "udogwifgun",
+      "emoji": "🐶🔫",
+      "poolId": "1194",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ueggplant",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ueggplant",
+      "name": "ueggplant",
+      "emoji": "🍆",
+      "poolId": "1195",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ueightball",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ueightball",
+      "name": "ueightball",
+      "emoji": "🎱",
+      "poolId": "1196",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uenvelop",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uenvelop",
+      "name": "uenvelop",
+      "emoji": "✉️",
+      "poolId": "1197",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufahrenheit",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufahrenheit",
+      "name": "ufahrenheit",
+      "emoji": "🔥",
+      "poolId": "1198",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufoose",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufoose",
+      "name": "ufoose",
+      "emoji": "🐸🙂",
+      "poolId": "1170",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufrog",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ufrog",
+      "name": "ufrog",
+      "emoji": "🐸",
+      "poolId": "1199",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugirl",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugirl",
+      "name": "ugirl",
+      "emoji": "🎀",
+      "poolId": "1200",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugobber",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugobber",
+      "name": "ugobber",
+      "emoji": "🍬",
+      "poolId": "1167",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugun",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ugun",
+      "name": "ugun",
+      "emoji": "🔫♡",
+      "poolId": "1201",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uhammer",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uhammer",
+      "name": "uhammer",
+      "emoji": "🔨",
+      "poolId": "1202",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uharambe",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uharambe",
+      "name": "uharambe",
+      "emoji": "🦍🍌",
+      "poolId": "1203",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uheart",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uheart",
+      "name": "uheart",
+      "emoji": "❤️❤️❤️❤️❤️",
+      "poolId": "1237",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uinternet",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uinternet",
+      "name": "uinternet",
+      "emoji": "🛜",
+      "poolId": "1164",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ujeet",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ujeet",
+      "name": "ujeet",
+      "emoji": "🪯",
+      "poolId": "1204",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ujewnicorn",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ujewnicorn",
+      "name": "ujewnicorn",
+      "emoji": "🇮🇱🐴",
+      "poolId": "1168",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uknightcore",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uknightcore",
+      "name": "uknightcore",
+      "emoji": "⚔️",
+      "poolId": "1169",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ulain",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ulain",
+      "name": "ulain",
+      "emoji": "",
+      "poolId": "1236",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ulawb",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ulawb",
+      "name": "ulawb",
+      "emoji": "🦞",
+      "poolId": "1173",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umeat",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umeat",
+      "name": "umeat",
+      "emoji": "🥩",
+      "poolId": "1205",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umog",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umog",
+      "name": "umog",
+      "emoji": "😹",
+      "poolId": "1206",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umondo",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umondo",
+      "name": "umondo",
+      "emoji": "",
+      "poolId": "1165",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umoon",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/umoon",
+      "name": "umoon",
+      "emoji": "🌕",
+      "poolId": "1207",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uorwell",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uorwell",
+      "name": "uorwell",
+      "emoji": "🐷",
+      "poolId": "1208",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uowo",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uowo",
+      "name": "uowo",
+      "emoji": "🦄",
+      "poolId": "",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upaper",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upaper",
+      "name": "upaper",
+      "emoji": "📄",
+      "poolId": "1209",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upeace",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upeace",
+      "name": "upeace",
+      "emoji": "☮️",
+      "poolId": "1210",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upeach",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upeach",
+      "name": "upeach",
+      "emoji": "🍑",
+      "poolId": "1211",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upi",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upi",
+      "name": "upi",
+      "emoji": "🥧",
+      "poolId": "1212",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uplaceholder",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uplaceholder",
+      "name": "uplaceholder",
+      "emoji": "placeholder",
+      "poolId": "1213",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upoo",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upoo",
+      "name": "upoo",
+      "emoji": "💩",
+      "poolId": "1214",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upretzel",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upretzel",
+      "name": "upretzel",
+      "emoji": "🥨",
+      "poolId": "1215",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurpdildo",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurpdildo",
+      "name": "upurpdildo",
+      "emoji": "🟣🍆",
+      "poolId": "1235",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurplephat",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurplephat",
+      "name": "upurplephat",
+      "emoji": "💜🎉",
+      "poolId": "1162",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurplepill",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/upurplepill",
+      "name": "upurplepill",
+      "emoji": "💜💊",
+      "poolId": "1216",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uretard",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uretard",
+      "name": "uretard",
+      "emoji": "🫵🤡",
+      "poolId": "1217",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/urock",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/urock",
+      "name": "urock",
+      "emoji": "🪨",
+      "poolId": "1218",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/urocket",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/urocket",
+      "name": "urocket",
+      "emoji": "🚀",
+      "poolId": "1219",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usa",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usa",
+      "name": "usa",
+      "emoji": "🇺🇸",
+      "poolId": "1220",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uscisors",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uscisors",
+      "name": "uscisors",
+      "emoji": "✂️",
+      "poolId": "1221",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ushot",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ushot",
+      "name": "ushot",
+      "emoji": "💉🧬",
+      "poolId": "1222",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ushrimp",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/ushrimp",
+      "name": "ushrimp",
+      "emoji": "🦐",
+      "poolId": "1223",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uskull",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uskull",
+      "name": "uskull",
+      "emoji": "💀",
+      "poolId": "1224",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usparkle",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usparkle",
+      "name": "usparkle",
+      "emoji": "✨",
+      "poolId": "1225",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uspx",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uspx",
+      "name": "uspx",
+      "emoji": "📈",
+      "poolId": "1163",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usushi",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usushi",
+      "name": "usushi",
+      "emoji": "🍣",
+      "poolId": "1226",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usyrupcity",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/usyrupcity",
+      "name": "usyrupcity",
+      "emoji": "🍇🥤",
+      "poolId": "1166",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utaco",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utaco",
+      "name": "utaco",
+      "emoji": "🌮",
+      "poolId": "1227",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utaiwan",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utaiwan",
+      "name": "utaiwan",
+      "emoji": "🇹🇼",
+      "poolId": "1228",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utang",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utang",
+      "name": "utang",
+      "emoji": "🍊",
+      "poolId": "1229",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utest",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/utest",
+      "name": "utest",
+      "emoji": "test",
+      "poolId": "1230",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uvril",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uvril",
+      "name": "uvril",
+      "emoji": "ϟ",
+      "poolId": "1233",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uwatermelon",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uwatermelon",
+      "name": "uwatermelon",
+      "emoji": "🍉",
+      "poolId": "1231",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uwuxd",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uwuxd",
+      "name": "uwuxd",
+      "emoji": "😆",
+      "poolId": "1232",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    },
+    {
+      "id": "osmo-test-5:factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uzirconia",
+      "chain": "osmo-test-5",
+      "denom": "factory/osmo1f6zussydevqw8quygf0llyhsfq9sla5wcgjntq/uzirconia",
+      "name": "uzirconia",
+      "emoji": "◈",
+      "poolId": "1172",
+      "status": "testnet-reference",
+      "source": "https://github.com/nocktoshi/memoji-market"
+    }
+  ]
+}

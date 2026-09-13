@@ -1,0 +1,201 @@
+From 040494026d29af2f72a7566075433d21c8bf3a78 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:38:00 -0500
+Subject: [PATCH] refactor(zc): separate spotlight projection and script camera
+ transforms
+
+---
+ src/zc/hero.cpp           | 55 +++++++++++++++++++++++++++++++++++++--
+ src/zc/hero.h             |  4 +++
+ src/zc/script_drawing.cpp | 20 +++++++-------
+ 3 files changed, 67 insertions(+), 12 deletions(-)
+
+diff --git a/src/zc/hero.cpp b/src/zc/hero.cpp
+index a6dc944..8399fec 100644
+--- a/src/zc/hero.cpp
++++ b/src/zc/hero.cpp
+@@ -11,6 +11,7 @@
+ #include "zc/zelda.h"
+ 
+ #include <optional>
++#include <memory>
+ #include <cstring>
+ #include <set>
+ #include <stdio.h>
+@@ -1932,6 +1933,7 @@ int32_t HeroClass::getSpecialCave()
+ 
+ void HeroClass::init()
+ {
++	clearSpotlightProjection();
+ 	cache_tile_mod_clear();
+ 	usecounts.clear();
+ 	item_cooldown.clear();
+@@ -23315,8 +23317,53 @@ static int32_t get_beamoffs(spot_t val)
+ 	return -1;
+ }
+ 
++namespace
++{
++struct spotlight_tile_projection
++{
++    int source_x;
++    int world_x;
++    int world_y;
++};
++struct spotlight_visual_batch
++{
++    explicit spotlight_visual_batch(BITMAP* source) : art(source, destroy_bitmap) {}
++    std::unique_ptr<BITMAP, decltype(&destroy_bitmap)> art;
++    std::vector<spotlight_tile_projection> tiles;
++};
++// A visual snapshot of the last completed spotlight update, ordered exactly as
++// the legacy map/FFC raster passes. Own art so later combo trigger mutations do
++// not change its appearance when a camera reprojects it. No gameplay is stored.
++static std::vector<spotlight_visual_batch> spotlight_visuals;
++static int spotlight_visual_map = -1;
++static int spotlight_visual_screen = -1;
++}
++
++bool HeroClass::reprojectSpotlights(BITMAP* target, const viewport_t& render_view) const
++{
++    if (spotlight_visual_map != cur_map || spotlight_visual_screen != cur_screen ||
++        !target || bitmap_color_depth(target) != 8 || target->w <= 0 ||
++        target->h <= 0 || target->w > 512 || target->h > 464)
++        return false;
++    clear_bitmap(target);
++    for (const auto& batch : spotlight_visuals)
++        for (const auto& tile : batch.tiles)
++            masked_blit(batch.art.get(), target, tile.source_x, 0,
++                tile.world_x - render_view.x, tile.world_y - render_view.y, 16, 16);
++    return true;
++}
++
++void HeroClass::clearSpotlightProjection()
++{
++	spotlight_visuals.clear();
++	spotlight_visual_map = spotlight_visual_screen = -1;
++}
++
+ void HeroClass::handleSpotlights()
+ {
++	clearSpotlightProjection();
++	spotlight_visual_map = cur_map;
++	spotlight_visual_screen = cur_screen;
+ 	static bool had_spotlight = true;
+ 	if (cpos_exists_spotlight())
+ 	{
+@@ -23459,16 +23506,17 @@ void HeroClass::handleSpotlights()
+ 			int32_t id = it->first;
+ 			spot_t* grid = it->second;
+ 			BITMAP* cbmp = generate_beam_bitmap(id);
++			auto& visual = spotlight_visuals.emplace_back(cbmp);
+ 			for (rpos_t rpos = (rpos_t)0; rpos < region_max_rpos; rpos = (rpos_t)((int)rpos + 1))
+ 			{
+ 				int32_t offs = get_beamoffs(grid[(int)rpos]);
+ 				if(offs > -1)
+ 				{
+ 					auto [x, y] = COMBOXY_REGION(rpos);
++					visual.tiles.push_back({offs*16, x, y});
+ 					masked_blit(cbmp, lightbeam_bmp, offs*16, 0, x-viewport.x, y-viewport.y, 16, 16);
+ 				}
+ 			}
+-			destroy_bitmap(cbmp);
+ 			delete[] it->second;
+ 			it = maps.erase(it);
+ 		}
+@@ -23477,14 +23525,17 @@ void HeroClass::handleSpotlights()
+ 			int32_t id = it->first;
+ 			std::map<dword,spot_t> const& grid = it->second;
+ 			BITMAP* cbmp = generate_beam_bitmap(id);
++			auto& visual = spotlight_visuals.emplace_back(cbmp);
+ 			for(auto it2 = grid.begin(); it2 != grid.end(); ++it2)
+ 			{
+ 				lightbeam_xy ffxy(it2->first);
+ 				int32_t offs = get_beamoffs(it2->second);
+ 				if(offs > -1)
++				{
++					visual.tiles.push_back({offs*16, ffxy.x-8, ffxy.y-8});
+ 					masked_blit(cbmp, lightbeam_bmp, offs*16, 0, ffxy.x-8-viewport.x, ffxy.y-8-viewport.y, 16, 16);
++				}
+ 			}
+-			destroy_bitmap(cbmp);
+ 			it = ffmaps.erase(it);
+ 		}
+ 	}
+diff --git a/src/zc/hero.h b/src/zc/hero.h
+index 5164a5c..0e062b0 100644
+--- a/src/zc/hero.h
++++ b/src/zc/hero.h
+@@ -478,6 +478,10 @@ public:
+ 	bool handle_portal_collide(portal* p);
+ 	void handle_portal_prox(portal* p);
+ 	void handle_water_passive_damage(combined_handle_t combined_handle, int compat = 0);
++	// Replays retained world-space light art only; no beam physics/triggers.
++	// Target uses world-pixel scale, at most 512x464, without HUD offset.
++	bool reprojectSpotlights(BITMAP* target, const viewport_t& render_view) const;
++	void clearSpotlightProjection();
+ private:
+ 	void handleSpotlights();
+ 	void setpit(const mapscr* base_scr = nullptr);
+diff --git a/src/zc/script_drawing.cpp b/src/zc/script_drawing.cpp
+index 181b524..ece135a 100644
+--- a/src/zc/script_drawing.cpp
++++ b/src/zc/script_drawing.cpp
+@@ -37,8 +37,8 @@ static std::optional<std::pair<int, int>> get_draw_origin_offset(DrawOrigin draw
+ 	int yoffset;
+ 	if (draw_origin == DrawOrigin::Region)
+ 	{
+-		xoffset = xoff - viewport.x;
+-		yoffset = yoff - viewport.y;
++		xoffset = xoff - get_render_viewport().x;
++		yoffset = yoff - get_render_viewport().y;
+ 	}
+ 	else if (draw_origin == DrawOrigin::RegionScrollingNew)
+ 	{
+@@ -49,8 +49,8 @@ static std::optional<std::pair<int, int>> get_draw_origin_offset(DrawOrigin draw
+ 		}
+ 		else
+ 		{
+-			xoffset = xoff - viewport.x;
+-			yoffset = yoff - viewport.y;
++			xoffset = xoff - get_render_viewport().x;
++			yoffset = yoff - get_render_viewport().y;
+ 		}
+ 	}
+ 	else if (draw_origin == DrawOrigin::PlayingField)
+@@ -75,8 +75,8 @@ static std::optional<std::pair<int, int>> get_draw_origin_offset(DrawOrigin draw
+ 			return std::nullopt;
+ 		}
+ 
+-		xoffset = xoff - viewport.x + draw_origin_target->x.getInt();
+-		yoffset = yoff - viewport.y + draw_origin_target->y.getInt();
++		xoffset = xoff - get_render_viewport().x + draw_origin_target->x.getInt();
++		yoffset = yoff - get_render_viewport().y + draw_origin_target->y.getInt();
+ 	}
+ 	else
+ 	{
+@@ -12370,8 +12370,8 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 				if(dith_arg >= 0) dith_arg /= 10000;
+ 
+ 				// Undo the inherit offset applied within the function. xoffset/yoffset handles for us here.
+-				cx += viewport.x;
+-				cy += viewport.y;
++				cx += get_render_viewport().x;
++				cy += get_render_viewport().y;
+ 
+ 				doDarkroomCone(cx,cy,length,dir,darkscr_bmp,nullptr,dith_rad,transp_rad,dith_type,dith_arg);
+ 			}
+@@ -12397,8 +12397,8 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 				if(dith_arg >= 0) dith_arg /= 10000;
+ 
+ 				// Undo the inherit offset applied within the function. xoffset/yoffset handles for us here.
+-				cx += viewport.x;
+-				cy += viewport.y;
++				cx += get_render_viewport().x;
++				cy += get_render_viewport().y;
+ 
+ 				if (sdci[0] == DRAWLIGHT_CIRCLE)
+ 					doDarkroomCircle(cx,cy,radius,darkscr_bmp,nullptr,dith_rad,transp_rad,dith_type,dith_arg);
+-- 
+2.52.0.windows.1
+

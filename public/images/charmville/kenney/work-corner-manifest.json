@@ -1,0 +1,38 @@
+﻿[
+    {
+        "author":  "Kenney",
+        "note":  "Unmodified source sprite; assembled as decorative work shelter and supplies outside playable plots in garden-ground.tsx.",
+        "source":  "https://kenney.nl/assets/isometric-miniature-farm",
+        "license":  "CC0-1.0",
+        "modified":  false,
+        "sha256":  "ec4c590e5cb441512c98d61be201a28c69b23fdb3cb9a1d26b996cb6aa06bb2e",
+        "file":  "roofSingleWall_N.png"
+    },
+    {
+        "author":  "Kenney",
+        "note":  "Unmodified source sprite; assembled as decorative work shelter and supplies outside playable plots in garden-ground.tsx.",
+        "source":  "https://kenney.nl/assets/isometric-miniature-farm",
+        "license":  "CC0-1.0",
+        "modified":  false,
+        "sha256":  "ecf823fdd6115154f84655ec9d765a92599eed7756f7c12ad4b37a499548f6bd",
+        "file":  "woodWallWindow_N.png"
+    },
+    {
+        "author":  "Kenney",
+        "note":  "Unmodified source sprite; assembled as decorative work shelter and supplies outside playable plots in garden-ground.tsx.",
+        "source":  "https://kenney.nl/assets/isometric-miniature-farm",
+        "license":  "CC0-1.0",
+        "modified":  false,
+        "sha256":  "79f44ca26246d7ed678726fd3d06566da6864b4df8cc0cc857de868e9b08f05c",
+        "file":  "hayBalesStacked_N.png"
+    },
+    {
+        "author":  "Kenney",
+        "note":  "Unmodified source sprite; assembled as decorative work shelter and supplies outside playable plots in garden-ground.tsx.",
+        "source":  "https://kenney.nl/assets/isometric-miniature-farm",
+        "license":  "CC0-1.0",
+        "modified":  false,
+        "sha256":  "a071e94fb8c0d88d8d306f2c4f3009f347542c3acc1ae51376d9e5ee6c38da11",
+        "file":  "sack_N.png"
+    }
+]

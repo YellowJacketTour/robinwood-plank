@@ -1,5 +1,7 @@
 "use client";
 
+import { localPlaytestWallet } from "@/lib/charmville/local-playtest-client";
+
 export type PlankLoveWalletState = {
   address: string | null;
   chainId: number | null;
@@ -35,6 +37,8 @@ function request(method: Method, payload?: { address?: string; message?: string;
 }
 
 export async function getPlankLoveWalletState():Promise<PlankLoveWalletState> {
+  const local = localPlaytestWallet();
+  if (local) return {address:local,chainId:null,status:"connected",isConnected:true};
   const result = await request("getState").catch(()=>({} as Result));
   if(result.state?.address){rememberWallet(result.state.address);return result.state}
   const address=cachedWallet();
@@ -42,6 +46,8 @@ export async function getPlankLoveWalletState():Promise<PlankLoveWalletState> {
 }
 
 export async function connectPlankLoveWallet() {
+  const local = localPlaytestWallet();
+  if (local) return local;
   const current=await request("getState").catch(()=>({} as Result)),connected=current.address||current.state?.address;
   if(connected){rememberWallet(connected);return connected.toLowerCase()}
   const remembered=cachedWallet();
@@ -86,29 +92,27 @@ export function subscribePlankLoveWalletState(
   listener: (state: PlankLoveWalletState) => void
 ) {
   if (typeof window === "undefined") return () => {};
+  let stateVersion = 0;
+  let disposed = false;
 
   const handleState = (event: Event) => {
+    if (localPlaytestWallet()) return;
     const detail = (event as CustomEvent<PlankLoveWalletState>).detail;
-    if (detail){if(detail.address)rememberWallet(detail.address);listener(detail)}
-  };
-
-  const handleResponse = (event: Event) => {
-    const detail = (event as CustomEvent<{
-      result?: { state?: PlankLoveWalletState };
-    }>).detail;
-
-    if (detail?.result?.state) {
-      listener(detail.result.state);
-    }
+    if (detail){++stateVersion;if(detail.address)rememberWallet(detail.address);listener(detail)}
   };
 
   window.addEventListener("plank:wallet-state", handleState);
-  window.addEventListener("plank:wallet-response", handleResponse);
 
-  void getPlankLoveWalletState().then(listener).catch(() => undefined);
+  // Request replies are snapshots, not wallet-change notifications. A delayed
+  // getState reply must not disconnect a session established after that request.
+
+  const initialVersion = stateVersion;
+  void getPlankLoveWalletState().then(state => {
+    if (!disposed && stateVersion === initialVersion) listener(state);
+  }).catch(() => undefined);
 
   return () => {
+    disposed = true;
     window.removeEventListener("plank:wallet-state", handleState);
-    window.removeEventListener("plank:wallet-response", handleResponse);
   };
 }

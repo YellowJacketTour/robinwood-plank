@@ -1,0 +1,299 @@
+From eee0c5e189b4ad6e51dd5ea6db56be602c3605d3 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:00:15 -0500
+Subject: [PATCH] refactor(zc): separate presentation geometry and lens effect
+ ownership
+
+---
+ src/zc/maps.cpp                        | 17 ++++++-
+ src/zc/maps.h                          | 12 ++++-
+ src/zc/presentation_camera.h           | 65 ++++++++++++++++++++++++++
+ src/zc/presentation_frame.h            | 19 ++++++++
+ src/zc/zelda.cpp                       |  3 +-
+ tests/presentation_camera_geometry.cpp | 37 +++++++++++++++
+ tests/presentation_frame_effects.cpp   | 32 +++++++++++++
+ 7 files changed, 181 insertions(+), 4 deletions(-)
+ create mode 100644 src/zc/presentation_camera.h
+ create mode 100644 src/zc/presentation_frame.h
+ create mode 100644 tests/presentation_camera_geometry.cpp
+ create mode 100644 tests/presentation_frame_effects.cpp
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 7d95f0a..672d4c6 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -367,6 +367,13 @@ std::vector<mapscr*> take_temporary_scrs()
+ 	return screens;
+ }
+ 
++std::optional<presentation_camera::geometry> get_presentation_geometry(
++    presentation_camera::rectangle target, double zoom)
++{
++    return presentation_camera::make({viewport.x, viewport.y, viewport.w, viewport.h},
++        target, world_w, world_h, zoom, viewport_mode == ViewportMode::CenterAndBound);
++}
++
+ void calculate_viewport(viewport_t& viewport, int dmap, int screen, int world_w, int world_h, int x, int y)
+ {
+ 	// TODO: In future, maybe add x/y centering offsets to zscript (Viewport->TargetXOffset/Viewport->TargetYOffset).
+@@ -4958,8 +4965,11 @@ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark, cons
+ //
+ // But if drawPassiveSubscreenSeparate is true: framebuf_no_passive_subscreen will also contain all
+ // draws excluding the passive subscreen.
+-void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSeparate)
++void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSeparate,
++    presentation_frame_effects* effects)
+ {
++    presentation_frame_effects independent_effects;
++    if (!effects) effects = &independent_effects;
+ 	framebuf_composed_since_present = true;
+ 	bool classic_draw = get_qr(qr_CLASSIC_DRAWING_ORDER);
+ 	bool old_layer_draw_order = get_qr(qr_OLD_LAYER_DRAW_ORDER);
+@@ -5692,7 +5702,10 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 	if (is_in_scrolling_region() && lensclk && !FFCore.system_suspend[susptLENS])
+ 	{
+ 		draw_lens_over(dest);
+-		--lensclk;
++		// Preserve the legacy script-visible phase: after lens art but before
++		// layer-6 text, subscreen primitives and POST_DRAW. The transaction owner
++		// permits exactly one clock advance even when future views share it.
++		effects->consume_lens_clock(lensclk);
+ 	}
+ 
+ 	// Draw some text on dest
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index f70dfc2..e5d8b77 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -9,6 +9,8 @@
+ #include "../ffc.h"
+ #include "sprite.h"
+ #include "zc/zelda.h"
++#include "zc/presentation_camera.h"
++#include "zc/presentation_frame.h"
+ 
+ struct newcombo;
+ struct BITMAP;
+@@ -27,6 +29,10 @@ extern int world_w, world_h;
+ //  - w, h is 256, 176
+ extern viewport_t viewport;
+ extern ViewportMode viewport_mode;
++// Geometry proposal only: the legacy draw pipeline is not yet zoom capable.
++// This read-only boundary is intentionally not exported to scripts or browser input.
++std::optional<presentation_camera::geometry> get_presentation_geometry(
++    presentation_camera::rectangle target, double zoom);
+ // The screen offset from the region origin that the hero is currently standing in. If not currently
+ // in a scrolling region, this is just 0.
+ extern int region_scr_dx, region_scr_dy;
+@@ -488,7 +494,11 @@ void do_effectflags(mapscr* scr, int32_t x, int32_t y);
+ void do_script_draws(BITMAP *bmp, mapscr *scr, int32_t x, int32_t y, bool hideLayer7 = false);
+ void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy);
+ void calc_darkroom_ffcs(mapscr* scr, int offx, int offy);
+-void draw_screen(bool showhero=true, bool runGeneric = false, bool drawPassiveSubscreenSeparate = false);
++// Share effects only between views of the same presentation transaction. Null
++// retains legacy independent draw calls (warps, cutscenes and message loops).
++// This does not make the remaining draw pipeline pure or scripts repeat-safe.
++void draw_screen(bool showhero=true, bool runGeneric = false, bool drawPassiveSubscreenSeparate = false,
++    presentation_frame_effects* effects = nullptr);
+ void put_door(mapscr* scr, BITMAP *dest, int32_t pos, int32_t side, int32_t type, bool redraw, bool even_walls=false);
+ void update_door(mapscr* scr, int32_t side, int32_t door, bool even_walls=false);
+ void putdoor(mapscr* scr, BITMAP *dest, int32_t side, int32_t door, bool redraw=true, bool even_walls=false);
+diff --git a/src/zc/presentation_camera.h b/src/zc/presentation_camera.h
+new file mode 100644
+index 0000000..eb144fd
+--- /dev/null
++++ b/src/zc/presentation_camera.h
+@@ -0,0 +1,65 @@
++#ifndef ZC_PRESENTATION_CAMERA_H_
++#define ZC_PRESENTATION_CAMERA_H_
++
++#include <algorithm>
++#include <cmath>
++#include <optional>
++
++// Presentation only. Never use this rectangle for activation, collision, despawn,
++// script Viewport bindings, or authoritative interest management.
++namespace presentation_camera
++{
++struct rectangle { int x, y, w, h; };
++struct point { double x, y; };
++struct geometry
++{
++    rectangle world;
++    rectangle target;
++    double requested_zoom;
++
++    point world_to_target(point p) const
++    {
++        return {target.x + (p.x - world.x) * target.w / world.w,
++                target.y + (p.y - world.y) * target.h / world.h};
++    }
++    point target_to_world(point p) const
++    {
++        return {world.x + (p.x - target.x) * world.w / target.w,
++                world.y + (p.y - target.y) * world.h / target.h};
++    }
++};
++
++inline int centered_axis(int focus, int extent, int region_extent, bool bounded)
++{
++    if (!bounded) return focus - extent / 2;
++    // Negative origins deliberately expose empty letterbox space, never a clamp
++    // with its maximum below its minimum. Rendering must clip to valid terrain.
++    if (extent > region_extent) return (region_extent - extent) / 2;
++    return std::clamp(focus - extent / 2, 0, region_extent - extent);
++}
++
++// Invalid requests return no geometry; callers retain the last valid render
++// target. No allocation and no mutation of the legacy simulation viewport.
++inline std::optional<geometry> make(rectangle legacy, rectangle target,
++    int region_w, int region_h, double zoom, bool bounded)
++{
++    if (!std::isfinite(zoom) || zoom < 0.5 || zoom > 2.0 ||
++        legacy.w <= 0 || legacy.h <= 0 || legacy.w > 256 || legacy.h > 232 ||
++        target.w <= 0 || target.h <= 0 || target.w > 4096 || target.h > 4096 ||
++        region_w <= 0 || region_h <= 0 || region_w > 4096 || region_h > 1408 ||
++        legacy.x < -8192 || legacy.x > 8192 || legacy.y < -8192 || legacy.y > 8192)
++        return std::nullopt;
++
++    // Exact legacy view at 1x, including authored script-camera offsets.
++    rectangle visual = legacy;
++    if (zoom != 1.0)
++    {
++        visual.w = static_cast<int>(std::ceil(legacy.w / zoom));
++        visual.h = static_cast<int>(std::ceil(legacy.h / zoom));
++        visual.x = centered_axis(legacy.x + legacy.w / 2, visual.w, region_w, bounded);
++        visual.y = centered_axis(legacy.y + legacy.h / 2, visual.h, region_h, bounded);
++    }
++    return geometry{visual, target, zoom};
++}
++}
++#endif
+diff --git a/src/zc/presentation_frame.h b/src/zc/presentation_frame.h
+new file mode 100644
+index 0000000..976c2db
+--- /dev/null
++++ b/src/zc/presentation_frame.h
+@@ -0,0 +1,19 @@
++#ifndef ZC_PRESENTATION_FRAME_H_
++#define ZC_PRESENTATION_FRAME_H_
++
++#include <cstdint>
++
++// Owned by one presentation transaction, never inferred from the engine's frame
++// number: legacy warps and cutscenes have their own drawing/advance loops.
++struct presentation_frame_effects
++{
++    bool lens_clock_consumed = false;
++
++    void consume_lens_clock(int16_t& clock)
++    {
++        if (lens_clock_consumed || !clock) return;
++        lens_clock_consumed = true;
++        --clock;
++    }
++};
++#endif
+diff --git a/src/zc/zelda.cpp b/src/zc/zelda.cpp
+index be1b0aa..26b734c 100644
+--- a/src/zc/zelda.cpp
++++ b/src/zc/zelda.cpp
+@@ -3309,12 +3309,13 @@ void game_loop()
+ 		// will have a solid background and thus the duplication can't be seen. So no need to do the
+ 		// extra work in that case.
+ 		bool drawPassiveSubscreenSeparate = false;
++		presentation_frame_effects screen_effects;
+ 		if ( !FFCore.system_suspend[susptSCREENDRAW] )
+ 		{
+ 			// Only supported when the nesfix qr_SUBSCREENOVERSPRITES is on. Otherwise, there'd be
+ 			// too much double drawing.
+ 			drawPassiveSubscreenSeparate = is_extended_height_mode() && get_qr(qr_SUBSCREENOVERSPRITES);
+-			draw_screen(true, true, drawPassiveSubscreenSeparate);
++			draw_screen(true, true, drawPassiveSubscreenSeparate, &screen_effects);
+ 		}
+ 		else FFCore.runGenericPassiveEngine(SCR_TIMING_POST_DRAW);
+ 
+diff --git a/tests/presentation_camera_geometry.cpp b/tests/presentation_camera_geometry.cpp
+new file mode 100644
+index 0000000..3937b5b
+--- /dev/null
++++ b/tests/presentation_camera_geometry.cpp
+@@ -0,0 +1,37 @@
++#include "zc/presentation_camera.h"
++#include <cassert>
++#include <limits>
++
++int main()
++{
++    using namespace presentation_camera;
++    const rectangle target{0, 56, 256, 176};
++    const rectangle legacy{128, 88, 256, 176};
++    auto same = make(legacy, target, 512, 352, 1, true).value();
++    assert(same.world.x == 128 && same.world.y == 88);
++    assert(same.world.w == 256 && same.world.h == 176);
++    auto wide = make(legacy, target, 512, 352, 0.5, true).value();
++    assert(wide.world.x == 0 && wide.world.y == 0);
++    assert(wide.world.w == 512 && wide.world.h == 352);
++    assert(wide.target.y == 56 && wide.target.w == 256);
++    auto small_region = make({0, 0, 256, 176}, target, 256, 176, .5, true).value();
++    assert(small_region.world.x == -128 && small_region.world.y == -88);
++    auto authored = make({-17, 91, 256, 176}, target, 512, 352, 1, false).value();
++    assert(authored.world.x == -17 && authored.world.y == 91);
++    for (double zoom : {.5, .75, 1., 1.5, 2.})
++    {
++        auto g = make(legacy, target, 512, 352, zoom, true).value();
++        for (point p : {point{0, 0}, point{255.5, 175.5}, point{511, 351}})
++        {
++            auto back = g.target_to_world(g.world_to_target(p));
++            assert(std::abs(back.x - p.x) < 1e-9);
++            assert(std::abs(back.y - p.y) < 1e-9);
++        }
++        assert(legacy.x == 128 && legacy.y == 88 && legacy.w == 256 && legacy.h == 176);
++    }
++    assert(!make(legacy, target, 512, 352, 0, true));
++    assert(!make(legacy, target, 512, 352, 2.1, true));
++    assert(!make(legacy, target, 512, 352, std::numeric_limits<double>::quiet_NaN(), true));
++    assert(!make(legacy, {0, 0, 0, 176}, 512, 352, 1, true));
++    assert(!make(legacy, target, 0, 352, 1, true));
++}
+diff --git a/tests/presentation_frame_effects.cpp b/tests/presentation_frame_effects.cpp
+new file mode 100644
+index 0000000..0d22a17
+--- /dev/null
++++ b/tests/presentation_frame_effects.cpp
+@@ -0,0 +1,32 @@
++#include "zc/presentation_frame.h"
++#include <cassert>
++
++int main()
++{
++    int16_t clock = 3;
++    presentation_frame_effects frame;
++    frame.consume_lens_clock(clock);
++    assert(clock == 2);
++    frame.consume_lens_clock(clock);
++    assert(clock == 2);
++    presentation_frame_effects next_frame;
++    next_frame.consume_lens_clock(clock);
++    assert(clock == 1);
++    // A zero clock is not a consumed effect; a script can activate it later.
++    clock = 0;
++    presentation_frame_effects inactive;
++    inactive.consume_lens_clock(clock);
++    clock = 1;
++    inactive.consume_lens_clock(clock);
++    assert(clock == 0);
++    inactive.consume_lens_clock(clock);
++    assert(clock == 0);
++    // Independent legacy draws preserve one decrement per draw, including
++    // negative clocks (preserve legacy semantics instead of normalizing here).
++    clock = -1;
++    presentation_frame_effects first;
++    first.consume_lens_clock(clock);
++    presentation_frame_effects second;
++    second.consume_lens_clock(clock);
++    assert(clock == -3);
++}
+-- 
+2.52.0.windows.1
+

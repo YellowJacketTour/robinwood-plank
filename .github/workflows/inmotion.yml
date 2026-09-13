@@ -205,6 +205,12 @@ jobs:
       - run: npm run lint:inmotion
       - run: npx tsc --noEmit
       - run: npm run db:migrate
+      - name: Charmville private alpha PostgreSQL gates
+        env:
+          # Explicit fixture URL makes database tests execute, not skip.
+          NODE_ENV: development
+          CHARMVILLE_TEST_DATABASE_URL: postgres://plankapp:github-actions-postgres@127.0.0.1:5432/plank
+        run: npx tsx --test test/market/charmville-social.test.ts test/market/charmville-invites.test.ts test/market/charmville-runtime-session.test.ts
       # CCS-2L settlement gates. The wei-exact JS<->Solidity differential
       # (test/contracts/PlankCcs2LSettlement.test.ts) runs inside `npm test`
       # via test:contracts; this step adds the node-only simulation invariants
@@ -346,6 +352,9 @@ jobs:
           mkdir -p .next/standalone/deploy/inmotion
           cp -R deploy/inmotion/postgres .next/standalone/deploy/inmotion/postgres
           cp deploy/inmotion/passenger.cjs .next/standalone/deploy/inmotion/passenger.cjs
+          cp deploy/inmotion/charmville-runtime.cjs .next/standalone/deploy/inmotion/charmville-runtime.cjs
+          mkdir -p .next/standalone/scripts
+          cp scripts/configure-charmville-private-release.mjs .next/standalone/scripts/configure-charmville-private-release.mjs
           mkdir -p .next/standalone/scripts
           cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
           # PlankCrash table: the supervisor plus the chain seed CI deployed.
@@ -517,6 +526,54 @@ jobs:
       - name: Assert release is present
         shell: bash
         run: test -s passenger-release.tgz
+
+      - name: Checkout exact private runtime preparation tools
+        if: vars.CHARMVILLE_RUNTIME_RELEASE != ''
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: private-release-tools
+          persist-credentials: false
+
+      - name: Set up private runtime preparation Node
+        if: vars.CHARMVILLE_RUNTIME_RELEASE != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+
+      - name: Attach accepted encrypted Charmville package privately
+        if: vars.CHARMVILLE_RUNTIME_RELEASE != ''
+        env:
+          CHARMVILLE_RUNTIME_PACKAGE_KEY: ${{ secrets.CHARMVILLE_RUNTIME_PACKAGE_KEY }}
+          CHARMVILLE_RUNTIME_PACKAGE_URL: ${{ vars.CHARMVILLE_RUNTIME_PACKAGE_URL }}
+          CHARMVILLE_RUNTIME_ARCHIVE_SHA256: ${{ vars.CHARMVILLE_RUNTIME_ARCHIVE_SHA256 }}
+          CHARMVILLE_RUNTIME_PLAINTEXT_SHA256: ${{ vars.CHARMVILLE_RUNTIME_PLAINTEXT_SHA256 }}
+          CHARMVILLE_RUNTIME_INVENTORY_SHA256: ${{ vars.CHARMVILLE_RUNTIME_INVENTORY_SHA256 }}
+          CHARMVILLE_RUNTIME_RELEASE: ${{ vars.CHARMVILLE_RUNTIME_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          package_root="$(mktemp -d "$RUNNER_TEMP/charmville-release.XXXXXX")"
+          trap 'rm -rf -- "$package_root"' EXIT
+          node --input-type=module -e '
+            const e=process.env,u=new URL(e.CHARMVILLE_RUNTIME_PACKAGE_URL);
+            const prefix="/"+e.GITHUB_REPOSITORY+"/releases/download/";
+            if(u.origin!=="https://github.com"||u.username||u.password||u.search||u.hash||!u.pathname.startsWith(prefix)||!/^[-A-Za-z0-9_.]+\/[-A-Za-z0-9_.]+$/.test(u.pathname.slice(prefix.length)))throw Error("Pinned repository release URL required");
+            for(const k of ["ARCHIVE","PLAINTEXT","INVENTORY"])if(!/^[a-f0-9]{64}$/.test(e["CHARMVILLE_RUNTIME_"+k+"_SHA256"]||""))throw Error("Pinned digest required");
+          '
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 600 "$CHARMVILLE_RUNTIME_PACKAGE_URL" -o "$package_root/runtime.encrypted"
+          mkdir "$package_root/standalone"
+          tar -xzf passenger-release.tgz -C "$package_root/standalone"
+          node private-release-tools/scripts/charmville/prepare-private-runtime-release.mjs \
+            --input "$package_root/runtime.encrypted" --workdir "$package_root/prepared" \
+            --standalone "$package_root/standalone" --release "$CHARMVILLE_RUNTIME_RELEASE" \
+            --archive-sha256 "$CHARMVILLE_RUNTIME_ARCHIVE_SHA256" \
+            --plaintext-sha256 "$CHARMVILLE_RUNTIME_PLAINTEXT_SHA256" \
+            --inventory-sha256 "$CHARMVILLE_RUNTIME_INVENTORY_SHA256"
+          # This enriched archive is transferred only to the server. No later
+          # cache or GitHub artifact upload may receive these private bytes.
+          tar -C "$package_root/standalone" -czf passenger-release.tgz .
 
       - name: Configure trusted SSH host
         shell: bash
@@ -722,10 +779,19 @@ jobs:
           rm -f "$playtest_config"
 
       - name: Migrate, activate, and restart Passenger
+        env:
+          CHARMVILLE_RUNTIME_RELEASE: ${{ vars.CHARMVILLE_RUNTIME_RELEASE }}
+          CHARMVILLE_ADMIN_WALLETS: ${{ vars.CHARMVILLE_ADMIN_WALLETS }}
         shell: bash
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
+          if [ -n "${CHARMVILLE_RUNTIME_RELEASE:-}" ]; then
+            [[ "$CHARMVILLE_RUNTIME_RELEASE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$ ]]
+            [[ "${CHARMVILLE_ADMIN_WALLETS:-}" =~ ^0x[a-fA-F0-9]{40}(,0x[a-fA-F0-9]{40})*$ ]]
+          else
+            CHARMVILLE_ADMIN_WALLETS='-'
+          fi
           if [ "$RECOVERY_BACKUP_NAME" != '-' ]; then
             [[ "$RECOVERY_BACKUP_NAME" =~ ^predeploy-[0-9TZ.-]+\.dump$ ]]
             [[ "$RECOVERY_BACKUP_BYTES" =~ ^[1-9][0-9]*$ ]]
@@ -740,7 +806,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" "$RECOVERY_BACKUP_NAME" "$RECOVERY_BACKUP_BYTES" "$RECOVERY_BASE_RELEASE" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" "$RECOVERY_BACKUP_NAME" "$RECOVERY_BACKUP_BYTES" "$RECOVERY_BASE_RELEASE" "${CHARMVILLE_RUNTIME_RELEASE:--}" "${CHARMVILLE_ADMIN_WALLETS:--}" <<'REMOTE'
           set -euo pipefail
           trap 'status=$?; echo "Remote activation failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
           app_dir="$1"
@@ -749,6 +815,8 @@ jobs:
           recovery_backup="$4"
           recovery_bytes="$5"
           recovery_base="$6"
+          charmville_release="$7"
+          charmville_admins="$8"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected INMOTION_APP_DIR: $app_dir" >&2; exit 1 ;;
@@ -933,6 +1001,16 @@ jobs:
           else
             "$node_bin" --env-file="$app_dir/shared/.env.production" \
               "$release_dir/scripts/migrate-postgres.mjs" --defer-locked-notifications
+          fi
+
+          if [ "$charmville_release" != '-' ]; then
+            # Revalidate the accepted marker on the actual immutable server
+            # release before granting access or enabling any runtime routes.
+            CHARMVILLE_RUNTIME_READY=1 CHARMVILLE_RUNTIME_RELEASE="$charmville_release" \
+              "$node_bin" -e 'const path=require("node:path");const root=process.argv[1];const {configureCharmvilleRuntime}=require(path.join(root,"deploy/inmotion/charmville-runtime.cjs"));if(!configureCharmvilleRuntime(process.env,root).ready)process.exit(1)' "$release_dir"
+            CHARMVILLE_ACCESS_MODE=private CHARMVILLE_RUNTIME_READY=1 \
+              CHARMVILLE_RUNTIME_RELEASE="$charmville_release" CHARMVILLE_ADMIN_WALLETS="$charmville_admins" \
+              "$node_bin" "$release_dir/scripts/configure-charmville-private-release.mjs" "$app_dir/shared/.env.production"
           fi
 
           if [ -L "$app_dir/current" ]; then

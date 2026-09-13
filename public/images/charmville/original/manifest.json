@@ -1,0 +1,81 @@
+{
+  "generator": "scripts/charmville/render_crops.py",
+  "blender": "4.5.9 LTS",
+  "projection": "orthographic 2:1",
+  "frameSize": [
+    256,
+    192
+  ],
+  "frames": 8,
+  "fps": 8,
+  "species": {
+    "stalk": {
+      "seedling": [
+        "stalk/seedling/00.png",
+        "stalk/seedling/01.png",
+        "stalk/seedling/02.png",
+        "stalk/seedling/03.png",
+        "stalk/seedling/04.png",
+        "stalk/seedling/05.png",
+        "stalk/seedling/06.png",
+        "stalk/seedling/07.png"
+      ],
+      "growing": [
+        "stalk/growing/00.png",
+        "stalk/growing/01.png",
+        "stalk/growing/02.png",
+        "stalk/growing/03.png",
+        "stalk/growing/04.png",
+        "stalk/growing/05.png",
+        "stalk/growing/06.png",
+        "stalk/growing/07.png"
+      ],
+      "ripe": [
+        "stalk/ripe/00.png",
+        "stalk/ripe/01.png",
+        "stalk/ripe/02.png",
+        "stalk/ripe/03.png",
+        "stalk/ripe/04.png",
+        "stalk/ripe/05.png",
+        "stalk/ripe/06.png",
+        "stalk/ripe/07.png"
+      ]
+    },
+    "splinter": {
+      "seedling": [
+        "splinter/seedling/00.png",
+        "splinter/seedling/01.png",
+        "splinter/seedling/02.png",
+        "splinter/seedling/03.png",
+        "splinter/seedling/04.png",
+        "splinter/seedling/05.png",
+        "splinter/seedling/06.png",
+        "splinter/seedling/07.png"
+      ],
+      "growing": [
+        "splinter/growing/00.png",
+        "splinter/growing/01.png",
+        "splinter/growing/02.png",
+        "splinter/growing/03.png",
+        "splinter/growing/04.png",
+        "splinter/growing/05.png",
+        "splinter/growing/06.png",
+        "splinter/growing/07.png"
+      ],
+      "ripe": [
+        "splinter/ripe/00.png",
+        "splinter/ripe/01.png",
+        "splinter/ripe/02.png",
+        "splinter/ripe/03.png",
+        "splinter/ripe/04.png",
+        "splinter/ripe/05.png",
+        "splinter/ripe/06.png",
+        "splinter/ripe/07.png"
+      ]
+    }
+  },
+  "anchor": [
+    128.0,
+    115.437
+  ]
+}

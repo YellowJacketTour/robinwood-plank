@@ -1,0 +1,1 @@
+CREATE TABLE charmville_battle_assists(encounter_id uuid PRIMARY KEY REFERENCES charmville_encounters(id),controller_id bigint NOT NULL REFERENCES plankspace_profiles(id),helper_id bigint NOT NULL REFERENCES plankspace_profiles(id),expires_at timestamptz NOT NULL,consumed boolean NOT NULL DEFAULT false,CHECK(controller_id<>helper_id));

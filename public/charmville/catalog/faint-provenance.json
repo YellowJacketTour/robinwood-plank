@@ -1,0 +1,29 @@
+{
+  "commit": "db1928346e452e1a36b8ecff62f7e4d195504763",
+  "species": 286,
+  "action": "Faint",
+  "w": 32,
+  "h": 48,
+  "durations": [
+    8,
+    12,
+    4,
+    10
+  ],
+  "totalTicks": 34,
+  "anchorsVerified": 32,
+  "files": [
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0261/Faint-Anim.png",
+      "sha256": "71faaf5477b8d388050e1f580b82b90f91e6891e72431f158062c2412fd28f33"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0261/Faint-Shadow.png",
+      "sha256": "d490a1f14cb2645a739de7ad68c2da0e2a7e931f8bfc1a4b7ff233786f28edc6"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/db1928346e452e1a36b8ecff62f7e4d195504763/sprite/0261/Faint-Offsets.png",
+      "sha256": "65515390908040bac701e8992c2f5b5f0509dee9d6e348dcd68041f54ec635c2"
+    }
+  ]
+}

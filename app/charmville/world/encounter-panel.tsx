@@ -1,0 +1,67 @@
+"use client";
+
+import {useCallback,useEffect,useRef,useState} from 'react';
+
+import EncounterScene,{type Participant,type CombatEvent} from './encounter-scene';
+
+import AssistInvitation from './assist-invitation';
+
+import CapturePanel from './capture-panel';
+
+import BattlePanel from './battle-panel';
+
+import {savedWalletProof} from '@/integrations/plankspace-app/app/auth-client';
+
+type Action='claim'|'enter-turn'|'return-world'|'release';
+
+export type Snapshot={habitat?:{serverNow:string;nextSpawnAt:string|null;spawnCount:number;spawnLimit:number;windowSeconds:number;cooldownSeconds:number}|null;canAssist?:boolean;participants?:Participant[];events?:CombatEvent[];profileId:string;actorEpoch:number;inRange:boolean;legalActions:Action[];encounter:{captured?:boolean;id:string;speciesId:number;name:string;level:number;hp:number;maxHp:number;statuses:string[];mode:'world'|'turn';controllerId:string|null;revision:string}};
+
+type Command={requestId:string;encounterId:string;revision:string;actorEpoch:number;action:Action};
+
+const labels:Record<Action,string>={claim:'Meet creature','enter-turn':'Begin companion battle','return-world':'Return to world',release:'Leave encounter'};
+
+export default function EncounterPanel({wallet,active,onSnapshot,onCaptureReceipt,onCaptureAvailability,onParty}:{wallet:string;active:boolean;onSnapshot?:(snapshot:Snapshot|null)=>void;onCaptureReceipt?:(receipt:unknown)=>void;onCaptureAvailability?:(available:boolean)=>void;onParty?:()=>void}){
+
+ const [captureOwner,setCaptureOwner]=useState<string|null>(null);
+
+ const [state,setState]=useState<Snapshot|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[retry,setRetry]=useState(false);
+
+ const pending=useRef<Command|null>(null),abort=useRef<AbortController|null>(null),epoch=useRef(0),running=useRef(false);
+
+ const request=useCallback(async(command?:Command)=>{
+
+  if(running.current&&!command)return;if(command)abort.current?.abort();running.current=true;const version=++epoch.current;const controller=new AbortController();abort.current=controller;
+
+  if(command){setBusy(true);setMessage('');}
+
+  try{const proof=await savedWalletProof(wallet);if(controller.signal.aborted||version!==epoch.current)return;if(!proof.sessionToken){setState(null);onSnapshot?.(null);return;}
+
+   const response=await fetch('/api/charmville/world/encounter',{method:command?'POST':'GET',headers:{authorization:`Bearer ${proof.sessionToken}`,'Content-Type':'application/json'},body:command?JSON.stringify(command):undefined,cache:'no-store',mode:'same-origin',redirect:'error',signal:controller.signal});
+
+   const data=await response.json();if(controller.signal.aborted||version!==epoch.current)return;
+
+   if(!response.ok){if(command&&[400,403,404,409,422].includes(response.status)){pending.current=null;setRetry(false);}if(!command){setState(null);onSnapshot?.(null);return;}throw new Error(data.error??'Encounter could not be confirmed.');}
+
+   setCaptureOwner(previous=>data.encounter.controllerId===data.profileId?data.encounter.id:data.encounter.captured&&previous===data.encounter.id?previous:null);setState(data);onSnapshot?.(data);if(command){pending.current=null;setRetry(false);setMessage(command.action==='release'?'Encounter released.':'Encounter updated.');}
+
+  }catch(error){if(!controller.signal.aborted&&version===epoch.current&&command){setRetry(!!pending.current);setMessage(error instanceof Error?error.message:'Connection interrupted. Retry to check the same action.');}}
+
+  finally{if(version===epoch.current){running.current=false;setBusy(false);}}
+
+ },[wallet,onSnapshot]);
+
+ useEffect(()=>{if(!active)return;const epochs=epoch;let disposed=false;void Promise.resolve().then(()=>{if(!disposed){setState(null);setCaptureOwner(null);pending.current=null;setRetry(false);setMessage('');void request();}});const timer=setInterval(()=>{if(document.visibilityState==='visible')void request();},2000);return()=>{disposed=true;clearInterval(timer);++epochs.current;abort.current?.abort();running.current=false;onSnapshot?.(null);};},[active,request,onSnapshot]);
+
+ const refresh=useCallback(()=>{void request();},[request]);
+
+ if(!active||!state||(!state.inRange&&state.encounter.controllerId!==state.profileId))return null;
+
+ const encounter=state.encounter;
+ const ongoing=!encounter.captured&&encounter.hp>0;
+
+ const remaining=state.habitat?.nextSpawnAt?Math.max(0,Math.ceil((Date.parse(state.habitat.nextSpawnAt)-Date.parse(state.habitat.serverNow))/1000)):null;
+
+ return <details className="world-encounter-drawer"><summary>Nearby encounter · {ongoing?'Battle controls':'Encounter complete'}</summary><section aria-label="Nearby encounter" className="mt-3 rounded-xl border border-line-strong bg-wood-900 p-4 text-cream"><div className="flex items-center justify-between gap-3"><h3 className="font-display text-xl text-gold-300">{encounter.name}</h3><span>Level {encounter.level}</span></div>{remaining!==null&&Number.isFinite(remaining)&&<section aria-label="Habitat recovery" className="my-3 rounded-lg border border-line bg-forest-900 p-3"><p className="font-bold text-gold-300">{remaining>0?`Next encounter in ${Math.floor(remaining/60)}m ${String(remaining%60).padStart(2,'0')}s`:'Checking for the next encounter…'}</p><p className="mt-1 text-xs text-cream-muted">The habitat refreshes automatically. {state.habitat!.spawnCount} / {state.habitat!.spawnLimit} encounters in the current habitat window.</p></section>}<EncounterScene wild={encounter} participants={state.participants??[]} events={state.events??[]} controllerId={encounter.controllerId}/><p className="my-2 text-sm text-cream-muted">{encounter.captured?'This creature has joined your collection. Open Party to review your companions.':encounter.hp===0?'The encounter is complete. Review your companion’s health before exploring again.':encounter.controllerId&&encounter.controllerId!==state.profileId?'Another player is meeting this creature.':encounter.mode==='turn'?'Choose your companion’s move below. Health and move uses are saved after each turn.':'A wild creature is nearby.'}</p>{ongoing&&encounter.mode==='turn'&&(encounter.controllerId===state.profileId||state.canAssist)&&<BattlePanel key={`battle:${wallet}:${encounter.id}`} wallet={wallet} encounterId={encounter.id} actorEpoch={state.actorEpoch} onChanged={refresh} showPartner={!state.participants?.some(player=>player.profileId===state.profileId&&player.boundCreature)}/>}{ongoing&&encounter.mode==='turn'&&encounter.controllerId===state.profileId&&<AssistInvitation key={`assist:${wallet}:${encounter.id}`} wallet={wallet} revision={encounter.revision} actorEpoch={state.actorEpoch} participants={(state.participants??[]).filter(player=>player.profileId!==state.profileId)} onChanged={refresh}/>}{((ongoing&&encounter.controllerId===state.profileId)||(encounter.captured&&captureOwner===encounter.id))&&<CapturePanel key={`capture:${wallet}:${encounter.id}`} wallet={wallet} encounterId={encounter.id} revision={encounter.revision} actorEpoch={state.actorEpoch} onChanged={refresh} onReceipt={onCaptureReceipt} onAvailability={onCaptureAvailability}/>}<div className="flex flex-wrap gap-2">{(ongoing?state.legalActions:[]).filter(action=>action in labels).map(action=><button key={action} type="button" className="min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50" disabled={busy||retry} onClick={()=>{const command={requestId:crypto.randomUUID(),encounterId:encounter.id,revision:encounter.revision,actorEpoch:state.actorEpoch,action};pending.current=command;void request(command);}}>{action==='claim'?`Meet ${encounter.name}`:labels[action]}</button>)}{onParty&&(encounter.captured||encounter.hp===0||encounter.controllerId!==state.profileId)&&<button type="button" className="min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300" onClick={onParty}>Review party &amp; care</button>}{retry&&<button type="button" className="min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300" disabled={busy} onClick={()=>{if(pending.current)void request(pending.current);}}>Retry encounter action</button>}</div>{message&&<p role="status" className="mt-2 text-sm">{message}</p>}</section></details>;
+
+}
+

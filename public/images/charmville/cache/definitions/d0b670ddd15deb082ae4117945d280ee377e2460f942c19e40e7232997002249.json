@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 1,
+  "authority": "server-receipts-and-yard-snapshots",
+  "faces": [
+    {
+      "id": "stalk",
+      "portrait": "face:stalk",
+      "cropAvailable": true
+    },
+    {
+      "id": "splinter",
+      "portrait": "face:splinter",
+      "cropAvailable": true
+    },
+    {
+      "id": "knock",
+      "portrait": "face:knock",
+      "cropAvailable": false
+    },
+    {
+      "id": "hum",
+      "portrait": "face:hum",
+      "cropAvailable": false
+    },
+    {
+      "id": "pith",
+      "portrait": "face:pith",
+      "cropAvailable": false
+    },
+    {
+      "id": "gleam",
+      "portrait": "face:gleam",
+      "cropAvailable": false
+    },
+    {
+      "id": "knot",
+      "portrait": "face:knot",
+      "cropAvailable": false
+    }
+  ],
+  "crops": [
+    {
+      "id": "stalk",
+      "stages": {
+        "seedling": "crop:stalk:seedling",
+        "growing": "crop:stalk:growing",
+        "ripe": "crop:stalk:ripe"
+      },
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ],
+      "frames": 8,
+      "fps": 8
+    },
+    {
+      "id": "splinter",
+      "stages": {
+        "seedling": "crop:splinter:seedling",
+        "growing": "crop:splinter:growing",
+        "ripe": "crop:splinter:ripe"
+      },
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ],
+      "frames": 8,
+      "fps": 8
+    }
+  ],
+  "geometry": {
+    "projection": "orthographic-2:1",
+    "tileSize": [
+      80,
+      40
+    ],
+    "origin": [
+      360,
+      70
+    ],
+    "sceneryBounds": [
+      0,
+      0,
+      8,
+      8
+    ],
+    "cropFootprint": [
+      2,
+      3,
+      7,
+      6
+    ],
+    "crop": {
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        115.437
+      ]
+    },
+    "scenery": {
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ]
+    },
+    "miniature": {
+      "frameSize": [
+        256,
+        512
+      ],
+      "anchor": [
+        128,
+        448
+      ]
+    }
+  },
+  "maps": [
+    {
+      "id": "porch:starter",
+      "plots": [
+        {
+          "id": "plot:0",
+          "plotIndex": 0,
+          "cell": [
+            2.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:1",
+          "plotIndex": 1,
+          "cell": [
+            4.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:2",
+          "plotIndex": 2,
+          "cell": [
+            6.5,
+            3.5
+          ]
+        },
+        {
+          "id": "plot:3",
+          "plotIndex": 3,
+          "cell": [
+            2.5,
+            5.5
+          ]
+        },
+        {
+          "id": "plot:4",
+          "plotIndex": 4,
+          "cell": [
+            4.5,
+            5.5
+          ]
+        },
+        {
+          "id": "plot:5",
+          "plotIndex": 5,
+          "cell": [
+            6.5,
+            5.5
+          ]
+        }
+      ]
+    }
+  ],
+  "animations": [
+    {
+      "id": "idle",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 1,
+      "fps": 8,
+      "directions": [
+        "character:idle:0",
+        "character:idle:1",
+        "character:idle:2",
+        "character:idle:3",
+        "character:idle:4",
+        "character:idle:5",
+        "character:idle:6",
+        "character:idle:7"
+      ],
+      "loop": true
+    },
+    {
+      "id": "walk",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 8,
+      "fps": 8,
+      "directions": [
+        "character:walk:0",
+        "character:walk:1",
+        "character:walk:2",
+        "character:walk:3",
+        "character:walk:4",
+        "character:walk:5",
+        "character:walk:6",
+        "character:walk:7"
+      ],
+      "loop": true
+    },
+    {
+      "id": "pickup",
+      "frameSize": [
+        128,
+        160
+      ],
+      "frames": 8,
+      "fps": 8,
+      "directions": [
+        "character:pickup:0",
+        "character:pickup:1",
+        "character:pickup:2",
+        "character:pickup:3",
+        "character:pickup:4",
+        "character:pickup:5",
+        "character:pickup:6",
+        "character:pickup:7"
+      ],
+      "loop": false
+    }
+  ],
+  "stamps": {
+    "enabledFaces": [
+      "stalk"
+    ],
+    "accounting": "accepted-server-receipts",
+    "quantities": "server-snapshot"
+  },
+  "landValue": {
+    "status": "not-implemented",
+    "formula": null
+  },
+  "workshop": [
+    {
+      "id": "workshop:blossom",
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ],
+      "authoringSource": "workshop:blossom:source",
+      "image": "workshop:blossom:image",
+      "image3x": "workshop:blossom:image3x",
+      "model": "workshop:blossom:model"
+    },
+    {
+      "id": "workshop:cottage",
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ],
+      "authoringSource": "workshop:cottage:source",
+      "image": "workshop:cottage:image",
+      "image3x": "workshop:cottage:image3x",
+      "model": "workshop:cottage:model"
+    },
+    {
+      "id": "workshop:flowers",
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ],
+      "authoringSource": "workshop:flowers:source",
+      "image": "workshop:flowers:image",
+      "image3x": "workshop:flowers:image3x",
+      "model": "workshop:flowers:model"
+    },
+    {
+      "id": "workshop:orchard",
+      "frameSize": [
+        256,
+        192
+      ],
+      "anchor": [
+        128,
+        132.444
+      ],
+      "authoringSource": "workshop:orchard:source",
+      "image": "workshop:orchard:image",
+      "image3x": "workshop:orchard:image3x",
+      "model": "workshop:orchard:model"
+    },
+    {
+      "id": "workshop:turf",
+      "frameSize": [
+        512,
+        512
+      ],
+      "seamless": true,
+      "authoringSource": "workshop:turf:source",
+      "image": "workshop:turf:image"
+    }
+  ],
+  "authoring": {
+    "crops": "scripts/charmville/render_crops.py",
+    "character": "scripts/charmville/render_sourced_character.py",
+    "portraits": "scripts/charmville/render_charms.py",
+    "credits": "/images/charmville/CREDITS.html",
+    "gltf": "scripts/charmville/render_workshop.py",
+    "sources": {
+      "workshop:blossom:source": {
+        "url": "/images/charmville/cache/sources/bdd6ecf730297edfbfd8dd629753e6251c810d2b3678eb140e5bd52724e10d7e.blend",
+        "sha256": "bdd6ecf730297edfbfd8dd629753e6251c810d2b3678eb140e5bd52724e10d7e",
+        "bytes": 3671941,
+        "mime": "application/x-blender",
+        "original": "/images/charmville/workshop/blossom-tree.blend",
+        "author": "Charmville original workshop",
+        "license": "Original project-owned models; no third-party art",
+        "generator": "scripts/charmville/render_workshop.py",
+        "blender": "4.5.9 LTS"
+      },
+      "workshop:cottage:source": {
+        "url": "/images/charmville/cache/sources/f4412eac9a68369fcf1aa2867ef2268bcd840fbe3520441fb6888943c2a6b4fb.blend",
+        "sha256": "f4412eac9a68369fcf1aa2867ef2268bcd840fbe3520441fb6888943c2a6b4fb",
+        "bytes": 3342495,
+        "mime": "application/x-blender",
+        "original": "/images/charmville/workshop/seed-cottage.blend",
+        "author": "Charmville original workshop",
+        "license": "Original project-owned models; no third-party art",
+        "generator": "scripts/charmville/render_workshop.py",
+        "blender": "4.5.9 LTS"
+      },
+      "workshop:flowers:source": {
+        "url": "/images/charmville/cache/sources/62f61e877ceaf2b0782f116823580aeca7ceec5b1a7b89ed953f571c9cb8e09e.blend",
+        "sha256": "62f61e877ceaf2b0782f116823580aeca7ceec5b1a7b89ed953f571c9cb8e09e",
+        "bytes": 4098728,
+        "mime": "application/x-blender",
+        "original": "/images/charmville/workshop/flower-border.blend",
+        "author": "Charmville original workshop",
+        "license": "Original project-owned models; no third-party art",
+        "generator": "scripts/charmville/render_workshop.py",
+        "blender": "4.5.9 LTS"
+      },
+      "workshop:orchard:source": {
+        "url": "/images/charmville/cache/sources/9bae10b959aa7c10ca11b2490205837e1cb293407421d0c5d54706ae9baa0701.blend",
+        "sha256": "9bae10b959aa7c10ca11b2490205837e1cb293407421d0c5d54706ae9baa0701",
+        "bytes": 3602197,
+        "mime": "application/x-blender",
+        "original": "/images/charmville/workshop/orchard-tree.blend",
+        "author": "Charmville original workshop",
+        "license": "Original project-owned models; no third-party art",
+        "generator": "scripts/charmville/render_workshop.py",
+        "blender": "4.5.9 LTS"
+      },
+      "workshop:turf:source": {
+        "url": "/images/charmville/cache/sources/766b760dbb0fc8a2488094cc01a78fd1ce9609790c147bbfa9c1890c0d07ec7e.blend",
+        "sha256": "766b760dbb0fc8a2488094cc01a78fd1ce9609790c147bbfa9c1890c0d07ec7e",
+        "bytes": 1770513,
+        "mime": "application/x-blender",
+        "original": "/images/charmville/workshop/clover-turf.blend",
+        "author": "Charmville original workshop",
+        "license": "Original project-owned models; no third-party art",
+        "generator": "scripts/charmville/render_workshop.py",
+        "blender": "4.5.9 LTS"
+      }
+    }
+  }
+}

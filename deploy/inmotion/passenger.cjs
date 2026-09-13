@@ -15,6 +15,23 @@ if (fs.existsSync(envFile)) {
   process.loadEnvFile(envFile);
 }
 
+// Pin the native runtime to the real immutable application release. Never use
+// a shared stale root or the current symlink: rollback must carry its own game.
+// Missing helper/package disables only this optional runtime.
+try {
+  const { configureCharmvilleRuntime } = require(path.join(
+    releaseRoot, "deploy", "inmotion", "charmville-runtime.cjs"
+  ));
+  const gameRuntime = configureCharmvilleRuntime(process.env, releaseRoot);
+  if (!gameRuntime.ready && gameRuntime.reason !== "not-enabled") {
+    console.warn("Charmville runtime disabled: accepted release bundle unavailable.");
+  }
+} catch {
+  process.env.CHARMVILLE_RUNTIME_READY = "0";
+  delete process.env.CHARMVILLE_RUNTIME_ROOT;
+  console.warn("Charmville runtime disabled: bootstrap helper unavailable.");
+}
+
 // GitHub Actions installs this server-only credential separately from the
 // release artifact and .env.production. A cPanel-provided environment value
 // still wins when present.

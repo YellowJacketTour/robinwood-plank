@@ -1,0 +1,218 @@
+[
+  {
+    "dmap": 2,
+    "screen": 75,
+    "name": "Palm Island - 4B",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 75,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 80,
+      "enemies": 2,
+      "centerOpen": 30
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 74,
+    "name": "Palm Island - 4A",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 74,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 68,
+      "enemies": 3,
+      "centerOpen": 36
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 76,
+    "name": "Palm Island - 4C",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 76,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 166,
+      "solid": 82,
+      "enemies": 3,
+      "centerOpen": 23
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 59,
+    "name": "Palm Island - 3B",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 59,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 175,
+      "solid": 135,
+      "enemies": 1,
+      "centerOpen": 14
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 91,
+    "name": "Palm Island - 5B",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 91,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 170,
+      "solid": 52,
+      "enemies": 2,
+      "centerOpen": 18
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 69,
+    "name": "Palm Island - 45",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 69,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 12,
+      "enemies": 0,
+      "centerOpen": 40
+    }
+  },
+  {
+    "dmap": 2,
+    "screen": 85,
+    "name": "Palm Island - 55",
+    "map": 1,
+    "palette": 0,
+    "midi": 4,
+    "room": {
+      "map": 1,
+      "screen": 85,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 11,
+      "enemies": 0,
+      "centerOpen": 40
+    }
+  },
+  {
+    "dmap": 26,
+    "screen": 112,
+    "name": "Link's House - 70",
+    "map": 11,
+    "palette": 12,
+    "midi": 17,
+    "room": {
+      "map": 11,
+      "screen": 112,
+      "palette": 4,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 122,
+      "enemies": 0,
+      "centerOpen": 17
+    }
+  },
+  {
+    "dmap": 207,
+    "screen": 86,
+    "name": "TreeTop Village - 56",
+    "map": 16,
+    "palette": 0,
+    "midi": 37,
+    "room": {
+      "map": 16,
+      "screen": 86,
+      "palette": 16,
+      "roomType": 0,
+      "nonzero": 134,
+      "solid": 62,
+      "enemies": 0,
+      "centerOpen": 38
+    }
+  },
+  {
+    "dmap": 3,
+    "screen": 106,
+    "name": "Hyrule Field - 6A",
+    "map": 7,
+    "palette": 0,
+    "midi": 12,
+    "room": {
+      "map": 7,
+      "screen": 106,
+      "palette": 0,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 129,
+      "enemies": 0,
+      "centerOpen": 21
+    }
+  },
+  {
+    "dmap": 73,
+    "screen": 112,
+    "name": "Slash House - 70",
+    "map": 16,
+    "palette": 29,
+    "midi": 24,
+    "room": {
+      "map": 16,
+      "screen": 112,
+      "palette": 16,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 125,
+      "enemies": 6,
+      "centerOpen": 18
+    }
+  },
+  {
+    "dmap": 8,
+    "screen": 116,
+    "name": "Ruto's House - 74",
+    "map": 11,
+    "palette": 12,
+    "midi": 39,
+    "room": {
+      "map": 11,
+      "screen": 116,
+      "palette": 4,
+      "roomType": 0,
+      "nonzero": 176,
+      "solid": 134,
+      "enemies": 5,
+      "centerOpen": 15
+    }
+  }
+]

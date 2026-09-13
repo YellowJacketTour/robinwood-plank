@@ -1,0 +1,299 @@
+[
+  {
+    "file": "corn_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "8611d2cdc7b9bbce67efe1fc4d497813aab35d9c734953d3c82fc05068b1a86c",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "cornYoung_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "983ba5796629758f9e035406829517d5799d95858ca7d74bf187c91e69da1cc3",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "dirt_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "eff7f8dc2d76b600abd98c77486bd33bc674832315abd3f94bd42ba30c9a8e00",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "farm-license.txt",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "16bf6a7b8c67a2a1e494fb3f7557af25e5df2221db16d77f19f484da39d97189",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "fenceLow_E.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "8a1623799678d6bcf9753c6a4cde044337feaa89cda76fbb6522d28ba944f12c",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "fenceLow_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "e9f86c61f245bff9ae6e91fe193a8b61bc023f934ee65f01736141fcc224ac97",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "grass.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-tiles-landscape",
+    "sha256": "84138b5865531471c626224939dd0133c0758a7713e97d59e94b187e7831aa70",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "hayBales_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "13a3e413953bd3c827b0d5608e97f59e65df0cc40765d79f027c111e987a8bf4",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "landscape-license.txt",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-tiles-landscape",
+    "sha256": "75ecca7c3888db2320ecff48a70dbd7fb68ec42b74c21d2e0188dd389dc40b2c",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_detailed.mtl",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "4037993d8d84f1c7528962076bcf796ba368801622874a2bf2960e70d8b8fc99",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_detailed.obj",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "0a67913edf811aabb1c2f54b671c0626eb7c17e6818536484f34d4444030a9c7",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_fat.mtl",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "0d90ca9c9ac521fcc0a0889ac1aca36f6e4b4ab6cd6975c337ecaf764f08e2e7",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_fat.obj",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "860635758fc56ce66f00967ba6fef850ff2bc8750422ac469f19f19099d0a138",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_oak.mtl",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "0d90ca9c9ac521fcc0a0889ac1aca36f6e4b4ab6cd6975c337ecaf764f08e2e7",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_oak.obj",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "1a1dba69f49a454492db2413110e0867dc6dc3d5fe412d2499047625c93a3c06",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_plateau.mtl",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "0d90ca9c9ac521fcc0a0889ac1aca36f6e4b4ab6cd6975c337ecaf764f08e2e7",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "models/tree_plateau.obj",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "c7a2d563c79fdb27175d457a680f0bfa5469a75c006ba7efcf650374acc57091",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "nature-license.txt",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "cb96b75e3560ac78d7a53ce6f083f4cdb5c53faea6141b62d63458dcfe1e4b9d",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "planks_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "ec2e9c2d36c75b34dd5bcf74f2e79809d7e36eb187a039d63ca3b15d9439bdcd",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "roof_E.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "456e7922f3715153e1b5de4ab7e57d83109a10fb1ac6b9aeff3f8a1f7d2bae3f",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "roof_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "a808c50e850167b71f5a02a5d0c6b05971260b2d1a1ad519e55aae25db1c745c",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "sacksCrate_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "45a6f8811a73c1bc8f166f5f26aea70c3b5186daea5cafbecb70b6e5755aa576",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "scenery.json",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "3ea1ac7d2e3f37da614f871322ff140267566c9599bef2bc31aa5c11e4b151bc",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "tree_detailed.blend",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "ffcc754bf2c2c33b1cd6cf77a0132a0d0e4a6789ca81b6d6f3c6b076882cbd65",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_detailed.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "5f030d5b2dbb65ebacbd8ab9950bf574c7cdd423df3fc85436f0c584325f6e68",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_fat.blend",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "e87fa667c3a373e71b93cb8df7bdb2352f1abf6ce24859415e7eb07aa70b3812",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_fat.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "7b601dc3fbd3ec1a9bbcf12ec07def31e3ba539e6b017e6526ea22717f0cba9c",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_oak.blend",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "49deca4609364a81ec41c3bddbaa8c52d2ef28165a497decd70983213785759d",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_oak.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "4f414a216340e447a59de3085d3fa6a9fc74a045b68bfab08d0a071f82dec004",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_plateau.blend",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "a392dc7ca98e019133c2962bea755cc19fe519ba736f7b4c837759a129900c02",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "tree_plateau.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/nature-kit",
+    "sha256": "81c8690b42f375252dbb42f798906176a1cfe81c4046152004f2e825b5ea8b4e",
+    "modified": true,
+    "note": "Derived tree render: see render_scenery.py; source OBJ/MTL preserved"
+  },
+  {
+    "file": "woodWall_E.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "86c0cff19eeb1d77e7fa0f043ca4e9edfcfada3f4d05ddaf26715f0432b115cc",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  },
+  {
+    "file": "woodWallDoorOpen_N.png",
+    "author": "Kenney",
+    "license": "CC0",
+    "source": "https://kenney.nl/assets/isometric-miniature-farm",
+    "sha256": "bfb53960dbd0940f6051e97858d136ca83b7483d41ec45adeb306e32b3c8f3c3",
+    "modified": false,
+    "note": "Source asset or metadata; some props retained for subsequent composition work"
+  }
+]
