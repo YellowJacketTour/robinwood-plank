@@ -323,7 +323,7 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
   .pocket-actions{gap:6px}
   .pocket-stake-picker{padding:4px 6px}
   .pocket-stake-picker button{height:44px}
-  body #primaryBtn{padding:10px 8px;min-height:56px}
-  body .console-target{padding:12px 8px 4px 4px;min-height:56px}
+  body:not([data-playtest="true"]) #primaryBtn{padding:10px 8px;min-height:56px}
+  body:not([data-playtest="true"]) .console-target{padding:12px 8px 4px 4px;min-height:56px}
   body #communityFuelControl summary{min-height:32px}
 }
