@@ -4,12 +4,15 @@ import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { charmSocial, parseSocialPin } from "../../lib/charmville/social";
+import { SOCIAL_ITEMS, socialItem } from "../../lib/charmville/social-items";
 
 test("social pins accept only explicit Oran identity and stable IDs", () => {
   const pin={face:"oran-berry",postId:"42",requestId:randomUUID()};
   assert.deepEqual(parseSocialPin(pin),pin);
-  for (const bad of [null,{}, {...pin,face:"stalk"},{...pin,postId:"-1"},{...pin,requestId:"retry"}])
+  for (const bad of [null,{}, {...pin,face:"stalk"},{...pin,face:"burning-heart"},{...pin,face:"__proto__"},{...pin,face:{toString:()=>"oran-berry"}},{...pin,postId:"-1"},{...pin,requestId:"retry"}])
     assert.throws(()=>parseSocialPin(bad));
+  assert.equal(socialItem("burning-heart"), undefined);
+  assert.deepEqual(SOCIAL_ITEMS.map(item => item.id), ["oran-berry"]);
 });
 
 test("Oran pins conserve custody, replay safely, reject blocks and serialize last-item races",{skip:!process.env.CHARMVILLE_TEST_DATABASE_URL},async()=>{
@@ -29,14 +32,24 @@ test("Oran pins conserve custody, replay safely, reject blocks and serialize las
     await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)",[createHash("sha256").update(token).digest("hex"),wallet,new Date(Date.now()+3600000).toISOString()]);
     await pool.query("INSERT INTO charmville_yards(profile_id) VALUES($1)",[actor]);
     await pool.query("INSERT INTO charmville_stacks(profile_id,face_id,qty) VALUES($1,'oran-berry',2)",[actor]);
+    await pool.query("INSERT INTO charmville_stacks(profile_id,face_id,qty) VALUES($1,'burning-heart',99)",[actor]);
     const postId=(await pool.query("INSERT INTO plankspace_posts(author_wallet,body) VALUES($1,'A friend’s harvest') RETURNING id::text",[other])).rows[0].id;
     const pin={face:"oran-berry",postId,requestId:randomUUID()};
     const result=await charmSocial(pool,token,pin);
+    const storedHash=(await pool.query("SELECT payload_hash FROM charmville_receipts WHERE actor_profile_id=$1 AND request_id=$2",[actor,pin.requestId])).rows[0].payload_hash;
+    assert.equal(storedHash,createHash("sha256").update(JSON.stringify({domain:"social-pin",postId,face:"oran-berry",requestId:pin.requestId})).digest("hex"));
+    const visible=await charmSocial(pool,token);
+    assert.ok("posts" in visible);
+    if ("posts" in visible) {
+      assert.equal(visible.posts.find((p:{id:string})=>p.id===postId).oranPins,"1");
+      assert.deepEqual(visible.posts.find((p:{id:string})=>p.id===postId).pins,{"oran-berry":"1"});
+      assert.deepEqual(visible.basket,[{face:"oran-berry",qty:"1"}]);
+    }
     assert.deepEqual(await charmSocial(pool,token,pin),result);
     await assert.rejects(charmSocial(pool,token,{...pin,postId:"999999"}),/already used/);
     const races=await Promise.allSettled([1,2].map(()=>charmSocial(pool,token,{...pin,requestId:randomUUID()})));
     assert.equal(races.filter(r=>r.status==="fulfilled").length,1);
-    const total=(await pool.query("SELECT (SELECT qty FROM charmville_stacks WHERE profile_id=$1)+(SELECT sum(qty) FROM charmville_stamps WHERE profile_id=$1) AS total",[actor])).rows[0].total;
+    const total=(await pool.query("SELECT (SELECT qty FROM charmville_stacks WHERE profile_id=$1 AND face_id='oran-berry')+(SELECT sum(qty) FROM charmville_stamps WHERE profile_id=$1) AS total",[actor])).rows[0].total;
     assert.equal(String(total),"2");
     await pool.query("INSERT INTO plankspace_profile_relations(owner_wallet,target_handle,kind) VALUES($1,'pin_sender','block')",[other]);
     await assert.rejects(charmSocial(pool,token,{...pin,requestId:randomUUID()}),/unavailable/);

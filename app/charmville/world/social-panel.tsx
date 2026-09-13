@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import SocialCharmBasket, { type BasketPin, type BasketPinResult, type BasketPost } from "./social-charm-basket";
 import styles from "./social-charm-basket.module.css";
+import { SOCIAL_ITEMS, socialItem } from "@/lib/charmville/social-items";
 
 type SocialData = {
-  posts: { id: string; body: string; authorHandle: string; authorName: string | null; createdAt: string; oranPins: string }[];
+  posts: { id: string; body: string; authorHandle: string; authorName: string | null; createdAt: string; oranPins: string; pins?: Record<string,string> }[];
   basket: { face: string; qty: string }[];
 };
 type Props = { token: string; active: boolean; onPinned?: () => void };
@@ -15,8 +16,11 @@ function socialData(value: unknown): value is SocialData {
   return record(value) && Array.isArray(value.posts) && value.posts.length <= 30 && value.posts.every(post =>
     record(post) && typeof post.id === "string" && /^[1-9]\d{0,17}$/.test(post.id) && typeof post.body === "string" &&
     typeof post.authorHandle === "string" && (post.authorName === null || typeof post.authorName === "string") &&
-    typeof post.createdAt === "string" && count(post.oranPins)) && Array.isArray(value.basket) && value.basket.every(item =>
-      record(item) && item.face === "oran-berry" && count(item.qty));
+    typeof post.createdAt === "string" && count(post.oranPins) && (post.pins === undefined ||
+      (record(post.pins) && Object.entries(post.pins).every(([id, qty]) => !!socialItem(id) && count(qty))))) &&
+    Array.isArray(value.basket) && value.basket.length <= SOCIAL_ITEMS.length && value.basket.every(item =>
+      record(item) && !!socialItem(item.face) && count(item.qty)) &&
+    new Set(value.basket.map(item => item.face)).size === value.basket.length;
 }
 
 /** Identity changes discard the former account's private basket immediately. */
@@ -77,10 +81,10 @@ function SocialAccountPanel({ token, active, onPinned }: Props) {
     return { remainingQuantity: Number(result.remaining) };
   }
 
-  const oranQuantity = Number(data?.basket.find(item => item.face === "oran-berry")?.qty ?? 0);
+  const charms = SOCIAL_ITEMS.map(item => ({ ...item, quantity: Number(data?.basket.find(balance => balance.face === item.id)?.qty ?? 0) }));
   return <div hidden={!active} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     {target ? <SocialCharmBasket key={target.id} post={target}
-      charms={[{ id: "oran-berry", name: "Oran Berry", image: "/charmville/items/oran-berry.png", quantity: Number.isSafeInteger(oranQuantity) ? oranQuantity : 0, description: "Grown at home. Useful on your journey, or a little gift pinned to a post." }]}
+      charms={charms}
       onPin={pin} onClose={() => { setTarget(null); void refresh(); }} onPinned={() => onPinned?.()} />
       : <section className={styles.basket} aria-label="PlankSpace public posts" aria-busy={loading}>
         <header className={styles.header}><div><span className={styles.eyebrow}>Charmdex · PlankSpace</span><h2>Public posts</h2></div>
@@ -91,7 +95,8 @@ function SocialAccountPanel({ token, active, onPinned }: Props) {
         {data?.posts.length === 0 && <p className={styles.empty}>No public posts are available yet.</p>}
         <div className={styles.feed}>{data?.posts.map(post => <article key={post.id} className={styles.post}>
           <strong>{post.authorName || post.authorHandle}</strong><span className={styles.byline}> @{post.authorHandle}</span>
-          <p>{post.body}</p><div className={styles.postActions}><span>{post.oranPins} Oran pins</span>
+          <p>{post.body}</p><div className={styles.postActions}><span>{SOCIAL_ITEMS.map(item =>
+            <span key={item.id}>{post.pins?.[item.id] ?? (item.id === "oran-berry" ? post.oranPins : "0")} {item.name} pins </span>)}</span>
             <button type="button" onClick={() => setTarget({ id: post.id, author: post.authorHandle, excerpt: post.body })}>Open charm basket</button>
           </div></article>)}</div>
       </section>}
