@@ -32,7 +32,7 @@ export default function RegionMap({state}:{state:RegionMapState|null}){
  });
  if(!state)return null;
  const supported=nativeMaps.some(map=>map.id===state.geometryId&&map.revision===state.geometryRevision);
- const you=supported?atlasPoint(state.geometryId,state.cell):null;
+ const you=supported&&!state.stale?atlasPoint(state.geometryId,state.cell):null;
  const area=nativeAtlas.areas.find(area=>area.geometryId===state.geometryId);
  const width=(nativeAtlas.width+2)/zoom,height=(nativeAtlas.height+2)/zoom;
  const clamp=(p:{x:number;y:number})=>({x:Math.max(-1+width/2,Math.min(nativeAtlas.width+1-width/2,p.x)),y:Math.max(-1+height/2,Math.min(nativeAtlas.height+1-height/2,p.y))});
@@ -42,7 +42,8 @@ export default function RegionMap({state}:{state:RegionMapState|null}){
  const findMe=()=>{if(you)setCenter({x:you.x+.5,y:you.y+.5});};
  const endPointer=(id:number)=>{pointers.current.delete(id);pinch.current=null;drag.current=null;};
  return <details className="mb-2 rounded-lg border border-line p-2 text-sm">
-  <summary className="min-h-11 cursor-pointer py-2">World map · {location} · {area?.label??'Locating…'}</summary>
+  <summary className="min-h-11 cursor-pointer py-2">World map · {location} · {area?.label??'Locating…'}{state.stale?' · Reconnecting…':''}</summary>
+  {state.stale&&<p role="status" className="mb-2 text-cream-muted">Reconnecting to the world. Your map stays open; live positions will return when connected.</p>}
   {!supported?<p>Map geometry is updating. Position markers are hidden until it matches.</p>:<>
    <div className="mb-2 flex flex-wrap items-center gap-2 text-gold-300" role="group" aria-label="Map controls">
     <button type="button" className={control} disabled={zoom===1} onClick={()=>setZoom(value=>Math.max(1,value/2))} aria-label="Zoom out">−</button>
@@ -84,7 +85,7 @@ export default function RegionMap({state}:{state:RegionMapState|null}){
      <rect width={area.width} height={area.height} fill="none" stroke={state.geometryId===area.geometryId?'var(--color-gold-500)':'var(--color-line)'} strokeWidth={.2}/>
     </g>;})}
     <path d="M 31 5 H 33 M 31 12 H 33" fill="none" stroke="var(--color-gold-300)" strokeWidth={.4}><title>Connected walking border</title></path>
-    {(state.peers??[]).filter(peer=>peer.profileId!==state.profileId).map(peer=>{const point=atlasPoint(state.geometryId,peer.cell);return point?<circle key={peer.profileId} cx={point.x+.5} cy={point.y+.5} r={.55} fill="var(--color-cream)"><title>{peer.handle}</title></circle>:null;})}
+    {(state.stale?[]:state.peers??[]).filter(peer=>peer.profileId!==state.profileId).map(peer=>{const point=atlasPoint(state.geometryId,peer.cell);return point?<circle key={peer.profileId} cx={point.x+.5} cy={point.y+.5} r={.55} fill="var(--color-cream)"><title>{peer.handle}</title></circle>:null;})}
     {you&&<path d={`M ${you.x+.5} ${you.y-.3} l .8 1.4 h -1.6 Z`} fill="var(--color-gold-500)"><title>Your server-confirmed position</title></path>}
    </svg>
    <p className="mt-2 text-xs text-cream-muted">▲ You · ● Nearby players · Gold border: your area. Walk west from the meadow to reach the connected path.</p>

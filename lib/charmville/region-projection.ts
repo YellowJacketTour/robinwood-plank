@@ -9,3 +9,11 @@ export function acceptsRegionProjection(previous:SavedActor|null,next:SavedActor
  if(next.regionEpoch!==previous.regionEpoch)return next.regionEpoch>previous.regionEpoch;
  return next.version>=previous.version && next.sequence>=previous.sequence;
 }
+
+/** Retain scenery during a transient outage, never another admission or live markers. */
+export function retainRegionMapDuringReconnect<T extends SavedActor & {peers?:unknown[];stale?:boolean}>(
+ previous:{admission:string;state:T}|null,profileId:string,admission:string,
+):{admission:string;state:T}|null {
+ if(!previous||previous.admission!==admission||previous.state.profileId!==profileId)return null;
+ return {...previous,state:{...previous.state,peers:[],stale:true}};
+}
