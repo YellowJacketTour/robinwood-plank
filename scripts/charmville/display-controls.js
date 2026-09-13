@@ -31,14 +31,71 @@ function fit(){
 }
 function setZoom(value){zoom=Math.max(.5,Math.min(2,value));try{localStorage.setItem('charmville-display-zoom',String(zoom));}catch{/* Optional preference. */}fit();}
 slider.addEventListener('input',()=>setZoom(Number(slider.value)/100));
+// BEGIN native display navigation
+function bindDisplayNavigation(surface,host,root,readZoom,writeZoom,ready=()=>true){
+ const blocked=()=>!ready()||Boolean(root.querySelector('dialog[open], [aria-modal="true"]'));
+ surface.addEventListener('wheel',event=>{
+  if(blocked()||event.altKey||event.metaKey)return;
+  const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?surface.clientHeight:1);
+  if(!Number.isFinite(delta)||delta===0)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  writeZoom(readZoom()*Math.exp(-Math.max(-500,Math.min(500,delta))*.002));
+ },{passive:false,capture:true});
+ const zoomKeys=new Set(['+','=','-','_','0','PageUp','PageDown']);
+ const handle=event=>{
+  if(blocked()||root.hidden||event.ctrlKey||event.metaKey||event.altKey||!zoomKeys.has(event.key))return;
+  if(event.target!==surface&&root.activeElement!==surface)return;
+  if(event.target?.tagName&&['INPUT','TEXTAREA','SELECT','BUTTON'].includes(event.target.tagName))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(event.type==='keyup')return;
+  writeZoom(event.key==='0'?1:readZoom()*(['+','=','PageUp'].includes(event.key)?1.1:1/1.1));
+ };
+ host.addEventListener('keydown',handle,true);host.addEventListener('keyup',handle,true);
+ let pinch=null;
+ const distance=touches=>Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
+ surface.addEventListener('touchstart',event=>{
+  if(blocked()||event.touches.length!==2){pinch=null;return;}
+  pinch={distance:distance(event.touches),zoom:readZoom()};
+  event.preventDefault();event.stopImmediatePropagation();
+ },{passive:false,capture:true});
+ surface.addEventListener('touchmove',event=>{
+  if(blocked()||!pinch||event.touches.length!==2)return;
+  const current=distance(event.touches);
+  if(pinch.distance>0&&Number.isFinite(current))writeZoom(pinch.zoom*current/pinch.distance);
+  event.preventDefault();event.stopImmediatePropagation();
+ },{passive:false,capture:true});
+ for(const type of ['touchend','touchcancel'])surface.addEventListener(type,()=>{pinch=null;},{passive:false,capture:true});
+}
+// END native display navigation
+// Camera gestures never write CSS size. Only a capable native frame may accept
+// a request; legacy runtimes keep these controls hidden and gestures untouched.
+const camera=document.createElement('fieldset');camera.hidden=true;
+camera.innerHTML='<legend>World camera</legend><label>View distance <input aria-label="World camera zoom" type="range" min="50" max="100" step="5" value="100"></label><output aria-live="polite">100%</output><button type="button">Wide view</button><button type="button">Follow view</button><p>Wheel or pinch to see more land. + / − zoom; 0 resets. Window size stays fixed.</p>';
+panel.append(camera);
+const cameraSlider=camera.querySelector('input'),cameraOutput=camera.querySelector('output');
+const cameraReady=()=>window.charmvilleCameraReady===true;
+const readCamera=()=>Number.isFinite(window.charmvilleCameraZoom)?window.charmvilleCameraZoom:1;
+function requestCamera(value){
+ if(!cameraReady()||!Number.isFinite(value))return;
+ window.charmvilleCameraZoom=Math.max(.5,Math.min(1,value));
+ cameraSlider.value=String(Math.round(window.charmvilleCameraZoom*100));
+}
+cameraSlider.addEventListener('input',()=>requestCamera(Number(cameraSlider.value)/100));
+camera.querySelectorAll('button')[0].onclick=()=>requestCamera(.5);
+camera.querySelectorAll('button')[1].onclick=()=>requestCamera(1);
+bindDisplayNavigation(canvas,window,document,readCamera,requestCamera,cameraReady);
+const cameraStatus=setInterval(()=>{
+ camera.hidden=!cameraReady();
+ if(camera.hidden)return;
+ const actual=window.charmvilleCameraActualZoom;
+ cameraOutput.textContent=Number.isFinite(actual)?`${Math.round(actual*100)}%`: 'Applying…';
+ panel.querySelector('p').textContent='Game size scales the display. World camera changes how much land you see.';
+},250);
+addEventListener('pagehide',()=>clearInterval(cameraStatus),{once:true});
 panel.querySelectorAll('button')[0].onclick=()=>setZoom(1);
 panel.querySelectorAll('button')[1].onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{output.textContent='Fullscreen unavailable in this browser';}};
 new MutationObserver(fit).observe(canvas,{attributes:true,attributeFilter:['width','height']});
 new ResizeObserver(fit).observe(header);
 addEventListener('resize',fit);document.addEventListener('fullscreenchange',()=>{document.body.classList.toggle('charm-cinema',Boolean(document.fullscreenElement));document.body.classList.remove('charm-cinema-menu');fit();});
-// Two-finger pinch over the game; one-finger native controls are untouched.
-let pinch=0,pinchZoom=1;
-canvas.addEventListener('touchstart',e=>{if(e.touches.length===2){pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pinchZoom=zoom;}},{passive:true});
-canvas.addEventListener('touchmove',e=>{if(e.touches.length===2&&pinch){e.preventDefault();setZoom(pinchZoom*Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)/pinch);}},{passive:false});
-canvas.addEventListener('touchend',()=>{pinch=0;});
+// Presentation size remains available explicitly in Display, not as map zoom.
 fit();
