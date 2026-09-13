@@ -1,3 +1,5 @@
+> Approved scope, 2026-09-13: Read [APPROVED-GLOBAL-COMPLETION-CONTRACT.md](APPROVED-GLOBAL-COMPLETION-CONTRACT.md) before planning or declaring completion. Its 25 GLOBAL acceptance gates supplement every retained earlier requirement. Adoption of a plan does not certify implementation; advanced experiments must beat documented baselines.
+
 # Requirement coverage audit — 2026-09-12
 
 This is a coverage and dependency audit, not completion certification. Baseline commit: `48124b5`; initial working tree contained only untracked `work/`. Other workers may add implementation after this snapshot. No maturity percentages are assigned. Existing five-cell bars are coarse historical evidence levels, not effort remaining or release readiness.

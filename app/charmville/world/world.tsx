@@ -1,8 +1,13 @@
 "use client";
+import {runtimeDestination} from './runtime-destination';
+import {bootRuntimeSession,renewRuntimeSession} from './runtime-boot';
 import './world-shell.css';
 import {createCaptureStream} from "./capture-stream";
 
 import Link from "next/link";
+import SocialPanel from "./social-panel";
+import SpectatorSettings from './spectator-settings';
+import RegionMap from "./region-map";
 import ControlGuide from "./control-guide";
 import FirstSteps from "./first-steps";
 import {useTutorialBridge} from "./tutorial-bridge";
@@ -10,7 +15,7 @@ import HomePermissions from "../start/home-permissions";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import Image from "next/image";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
 import { connectPlankLoveWallet, subscribePlankLoveWalletState } from "@/integrations/plankspace-app/app/plank-love-wallet";
 import { createGameAccountClient, type GameIdentity } from "@/lib/charmville/account-client";
@@ -23,19 +28,31 @@ import {useNativeResources} from "./native-resources";
 import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
 import {useNativeContactObserver} from "./native-contact-observer";
+import {requestWorldEntry} from "@/lib/charmville/world-entry-client";
 
 type Presence = { profileId:string; regionId:string; ownerHandle:string|null; revision:string; expiresAt:string;
   active:boolean; peers:Array<{profileId:string;handle:string}>; reason:string|null };
 type Session = { identity:GameIdentity; token:string };
-const tabs=[['play','Play'],['companions','Party'],['inventory','Satchel'],['exchange','Exchange'],['friends','Friends']] as const;
+const tabs=[['play','Play'],['companions','Party'],['inventory','Satchel'],['exchange','Exchange'],['friends','Friends'],['social','Social']] as const;
 type WorldTab=typeof tabs[number][0];
 const button = "min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 
-export default function World({localRuntime}:{localRuntime:boolean}) {
+const subscribeOrigin=()=>()=>{};
+const browserOrigin=()=>window.location.origin;
+export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean;runtimePrefix?:string|null}) {
+  const pageOrigin=useSyncExternalStore(subscribeOrigin,browserOrigin,()=>"");
+  const destination=runtimeDestination(localRuntime,runtimePrefix,pageOrigin);
+  const runtimeOrigin=destination?.origin??"",runtimeUrl=destination?.url??"",runtimeNeedsSession=destination?.requiresSession??false;
+  const runtimeBoot=useRef<AbortController|null>(null);
+  const [runtimeOpening,setRuntimeOpening]=useState(false);
+  const [runtimeExpiry,setRuntimeExpiry]=useState<string|null>(null);
+  const [runtimeIssue,setRuntimeIssue]=useState("");
   const [identity,setIdentity]=useState<GameIdentity|null>(null);
   const [address,setAddress]=useState("");
   const [presence,setPresence]=useState<Presence|null>(null);
+  const [arrivalRequest,setArrivalRequest]=useState(0);
   const [inventory,setInventory]=useState<YardInventory|null>(null);
+  const [journeyRevision,setJourneyRevision]=useState(0);
   const [visitor,setVisitor]=useState("");
   const [message,setMessage]=useState("");
   const [busy,setBusy]=useState(false);
@@ -62,19 +79,19 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     window.addEventListener('keydown',back);
     return()=>window.removeEventListener('keydown',back);
   },[tab,returnToPlay,presence?.active]);
-  useNativeContactObserver(frame);
+  useNativeContactObserver(frame,runtimeOrigin);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
   const socketEncounterAt=useRef(0);
   const captureAvailable=useRef(false);
-  const updateCaptureAvailability=useCallback((available:boolean)=>{captureAvailable.current=available;if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:capture-availability',available},'http://localhost:3021');},[]);
+  const updateCaptureAvailability=useCallback((available:boolean)=>{captureAvailable.current=available;if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:capture-availability',available},runtimeOrigin);},[runtimeOrigin]);
   const [captureStream]=useState(()=>createCaptureStream());
   const updateEncounter=useCallback((snapshot:unknown|null)=>{
     if(Date.now()-socketEncounterAt.current<1000)return;
     encounterSnapshot.current=snapshot;
-    if(frameReady.current)frame.current?.contentWindow?.postMessage(nativeEncounterProjection(snapshot),'http://localhost:3021');
-    for(const event of captureStream.snapshot(snapshot)){if(frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');}
-  },[captureStream]);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage(nativeEncounterProjection(snapshot),runtimeOrigin);
+    for(const event of captureStream.snapshot(snapshot)){if(frameReady.current)frame.current?.contentWindow?.postMessage(event,runtimeOrigin);}
+  },[captureStream,runtimeOrigin]);
   const updateSocketEncounter=useCallback((snapshot:unknown|null)=>{
     socketEncounterAt.current=0;
     updateEncounter(snapshot);
@@ -82,30 +99,30 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   },[updateEncounter]);
   const showCapture=useCallback((receipt:unknown)=>{
     const event=captureStream.receipt(receipt);
-    if(event&&frameReady.current)frame.current?.contentWindow?.postMessage(event,'http://localhost:3021');
-  },[captureStream]);
+    if(event&&frameReady.current)frame.current?.contentWindow?.postMessage(event,runtimeOrigin);
+  },[captureStream,runtimeOrigin]);
   const followerSpecies=useRef(0);
   const partySpecies=useRef<number[]>([]);
   const partyCreatureIds=useRef<string[]>([]);
   const followerFormation=useRef<'close'|'relaxed'>('close');
   const updateFormation=useCallback((formation:'close'|'relaxed')=>{
     followerFormation.current=formation;
-    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower-formation',formation},'http://localhost:3021');
-  },[]);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower-formation',formation},runtimeOrigin);
+  },[runtimeOrigin]);
   const updateFollowers=useCallback((speciesIds:number[],creatureIds:string[]=[])=>{
     const members=speciesIds.map((speciesId,index)=>({speciesId,id:creatureIds[index]??''})).filter(member=>[277,280,283,25,133,286].includes(member.speciesId)).slice(0,6);
     partySpecies.current=members.map(member=>member.speciesId);
     partyCreatureIds.current=members.map(member=>member.id);
-    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current,creatureIds:partyCreatureIds.current},'http://localhost:3021');
-  },[]);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:party-followers',speciesIds:partySpecies.current,creatureIds:partyCreatureIds.current},runtimeOrigin);
+  },[runtimeOrigin]);
   const updateFollower=useCallback((speciesId:number)=>{
     followerSpecies.current=[277,280,283,25,133,286].includes(speciesId)?speciesId:0;
-    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower',speciesId:followerSpecies.current},'http://localhost:3021');
-  },[]);
+    if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower',speciesId:followerSpecies.current},runtimeOrigin);
+  },[runtimeOrigin]);
   const pendingPanel=useRef<'charmdex'|'voice'|null>(null);
   const session=useRef<Session|null>(null);
   const [sessionToken,setSessionToken]=useState<string|null>(null);
-  const tutorialStatus=useTutorialBridge(frame,sessionToken);
+  const tutorialStatus=useTutorialBridge(frame,sessionToken,runtimeOrigin);
   const wallet=useRef<string|null>(null);
   const generation=useRef(0);
   const inFlight=useRef<AbortController|null>(null);
@@ -113,39 +130,85 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
   const [accountClient]=useState(()=>createGameAccountClient());
   const mounted=useRef(true);
   const signingIn=useRef(false);
-  const movementStatus=useNativeMovement(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,updateSocketEncounter);
+  const {status:movementStatus,map:regionMap}=useNativeMovement(frame,session,identity?.profileId,presence?.active?`${presence.regionId}:${arrivalRequest}`:undefined,updateSocketEncounter,runtimeOrigin);
+
+  const openAdventure=useCallback(async(forceSession=false)=>{
+    if(!runtimeUrl||runtimeBoot.current)return false;
+    if(camera&&!forceSession)return true;
+    if(!runtimeNeedsSession){setCamera(true);return true;}
+    const account=session.current;
+    if(!account){setRuntimeIssue('Sign in before opening the adventure.');return false;}
+    const controller=new AbortController(),version=generation.current;
+    runtimeBoot.current=controller;setRuntimeOpening(true);setRuntimeIssue('');
+    try{
+      const lease=await bootRuntimeSession({token:account.token,signal:controller.signal,isCurrent:()=>mounted.current&&version===generation.current&&session.current?.token===account.token});
+      setRuntimeExpiry(lease.expiresAt);setCamera(true);return true;
+    }catch(error){
+      if(!controller.signal.aborted&&mounted.current&&version===generation.current)setRuntimeIssue(error instanceof Error?error.message:'The adventure could not open.');
+      return false;
+    }finally{if(runtimeBoot.current===controller){runtimeBoot.current=null;if(mounted.current)setRuntimeOpening(false);}}
+  },[runtimeUrl,runtimeNeedsSession,camera]);
+
+  useEffect(()=>{
+    if(!camera||!runtimeNeedsSession||!runtimeExpiry||!sessionToken)return;
+    const controller=new AbortController(),version=generation.current;
+    const renew=async()=>{
+      try{
+        const lease=await renewRuntimeSession({token:sessionToken,signal:controller.signal,isCurrent:()=>mounted.current&&generation.current===version&&session.current?.token===sessionToken});
+        setRuntimeExpiry(lease.expiresAt);setRuntimeIssue('');
+      }catch(error){if(!controller.signal.aborted&&mounted.current&&generation.current===version)setRuntimeIssue(error instanceof Error?error.message:'Game access could not be renewed. Reconnect when ready.');}
+    };
+    // One bounded renewal attempt, then explicit player recovery on failure.
+    const timer=setTimeout(()=>void renew(),Math.max(1000,Date.parse(runtimeExpiry)-Date.now()-60_000));
+    return()=>{clearTimeout(timer);controller.abort();};
+  },[camera,runtimeNeedsSession,runtimeExpiry,sessionToken]);
 
   const clear=useCallback(()=>{
+    runtimeBoot.current?.abort();runtimeBoot.current=null;setRuntimeOpening(false);setRuntimeExpiry(null);setRuntimeIssue("");setCamera(false);
     socketEncounterAt.current=0;
     ++generation.current; inFlight.current?.abort(); inFlight.current=null;
     accountClient.disconnect(); session.current=null;setSessionToken(null); location.current=null;updateCaptureAvailability(false);
-    frame.current?.contentWindow?.postMessage({type:'charmville:capture-event',active:false},'http://localhost:3021');
+    frame.current?.contentWindow?.postMessage({type:'charmville:capture-event',active:false},runtimeOrigin);
     updateEncounter(null);
     updateFollower(0);
     updateFollowers([]);
     pendingPanel.current=null;
     frameReady.current=false;
-  },[accountClient,updateFollower,updateFollowers,updateEncounter,updateCaptureAvailability]);
+  },[accountClient,updateFollower,updateFollowers,updateEncounter,updateCaptureAvailability,runtimeOrigin]);
 
-  const load=useCallback(async(destination?:{destination:"home"|"public";handle?:string})=>{
+  const load=useCallback(async(destination?:{destination:"home"|"public";handle?:string},background=false)=>{
     const account=session.current;
     if(!account)return;
     inFlight.current?.abort();
     const controller=new AbortController();inFlight.current=controller;
     const version=generation.current;
-    setBusy(true);setMessage("");
+    if(!background){setBusy(true);setMessage("");}
     const request=async(path:string,body?:object)=>{
       const response=await fetch(path,{method:body?"POST":"GET",headers:{authorization:`Bearer ${account.token}`,...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,
         cache:"no-store",credentials:"same-origin",mode:"same-origin",redirect:"error",signal:controller.signal});
-      const data=await response.json();
+      let data;
+      try{data=await response.json();}catch(error){
+        // Preserve denial status even when a proxy supplies an HTML error body.
+        // A malformed success can be retried with the same admission revision.
+        if(!response.ok)throw Object.assign(new Error('Your world could not be refreshed.'),{status:response.status});
+        throw error;
+      }
       if(!response.ok)throw Object.assign(new Error(data.error??"Your world could not be refreshed."),{status:response.status});
       return data;
     };
     try {
-      const next=await request("/api/charmville/world/presence",destination?{...destination,revision:location.current?.revision??"0"}:undefined) as Presence;
+      const next=(destination?await requestWorldEntry({
+        entry:{...destination,revision:location.current?.revision??"0"},
+        request:entry=>request("/api/charmville/world/presence",entry),
+        signal:controller.signal,isCurrent:()=>version===generation.current,
+      }):await request("/api/charmville/world/presence")) as Presence;
       if(controller.signal.aborted||version!==generation.current)return;
       // Commit admission independently: an inventory read failure must not hide a successful move.
       location.current=next;setPresence(next);
+      // Explicit travel also recovers the native camera when returning to the
+      // same admitted region. Background inventory/presence refreshes must not
+      // reset movement or repeatedly teleport the player.
+      if(destination&&next.active&&!background)setArrivalRequest(value=>value+1);
       const yard=await request(`/api/charmville/${encodeURIComponent(account.identity.handle)}`) as {inventory:YardInventory|null};
       if(controller.signal.aborted||version!==generation.current)return;
       setInventory(yard.inventory);
@@ -177,10 +240,16 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     localStorage.setItem('plankspace-last-verified-wallet',test.wallet);
     attachLocalPlaytestWallet(test.wallet);
     wallet.current=test.wallet;session.current={identity:verified,token:test.token};setSessionToken(test.token);
-    setAddress(test.wallet);setIdentity(verified);setPresence(null);setInventory(null);setCamera(true);setTab('companions');
+    setAddress(test.wallet);setIdentity(verified);setPresence(null);setInventory(null);setCamera(!runtimeNeedsSession);setTab('companions');
     await load();
-  },[localRuntime,accountClient,clear,load]);
-  const resourceStatus=useNativeResources(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,load);
+  },[localRuntime,accountClient,clear,load,runtimeNeedsSession]);
+  const resourceChanged=useCallback(()=>{
+    // Refresh accomplishments after the authoritative receipt, even if the
+    // following inventory refresh fails or the action did not change a balance.
+    setJourneyRevision(value=>value+1);
+    void load();
+  },[load]);
+  const resourceStatus=useNativeResources(frame,session,identity?.profileId,presence?.active?presence.regionId:undefined,resourceChanged,runtimeOrigin);
 
   const restore=useCallback(async(token:string,version:number)=>{
     if(version!==generation.current)return;
@@ -188,9 +257,9 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     if(version!==generation.current)return;
     session.current={identity:account,token};setSessionToken(token);setIdentity(account);
     setAddress(wallet.current??"");
-    if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);
+    if(!runtimeNeedsSession&&runtimeUrl)setCamera(true);
     await load();
-  },[accountClient,load,localRuntime]);
+  },[accountClient,load,runtimeNeedsSession,runtimeUrl]);
 
   useEffect(()=>{
     let disposed=false;
@@ -203,7 +272,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
 
   useEffect(()=>{
     const returnToMenus=(event:MessageEvent)=>{
-      if(event.origin!=='http://localhost:3021'||event.source!==frame.current?.contentWindow)return;
+      if(!runtimeOrigin||event.origin!==runtimeOrigin||event.source!==frame.current?.contentWindow)return;
       if(event.data?.type==='charmville:capture-request'){if(captureAvailable.current)window.dispatchEvent(new Event('charmville:capture-request'));return;}
       if(event.data?.type==='charmville:follower-ready'){updateCaptureAvailability(captureAvailable.current);updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);return;}
       if(event.data?.type!=='charmville:account-menu')return;
@@ -215,7 +284,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     };
     window.addEventListener('message',returnToMenus);
     return()=>window.removeEventListener('message',returnToMenus);
-  },[updateFollower,updateFollowers,updateFormation,updateEncounter,updateCaptureAvailability]);
+  },[updateFollower,updateFollowers,updateFormation,updateEncounter,updateCaptureAvailability,runtimeOrigin]);
 
   useEffect(()=>{
     const changed=()=>setFullscreen(Boolean(document.fullscreenElement));
@@ -244,8 +313,8 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
     const timer=setInterval(()=>{
       if(document.hidden||inFlight.current||!session.current)return;
       const current=location.current;
-      if(current?.active)void load(current.ownerHandle?{destination:"home",handle:current.ownerHandle}:{destination:"public"});
-      else void load();
+      if(current?.active)void load(current.ownerHandle?{destination:"home",handle:current.ownerHandle}:{destination:"public"},true);
+      else void load(undefined,true);
     },30000);
     return()=>clearInterval(timer);
   },[load]);
@@ -280,13 +349,13 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
 
   function sendPanel(){
     if(!pendingPanel.current||!frameReady.current||!frame.current?.contentWindow)return;
-    frame.current.contentWindow.postMessage({type:'charmville:open-panel',panel:pendingPanel.current},'http://localhost:3021');
+    frame.current.contentWindow.postMessage({type:'charmville:open-panel',panel:pendingPanel.current},runtimeOrigin);
     pendingPanel.current=null;
   }
   function openPanel(panel:'charmdex'|'voice'){
-    if(!localRuntime||!["localhost","127.0.0.1"].includes(window.location.hostname)){setMessage("The adventure tools are available on the local development machine.");return;}
+    if(!runtimeUrl){setMessage("The adventure runtime is not ready on this deployment.");return;}
     pendingPanel.current=panel;setTab('play');
-    if(camera)sendPanel();else {frameReady.current=false;setCamera(true);}
+    if(camera)sendPanel();else {frameReady.current=false;void openAdventure();}
   }
 
   return <main ref={menuRoot} data-market-shell data-playing={identity?'true':'false'} data-world-tab={tab} className="charm-world min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
@@ -304,18 +373,21 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
           onClick={()=>{setTab(id);if(id==='play')requestAnimationFrame(()=>frame.current?.focus());}} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;event.preventDefault();setTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}>{label}</button>)}
       </div>
       <p className="mt-2 truncate border-t border-line px-2 pt-2 text-xs text-cream-muted">@{identity.handle} · {presence?.active?(presence.ownerHandle?`Home of @${presence.ownerHandle}`:'Public meadow'):'Choose a location in Friends'}</p>
-      {localRuntime&&<div className="mt-2 flex flex-wrap gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Discover charms</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
+      {runtimeUrl&&<div className="mt-2 flex flex-wrap gap-2"><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('charmdex')}>Discover charms</button><button className="min-h-11 rounded-lg border border-line px-3 text-sm text-gold-300" onClick={()=>openPanel('voice')}>Voice note</button></div>}
     </div>
     {tutorialStatus&&<p role="status">{tutorialStatus}</p>}
-    {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps inventory={inventory} onSatchel={()=>setTab('inventory')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
+    {sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}
+    {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps onPlay={()=>{document.querySelector<HTMLDetailsElement>(".world-journal")?.removeAttribute("open");frame.current?.focus();}} inventory={inventory} onSatchel={()=>setTab('inventory')} onExchange={()=>setTab('exchange')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}:${journeyRevision}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
     <div className={`world-stage grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
-      <section id="panel-play" inert={tab!=='play'||!presence?.active} aria-hidden={tab!=='play'||!presence?.active} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'?'hidden xl:block':''}`} aria-label="Native adventure camera">
+      <section id="panel-play" inert={tab!=='play'||!presence?.active} aria-hidden={tab!=='play'||!presence?.active} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'&&tab!=='social'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-2 flex items-center justify-between gap-2"><h2 className="font-display text-xl text-gold-300">Adventure</h2><span className="text-xs text-cream-muted">Enter · Game menus</span></div>
         <p role="status" className="mb-2 text-sm text-cream-muted">{resourceStatus||movementStatus}</p>
+        {runtimeIssue&&<div role="alert" className="mb-3 rounded-lg border border-line p-3"><p>{runtimeIssue}</p>{runtimeNeedsSession&&camera&&<button className={button} disabled={runtimeOpening} onClick={()=>void openAdventure(true)}>{runtimeOpening?'Reconnecting...':'Reconnect game access'}</button>}</div>}
+        <RegionMap state={regionMap}/>
         <details className="mb-2 text-xs text-cream-muted"><summary className="cursor-pointer py-2">What saves with your account</summary><p className="py-2">{presence?.active?'Your movement, Oran harvests, companion health and captured creatures save to your account. Supported encounter victories award experience. The native equipment menu remains a separate test loadout.':'Join a location in Friends to save movement and grow Oran Berries for your Satchel and Exchange.'}</p></details>
-        {camera?<iframe ref={frame} onLoad={()=>{frameReady.current=true;updateCaptureAvailability(captureAvailable.current);frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},'http://localhost:3021');frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},'http://localhost:3021');updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);sendPanel();}} title="Charmville native reference adventure" src="http://localhost:3021/charmville/tutorial/" sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
-          <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{localRuntime?<button className={button} onClick={()=>{if(["localhost","127.0.0.1"].includes(window.location.hostname))setCamera(true);else setMessage("The native runtime is currently available on the local development machine.");}}>Load adventure</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
-        {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter} onCaptureReceipt={showCapture} onCaptureAvailability={updateCaptureAvailability}/>}
+        {camera&&runtimeUrl?<iframe ref={frame} onLoad={()=>{frameReady.current=true;updateCaptureAvailability(captureAvailable.current);frame.current?.contentWindow?.postMessage({type:'charmville:account-peers',active:true,peers:[]},runtimeOrigin);frame.current?.contentWindow?.postMessage({type:'charmville:host-ready'},runtimeOrigin);updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);sendPanel();}} title="Charmville native reference adventure" src={runtimeUrl} sandbox="allow-scripts allow-same-origin allow-downloads" allow="cross-origin-isolated; fullscreen; gamepad; keyboard-map; microphone" allowFullScreen referrerPolicy="no-referrer" className="h-[72vh] min-h-96 w-full rounded-lg border border-line" />:
+          <div className="flex min-h-96 items-center justify-center rounded-lg border border-line bg-panel-soft p-6">{runtimeUrl?<button className={button} disabled={runtimeOpening} onClick={()=>void openAdventure()}>{runtimeOpening?'Opening adventure...':'Load adventure'}</button>:<p className="text-cream-muted">Native hosting is being connected. Account locations and inventory are available independently.</p>}</div>}
+        {address&&<EncounterPanel key={`encounter:${address}`} wallet={address} active={tab==='play'} onSnapshot={updateEncounter} onCaptureReceipt={showCapture} onCaptureAvailability={updateCaptureAvailability} onParty={()=>setTab('companions')}/>}
       </section>
       {tab==='play'&&!presence?.active&&<section className="world-arrival" aria-label="Choose your arrival">
         <div><p className="text-xs font-bold tracking-wide text-gold-300">CHARMVILLE · YOUR JOURNEY</p>
@@ -326,7 +398,8 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <button className={button} disabled={busy} onClick={()=>setTab('friends')}>Visit a friend</button></div>
         <p className="mt-5 text-sm text-cream-muted">{presence?.reason==='permission-revoked'?'Your invitation has changed. Choose an available destination.':'Gameplay connects after your destination accepts your account.'}</p></div>
       </section>}
-      <aside className={tab==='play'?'hidden':'world-menu space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={returnToPlay}>Return to play</button></div>
+      <aside data-social={tab==='social'} className={tab==='play'?'hidden':'world-menu space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={returnToPlay}>Return to play</button></div>
+        <div id="panel-social" role="tabpanel" aria-labelledby="tab-social" hidden={tab!=='social'}>{sessionToken&&<SocialPanel key={identity.profileId} token={sessionToken} active={tab==='social'} onPinned={()=>void load()}/>}</div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
         <section className="rounded-xl border border-line bg-panel p-4"><h2 className="font-display text-xl">@{identity.handle}</h2><p className="mt-2 text-cream-muted">{presence?.active?(presence.ownerHandle?`At @${presence.ownerHandle}’s home`:"In the public meadow"):"Choose where to join"}</p>
           <div className="my-3 flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>void load({destination:"home",handle:identity.handle})}>Go home</button><button className={button} disabled={busy} onClick={()=>void load({destination:"public"})}>Public meadow</button></div>
@@ -341,7 +414,7 @@ export default function World({localRuntime}:{localRuntime:boolean}) {
         <section className="rounded-xl bg-panel p-4" aria-label="Saved inventory">{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{charmName(stack.face)} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face} className="flex items-center gap-2">{stack.face==='oran-berry'&&<Image src="/charmville/items/oran-berry.png" alt="" width={24} height={24} className="[image-rendering:pixelated]"/>}{charmName(stack.face)} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<div><p className="mb-3 text-cream-muted">Set up your home to start collecting supplies and charms.</p><button className={button} onClick={()=>setTab('companions')}>Open Party setup</button></div>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
-        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');if(localRuntime&&['localhost','127.0.0.1'].includes(window.location.hostname))setCamera(true);requestAnimationFrame(()=>frame.current?.focus());}} />}</div>
+        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onEnterHome={()=>{setTab("play");void load({destination:"home",handle:identity.handle});}} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');void openAdventure().then(opened=>{if(opened)requestAnimationFrame(()=>frame.current?.focus());});}} />}</div>
         <div id="panel-exchange" role="tabpanel" aria-labelledby="tab-exchange" hidden={tab!=='exchange'}>{address&&<ExchangePanel key={`${address}:${identity.handle}`} wallet={address} handle={identity.handle} onChanged={()=>void load()} />}</div>
       </aside>
     </div></>}

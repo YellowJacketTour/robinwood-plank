@@ -1,0 +1,100 @@
+From efa400295446a6fe967a1d3dd3b85e6d96ccc269 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:26:54 -0500
+Subject: [PATCH] refactor(zc): route explicit world script lighting targets
+
+---
+ src/zc/script_drawing.cpp | 23 +++++++++++++++++++----
+ src/zc/script_drawing.h   | 11 +++++++++++
+ 2 files changed, 30 insertions(+), 4 deletions(-)
+
+diff --git a/src/zc/script_drawing.cpp b/src/zc/script_drawing.cpp
+index ece135a..bd06b69 100644
+--- a/src/zc/script_drawing.cpp
++++ b/src/zc/script_drawing.cpp
+@@ -11991,6 +11991,11 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t target_sprite_uid
+ }
+ 
+ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yoff, int32_t target_sprite_uid)
++{
++	do_primitives(targetBitmap, type, xoff, yoff, target_sprite_uid, nullptr);
++}
++
++void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yoff, int32_t target_sprite_uid, const script_world_light_targets* world_lights)
+ {
+ 	if(type > 7)
+ 		return;
+@@ -12050,6 +12055,15 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 			draw_origin = DrawOrigin::Screen;
+ 		}
+ 
++		// Classify the effective origin after offscreen targets force Screen.
++		// PlayingField is an overlay, not world space; transition origins use
++		// scroll offsets and must stay on the legacy path until separately routed.
++		const bool use_world_lights = world_lights && world_lights->opaque &&
++			world_lights->translucent && !isTargetOffScreenBmp && !screenscrolling &&
++			(draw_origin == DrawOrigin::Region || draw_origin == DrawOrigin::Sprite);
++		BITMAP* light_opaque = use_world_lights ? world_lights->opaque : darkscr_bmp;
++		BITMAP* light_translucent = use_world_lights ? world_lights->translucent : nullptr;
++
+ 		current_target_bmp = bmp;
+ 
+ 		int xoffset, yoffset;
+@@ -12346,7 +12360,8 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 			case BMPMASKDRAW: do_bmpmaskdraw(bmp, sdci, xoffset, yoffset); break;
+ 			case BMPMASKBLIT: do_bmpmaskblit(bmp, sdci, xoffset, yoffset); break;
+ 
+-			// The following are special cases, in that the target bitmap is fixed (darkscr_bmp).
++			// Light commands bypass the ordinary bitmap target. Only explicit world
++			// origins may use the supplied paired world darkness planes.
+ 
+ 			case DRAWLIGHT_CONE:
+ 			{
+@@ -12373,7 +12388,7 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 				cx += get_render_viewport().x;
+ 				cy += get_render_viewport().y;
+ 
+-				doDarkroomCone(cx,cy,length,dir,darkscr_bmp,nullptr,dith_rad,transp_rad,dith_type,dith_arg);
++				doDarkroomCone(cx,cy,length,dir,light_opaque,light_translucent,dith_rad,transp_rad,dith_type,dith_arg);
+ 			}
+ 			break;
+ 
+@@ -12401,9 +12416,9 @@ void do_primitives(BITMAP *targetBitmap, int32_t type, int32_t xoff, int32_t yof
+ 				cy += get_render_viewport().y;
+ 
+ 				if (sdci[0] == DRAWLIGHT_CIRCLE)
+-					doDarkroomCircle(cx,cy,radius,darkscr_bmp,nullptr,dith_rad,transp_rad,dith_type,dith_arg);
++					doDarkroomCircle(cx,cy,radius,light_opaque,light_translucent,dith_rad,transp_rad,dith_type,dith_arg);
+ 				else
+-					doDarkroomSquare(cx,cy,radius,darkscr_bmp,nullptr,dith_rad,transp_rad,dith_type,dith_arg);
++					doDarkroomSquare(cx,cy,radius,light_opaque,light_translucent,dith_rad,transp_rad,dith_type,dith_arg);
+ 			}
+ 			break;
+ 		}
+diff --git a/src/zc/script_drawing.h b/src/zc/script_drawing.h
+index b51cc22..e509cef 100644
+--- a/src/zc/script_drawing.h
++++ b/src/zc/script_drawing.h
+@@ -14,8 +14,19 @@
+ #define DRAWCMD_BMP_TARGET     18
+ #define DRAWCMD_CURRENT_TARGET 19
+ 
++// Borrowed paired planes in the same pixel space as the render viewport. These
++// route Region/Sprite light commands only; screen-space and scrolling commands
++// retain legacy targets. Both planes must be supplied together and remain alive
++// throughout do_primitives. This does not clear planes or run gameplay updates.
++struct script_world_light_targets
++{
++    BITMAP* opaque;
++    BITMAP* translucent;
++};
++
+ void do_primitives(BITMAP *bmp, int32_t type, int32_t target_sprite_uid = 0);
+ void do_primitives(BITMAP *bmp, int32_t type, int32_t x, int32_t y, int32_t target_sprite_uid = 0);
++void do_primitives(BITMAP *bmp, int32_t type, int32_t x, int32_t y, int32_t target_sprite_uid, const script_world_light_targets* world_lights);
+ 
+ // (bitmap_id, is_user_bitmap)
+ std::pair<int, bool> resolveScriptingBitmapId(int scripting_bitmap_id);
+-- 
+2.52.0.windows.1
+

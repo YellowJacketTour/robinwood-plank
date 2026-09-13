@@ -19,10 +19,16 @@ export async function worldEncounter(pool:Pool,token:string,raw?:unknown){
   const region=presence.owner?`home:${presence.owner}`:"public:meadow";
   const actor=(await c.query("SELECT * FROM charmville_native_actors WHERE profile_id=$1 FOR UPDATE",[profileId])).rows[0];
   if(!actor||actor.region_id!==region||actor.geometry_revision!==manifest.revision||actorGeometry.blocked.has(`${cell.x},${cell.y}`))throw new YardError("Refresh your supported world position",409);
-  const iv=randomInt(32),hp=maxHp(speciesId,2,iv,0);
-  await c.query("INSERT INTO charmville_encounters(id,region_id,geometry_revision,species_id,level,hp_iv,hp,max_hp) VALUES($1,$2,$3,$4,2,$5,$6,$6) ON CONFLICT(region_id) DO NOTHING",[randomUUID(),region,manifest.revision,speciesId,iv,hp]);
-  const habitat=await habitatRefresh(c,region,manifest.revision);
+  // Homes are safe arrival spaces. Reading the encounter panel must not create
+  // a hostile habitat in a new home. Preserve previously authored encounters
+  // and their custody/receipts so an existing battle can still be completed.
+  if(!presence.owner){
+   const iv=randomInt(32),hp=maxHp(speciesId,2,iv,0);
+   await c.query("INSERT INTO charmville_encounters(id,region_id,geometry_revision,species_id,level,hp_iv,hp,max_hp) VALUES($1,$2,$3,$4,2,$5,$6,$6) ON CONFLICT(region_id) DO NOTHING",[randomUUID(),region,manifest.revision,speciesId,iv,hp]);
+  }
+  const habitat=presence.owner?null:await habitatRefresh(c,region,manifest.revision);
   let e=(await c.query("SELECT * FROM charmville_encounters WHERE region_id=$1 FOR UPDATE",[region])).rows[0];
+  if(!e)throw new YardError("No wild encounter in this home. Explore the public meadow to meet wild creatures.",404);
   if(e.geometry_revision!==manifest.revision)throw new YardError("Encounter map revision unavailable",409);
   if(e.controller_id){
    const valid=(await c.query(`SELECT 1 FROM charmville_world_presence w JOIN plankspace_profiles p ON p.id=w.profile_id WHERE w.profile_id=$1 AND p.moderation_status='approved' AND w.expires_at>clock_timestamp() AND $2::timestamptz>clock_timestamp() AND w.home_owner_id IS NOT DISTINCT FROM $3::bigint AND (w.home_owner_id IS NULL OR w.home_owner_id=w.profile_id OR EXISTS(SELECT 1 FROM charmville_home_grants g WHERE g.owner_profile_id=w.home_owner_id AND g.visitor_profile_id=w.profile_id AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp() AND 'visit'=ANY(g.rights)))`,[e.controller_id,e.lease_until,presence.owner])).rowCount;

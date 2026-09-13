@@ -7,5 +7,6 @@ void drawCompanionScaled(bitmap art,int species,int layer,int sx,int sy,int w,in
     if(species==133)target=16;
     if(species==286){target=20;source=27;}
     int dw=Round(w*target/source);int dh=Round(h*target/source);
-    art->Blit(layer,RT_SCREEN,sx,sy,w,h,footX-Round(anchorX*dw/w),footY-Round(anchorY*dh/h),dw,dh);
+    // Resolve the current layer's buffer, including ground draws below Hero.
+    art->Blit(layer,RT_CURRENT,sx,sy,w,h,footX-Round(anchorX*dw/w),footY-Round(anchorY*dh/h),dw,dh);
 }

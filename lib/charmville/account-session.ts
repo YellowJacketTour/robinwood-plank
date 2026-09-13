@@ -1,3 +1,4 @@
+import {requireCharmvilleAdmission} from './admission';
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 
@@ -17,6 +18,7 @@ export async function readGameSession(pool: Pool, token: string) {
       AND p.moderation_status='approved'`,
   [createHash("sha256").update(token).digest("hex")]);
   if (!rows[0]) throw new GameSessionError();
+  await requireCharmvilleAdmission(pool,rows[0].profileId);
   return { profileId: rows[0].profileId, handle: rows[0].handle,
     expiresAt: rows[0].expiresAt.toISOString() };
 }

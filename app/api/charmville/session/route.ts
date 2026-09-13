@@ -1,3 +1,4 @@
+import {YardError} from '@/lib/charmville/errors';
 import { postgresPool } from "@/lib/postgres";
 import { GameSessionError, readGameSession } from "@/lib/charmville/account-session";
 
@@ -10,8 +11,8 @@ export async function GET(request: Request) {
     const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     return Response.json(await readGameSession(postgresPool(), token), { headers });
   } catch (error) {
-    const denied = error instanceof GameSessionError;
+    const denied = error instanceof GameSessionError || error instanceof YardError;
     return Response.json({ error: denied ? error.message : "Account service unavailable." },
-      { status: denied ? 401 : 503, headers });
+      { status: error instanceof YardError ? error.status : denied ? 401 : 503, headers });
   }
 }

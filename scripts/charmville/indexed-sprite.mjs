@@ -16,7 +16,27 @@ function chunk(type, data) {
 // Asset-format compilation, not quantization: retain every opaque source color
 // exactly and reserve index zero exclusively for transparent pixels. Allegro's
 // 8-bit masked sprite renderer cannot safely consume RGBA source bitmaps.
-export function compileIndexedSprite(bytes) {
+export function compileIndexedSprite(bytes, { transparentPaletteIndexZero = false } = {}) {
+  if (transparentPaletteIndexZero) {
+    if (bytes[25] !== 3) throw Error('Palette-index-zero transparency requires an indexed PNG.');
+    // Emerald sheets declare their mask by palette index, without a tRNS
+    // chunk. Tell the decoder that convention before RGBA expansion so an
+    // opaque duplicate RGB value in another index remains opaque.
+    const parts = [bytes.subarray(0, 8)]; let added = false;
+    for (let offset = 8; offset < bytes.length;) {
+      const length = bytes.readUInt32BE(offset), end = offset + length + 12;
+      const type = bytes.toString('ascii', offset + 4, offset + 8);
+      if (type === 'tRNS') {
+        const alpha = Buffer.from(bytes.subarray(offset + 8, offset + 8 + length));
+        alpha[0] = 0; parts.push(chunk('tRNS', alpha)); added = true;
+      } else {
+        if (type === 'IDAT' && !added) { parts.push(chunk('tRNS', Buffer.from([0]))); added = true; }
+        parts.push(bytes.subarray(offset, end));
+      }
+      offset = end;
+    }
+    bytes = Buffer.concat(parts);
+  }
   const { width, height, data } = PNG.sync.read(bytes);
   const colors = [[0, 0, 0]], indices = new Map();
   const scanlines = Buffer.alloc((width + 1) * height);

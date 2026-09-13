@@ -3,6 +3,32 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 
+test('resume and returning arrival focus the canvas without a native click or stealing control focus',()=>{
+ const files=new Map<string,string>([['action-run.txt','1']]);
+ const listeners:Record<string,(event:any)=>void>={};
+ const children:any[]=[];let tick=()=>{},dialog=false,focusCount=0;
+ const body={classList:{contains:()=>false}};
+ const canvas={tabIndex:-1,focus(options:unknown){assert.deepEqual(JSON.parse(JSON.stringify(options)),{preventScroll:true});focusCount++;document.activeElement=canvas;},click(){assert.fail('canvas clicks open the native menu');}};
+ const header={querySelector:()=>children.find(child=>child.className==='charm-focus-game'),append:(child:any)=>{children.push(child);child.isConnected=true;}};
+ const document={body,activeElement:body as any,hasFocus:()=>true,addEventListener:(name:string,fn:(event:any)=>void)=>{listeners['document:'+name]=fn;},querySelector:(selector:string)=>selector==='header'?header:selector==='canvas'?canvas:dialog?{}:null,createElement:()=>({events:{} as Record<string,()=>void>,isConnected:false,addEventListener(name:string,fn:()=>void){this.events[name]=fn;}})};
+ const parent={postMessage(){}};
+ const filename=(path:string)=>path.split('/').pop()!;
+ runInNewContext(readFileSync('scripts/charmville/tutorial-bridge.js','utf8'),{
+  parent,document,Uint32Array,crypto:{getRandomValues:(values:Uint32Array)=>values.fill(10)},
+  window:{addEventListener:(name:string,fn:(event:any)=>void)=>{listeners[name]=fn;}},setInterval:(fn:()=>void)=>{tick=fn;return 1;},clearInterval(){},
+  FS:{cwd:()=>'/x',analyzePath:(path:string)=>({exists:files.has(filename(path))}),readFile:(path:string)=>files.get(filename(path)),writeFile:(path:string,value:string)=>files.set(filename(path),value)}
+ });
+ tick();const resume=children.find(child=>child.className==='charm-focus-game');
+ resume.events.click();assert.equal(focusCount,1);assert.equal(canvas.tabIndex,0);
+ dialog=true;resume.events.click();assert.equal(focusCount,1);dialog=false;
+ listeners.message({source:parent,origin:'http://localhost:3017',data:{type:'charmville:tutorial-state',context:'a',completed:true}});tick();
+ const nonce=files.get('tutorial-state.txt')!.split('|')[1];
+ const enter={};listeners['document:click']({target:{closest:()=>enter}});document.activeElement=enter;
+ files.set('tutorial-progress.txt',`${nonce}|2|0`);tick();assert.equal(focusCount,2);
+ listeners['document:click']({target:{closest:()=>enter}});document.activeElement={tagName:'INPUT'};tick();assert.equal(focusCount,2);
+ document.activeElement=body;tick();assert.equal(focusCount,2,'arrival focus request is consumed when the player chooses a control');
+});
+
 test('introduction requests advance once and reject stale context progress',()=>{
  const files=new Map<string,string>([['action-run.txt','1']]);
  const events:Record<string,(event?:unknown)=>void>={};
@@ -11,9 +37,11 @@ test('introduction requests advance once and reject stale context progress',()=>
  const button={hidden:true,disabled:false,textContent:'',isConnected:false,addEventListener:(name:string,fn:()=>void)=>{events[name]=fn;},remove(){}};
  const parent={postMessage:(message:{type:string;context?:string})=>sent.push(message)};
  const filename=(path:string)=>path.split('/').pop()!;
+ const body={classList:{contains:()=>false}};
+ const document={activeElement:body,body,hasFocus:()=>true,addEventListener(){},querySelector:(selector:string)=>selector==='header'?{querySelector:()=>true,append:()=>{button.isConnected=true;}}:null,createElement:()=>button};
  runInNewContext(readFileSync('scripts/charmville/tutorial-bridge.js','utf8'),{
   parent,Uint32Array,crypto:{getRandomValues:(values:Uint32Array)=>{values[0]=++random;return values;}},
-  document:{querySelector:()=>({append:()=>{button.isConnected=true;}}),createElement:()=>button},
+  document,
   window:{addEventListener:(name:string,fn:(event?:unknown)=>void)=>{events[name]=fn;}},
   setInterval:(fn:()=>void)=>{tick=fn;return 1;},clearInterval(){},
   FS:{cwd:()=>'/x',analyzePath:(path:string)=>({exists:files.has(filename(path))}),readFile:(path:string)=>files.get(filename(path)),writeFile:(path:string,value:string)=>files.set(filename(path),value)}

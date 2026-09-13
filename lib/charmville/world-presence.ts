@@ -28,8 +28,6 @@ export async function worldPresence(pool:Pool,token:string,raw?:WorldEntry) {
   let reason:string|null=null;
   if(raw) {
    const entry=parseWorldEntry(raw);
-   if(entry.revision!==row.revision)throw new YardError("Your location changed. Refresh the world.",409);
-   if(row.throttled)throw new YardError("Please wait a moment before traveling again",429);
    let owner:string|null=null;
    if(entry.destination==="home") {
     const result=await client.query("SELECT id::text FROM plankspace_profiles WHERE handle=$1 AND moderation_status='approved'",[entry.handle]);
@@ -37,8 +35,17 @@ export async function worldPresence(pool:Pool,token:string,raw?:WorldEntry) {
     owner=result.rows[0].id;
     await requireHomeRight(client,owner!,profileId,"visit");
    }
-   await client.query("UPDATE charmville_world_presence SET home_owner_id=$2,revision=revision+1,expires_at=clock_timestamp()+interval '90 seconds',changed_at=clock_timestamp() WHERE profile_id=$1",[profileId,owner]);
-   row={...row,owner,active:true};
+   // A response can be lost after COMMIT. Recognize only the immediately
+   // preceding admission to this still-active destination. Recheck the home's
+   // permission above; a retry must not renew its lease, increment its epoch,
+   // bypass revocation or replay an older journey after intervening travel.
+   const replay=entry.revision!==row.revision && row.active && row.owner===owner && BigInt(entry.revision)+1n===BigInt(row.revision);
+   if(!replay) {
+    if(entry.revision!==row.revision)throw new YardError("Your location changed. Refresh the world.",409);
+    if(row.throttled)throw new YardError("Please wait a moment before traveling again",429);
+    await client.query("UPDATE charmville_world_presence SET home_owner_id=$2,revision=revision+1,expires_at=clock_timestamp()+interval '90 seconds',changed_at=clock_timestamp() WHERE profile_id=$1",[profileId,owner]);
+    row={...row,owner,active:true};
+   }
   }else if(!row.active && row.owner!==null) {
    reason="expired";
   }else if(row.owner!==null) {

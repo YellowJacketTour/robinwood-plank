@@ -1,0 +1,62 @@
+// Headless diagnostic only. Position setup occurs before measured input.
+// Once measurement begins, only directional input and Waitframe are used.
+void RunRegionCandidateMotion()
+{
+    int seamY=-1;
+    for(int y=184;y<=320 && seamY<0;y+=8)
+    {
+        bool clear=true;
+        for(int x=240;x<=304;x+=4)
+            for(int dy=0;dy<=15;dy+=5)
+                if(Screen->isSolid(x,y+dy))clear=false;
+        if(clear)seamY=y;
+    }
+    if(seamY<0){printf("REGION_MOTION_BLOCKED no_clear_corridor\n");return;}
+    Hero->X=240;Hero->Y=seamY;Hero->Action=LA_NONE;
+    Waitframe();
+    int startX=Hero->X;
+    int startScreen=Game->HeroScreen;
+    printf("REGION_MOTION_BEFORE x=%d y=%d heroScreen=%d origin=%d width=%d height=%d cameraX=%d\n",Hero->X,Hero->Y,Game->HeroScreen,Game->GetCurScreen(),Region->Width,Region->Height,Viewport->X);
+    for(int frame=0;frame<36;frame++)
+    {
+        Hero->InputRight=true;
+        Waitframe();
+    }
+    Hero->InputRight=false;
+    printf("REGION_MOTION_AFTER x=%d y=%d heroScreen=%d origin=%d width=%d height=%d cameraX=%d startX=%d startScreen=%d\n",Hero->X,Hero->Y,Game->HeroScreen,Game->GetCurScreen(),Region->Width,Region->Height,Viewport->X,startX,startScreen);
+    int seamX=-1;
+    for(int x=8;x<=488 && seamX<0;x+=8)
+    {
+        bool clear=true;
+        for(int y=136;y<=224;y+=4)
+            for(int dx=0;dx<=15;dx+=5)
+                if(Screen->isSolid(x+dx,y))clear=false;
+        if(clear)seamX=x;
+    }
+    if(seamX<0){printf("REGION_MOTION_BLOCKED no_vertical_corridor\n");return;}
+    Hero->X=seamX;Hero->Y=144;Hero->Action=LA_NONE;
+    for(int frame=0;frame<20;frame++)Waitframe();
+    printf("REGION_VERTICAL_BEFORE x=%d y=%d heroScreen=%d origin=%d cameraY=%d\n",Hero->X,Hero->Y,Game->HeroScreen,Game->GetCurScreen(),Viewport->Y);
+    for(int frame=0;frame<36;frame++){Hero->InputDown=true;Waitframe();}
+    Hero->InputDown=false;
+    printf("REGION_VERTICAL_DOWN x=%d y=%d heroScreen=%d origin=%d cameraY=%d\n",Hero->X,Hero->Y,Game->HeroScreen,Game->GetCurScreen(),Viewport->Y);
+    for(int frame=0;frame<36;frame++){Hero->InputUp=true;Waitframe();}
+    Hero->InputUp=false;
+    printf("REGION_VERTICAL_UP x=%d y=%d heroScreen=%d origin=%d cameraY=%d\n",Hero->X,Hero->Y,Game->HeroScreen,Game->GetCurScreen(),Viewport->Y);
+    int returnY=Hero->Y;
+    int returnScreen=Game->HeroScreen;
+    // Repeated reversals expose cumulative drift; no position writes or warps
+    // occur within this sequence, including between cycles.
+    for(int cycle=0;cycle<50;cycle++)
+    {
+        for(int frame=0;frame<36;frame++){Hero->InputDown=true;Waitframe();}
+        Hero->InputDown=false;
+        if(Game->HeroScreen!=returnScreen+16 || Game->GetCurScreen()!=46)
+        {printf("REGION_REPEAT_FAILED cycle=%d phase=down\n",cycle);return;}
+        for(int frame=0;frame<36;frame++){Hero->InputUp=true;Waitframe();}
+        Hero->InputUp=false;
+        if(Hero->Y!=returnY || Hero->X!=seamX || Game->HeroScreen!=returnScreen || Game->GetCurScreen()!=46)
+        {printf("REGION_REPEAT_FAILED cycle=%d phase=up x=%d y=%d\n",cycle,Hero->X,Hero->Y);return;}
+    }
+    printf("REGION_REPEAT_PASSED cycles=50 frames=3600 x=%d y=%d origin=%d\n",Hero->X,Hero->Y,Game->GetCurScreen());
+}

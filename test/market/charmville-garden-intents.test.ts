@@ -11,7 +11,7 @@ test("in-game garden intents reuse server plot state, ignore reward claims and e
  assert.ok(["127.0.0.1","localhost"].includes(new URL(connectionString).hostname));
  const admin=new Pool({connectionString});const schema=`intent_${randomUUID().replaceAll("-","")}`;await admin.query(`CREATE SCHEMA ${schema}`);const pool=new Pool({connectionString,options:`-c search_path=${schema}`});
  try{
-  for(const f of ["090_plankspace_native.sql","104_charmville_soil.sql","105_charmville_layout.sql","106_charmville_home_access.sql","107_charmville_grain_reserve.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${f}`,"utf8"));
+  for(const f of ["090_plankspace_native.sql","116_charmville_soil.sql","117_charmville_layout.sql","118_charmville_home_access.sql","119_charmville_grain_reserve.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${f}`,"utf8"));
   for(let i=1;i<=2;i++){const wallet=`0x${String(i).repeat(40)}`;await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,$2,$2,'approved')",[wallet,`garden${i}`]);await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)",[createHash("sha256").update(String(i).repeat(64)).digest("hex"),wallet,new Date(Date.now()+3600000).toISOString()]);await mutateYard(pool,`garden${i}`,String(i).repeat(64),{action:"claim",requestId:randomUUID()});}
   const owner="1".repeat(64),helper="2".repeat(64);
   const initial=await readYard(pool,"garden1",owner);const plot=initial.plots[0];

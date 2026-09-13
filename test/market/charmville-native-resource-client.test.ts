@@ -20,3 +20,10 @@ test('uncertain contact retries identical receipt without another begin',async()
 test('growth art follows server clock rather than browser elapsed time',()=>{
  const projection=nativeResourceProjection({...snapshot,beds:[{id:0,stage:3,revision:'2',readyAt:'2026-09-09T00:00:05Z',planterId:'1'}]});assert.equal(projection.beds[0].growthVisualPhase,2);
 });
+
+test('growth art uses the crop duration and remains valid when timing is unavailable',()=>{
+ const bed={id:0,stage:3,revision:'2',readyAt:'2026-09-09T00:01:00Z',planterId:'1',growthDurationMs:120000};
+ assert.equal(nativeResourceProjection({...snapshot,beds:[bed]}).beds[0].growthVisualPhase,1);
+ assert.equal(nativeResourceProjection({...snapshot,beds:[{...bed,readyAt:null}]}).beds[0].growthVisualPhase,0);
+ assert.equal(nativeResourceProjection({...snapshot,beds:[{...bed,growthDurationMs:0}]}).beds[0].growthVisualPhase,0);
+});

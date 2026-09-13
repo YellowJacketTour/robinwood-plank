@@ -1,0 +1,237 @@
+From 5d88acdb8a10a0c54bb8bf62fedca589e3a5ba67 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:46:38 -0500
+Subject: [PATCH] refactor(zc): own bounded presentation scratch targets
+
+---
+ src/zc/presentation_bitmap_targets.h |  16 ++++
+ src/zc/presentation_targets.h        | 108 +++++++++++++++++++++++++++
+ tests/presentation_targets.cpp       |  78 +++++++++++++++++++
+ 3 files changed, 202 insertions(+)
+ create mode 100644 src/zc/presentation_bitmap_targets.h
+ create mode 100644 src/zc/presentation_targets.h
+ create mode 100644 tests/presentation_targets.cpp
+
+diff --git a/src/zc/presentation_bitmap_targets.h b/src/zc/presentation_bitmap_targets.h
+new file mode 100644
+index 0000000..8b36b95
+--- /dev/null
++++ b/src/zc/presentation_bitmap_targets.h
+@@ -0,0 +1,16 @@
++#ifndef ZC_PRESENTATION_BITMAP_TARGETS_H_
++#define ZC_PRESENTATION_BITMAP_TARGETS_H_
++#include "allegro.h"
++#include "zc/presentation_targets.h"
++namespace presentation_camera
++{
++using bitmap_scratch_targets = scratch_targets<BITMAP>;
++inline bitmap_scratch_targets::backend bitmap_scratch_backend()
++{
++    return {nullptr,
++        [](void*, int w, int h) { return create_bitmap_ex(8, w, h); },
++        [](void*, BITMAP* bitmap) { destroy_bitmap(bitmap); },
++        [](void*, BITMAP* bitmap) { clear_bitmap(bitmap); }};
++}
++}
++#endif
+diff --git a/src/zc/presentation_targets.h b/src/zc/presentation_targets.h
+new file mode 100644
+index 0000000..bff069c
+--- /dev/null
++++ b/src/zc/presentation_targets.h
+@@ -0,0 +1,108 @@
++#ifndef ZC_PRESENTATION_TARGETS_H_
++#define ZC_PRESENTATION_TARGETS_H_
++
++#include <array>
++#include <cstddef>
++
++namespace presentation_camera
++{
++struct surface_extent
++{
++    int w = 0, h = 0;
++    bool operator==(const surface_extent& other) const { return w == other.w && h == other.h; }
++};
++struct scratch_spec
++{
++    // Explicitly separate: legacy composition/scratch and beam planes have
++    // different heights. The caller owns HUD/playfield offset policy.
++    surface_extent world;
++    surface_extent light;
++};
++enum class scratch_plane : std::size_t { world, background, darkness, translucent_darkness, light, count };
++enum class scratch_resize_result { unchanged, resized, invalid, allocation_failed };
++
++// The backend/context must outlive this owner. Callbacks must not throw;
++// allocation returns nullptr on failure. Native integration supplies 8-bit
++// create_bitmap_ex, destroy_bitmap and clear_bitmap wrappers. Keeping allocation
++// injectable makes partial-failure recovery testable without exhausting memory.
++template<class Surface> class scratch_targets
++{
++public:
++    struct backend
++    {
++        void* context;
++        Surface* (*create)(void*, int, int);
++        void (*destroy)(void*, Surface*);
++        void (*clear)(void*, Surface*);
++    };
++    explicit scratch_targets(backend api) : api_(api) {}
++    ~scratch_targets() { reset(); }
++    scratch_targets(const scratch_targets&) = delete;
++    scratch_targets& operator=(const scratch_targets&) = delete;
++    scratch_targets(scratch_targets&&) = delete;
++    scratch_targets& operator=(scratch_targets&&) = delete;
++
++    scratch_resize_result ensure(scratch_spec requested)
++    {
++        if (!valid(requested.world) || !valid(requested.light) ||
++            !api_.create || !api_.destroy || !api_.clear)
++            return scratch_resize_result::invalid;
++        std::array<Surface*, count> replacements{};
++        bool changed = false;
++        for (std::size_t i = 0; i < count; ++i)
++        {
++            const auto extent = extent_for(requested, i);
++            if (surfaces_[i] && extent == extents_[i]) continue;
++            replacements[i] = api_.create(api_.context, extent.w, extent.h);
++            if (!replacements[i])
++            {
++                for (auto* pending : replacements)
++                    if (pending) api_.destroy(api_.context, pending);
++                return scratch_resize_result::allocation_failed;
++            }
++            api_.clear(api_.context, replacements[i]);
++            changed = true;
++        }
++        // Publish the entire set only after every required allocation succeeds.
++        // Existing pixels/pointers remain intact on every failure path.
++        for (std::size_t i = 0; i < count; ++i)
++        {
++            if (!replacements[i]) continue;
++            if (surfaces_[i]) api_.destroy(api_.context, surfaces_[i]);
++            surfaces_[i] = replacements[i];
++            extents_[i] = extent_for(requested, i);
++        }
++        return changed ? scratch_resize_result::resized : scratch_resize_result::unchanged;
++    }
++    Surface* get(scratch_plane plane) const
++    {
++        auto i = static_cast<std::size_t>(plane);
++        return i < count ? surfaces_[i] : nullptr;
++    }
++    surface_extent extent(scratch_plane plane) const
++    {
++        auto i = static_cast<std::size_t>(plane);
++        return i < count ? extents_[i] : surface_extent{};
++    }
++    void reset()
++    {
++        for (auto*& surface : surfaces_)
++        {
++            if (surface) api_.destroy(api_.context, surface);
++            surface = nullptr;
++        }
++        extents_ = {};
++    }
++private:
++    static constexpr std::size_t count = static_cast<std::size_t>(scratch_plane::count);
++    static bool valid(surface_extent e) { return e.w > 0 && e.h > 0 && e.w <= 512 && e.h <= 464; }
++    static surface_extent extent_for(scratch_spec s, std::size_t plane)
++    {
++        return plane == static_cast<std::size_t>(scratch_plane::light) ? s.light : s.world;
++    }
++    backend api_;
++    std::array<Surface*, count> surfaces_{};
++    std::array<surface_extent, count> extents_{};
++};
++}
++#endif
+diff --git a/tests/presentation_targets.cpp b/tests/presentation_targets.cpp
+new file mode 100644
+index 0000000..74fb509
+--- /dev/null
++++ b/tests/presentation_targets.cpp
+@@ -0,0 +1,78 @@
++#include "zc/presentation_targets.h"
++#include <cassert>
++#include <set>
++using namespace presentation_camera;
++struct surface { int w, h, value; };
++struct allocator
++{
++    int calls = 0, clears = 0, fail_at = -1;
++    std::set<surface*> live;
++    static surface* create(void* state, int w, int h)
++    {
++        auto& a = *static_cast<allocator*>(state);
++        if (++a.calls == a.fail_at) return nullptr;
++        auto* p = new surface{w,h,42}; a.live.insert(p); return p;
++    }
++    static void destroy(void* state, surface* p)
++    {
++        auto& a = *static_cast<allocator*>(state);
++        assert(a.live.erase(p) == 1); delete p;
++    }
++    static void clear(void* state, surface* p)
++    {
++        ++static_cast<allocator*>(state)->clears; p->value = 0;
++    }
++    scratch_targets<surface>::backend backend() { return {this, create, destroy, clear}; }
++};
++int main()
++{
++    const scratch_spec normal{{256,232},{256,176}}, large{{512,464},{512,352}};
++    // Every partial initial allocation is reclaimed, with no half-ready owner.
++    for(int failure=1; failure<=5; ++failure)
++    {
++        allocator a; a.fail_at=failure;
++        scratch_targets<surface> targets(a.backend());
++        assert(targets.ensure(normal)==scratch_resize_result::allocation_failed);
++        assert(a.live.empty());
++        assert(targets.get(scratch_plane::world)==nullptr);
++    }
++    // Every partial resize preserves all prior targets and their rendered pixels.
++    for(int failure=1; failure<=5; ++failure)
++    {
++        allocator a;
++        {
++            scratch_targets<surface> targets(a.backend());
++            assert(targets.ensure(normal)==scratch_resize_result::resized);
++            auto* world=targets.get(scratch_plane::world); world->value=77;
++            auto* light=targets.get(scratch_plane::light);
++            a.fail_at=a.calls+failure;
++            assert(targets.ensure(large)==scratch_resize_result::allocation_failed);
++            assert(a.live.size()==5 && targets.get(scratch_plane::world)==world);
++            assert(targets.get(scratch_plane::light)==light && world->value==77);
++            assert(targets.extent(scratch_plane::light).h==176);
++            a.fail_at=-1;
++            assert(targets.ensure(large)==scratch_resize_result::resized);
++            assert(a.live.size()==5 && targets.extent(scratch_plane::world).h==464);
++        }
++        assert(a.live.empty());
++    }
++    allocator a;
++    {
++        scratch_targets<surface> targets(a.backend());
++        assert(targets.ensure(normal)==scratch_resize_result::resized);
++        auto* world=targets.get(scratch_plane::world); world->value=91;
++        int calls=a.calls, clears=a.clears;
++        assert(targets.ensure(normal)==scratch_resize_result::unchanged);
++        assert(a.calls==calls && a.clears==clears && world->value==91);
++        assert(targets.ensure({{256,232},{512,352}})==scratch_resize_result::resized);
++        assert(a.calls==calls+1 && targets.get(scratch_plane::world)==world && world->value==91);
++        calls=a.calls;
++        for(auto bad : {scratch_spec{{0,232},{256,176}}, scratch_spec{{513,232},{256,176}},
++            scratch_spec{{256,465},{256,176}}, scratch_spec{{256,232},{-1,176}}})
++            assert(targets.ensure(bad)==scratch_resize_result::invalid);
++        assert(a.calls==calls && a.live.size()==5);
++        assert(targets.get(scratch_plane::count)==nullptr);
++        targets.reset(); targets.reset(); assert(a.live.empty());
++    }
++    assert(a.live.empty());
++}
+-- 
+2.52.0.windows.1
+

@@ -1,3 +1,4 @@
+import {requireCharmvilleViewer} from './admission-viewer';
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { discoverReputation, projectReputation, type AcceptedReaction } from "./reputation";
@@ -11,6 +12,7 @@ export async function searchPineReputation(pool: Pool, search: PineSearch, token
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await requireCharmvilleViewer(client,token);
     let wallet: string | null = null;
     if (token) {
       if (!/^[a-f0-9]{64}$/i.test(token)) throw new ReputationSearchError("Sign in again to apply your block list.", 401);

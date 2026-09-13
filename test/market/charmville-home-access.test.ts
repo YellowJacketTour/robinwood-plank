@@ -16,8 +16,8 @@ test("durable home permissions enforce owner, privacy, revision, expiry, revocat
  await admin.query(`CREATE SCHEMA ${schema}`);
  const pool=new Pool({connectionString,options:`-c search_path=${schema}`});
  try {
-  for(const file of ["090_plankspace_native.sql","104_charmville_soil.sql","106_charmville_home_access.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,"utf8"));
-  await pool.query(await readFile("deploy/inmotion/postgres/migrations/106_charmville_home_access.sql","utf8"));
+  for(const file of ["090_plankspace_native.sql","116_charmville_soil.sql","118_charmville_home_access.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,"utf8"));
+  await pool.query(await readFile("deploy/inmotion/postgres/migrations/118_charmville_home_access.sql","utf8"));
   const ids:string[]=[];
   for(let i=0;i<3;i++) {
    const wallet=`0x${String(i+1).repeat(40)}`,token=String(i+1).repeat(64);

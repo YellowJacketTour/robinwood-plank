@@ -29,3 +29,17 @@ test('refuses palette overflow rather than silently quantizing', () => {
   for(let i=0;i<256;i++) source.data.set([i,1,2,255],i*4);
   assert.throws(() => compileIndexedSprite(PNG.sync.write(source)), /255 opaque colors/);
 });
+
+test('expands 4-bit palette masks to 8-bit while preserving opaque duplicate black', () => {
+  // Three pixels: mask index0, opaque index1 with the same black RGB, red index2.
+  const source = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAMAAAABBAMAAADpzgmHAAAAMFBMVEUAAAAAAADIKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAuU0giAAAAC0lEQVR4nGNklAcAACcAIizwhaUAAAAASUVORK5CYII=', 'base64');
+  assert.equal(source[24], 4);
+  const result = compileIndexedSprite(source, { transparentPaletteIndexZero: true });
+  assert.equal(result.bytes[24], 8);
+  assert.equal(result.bytes[25], 3);
+  assert.equal(result.bytes.includes(Buffer.from('tRNS')), false);
+  assert.deepEqual(result.colors, [0,0,0, 0,0,0, 200,40,70]);
+  let offset=8;const imageChunks=[];
+  while(offset<result.bytes.length){const size=result.bytes.readUInt32BE(offset);if(result.bytes.toString('ascii',offset+4,offset+8)==='IDAT')imageChunks.push(result.bytes.subarray(offset+8,offset+8+size));offset+=size+12;}
+  assert.deepEqual([...inflateSync(Buffer.concat(imageChunks))], [0,0,1,2]);
+});

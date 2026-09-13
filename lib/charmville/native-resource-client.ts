@@ -4,10 +4,17 @@ export function readLifecycle(raw:unknown):Lifecycle|null{
  if(!p||p.type!=='charmville:action-lifecycle'||typeof p.sessionId!=='string'||!/^[a-f0-9-]{36}$/i.test(p.sessionId)||!Number.isSafeInteger(p.localActionId)||p.localActionId<1||!Number.isSafeInteger(p.sequence)||p.sequence<1||!['begin','contact','cancel'].includes(p.phase)||!['till','plant','water','harvest'].includes(p.action)||!Number.isInteger(p.plotIndex)||p.plotIndex<0||p.plotIndex>2||p.dmap!==4||p.screen!==63||![p.x,p.y].every(Number.isFinite)||!Number.isInteger(p.direction)||p.direction<0||p.direction>3)return null;
  return p;
 }
-export type ResourceSnapshot={regionId:string;serverNow:string;beds:{id:number;stage:number;revision:string;readyAt:string|null;planterId:string|null;allowedActions?:string[]}[];seeds:string;produce:string};
+export type ResourceSnapshot={regionId:string;serverNow:string;beds:{id:number;stage:number;revision:string;readyAt:string|null;planterId:string|null;cropId?:string;growthDurationMs?:number;allowedActions?:string[]}[];seeds:string;produce:string};
 export function nativeResourceProjection(snapshot:ResourceSnapshot,sessionId?:string,resolvedLocalActionId=0){
  const now=Date.parse(snapshot.serverNow);
- return {type:'charmville:resource-state',active:true,sessionId,resolvedLocalActionId,beds:snapshot.beds.map(b=>({id:b.id,stage:b.stage,allowedActions:(b.allowedActions??[]).filter(a=>['till','plant','water','harvest'].includes(a)),growthVisualPhase:b.stage===3?Math.max(0,Math.min(2,Math.floor((30000-(Date.parse(b.readyAt??'')-now))/10000))):0})),seeds:Math.min(200000,Number(snapshot.seeds)),produce:Math.min(200000,Number(snapshot.produce))};
+ const growthPhase=(bed:ResourceSnapshot['beds'][number])=>{
+  if(bed.stage!==3)return 0;
+  const duration=bed.growthDurationMs??30000; // Previous server versions expose only Oran.
+  const ready=Date.parse(bed.readyAt??'');
+  if(!Number.isFinite(now)||!Number.isFinite(ready)||!Number.isFinite(duration)||duration<=0)return 0;
+  return Math.max(0,Math.min(2,Math.floor(3*(1-(ready-now)/duration))));
+ };
+ return {type:'charmville:resource-state',active:true,sessionId,resolvedLocalActionId,beds:snapshot.beds.map(b=>({id:b.id,stage:b.stage,allowedActions:(b.allowedActions??[]).filter(a=>['till','plant','water','harvest'].includes(a)),growthVisualPhase:growthPhase(b)})),seeds:Math.min(200000,Number(snapshot.seeds)),produce:Math.min(200000,Number(snapshot.produce))};
 }
 /** One native action at a time; acknowledgments are projections, never authority. */
 export function createNativeResourceClient(o:{read:()=>Promise<ResourceSnapshot>;actor:()=>Promise<{sequence:number;regionEpoch:number}>;post:(body:object)=>Promise<unknown>;send:(body:object)=>void;changed:()=>void;status:(message:string)=>void;uuid:()=>string}){

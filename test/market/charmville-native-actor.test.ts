@@ -10,7 +10,7 @@ test("persistent movement isolates identities, replays, collision, renewal and r
  const connectionString=process.env.CHARMVILLE_TEST_DATABASE_URL!;assert.ok(["127.0.0.1","localhost"].includes(new URL(connectionString).hostname));
  const admin=new Pool({connectionString}),schema=`actor_${randomUUID().replaceAll("-","")}`;await admin.query(`CREATE SCHEMA ${schema}`);const pool=new Pool({connectionString,options:`-c search_path=${schema}`});
  try{
-  for(const f of ["090_plankspace_native.sql","104_charmville_soil.sql","106_charmville_home_access.sql","108_charmville_world_presence.sql","113_charmville_native_actor.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${f}`,"utf8"));
+  for(const f of ["090_plankspace_native.sql","116_charmville_soil.sql","118_charmville_home_access.sql","120_charmville_world_presence.sql","125_charmville_native_actor.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${f}`,"utf8"));
   const tokens=["a".repeat(64),"b".repeat(64)];
   for(let i=0;i<2;i++){const wallet=`0x${i+1}`.padEnd(42,String(i+1));const p=await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,$2,$2,'approved') RETURNING id",[wallet,`p${i}`]);await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,clock_timestamp()+interval '1 hour')",[createHash("sha256").update(tokens[i]).digest("hex"),wallet]);await pool.query("INSERT INTO charmville_yards(profile_id) VALUES($1)",[p.rows[0].id]);await worldPresence(pool,tokens[i],{destination:"public",revision:"0"});}
   const a=await nativeActor(pool,tokens[0]),b=await nativeActor(pool,tokens[1]);assert.notEqual(a.profileId,b.profileId);assert.deepEqual((await nativeActor(pool,tokens[0])).peers?.map(p=>p.profileId),[b.profileId]);
@@ -40,6 +40,33 @@ test("persistent movement isolates identities, replays, collision, renewal and r
   await homeAccess(pool,"p0",tokens[0],parseHomeGrant({visitor:"p1",revision:"1",revoke:true}));assert.deepEqual((await nativeActor(pool,tokens[0])).peers,[]);await assert.rejects(nativeActor(pool,tokens[1]),/permission/);
   await homeAccess(pool,"p0",tokens[0],parseHomeGrant({visitor:"p1",revision:"2",revoke:false,rights:["visit"],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));
   await pool.query("UPDATE charmville_world_presence SET expires_at=clock_timestamp()-interval '1 second' WHERE profile_id=$1",[b.profileId]);assert.deepEqual((await nativeActor(pool,tokens[0])).peers,[]);
+  // Account identity survives physical screen travel; offscreen peers disappear.
+  await pool.query("UPDATE charmville_native_actors SET x=0,y=9,last_move_at=0 WHERE profile_id=$1",[a.profileId]);
+  const edge=await nativeActor(pool,tokens[0]);
+  const crossing={destination:'native-adventure-d4-s62',geometryId:edge.geometryId,presenceRevision:edge.presenceRevision,regionEpoch:edge.regionEpoch,sequence:edge.sequence+1};
+  const west=await nativeActor(pool,tokens[0],crossing);
+  assert.equal(west.native.screen,62);assert.equal(west.regionId,edge.regionId);assert.deepEqual(west.cell,{x:30,y:9});
+  assert.equal((await nativeActor(pool,tokens[0])).native.screen,62,'reconnect preserves destination');
+  await assert.rejects(nativeActor(pool,tokens[0],crossing),/Unsupported/);
+  await pool.query("UPDATE charmville_native_actors SET last_move_at=0 WHERE profile_id=$1",[a.profileId]);
+  const back=await nativeActor(pool,tokens[0],{destination:edge.geometryId,geometryId:west.geometryId,presenceRevision:west.presenceRevision,regionEpoch:west.regionEpoch,sequence:west.sequence+1});
+  assert.equal(back.native.screen,63);assert.deepEqual(back.cell,{x:0,y:9});
+  assert.equal(back.pacedMovement,true);
+  const pacedNext=[{x:1,y:9},{x:0,y:8},{x:0,y:10}].find(p=>!actorGeometry.blocked.has(`${p.x},${p.y}`))!;
+  assert.ok(pacedNext);
+  await pool.query("UPDATE charmville_native_actors SET last_move_at=floor(extract(epoch FROM clock_timestamp())*1000)+10 WHERE profile_id=$1",[a.profileId]);
+  const schedule=Number((await pool.query('SELECT last_move_at FROM charmville_native_actors WHERE profile_id=$1',[a.profileId])).rows[0].last_move_at)+100;
+  const paced={...pacedNext,sequence:back.sequence+1,regionEpoch:back.regionEpoch,presenceRevision:back.presenceRevision,geometryId:back.geometryId,waitForTurn:true};
+  await assert.rejects(nativeActor(pool,tokens[0],{...paced,waitForTurn:false}),/Unsupported/);
+  const settled=await nativeActor(pool,tokens[0],paced);
+  assert.deepEqual(settled.cell,pacedNext);
+  assert.ok(Number((await pool.query('SELECT last_move_at FROM charmville_native_actors WHERE profile_id=$1',[a.profileId])).rows[0].last_move_at)>=schedule,'paced request must not bypass speed schedule');
+  assert.deepEqual((await nativeActor(pool,tokens[0],paced)).cell,pacedNext,'same step remains replay-safe');
+  // An admitted request cannot finish after its presence expires during pacing.
+  await pool.query("UPDATE charmville_native_actors SET last_move_at=floor(extract(epoch FROM clock_timestamp())*1000)+10 WHERE profile_id=$1",[a.profileId]);
+  await pool.query("UPDATE charmville_world_presence SET expires_at=clock_timestamp()+interval '40 milliseconds' WHERE profile_id=$1",[a.profileId]);
+  await assert.rejects(nativeActor(pool,tokens[0],{...paced,x:back.cell.x,y:back.cell.y,sequence:settled.sequence+1}),/Enter the world/);
+  const afterExpiry=await stored();assert.equal(afterExpiry.x,pacedNext.x);assert.equal(afterExpiry.y,pacedNext.y);assert.equal(afterExpiry.sequence,String(settled.sequence));
   await pool.query("UPDATE charmville_world_presence SET expires_at=clock_timestamp()-interval '1 second'");await assert.rejects(nativeActor(pool,tokens[0]),/Enter the world/);
  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

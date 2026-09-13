@@ -1,3 +1,4 @@
+import {YardError} from '@/lib/charmville/errors';
 import { postgresPool } from "@/lib/postgres";
 import { parsePineSearch, ReputationSearchError, searchPineReputation } from "@/lib/charmville/reputation-search";
 
@@ -10,6 +11,6 @@ export async function GET(request: Request) {
     const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     return Response.json(await searchPineReputation(postgresPool(), search, token), { headers });
   } catch (error) {
-    return Response.json({ error: error instanceof ReputationSearchError ? error.message : "Pine search is temporarily unavailable. Please try again." }, { status: error instanceof ReputationSearchError ? error.status : 503, headers });
+    return Response.json({ error: (error instanceof ReputationSearchError || error instanceof YardError) ? error.message : "Pine search is temporarily unavailable. Please try again." }, { status: (error instanceof ReputationSearchError || error instanceof YardError) ? error.status : 503, headers });
   }
 }

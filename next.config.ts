@@ -167,15 +167,39 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
-      ...(process.env.NODE_ENV === "development" ? [{
+      // The threaded native frame needs an isolated top-level account page in
+      // production too. Development exceptions stay confined to this surface.
+      {
         source: "/charmville/world",
         headers: [
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
-          { key: "Permissions-Policy", value: 'camera=(), microphone=(self "http://localhost:3021"), geolocation=(), cross-origin-isolated=(self "http://localhost:3021"), keyboard-map=(self "http://localhost:3021")' },
-          { key: "Content-Security-Policy", value: securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:3023") },
+          { key: "Permissions-Policy", value: ['camera=()', 'geolocation=()', ...['microphone','cross-origin-isolated','keyboard-map','gamepad','fullscreen'].map(feature => `${feature}=(self${process.env.NODE_ENV === "development" ? ' "http://localhost:3021" "http://localhost:3024"' : ''})`)].join(', ') },
+          { key: "Content-Security-Policy", value: process.env.NODE_ENV === "development"
+            ? securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021 http://localhost:3024").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:3023")
+            : securityHeaders.find(header => header.key === "Content-Security-Policy")!.value },
         ],
-      }] : []),
+      },
+      // Protected release bytes only: same-origin Emscripten pthread workers,
+      // WASM compilation and locally recorded voice/video. No external scripts,
+      // frames, endpoints or general JavaScript eval allowance is added here.
+      {
+        source: "/charmville/runtime/:path*",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+          { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self), cross-origin-isolated=(self), keyboard-map=(self), gamepad=(self), fullscreen=(self)" },
+          { key: "Content-Security-Policy", value: [
+            "default-src 'self'", "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'", "worker-src 'self'",
+            "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "font-src 'self' data:",
+            "media-src 'self' blob:", "connect-src 'self'", "frame-src 'none'", "object-src 'none'",
+            "frame-ancestors 'self'", "base-uri 'self'", "form-action 'self'",
+          ].join('; ') },
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
       // Marketplank is a live application shell. Never let an edge or hosting
       // proxy carry its HTML across an immutable release switch.
       {

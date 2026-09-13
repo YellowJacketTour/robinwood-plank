@@ -1,5 +1,6 @@
 import type {Pool} from 'pg';
 import {homeActor} from './home-access-store';
+import {requireCharmvilleAdmission} from './admission';
 import {YardError} from './errors';
 import type {BroadcastAuthority} from './broadcast-session';
 
@@ -15,6 +16,7 @@ export async function broadcastAuthority(pool:Pool,token:string,ownerId:string):
   const profileId=await homeActor(client,token);
   const owner=await client.query("SELECT id FROM plankspace_profiles WHERE id=$1 AND moderation_status='approved' FOR SHARE",[ownerId]);
   if(!owner.rowCount)throw new YardError('Broadcast owner unavailable',404);
+  await requireCharmvilleAdmission(client,ownerId);
   const result=await client.query('SELECT mode,allowed_ids::text[] AS allowed,revision::text FROM charmville_spectator_settings WHERE profile_id=$1 FOR SHARE',[ownerId]);
   const policy=result.rows[0]??{mode:'public',allowed:[],revision:'0'};
   if(!['public','private','allowlist'].includes(policy.mode)||!Array.isArray(policy.allowed)||!policy.allowed.every((id:unknown)=>typeof id==='string')||!/^\d{1,18}$/.test(policy.revision))throw new YardError('Viewing policy unavailable',503);

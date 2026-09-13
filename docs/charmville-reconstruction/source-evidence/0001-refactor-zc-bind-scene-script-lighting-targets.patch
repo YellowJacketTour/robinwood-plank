@@ -1,0 +1,333 @@
+From c1445cca302dfe23e63a282823696f8300fb3694 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:28:02 -0500
+Subject: [PATCH] refactor(zc): bind scene script lighting targets
+
+---
+ src/zc/maps.cpp | 79 +++++++++++++++++++++++++------------------------
+ 1 file changed, 41 insertions(+), 38 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 00ee20b..d5985d8 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4901,7 +4901,8 @@ struct scene_darkness_targets
+ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
+     const scene_darkness_targets& darkness)
+ {
+-	do_primitives(dest, SPLAYER_DARKROOM_UNDER);
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
++	do_primitives(dest, SPLAYER_DARKROOM_UNDER, 0, playing_field_offset, 0, &world_lights);
+ 	set_clip_rect(dest, 0, playing_field_offset, dest->w, dest->h);
+ 	
+ 	bool any_trans = false;
+@@ -4976,7 +4977,7 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
+ 	color_map = trans_table;
+ 
+ 	set_clip_rect(dest, 0, 0, dest->w, dest->h);
+-	do_primitives(dest, SPLAYER_DARKROOM_OVER);
++	do_primitives(dest, SPLAYER_DARKROOM_OVER, 0, playing_field_offset, 0, &world_lights);
+ }
+ 
+ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark,
+@@ -5004,6 +5005,7 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+     bool drawPassiveSubscreenSeparate,
+     bool old_layer_draw_order)
+ {
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
+ 	// Draw some text on dest
+ 
+ 	set_clip_rect(dest, 0, 0, dest->w - 1, dest->h - 1);
+@@ -5019,12 +5021,12 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+ 
+ 		put_passive_subscr(dest, 0, 0, game->should_show_time(), sspUP);
+ 
+-		do_primitives(dest, 7);
++		do_primitives(dest, 7, 0, playing_field_offset, 0, &world_lights);
+ 		if (drawPassiveSubscreenSeparate)
+-			do_primitives(without_passive_subscreen, 7);
++			do_primitives(without_passive_subscreen, 7, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	else if (!old_layer_draw_order)
+-		do_primitives(dest, 7);
++		do_primitives(dest, 7, 0, playing_field_offset, 0, &world_lights);
+ 
+ 	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens, darkness);
+ 	if (drawPassiveSubscreenSeparate)
+@@ -5047,6 +5049,7 @@ static void compose_scene(const scene_composition_targets& targets,
+     bool showhero, bool runGeneric, bool drawPassiveSubscreenSeparate,
+     bool classic_draw, bool old_layer_draw_order, presentation_frame_effects* effects)
+ {
++	const script_world_light_targets world_lights{targets.darkness.opaque, targets.darkness.translucent};
+ 	BITMAP* dest = targets.scene;
+ 	BITMAP* background = targets.background;
+ 	clear_bitmap(dest);
+@@ -5065,7 +5068,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		{
+ 			_do_current_ffc_layer(background, layer);
+ 			if (script_drawing_commands.is_dirty(layer))
+-				do_primitives(background, layer);
++				do_primitives(background, layer, 0, playing_field_offset, 0, &world_lights);
+ 		}
+ 	}
+ 	
+@@ -5106,7 +5109,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	if (!old_layer_draw_order)
+ 	{
+-		do_primitives(background, -3);
++		do_primitives(background, -3, 0, playing_field_offset, 0, &world_lights);
+ 		// Actually use proper ordering (-3 < -2)
+ 		for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 			mapscr* base_scr = screen_handles[0].base_scr;
+@@ -5124,10 +5127,10 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		if (l2bg)
+ 			draw_msgstr(2, background);
+ 		
+-		do_primitives(background, -2);
++		do_primitives(background, -2, 0, playing_field_offset, 0, &world_lights);
+ 		
+ 		_do_current_ffc_layer(background, -1);
+-		do_primitives(background, -1);
++		do_primitives(background, -1, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	
+ 	// Draw the main combo screens ("layer 0").
+@@ -5143,18 +5146,18 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		if(!get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+ 			if(mblock2.draw(background,0))
+-				do_primitives(background, SPLAYER_MOVINGBLOCK);
++				do_primitives(background, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 
+ 	// Lens hints, then primitives, then particles.
+ 	if((lensclk || (get_debug() && zc_getkey(KEY_L))) && !get_qr(qr_OLDLENSORDER))
+ 	{
+ 		draw_lens_under(background, false);
+-		do_primitives(background, SPLAYER_LENS_UNDER_1);
++		do_primitives(background, SPLAYER_LENS_UNDER_1, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	
+ 	if(show_layers[0] && lenscheck(hero_scr,0))
+-		do_primitives(background, 0);
++		do_primitives(background, 0, 0, playing_field_offset, 0, &world_lights);
+ 	particles.draw(background, true, 0);
+ 	_do_current_ffc_layer(background, 0);
+ 	draw_msgstr(0, background);
+@@ -5228,7 +5231,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	if(!XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+ 		draw_msgstr(2, background);
+ 
+-	do_primitives(background, SPLAYER_FFC_DRAW);
++	do_primitives(background, SPLAYER_FFC_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+ 	if(get_qr(qr_LAYER12UNDERCAVE))
+ 	{
+@@ -5272,7 +5275,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			}
+ 		});
+ 
+-		do_primitives(background, SPLAYER_PUSHBLOCK);
++		do_primitives(background, SPLAYER_PUSHBLOCK, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 
+ 	// Show walkflags cheat
+@@ -5297,11 +5300,11 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		if(get_qr(qr_OLDLENSORDER))
+ 		{
+ 			draw_lens_under(background, false);
+-			do_primitives(background, SPLAYER_LENS_UNDER_1);
++			do_primitives(background, SPLAYER_LENS_UNDER_1, 0, playing_field_offset, 0, &world_lights);
+ 		}
+ 		
+ 		draw_lens_under(background, true);
+-		do_primitives(background, SPLAYER_LENS_UNDER_2);
++		do_primitives(background, SPLAYER_LENS_UNDER_2, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	
+ 	// Blit those layers onto dest (framebuf)
+@@ -5375,14 +5378,14 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					if(((weapon *)Ewpns.spr(i))->behind)
+ 						Ewpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW);
++				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Lwpns.spr(i))->behind)
+ 						Lwpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW);
++				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+ 				if(get_qr(qr_SHADOWS)&&(!get_qr(qr_SHADOWSFLICKER)||global_frame&1))
+ 				{
+@@ -5401,12 +5404,12 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					auto [sx, sy] = translate_screen_coordinates_to_world(maze_screen);
+ 					set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 				}
+-				do_primitives(dest, SPLAYER_NPC_DRAW);
++				do_primitives(dest, SPLAYER_NPC_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				if (do_clip)
+ 					clear_clip_rect(dest);
+ 
+ 				chainlinks.draw(dest,true);
+-				do_primitives(dest, SPLAYER_CHAINLINK_DRAW);
++				do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				//Lwpns.draw(dest,true);
+ 				
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+@@ -5414,14 +5417,14 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					if(!((weapon *)Ewpns.spr(i))->behind)
+ 						Ewpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW);
++				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(!((weapon *)Lwpns.spr(i))->behind)
+ 						Lwpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW);
++				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+ 				if (do_clip)
+ 					items.draw_smooth_maze(dest);
+@@ -5433,7 +5436,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					auto [sx, sy] = translate_screen_coordinates_to_world(maze_screen);
+ 					set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 				}
+-				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW);
++				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				if (do_clip)
+ 					clear_clip_rect(dest);
+ 			}
+@@ -5444,14 +5447,14 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					if(((weapon *)Ewpns.spr(i))->behind)
+ 						Ewpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW);
++				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Lwpns.spr(i))->behind)
+ 						Lwpns.spr(i)->draw(dest);
+ 				}
+-				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW);
++				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				if(get_qr(qr_SHADOWS)&&(!get_qr(qr_SHADOWSFLICKER)||global_frame&1))
+ 				{
+@@ -5459,12 +5462,12 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				}
+ 				
+ 				items.draw(dest,false);
+-				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW);
++				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				chainlinks.draw(dest,false);
+-				do_primitives(dest, SPLAYER_CHAINLINK_DRAW);
++				do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				//Lwpns.draw(dest,false);
+ 				guys.draw(dest,false);
+-				do_primitives(dest, SPLAYER_NPC_DRAW);
++				do_primitives(dest, SPLAYER_NPC_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+ 				{
+@@ -5473,7 +5476,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 						Ewpns.spr(i)->draw(dest);
+ 					}
+ 				}
+-				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW);
++				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+@@ -5482,7 +5485,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 						Lwpns.spr(i)->draw(dest);
+ 					}
+ 				}
+-				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW);
++				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			}
+ 			
+ 			guys.draw2(dest,true);
+@@ -5497,7 +5500,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			if(get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+ 			{
+ 				mblock2.draw(dest,-1);
+-				do_primitives(dest, SPLAYER_MOVINGBLOCK);
++				do_primitives(dest, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, &world_lights);
+ 			}
+ 			if(!hero_draw_done)
+ 			{
+@@ -5539,7 +5542,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				//Jumping enemies in front of Hero.
+ 				guys.spr(i)->draw(dest);
+ 			}
+-			do_primitives(dest, SPLAYER_NPC_ABOVEPLAYER_DRAW);
++			do_primitives(dest, SPLAYER_NPC_ABOVEPLAYER_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 		}
+ 	}
+ 	else
+@@ -5630,7 +5633,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		}
+ 	});
+ 
+-	do_primitives(dest, SPLAYER_OVERHEAD_CMB);
++	do_primitives(dest, SPLAYER_OVERHEAD_CMB, 0, playing_field_offset, 0, &world_lights);
+ 
+ 	if(!get_qr(qr_SUBSCREENOVERSPRITES))
+ 	{
+@@ -5650,7 +5653,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			decorations.draw2(dest,false);
+ 			Hero.draw(dest);
+ 			chainlinks.draw(dest,true);
+-			do_primitives(dest, SPLAYER_CHAINLINK_DRAW);
++			do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 			for(int32_t i=0; i<Lwpns.Count(); i++)
+ 			{
+@@ -5659,7 +5662,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 					Lwpns.spr(i)->draw(dest);
+ 				}
+ 			}
+-			do_primitives(dest, SPLAYER_LWEAP_ABOVE_DRAW);
++			do_primitives(dest, SPLAYER_LWEAP_ABOVE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 			decorations.draw(dest,false);
+ 		}
+@@ -5683,7 +5686,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				}
+ 			}
+ 		}
+-		do_primitives(dest, SPLAYER_NPC_AIRBORNE_DRAW);
++		do_primitives(dest, SPLAYER_NPC_AIRBORNE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	else draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_OVERHEAD]);
+ 	
+@@ -5694,7 +5697,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		if(itm.type == itype_fairy && itm.misc3)
+ 			items.spr(i)->draw(dest);
+ 	}
+-	do_primitives(dest, SPLAYER_FAIRYITEM_DRAW);
++	do_primitives(dest, SPLAYER_FAIRYITEM_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 	
+ 	// Draw some layers onto dest
+ 
+@@ -5724,7 +5727,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	_do_current_ffc_layer(dest, -1000); // 'overhead' freeform combos
+ 
+-	do_primitives(dest, SPLAYER_OVERHEAD_FFC);
++	do_primitives(dest, SPLAYER_OVERHEAD_FFC, 0, playing_field_offset, 0, &world_lights);
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		do_layer(dest, 0, screen_handles[6], offx, offy);
+-- 
+2.52.0.windows.1
+

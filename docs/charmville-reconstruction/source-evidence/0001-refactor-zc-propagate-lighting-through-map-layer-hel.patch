@@ -1,0 +1,284 @@
+From a151a11d7f26f06b8e3c5133169755c6e45401af Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:29:32 -0500
+Subject: [PATCH] refactor(zc): propagate lighting through map layer helpers
+
+---
+ src/zc/maps.cpp | 78 ++++++++++++++++++++++++++++---------------------
+ src/zc/maps.h   |  5 ++++
+ 2 files changed, 49 insertions(+), 34 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index d5985d8..6873d21 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4320,6 +4320,11 @@ bool lenscheck(mapscr* scr, int layer)
+ }
+ 
+ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y)
++{
++	do_layer(bmp, type, screen_handle, x, y, nullptr);
++}
++
++void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y, const script_world_light_targets* world_lights)
+ {
+ 	bool showlayer = true;
+ 	mapscr* base_scr = screen_handle.base_scr;
+@@ -4356,12 +4361,17 @@ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, i
+ 			do_scrolling_layer(bmp, type, screen_handle, x, y);
+ 			if(!type && !get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+ 				if(mblock2.draw(bmp,layer))
+-					do_primitives(bmp, SPLAYER_MOVINGBLOCK);
++					do_primitives(bmp, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, world_lights);
+ 		}
+ 	}
+ }
+ 
+ void do_layer_primitives(BITMAP *bmp, int32_t layer)
++{
++	do_layer_primitives(bmp, layer, nullptr);
++}
++
++void do_layer_primitives(BITMAP *bmp, int32_t layer, const script_world_light_targets* world_lights)
+ {
+ 	bool showlayer = true;
+ 	
+@@ -4374,7 +4384,7 @@ void do_layer_primitives(BITMAP *bmp, int32_t layer)
+ 	}
+ 	
+ 	if (showlayer)
+-		do_primitives(bmp, layer);
++		do_primitives(bmp, layer, 0, playing_field_offset, 0, world_lights);
+ }
+ 
+ // Called by do_walkflags
+@@ -4843,7 +4853,7 @@ static void set_draw_screen_clip(BITMAP* bmp)
+ 	set_clip_rect(bmp, draw_screen_clip_rect_x1, draw_screen_clip_rect_y1, draw_screen_clip_rect_x2, draw_screen_clip_rect_y2);
+ }
+ 
+-static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, set<sprite*, SpriteSorter>::iterator& it, word upto_z)
++static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, set<sprite*, SpriteSorter>::iterator& it, word upto_z, const script_world_light_targets* world_lights)
+ {
+ 	bool checkz = upto_z != word(-1); // max value represents "infinity" height
+ 	if(it == sprite_set.end() || (checkz && (*it)->total_z() >= upto_z))
+@@ -4878,7 +4888,7 @@ static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, s
+ 		else if(spr == &mblock2) // Draw the moving pushblock
+ 		{
+ 			mblock2.draw(dest, -1);
+-			do_primitives(dest, SPLAYER_MOVINGBLOCK);
++			do_primitives(dest, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, world_lights);
+ 		}
+ 		else if(enemy* e = dynamic_cast<enemy*>(spr))
+ 		{
+@@ -5078,13 +5088,13 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 			mapscr* base_scr = screen_handles[0].base_scr;
+ 			if (XOR(base_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+-				do_layer(background, 0, screen_handles[2], offx, offy);
++				do_layer(background, 0, screen_handles[2], offx, offy, &world_lights);
+ 		});
+ 
+ 		bool l2bg = XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG);
+ 		if (l2bg)
+ 		{
+-			do_layer_primitives(background, 2);
++			do_layer_primitives(background, 2, &world_lights);
+ 			particles.draw(background, true, 2);
+ 		}
+ 		_do_current_ffc_layer(background, -2);
+@@ -5095,12 +5105,12 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		mapscr* base_scr = screen_handles[0].base_scr;
+ 		if (XOR(base_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+-			do_layer(background, 0, screen_handles[3], offx, offy);
++			do_layer(background, 0, screen_handles[3], offx, offy, &world_lights);
+ 	});
+ 	
+ 	if (XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+ 	{
+-		do_layer_primitives(background, 3);
++		do_layer_primitives(background, 3, &world_lights);
+ 		particles.draw(background, true, 3);
+ 	}
+ 	_do_current_ffc_layer(background, -3);
+@@ -5114,13 +5124,13 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 			mapscr* base_scr = screen_handles[0].base_scr;
+ 			if (XOR(base_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+-				do_layer(background, 0, screen_handles[2], offx, offy);
++				do_layer(background, 0, screen_handles[2], offx, offy, &world_lights);
+ 		});
+ 		
+ 		bool l2bg = XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG);
+ 		if (l2bg)
+ 		{
+-			do_layer_primitives(background, 2);
++			do_layer_primitives(background, 2, &world_lights);
+ 			particles.draw(background, true, 2);
+ 		}
+ 		_do_current_ffc_layer(background, -2);
+@@ -5207,10 +5217,10 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 	
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-		do_layer(background, 0, screen_handles[1], offx, offy); // LAYER 1
++		do_layer(background, 0, screen_handles[1], offx, offy, &world_lights); // LAYER 1
+ 	});
+ 
+-	do_layer_primitives(background, 1);
++	do_layer_primitives(background, 1, &world_lights);
+ 	particles.draw(background, true, 1);
+ 	_do_current_ffc_layer(background, 1);
+ 	draw_msgstr(1, background);
+@@ -5219,12 +5229,12 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		mapscr* base_scr = screen_handles[0].base_scr;
+ 		if (!XOR(base_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+-			do_layer(background, 0, screen_handles[2], offx, offy);
++			do_layer(background, 0, screen_handles[2], offx, offy, &world_lights);
+ 	});
+ 
+ 	if(!XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+ 	{
+-		do_layer_primitives(background, 2);
++		do_layer_primitives(background, 2, &world_lights);
+ 		particles.draw(background, true, 2);
+ 	}
+ 	_do_current_ffc_layer(background, 2);
+@@ -5267,11 +5277,11 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	if (get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+ 	{
+ 		for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-			do_layer(background, -2, screen_handles[0], offx, offy); // push blocks!
++			do_layer(background, -2, screen_handles[0], offx, offy, &world_lights); // push blocks!
+ 			if(get_qr(qr_PUSHBLOCK_LAYER_1_2))
+ 			{
+-				do_layer(background, -2, screen_handles[1], offx, offy); // push blocks!
+-				do_layer(background, -2, screen_handles[2], offx, offy); // push blocks!
++				do_layer(background, -2, screen_handles[1], offx, offy, &world_lights); // push blocks!
++				do_layer(background, -2, screen_handles[2], offx, offy, &world_lights); // push blocks!
+ 			}
+ 		});
+ 
+@@ -5585,7 +5595,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 	auto sprite_it = sorted_sprites.begin();
+ 	if (!classic_draw)
+-		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_GROUND]);
++		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_GROUND], &world_lights);
+ 	
+ 	// Draw some layers onto dest
+ 	set_draw_screen_clip(dest);
+@@ -5596,15 +5606,15 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		mapscr* base_scr = screen_handles[0].base_scr;
+ 		if (!XOR(base_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+-			do_layer(dest, 0, screen_handles[3], offx, offy);
++			do_layer(dest, 0, screen_handles[3], offx, offy, &world_lights);
+ 	});
+ 	
+ 	if (!classic_draw)
+-		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_3]);
++		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_3], &world_lights);
+ 	
+ 	if(!XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+ 	{
+-		do_layer_primitives(dest, 3);
++		do_layer_primitives(dest, 3, &world_lights);
+ 		particles.draw(dest, true, 3);
+ 	}
+ 	_do_current_ffc_layer(dest, 3);
+@@ -5613,23 +5623,23 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-		do_layer(dest, 0, screen_handles[4], offx, offy);
++		do_layer(dest, 0, screen_handles[4], offx, offy, &world_lights);
+ 	});
+ 	
+ 	if (!classic_draw)
+-		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_4]);
++		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_4], &world_lights);
+ 	
+-	do_layer_primitives(dest, 4);
++	do_layer_primitives(dest, 4, &world_lights);
+ 	particles.draw(dest, true, 4);
+ 	_do_current_ffc_layer(dest, 4);
+ 	draw_msgstr(4, dest);
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-		do_layer(dest, -1, screen_handles[0], offx, offy);
++		do_layer(dest, -1, screen_handles[0], offx, offy, &world_lights);
+ 		if (get_qr(qr_OVERHEAD_COMBOS_L1_L2))
+ 		{
+-			do_layer(dest, -1, screen_handles[1], offx, offy);
+-			do_layer(dest, -1, screen_handles[2], offx, offy);
++			do_layer(dest, -1, screen_handles[1], offx, offy, &world_lights);
++			do_layer(dest, -1, screen_handles[2], offx, offy, &world_lights);
+ 		}
+ 	});
+ 
+@@ -5688,7 +5698,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		}
+ 		do_primitives(dest, SPLAYER_NPC_AIRBORNE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 	}
+-	else draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_OVERHEAD]);
++	else draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_OVERHEAD], &world_lights);
+ 	
+ 	// Draw the Moving Fairy above layer 3
+ 	for(int32_t i=0; i<items.Count(); i++)
+@@ -5714,13 +5724,13 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-		do_layer(dest, 0, screen_handles[5], offx, offy);
++		do_layer(dest, 0, screen_handles[5], offx, offy, &world_lights);
+ 	});
+ 
+ 	if (!classic_draw)
+-		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_5]);
++		draw_sprites(dest, sorted_sprites, sprite_it, zinit.sprite_z_thresholds[SPRITE_THRESHOLD_5], &world_lights);
+ 	
+-	do_layer_primitives(dest, 5);
++	do_layer_primitives(dest, 5, &world_lights);
+ 	particles.draw(dest, true, 5);
+ 	_do_current_ffc_layer(dest, 5);
+ 	draw_msgstr(5, dest);
+@@ -5730,13 +5740,13 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	do_primitives(dest, SPLAYER_OVERHEAD_FFC, 0, playing_field_offset, 0, &world_lights);
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+-		do_layer(dest, 0, screen_handles[6], offx, offy);
++		do_layer(dest, 0, screen_handles[6], offx, offy, &world_lights);
+ 	});
+ 
+ 	if (!classic_draw)
+-		draw_sprites(dest, sorted_sprites, sprite_it, word(-1));
++		draw_sprites(dest, sorted_sprites, sprite_it, word(-1), &world_lights);
+ 	
+-	do_layer_primitives(dest, 6);
++	do_layer_primitives(dest, 6, &world_lights);
+ 	particles.draw(dest, true, 6);
+ 	_do_current_ffc_layer(dest, 6);
+ 
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index c15bacf..46f1e25 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -504,8 +504,13 @@ void bombdoor(int32_t x,int32_t y);
+ bool lenscheck(mapscr* scr, int layer);
+ void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_handle, int32_t x, int32_t y);
+ void do_scrolling_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y);
++// Explicit script-light targets are borrowed for this draw only. Legacy public
++// overloads preserve their original global-plane behavior (including map capture).
++struct script_world_light_targets;
+ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y);
++void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y, const script_world_light_targets* world_lights);
+ void do_layer_primitives(BITMAP *bmp, int32_t layer);
++void do_layer_primitives(BITMAP *bmp, int32_t layer, const script_world_light_targets* world_lights);
+ void do_walkflags(const std::array<screen_handle_t, 7>& screen_handles ,int32_t x, int32_t y);
+ void do_walkflags(int32_t x, int32_t y);
+ void do_effectflags(mapscr* scr, int32_t x, int32_t y);
+-- 
+2.52.0.windows.1
+

@@ -1,3 +1,6 @@
+// Explicit approved test admission; production policy remains fail-closed.
+process.env.CHARMVILLE_ACCESS_MODE='private';
+process.env.CHARMVILLE_ALLOWED_WALLETS='0x1111111111111111111111111111111111111111';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {Pool} from 'pg';
@@ -8,6 +11,7 @@ function database(authenticated=true,mode='allowlist'){
  const client={release(){calls.push('RELEASE');},async query(sql:string){
   calls.push(sql);
   if(sql.includes('plankspace_wallet_sessions'))return {rows:authenticated?[{id:'7'}]:[]};
+  if(sql.includes('SELECT wallet FROM plankspace_profiles'))return {rows:[{wallet:'0x1111111111111111111111111111111111111111'}],rowCount:1};
   if(sql.includes('SELECT id FROM plankspace_profiles'))return {rows:[{id:'9'}],rowCount:1};
   if(sql.includes('charmville_spectator_settings'))return {rows:[{mode,allowed:['7'],revision:'4'}]};
   return {rows:[]};

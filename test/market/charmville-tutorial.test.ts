@@ -18,7 +18,7 @@ test("tutorial completion persists per authenticated account and replay changes 
  await admin.query(`CREATE SCHEMA ${schema}`);
  const pool = new Pool({connectionString, options: `-c search_path=${schema}`});
  try {
-  for (const file of ["090_plankspace_native.sql", "128_charmville_tutorial.sql", "128_charmville_tutorial.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`, "utf8"));
+  for (const file of ["090_plankspace_native.sql", "140_charmville_tutorial.sql", "140_charmville_tutorial.sql"]) await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`, "utf8"));
   for (let i = 1; i <= 2; i++) {
    const wallet = `0x${String(i).repeat(40)}`;
    await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,$2,$2,'approved')", [wallet, `player${i}`]);

@@ -1,14 +1,15 @@
 "use client";
+import {NATIVE_RUNTIME_ORIGIN as DEFAULT_RUNTIME_ORIGIN} from './native-runtime';
 import {useEffect,useState,type RefObject} from 'react';
 /** Presentation preference only: completing the introduction grants no rewards. */
-export function useTutorialBridge(frame:RefObject<HTMLIFrameElement|null>,token:string|null){
+export function useTutorialBridge(frame:RefObject<HTMLIFrameElement|null>,token:string|null,runtimeOrigin=DEFAULT_RUNTIME_ORIGIN){
  const [status,setStatus]=useState('');
  useEffect(()=>{
-  if(!token)return;
+  if(!token||!runtimeOrigin)return;
   const controller=new AbortController(),context=crypto.randomUUID();
   let completed:boolean|undefined,busy=false,lastAttempt=0;
   let runtimeWindow:Window|null=null;
-  const send=()=>{if(completed!==undefined)frame.current?.contentWindow?.postMessage({type:'charmville:tutorial-state',context,completed},'http://localhost:3021');};
+  const send=()=>{if(completed!==undefined)frame.current?.contentWindow?.postMessage({type:'charmville:tutorial-state',context,completed},runtimeOrigin);};
   const request=async(save=false)=>{
    if(busy||Date.now()-lastAttempt<1000)return;
    busy=true;lastAttempt=Date.now();
@@ -21,13 +22,13 @@ export function useTutorialBridge(frame:RefObject<HTMLIFrameElement|null>,token:
    finally{busy=false;}
   };
   const receive=(event:MessageEvent)=>{
-   if(event.source!==frame.current?.contentWindow||event.origin!=='http://localhost:3021')return;
+   if(event.source!==frame.current?.contentWindow||event.origin!==runtimeOrigin)return;
    runtimeWindow=frame.current.contentWindow;
    if(event.data?.type==='charmville:tutorial-ready'){if(completed===undefined)void request();else send();}
    if(event.data?.type==='charmville:tutorial-completed'&&event.data.context===context&&!completed)void request(true);
   };
   window.addEventListener('message',receive);void request();
-  return()=>{controller.abort();window.removeEventListener('message',receive);runtimeWindow?.postMessage({type:'charmville:tutorial-reset',context},'http://localhost:3021');};
- },[frame,token]);
+  return()=>{controller.abort();window.removeEventListener('message',receive);runtimeWindow?.postMessage({type:'charmville:tutorial-reset',context},runtimeOrigin);};
+ },[frame,token,runtimeOrigin]);
  return token?status:'';
 }

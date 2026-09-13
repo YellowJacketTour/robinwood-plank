@@ -85,13 +85,13 @@ http.createServer(async(req,res)=>{
      Object.assign(document.querySelector('header').style,{zIndex:'10001'});
      Object.assign(help.style,{position:'relative',background:'black',padding:'6px',maxWidth:'560px'});
      const summary=document.createElement('summary');summary.textContent='Controls and weapon tests';help.append(summary);
-     const instructions=document.createElement('p');instructions.textContent='Arrows move Â· Z sword (hold then release to spin) Â· X selected item Â· Enter inventory. Bow fires immediately in this quest. These isolated tests reset progress and remove the endgame gear that masks damage and costs.';help.append(instructions);
+     const instructions=document.createElement('p');instructions.textContent='Arrows move / Z sword (hold then release to spin) / X selected item / Enter inventory. Bow fires immediately in this quest. These isolated tests reset progress and remove the endgame gear that masks damage and costs.';help.append(instructions);
      for(const [key,label] of ${JSON.stringify([['endgame','Full endgame kit'],...Object.entries(diagnosticKits).map(([key,value])=>[key,value.label])])}){const link=document.createElement('a');link.href='/charmville/?kit='+key;link.textContent=label;link.className='panel-button';help.append(link);}
      document.querySelector('.panel-buttons').after(help);
      const tutorial=document.createElement('a');tutorial.href='/charmville/tutorial/';tutorial.textContent='Homestead tutorial';tutorial.className='panel-button';help.append(tutorial);
      const start=document.createElement('button');start.textContent='Enter the world';start.className='panel-button';
      document.querySelector('.panel-buttons').prepend(start);
-     start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading worldâ€¦';
+     start.addEventListener('click',async()=>{start.disabled=true;start.textContent='Loading world...';
       try{for(const src of ['../main.js','../zplayer.data.js','../zplayer.js']) {
        if(src==='../zplayer.js'){
         const response=await fetch('/midi-bank.json',{signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('MIDI bank unavailable');const bank=await response.json();
@@ -106,7 +106,7 @@ http.createServer(async(req,res)=>{
        }
        await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src==='../main.js'&&${rebuilt}&&(new URLSearchParams(location.search).get('test')||'').includes('/homestead-region/')?src+'?gameFrame=1':src;script.onload=resolve;script.onerror=reject;document.body.append(script);});
       }start.remove();}
-      catch{start.textContent='Loading failed â€” reload to retry';}
+      catch{start.textContent='Loading failed - reload to retry';}
      },{once:true});
     </script><script type="module" src="/charmville-display.js"></script><script type="module" src="/charmville-controller.js"></script><script type="module" src="/runtime-shell.mjs"></script></body>`);
    }

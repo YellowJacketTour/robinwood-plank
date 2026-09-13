@@ -2,7 +2,7 @@
 
 ## Current constraints
 
-The current database deliberately stores one starter per account: `110_charmville_companions.sql` has `UNIQUE(owner_profile_id)` and permits only Emerald IDs 277, 280 and 283. Migration111 adds a following preference and revision. `lib/charmville/companions.ts` returns the single owned record in a `party` array; this is not six acquired creatures. Source graphics and species metadata are discovery/reference material, not owned assets. Following preference is not evidence of server-simulated movement.
+The current database deliberately stores one starter per account: `122_charmville_companions.sql` has `UNIQUE(owner_profile_id)` and permits only Emerald IDs 277, 280 and 283. Migration111 adds a following preference and revision. `lib/charmville/companions.ts` returns the single owned record in a `party` array; this is not six acquired creatures. Source graphics and species metadata are discovery/reference material, not owned assets. Following preference is not evidence of server-simulated movement.
 
 `scripts/charmville/encounter-state.mjs` is a pure proposed domain model. It preserves one entity's health/status across modes and deduplicates requests, but its caller must provide trusted damage, range, randomness, inventory and persistence. It is not connected to authoritative capture settlement. These are inspected local implementation facts.
 

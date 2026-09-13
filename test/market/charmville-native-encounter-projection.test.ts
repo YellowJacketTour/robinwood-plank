@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {nativeEncounterProjection,nativeCaptureProjection} from '../../lib/charmville/native-encounter-projection';
+
+test('defeated encounters leave the live world despite retained damage history',()=>{
+ const encounter={id:'wild',speciesId:286,cell:{x:4,y:9},hp:0,maxHp:14,revision:'3'};
+ assert.deepEqual(nativeEncounterProjection({encounter,events:[{eventId:'15',log:[{targetId:'wild',damage:14}]}]}),{type:'charmville:world-encounter',active:false});
+});
 test('native encounter projects only wild-target committed damage and newest event',()=>{
  const encounter={id:'wild',speciesId:286,cell:{x:4,y:9},hp:8,maxHp:14,revision:'2'};
  const result=nativeEncounterProjection({encounter,events:[{eventId:'12',log:[{targetId:'wild',damage:4}]},{eventId:'13',log:[{targetId:'partner',damage:9}]},{eventId:'11',log:[{targetId:'wild',damage:2}]}]});

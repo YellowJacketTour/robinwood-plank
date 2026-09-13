@@ -3,46 +3,70 @@
 import {useEffect, useState} from "react";
 import type {YardInventory} from "@/lib/charmville/inventory";
 
-type Setup = {homeClaimed:boolean; companion:{id:string}|null};
+type Setup = {token:string;homeClaimed:boolean; companion:boolean; completed:string[]};
 type Props = {
-  token:string; refreshKey:string; handle:string; busy:boolean; inventory:YardInventory|null; onSatchel:()=>void;
+  token:string; refreshKey:string; handle:string; busy:boolean; inventory:YardInventory|null; onSatchel:()=>void; onExchange:()=>void;
   location:{active:boolean;ownerHandle:string|null;peers:Array<{profileId:string;handle:string}>}|null;
-  profileId:string; onSetup:()=>void; onHome:()=>void; onPublic:()=>void; onFriends:()=>void;
+  profileId:string; onSetup:()=>void; onHome:()=>void; onPublic:()=>void; onFriends:()=>void; onPlay:()=>void;
 };
 const action="min-h-11 rounded-lg border border-line-strong bg-gold-500 px-4 py-2 font-bold text-wood-950 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
-export default function FirstSteps({token,refreshKey,handle,busy,location,profileId,onSetup,onHome,onPublic,onFriends,inventory,onSatchel}:Props){
-  const [setup,setSetup]=useState<Setup|null>(null);
+export default function FirstSteps({token,refreshKey,handle,busy,location,profileId,onSetup,onHome,onPublic,onFriends,onPlay,inventory,onSatchel,onExchange}:Props){
+  const [snapshot,setSetup]=useState<Setup|null>(null);
+  const setup=snapshot?.token===token?snapshot:null;
   const [error,setError]=useState(false);
+  const [retry,setRetry]=useState(0);
   useEffect(()=>{
     const controller=new AbortController();
+    let pending=false;
     const refresh=async()=>{
+      if(pending)return;
+      pending=true;
       try{
-        const response=await fetch('/api/charmville/companions',{headers:{authorization:`Bearer ${token}`},cache:'no-store',credentials:'same-origin',mode:'same-origin',redirect:'error',signal:controller.signal});
+        const response=await fetch('/api/charmville/journey',{headers:{authorization:`Bearer ${token}`},cache:'no-store',credentials:'same-origin',mode:'same-origin',redirect:'error',signal:controller.signal});
         if(!response.ok)throw Error('Setup unavailable');
         const data=await response.json();
-        if(!controller.signal.aborted){setSetup(data);setError(false);}
+        if(data.version!==1||!Array.isArray(data.completed)||!data.completed.every((key:unknown)=>typeof key==='string'))throw Error('Journey unavailable');
+        if(!controller.signal.aborted){setSetup({token,homeClaimed:data.completed.includes('home.claimed'),companion:data.completed.includes('partner.chosen'),completed:data.completed});setError(false);}
       }catch{if(!controller.signal.aborted)setError(true);}
+      finally{pending=false;}
     };
-    void refresh();const timer=setInterval(()=>void refresh(),30000);
+    void refresh();const timer=setInterval(()=>void refresh(),10000);
     return()=>{controller.abort();clearInterval(timer);};
-  },[token,refreshKey]);
+  },[token,refreshKey,retry]);
   const atHome=Boolean(location?.active&&location.ownerHandle===handle);
   const inPublic=Boolean(location?.active&&!location.ownerHandle);
-  const berries=inventory?.faces.find(stack=>stack.face==='oran-berry')?.qty??'0';
-  const hasBerries=/^[0-9]+$/.test(berries)&&BigInt(berries)>0n;
+  const berries=inventory?inventory.faces.find(stack=>stack.face==='oran-berry')?.qty??'0':null;
+  const harvested=Boolean(setup?.completed.includes('home.oran.harvested'));
+  // Receipts describe lessons already completed, not the state of any current bed.
+  const nextLesson=!setup?.completed.includes('home.soil.tilled')
+    ?{title:'Prepare your first bed',text:'Approach an empty Oran bed and prepare the soil. Follow the action shown for that bed.'}
+    :!setup.completed.includes('home.oran.planted')
+    ?{title:'Plant your first Oran seed',text:'Soil preparation learned. Find a prepared bed and plant an Oran seed. If the bed has changed, follow its current action first.'}
+    :!setup.completed.includes('home.oran.watered')
+    ?{title:'Water your first Oran plant',text:'Planting learned. Approach a planted Oran bed and water it. Follow the bed’s current action if it needs preparing or planting again.'}
+    :{title:'Gather your first Oran harvest',text:'Watering learned. Check an Oran bed for ripe berries and gather them when ready. A growing plant needs time; an empty bed needs planting again.'};
   const peers=location?.active?location.peers.filter(peer=>peer.profileId!==profileId):[];
-  const title=!setup?'Getting your bearings':!setup.homeClaimed?'A place of your own':!setup.companion?'Choose your first companion':atHome?(hasBerries?'Your harvest is ready to use':'Grow your first Oran Berries'):inPublic?'Out in the shared meadow':'Return to your homestead';
-  const text=!setup?'Checking your saved home and companion.':!setup.homeClaimed?'Claim your home in Party setup. Your supplies and progress belong to your PlankSpace account.':!setup.companion?'Choose a partner in Party, then select Walk with me to explore together.':atHome?'Start with the Oran beds. Grow berries, gather them into your Satchel, and care for your party. When you are ready, head to the shared meadow.':inPublic?'Meet signed-in players in this region. Wild encounters support shared battle viewing and invited assistance. Open Friends to see who is here.':'Enter your own home to grow berries and prepare your party before meeting others.';
+  const title=!setup?'Getting your bearings':!setup.homeClaimed?'A place of your own':!setup.companion?'Choose your first companion':atHome?(harvested?'First harvest complete':nextLesson.title):inPublic?'Out in the shared meadow':'Return to your homestead';
+  const text=!setup?'Checking your saved home and companion.':!setup.homeClaimed?'Claim your home in Party setup. Your supplies and progress belong to your PlankSpace account.':!setup.companion?'Choose a partner in Party, then select Walk with me to explore together.':atHome?'Start with the Oran beds. Grow berries, gather them into your Satchel, and care for your party. When you are ready, head to the shared meadow.':inPublic?'Meet signed-in players in this region. Open Friends to meet people here, or return home to tend your garden. Your journey does not require a battle.':'Enter your own home to grow berries and prepare your party before meeting others.';
   return <section aria-label="Your next adventure" className="mb-3 rounded-xl border border-line-strong bg-wood-900 p-3 sm:p-4">
     <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-start">
-      <div className="min-w-0 flex-1"><p className="text-xs font-bold tracking-wide text-gold-300">{inPublic?'SHARED MEADOW':'FIRST STEPS'}</p><h2 className="mt-1 text-lg font-bold text-cream">{title}</h2><p className="mt-1 max-w-2xl text-sm text-cream-muted">{setup?.companion?(atHome?(hasBerries?`${berries} Oran Berries in your Satchel. Use them to care for your companions or bring them to the Exchange.`:"Approach an Oran bed. Prepare the soil, plant, water, then return when the berries are ripe."):inPublic?"Meet nearby players and assist in supported wild encounters.":text):text}</p></div>
-      {setup&&<button className={action} disabled={busy||error} onClick={!setup.homeClaimed||!setup.companion?onSetup:atHome?(hasBerries?onSatchel:onPublic):inPublic?onFriends:onHome}>{!setup.homeClaimed?'Set up my home':!setup.companion?'Choose a partner':atHome?(hasBerries?'Open my Satchel':'Visit the meadow'):inPublic?'Players & travel':'Enter my home'}</button>}
+      <div className="min-w-0 flex-1"><p className="text-xs font-bold tracking-wide text-gold-300">{inPublic?'SHARED MEADOW':'FIRST STEPS'}</p><h2 className="mt-1 text-lg font-bold text-cream">{title}</h2><p className="mt-1 max-w-2xl text-sm text-cream-muted">{setup?.companion?(atHome?(harvested?'You have gathered your first harvest. Care for your companions, keep growing, or visit the shared meadow.':nextLesson.text):inPublic?"Meet nearby players, visit friends, and bring what you learn back to your garden.":text):text}</p></div>
+      {setup&&<button className={action} disabled={busy||error} onClick={!setup.homeClaimed||!setup.companion?onSetup:atHome?(harvested?onPublic:onPlay):inPublic?onFriends:onHome}>{!setup.homeClaimed?'Set up my home':!setup.companion?'Choose a partner':atHome?(harvested?'Visit the meadow':'Return to the beds'):inPublic?'Players & travel':'Enter my home'}</button>}
     </div>
-    {error&&<p role="status" className="mt-2 text-sm text-cream-muted">Your setup could not be checked. <button className="min-h-11 px-2 text-gold-300 underline focus-visible:outline-2 focus-visible:outline-gold-300" onClick={onSetup}>Open Party to retry</button></p>}
+    {error&&<p role="status" className="mt-2 text-sm text-cream-muted">Your setup could not be checked. <button className="min-h-11 px-2 text-gold-300 underline focus-visible:outline-2 focus-visible:outline-gold-300" onClick={()=>setRetry(value=>value+1)}>Retry journey</button></p>}
+    <p className="mt-2 text-sm text-cream-muted">{berries===null?'Checking your Satchel…':`In your Satchel: ${berries} Oran Berries.`} {harvested&&"Your first harvest stays completed after using or trading them."} <button className="min-h-11 px-2 text-gold-300 underline focus-visible:outline-2 focus-visible:outline-gold-300" onClick={onSatchel}>Open Satchel</button></p>
+    {setup&&<nav aria-label="Peaceful adventures" className="mt-3 flex flex-wrap gap-2">
+      {!atHome&&<button className={action} disabled={busy||error} onClick={setup.homeClaimed?onHome:onSetup}>{setup.homeClaimed?'Return home':'Set up my home'}</button>}
+      <button className={action} disabled={busy||error} onClick={onFriends}>Visit friends</button>
+      <button className={action} disabled={busy||error} onClick={onExchange}>Explore Exchange</button>
+      {atHome&&<button className={action} disabled={busy||error} onClick={onPublic}>Explore the meadow</button>}
+    </nav>}
+    {harvested&&<p className="mt-2 text-sm text-cream-muted">Your harvest is yours to keep, use, or offer in the Exchange. Listing an item does not guarantee a buyer. Keep some supplies for your next planting.</p>}
     <details className="mt-2 text-xs text-cream-muted"><summary className="min-h-11 cursor-pointer py-3">Journey & location details</summary>
     {setup?.companion&&<p className="text-sm">{text}</p>}
-    <ol aria-label="Journey milestones" className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-cream-muted">
-      <li>{setup?.homeClaimed?'✓':'1'} Home claimed</li><li>{setup?.companion?'✓':'2'} Partner chosen</li><li>{atHome?'●':'3'} Explore your home</li><li>{inPublic?'●':'4'} Shared meadow</li>
+    <p className="mt-3">{setup?'Completed lessons stay in your journal. Check each bed in the world for its current condition.':'Your saved lessons have not loaded yet.'}</p>
+    <ol aria-label="Journey milestones" aria-busy={!setup&&!error} className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-cream-muted">
+      {[['home.claimed','Home claimed'],['partner.chosen','Partner chosen'],['home.soil.tilled','Soil prepared'],['home.oran.planted','Oran planted'],['home.oran.watered','Oran watered'],['home.oran.harvested','First harvest']].map(([key,label])=><li key={key}><span aria-hidden="true">{!setup?'…':setup.completed.includes(key)?'✓':'○'}</span> {label}<span className="sr-only">{!setup?' — status unknown':setup.completed.includes(key)?' — completed':' — not completed'}</span></li>)}
     </ol>
     {inPublic&&<p className="mt-2 text-xs text-cream-muted">{peers.length===0?'No other signed-in players are currently listed here.':`${peers.length} other ${peers.length===1?'player':'players'} here: ${peers.map(peer=>'@'+peer.handle).join(', ')}`}</p>}
     </details>

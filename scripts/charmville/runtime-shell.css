@@ -103,3 +103,119 @@ body.charm-runtime {
 .voice-notes textarea { display:block; box-sizing:border-box; width:100%; padding:12px; background:var(--color-wood-900); color:var(--color-cream); border:1px solid var(--color-line); }
 
 .charm-runtime .charm-tutorial-continue[hidden] { display:none!important; }
+
+/* Charmville game palette — scoped aliases documented in DESIGN.md. */
+body.charm-runtime {
+ --game-night:#102F3A; --game-frame:#174955; --game-panel:#205966;
+ --game-edge:#75B7B3; --game-paper:#F2F7E6; --game-muted:#B7D5D2; --game-select:#F8D66D;
+ --color-wood-950:var(--game-night); --color-wood-900:var(--game-frame);
+ --color-wood-850:var(--game-panel); --color-wood-800:var(--game-panel); --color-wood-700:var(--game-frame);
+ --color-forest-900:var(--game-night); --color-forest-800:var(--game-frame);
+ --color-forest-700:var(--game-panel); --color-forest-600:var(--game-edge);
+ --color-cream:var(--game-paper); --color-cream-muted:var(--game-muted);
+ --color-gold-500:var(--game-select); --color-gold-400:var(--game-paper);
+ --color-gold-300:var(--game-paper); --color-gold-600:var(--game-edge);
+ --color-panel:var(--game-frame); --color-panel-soft:var(--game-panel); --color-panel-strong:var(--game-night);
+ --color-line:var(--game-edge); --color-line-strong:var(--game-edge); --color-on-gold:var(--game-night);
+ background:var(--game-night); color:var(--game-paper);
+}
+
+/* Keep the saved-placement handshake out of the opening scene. */
+.charm-runtime.charm-arrival-pending canvas { visibility:hidden; }
+.charm-runtime #charm-arrival-status { padding:16px; margin:0; color:var(--color-cream); background:var(--color-wood-900); }
+.charm-runtime #charm-arrival-status[hidden] { display:none; }
+
+/* World-first readout: native footer falls back when its presentation lease expires. */
+.charm-compact-hud { position:fixed; z-index:20; box-sizing:border-box; color:var(--color-cream); background:var(--color-wood-950); border:1px solid var(--color-line); border-radius:8px; font:600 13px/1.35 system-ui,sans-serif; }
+.charm-compact-hud[hidden],.charm-compact-hud [hidden] { display:none!important; }
+.charm-compact-hud-line { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-left:10px; }
+.charm-compact-hud [data-task] { min-width:0; }
+.charm-runtime .charm-compact-hud button { min-height:44px; padding:6px 10px; font-size:12px; border-width:0 0 0 1px; border-radius:0 8px 8px 0; flex-shrink:0; }
+.charm-runtime:has(dialog[open]) .charm-compact-hud { visibility:hidden; }
+.charm-compact-hud p { margin:8px 10px; }
+.charm-compact-hud [data-care] { color:var(--color-cream-muted); }
+
+/* Adventure menu: a stable illustrated pane, destination list and help window.
+   Artwork is the existing source icon catalogue; ownership is never implied. */
+.charm-runtime .charm-game-menu { box-sizing:border-box; width:min(92vw,720px); max-height:92dvh; overflow:auto; padding:0; border:4px solid var(--game-edge); border-radius:18px 18px 10px 10px; background:var(--game-frame); color:var(--game-paper); box-shadow:0 0 0 3px var(--game-night),0 12px 0 var(--game-night); }
+.charm-game-menu::backdrop { background:color-mix(in srgb,var(--game-night) 72%,transparent); }
+.charm-menu-heading { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:4px solid var(--game-night); background:var(--game-panel); }
+.charm-menu-heading span { font-size:11px; font-weight:800; letter-spacing:.16em; color:var(--game-muted); }
+.charm-menu-heading h1 { margin:0; font-size:24px; line-height:1.2; letter-spacing:-.03em; color:var(--game-paper); }
+.charm-menu-heading .charm-menu-device { color:var(--game-select); letter-spacing:.3em; }
+.charm-menu-body { display:grid; grid-template-columns:minmax(170px,.9fr) minmax(230px,1.25fr); gap:12px; padding:14px; }
+.charm-menu-preview { display:flex; flex-direction:column; justify-content:center; align-items:center; min-width:0; border:3px solid var(--game-edge); border-radius:8px; background:var(--game-paper); color:var(--game-night); }
+.charm-menu-art-well { display:grid; place-items:center; position:relative; width:100%; min-height:190px; overflow:hidden; background:repeating-linear-gradient(0deg,transparent 0 7px,color-mix(in srgb,var(--game-edge) 18%,transparent) 7px 8px); }
+.charm-menu-art-well img { position:relative; z-index:1; width:96px; height:96px; image-rendering:pixelated; object-fit:contain; filter:drop-shadow(0 5px 0 color-mix(in srgb,var(--game-night) 15%,transparent)); }
+.charm-menu-art-base { position:absolute; width:116px; height:26px; top:calc(50% + 39px); border-radius:50%; background:color-mix(in srgb,var(--game-edge) 45%,transparent); }
+.charm-menu-caption { width:100%; box-sizing:border-box; min-height:96px; text-align:center; border-top:2px solid var(--game-edge); padding:12px; }
+.charm-menu-caption > span { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.1em; }
+.charm-menu-caption h2 { margin:4px 0 0; font-size:21px; line-height:1.2; color:var(--game-night); }
+.charm-menu-navigation { display:flex; flex-direction:column; gap:3px; padding:5px; border:3px solid var(--game-night); border-radius:8px; background:var(--game-paper); }
+.charm-runtime .charm-menu-navigation button { display:grid; grid-template-columns:14px 28px 1fr auto; justify-content:start; gap:6px; min-height:44px; border:2px solid transparent; border-radius:4px; padding:4px 8px; background:transparent; color:var(--game-night); text-align:left; font-size:16px; line-height:1.2; }
+.charm-menu-navigation img { image-rendering:pixelated; object-fit:contain; }
+.charm-menu-cursor { opacity:0; font-size:12px; }
+.charm-runtime .charm-menu-navigation button[data-preview=true] { background:var(--game-select); border-color:var(--game-night); color:var(--game-night); }
+.charm-menu-navigation button[data-preview=true] .charm-menu-cursor { opacity:1; }
+.charm-runtime .charm-menu-navigation button:focus-visible { outline:3px solid var(--game-panel); outline-offset:1px; }
+.charm-runtime .charm-menu-navigation button:disabled { opacity:.5; cursor:default; }
+.charm-menu-navigation small { font-size:9px; max-width:44px; text-align:right; }
+.charm-menu-description { margin:0 14px 12px; padding:12px 16px; min-height:78px; box-sizing:border-box; border:3px double var(--game-edge); border-radius:8px; background:var(--game-night); }
+.charm-menu-description p { margin:0 0 5px; font-size:15px; line-height:1.4; color:var(--game-paper); }
+.charm-menu-description > span { display:block; font-size:11px; color:var(--game-muted); }
+.charm-menu-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:8px 14px; border-top:2px solid var(--game-edge); background:var(--game-panel); }
+.charm-menu-footer p { margin:0; font-size:12px; color:var(--game-paper); }
+.charm-menu-footer p > span { margin:0 5px; }
+.charm-menu-footer kbd { border:0; padding:0; font-size:11px; font-family:inherit; font-weight:800; }
+.charm-runtime .charm-menu-footer button { gap:8px; background:var(--game-paper); color:var(--game-night); border:2px solid var(--game-edge); border-radius:8px; }
+.charm-menu-footer button kbd { color:inherit; }
+@media(max-width:540px) {
+ .charm-runtime .charm-game-menu { width:96vw; max-height:96dvh; }
+ .charm-menu-heading { padding:10px 14px; }
+ .charm-menu-heading h1 { font-size:21px; }
+ .charm-menu-body { grid-template-columns:minmax(90px,.65fr) minmax(180px,1.35fr); gap:8px; padding:8px; }
+ .charm-menu-art-well { min-height:140px; }
+ .charm-menu-art-well img { width:72px; height:72px; }
+ .charm-menu-art-base { width:80px; height:18px; top:calc(50% + 28px); }
+ .charm-menu-caption { padding:8px 5px; }
+ .charm-menu-caption h2 { font-size:17px; }
+ .charm-runtime .charm-menu-navigation button { font-size:14px; gap:3px; padding:4px; grid-template-columns:10px 24px 1fr; }
+ .charm-menu-navigation small { display:none; }
+ .charm-menu-description { margin:0 8px 8px; padding:10px; min-height:90px; }
+ .charm-menu-description p { font-size:13px; }
+ .charm-menu-footer { padding:6px 8px; }
+}
+@media(max-height:560px) and (min-width:541px) {
+ .charm-menu-body { padding:8px 14px; }
+ .charm-menu-navigation { max-height:220px; overflow:auto; }
+ .charm-menu-art-well { min-height:120px; }
+ .charm-menu-caption { min-height:70px; }
+ .charm-menu-description { min-height:64px; padding:8px 12px; }
+}
+
+/* The notebook shares the illustrated device/paper vocabulary of the game menu. */
+.charm-runtime dialog.voice-notes { width:min(760px,calc(100vw - 24px)); padding:0; border:4px solid var(--color-line-strong); border-radius:18px; background:var(--color-wood-950); max-height:90dvh; overflow:auto; }
+.voice-studio-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px; background:var(--color-wood-700); border-bottom:3px double var(--color-line-strong); }
+.voice-studio-heading div { display:grid; gap:4px; }
+.voice-studio-heading small { font-size:10px; font-weight:800; letter-spacing:.12em; }
+.voice-studio-heading strong { font-size:24px; }
+.voice-studio-body { display:grid; grid-template-columns:minmax(140px,.8fr) minmax(0,1.6fr); gap:14px; padding:14px; }
+.voice-studio-art,.voice-studio-work { background:var(--color-cream); color:var(--color-wood-950); border:3px double var(--color-line-strong); border-radius:8px; padding:16px; }
+.voice-studio-art { text-align:center; align-self:start; }
+.voice-studio-art img { display:block; image-rendering:pixelated; margin:24px auto; }
+.voice-studio-art h2 { font-size:20px; line-height:1.2; }
+.voice-studio-art p { font-size:13px; }
+.voice-studio-art [role=status] { border-top:2px solid var(--color-line-strong); padding-top:14px; font-weight:700; }
+.voice-studio-work h2 { margin:18px 0 10px; font-size:16px; }
+.voice-studio-work h2:first-child { margin-top:0; }
+.voice-studio-work label { font-size:12px; }
+.charm-runtime .voice-studio-work textarea { background:var(--color-cream); color:var(--color-wood-950); border:2px solid var(--color-wood-700); border-radius:6px; margin:6px 0 10px; font-size:16px; }
+.voice-studio-work .voice-recognition-note { color:var(--color-wood-700); font-size:12px; }
+.voice-studio-footer { padding:14px 18px; border-top:3px double var(--color-line-strong); font-size:12px; }
+@media(max-width:480px){ .voice-studio-body{grid-template-columns:1fr;} .voice-studio-art{display:grid;grid-template-columns:64px 1fr;gap:8px;text-align:left;padding:10px;} .voice-studio-art img{width:64px;height:64px;margin:0;grid-row:span 2;} .voice-studio-art h2,.voice-studio-art p{margin:0;} .voice-studio-art [role=status]{grid-column:1/-1;} }
+.charm-runtime .voice-studio-work textarea { font-family:inherit; line-height:1.5; }
+
+/* Field-guide cards keep input help in the same paper/device language. */
+.charm-runtime .charm-runtime-controls dl > div { background:var(--color-cream); color:var(--color-wood-950); border:2px solid var(--color-line-strong); border-left:6px solid var(--color-gold-500); border-radius:6px; padding:14px; }
+.charm-runtime .charm-runtime-controls dt { color:var(--color-wood-950); font-size:17px; }
+.charm-runtime .charm-runtime-controls kbd { background:var(--color-wood-950); color:var(--color-cream); min-width:18px; text-align:center; box-shadow:0 2px 0 var(--color-wood-700); }

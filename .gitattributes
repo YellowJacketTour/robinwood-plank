@@ -2,3 +2,7 @@
 public/charmville/reference-items/** -text
 public/charmville/catalog/emoji-test-17.0.txt -text
 public/charmville/creatures/followers/** -text -whitespace
+
+# Content-addressed cache bytes must not change across operating systems.
+public/images/charmville/cache/** -text
+docs/charmville-reconstruction/source-evidence/** -text -whitespace

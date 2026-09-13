@@ -31,3 +31,81 @@
  .belt { align-self:start; position:sticky; top:44px; }
 }
 @media (prefers-reduced-motion:reduce) { .slot { transition:none; } }
+
+/* Party is a roster and inspection screen, with stable information positions. */
+.roster { grid-template-columns:1fr; gap:8px; }
+.slot { display:grid; grid-template-columns:64px minmax(0,1fr) auto; grid-template-rows:auto auto auto; column-gap:10px; min-height:86px; padding:10px 14px 10px 20px; border-radius:8px 24px 24px 8px; text-align:left; }
+.slot > [role=img] { grid-column:1; grid-row:1 / 4; }
+.slotName { grid-column:2; grid-row:1; font-size:14px; }
+.slotHealth { grid-column:2; grid-row:2; text-align:left; font-size:12px; }
+.healthTrack { grid-column:2; grid-row:3; width:100%; height:7px; margin:2px 0; border:1px solid var(--color-cream-muted); }
+.healthTrack > span { background:var(--color-forest-600); }
+.slot > span:last-child:not(.healthTrack):not(.slotHealth) { grid-column:3; grid-row:1 / 4; font-size:11px; }
+.slotNumber { left:5px; top:5px; font-size:10px; }
+.selected { border-color:var(--color-gold-500); box-shadow:inset 4px 0 0 var(--color-gold-500),0 3px 0 var(--color-forest-900); }
+.portrait { flex-direction:column; text-align:center; gap:6px; min-height:180px; border-radius:8px; }
+.portrait > [role=img] { margin:18px; transform:scale(2); }
+.portrait > div:last-child > div { justify-content:center; }
+@container (min-width:580px) { .roster { grid-template-columns:1fr; } .slot { min-height:86px; } .layout { grid-template-columns:minmax(260px,.9fr) minmax(280px,1.1fr); } }
+@container (max-width:360px) { .slot { grid-template-columns:48px minmax(0,1fr); } .slot > [role=img] { transform:scale(.75); transform-origin:left center; } .slot > span:last-child:not(.healthTrack):not(.slotHealth) { grid-column:2; grid-row:4; justify-self:start; } }
+
+/* Empty belt positions remain selectable without burying companion actions. */
+.slot:not(:has([role=img])) { min-height:48px; grid-template-rows:auto auto; padding-block:6px; }
+.slot:not(:has([role=img])) > span:nth-child(2) { height:auto; grid-column:1; grid-row:1 / 3; }
+.slot:not(:has([role=img])) .slotHealth { grid-column:2; grid-row:2; }
+
+@container (max-width:579px) {
+ .shell[data-party-page=roster] .detail { display:none; }
+ .shell[data-party-page=detail] .belt { display:none; }
+ .portrait { min-height:150px; }
+}
+
+.detail { scroll-margin-top:68px; }
+
+.pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:12px; font-weight:700; }
+.pager button { padding-inline:10px; }
+
+.departure { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 16px; border-bottom:2px solid var(--color-line); }
+.departure p { flex:1 1 180px; font-size:13px; line-height:1.5; }
+
+/* Match the approved native adventure menu: teal instrument, paper roster,
+   warm selection and source-art portrait. Scoped to this account panel. */
+.shell { border:4px solid var(--game-edge); border-radius:18px 18px 10px 10px; background:var(--game-frame); color:var(--game-night); box-shadow:0 0 0 2px var(--game-night),0 7px 0 var(--game-night); }
+.shell > header { border-bottom:4px solid var(--game-night); background:var(--game-panel); color:var(--game-paper); }
+.deviceHeading { display:flex; gap:12px; align-items:center; min-width:0; }
+.deviceEmblem { display:block; width:48px; height:48px; flex-shrink:0; background:url('/charmville/reference-items/pokeemerald/graphics/items/icons/poke_ball.png') center/48px 48px no-repeat; image-rendering:pixelated; }
+.belt { padding:12px; background:var(--game-frame); }
+.beltHeading { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 4px 9px; color:var(--game-paper); }
+.beltHeading strong { font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+.beltHeading span { font-size:11px; color:var(--game-muted); }
+.roster { gap:5px; padding:6px; border:3px solid var(--game-night); border-radius:8px; background:var(--game-paper); }
+.slot { min-height:80px; padding:8px 8px 8px 20px; border:2px solid color-mix(in srgb,var(--game-edge) 45%,transparent); border-radius:5px; background:var(--game-paper); color:var(--game-night); box-shadow:none; transition:none; }
+.slot:hover { transform:none; border-color:var(--game-panel); }
+.slot.selected { background:var(--game-select); border-color:var(--game-night); outline:none; box-shadow:inset 4px 0 0 var(--game-night); }
+.slot.selected::before { content:'▶'; position:absolute; left:4px; top:calc(50% - 6px); font-size:10px; line-height:12px; color:var(--game-night); }
+.slot:focus-visible { outline:3px solid var(--game-panel); outline-offset:1px; }
+.slotNumber { color:var(--game-panel); }
+.belt .slot :global(.text-cream-muted),.belt .slot .slotHealth { color:var(--game-frame); }
+.slot .walkingStatus { border:1px solid var(--game-edge); color:var(--game-night); background:var(--game-muted); font-size:10px; padding:3px 5px; }
+.healthTrack { background:var(--game-muted); border-color:var(--game-frame); }
+.healthTrack > span { background:var(--game-panel); }
+.belt fieldset legend { color:var(--game-muted)!important; }
+.belt fieldset button { color:var(--game-night); background:var(--game-paper); border:2px solid var(--game-edge); box-shadow:none; }
+.belt fieldset button[aria-pressed=true] { background:var(--game-select); border-color:var(--game-night); }
+.detail { margin:12px; padding:12px; border:3px solid var(--game-edge); border-radius:8px; background:var(--game-paper); }
+.detail :global(.text-cream-muted) { color:var(--game-frame); }
+.detail :global(.text-gold-300) { color:var(--game-night); }
+.detail button { color:var(--game-night); border-color:var(--game-edge); box-shadow:none; }
+.detail button:focus-visible { outline:3px solid var(--game-panel); outline-offset:2px; }
+.detail .portrait { min-height:180px; border:2px solid var(--game-edge); border-radius:5px; background:repeating-linear-gradient(0deg,transparent 0 7px,color-mix(in srgb,var(--game-edge) 18%,transparent) 7px 8px),var(--game-paper); }
+.portrait > [role=img] { filter:drop-shadow(0 3px 0 color-mix(in srgb,var(--game-night) 12%,transparent)); }
+.detailTabs { background:var(--game-muted); border:2px solid var(--game-edge); }
+.detailTabs button[aria-pressed=true] { background:var(--game-select); color:var(--game-night); box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--game-night) 18%,transparent); }
+.footer { background:var(--game-panel); color:var(--game-paper); border-top:2px solid var(--game-edge); }
+.footer :global(.text-cream-muted),.footer :global(.text-gold-300) { color:var(--game-paper); }
+.controlGuide { margin:2px 0 4px; font-size:11px; color:var(--game-muted); }
+.controlGuide kbd { font-family:inherit; font-size:11px; font-weight:800; color:var(--game-paper); }
+.controlGuide > span { margin:0 5px; }
+.departure { background:var(--game-paper); color:var(--game-night); }
+@container (min-width:580px) { .detail { margin-left:0; border:3px solid var(--game-edge); } .slot { min-height:80px; } }
+@container (max-width:579px) { .detail { margin:10px; } .deviceEmblem { width:36px; height:36px; background-size:36px 36px; } }

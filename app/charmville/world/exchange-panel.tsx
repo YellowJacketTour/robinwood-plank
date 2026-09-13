@@ -16,9 +16,9 @@ export default function ExchangePanel({wallet,handle,onChanged}:{wallet:string;h
  const epoch=useRef(0),abort=useRef<AbortController|null>(null),readAbort=useRef<AbortController|null>(null);
  const load=useCallback(async()=>{
   const version=epoch.current;readAbort.current?.abort();const controller=new AbortController();readAbort.current=controller;
-  try{const response=await fetch("/api/charmville/exchange",{cache:"no-store",mode:"same-origin",redirect:"error",signal:controller.signal});const data=await response.json();if(version!==epoch.current||controller.signal.aborted)return;if(!response.ok)throw new Error(data.error??"Exchange unavailable");setOffers(data.offers);setDefinitions(data.definitions);}
+  try{const proof=await savedWalletProof(wallet);if(controller.signal.aborted)return;const response=await fetch("/api/charmville/exchange",{headers:proof.sessionToken?{authorization:`Bearer ${proof.sessionToken}`}:{},cache:"no-store",mode:"same-origin",redirect:"error",signal:controller.signal});const data=await response.json();if(version!==epoch.current||controller.signal.aborted)return;if(!response.ok)throw new Error(data.error??"Exchange unavailable");setOffers(data.offers);setDefinitions(data.definitions);}
   catch(error){if(version===epoch.current&&!controller.signal.aborted)setMessage(error instanceof Error?error.message:"Exchange unavailable");}
- },[]);
+ },[wallet]);
  useEffect(()=>{let disposed=false;const versions=epoch,controllers=abort,reads=readAbort;void Promise.resolve().then(()=>{if(!disposed)void load();});return()=>{disposed=true;++versions.current;controllers.current?.abort();reads.current?.abort();};},[load,wallet,handle]);
  function whole(value:string,max:bigint){if(!/^[1-9]\d{0,9}$/.test(value)||BigInt(value)>max)throw new Error("Enter a valid whole quantity and Grain price.");return BigInt(value);}
  function prepare(command:Command,summary:string){if(uncertain)return;setMessage("");setReview({command,summary});}

@@ -1,0 +1,128 @@
+From f851e093c9b4216ac312a667f7cb36e875468753 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:39:52 -0500
+Subject: [PATCH] refactor(zc): support paired sprite lighting targets
+
+---
+ src/sprite.h         |  3 +++
+ src/zc/zc_sprite.cpp | 27 ++++++++++++++++++++++++---
+ src/zq/zq_sprite.cpp | 10 ++++++++++
+ 3 files changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/src/sprite.h b/src/sprite.h
+index dfdc22e..3118984 100644
+--- a/src/sprite.h
++++ b/src/sprite.h
+@@ -154,6 +154,8 @@ public:
+     sprite(zfix X,zfix Y,int32_t T,int32_t CS,int32_t F,int32_t Clk,int32_t Yofs);
+     virtual ~sprite();
+ 	virtual void handle_sprlighting();
++	// Borrowed paired targets; omitted/incomplete pairs retain legacy planes.
++	virtual void handle_sprlighting(BITMAP* darkness, BITMAP* translucent_darkness);
+     virtual void draw(BITMAP* dest);                        // main layer
+     virtual void drawzcboss(BITMAP* dest);                        // main layer
+     virtual void draw8(BITMAP* dest);                       // main layer
+@@ -322,6 +324,7 @@ public:
+ 	movingblock();
+ 	void clear();
+ 	void handle_sprlighting() override;
++	void handle_sprlighting(BITMAP* darkness, BITMAP* translucent_darkness) override;
+ 	void set(int32_t X, int32_t Y, int32_t combo, int32_t cset, int32_t layer, int32_t placedfl);
+ 	void push(zfix bx,zfix by,int32_t d,int32_t f);
+ 	void push_new(zfix bx,zfix by,int32_t d,int32_t f,zfix spd);
+diff --git a/src/zc/zc_sprite.cpp b/src/zc/zc_sprite.cpp
+index 4007c7f..78ecfc5 100644
+--- a/src/zc/zc_sprite.cpp
++++ b/src/zc/zc_sprite.cpp
+@@ -11,6 +11,11 @@
+ #include "iter.h"
+ 
+ void sprite::handle_sprlighting()
++{
++	handle_sprlighting(nullptr, nullptr);
++}
++
++void sprite::handle_sprlighting(BITMAP* darkness, BITMAP* translucent_darkness)
+ {
+ 	if (!get_qr(qr_NEW_DARKROOM)) return;
+ 	if (!is_any_room_dark) return;
+@@ -42,7 +47,13 @@ void sprite::handle_sprlighting()
+ 		}
+ 	}
+ 
+-	handle_lighting(x0, y0 + playing_field_offset, glowShape, glowRad, dir, darkscr_bmp);
++	// Never combine one supplied plane with one legacy plane.
++	if (!darkness || !translucent_darkness)
++	{
++		darkness = darkscr_bmp;
++		translucent_darkness = darkscr_bmp_trans;
++	}
++	handle_lighting(x0, y0 + playing_field_offset, glowShape, glowRad, dir, darkness, translucent_darkness);
+ }
+ 
+ bool is_conveyor(int32_t type)
+@@ -277,13 +288,23 @@ newcombo const* sprite::check_conveyor()
+ }
+ 
+ void movingblock::handle_sprlighting()
++{
++	handle_sprlighting(nullptr, nullptr);
++}
++
++void movingblock::handle_sprlighting(BITMAP* darkness, BITMAP* translucent_darkness)
+ {
+ 	if (!get_qr(qr_NEW_DARKROOM)) return;
+ 	if (!is_any_room_dark) return;
+ 	
+ 	if (!active()) return;
+ 	
+-	sprite::handle_sprlighting();
++	if (!darkness || !translucent_darkness)
++	{
++		darkness = darkscr_bmp;
++		translucent_darkness = darkscr_bmp_trans;
++	}
++	sprite::handle_sprlighting(darkness, translucent_darkness);
+ 
+ 	if (unsigned(bcombo) < MAXCOMBOS)
+ 	{
+@@ -293,7 +314,7 @@ void movingblock::handle_sprlighting()
+ 			int x0 = x.getInt() + (hit_width / 2);
+ 			int y0 = y.getInt() + (hit_height / 2);
+ 
+-			do_torch_combo(cmb, x0, y0 + playing_field_offset, darkscr_bmp);
++			do_torch_combo(cmb, x0, y0 + playing_field_offset, darkness, translucent_darkness);
+ 		}
+ 	}
+ }
+diff --git a/src/zq/zq_sprite.cpp b/src/zq/zq_sprite.cpp
+index 86b7c3c..6bbead4 100644
+--- a/src/zq/zq_sprite.cpp
++++ b/src/zq/zq_sprite.cpp
+@@ -12,6 +12,11 @@ void sprite::handle_sprlighting()
+ 	return;
+ }
+ 
++void sprite::handle_sprlighting(BITMAP*, BITMAP*)
++{
++	return;
++}
++
+ bool sprite::on_sideview_solid() const
+ {
+ 	return false;
+@@ -25,6 +30,11 @@ void movingblock::handle_sprlighting()
+ 	return;
+ }
+ 
++void movingblock::handle_sprlighting(BITMAP*, BITMAP*)
++{
++	return;
++}
++
+ void movingblock::push(zfix,zfix,int32_t,int32_t)
+ {
+     return;
+-- 
+2.52.0.windows.1
+

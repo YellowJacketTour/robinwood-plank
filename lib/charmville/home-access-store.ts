@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { YardError } from "./errors";
+import { requireCharmvilleAdmission } from "./admission";
 export const HOME_RIGHTS = ["visit", "help", "harvest", "build", "storage"] as const;
 export type HomeRight = typeof HOME_RIGHTS[number];
 export type HomeGrantInput = { visitor: string; revoke: boolean; rights: HomeRight[]; containers: string[]; expiresAt?: string; revision: string };
@@ -18,6 +19,7 @@ export async function homeActor(client: PoolClient, token: string): Promise<stri
   if (!/^[a-f0-9]{64}$/i.test(token)) throw new YardError("Sign in to access this home",401);
   const {rows}=await client.query(`SELECT p.id::text FROM plankspace_wallet_sessions s JOIN plankspace_profiles p ON lower(p.wallet)=lower(s.wallet) WHERE s.token_hash=$1 AND s.expires_at::timestamptz>clock_timestamp() AND p.moderation_status='approved' FOR SHARE OF s,p`,[createHash("sha256").update(token).digest("hex")]);
   if (!rows[0]) throw new YardError("Your session expired. Sign in again.",401);
+  await requireCharmvilleAdmission(client,rows[0].id);
   return rows[0].id;
 }
 // Call inside the same transaction as the world/economic mutation. The home row

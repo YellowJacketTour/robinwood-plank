@@ -1,0 +1,95 @@
+From a18aa020e7691e92692e6d1c2278359eaba113f1 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 07:43:52 -0500
+Subject: [PATCH] feat(zc): pan live world camera independently of player
+
+---
+ src/zc/maps.cpp | 34 +++++++++++++++++++++++++++++++---
+ 1 file changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 4214b53..008b1e7 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -5841,21 +5841,47 @@ struct world_camera_frame
+     scene_ui_commands ui;
+     bool prepared = false;
+     double zoom = 1.0;
++    int pan_x = 0, pan_y = 0;
+     int map = -1, screen = -1, offset = 0;
+ };
+ static std::unique_ptr<world_camera_frame> camera_frame;
+ 
+ void release_world_camera_frame() { camera_frame.reset(); }
+ 
++static std::optional<presentation_camera::geometry> get_world_camera_geometry(double zoom, int pan_x, int pan_y)
++{
++    auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, zoom);
++    if (!geometry) return std::nullopt;
++    if (pan_x || pan_y)
++    {
++        auto& r = geometry->world;
++        r.x = presentation_camera::centered_axis(r.x + r.w / 2 + pan_x, r.w, world_w, true);
++        r.y = presentation_camera::centered_axis(r.y + r.h / 2 + pan_y, r.h, world_h, true);
++    }
++    return geometry;
++}
++
+ void begin_world_camera_frame()
+ {
+     double requested = 1.0;
++    int pan_x = 0, pan_y = 0;
+ #ifdef __EMSCRIPTEN__
+     requested = EM_ASM_DOUBLE({
+         window.charmvilleCameraReady = true;
++        window.charmvilleCameraPanReady = true;
+         const z = Number(window.charmvilleCameraZoom);
+         return Number.isFinite(z) ? z : 1;
+     });
++#endif
++#ifdef __EMSCRIPTEN__
++    pan_x = EM_ASM_INT({
++        const value = Number(window.charmvilleCameraPanX);
++        return Number.isFinite(value) ? Math.round(Math.max(-4096, Math.min(4096, value))) : 0;
++    });
++    pan_y = EM_ASM_INT({
++        const value = Number(window.charmvilleCameraPanY);
++        return Number.isFinite(value) ? Math.round(Math.max(-1408, Math.min(1408, value))) : 0;
++    });
+ #endif
+     if (camera_frame) camera_frame->prepared = false;
+ #ifdef __EMSCRIPTEN__
+@@ -5874,10 +5900,11 @@ void begin_world_camera_frame()
+         EM_ASM({ window.charmvilleMapOpen = false; });
+     }
+ #endif
+-    if (requested >= 1 || requested < .5 || !std::isfinite(requested) ||
++    if (requested > 1 || requested < .5 || !std::isfinite(requested) ||
++        (requested == 1 && pan_x == 0 && pan_y == 0) ||
+         !game || !is_in_scrolling_region() || screenscrolling || lensclk ||
+         is_extended_height_mode() || !framebuf) return;
+-    auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, requested);
++    auto geometry = get_world_camera_geometry(requested, pan_x, pan_y);
+     if (!geometry) return;
+     const auto r = geometry->world;
+     if (r.h + playing_field_offset + 8 > 464) return;
+@@ -5892,6 +5919,7 @@ void begin_world_camera_frame()
+         frame.targets.get(presentation_camera::scratch_plane::translucent_darkness));
+     frame.ui.clear();
+     frame.zoom = requested;
++    frame.pan_x = pan_x; frame.pan_y = pan_y;
+     frame.map = cur_map; frame.screen = cur_screen; frame.offset = playing_field_offset;
+     frame.prepared = true;
+ }
+@@ -5937,7 +5965,7 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 	{
+ 		auto& frame = *camera_frame;
+ 		frame.prepared = false;
+-		auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, frame.zoom);
++		auto geometry = get_world_camera_geometry(frame.zoom, frame.pan_x, frame.pan_y);
+ 		if (geometry && frame.targets.extent(presentation_camera::scratch_plane::world) ==
+ 			presentation_camera::surface_extent{geometry->world.w, geometry->world.h + playing_field_offset})
+ 		{
+-- 
+2.52.0.windows.1
+

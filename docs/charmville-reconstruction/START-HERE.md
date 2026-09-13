@@ -1,3 +1,5 @@
+> Approved scope, 2026-09-13: Read [APPROVED-GLOBAL-COMPLETION-CONTRACT.md](APPROVED-GLOBAL-COMPLETION-CONTRACT.md) before planning or declaring completion. Its 25 GLOBAL acceptance gates supplement every retained earlier requirement. Adoption of a plan does not certify implementation; advanced experiments must beat documented baselines.
+
 # Charmville: context-free recovery and continuation
 
 Recovery opening updated: 2026-09-12. This directory is the durable handoff; chat history is not required.

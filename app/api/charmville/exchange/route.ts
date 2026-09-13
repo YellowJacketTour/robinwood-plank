@@ -4,7 +4,7 @@ import { YardError } from '@/lib/charmville/errors';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const headers={'Cache-Control':'private, no-store'};
-export async function GET(){try{return Response.json(await readExchange(postgresPool()),{headers});}catch{return Response.json({error:'Exchange unavailable'},{status:503,headers});}}
+export async function GET(request:Request){try{return Response.json(await readExchange(postgresPool(),request.headers.get('authorization')?.replace(/^Bearer\s+/i,'')??''),{headers});}catch(error){return Response.json({error:error instanceof YardError?error.message:'Exchange unavailable'},{status:error instanceof YardError?error.status:503,headers});}}
 export async function POST(request:Request){
  try{
   if(request.headers.get('origin') && request.headers.get('origin')!==new URL(request.url).origin)throw new YardError('Invalid origin',403);

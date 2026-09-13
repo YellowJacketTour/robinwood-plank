@@ -9,7 +9,7 @@ const sequence = (value:unknown):value is string => typeof value==='string'&&/^\
 export function nativeEncounterProjection(raw:unknown){
  const snapshot=record(raw),e=record(snapshot?.encounter);
  const off={type:'charmville:world-encounter',active:false};
- if(!e||e.captured===true||typeof e.id!=='string'||e.speciesId!==286||!cell(e.cell)||!integer(e.hp,0,65535)||!integer(e.maxHp,1,65535)||e.hp>e.maxHp||!sequence(e.revision))return off;
+ if(!e||e.captured===true||typeof e.id!=='string'||e.speciesId!==286||!cell(e.cell)||!integer(e.hp,1,65535)||!integer(e.maxHp,1,65535)||e.hp>e.maxHp||!sequence(e.revision))return off;
  const projected=new Map<string,DamageEvent>();
  for(const rawEvent of Array.isArray(snapshot?.events)?snapshot.events:[]){
   const event=record(rawEvent);

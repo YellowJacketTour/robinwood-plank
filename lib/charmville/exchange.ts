@@ -1,3 +1,5 @@
+import {requireCharmvilleViewer} from './admission-viewer';
+import {requireCharmvilleAdmission} from './admission';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { YardError } from './errors';
@@ -24,7 +26,7 @@ async function actor(client:PoolClient,token:string){
  if(!/^[a-f0-9]{64}$/i.test(token))throw new YardError('Sign in to trade',401);
  const r=await client.query(`SELECT p.id::text FROM plankspace_wallet_sessions s JOIN plankspace_profiles p ON lower(p.wallet)=lower(s.wallet)
  WHERE s.token_hash=$1 AND s.expires_at::timestamptz>clock_timestamp() AND p.moderation_status='approved' FOR SHARE OF s`,[hash(token)]);
- if(!r.rowCount)throw new YardError('Sign in to trade',401);return r.rows[0].id as string;
+ if(!r.rowCount)throw new YardError('Sign in to trade',401);await requireCharmvilleAdmission(client,r.rows[0].id);return r.rows[0].id as string;
 }
 async function grain(client:PoolClient,id:string,delta:bigint){
  const r=await client.query('UPDATE charmville_yards SET grain=grain+$2 WHERE profile_id=$1 AND grain+$2>=0 RETURNING profile_id',[id,delta.toString()]);
@@ -76,9 +78,10 @@ export async function exchangeCommand(pool:Pool,token:string,raw:unknown){
   await client.query('COMMIT');return result;
  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
-export async function readExchange(pool:Pool){
+export async function readExchange(pool:Pool,token=""){
  const client=await pool.connect();
  try{await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+ await requireCharmvilleViewer(client,token);
  const {rows}=await client.query(`SELECT o.id,p.handle AS owner,o.side,o.face_id AS face,o.price::text,o.remaining::text,o.created_at AS "createdAt"
  FROM charmville_offers o JOIN plankspace_profiles p ON p.id=o.owner_profile_id WHERE o.state='open' AND p.moderation_status='approved' ORDER BY o.created_at,o.id LIMIT 100`);
  const totals=await client.query(`SELECT r.grain::text AS reserve,r.opening_supply::text AS "openingSupply",

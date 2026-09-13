@@ -16,11 +16,11 @@ test("Charmville PostgreSQL lifecycle, authorization, retries and races", { skip
   await admin.query(`CREATE SCHEMA ${schema}`);
   try {
     await pool.query(await readFile("deploy/inmotion/postgres/migrations/090_plankspace_native.sql", "utf8"));
-    const sql = await readFile("deploy/inmotion/postgres/migrations/104_charmville_soil.sql", "utf8");
+    const sql = await readFile("deploy/inmotion/postgres/migrations/116_charmville_soil.sql", "utf8");
     await pool.query(sql); await pool.query(sql);
-    await pool.query(await readFile("deploy/inmotion/postgres/migrations/105_charmville_layout.sql","utf8"));
-    await pool.query(await readFile("deploy/inmotion/postgres/migrations/106_charmville_home_access.sql","utf8"));
-    const reserveSql = await readFile("deploy/inmotion/postgres/migrations/107_charmville_grain_reserve.sql", "utf8");
+    await pool.query(await readFile("deploy/inmotion/postgres/migrations/117_charmville_layout.sql","utf8"));
+    await pool.query(await readFile("deploy/inmotion/postgres/migrations/118_charmville_home_access.sql","utf8"));
+    const reserveSql = await readFile("deploy/inmotion/postgres/migrations/119_charmville_grain_reserve.sql", "utf8");
     await pool.query(reserveSql);
     const supply = async () => (await pool.query("SELECT (r.grain + COALESCE((SELECT SUM(grain) FROM charmville_yards),0))::text AS total FROM charmville_grain_reserve r WHERE id=1")).rows[0].total;
     const token = "a".repeat(64), otherToken = "b".repeat(64);

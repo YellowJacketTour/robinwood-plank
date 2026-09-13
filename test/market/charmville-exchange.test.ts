@@ -12,7 +12,7 @@ test('real PostgreSQL escrow preserves supply under partial fills, retries, race
  const admin=new Pool({connectionString}),schema=`exchange_${randomUUID().replaceAll('-','')}`;await admin.query(`CREATE SCHEMA ${schema}`);
  const pool=new Pool({connectionString,options:`-c search_path=${schema}`});
  try{
-  for(const file of ['090_plankspace_native.sql','104_charmville_soil.sql','109_charmville_exchange.sql'])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,'utf8'));
+  for(const file of ['090_plankspace_native.sql','116_charmville_soil.sql','121_charmville_exchange.sql'])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,'utf8'));
   const ids:string[]=[];
   for(let i=1;i<=3;i++){
    const wallet='0x'+String(i).repeat(40),token=String(i).repeat(64);
@@ -21,7 +21,7 @@ test('real PostgreSQL escrow preserves supply under partial fills, retries, race
    await pool.query('INSERT INTO charmville_yards(profile_id,grain) VALUES($1,100)',[ids[i-1]]);
    await pool.query("INSERT INTO charmville_stacks(profile_id,face_id,qty) VALUES($1,'stalk',10)",[ids[i-1]]);
   }
-  await pool.query(await readFile('deploy/inmotion/postgres/migrations/107_charmville_grain_reserve.sql','utf8'));
+  await pool.query(await readFile('deploy/inmotion/postgres/migrations/119_charmville_grain_reserve.sql','utf8'));
   const supply=async()=>{const r=await pool.query(`SELECT
    ((SELECT sum(grain) FROM charmville_yards)+COALESCE((SELECT sum(price*remaining) FROM charmville_offers WHERE side='buy' AND state='open'),0))::text AS grain,
    ((SELECT sum(qty) FROM charmville_stacks)+COALESCE((SELECT sum(remaining) FROM charmville_offers WHERE side='sell' AND state='open'),0))::text AS charms`);assert.deepEqual(r.rows[0],{grain:'300',charms:'30'});};

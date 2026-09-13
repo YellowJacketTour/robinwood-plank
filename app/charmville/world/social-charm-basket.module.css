@@ -1,0 +1,23 @@
+.basket { background:var(--game-frame); color:var(--game-paper); border:3px solid var(--game-edge); border-radius:18px; padding:16px; max-width:640px; max-height:100%; overflow:auto; overscroll-behavior:contain; box-shadow:inset 0 0 0 3px var(--game-night); }
+.header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.header h2 { margin:4px 0; font-size:1.35rem; }
+.eyebrow { color:var(--game-muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; }
+.basket button { min-height:44px; padding:10px 14px; border:2px solid var(--game-edge); border-radius:10px; background:var(--game-panel); color:var(--game-paper); cursor:pointer; }
+.basket button:focus-visible { outline:3px solid var(--game-select); outline-offset:3px; }
+.basket button:disabled { opacity:.6; cursor:default; }
+.post,.detail { background:var(--game-paper); color:var(--game-night); border-radius:10px; padding:14px; }
+.post p { margin:6px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; max-height:7em; overflow:auto; }
+.hint { font-size:.875rem; color:var(--game-muted); margin:12px 0; }
+.items { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:12px 0; }
+.basket .item { display:grid; justify-items:center; gap:6px; padding:12px; }
+.item img { object-fit:contain; image-rendering:pixelated; }
+.basket .item[aria-pressed="true"] { border-color:var(--game-select); box-shadow:inset 0 0 0 2px var(--game-select); }
+.detail h3 { margin:0 0 6px; font-size:1.1rem; }
+.detail p { margin:8px 0; }
+.basket .confirm { background:var(--game-select); color:var(--game-night); border-color:var(--game-night); font-weight:800; }
+.status { min-height:1.5em; margin:12px 0; }
+.empty { padding:20px; text-align:center; border:2px dashed var(--game-edge); border-radius:12px; }
+.feed { display:grid; gap:14px; }
+.byline { font-size:.8rem; }
+.postActions { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; margin-top:12px; }
+@media (max-width:420px) { .basket { padding:12px; border-radius:12px; } .header h2 { font-size:1.15rem; } .items { grid-template-columns:repeat(2,minmax(0,1fr)); } }

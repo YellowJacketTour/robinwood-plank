@@ -1,11 +1,11 @@
 // Server-filtered parent projection; the native guest relay is a separate mode.
 const origins=new Set(['http://localhost:3017','http://127.0.0.1:3017']);
-let peers=[],expires=0,last=null;
+let peers=[],expires=0,last=null,native={dmap:4,screen:63};
 function rendered(peer,now){const t=Math.min(1,Math.max(0,(now-peer.started)/100));return {x:Math.round(peer.fromX+(peer.x-peer.fromX)*t),y:Math.round(peer.fromY+(peer.y-peer.fromY)*t)};}
 function flush(){
  if(parent===window||typeof FS==='undefined')return;
  if(Date.now()>expires)peers=[];
- const text=[1,peers.length,...peers.flatMap(p=>{const point=rendered(p,Date.now());return [point.x,point.y];}),...peers.map(p=>p.direction)].join('|');
+ const text=[1,peers.length,...peers.flatMap(p=>{const point=rendered(p,Date.now());return [point.x,point.y];}),...peers.map(p=>p.direction),native.dmap,native.screen].join('|');
  if(text===last)return;
  try{const root=FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville';FS.mkdirTree(root);FS.writeFile(root+'/account-peers.txt',text);last=text;}catch{}
 }
@@ -17,6 +17,10 @@ window.addEventListener('message',event=>{
   if(!p||typeof p.profileId!=='string'||p.profileId.length<1||p.profileId.length>128||ids.has(p.profileId)||typeof p.handle!=='string'||p.handle.length>128)return;
   if(!Number.isInteger(p.x)||!Number.isInteger(p.y)||p.x<0||p.x>240||p.y<0||p.y>160||p.x%8||p.y%8)return;ids.add(p.profileId);
  }
+ const destination=data.native??{dmap:4,screen:63};
+ if(destination.dmap!==4||![62,63].includes(destination.screen))return;
+ if(destination.screen!==native.screen){peers=[];last=null;}
+ native=destination;
  const now=Date.now();
  const previous=new Map((now>expires?[]:peers).map(p=>[p.profileId,p]));
  peers=data.active?data.peers.map(p=>{

@@ -1,3 +1,5 @@
+import {requireCharmvilleViewer} from './admission-viewer';
+import {requireCharmvilleAdmission} from './admission';
 import { STARTER_DECORATIONS, validDecorations, type Decoration } from "./layout";
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
@@ -53,6 +55,7 @@ async function actor(client: PoolClient, token: string) {
     WHERE s.token_hash=$1 AND s.expires_at::timestamptz > clock_timestamp()
     AND p.moderation_status='approved' FOR SHARE OF s`, [hash]);
   if (!rows[0]) throw new YardError("Your session expired. Sign in again; your porch is safe.", 401);
+  await requireCharmvilleAdmission(client, rows[0].id);
   return { ...rows[0], hash } as { id: string; wallet: string; hash: string };
 }
 
@@ -82,6 +85,7 @@ export async function readYard(pool: Pool, handle: string, token = "") {
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await requireCharmvilleViewer(client,token);
     const { rows } = await client.query("SELECT id::text, wallet FROM plankspace_profiles WHERE handle=$1 AND moderation_status='approved'", [handle]);
     if (!rows[0]) throw new YardError("Board not found", 404);
     let owner = false;

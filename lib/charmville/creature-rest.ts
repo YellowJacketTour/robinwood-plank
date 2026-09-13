@@ -8,7 +8,7 @@ export async function creatureRest(pool:Pool,token:string,raw?:unknown){const c=
  await c.query("BEGIN");const id=await homeActor(c,token);await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`creature-vitals:${id}`]);
  const p=(await c.query("SELECT home_owner_id::text AS owner,expires_at>clock_timestamp() AS active FROM charmville_world_presence WHERE profile_id=$1 FOR UPDATE",[id])).rows[0];
  const a=(await c.query("SELECT * FROM charmville_native_actors WHERE profile_id=$1 FOR UPDATE",[id])).rows[0];
- const battle=(await c.query("SELECT 1 FROM charmville_encounters WHERE controller_id=$1 AND mode='turn' AND lease_until>clock_timestamp()",[id])).rowCount;
+ const battle=(await c.query("SELECT 1 FROM charmville_encounters WHERE controller_id=$1 AND mode='turn' AND hp>0 AND NOT captured AND lease_until>clock_timestamp()",[id])).rowCount;
  const reason=!p?.active||p.owner!==id?"Return to your own home to rest":!a||a.region_id!==`home:${id}`||a.geometry_revision!==manifest.revision?"Refresh your home position":battle?"Leave the encounter before resting":null;
  await c.query("UPDATE charmville_creature_rest SET status='cancelled' WHERE profile_id=$1 AND status='pending' AND expires_at<=clock_timestamp()",[id]);
  let result:unknown=null;

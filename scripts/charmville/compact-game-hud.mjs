@@ -43,8 +43,8 @@ export function mountCompactHud(root,{getFS=()=>globalThis.FS,isOverlayBlocked=(
    const prompt=view.matchMedia('(pointer:coarse)').matches?'Interact':'E / D';
    const text=(node,value)=>{if(node.textContent!==value)node.textContent=value;};
    text(task,`Bed ${state.bed} · ${interact?prompt+' — ':''}${tasks[state.task]}`);
-   text(stock,state.account?`${state.berries} Oran · ${state.seeds} seeds · ${state.guests} nearby`:`${state.berries} berries · ${state.xp} XP · ${state.guests} nearby`);
-   text(care,state.canFeed?'D — Feed the soil with a cutting.':state.fed?'Soil fed. Your plant is growing.':`${state.cuttings} cuttings · ${state.account?'Saved-world values':'Local adventure; progress is temporary'}`);
+   text(stock,state.account?`${state.berries} Oran · ${state.seeds} ${state.seeds===1?'seed':'seeds'} · ${state.guests} nearby`:`${state.berries} ${state.berries===1?'berry':'berries'} · ${state.xp} XP · ${state.guests} nearby`);
+   text(care,state.canFeed?'D — Feed the soil with a cutting.':state.fed?'Soil fed. Your plant is growing.':`${state.cuttings} ${state.cuttings===1?'cutting':'cuttings'} · ${state.account?'Saved-world values':'Local adventure; progress is temporary'}`);
    panel.hidden=false;
    if(!place()){panel.hidden=true;return;}
    // Write only after valid, visible UI. If this module fails, native restores

@@ -21,7 +21,7 @@ Read `AGENTS.md` and `DESIGN.md`. Before changing persistence, marketplace, wall
 | Scene, controls, coordinates and character | `integrations/plankspace-app/app/charmville/scene.tsx`, `scene.module.css`, `groundskeeper.tsx`, `isometric.ts`, `garden-ground.tsx`, `crop-art.tsx`, `game-icons.tsx`; `lib/charmville/navigation.ts` |
 | Layout and interrupted draft recovery | `lib/charmville/layout.ts`, `layout-draft.ts`; porch/scene integration |
 | Authoritative yard mutation | `app/api/charmville/[handle]/route.ts`; `lib/charmville/store.ts`; `lib/postgres.ts` |
-| Persistent soil/layout schema | `deploy/inmotion/postgres/migrations/104_charmville_soil.sql`, `105_charmville_layout.sql`; preceding PlankSpace migrations provide identities/sessions/posts |
+| Persistent soil/layout schema | `deploy/inmotion/postgres/migrations/116_charmville_soil.sql`, `117_charmville_layout.sql`; preceding PlankSpace migrations provide identities/sessions/posts |
 | Reputation | `lib/charmville/reputation.ts`, `reputation-store.ts`, `reputation-search.ts`, `reputation-query.ts`; `app/api/charmville/reputation/route.ts`; board `reputation-search.tsx` and `reputation-filter.tsx` |
 | Content runtime | `lib/charmville/content.ts`, generated `content-manifest.json`; `scripts/charmville/pack-cache.mjs`; `public/images/charmville/cache/` |
 | Original crops/charms | `scripts/charmville/render_crops.py`, `render_charms.py`, `pack-crops.mjs`; `public/images/charmville/original/`, `charms/` |
