@@ -531,7 +531,9 @@
     0%, 100% { box-shadow: 0 8px 34px rgba(62,224,140,0.35); }
     50% { box-shadow: 0 8px 46px rgba(62,224,140,0.6); }
   }
-  .btn-sub { text-align: center; margin-top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+  /* Reserve the line even when empty: a collapsing sub-line moved the whole
+     dock 22px and resized the WebGL stage exactly at the 3-2-1 on phones. */
+  .btn-sub { text-align: center; margin-top: 10px; min-height: 1.6em; font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
   .sim-btn {
     display: block; width: 100%; max-width: 520px; margin: 10px auto 0; padding: 10px;
     border-radius: 10px; border: 1px dashed var(--line); background: transparent;
@@ -4465,12 +4467,21 @@ async function refresh() {
   const readingCrash = crash, readingProvider = provider, readingWallet = signer?.address || null;
   try {
     const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = await readRoundSnapshot(readingProvider, readingCrash, readingWallet);
-    if(publicPresentationLeadMs&&!publicClockAnchored){
-      // The local development chain can have a deliberate epoch offset.
-      // Preserve the shared server clock's fractional second, then bind it
-      // to the same chain epoch as the contract's scheduled timestamps.
-      publicServerOffsetMs+=(chainNow-Math.floor((performance.now()+publicServerOffsetMs)/1000))*1000;
-      publicClockAnchored=true;
+    if(publicPresentationLeadMs){
+      // The chain can have a deliberate epoch offset, and -- what this used to
+      // miss -- that offset can CHANGE while a tab is open: every restart of the
+      // hosted table advances the chain clock to the wall, so a tab anchored once
+      // at load was 40-60s wrong afterwards. Countdowns hit 0 with nothing behind
+      // them, flights re-anchored late and the finale timing broke, in every tab
+      // left open across a restart, while a fresh join looked perfect. Keep the
+      // shared server clock's fractional second and re-bind whole seconds
+      // whenever the chain disagrees by more than the poll can explain.
+      const driftSec=chainNow-Math.floor((performance.now()+publicServerOffsetMs)/1000);
+      if(!publicClockAnchored||Math.abs(driftSec)>=2){
+        publicServerOffsetMs+=driftSec*1000;
+        publicClockAnchored=true;
+        if(Math.abs(driftSec)>=2){publicScheduledLiftoffMs=null;publicLiftoffs.clear();}
+      }
     }
     if (crash !== readingCrash || provider !== readingProvider || (signer?.address || null) !== readingWallet) return;
 
