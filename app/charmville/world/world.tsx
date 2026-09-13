@@ -15,7 +15,7 @@ import HomePermissions from "../start/home-permissions";
 import FriendsTravelPanel from "./friends-panel";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
-import Image from "next/image";
+import InventoryPanel from "./inventory-panel";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { savedWalletProof, walletProof } from "@/integrations/plankspace-app/app/auth-client";
 import { connectPlankLoveWallet, subscribePlankLoveWalletState } from "@/integrations/plankspace-app/app/plank-love-wallet";
@@ -26,7 +26,6 @@ import CompanionPanel from "./companion-panel";
 import EncounterPanel from "./encounter-panel";
 import {nativeEncounterProjection} from "@/lib/charmville/native-encounter-projection";
 import {useNativeResources} from "./native-resources";
-import {charmName} from "@/lib/charmville/item-display";
 import {useNativeMovement} from "./native-movement";
 import {useNativeContactObserver} from "./native-contact-observer";
 import {requestWorldEntry} from "@/lib/charmville/world-entry-client";
@@ -400,7 +399,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>
         <div id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden={tab!=='inventory'}>
-        <section className="rounded-xl bg-panel p-4" aria-label="Saved inventory">{inventory?<><p className="my-2 text-gold-300">{inventory.grain} Grain</p><h3 className="mt-3 font-bold">Gameplay supplies</h3><ul>{inventory.seeds.map(stack=><li key={stack.face}>{charmName(stack.face)} seed × {stack.qty}</li>)}</ul><h3 className="mt-3 font-bold">Charm Satchel</h3>{inventory.faces.length?<ul>{inventory.faces.map(stack=><li key={stack.face} className="flex items-center gap-2">{stack.face==='oran-berry'&&<Image src="/charmville/items/oran-berry.png" alt="" width={24} height={24} className="[image-rendering:pixelated]"/>}{charmName(stack.face)} × {stack.qty}</li>)}</ul>:<p className="text-cream-muted">No charms yet.</p>}</>:<div><p className="mb-3 text-cream-muted">Set up your home to start collecting supplies and charms.</p><button className={button} onClick={()=>setTab('companions')}>Open Party setup</button></div>}<button className={`${button} mt-3`} disabled={busy} onClick={()=>void load()}>Refresh account</button></section>
+        <InventoryPanel inventory={inventory} busy={busy} onSetup={()=>setTab('companions')} onRefresh={()=>void load()}/>
         <p className="mt-2 text-sm text-cream-muted">Account inventory. The reference adventure’s equipment menu is separate.</p>
         </div>
         <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onEnterHome={()=>{setTab("play");void load({destination:"home",handle:identity.handle});}} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');void openAdventure().then(opened=>{if(opened)requestAnimationFrame(()=>frame.current?.focus());});}} />}</div>

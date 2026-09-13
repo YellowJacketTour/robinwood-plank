@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+ <title>Burning Heart</title>
+ <desc>An original red heart blossom with a golden flame and green stem.</desc>
+ <path fill="#1B120A" d="M16 1h2v4h3v4h2v5h3v3h2v7h-3v3h-4v2h-4v2h-3v-3h-4v-3H6v-3H4v-7h2v-3h6V8h2V5h2z"/>
+ <path fill="#AF761D" d="M16 5h2v3h3v4h2v5H11v-5h3V9h2z"/>
+ <path fill="#E9B43F" d="M16 7h2v4h3v5H13v-4h3z"/>
+ <path fill="#FFF2CF" d="M16 12h2v5h-3v-3h1z"/>
+ <path fill="#BE123C" d="M6 15h2v-2h5v2h6v-2h5v2h2v7h-3v3h-4v3h-5v-3h-4v-3H6z"/>
+ <path fill="#F43F5E" d="M8 15h5v2h6v-2h5v6h-3v3h-4v2h-2v-2h-4v-3H8z"/>
+ <path fill="#FFF2CF" d="M9 16h3v2H9z"/>
+ <path fill="#24693F" d="M15 27h3v4h-3zM10 26h3v2h2v2h-3v-2h-2zM20 26h3v2h-3v2h-2v-2h2z"/>
+</svg>
