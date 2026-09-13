@@ -33,13 +33,14 @@ export function mountInvitePlay({connect}) {
     if(joining||connection)return;joining=true;balance.textContent='Joining…';
     try{
       const r=await fetch('/api/invite/session',{cache:'no-store'});
-      if(r.status===401){location.replace('/');return;}
+      if(r.status===401){        // The session is gone (the chain was reseeded under this tab, or the        // host launched a fresh table). '/' is the gateway's join page only        // when the gateway serves the whole site; behind the plank.love proxy        // it is the marketplace home. Go back to the gate with the last good        // token: same table -> rejoin funded; rotated token -> the gate says so.        const joinPath=document.querySelector('meta[name="plank-invite-join"]')?.content||'/';        const last=sessionStorage.getItem('plank:invite:token')||'';        location.replace(joinPath+(last?'#invite='+last:''));return;      }
       if(!r.ok)throw Error('Test unavailable');const session=await r.json();
       if(session.simulated!==true)throw Error('Free test unavailable');
       invite=session.invite;connection=await connect(session.key);repeat.disabled=false;
       // Joining observes the independent round clock. A wager requires Play,
       // or an explicit repeat opt-in in this session; never spend on reconnect.
       if(auto.classList.contains('active'))auto.click();
+      if(invite)sessionStorage.setItem('plank:invite:token',invite);
       localStorage.setItem('plank:invite:auto','paused');hydrated=true;paintRepeat();await updateBalance();
     }catch{balance.textContent='Tap to retry';balance.onclick=join;balance.style.cursor='pointer';}
     finally{joining=false;}
