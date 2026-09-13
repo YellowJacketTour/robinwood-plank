@@ -2,12 +2,13 @@ import {requireCharmvilleAdmission} from './admission';
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { YardError } from "./errors";
-import { SOCIAL_ITEMS, socialItem } from "./social-items";
+import { socialCustodyItems } from "./social-items";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-export function parseSocialPin(raw: unknown) {
+type SocialPolicy = Parameters<typeof socialCustodyItems>[0];
+export function parseSocialPin(raw: unknown, policy?: SocialPolicy) {
   const p = raw as Record<string, unknown> | null;
-  const item = socialItem(p?.face);
+  const item = socialCustodyItems(policy).find(item => item.id === p?.face);
   if (!p || !item || !/^[1-9]\d{0,17}$/.test(String(p.postId)) ||
       !/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(String(p.requestId)))
     throw new YardError("Choose an owned Oran and a current post", 400);
@@ -19,8 +20,9 @@ const eligible = `p.moderation_status='approved' AND a.moderation_status='approv
  AND ((lower(b.owner_wallet)=lower(v.wallet) AND b.target_handle=a.handle)
  OR (lower(b.owner_wallet)=lower(a.wallet) AND b.target_handle=v.handle)))`;
 
-export async function charmSocial(pool: Pool, token: string, raw?: unknown) {
-  const pin = raw === undefined ? null : parseSocialPin(raw);
+export async function charmSocial(pool: Pool, token: string, raw?: unknown, policy?: SocialPolicy) {
+  const items = socialCustodyItems(policy);
+  const pin = raw === undefined ? null : parseSocialPin(raw, policy);
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
@@ -47,7 +49,7 @@ export async function charmSocial(pool: Pool, token: string, raw?: unknown) {
         JOIN plankspace_profiles v ON v.id=$1 WHERE p.id=$2 AND ${eligible} FOR SHARE OF p`, [id,pin.postId]);
       if (!post.rowCount) throw new YardError("This post is unavailable for pinning",403);
       const debit = await c.query("UPDATE charmville_stacks SET qty=qty-1 WHERE profile_id=$1 AND face_id=$2 AND qty>=1 RETURNING qty::text",[id,pin.face]);
-      if (!debit.rowCount) throw new YardError(socialItem(pin.face)!.emptyMessage,409);
+      if (!debit.rowCount) throw new YardError(items.find(item => item.id === pin.face)!.emptyMessage,409);
       const receiptId = randomUUID();
       const result = { receiptId, postId:pin.postId, face:pin.face, qty:1, remaining:debit.rows[0].qty };
       await c.query(`INSERT INTO charmville_receipts(id,profile_id,action,request_id,payload_hash,actor_profile_id,actor_wallet,session_hash,face_id,qty,result)
@@ -62,10 +64,10 @@ export async function charmSocial(pool: Pool, token: string, raw?: unknown) {
         (SELECT s.face_id,sum(s.qty)::text AS qty FROM charmville_stamps s
          WHERE s.post_id=p.id AND s.face_id=ANY($2::text[]) GROUP BY s.face_id) t),'{}'::jsonb) AS pins
       FROM plankspace_posts p JOIN plankspace_profiles a ON lower(a.wallet)=lower(p.author_wallet)
-      JOIN plankspace_profiles v ON v.id=$1 WHERE ${eligible} ORDER BY p.id DESC LIMIT 30`,[id,SOCIAL_ITEMS.map(item => item.id)]);
-    const balances = (await c.query("SELECT face_id,qty::text FROM charmville_stacks WHERE profile_id=$1 AND face_id=ANY($2::text[])",[id,SOCIAL_ITEMS.map(item => item.id)])).rows;
+      JOIN plankspace_profiles v ON v.id=$1 WHERE ${eligible} ORDER BY p.id DESC LIMIT 30`,[id,items.map(item => item.id)]);
+    const balances = (await c.query("SELECT face_id,qty::text FROM charmville_stacks WHERE profile_id=$1 AND face_id=ANY($2::text[])",[id,items.map(item => item.id)])).rows;
     await c.query("COMMIT");
-    return { posts:posts.rows, basket:SOCIAL_ITEMS.map(item => ({face:item.id,qty:balances.find(row => row.face_id === item.id)?.qty ?? "0"})) };
+    return { posts:posts.rows, basket:items.map(item => ({face:item.id,qty:balances.find(row => row.face_id === item.id)?.qty ?? "0"})) };
   } catch (error) { await c.query("ROLLBACK"); throw error; }
   finally { c.release(); }
 }
