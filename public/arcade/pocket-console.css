@@ -311,3 +311,19 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
   .lottery-details{margin:4px auto}
   .lottery-actions{padding-bottom:2px}
 }
+
+/* Phones: a tighter dock so the stage shows the artwork the way desktop does.
+   Measured at 375x667 before: deck 372px (target well and Play both 98px on
+   76px minimums, 10px grid gaps, a 61px invite bar) left the stage 317px.
+   Tap targets stay >= 44px. */
+@media(max-width:540px){
+  body .deck{padding:8px 10px 4px;gap:2px}
+  .invite-player{margin:0 0 2px;padding-bottom:2px}
+  .invite-player button{min-height:40px;padding:6px 10px}
+  .pocket-actions{gap:6px}
+  .pocket-stake-picker{padding:4px 6px}
+  .pocket-stake-picker button{height:44px}
+  body #primaryBtn{padding:10px 8px;min-height:56px}
+  body .console-target{padding:12px 8px 4px 4px;min-height:56px}
+  body #communityFuelControl summary{min-height:32px}
+}
