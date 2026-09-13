@@ -155,7 +155,12 @@ if [ -s "$seed" ] && [ -n "$want_seed" ] && [ "$want_seed" != "$have_seed" ]; th
   printf '%s' "$want_seed" > "$seed_marker"
 fi
 
-log "starting anvil""$anvil_bin" \
+# anvil.log is append-only; the FATAL branch below re-prints its tail with a
+# fresh timestamp, and last time that resurrected a week-old "trailing
+# characters" error while the real failure was elsewhere. Start each run clean.
+: > "$table_dir/anvil.log"
+log "starting anvil"
+"$anvil_bin" \
   --port "$anvil_port" --host 127.0.0.1 --chain-id 31337 \
   --accounts 20 --balance 10000 --order fifo \
   --state "$state_file" --state-interval 60 \
