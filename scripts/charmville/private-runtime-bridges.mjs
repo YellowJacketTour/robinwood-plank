@@ -10,7 +10,7 @@ export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'voice-notes.js': 'ccf6409731cc88dc74ae71d2c62b518c608c7657054010e3b9ccea78a9c1cf4e',
   'follower-bridge.js': '8bdfe7d7086d8e056c7ba21735b2849ced62f23936e8f9b005c5f47a01c7a4d2',
   'action-event-bridge.js': '8c39fe74b0388fbfc7a5c27a5cfed1599ed4baefec8b517c59b14fb45ee43e23',
-  'position-observer.js': 'df2bce92285278bc9fdffdd2e1b86b14111ef010bf379700bbe039d43432d30e',
+  'position-observer.js': '02e8aacc12d4ef4f7b40d31804e02a88bf81102431e5f3fa22520d47873e6616',
   'account-peers.js': 'a580817ee73ab0b97f36602b68dc5467617a7148c6cf25be87c270bc31a88479',
   'resource-bridge.js': 'ef3aef881660c18904f5423077f6ded71fbab3f41e24764fa11d0a40ba94ccf1',
   'world-encounter.js': '971481f8d59bd314fe8400816d60756bbd03f0d4ff47b665bfc08bfb6f2e6ccb',
