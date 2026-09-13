@@ -1,25 +1,26 @@
 import { createHash } from 'node:crypto';
 import { privateRuntimeConfig } from './private-runtime-adapter.mjs';
 
+// Canonical LF source identities. Inventories separately verify exact package bytes.
 export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'tutorial-bridge.js': 'e42e8d7ea6dd4d08970adcee7a4614a7ecd1b0b90c9bca33863b03a778f1079b',
-  'runtime-shell.css': '65e8598a356fe8cf2881335eab1d1c93a2a3ac79144b4ccbd409143c2a0f40ca',
-  'charmdex-device.css': '810966c0ee64c1bbd7b0a3b259dd511c228214a6af120b4f2b15a0cc0cb0b788',
-  'runtime-shell.mjs': 'c56ff0bd975caff44849948956a28bd80ae205f218a3b51bdeebf7af3c2c59d1',
-  'charmdex.js': 'e00e20d761982df8d0d2ef1e6e7f944363230b909149ebbb9e7875ccd00e3315',
-  'voice-notes.js': 'ccf6409731cc88dc74ae71d2c62b518c608c7657054010e3b9ccea78a9c1cf4e',
-  'follower-bridge.js': '8bdfe7d7086d8e056c7ba21735b2849ced62f23936e8f9b005c5f47a01c7a4d2',
+  'runtime-shell.css': 'bbc1a98fe6f9daf2fdecbd29027915480cca21ad3c86a08b0c3dce8e9cc861c5',
+  'charmdex-device.css': '1db48cd7fba5e812941d83938ef9249aa618baa6af51e085b39d970af420bef4',
+  'runtime-shell.mjs': 'dc47a4e44b4075472c50187ab005e299e435167fe8c6e4f09b6be22ba5a97e30',
+  'charmdex.js': 'd38cd5f9020766c65a296943e0c59d654c6ae4f2e0712217aa09e2fc0466c06d',
+  'voice-notes.js': '1c504fc60e6d445c5f7acf3e45d76f12240aec9973a0538d1d14c9a819e0e67e',
+  'follower-bridge.js': '4da08da432397a65435a142b3a840c42ececf7bea73151289efe863ec2dfd52d',
   'action-event-bridge.js': '8c39fe74b0388fbfc7a5c27a5cfed1599ed4baefec8b517c59b14fb45ee43e23',
-  'position-observer.js': '02e8aacc12d4ef4f7b40d31804e02a88bf81102431e5f3fa22520d47873e6616',
-  'account-peers.js': 'a580817ee73ab0b97f36602b68dc5467617a7148c6cf25be87c270bc31a88479',
+  'position-observer.js': '1ff08799a3650b813e9d24a53b877ef18f67710b8278aba31ac28ced860cd22f',
+  'account-peers.js': '3d29347bf8fbee4cccb90e416b52d79950f6921b28d9455baa0721ae265f85b7',
   'resource-bridge.js': 'ef3aef881660c18904f5423077f6ded71fbab3f41e24764fa11d0a40ba94ccf1',
-  'world-encounter.js': '971481f8d59bd314fe8400816d60756bbd03f0d4ff47b665bfc08bfb6f2e6ccb',
-  'capture-bridge.js': 'd4bfc3b1cf382cb0a6858fc7bf9b78f6f0f78e8fbc471ac02f3a4bd26042086c',
+  'world-encounter.js': '225b6b591d7b784f66c80de9c0404f91ecc025945bec5dbfb01b36429d13e04e',
+  'capture-bridge.js': '9b1b03b69aec5762ccfc13129a101efb017dd6b6cf93b588845a361fd7058aa8',
   'gameplay-video.mjs': 'b187c20f6d23a3dc8bd0c061a895d1222eb03c32b8823498984962445340c3b0',
   'gameplay-capture.mjs': 'd15358b7e8500c3d6bea07ed8d45d23ca2bdd2239411de8a410fded83763213f',
-  'compact-game-hud.mjs': '1f193dc7e6063a12f086ea78ed5c19cbfeaa6d6222172f805c40bed78409fd2b',
-  'display-controls.js': '3f12d54931afbee4874e3662d5a0a9e023203cf52abca45647b784bdd88d49d3',
-  'controller-controls.js': '30a8ab50bb4770ff783c2138da3e2739e053b833c5fd9683fd1d581e8a8380e4',
+  'compact-game-hud.mjs': '8be3bf73e3dd5884d7c934246f2321c6a674d78378dec84085b8967ab6914289',
+  'display-controls.js': 'b67d088a076f7d785d4159a2d5fdc70efa7abe54f2affc2c75a69eec828fe901',
+  'controller-controls.js': '06bb7e6671c2adae84a224912795600bcb412f24e4d77c53c5eb4e41a70164f8',
 });
 function replaceCount(source, before, after, expected) {
   if (source.split(before).length - 1 !== expected) throw Error('Bridge replacement coverage changed');
@@ -27,6 +28,7 @@ function replaceCount(source, before, after, expected) {
 }
 export function adaptPrivateBridge(name, source, options) {
   const config = privateRuntimeConfig(options);
+  source = source.replace(/\r\n/g, '\n');
   if (!Object.hasOwn(PRIVATE_BRIDGE_HASHES, name) || createHash('sha256').update(source).digest('hex') !== PRIVATE_BRIDGE_HASHES[name]) throw Error('Unreviewed runtime bridge revision');
   let result = source;
   const originBridge = ['tutorial-bridge.js', 'follower-bridge.js', 'action-event-bridge.js', 'position-observer.js', 'account-peers.js', 'resource-bridge.js', 'world-encounter.js', 'capture-bridge.js', 'runtime-shell.mjs'];

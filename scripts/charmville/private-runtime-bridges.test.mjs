@@ -40,3 +40,12 @@ test('capture bridge still rejects foreign source/origin and accepts admitted pa
   assert.doesNotThrow(() => listener({ source: parent, origin: 'https://other.test', get data() { throw Error('Should reject foreign origin before reading data'); } }));
   assert.doesNotThrow(() => listener({ source: parent, origin: options.accountOrigin, data: { type: 'unrelated' } }));
 });
+
+ test('reviewed text tolerates checkout line endings but not source edits', async()=>{
+ const sources=await readSources();
+ for(const [name,source] of Object.entries(sources)){
+ const lf=source.replace(/\r\n/g,'\n');
+ assert.equal(adaptPrivateBridge(name,lf,options),adaptPrivateBridge(name,lf.replace(/\n/g,'\r\n'),options));
+ assert.throws(()=>adaptPrivateBridge(name,lf+'// changed source\n',options),/Unreviewed/);
+ }
+ });
