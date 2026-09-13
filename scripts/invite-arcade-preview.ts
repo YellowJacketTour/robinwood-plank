@@ -132,8 +132,8 @@ const assetStamp=await (async()=>{const {createHash}=await import('node:crypto')
   return h.digest('hex').slice(0,10);})();
 const stampAssets=(html:string)=>html
   .replace(/(href|src)="((?!vendor\/|art\/|https?:)[A-Za-z0-9_./-]+\.(?:js|css))"/g,(_m,attr,file)=>`${attr}="${file}?v=${assetStamp}"`)
-  .replace(/from (['"])\.\/([A-Za-z0-9_./-]+\.js)/g,(_m,q,file)=>`from ${q}./${file}?v=${assetStamp}${q}`)
-  .replace(/import\((['"])\.\/([A-Za-z0-9_./-]+\.js)\)/g,(_m,q,file)=>`import(${q}./${file}?v=${assetStamp}${q})`);
+  .replace(/from (['"])\.\/([A-Za-z0-9_./-]+\.js)\1/g,(_m,q,file)=>`from ${q}./${file}?v=${assetStamp}${q}`)
+  .replace(/import\((['"])\.\/([A-Za-z0-9_./-]+\.js)\1\)/g,(_m,q,file)=>`import(${q}./${file}?v=${assetStamp}${q})`);
 const landing=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PlankCrash · Friend test</title><link rel="stylesheet" href="/arcade/pocket-console.css"></head><body style="display:grid;place-items:center;min-height:100svh;color:var(--ink);text-align:center"><main><h1>PLANKCRASH</h1><p id="status">Joining the launch…</p><p>Simulated ETH · no cash value</p><button id="retry" hidden>Try again</button></main><script>
 async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
