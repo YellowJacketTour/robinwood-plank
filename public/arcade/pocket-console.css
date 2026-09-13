@@ -295,3 +295,19 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
 .lottery-prize-art[hidden]{display:none}.lottery-prize-art:active{cursor:grabbing}.lottery-prize-art:focus-visible{outline:2px solid var(--accent)}
 .lottery-theatre:not([data-reveal="presented"]) .lottery-prize-art{visibility:hidden}
 @media(max-width:400px){.lottery-prize-art{width:104px;height:92px;flex-basis:104px}.lottery-prize-summary .lottery-amount{font-size:24px}}
+
+/* Phones: the lottery card never scrolls. The dialog is a column whose scene
+   absorbs the shortfall (measured at 375x667: 705px of content in a 641px
+   dialog hid the Next-round button below the fold). Text and art keep their
+   size; the machine's viewport gives way, down to a floor it still reads at. */
+@media(max-width:540px){
+  .lottery-theatre[open]{display:flex;flex-direction:column;overflow:hidden;height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+  .lottery-theatre>*{flex:0 0 auto}
+  .lottery-theatre-scene{flex:1 1 auto;min-height:140px;height:auto}
+  .lottery-theatre-scene:has(.lottery-funding-icon){flex:1 1 auto;height:auto;min-height:120px}
+  .lottery-theatre h2{margin-bottom:6px}
+  .lottery-theatre .lottery-odds{margin-bottom:4px}
+  .lottery-status{margin:4px 0 8px}
+  .lottery-details{margin:4px auto}
+  .lottery-actions{padding-bottom:2px}
+}
