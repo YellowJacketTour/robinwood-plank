@@ -22,3 +22,11 @@ The new native arrival receipt is source-compiled but not yet packaged into the 
 - Complete distinct Burning Heart art/protocol, bed selection, balances, harvest and explicit social pin before activation.
 - Inspect and author actual Kakariko destination geometry, collision, services and reciprocal admission. Current shared meadow is not the completed town.
 - Complete release checks before deployment; preserve private runtime packaging and gated access.
+
+## Follow-up: packaged arrival and visit verification
+
+Candidate alpha01-arrival-receipt assembled from verified private inputs with inventory 0bf33fd22b6fbc1d694ed586da97bdad8853fc071920e2fddeff487ad72bd439. It includes compiled arrival receipt and tutorial acknowledgment changes. Local server3018 serves this candidate under development-only permission; production unchanged. Same tab22 booted to connected home with Link and Treecko, and accepted right/left keyboard piloting. This is embedded arrival evidence; standalone receipt and full regression acceptance remain separate.
+
+Friend world-presence fixture repaired in dd0a456e: agent ran actual isolated PostgreSQL checks,12pass0skip, including denied/invited entry, home return, re-entry, stale retries, expiry, revocation and invariant balances/receipts.
+
+Broader private-runtime-bridges test currently fails2 cases because several existing checkout bridge files differ from reviewed package pins (some CRLF-only, some content). Do not refresh these pins wholesale. The new candidate assembler verified the supplied input identities successfully. Reconcile unrelated source/pinned revisions before production promotion.
