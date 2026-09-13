@@ -12,6 +12,7 @@ import ControlGuide from "./control-guide";
 import FirstSteps from "./first-steps";
 import {useTutorialBridge} from "./tutorial-bridge";
 import HomePermissions from "../start/home-permissions";
+import FriendsTravelPanel from "./friends-panel";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import Image from "next/image";
@@ -53,7 +54,6 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   const [arrivalRequest,setArrivalRequest]=useState(0);
   const [inventory,setInventory]=useState<YardInventory|null>(null);
   const [journeyRevision,setJourneyRevision]=useState(0);
-  const [visitor,setVisitor]=useState("");
   const [message,setMessage]=useState("");
   const [busy,setBusy]=useState(false);
   const [camera,setCamera]=useState(false);
@@ -335,12 +335,6 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     finally{signingIn.current=false;if(mounted.current)setBusy(false);}
   }
 
-  function visit(){
-    const handle=visitor.trim().replace(/^@/,"").toLowerCase();
-    if(!/^[a-z0-9_]{1,40}$/.test(handle)){setMessage("Use a player handle: up to 40 letters, numbers or underscores.");return;}
-    void load({destination:"home",handle});
-  }
-
   function toggleFullscreen(){
     if(typeof document.documentElement.requestFullscreen!=="function"){setMessage("Fullscreen is unavailable in this browser.");return;}
     const action=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
@@ -401,13 +395,8 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
       <aside data-social={tab==='social'} className={tab==='play'?'hidden':'world-menu space-y-4 rounded-2xl border-2 border-line-strong bg-wood-900 p-3'} aria-label="Account world controls"><div className="flex items-center justify-between border-b border-line pb-2"><h2 className="font-display text-xl text-gold-300">{tabs.find(([id])=>id===tab)?.[1]}</h2><button className={button} onClick={returnToPlay}>Return to play</button></div>
         <div id="panel-social" role="tabpanel" aria-labelledby="tab-social" hidden={tab!=='social'}>{sessionToken&&<SocialPanel key={identity.profileId} token={sessionToken} active={tab==='social'} onPinned={()=>void load()}/>}</div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
-        <section className="rounded-xl border border-line bg-panel p-4"><h2 className="font-display text-xl">@{identity.handle}</h2><p className="mt-2 text-cream-muted">{presence?.active?(presence.ownerHandle?`At @${presence.ownerHandle}’s home`:"In the public meadow"):"Choose where to join"}</p>
-          <div className="my-3 flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>void load({destination:"home",handle:identity.handle})}>Go home</button><button className={button} disabled={busy} onClick={()=>void load({destination:"public"})}>Public meadow</button></div>
-          <form onSubmit={e=>{e.preventDefault();visit();}}><label className="block text-sm" htmlFor="visit-handle">Visit a friend</label><input id="visit-handle" value={visitor} maxLength={visitor.startsWith("@")?41:40} onChange={e=>setVisitor(e.target.value)} className="my-2 min-h-11 w-full rounded-lg border border-line bg-panel-soft px-3" placeholder="Their player handle"/><button className={button} disabled={busy||!visitor.trim()}>Visit home</button></form>
-          <p className="mt-3 text-sm text-cream-muted">Your friend must invite you. Visiting does not grant permission to take items or build.</p>
-        </section>
+        <FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>
         {address&&tab==='friends'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
-        <section className="rounded-xl border border-line bg-panel p-4" aria-label="Players here"><h2 className="font-display text-xl">Players here</h2>{presence?.active?<><p className="my-2 text-sm text-cream-muted">Account presence · refreshed every 30 seconds</p><ul className="space-y-2"><li>You · @{identity.handle}</li>{presence.peers.filter(peer=>peer.profileId!==identity.profileId).map(peer=><li key={peer.profileId}>@{peer.handle}</li>)}</ul></>:<p className="mt-2 text-cream-muted">Join a location to meet other signed-in players.</p>}</section>
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>
         <div id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden={tab!=='inventory'}>
