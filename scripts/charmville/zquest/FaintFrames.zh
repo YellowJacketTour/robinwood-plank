@@ -1,0 +1,4 @@
+int faint_poochyena_colors[]={0,0,0,0,0,0,175,183,191,127,143,151,71,103,111,215,223,223,255,231,159,215,63,0,159,0,0,255,255,255};
+int faint_poochyena_x[]={15,13,13,13,15,13,13,13,16,18,18,18,15,13,13,13,15,13,13,13,15,13,13,13,15,13,13,13,15,13,13,13};
+int faint_poochyena_y[]={28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28};
+void drawFaintPoochyena(bitmap art,int clock,int row,int x,int y,int layer){int frame=clock<8?0:(clock<20?1:(clock<24?2:3));int anchor=row*4+frame;drawCompanionScaled(art,286,layer,frame*32,row*48,32,48,x+8,y+72,faint_poochyena_x[anchor],faint_poochyena_y[anchor]);}

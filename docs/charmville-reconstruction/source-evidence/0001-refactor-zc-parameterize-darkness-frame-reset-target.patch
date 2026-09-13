@@ -1,0 +1,47 @@
+From 99bb7e794b4df50d052d6c221d137f67c92ecd25 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:17:43 -0500
+Subject: [PATCH] refactor(zc): parameterize darkness frame reset targets
+
+---
+ src/zc/maps.cpp | 8 +++++---
+ src/zc/maps.h   | 3 ++-
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 72de465..00ee20b 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -6402,10 +6402,12 @@ void openshutters(mapscr* scr)
+ 		sfx(WAV_DOOR);
+ }
+ 
+-void clear_darkroom_bitmaps()
++void clear_darkroom_bitmaps(BITMAP* darkness, BITMAP* translucent_darkness)
+ {
+-	clear_to_color(darkscr_bmp, game->get_darkscr_color());
+-	clear_to_color(darkscr_bmp_trans, game->get_darkscr_color());
++	if (!darkness) darkness = darkscr_bmp;
++	if (!translucent_darkness) translucent_darkness = darkscr_bmp_trans;
++	clear_to_color(darkness, game->get_darkscr_color());
++	clear_to_color(translucent_darkness, game->get_darkscr_color());
+ }
+ 
+ bool is_dark(const mapscr* scr)
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index cd83f49..c15bacf 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -525,7 +525,8 @@ void putdoor(mapscr* scr, BITMAP *dest, int32_t side, int32_t door, bool redraw=
+ void showbombeddoor(mapscr* scr, BITMAP *dest, int32_t side, int32_t offx, int32_t offy);
+ void openshutters(mapscr* scr);
+ void loadscr(int32_t destdmap, int32_t screen, int32_t ldir, bool origin_screen_overlay=false, bool no_x80_dir=false);
+-void clear_darkroom_bitmaps();
++// Frame/transition reset: preserve the caller's phase and configured dark color.
++void clear_darkroom_bitmaps(BITMAP* darkness = nullptr, BITMAP* translucent_darkness = nullptr);
+ bool is_dark(const mapscr* scr);
+ bool scrolling_is_dark(const mapscr* scr);
+ bool is_any_dark();
+-- 
+2.52.0.windows.1
+

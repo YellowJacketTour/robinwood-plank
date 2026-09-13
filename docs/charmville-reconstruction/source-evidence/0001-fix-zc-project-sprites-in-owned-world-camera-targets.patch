@@ -1,0 +1,217 @@
+From bfc91163fa512183cfed41b65db5d0f602aa2b78 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 07:53:12 -0500
+Subject: [PATCH] fix(zc): project sprites in owned world camera targets
+
+---
+ src/items.cpp                       |  6 +++---
+ src/sprite.cpp                      |  8 ++++----
+ src/zc/maps.cpp                     | 20 +++++++++++++++++---
+ src/zc/maps.h                       |  6 +++++-
+ src/zc/presentation_target_space.h  | 16 ++++++++++++++++
+ tests/presentation_target_space.cpp | 25 +++++++++++++++++++++++++
+ 6 files changed, 70 insertions(+), 11 deletions(-)
+ create mode 100644 src/zc/presentation_target_space.h
+ create mode 100644 tests/presentation_target_space.cpp
+
+diff --git a/src/items.cpp b/src/items.cpp
+index aab13bf..d53421d 100644
+--- a/src/items.cpp
++++ b/src/items.cpp
+@@ -1020,10 +1020,10 @@ void putitem3(BITMAP *dest,int32_t x,int32_t y,int32_t item_id, int32_t clk)
+ 	// When drawing to the framebuf, sprite::draw translates from world coordinates to
+ 	// screen coordinates. However, putitem3 expects just screen coordinates. So convert
+ 	// to world coordinates.
+-	if (dest == framebuf || dest == scrollbuf)
++	if (is_world_render_target(dest))
+ 	{
+-		x += viewport.x;
+-		y += viewport.y;
++		x += get_render_viewport().x;
++		y += get_render_viewport().y;
+ 	}
+ #endif
+ 
+diff --git a/src/sprite.cpp b/src/sprite.cpp
+index b4fddd4..ef08bb1 100644
+--- a/src/sprite.cpp
++++ b/src/sprite.cpp
+@@ -1046,7 +1046,7 @@ void sprite::draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ 	sy -= fake_z(fakez);
+ 
+ #ifdef IS_PLAYER
+-	if (dest == framebuf || dest == scrollbuf)
++	if (is_world_render_target(dest))
+ 	{
+ 		sx -= get_render_viewport().x;
+ 		sy -= get_render_viewport().y;
+@@ -1533,7 +1533,7 @@ void sprite::drawzcboss(BITMAP* dest, const script_world_light_targets* world_li
+ 	sy -= fake_z(fakez);
+ 
+ #ifdef IS_PLAYER
+-	if (dest == framebuf || dest == scrollbuf)
++	if (is_world_render_target(dest))
+ 	{
+ 		sx -= get_render_viewport().x;
+ 		sy -= get_render_viewport().y;
+@@ -1914,7 +1914,7 @@ void sprite::draw8(BITMAP* dest, const script_world_light_targets* world_lights)
+ 	sy -= fake_z(fakez);
+ 
+ #ifdef IS_PLAYER
+-	if (dest == framebuf || dest == scrollbuf)
++	if (is_world_render_target(dest))
+ 	{
+ 		sx -= get_render_viewport().x;
+ 		sy -= get_render_viewport().y;
+@@ -1951,7 +1951,7 @@ void sprite::drawcloaked(BITMAP* dest, const script_world_light_targets* world_l
+ 	sy -= fake_z(fakez);
+ 
+ #ifdef IS_PLAYER
+-	if (dest == framebuf || dest == scrollbuf)
++	if (is_world_render_target(dest))
+ 	{
+ 		sx -= get_render_viewport().x;
+ 		sy -= get_render_viewport().y;
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 008b1e7..8d55fe3 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -1,4 +1,5 @@
+ #include "zc/presentation_bitmap_targets.h"
++#include "zc/presentation_target_space.h"
+ #include <memory>
+ #ifdef __EMSCRIPTEN__
+ #include <emscripten.h>
+@@ -66,22 +67,35 @@ viewport_t viewport;
+ // Rendering runs on the game thread. Nested passes restore their parent's view;
+ // no code assigns to the simulation viewport on behalf of this context.
+ static std::optional<viewport_t> render_viewport_override;
++static BITMAP* render_world_target;
++static BITMAP* render_background_target;
++bool is_world_render_target(const BITMAP* destination)
++{
++    return presentation_camera::uses_world_coordinates(destination, framebuf, scrollbuf,
++        render_world_target, render_background_target);
++}
+ const viewport_t& get_render_viewport()
+ {
+     return render_viewport_override ? *render_viewport_override : viewport;
+ }
+-render_viewport_scope::render_viewport_scope(const presentation_camera::geometry& geometry)
+-    : previous_(render_viewport_override)
++render_viewport_scope::render_viewport_scope(const presentation_camera::geometry& geometry, BITMAP* world, BITMAP* background)
++    : previous_(render_viewport_override), previous_world_(render_world_target), previous_background_(render_background_target)
+ {
+     const auto& r = geometry.world;
+     // Reject malformed/unbounded scratch requests while retaining parent state.
+     if (r.w > 0 && r.h > 0 && r.w <= 512 && r.h <= 464 &&
+         r.x >= -8192 && r.x <= 8192 && r.y >= -8192 && r.y <= 8192)
++    {
+         render_viewport_override = viewport_t{r.x, r.y, r.w, r.h};
++        render_world_target = world;
++        render_background_target = background;
++    }
+ }
+ render_viewport_scope::~render_viewport_scope()
+ {
+     render_viewport_override = previous_;
++    render_world_target = previous_world_;
++    render_background_target = previous_background_;
+ }
+ 
+ static int viewport_sprite_uid;
+@@ -5969,8 +5983,8 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 		if (geometry && frame.targets.extent(presentation_camera::scratch_plane::world) ==
+ 			presentation_camera::surface_extent{geometry->world.w, geometry->world.h + playing_field_offset})
+ 		{
+-			render_viewport_scope render_scope(*geometry);
+ 			using presentation_camera::scratch_plane;
++			render_viewport_scope render_scope(*geometry, frame.targets.get(scratch_plane::world), frame.targets.get(scratch_plane::background));
+ 			auto* scene = frame.targets.get(scratch_plane::world);
+ 			auto* lights = frame.targets.get(scratch_plane::light);
+ 			if (!Hero.reprojectSpotlights(lights, get_render_viewport())) clear_bitmap(lights);
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index 90925d1..45a280a 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -32,12 +32,14 @@ extern ViewportMode viewport_mode;
+ // Render-only coordinates. Simulation, scripts and activation must use viewport.
+ // Default is the current legacy viewport, not a snapshot from a prior frame.
+ const viewport_t& get_render_viewport();
++bool is_world_render_target(const BITMAP* destination);
+ // Staged cutover boundary; do not activate wider extents until all render paths,
+ // scratch buffers and script coordinate conventions have been migrated.
+ class render_viewport_scope
+ {
+ public:
+-    explicit render_viewport_scope(const presentation_camera::geometry& geometry);
++    explicit render_viewport_scope(const presentation_camera::geometry& geometry,
++        BITMAP* world = nullptr, BITMAP* background = nullptr);
+     ~render_viewport_scope();
+     render_viewport_scope(const render_viewport_scope&) = delete;
+     render_viewport_scope& operator=(const render_viewport_scope&) = delete;
+@@ -45,6 +47,8 @@ public:
+     render_viewport_scope& operator=(render_viewport_scope&&) = delete;
+ private:
+     std::optional<viewport_t> previous_;
++    BITMAP* previous_world_;
++    BITMAP* previous_background_;
+ };
+ 
+ // Geometry proposal only: the legacy draw pipeline is not yet zoom capable.
+diff --git a/src/zc/presentation_target_space.h b/src/zc/presentation_target_space.h
+new file mode 100644
+index 0000000..c15cd50
+--- /dev/null
++++ b/src/zc/presentation_target_space.h
+@@ -0,0 +1,16 @@
++#ifndef ZC_PRESENTATION_TARGET_SPACE_H_
++#define ZC_PRESENTATION_TARGET_SPACE_H_
++
++namespace presentation_camera
++{
++// Destination identity is part of the projection contract. Arbitrary offscreen
++// bitmaps stay local; explicitly registered scene targets use world coordinates.
++template <class Bitmap>
++constexpr bool uses_world_coordinates(const Bitmap* destination, const Bitmap* legacy_frame,
++    const Bitmap* legacy_background, const Bitmap* world, const Bitmap* background)
++{
++    return destination && (destination == legacy_frame || destination == legacy_background ||
++        destination == world || destination == background);
++}
++}
++#endif
+diff --git a/tests/presentation_target_space.cpp b/tests/presentation_target_space.cpp
+new file mode 100644
+index 0000000..2d30c98
+--- /dev/null
++++ b/tests/presentation_target_space.cpp
+@@ -0,0 +1,25 @@
++#include "zc/presentation_target_space.h"
++#include <cassert>
++int main()
++{
++    int legacy_frame, legacy_background, scene, background, offscreen;
++    using presentation_camera::uses_world_coordinates;
++    auto world = [&](const int* destination) {
++        return uses_world_coordinates(destination, &legacy_frame, &legacy_background, &scene, &background);
++    };
++    assert(world(&legacy_frame));
++    assert(world(&legacy_background));
++    assert(world(&scene));
++    assert(world(&background));
++    assert(!world(&offscreen));
++    assert(!world(nullptr));
++    // A nested fixed-UI scope unregisters scratch targets; legacy frame remains
++    // projected using its own restored legacy viewport, offscreen art stays local.
++    assert(!uses_world_coordinates(&scene, &legacy_frame, &legacy_background, (int*)nullptr, (int*)nullptr));
++    assert(uses_world_coordinates(&legacy_frame, &legacy_frame, &legacy_background, (int*)nullptr, (int*)nullptr));
++    // Hero and terrain now subtract the same world origin before zoom.
++    int hero_x = 400, origin_x = 256;
++    int raster_x = hero_x - (world(&scene) ? origin_x : 0);
++    assert(raster_x == 144);
++    assert(raster_x / 2 == 72);
++}
+-- 
+2.52.0.windows.1
+

@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "bat4blender",
+      "revision": "8f27d8b89ad2db85d40f80538c200b187f213066",
+      "upstream": "https://github.com/memo33/BAT4Blender.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "farmvillage",
+      "revision": "b3d3d782945af3754cadefbbbc60ee475c1dc811",
+      "upstream": "https://github.com/AcidCaos/farmvillage.git",
+      "count": 15,
+      "bytes": 108766,
+      "formats": {
+        ".png": 13,
+        ".jpg": 2
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "farmville-clone",
+      "revision": "ad85523aa1ebad95a39dd3f46deba3bef8067aae",
+      "upstream": "https://github.com/ksc3899/Farmville-Clone.git",
+      "count": 21,
+      "bytes": 3547980,
+      "formats": {
+        ".blend": 7,
+        ".png": 14
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "feiok",
+      "revision": "c8a1c5ab327f8bbdd6fdb652a47644712d266b6a",
+      "upstream": "https://github.com/dacousb/feiok.git",
+      "count": 11,
+      "bytes": 13122,
+      "formats": {
+        ".png": 11
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "freerct",
+      "revision": "d39154b32c9e0bd6f511da27fe112e50f6034557",
+      "upstream": "https://github.com/FreeRCT/FreeRCT.git",
+      "count": 4295,
+      "bytes": 153817154,
+      "formats": {
+        ".png": 4231,
+        ".blend": 51,
+        ".svg": 12,
+        ".jpg": 1
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "fv-replowed",
+      "revision": "01ece56b75ed578b62396a97705f5333831f41d7",
+      "upstream": "https://github.com/FV-Replowed/fv-replowed.git",
+      "count": 49,
+      "bytes": 1033186,
+      "formats": {
+        ".png": 43,
+        ".svg": 6
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "graal-reborn-server",
+      "revision": "efb5b901fc780fbc1f2399d0cc51fd4d6c93dbda",
+      "upstream": "https://github.com/xtjoeytx/GServer-v2.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "hjm-crops",
+      "revision": null,
+      "upstream": null,
+      "count": 12,
+      "bytes": 3087225,
+      "formats": {
+        ".png": 12
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "isomiddleearth",
+      "revision": "9e59a127ec87b141d6d767f4ab79ac9b4c38a75c",
+      "upstream": "https://github.com/hasanharman/isomiddleearth.git",
+      "count": 541,
+      "bytes": 19186077,
+      "formats": {
+        ".tsx": 23,
+        ".png": 518
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "kenney-landscape",
+      "revision": null,
+      "upstream": null,
+      "count": 130,
+      "bytes": 1136901,
+      "formats": {
+        ".png": 130
+      },
+      "status": "CC0 source; previews available"
+    },
+    {
+      "id": "kenney-miniature-farm",
+      "revision": null,
+      "upstream": null,
+      "count": 460,
+      "bytes": 9839022,
+      "formats": {
+        ".png": 460
+      },
+      "status": "CC0 source; previews available"
+    },
+    {
+      "id": "kenney-nature",
+      "revision": null,
+      "upstream": null,
+      "count": 2627,
+      "bytes": 19777918,
+      "formats": {
+        ".png": 1640,
+        ".fbx": 329,
+        ".glb": 329,
+        ".obj": 329
+      },
+      "status": "CC0 source; previews available"
+    },
+    {
+      "id": "lincity-ng",
+      "revision": "99939d94483189b5d512732b27555cd3e2e937a1",
+      "upstream": "https://github.com/lincity-ng/lincity-ng.git",
+      "count": 871,
+      "bytes": 173146708,
+      "formats": {
+        ".png": 572,
+        ".svg": 73,
+        ".blend": 60,
+        ".jpg": 25,
+        ".ogg": 3,
+        ".wav": 138
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "memoji-market",
+      "revision": "e4a2d1440c2a283cea6cedaa1147fca49d187502",
+      "upstream": "https://github.com/nocktoshi/memoji-market.git",
+      "count": 520,
+      "bytes": 62375824,
+      "formats": {
+        ".png": 412,
+        ".webp": 1,
+        ".mp3": 22,
+        ".wav": 1,
+        ".vox": 82,
+        ".svg": 2
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "micropolis-core",
+      "revision": "69ccf87ed72d2d2950b70cf16ef1391439bd9d48",
+      "upstream": "https://github.com/SimHacker/MicropolisCore.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "opengfx",
+      "revision": "c51c904f4f6e7466ee73f907520ef7ea9a53bcbb",
+      "upstream": "https://github.com/OpenTTD/OpenGFX.git",
+      "count": 566,
+      "bytes": 8090993,
+      "formats": {
+        ".png": 566
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "opengfx2",
+      "revision": "7a17fb370440aed7f2586715d606e9fe190b9dd3",
+      "upstream": "https://github.com/OpenTTD/OpenGFX2.git",
+      "count": 3,
+      "bytes": 339203,
+      "formats": {
+        ".png": 3
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "openrct2-opengraphics",
+      "revision": "930b0140685f85db92147af832080e8df12d8d4e",
+      "upstream": "https://github.com/OpenRCT2/OpenGraphics.git",
+      "count": 41,
+      "bytes": 223119853,
+      "formats": {
+        ".blend": 32,
+        ".jpg": 9
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "pokeemerald",
+      "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+      "upstream": "https://github.com/pret/pokeemerald.git",
+      "count": 4620,
+      "bytes": 6514506,
+      "formats": {
+        ".png": 4076,
+        ".wav": 544
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "quaternius-characters",
+      "revision": null,
+      "upstream": null,
+      "count": 209,
+      "bytes": 156451866,
+      "formats": {
+        ".blend": 52,
+        ".png": 137,
+        ".fbx": 20
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "quaternius-crops",
+      "revision": null,
+      "upstream": null,
+      "count": 78,
+      "bytes": 41592540,
+      "formats": {
+        ".blend": 78
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "research-2026-09-08",
+      "revision": null,
+      "upstream": null,
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "research-2026-09-09",
+      "revision": null,
+      "upstream": null,
+      "count": 1,
+      "bytes": 1656164,
+      "formats": {
+        ".glb": 1
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "simcity-threejs",
+      "revision": "9116cf680f677c3476f8159d5bbc7a4cfda00654",
+      "upstream": "https://github.com/dgreenheck/simcity-threejs-clone.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "simutrans-pak128",
+      "revision": "e45d9f08f6aa0a08432b5312cb0d7cb93232fdc6",
+      "upstream": "https://github.com/simutrans/pak128.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "solarus-mit-starter",
+      "revision": "e92bb2a8289df106bb318cc9f1b06a4d82bbf26f",
+      "upstream": "https://gitlab.com/Splyth/solarus-mit-starter-quest.git",
+      "count": 15,
+      "bytes": 318237,
+      "formats": {
+        ".ogg": 4,
+        ".png": 11
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "solarus-online",
+      "revision": "fcf940601a1007e8dc67efc09fd5bad27aea4d51",
+      "upstream": "https://github.com/stdgregwar/solarus-online.git",
+      "count": 253,
+      "bytes": 6514391,
+      "formats": {
+        ".png": 162,
+        ".ogg": 91
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "solarus-trillium",
+      "revision": "9577d8c8a933547688d83db11bb904fb0f19e76e",
+      "upstream": "https://gitlab.com/maxmraz/trillium.git",
+      "count": 871,
+      "bytes": 48270889,
+      "formats": {
+        ".png": 596,
+        ".ogg": 275
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "solarus-zsdx",
+      "revision": "e904d7904d74a97a50992b1340431d5d8f341d69",
+      "upstream": "https://gitlab.com/solarus-games/games/zsdx.git",
+      "count": 433,
+      "bytes": 11448825,
+      "formats": {
+        ".png": 336,
+        ".ogg": 97
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "tuxemon",
+      "revision": "59a34164f442ddecbaee4c436e3f1a5ba9474e29",
+      "upstream": "https://github.com/Tuxemon/Tuxemon.git",
+      "count": 2379,
+      "bytes": 173720607,
+      "formats": {
+        ".jpg": 9,
+        ".png": 1787,
+        ".tsx": 17,
+        ".tmx": 263,
+        ".ogg": 258,
+        ".mp3": 30,
+        ".wav": 15
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "universal-lpc",
+      "revision": "675e21e04aaff8486a3a24e09573b3d5af9d28b9",
+      "upstream": "https://github.com/sanderfrenken/Universal-LPC-Spritesheet-Character-Generator.git",
+      "count": 24221,
+      "bytes": 778230735,
+      "formats": {
+        ".png": 24221
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "unknown-horizons",
+      "revision": "af9c8ef5c7f6cf9ec0b8c9e7d172c555f2793615",
+      "upstream": "https://github.com/unknown-horizons/unknown-horizons.git",
+      "count": 926,
+      "bytes": 31455831,
+      "formats": {
+        ".png": 926
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "verification-2026-09-07",
+      "revision": null,
+      "upstream": null,
+      "count": 8,
+      "bytes": 1073970,
+      "formats": {
+        ".png": 8
+      },
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "xcaster",
+      "revision": "eb53c18e8af3f71b6d8cfe4bd9693cc7c82c0215",
+      "upstream": "https://github.com/awizardxch/xCaster.git",
+      "count": 0,
+      "bytes": 0,
+      "formats": {},
+      "status": "Reference indexed; per-file review required"
+    },
+    {
+      "id": "zelda3",
+      "revision": "fbbb3f967a51fafe642e6140d0753979e73b4090",
+      "upstream": "https://github.com/snesrev/zelda3.git",
+      "count": 2,
+      "bytes": 34162,
+      "formats": {
+        ".png": 1,
+        ".jpg": 1
+      },
+      "status": "Reference indexed; per-file review required"
+    }
+  ],
+  "assetCount": 44178,
+  "charmCount": 78
+}

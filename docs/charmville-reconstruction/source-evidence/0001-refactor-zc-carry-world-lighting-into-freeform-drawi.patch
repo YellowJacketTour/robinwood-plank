@@ -1,0 +1,242 @@
+From 72093a30953efa90b65f69ecd9e4adb81c1566d3 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:31:39 -0500
+Subject: [PATCH] refactor(zc): carry world lighting into freeform drawing
+
+---
+ src/ffc.cpp     |  9 +++++++--
+ src/ffc.h       |  3 +++
+ src/zc/maps.cpp | 40 +++++++++++++++++++++++-----------------
+ src/zc/maps.h   |  3 ++-
+ 4 files changed, 35 insertions(+), 20 deletions(-)
+
+diff --git a/src/ffc.cpp b/src/ffc.cpp
+index 57e41b5..b6f9cdf 100644
+--- a/src/ffc.cpp
++++ b/src/ffc.cpp
+@@ -30,14 +30,19 @@ void ffcdata::draw(BITMAP* dest)
+ }
+ 
+ void ffcdata::draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay)
++{
++	draw_ffc(dest, xofs, yofs, overlay, nullptr);
++}
++
++void ffcdata::draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay, const script_world_light_targets* world_lights)
+ {
+ 	if(!(flags&ffc_overlay) != !overlay) return; //force cast both of these to boolean. They're both not, so same as if they weren't not.
+ 	
+ 	#ifdef IS_PLAYER
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 	#endif
+ 
+diff --git a/src/ffc.h b/src/ffc.h
+index 54a8992..0e7d471 100644
+--- a/src/ffc.h
++++ b/src/ffc.h
+@@ -45,6 +45,8 @@ enum ffc_flags : uint32_t
+ };
+ } // ends namespace
+ 
++struct script_world_light_targets;
++
+ class ffcdata : public sprite
+ {
+ public:
+@@ -71,6 +73,7 @@ public:
+ 
+ 	void draw(BITMAP* dest) override;
+ 	void draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay);
++	void draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay, const script_world_light_targets* world_lights);
+ 
+ 	bool checkSolid() const;
+ 	virtual bool setSolid(bool set) override;
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 6873d21..3d4b75b 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4137,6 +4137,11 @@ static void get_bounds_for_draw_cmb_calls(BITMAP* bmp, int x, int y, int& start_
+ }
+ 
+ void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_handle, int32_t x, int32_t y)
++{
++	do_ffc_layer(bmp, layer, screen_handle, x, y, nullptr);
++}
++
++void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_handle, int32_t x, int32_t y, const script_world_light_targets* world_lights)
+ {
+ 	if(!show_ffcs) return;
+ 	mapscr* base_scr = screen_handle.base_scr;
+@@ -4165,15 +4170,15 @@ void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_hand
+ 		if (screenscrolling && (base_scr->ffcs[i].flags & ffc_carryover) != 0 && screen_handle.screen != scrolling_hero_screen)
+ 			continue; //If scrolling, only draw carryover ffcs from newscr and not oldscr.
+ 
+-		base_scr->ffcs[i].draw_ffc(bmp, x, y, is_overhead);
++		base_scr->ffcs[i].draw_ffc(bmp, x, y, is_overhead, world_lights);
+ 	}
+ }
+-void _do_current_ffc_layer(BITMAP* bmp, int32_t layer)
++void _do_current_ffc_layer(BITMAP* bmp, int32_t layer, const script_world_light_targets* world_lights)
+ {
+ 	if(!show_ffcs) return;
+ 	for_every_base_screen_in_region([&](mapscr* base_scr, unsigned int, unsigned int) {
+ 		screen_handle_t handle = {base_scr, base_scr, base_scr->screen, 0};
+-		do_ffc_layer(bmp, layer, handle, 0, 0);
++		do_ffc_layer(bmp, layer, handle, 0, 0, world_lights);
+ 	});
+ }
+ void do_scrolling_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y)
+@@ -4993,6 +4998,7 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
+ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark,
+     const nearby_screens_t& nearby_screens, const scene_darkness_targets& darkness)
+ {
++	const script_world_light_targets world_lights{darkness.opaque, darkness.translucent};
+ 	draw_msgstr(6, dest);
+ 
+ 	if (get_qr(qr_LAYER6_STRINGS_OVER_SUBSCREEN))
+@@ -5001,7 +5007,7 @@ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark,
+ 	if (get_qr(qr_NEW_DARKROOM) && !get_qr(qr_NEWDARK_L6) && any_dark)
+ 		draw_darkroom(dest, nearby_screens, darkness);
+ 
+-	_do_current_ffc_layer(dest, 7);
++	_do_current_ffc_layer(dest, 7, &world_lights);
+ 	draw_msgstr(7, dest);
+ }
+ 
+@@ -5076,7 +5082,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		for (int layer = -7; layer <= -4; ++layer)
+ 		{
+-			_do_current_ffc_layer(background, layer);
++			_do_current_ffc_layer(background, layer, &world_lights);
+ 			if (script_drawing_commands.is_dirty(layer))
+ 				do_primitives(background, layer, 0, playing_field_offset, 0, &world_lights);
+ 		}
+@@ -5097,7 +5103,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			do_layer_primitives(background, 2, &world_lights);
+ 			particles.draw(background, true, 2);
+ 		}
+-		_do_current_ffc_layer(background, -2);
++		_do_current_ffc_layer(background, -2, &world_lights);
+ 		if (l2bg)
+ 			draw_msgstr(2, background);
+ 	}
+@@ -5113,7 +5119,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		do_layer_primitives(background, 3, &world_lights);
+ 		particles.draw(background, true, 3);
+ 	}
+-	_do_current_ffc_layer(background, -3);
++	_do_current_ffc_layer(background, -3, &world_lights);
+ 	if (XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+ 		draw_msgstr(3, background);
+ 	
+@@ -5133,13 +5139,13 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			do_layer_primitives(background, 2, &world_lights);
+ 			particles.draw(background, true, 2);
+ 		}
+-		_do_current_ffc_layer(background, -2);
++		_do_current_ffc_layer(background, -2, &world_lights);
+ 		if (l2bg)
+ 			draw_msgstr(2, background);
+ 		
+ 		do_primitives(background, -2, 0, playing_field_offset, 0, &world_lights);
+ 		
+-		_do_current_ffc_layer(background, -1);
++		_do_current_ffc_layer(background, -1, &world_lights);
+ 		do_primitives(background, -1, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 	
+@@ -5169,7 +5175,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	if(show_layers[0] && lenscheck(hero_scr,0))
+ 		do_primitives(background, 0, 0, playing_field_offset, 0, &world_lights);
+ 	particles.draw(background, true, 0);
+-	_do_current_ffc_layer(background, 0);
++	_do_current_ffc_layer(background, 0, &world_lights);
+ 	draw_msgstr(0, background);
+ 
+ 	set_draw_screen_clip(background);
+@@ -5222,7 +5228,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 
+ 	do_layer_primitives(background, 1, &world_lights);
+ 	particles.draw(background, true, 1);
+-	_do_current_ffc_layer(background, 1);
++	_do_current_ffc_layer(background, 1, &world_lights);
+ 	draw_msgstr(1, background);
+ 
+ 	// Handle layer 2 NOT being used as background layers.
+@@ -5237,7 +5243,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		do_layer_primitives(background, 2, &world_lights);
+ 		particles.draw(background, true, 2);
+ 	}
+-	_do_current_ffc_layer(background, 2);
++	_do_current_ffc_layer(background, 2, &world_lights);
+ 	if(!XOR(origin_scr->flags7&fLAYER2BG, DMaps[cur_dmap].flags&dmfLAYER2BG))
+ 		draw_msgstr(2, background);
+ 
+@@ -5617,7 +5623,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		do_layer_primitives(dest, 3, &world_lights);
+ 		particles.draw(dest, true, 3);
+ 	}
+-	_do_current_ffc_layer(dest, 3);
++	_do_current_ffc_layer(dest, 3, &world_lights);
+ 	if(!XOR(origin_scr->flags7&fLAYER3BG, DMaps[cur_dmap].flags&dmfLAYER3BG))
+ 		draw_msgstr(3, dest);
+ 	
+@@ -5631,7 +5637,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	do_layer_primitives(dest, 4, &world_lights);
+ 	particles.draw(dest, true, 4);
+-	_do_current_ffc_layer(dest, 4);
++	_do_current_ffc_layer(dest, 4, &world_lights);
+ 	draw_msgstr(4, dest);
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+@@ -5732,10 +5738,10 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	do_layer_primitives(dest, 5, &world_lights);
+ 	particles.draw(dest, true, 5);
+-	_do_current_ffc_layer(dest, 5);
++	_do_current_ffc_layer(dest, 5, &world_lights);
+ 	draw_msgstr(5, dest);
+ 	
+-	_do_current_ffc_layer(dest, -1000); // 'overhead' freeform combos
++	_do_current_ffc_layer(dest, -1000, &world_lights); // 'overhead' freeform combos
+ 
+ 	do_primitives(dest, SPLAYER_OVERHEAD_FFC, 0, playing_field_offset, 0, &world_lights);
+ 
+@@ -5748,7 +5754,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	
+ 	do_layer_primitives(dest, 6, &world_lights);
+ 	particles.draw(dest, true, 6);
+-	_do_current_ffc_layer(dest, 6);
++	_do_current_ffc_layer(dest, 6, &world_lights);
+ 
+ 	bool any_dark = false;
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int, int) {
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index 46f1e25..3f39e9a 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -502,11 +502,12 @@ std::pair<int32_t, int32_t> nextscr2(int32_t dir);
+ std::pair<int32_t, int32_t> nextscr2(int m, int s, int32_t dir);
+ void bombdoor(int32_t x,int32_t y);
+ bool lenscheck(mapscr* scr, int layer);
++struct script_world_light_targets;
+ void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_handle, int32_t x, int32_t y);
++void do_ffc_layer(BITMAP* bmp, int32_t layer, const screen_handle_t& screen_handle, int32_t x, int32_t y, const script_world_light_targets* world_lights);
+ void do_scrolling_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y);
+ // Explicit script-light targets are borrowed for this draw only. Legacy public
+ // overloads preserve their original global-plane behavior (including map capture).
+-struct script_world_light_targets;
+ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y);
+ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, int32_t x, int32_t y, const script_world_light_targets* world_lights);
+ void do_layer_primitives(BITMAP *bmp, int32_t layer);
+-- 
+2.52.0.windows.1
+

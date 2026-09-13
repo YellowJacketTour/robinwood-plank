@@ -7,7 +7,10 @@ export const runtime = "nodejs";
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
-const ALLOWED: Record<string, { kind: "image" | "video"; extensions: string[] }> = {
+const ALLOWED: Record<string, { kind: "image" | "video" | "audio"; extensions: string[] }> = {
+  "audio/webm": { kind: "audio", extensions: ["webm", "weba"] },
+  "audio/ogg": { kind: "audio", extensions: ["ogg"] },
+  "audio/mp4": { kind: "audio", extensions: ["m4a", "mp4"] },
   "image/png": { kind: "image", extensions: ["png"] },
   "image/jpeg": { kind: "image", extensions: ["jpg", "jpeg"] },
   "image/webp": { kind: "image", extensions: ["webp"] },
@@ -36,13 +39,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Wallet session and file are required." }, { status: 400 });
   }
 
-  const allowed = ALLOWED[file.type];
+  const allowed = ALLOWED[file.type.split(";")[0].trim().toLowerCase()];
   const extension = file.name.split(".").pop()?.toLowerCase() || "";
-  if (!allowed || !allowed.extensions.includes(extension)) return Response.json({ error: "Use PNG, JPEG, WebP, GIF, MP4, or WebM media." }, { status: 415 });
+  if (!allowed || !allowed.extensions.includes(extension)) return Response.json({ error: "Use image/video media or WebM, Ogg, or M4A audio." }, { status: 415 });
   const kind = allowed.kind;
   const cap = kind === "video" ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
   if (file.size <= 0 || file.size > cap) {
-    return Response.json({ error: kind === "video" ? "Videos must be under 20 MB." : "Images and GIFs must be under 3 MB." }, { status: 413 });
+    return Response.json({ error: kind === "video" ? "Videos must be under 20 MB." : "Images, GIFs, and audio must be under 3 MB." }, { status: 413 });
   }
 
   const proof: Proof = { wallet, sessionToken };
@@ -50,7 +53,9 @@ export async function POST(request: Request) {
   if (!verified) return Response.json({ error: "Connect and verify your wallet before uploading media." }, { status: 403 });
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const saved = await saveUpload(bytes, file.name);
+  // Dedicated audio suffixes preserve the playback MIME without changing video semantics.
+  const storedName = kind === "audio" && extension === "webm" ? file.name.replace(/\.webm$/i, ".weba") : kind === "audio" && extension === "mp4" ? file.name.replace(/\.mp4$/i, ".m4a") : file.name;
+  const saved = await saveUpload(bytes, storedName);
   if ("error" in saved) return Response.json({ error: saved.error }, { status: 400 });
   return Response.json({ upload: { url: saved.url, mediaType: kind, bytes: saved.bytes } }, { status: 201 });
 }

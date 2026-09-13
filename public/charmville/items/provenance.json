@@ -1,0 +1,8 @@
+{
+  "oran-berry": {
+    "source": "pret/pokeemerald",
+    "path": "graphics/items/icons/oran_berry.png",
+    "sha256": "aff49f199fe0bf1b661cacba57c69a7ef7bdeeeed583a603a36130b3d0a03404",
+    "modified": false
+  }
+}

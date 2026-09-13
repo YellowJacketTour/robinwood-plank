@@ -1,0 +1,70 @@
+{
+  "startup": [
+    "4|46|488.0|248.0",
+    "4|46|272.0|248.0",
+    "4|46|272.0|248.0",
+    "4|46|272.0|248.0",
+    "4|46|272.0|248.0"
+  ],
+  "normal": {
+    "zoom": 1,
+    "view": {
+      "x": 152,
+      "y": 168,
+      "width": 256,
+      "height": 176,
+      "targetX": 0,
+      "targetY": 56,
+      "targetWidth": 256,
+      "targetHeight": 176
+    },
+    "position": "36|4|46|272.0|248.0|1|0.0|0.0|0|10|2|2",
+    "rect": {
+      "width": 1076,
+      "height": 807
+    }
+  },
+  "wide": {
+    "zoom": 0.5,
+    "view": {
+      "x": 0,
+      "y": 0,
+      "width": 512,
+      "height": 352,
+      "targetX": 0,
+      "targetY": 56,
+      "targetWidth": 256,
+      "targetHeight": 176
+    },
+    "position": "49|4|46|272.0|248.0|1|0.0|0.0|0|10|2|2",
+    "rect": {
+      "width": 1076,
+      "height": 807
+    }
+  },
+  "restored": {
+    "zoom": 1,
+    "view": {
+      "x": 200,
+      "y": 168,
+      "width": 256,
+      "height": 176,
+      "targetX": 0,
+      "targetY": 56,
+      "targetWidth": 256,
+      "targetHeight": 176
+    },
+    "position": "143|4|46|320.0|248.0|3|0.0|0.0|0|10|2|2",
+    "rect": {
+      "width": 1076,
+      "height": 807
+    }
+  },
+  "errors": [],
+  "limitations": [
+    "Existing tutorial startup relocation is not fixed by camera changes",
+    "Not multiplayer scale proof",
+    "Not a full quest replay comparison",
+    "Touch tested separately with synthetic gesture unit tests"
+  ]
+}

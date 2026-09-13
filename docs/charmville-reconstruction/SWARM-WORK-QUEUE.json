@@ -1,0 +1,1734 @@
+{
+  "generatedAt": "2026-09-09",
+  "source": "FEATURE-PROGRESS.md",
+  "concurrency": {
+    "coordinator": 1,
+    "workers": 3
+  },
+  "note": "Complete row coverage is assignment coverage, not implementation completion. Maturity is copied from the evidence tracker and is not percent complete. Workers rotate through lanes; queued lanes are not running.",
+  "items": [
+    {
+      "id": "CV-001",
+      "feature": "Approved PlankSpace account entrance",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Existing session validation and account shell; real wallet/device matrix still needed",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-002",
+      "feature": "One stable profile across game/social",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Account entrance now resolves canonical profile ID; native runtime still separate",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-003",
+      "feature": "Multiple wallets per profile",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Must add explicit proof-based account linking; not equivalent to wallet switching",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-004",
+      "feature": "OAuth and passkeys for same game identity",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Other auth namespace exists; safe linking not implemented",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-005",
+      "feature": "Preserved legacy garden storage (retired UI)",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "████░",
+      "evidence": "Legacy PostgreSQL lifecycle, ownership, retries and races tested; standalone UI retired, not unified gameplay",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "preserved infrastructure; product UI retired",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "archive"
+    },
+    {
+      "id": "CV-006",
+      "feature": "Native world persistent account progress",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Authenticated movement, bounded peers and Oran till/plant/water/harvest saved locally; combat and warps missing. See NATIVE-ECONOMIC-LOOP.md",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-007",
+      "feature": "Account-owned map instances",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Private account region and three-bed resource authority exist; distinct authored home geography and native routing remain missing",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-008",
+      "feature": "Friend invitations / revoke / expiry",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Invitation API and private resource revoke checks verified; playable native home-to-home visits remain missing",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-009",
+      "feature": "Help versus harvest/build/storage rights",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Durable garden tending checks grants transactionally; other native actions not connected",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-010",
+      "feature": "Player movement replication",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Seven native 8px steps persisted to same authenticated actor with no rejection corrections; two authenticated accounts project stored actors into native view; fixed pose, two-second poll, no interpolation/hit collisions",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-011",
+      "feature": "Shared resource replication",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "███░░",
+      "evidence": "Two authenticated native clients in one granted home render Oran stages 0→1→2→3→4→1; owner-only yield and unchanged visitor balances verified. One crop/map; permission-aware native prompts verified; remote tool animations remain missing. See NATIVE-RESOURCE-REPLICATION.md.",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-012",
+      "feature": "Reconnect / crash recovery",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Native actor reconnect and Oran inventory reload verified; interrupted action/full world crash recovery remains incomplete",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-013",
+      "feature": "Party and region shard routing",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "█░░░░",
+      "evidence": "Keep party together, separate region capacity from economic identity",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-014",
+      "feature": "Abuse prevention",
+      "section": "Shared foundation",
+      "lane": "authority",
+      "maturity": "██░░░",
+      "evidence": "Garden transactions and relay rate limits; movement/automation/encounter authority incomplete",
+      "acceptance": "Authenticated state, permission, retry and reconnect checks with two isolated accounts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-100"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-015",
+      "feature": "Directional walk / native character sprites",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Native quest playable; source-specific animation audit remains",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-016",
+      "feature": "Sword swipe / shield displacement",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native source behavior available; directional visual acceptance incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-017",
+      "feature": "Sword charge / spin",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Source quest equipment initialization; interruption and device verification needed",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-018",
+      "feature": "Bow / arrows / ammunition",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Native bow fires; draw behavior varies by source and needs explicit binding",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-019",
+      "feature": "Bomb fuse / flash / blast",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native source behavior; interaction/collision matrix not fully verified",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-020",
+      "feature": "Shield blocking / knockback / damage",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source systems; unified combat authority not wired",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-021",
+      "feature": "Lift / carry / throw pots and objects",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "█░░░░",
+      "evidence": "Native lifting source located; correct held art and world identity integration missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-022",
+      "feature": "Cut grass / drops / collection",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Native reference; authenticated yield and respawn policy missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-023",
+      "feature": "Magic / fire / protection",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Sword tile-bank fix for broken casting implemented; full spell matrix incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-024",
+      "feature": "Transformations / sustained aura / energy wave",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Procedural aura exists; character transformation and wave not finished",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-025",
+      "feature": "Doors / interiors / puzzles / switches",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source quest functionality; original shared-world content not authored",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-026",
+      "feature": "Dialogue / scripted introduction",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Small native farming intro; complete account-to-village storyline missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-027",
+      "feature": "Layering / canopy / foot sorting",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Local crop depth handling; general entity layering and collision incomplete",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-028",
+      "feature": "Source asset provenance and replacement pipeline",
+      "section": "Zelda / Graal adventure and presentation",
+      "lane": "world-actions",
+      "maturity": "██░░░",
+      "evidence": "Source vault/catalogue and validation prototypes; complete licensed distribution/replacement mapping missing",
+      "acceptance": "Four-facing visual playback, contact timing, collision, interruption and world-state acceptance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-029",
+      "feature": "Species and encounter tables",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Source catalogue resolves386 species and184 evolution rules; one persisted Poochyena inspection anchor exists, wider habitats/rates not authored",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-030",
+      "feature": "Creatures visible in adventure world",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Needs world entities, directional art, pathing and spawn budgets",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-031",
+      "feature": "Real-time creature combat",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Shared damage/ownership authority and source animation adapters missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-101",
+        "CV-102"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-032",
+      "feature": "Native-style turn battle",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "███░░",
+      "evidence": "Source-backed starter Pound/Scratch/Tackle versus wild Tackle; HP/PP and replay verified; full engine, statuses and attack animation missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-033",
+      "feature": "Hybrid HP/status continuity",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Domain transition tests; live world/turn handoff missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-034",
+      "feature": "Capture / ball consumption / ownership",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Source formula and atomic capture contract audited in CAPTURE-INTEGRATION-CONTRACT.md; finite ball issuance, DB capture and live presentation remain missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-031"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-035",
+      "feature": "Followers and companion reactions",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "███░░",
+      "evidence": "Six distinct authenticated local-test species project to native trail;18/26px presets verified. Reversals overlap; reactions, obstacle avoidance and shared creature replication missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-036",
+      "feature": "Party / storage / clinic",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "██░░░",
+      "evidence": "Six-slot owned roster plus source-backed level/HP and Oran consumption verified; server-timed home HP/PP recovery verified; full clinic, capture and storage gameplay remain missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-037",
+      "feature": "Moves / types / status durations",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "354 source move definitions catalogued; three basic moves integrated, full effects/status behavior missing",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-038",
+      "feature": "Evolution / traits / breeding",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Time, food, habitat capacity and offspring issuance specified conceptually",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-039",
+      "feature": "Fishing / aquatic encounters",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Rod, line, bobber, bite, reel and catch required",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-040",
+      "feature": "Collections / discovery journal",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Emoji discovery exists separately; creature discovery not connected",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-041",
+      "feature": "Game Corner activities",
+      "section": "Pokémon / companion systems",
+      "lane": "creatures",
+      "maturity": "█░░░░",
+      "evidence": "Separate amusement budget; game implementation and reward model absent",
+      "acceptance": "Owned entity continuity, species-specific art, command acknowledgment and replay-safe transitions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-042",
+      "feature": "Till / sow / water",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Three native private beds now settle Oran till/plant/water/harvest through server authority; broader crop/tool matrix missing",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-043",
+      "feature": "Visible crop growth stages",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Indexed source berry art; Oran 30-second server growth and harvested inventory/reload verified; full visual matrix missing",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-044",
+      "feature": "Fertilizer / bonus harvest",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "███░░",
+      "evidence": "Local one-use fertilizer loop verified; durable balancing absent",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-045",
+      "feature": "Orchards / seasons / weather",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Crop definitions, environmental clock and art sets required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-046",
+      "feature": "Soil / irrigation / compost",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Limited garden compost exists; rich soil system not built",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-047",
+      "feature": "Livestock / feed / produce",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Species, care, habitat and limited production chains specified",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-048",
+      "feature": "Woodcutting / mining",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Tool loops, deposits, depletion and authority required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-049",
+      "feature": "Cooking / smithing / carpentry / tailoring",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Recipe graph, station permissions, input escrow and outputs required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-050",
+      "feature": "Alchemy / engineering / automation",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Bounded energy/material throughput, no offline infinite production",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-051",
+      "feature": "Skills / XP / unlocks",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Local farm counter; persistent multi-profession system absent",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-052",
+      "feature": "Equipment tiers / durability / modifiers",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Separate material, quality, traits and unique-instance identity",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-053",
+      "feature": "Home furnishings / construction",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "██░░░",
+      "evidence": "Durable small scenery layout; native home building missing",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-054",
+      "feature": "Museum / collections / village relationships",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Authored content and persistent progression required",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-055",
+      "feature": "Companion labor / habitat utility",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Limited tasks and resource budgets; avoid currency generation by unattended loops",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-056",
+      "feature": "Combinatorial crafting and transmutation",
+      "section": "RuneScape / FarmVille / Stardew / Animal Crossing / Palworld / Minecraft",
+      "lane": "professions",
+      "maturity": "█░░░░",
+      "evidence": "Input/output conservation, discoverable recipes and variant compatibility",
+      "acceptance": "Visible action and resource lifecycle; server input debit/output conservation; reload and visitor rights.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-057",
+      "feature": "Connected world geography",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Master specification; twelve proposed regions are not authored maps",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-058",
+      "feature": "Private/public border transitions",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "██░░░",
+      "evidence": "Admission/travel invalidation tests exist; playable private/public native border warps remain missing",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-101",
+        "CV-007"
+      ],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-059",
+      "feature": "Mounts / boats / warp towers",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Logical requirements only; boarding and travel gameplay absent",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-060",
+      "feature": "Guild settlements / businesses",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Ownership roles, contribution escrow and public contracts",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-061",
+      "feature": "Roads / harbors / industry",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Shared construction, maintenance and logistics graph",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-062",
+      "feature": "Resource transport / regional trade",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Cargo identity, routes, delivery receipts and supply demand",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-063",
+      "feature": "Ecology / disasters / world events",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Bounded reversible events and persistent consequences; no unannounced home destruction",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-064",
+      "feature": "Sky / orbital / planetary travel",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Planned expansion; renderer and streaming decision not proven",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-065",
+      "feature": "Modern 3D within top-down world",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Requires renderer prototype benchmarks and asset compatibility; not native current camera",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-066",
+      "feature": "Continuing endgame",
+      "section": "SimCity / Age of Empires / EVE / No Man's Sky world scale",
+      "lane": "world-travel",
+      "maturity": "█░░░░",
+      "evidence": "Horizontal mastery, collections, public projects and authored expansions",
+      "acceptance": "Authored map route, border and instance transition, access rules, recovery and measured streaming.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-067",
+      "feature": "Full Unicode discovery catalogue",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "████░",
+      "evidence": "3,953 entries, searchable native overlay; discovery only",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-068",
+      "feature": "Custom memoji registry",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Historical registry reference; live completeness not verified",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-069",
+      "feature": "Family/species/quality/instance taxonomy",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Master specification; content definitions not exhaustively authored",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-070",
+      "feature": "Gameplay inventory versus Satchel",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Oran native produce and returned seed reach account inventory; unified equipment and wider items missing",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-071",
+      "feature": "Finite Grain rewards",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Local migration and garden integration; conservation/retry/exhaustion checked in PostgreSQL",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-072",
+      "feature": "Commodity production budgets",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Currency reserve does not make every crop or creature scarce",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-073",
+      "feature": "Player trades / order book / escrow",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "███░░",
+      "evidence": "Fixed-price offers, escrow, partial fills and cancellation tested; automatic matching absent",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-074",
+      "feature": "Exchange prices / volume / supply feed",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Actual offers and aggregate Grain supply available; charts/volume feed missing",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-075",
+      "feature": "Liquidity pools / fees / slippage",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Simulated funded-reserve design only",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-076",
+      "feature": "Derivatives and trader analytics",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Later separately funded subsystem; no implemented game perps",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-077",
+      "feature": "Cash skins / season passes",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Commerce and entitlements not integrated",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-078",
+      "feature": "Purchased Grain without minting",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "█░░░░",
+      "evidence": "Existing-supply transfer requirement; no cash purchase flow",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-079",
+      "feature": "Crafting sinks / social consumption",
+      "section": "Charms / Grained Exchange / social economy",
+      "lane": "economy",
+      "maturity": "██░░░",
+      "evidence": "Existing stamp consumes charm; broad sinks not implemented",
+      "acceptance": "Conserved supply and escrow, retries and concurrency, clear player costs and observable settlement.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-080",
+      "feature": "PlankSpace posts and charm stamps",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Existing account garden/social routes; native feed not embedded",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-081",
+      "feature": "In-game feed / Lumberyard / Pine browsing",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Same-origin account shell and input-isolated overlay required",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-082",
+      "feature": "In-game composing / reacting",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Needs existing authenticated APIs and explicit publication UX",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-083",
+      "feature": "Voice note recording / playback",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "████░",
+      "evidence": "Local draft flow tested with synthetic mic; no actual user audio recorded",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-084",
+      "feature": "Audio attachment to post",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Existing composer upload/playback code; native publication not connected",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-085",
+      "feature": "Voice-to-text",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Optional browser recognition; browser/provider support varies",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-086",
+      "feature": "Proximity voice / party voice",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Server-authorized room membership and transport not built",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-013"
+      ],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-087",
+      "feature": "Moderation / blocking / reporting",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Existing social moderation; native comms policy integration absent",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-088",
+      "feature": "Two-button menu and controller adapter",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Synthetic gamepad tests; physical-controller matrix pending",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-089",
+      "feature": "Mobile zoom / fullscreen / pixel scale",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "███░░",
+      "evidence": "Local browser verification; broad hardware coverage pending",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-090",
+      "feature": "Large seamless camera",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "█░░░░",
+      "evidence": "Current native viewport fixed; fullscreen is scaling, not a larger world view",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-091",
+      "feature": "Accessibility / remapping / subtitles",
+      "section": "Communications, social and player controls",
+      "lane": "experience",
+      "maturity": "██░░░",
+      "evidence": "Partial controls and labels; full accessibility testing absent",
+      "acceptance": "Keyboard, touch and controller flow; focus/close/reopen; accessibility; no unintended input or publication.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-092",
+      "feature": "Community content contract",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "██░░░",
+      "evidence": "Pack validation prototype; editor and publishing pipeline absent",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-093",
+      "feature": "Collaborative map/art editor",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Versioned assets, review, rollback and bounded scripting required",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-094",
+      "feature": "Animated action conformance suite",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "██░░░",
+      "evidence": "Several local regression scripts; full directional/action matrix absent",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-095",
+      "feature": "Economy concurrency testing",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "███░░",
+      "evidence": "Oran harvest, duplicate commits, permission revocation and exchange escrow/cancel tested; combat/capture races absent",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-096",
+      "feature": "Performance budgets / low-end fallback",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Proposed targets only; benchmark device set not measured",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-097",
+      "feature": "Remote friends-playable release",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Current links are localhost; no authenticated MMO deployment",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-098",
+      "feature": "Full source-to-bespoke replacement coverage",
+      "section": "Builder, quality and delivery",
+      "lane": "delivery",
+      "maturity": "█░░░░",
+      "evidence": "Provenance exists for subsets; replacement catalogue incomplete",
+      "acceptance": "Reproducible validation, documented evidence, rollback and measured target-device performance.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-099",
+      "feature": "Retire standalone garden entry points",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Old garden routes return to the adventure; no Porch gameplay surfaces or parallel Garden menu; preserve stored accounts and receipts.",
+      "status": "verified bounded removal",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-100",
+      "feature": "Trusted authored collision geometry",
+      "section": "Additional explicit player requirements",
+      "lane": "world-actions",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Pinned map identity and collision export; server validates traversable cells independently of client coordinates.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-101",
+      "feature": "Server-owned native movement",
+      "section": "Additional explicit player requirements",
+      "lane": "authority",
+      "maturity": "not scored",
+      "evidence": "Seven native 8px steps persisted; actor identity/replay/reconnect/expiry/travel and20ms jitter tests passed. Two-account standing peer projection verified, capped16 and polled2s; no interpolation/hit collisions, combat, rewards or native warps. Oran-only settlement is now verified; weapon/encounter authority, additional resource content and unified equipment remain blocking. See NATIVE-ACCOUNT-MOVEMENT.md.",
+      "acceptance": "Authenticated input sequence, speed/collision/range validation, stale epoch rejection and reconnect; two accounts cannot impersonate movement.",
+      "status": "connected locally; broader acceptance pending",
+      "prerequisites": [
+        "CV-100"
+      ],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-102",
+      "feature": "Timed native action settlement",
+      "section": "Additional explicit player requirements",
+      "lane": "authority",
+      "maturity": "not scored",
+      "evidence": "Native private till/plant/water/30s growth/harvest inventory and reload passed; PG escrow cancel/revoke/duplicate commits passed. No wider crop catalogue, crafting, combat or capture. See NATIVE-ECONOMIC-LOOP.md.",
+      "acceptance": "Server action start/contact/cancel; atomic input debit and resource update; revoke-at-contact, replay and lost-response receipt tests.",
+      "status": "Oran scope connected; broader acceptance pending",
+      "prerequisites": [
+        "CV-101",
+        "CV-009"
+      ],
+      "laneBlockers": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CV-103",
+      "feature": "Shared native resource presentation",
+      "section": "Additional explicit player requirements",
+      "lane": "world-actions",
+      "maturity": "███░░",
+      "evidence": "Two actual accounts in one granted private home render native Oran stages 0→1→2→3→4→1; owner gains1 Oran, visitor balances unchanged. Permission-aware native prompts verified; remote tool animation and wider resources remain missing. See NATIVE-RESOURCE-REPLICATION.md.",
+      "acceptance": "Two clients render one authoritative resource lifecycle; rejected/cancelled actions cannot show saved yield or mutate account balances.",
+      "status": "Oran two-account scope connected; broader acceptance pending",
+      "prerequisites": [
+        "CV-102"
+      ],
+      "laneBlockers": [
+        "CV-101"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-104",
+      "feature": "Native resource to exchange continuity",
+      "section": "Additional explicit player requirements",
+      "lane": "economy",
+      "maturity": "not scored",
+      "evidence": "Native private till/plant/water/30s growth/harvest inventory and reload passed; PG escrow cancel/revoke/duplicate commits passed. No wider crop catalogue, crafting, combat or capture. See NATIVE-ECONOMIC-LOOP.md.",
+      "acceptance": "One server-authorized native harvest reaches inventory, crafting input consumption and escrow trade with conserved quantities.",
+      "status": "Oran scope connected; broader acceptance pending",
+      "prerequisites": [
+        "CV-103",
+        "CV-073"
+      ],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-105",
+      "feature": "Native account action feedback",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Distinguish local observation, accepted start, committed receipt and rejected action; never label an animation as saved success.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-102"
+      ],
+      "laneBlockers": [],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-106",
+      "feature": "Six-member follower train and formations",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Distinct owned UUIDs; six visible followers; corners/warps; spacing and ordering.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-107",
+      "feature": "Attack, defend, hold and free-roam commands",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Acknowledged server commands, valid target selection, no neutral aggression, recall and leash.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-108",
+      "feature": "Species-specific move animation and effects",
+      "section": "Additional explicit player requirements",
+      "lane": "creatures",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Source markers and anchors bound to defined move events; projectile/effect ownership and single hit.",
+      "status": "queued",
+      "prerequisites": [
+        "CV-031"
+      ],
+      "laneBlockers": [
+        "CV-101",
+        "CV-102"
+      ],
+      "priority": "P1"
+    },
+    {
+      "id": "CV-109",
+      "feature": "Livestock intelligence and habitat assignment",
+      "section": "Additional explicit player requirements",
+      "lane": "professions",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Care and grazing permissions, species capabilities, bounded produce and breeding receipts.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-102"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-110",
+      "feature": "Nintendo-quality Charmdex interaction pass",
+      "section": "Additional explicit player requirements",
+      "lane": "experience",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Consistent hierarchy, belt selection, meaningful feedback, input parity and visual review of every state.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-105"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-111",
+      "feature": "All-source art replacement and provenance completeness",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Each used asset has source, hash, attribution, runtime role, replacement status and verified dimensions.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-112",
+      "feature": "Browser desktop/mobile GPU and memory budgets",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Measure startup, frame time, memory and input latency; record device/browser and fallback.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    },
+    {
+      "id": "CV-113",
+      "feature": "Account-transition recovery and GitHub handoff",
+      "section": "Additional explicit player requirements",
+      "lane": "delivery",
+      "maturity": "not scored",
+      "evidence": "Explicit conversation requirement; do not infer completion from assignment.",
+      "acceptance": "Committed sources, reproducible setup and zero-context handoff with current blockers.",
+      "status": "queued",
+      "prerequisites": [],
+      "laneBlockers": [
+        "CV-104"
+      ],
+      "priority": "P2"
+    }
+  ]
+}

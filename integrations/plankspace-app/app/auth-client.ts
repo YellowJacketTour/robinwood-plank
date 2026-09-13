@@ -31,12 +31,20 @@ async function activeToken(wallet: string) {
     { headers: { authorization: `Bearer ${token}` } },
   );
 
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      localStorage.removeItem(key(wallet));
+      return "";
+    }
+    throw new Error("Could not check your saved sign-in. Please try again.");
+  }
   const result = await readApiJson<{ active?: boolean }>(
     response,
     "Could not check the saved PlankSpace session.",
-  ).catch(() => ({ active: false }));
+  );
 
   if (result.active) return token;
+  if (result.active !== false) throw new Error("Could not check your saved sign-in. Please try again.");
 
   localStorage.removeItem(key(wallet));
   return "";

@@ -1,0 +1,3147 @@
+From 53e4bc55846c9b678501d234db2bc8d8d26c6680 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:53:58 -0500
+Subject: [PATCH] refactor(zc): propagate world lighting through sprite virtual
+ draws
+
+---
+ src/ffc.cpp                   |   4 +-
+ src/ffc.h                     |   2 +-
+ src/items.cpp                 |  14 +-
+ src/items.h                   |   4 +-
+ src/sprite.cpp                |  79 ++++----
+ src/sprite.h                  |  33 ++--
+ src/zc/decorations.cpp        |  68 +++----
+ src/zc/decorations.h          |  28 +--
+ src/zc/guys.cpp               | 334 +++++++++++++++++-----------------
+ src/zc/guys.h                 | 112 ++++++------
+ src/zc/hero.cpp               |  44 ++---
+ src/zc/hero.h                 |   6 +-
+ src/zc/maps.cpp               | 128 ++++++-------
+ src/zc/weapons.cpp            |  16 +-
+ src/zc/weapons.h              |   4 +-
+ src/zq/zquest.cpp             |   5 +-
+ tests/sprite_draw_context.cpp |  72 ++++++++
+ 17 files changed, 516 insertions(+), 437 deletions(-)
+ create mode 100644 tests/sprite_draw_context.cpp
+
+diff --git a/src/ffc.cpp b/src/ffc.cpp
+index b6f9cdf..8dfc624 100644
+--- a/src/ffc.cpp
++++ b/src/ffc.cpp
+@@ -24,9 +24,9 @@ void ffcdata::clear()
+ 	*this = ffcdata();
+ }
+ 
+-void ffcdata::draw(BITMAP* dest)
++void ffcdata::draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+-	draw_ffc(dest, 0, 0, false);
++	draw_ffc(dest, 0, 0, false, world_lights);
+ }
+ 
+ void ffcdata::draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay)
+diff --git a/src/ffc.h b/src/ffc.h
+index 0e7d471..e02f5c6 100644
+--- a/src/ffc.h
++++ b/src/ffc.h
+@@ -71,7 +71,7 @@ public:
+ 	// Note: If you use this to clear a ffc during gameplay, you must also call zc_ffc_set(ffc, 0)
+ 	void clear();
+ 
+-	void draw(BITMAP* dest) override;
++	void draw(BITMAP* dest, const script_world_light_targets* world_lights = nullptr) override;
+ 	void draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay);
+ 	void draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay, const script_world_light_targets* world_lights);
+ 
+diff --git a/src/items.cpp b/src/items.cpp
+index 7bc93bb..aab13bf 100644
+--- a/src/items.cpp
++++ b/src/items.cpp
+@@ -306,12 +306,12 @@ bool item::animate(int32_t)
+ 	return false;
+ }
+ 
+-void item::draw(BITMAP *dest)
++void item::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 	
+ 	if((pickup&ipNODRAW) || tile==0 || force_grab)
+@@ -320,7 +320,7 @@ void item::draw(BITMAP *dest)
+ 	if ( (z > 0 || fakez > 0) && get_qr(qr_ITEMSHADOWS) && get_qr(qr_CLASSIC_DRAWING_ORDER))
+ 	{
+ 		shadowtile = sprite_data_buf.get(spr_shadow).tile+aframe;
+-		sprite::drawshadow(dest,get_qr(qr_TRANSSHADOWS) != 0);
++		sprite::drawshadow(dest,get_qr(qr_TRANSSHADOWS) != 0, world_lights);
+ 	}
+ 	bool ignore_flicker = fallclk || drownclk;
+ 	if (!ignore_flicker)
+@@ -337,7 +337,7 @@ void item::draw(BITMAP *dest)
+ 		}
+ #endif
+ 	}
+-	sprite::draw(dest);
++	sprite::draw(dest, world_lights);
+ }
+ 
+ bool item::can_drawshadow() const
+@@ -347,11 +347,11 @@ bool item::can_drawshadow() const
+ 	return (z > 0 || fakez > 0) && get_qr(qr_ITEMSHADOWS);
+ }
+ 
+-void item::drawshadow(BITMAP* dest, bool translucent)
++void item::drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if (!can_drawshadow() || get_qr(qr_CLASSIC_DRAWING_ORDER))
+ 		return;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ }
+ 
+ void item::draw_hitbox()
+diff --git a/src/items.h b/src/items.h
+index 3135d1d..9f77805 100644
+--- a/src/items.h
++++ b/src/items.h
+@@ -94,8 +94,8 @@ public:
+     virtual ~item();
+     virtual bool animate(int32_t index);
+ 	virtual bool can_drawshadow() const;
+-    virtual void draw(BITMAP *dest);
+-	virtual void drawshadow(BITMAP* dest, bool translucent);
++    virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t run_script(int32_t mode);
+ 	virtual optional<ScriptType> get_scrtype() const {return ScriptType::ItemSprite;}
+ 	virtual ALLEGRO_COLOR hitboxColor(byte opacity = 255) const;
+diff --git a/src/sprite.cpp b/src/sprite.cpp
+index de8f383..b4fddd4 100644
+--- a/src/sprite.cpp
++++ b/src/sprite.cpp
+@@ -1,3 +1,4 @@
++#include "zc/script_drawing.h"
+ #include "solidobject.h"
+ #include "zalleg/pal_tables.h"
+ #include "base/util.h"
+@@ -301,11 +302,11 @@ void sprite::reassignUid(int32_t new_uid)
+ 	all_sprites[uid] = this;
+ }
+ 
+-void sprite::draw2(BITMAP *)                            // top layer for special needs
++void sprite::draw2(BITMAP *, const script_world_light_targets* world_lights)                            // top layer for special needs
+ {
+ }
+ 
+-void sprite::drawcloaked2(BITMAP *)                     // top layer for special needs
++void sprite::drawcloaked2(BITMAP *, const script_world_light_targets* world_lights)                     // top layer for special needs
+ {
+ }
+ 
+@@ -999,10 +1000,11 @@ void doSpriteDraw(int32_t drawstyle, BITMAP* dest, BITMAP* src, int32_t x, int32
+ 
+ #define SPRITE_MONOCOLOR(bmp) monocolor(bmp, sprite_flicker_color, sprite_flicker_transp_passes)
+ 
+-void sprite::draw(BITMAP* dest)
++void sprite::draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+ 	//Handle glowing sprites
+-	handle_sprlighting();
++	handle_sprlighting(world_lights ? world_lights->opaque : nullptr,
++		world_lights ? world_lights->translucent : nullptr);
+ 	if(!show_sprites || invis_timer)
+ 		return;
+ 	zfix tyoffs = yofs;
+@@ -1030,7 +1032,7 @@ void sprite::draw(BITMAP* dest)
+ #endif
+ 	if (FFCore.getQuestHeaderInfo(0) < 0x255 || ( FFCore.getQuestHeaderInfo(0) == 0x255 && FFCore.getQuestHeaderInfo(2) < 42 ) || get_qr(qr_OLDSPRITEDRAWS) || (drawflags & sprdrawflagALWAYSOLDDRAWS))
+ 	{
+-		drawzcboss(dest);
++		drawzcboss(dest, world_lights);
+ 		yofs = tyoffs;
+ 		return; //don't run the rest, use the old code
+ 	}
+@@ -1485,7 +1487,7 @@ void sprite::draw(BITMAP* dest)
+ 				}
+ 			}
+             
+-			w.draw(dest);
++			w.draw(dest, world_lights);
+ 		}
+ 	}
+ 
+@@ -1514,7 +1516,7 @@ void sprite::draw_hitbox()
+ 
+ //Z1 bosses draw tiles from guys.cpp, direct to the 'dest'
+ // ...but this also draws the hero if qr_OLDSPRITEDRAWS is enabled
+-void sprite::drawzcboss(BITMAP* dest)
++void sprite::drawzcboss(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+ 	if(!show_sprites)
+ 	{
+@@ -1543,7 +1545,7 @@ void sprite::drawzcboss(BITMAP* dest)
+         
+ 	if (!(FFCore.getQuestHeaderInfo(0) < 0x255 || (FFCore.getQuestHeaderInfo(0) == 0x255 && FFCore.getQuestHeaderInfo(2) < 42) || get_qr(qr_OLDSPRITEDRAWS) || (drawflags & sprdrawflagALWAYSOLDDRAWS)))
+ 	{
+-		sprite::draw(dest);
++		sprite::draw(dest, world_lights);
+ 		return; //don't run the rest, use the old code
+ 	}
+ 	if (sprite_flicker_color)
+@@ -1892,7 +1894,7 @@ void sprite::drawzcboss(BITMAP* dest)
+ 				}
+ 			}
+             
+-			w.draw(dest);
++			w.draw(dest, world_lights);
+ 		}
+ 	}
+     
+@@ -1900,7 +1902,7 @@ void sprite::drawzcboss(BITMAP* dest)
+ 		draw_hitbox();
+ }
+ 
+-void sprite::draw8(BITMAP* dest)
++void sprite::draw8(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+     int32_t sx = real_x(x+xofs);
+ 	// Pain. https://discord.com/channels/876899628556091432/1193381178716196864
+@@ -1937,7 +1939,7 @@ void sprite::draw8(BITMAP* dest)
+     }
+ }
+ 
+-void sprite::drawcloaked(BITMAP* dest)
++void sprite::drawcloaked(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+     int32_t sx = real_x(x+xofs);
+ 	// Pain. https://discord.com/channels/876899628556091432/1193381178716196864
+@@ -2012,7 +2014,7 @@ bool sprite::can_drawshadow() const
+ {
+ 	return true;
+ }
+-void sprite::drawshadow(BITMAP* dest,bool translucent)
++void sprite::drawshadow(BITMAP* dest,bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(extend == 4 || shadowtile==0 || id<0)
+ 	{
+@@ -2252,21 +2254,21 @@ bool sprite_list::del(sprite* spr, bool force, bool may_defer)
+ 	return del(index, force, may_defer);
+ }
+ 
+-void sprite_list::draw(BITMAP* dest,bool lowfirst)
++void sprite_list::draw(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights)
+ {
+ 	if(lowfirst)
+ 		for(int32_t i=0; i<count; i++)
+ 		{
+-			sprites[i]->draw(dest);
++			sprites[i]->draw(dest, world_lights);
+ 		}
+ 	else
+ 		for(int32_t i=count-1; i>=0; i--)
+ 		{
+-			sprites[i]->draw(dest);
++			sprites[i]->draw(dest, world_lights);
+ 		}
+ }
+ 
+-void sprite_list::draw_smooth_maze(BITMAP* dest)
++void sprite_list::draw_smooth_maze(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+ #ifdef IS_PLAYER
+ 	int maze_screen = maze_state.scr->screen;
+@@ -2278,7 +2280,7 @@ void sprite_list::draw_smooth_maze(BITMAP* dest)
+ 			set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 		else
+ 			clear_clip_rect(dest);
+-		sprites[i]->draw(dest);
++		sprites[i]->draw(dest, world_lights);
+ 	}
+ 
+ 	clear_clip_rect(dest);
+@@ -2287,21 +2289,21 @@ void sprite_list::draw_smooth_maze(BITMAP* dest)
+ #endif
+ }
+ 
+-void sprite_list::drawshadow(BITMAP* dest,bool translucent, bool lowfirst)
++void sprite_list::drawshadow(BITMAP* dest,bool translucent, bool lowfirst, const script_world_light_targets* world_lights)
+ {
+ 	if(lowfirst)
+ 		for(int32_t i=0; i<count; i++)
+ 		{
+-			sprites[i]->drawshadow(dest,translucent);
++			sprites[i]->drawshadow(dest,translucent, world_lights);
+ 		}
+ 	else
+ 		for(int32_t i=count-1; i>=0; i--)
+ 		{
+-			sprites[i]->drawshadow(dest,translucent);
++			sprites[i]->drawshadow(dest,translucent, world_lights);
+ 		}
+ }
+ 
+-void sprite_list::drawshadow_smooth_maze(BITMAP* dest, bool translucent)
++void sprite_list::drawshadow_smooth_maze(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ #ifdef IS_PLAYER
+ 	int maze_screen = maze_state.scr->screen;
+@@ -2311,7 +2313,7 @@ void sprite_list::drawshadow_smooth_maze(BITMAP* dest, bool translucent)
+ 	{
+ 		if (sprites[i]->screen_spawned != maze_state.scr->screen)
+ 			set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+-		sprites[i]->drawshadow(dest, translucent);
++		sprites[i]->drawshadow(dest, translucent, world_lights);
+ 	}
+ 
+ 	clear_clip_rect(dest);
+@@ -2321,31 +2323,31 @@ void sprite_list::drawshadow_smooth_maze(BITMAP* dest, bool translucent)
+ #endif
+ }
+ 
+-void sprite_list::draw2(BITMAP* dest,bool lowfirst)
++void sprite_list::draw2(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights)
+ {
+ 	if(lowfirst)
+ 		for(int32_t i=0; i<count; i++)
+ 		{
+-			sprites[i]->draw2(dest);
++			sprites[i]->draw2(dest, world_lights);
+ 		}
+ 	else
+ 		for(int32_t i=count-1; i>=0; i--)
+ 		{
+-			sprites[i]->draw2(dest);
++			sprites[i]->draw2(dest, world_lights);
+ 		}
+ }
+ 
+-void sprite_list::drawcloaked2(BITMAP* dest,bool lowfirst)
++void sprite_list::drawcloaked2(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights)
+ {
+ 	if(lowfirst)
+ 		for(int32_t i=0; i<count; i++)
+ 		{
+-			sprites[i]->drawcloaked2(dest);
++			sprites[i]->drawcloaked2(dest, world_lights);
+ 		}
+ 	else
+ 		for(int32_t i=count-1; i>=0; i--)
+ 		{
+-			sprites[i]->drawcloaked2(dest);
++			sprites[i]->drawcloaked2(dest, world_lights);
+ 		}
+ }
+ 
+@@ -2916,15 +2918,16 @@ movingblock::movingblock() : sprite(), blockLayer(0), step(0.5)
+     id=1;
+ }
+ 
+-void movingblock::draw(BITMAP *dest)
++void movingblock::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 	
+-	handle_sprlighting();
++	handle_sprlighting(world_lights ? world_lights->opaque : nullptr,
++		world_lights ? world_lights->translucent : nullptr);
+ 	if(fallclk)
+ 	{
+ 		int32_t old_cs = cs;
+@@ -2942,7 +2945,7 @@ void movingblock::draw(BITMAP *dest)
+ 			int32_t spd = spr.speed ? spr.speed : 1;
+ 			int32_t animclk = (PITFALL_FALL_FRAMES-fallclk);
+ 			tile = spr.tile + zc_min(animclk / spd, fr-1);
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 		}
+ 		
+ 		cs = old_cs;
+@@ -2966,7 +2969,7 @@ void movingblock::draw(BITMAP *dest)
+ 			int32_t spd = spr.speed ? spr.speed : 1;
+ 			int32_t animclk = (WATER_DROWN_FRAMES-drownclk);
+ 			tile = spr.tile + zc_min(animclk / spd, fr-1);
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 		}
+ 		
+ 		cs = old_cs;
+@@ -2984,12 +2987,12 @@ void movingblock::draw(BITMAP *dest)
+     }
+ }
+ 
+-bool movingblock::draw(BITMAP* dest, int layer)
++bool movingblock::draw(BITMAP* dest, int layer, const script_world_light_targets* world_lights)
+ {
+ 	if(!(fallclk || drownclk || clk)) return false;
+ 	if(layer < 0 || blockLayer == layer)
+ 	{
+-		draw(dest);
++		draw(dest, world_lights);
+ 		return true;
+ 	}
+ 	return false;
+@@ -3121,10 +3124,10 @@ tempsprite_shadow::tempsprite_shadow(sprite* p)
+ 	behind = false; // shadow is never 'behind'
+ }
+ 
+-void tempsprite_shadow::draw(BITMAP* dest)
++void tempsprite_shadow::draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+ 	if(parent)
+-		parent->drawshadow(dest, get_qr(qr_TRANSSHADOWS)!=0);
++		parent->drawshadow(dest, get_qr(qr_TRANSSHADOWS)!=0, world_lights);
+ }
+ 
+ //x1,y1 = top of left line
+diff --git a/src/sprite.h b/src/sprite.h
+index 3118984..6702bda 100644
+--- a/src/sprite.h
++++ b/src/sprite.h
+@@ -10,6 +10,7 @@
+ #include "core/cpos_info.h"
+ #include "base/containers.h"
+ 
++struct script_world_light_targets;
+ struct itemdata;
+ struct newcombo;
+ using std::map;
+@@ -156,14 +157,14 @@ public:
+ 	virtual void handle_sprlighting();
+ 	// Borrowed paired targets; omitted/incomplete pairs retain legacy planes.
+ 	virtual void handle_sprlighting(BITMAP* darkness, BITMAP* translucent_darkness);
+-    virtual void draw(BITMAP* dest);                        // main layer
+-    virtual void drawzcboss(BITMAP* dest);                        // main layer
+-    virtual void draw8(BITMAP* dest);                       // main layer
+-    virtual void drawcloaked(BITMAP* dest);                 // main layer
++    virtual void draw(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                        // main layer
++    virtual void drawzcboss(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                        // main layer
++    virtual void draw8(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                       // main layer
++    virtual void drawcloaked(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                 // main layer
+ 	virtual bool can_drawshadow() const;
+-    virtual void drawshadow(BITMAP* dest, bool translucent);// main layer
+-    virtual void draw2(BITMAP* dest);                       // top layer for special needs
+-    virtual void drawcloaked2(BITMAP* dest);                // top layer for special needs
++    virtual void drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights = nullptr);// main layer
++    virtual void draw2(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                       // top layer for special needs
++    virtual void drawcloaked2(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);                // top layer for special needs
+     virtual bool animate(int32_t index);
+ 	virtual void post_animate();
+ 	virtual void on_freeze() {}
+@@ -264,12 +265,12 @@ public:
+ 	void setMax(int32_t max) {max_sprites = (max < SLMAX ? max : SLMAX);}
+     bool del(int32_t index, bool force = false, bool may_defer = true);
+ 	bool del(sprite* spr, bool force = false, bool may_defer = true);
+-    void draw(BITMAP* dest,bool lowfirst);
+-    void drawshadow(BITMAP* dest,bool translucent, bool lowfirst);
+-	void draw_smooth_maze(BITMAP* dest);
+-	void drawshadow_smooth_maze(BITMAP* dest, bool translucent);
+-    void draw2(BITMAP* dest,bool lowfirst);
+-    void drawcloaked2(BITMAP* dest,bool lowfirst);
++    void draw(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights = nullptr);
++    void drawshadow(BITMAP* dest,bool translucent, bool lowfirst, const script_world_light_targets* world_lights = nullptr);
++	void draw_smooth_maze(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);
++	void drawshadow_smooth_maze(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++    void draw2(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights = nullptr);
++    void drawcloaked2(BITMAP* dest,bool lowfirst, const script_world_light_targets* world_lights = nullptr);
+     void animate();
+ 	void solid_push(solid_object* pusher);
+     void check_conveyor();
+@@ -333,8 +334,8 @@ public:
+ 	bool check_side_fall(bool antigrav) const;
+ 	bool active() const;
+ 	virtual bool animate(int32_t index) override;
+-	virtual void draw(BITMAP *dest) override;
+-	bool draw(BITMAP *dest, int layer);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
++	bool draw(BITMAP *dest, int layer, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class portal : public sprite
+@@ -371,7 +372,7 @@ class tempsprite_shadow : public sprite
+ {
+ public:
+ 	tempsprite_shadow(sprite* parent);
+-	void draw(BITMAP *dest) override;
++	void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
+ };
+ 
+ bool insideRotRect(double x, double y, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t x3, int32_t y3, int32_t x4, int32_t y4);
+diff --git a/src/zc/decorations.cpp b/src/zc/decorations.cpp
+index 14414e1..a8789d7 100644
+--- a/src/zc/decorations.cpp
++++ b/src/zc/decorations.cpp
+@@ -147,7 +147,7 @@ bool dBushLeaves::animate(int32_t)
+ 	return (clk++>=24);
+ }
+ 
+-void dBushLeaves::draw(BITMAP *dest)
++void dBushLeaves::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(screenscrolling)
+ 	{
+@@ -165,7 +165,7 @@ void dBushLeaves::draw(BITMAP *dest)
+ 		y=oy+ft[i][int32_t(float(clk-1)/3)][1];
+ 		flip=ft[i][int32_t(float(clk-1)/3)][2];
+ 		tile=t*4+i;
+-		decoration::draw8(dest);
++		decoration::draw8(dest, world_lights);
+ 	}
+ }
+ 
+@@ -188,7 +188,7 @@ bool comboSprite::animate(int32_t)
+ 	return (clk++ >= wspr.total_duration());
+ }
+ 
+-void comboSprite::realdraw(BITMAP *dest, int32_t draw_what)
++void comboSprite::realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights)
+ {
+ 	if(misc!=draw_what || the_deco_sprite < 0)
+ 		return;
+@@ -202,17 +202,17 @@ void comboSprite::realdraw(BITMAP *dest, int32_t draw_what)
+ 	
+ 	tile = t+(((clk-1)/spd)%fr);
+ 	
+-	decoration::draw(dest);
++	decoration::draw(dest, world_lights);
+ }
+ 
+-void comboSprite::draw(BITMAP *dest)
++void comboSprite::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	realdraw(dest,0);
++	realdraw(dest,0, world_lights);
+ }
+ 
+-void comboSprite::draw2(BITMAP *dest)
++void comboSprite::draw2(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	realdraw(dest,1);
++	realdraw(dest,1, world_lights);
+ }
+ 
+ dFlowerClippings::dFlowerClippings(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr) : decoration(X,Y,Id,Clk)
+@@ -334,7 +334,7 @@ bool dFlowerClippings::animate(int32_t)
+ 	return (clk++>=24);
+ }
+ 
+-void dFlowerClippings::draw(BITMAP *dest)
++void dFlowerClippings::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(screenscrolling)
+ 	{
+@@ -354,7 +354,7 @@ void dFlowerClippings::draw(BITMAP *dest)
+ 		y=oy+ft[i][int32_t(float(clk-1)/3)][1];
+ 		flip=ft[i][int32_t(float(clk-1)/3)][2];
+ 		tile=t*4+i;
+-		decoration::draw8(dest);
++		decoration::draw8(dest, world_lights);
+ 	}
+ }
+ 
+@@ -428,7 +428,7 @@ bool dGrassClippings::animate(int32_t)
+ 	return (clk++>=12);
+ }
+ 
+-void dGrassClippings::draw(BITMAP *dest)
++void dGrassClippings::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(screenscrolling)
+ 	{
+@@ -448,7 +448,7 @@ void dGrassClippings::draw(BITMAP *dest)
+ 		y=oy+ft[i][int32_t(float(clk-1)/3)][1];
+ 		flip=ft[i][int32_t(float(clk-1)/3)][2];
+ 		tile=(t+(ft[i][int32_t(float(clk-1)/3)][3]))*4+i;
+-		decoration::draw8(dest);
++		decoration::draw8(dest, world_lights);
+ 	}
+ }
+ 
+@@ -499,7 +499,7 @@ bool dHammerSmack::animate(int32_t)
+ 	return (clk++>=12);
+ }
+ 
+-void dHammerSmack::draw(BITMAP *dest)
++void dHammerSmack::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(screenscrolling)
+ 	{
+@@ -517,7 +517,7 @@ void dHammerSmack::draw(BITMAP *dest)
+ 		x=ox+ft[i][int32_t(float(clk-1)/3)][0];
+ 		y=oy+ft[i][int32_t(float(clk-1)/3)][1];
+ 		tile=t*4+i+(ft[i][int32_t(float(clk-1)/3)][2]*2);
+-		decoration::draw8(dest);
++		decoration::draw8(dest, world_lights);
+ 	}
+ }
+ 
+@@ -539,7 +539,7 @@ bool dTallGrass::animate(int32_t)
+ 	return !(g1&&g2);
+ }
+ 
+-void dTallGrass::draw(BITMAP *dest)
++void dTallGrass::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(HeroIsInvisible())
+ 		return;
+@@ -563,10 +563,10 @@ void dTallGrass::draw(BITMAP *dest)
+ 		tile=t+((HeroLStep()>=6)?2:0);
+ 	}
+ 	
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ 	x+=8;
+ 	++tile;
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ }
+ 
+ dRipples::dRipples(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr) : decoration(X,Y,Id,Clk,wpnSpr)
+@@ -603,7 +603,7 @@ bool dRipples::animate(int32_t)
+ 	}
+ }
+ 
+-void dRipples::draw(BITMAP *dest)
++void dRipples::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(HeroIsInvisible())
+ 		return;
+@@ -618,10 +618,10 @@ void dRipples::draw(BITMAP *dest)
+ 	x=HeroX();
+ 	y=HeroY()+10;
+ 	tile=t+(((clk/8)%3)*2);
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ 	x+=8;
+ 	++tile;
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ }
+ 
+ dHover::dHover(zfix X,zfix Y,int32_t Id,int32_t Clk, [[maybe_unused]] int32_t wpnSpr) : decoration(X,Y,Id,Clk)
+@@ -631,7 +631,7 @@ dHover::dHover(zfix X,zfix Y,int32_t Id,int32_t Clk, [[maybe_unused]] int32_t wp
+ 	wpnid = get_item_data(current_item_id(itype_hoverboots)).wpn_sprites[0];
+ }
+ 
+-void dHover::draw(BITMAP *dest)
++void dHover::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	auto const& wspr = sprite_data_buf.get(wpnid);
+ 	int32_t t = wspr.tile*4;
+@@ -640,10 +640,10 @@ void dHover::draw(BITMAP *dest)
+ 	x=HeroX();
+ 	y=HeroY()+10-HeroZ()-HeroFakeZ();
+ 	tile=t+(((clk/8)%3)*2);
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ 	x+=8;
+ 	++tile;
+-	decoration::draw8(dest);
++	decoration::draw8(dest, world_lights);
+ }
+ 
+ bool dHover::animate(int32_t)
+@@ -664,7 +664,7 @@ bool dDivineProtectionShield::animate(int32_t)
+ 	return HeroDivineProtectionShieldClk()<=0;
+ }
+ 
+-void dDivineProtectionShield::realdraw(BITMAP *dest, int32_t draw_what)
++void dDivineProtectionShield::realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights)
+ {
+ 	if(misc!=draw_what)
+ 	{
+@@ -703,28 +703,28 @@ void dDivineProtectionShield::realdraw(BITMAP *dest, int32_t draw_what)
+ 			tile+=((clk/spd)%fr);
+ 		}
+ 		
+-		decoration::draw(dest);
++		decoration::draw(dest, world_lights);
+ 		x+=16;
+ 		tile+=fr;
+-		decoration::draw(dest);
++		decoration::draw(dest, world_lights);
+ 		x-=16;
+ 		y+=16;
+ 		tile+=fr;
+-		decoration::draw(dest);
++		decoration::draw(dest, world_lights);
+ 		x+=16;
+ 		tile+=fr;
+-		decoration::draw(dest);
++		decoration::draw(dest, world_lights);
+ 	}
+ }
+ 
+-void dDivineProtectionShield::draw(BITMAP *dest)
++void dDivineProtectionShield::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	realdraw(dest,0);
++	realdraw(dest,0, world_lights);
+ }
+ 
+-void dDivineProtectionShield::draw2(BITMAP *dest)
++void dDivineProtectionShield::draw2(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	realdraw(dest,1);
++	realdraw(dest,1, world_lights);
+ }
+ 
+ //
+@@ -745,7 +745,7 @@ bool customWalkSprite::animate(int32_t)
+ 	return false;
+ }
+ 
+-void customWalkSprite::realdraw(BITMAP *dest, int32_t draw_what)
++void customWalkSprite::realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights)
+ {
+ 	if(misc!=draw_what || the_deco_sprite < 0)
+ 		return;
+@@ -762,7 +762,7 @@ void customWalkSprite::realdraw(BITMAP *dest, int32_t draw_what)
+ 	
+ 	tile = t+((clk/spd)%fr);
+ 	
+-	decoration::draw(dest);
++	decoration::draw(dest, world_lights);
+ }
+ 
+ void customWalkSprite::run_sprite(int32_t newSprite)
+diff --git a/src/zc/decorations.h b/src/zc/decorations.h
+index b1668c0..8e9b7e6 100644
+--- a/src/zc/decorations.h
++++ b/src/zc/decorations.h
+@@ -23,9 +23,9 @@ public:
+ 	int32_t tframes, spd;
+ 	comboSprite(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
+-	virtual void draw2(BITMAP *dest);
+-	virtual void realdraw(BITMAP *dest, int32_t draw_what);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw2(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class dBushLeaves : public decoration
+@@ -35,7 +35,7 @@ public:
+ 	int32_t ox, oy;
+ 	dBushLeaves(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class dFlowerClippings : public decoration
+@@ -45,7 +45,7 @@ public:
+ 	int32_t ox, oy;
+ 	dFlowerClippings(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class dGrassClippings : public decoration
+@@ -55,7 +55,7 @@ public:
+ 	int32_t ox, oy;
+ 	dGrassClippings(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class dHammerSmack : public decoration
+@@ -65,7 +65,7 @@ public:
+ 	int32_t ox, oy, wpnid;
+ 	dHammerSmack(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class dTallGrass : public decoration
+@@ -73,7 +73,7 @@ class dTallGrass : public decoration
+ public:
+ 	dTallGrass(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index) override;
+-	virtual void draw(BITMAP *dest) override;
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
+ 	bool is_drawn_with_offset() override {
+ 		return true;
+ 	};
+@@ -84,7 +84,7 @@ class dRipples : public decoration
+ public:
+ 	dRipples(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index) override;
+-	virtual void draw(BITMAP *dest) override;
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
+ 	bool is_drawn_with_offset() override {
+ 		return true;
+ 	};
+@@ -96,7 +96,7 @@ class dHover : public decoration
+ public:
+ 	dHover(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index) override;
+-	virtual void draw(BITMAP *dest) override;
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
+ 	bool is_drawn_with_offset() override {
+ 		return true;
+ 	};
+@@ -107,9 +107,9 @@ class dDivineProtectionShield : public decoration
+ public:
+ 	dDivineProtectionShield(zfix X,zfix Y,int32_t Id,int32_t Clk);
+ 	virtual bool animate(int32_t index) override;
+-	virtual void realdraw(BITMAP *dest, int32_t draw_what);
+-	virtual void draw(BITMAP *dest) override;
+-	virtual void draw2(BITMAP *dest) override;
++	virtual void realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
++	virtual void draw2(BITMAP *dest, const script_world_light_targets* world_lights = nullptr) override;
+ 	bool is_drawn_with_offset() override {
+ 		return true;
+ 	};
+@@ -121,7 +121,7 @@ public:
+ 	byte bits;
+ 	customWalkSprite(zfix X,zfix Y,int32_t Id,int32_t Clk, int32_t wpnSpr=0);
+ 	virtual bool animate(int32_t index) override;
+-	virtual void realdraw(BITMAP *dest, int32_t draw_what) override;
++	virtual void realdraw(BITMAP *dest, int32_t draw_what, const script_world_light_targets* world_lights = nullptr) override;
+ 	void run_sprite(int32_t newSprite);
+ 	bool is_drawn_with_offset() override {
+ 		return true;
+diff --git a/src/zc/guys.cpp b/src/zc/guys.cpp
+index 6dcfa24..bf19a8f 100644
+--- a/src/zc/guys.cpp
++++ b/src/zc/guys.cpp
+@@ -4116,7 +4116,7 @@ bool enemy::dont_draw() const
+ #define DRAW_INVIS 0
+ // base drawing function to be used by all derived classes instead of
+ // sprite::draw()
+-void enemy::draw(BITMAP *dest)
++void enemy::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	// The hitbox is normally draw in sprite::draw, but for enemies that is not always called.
+ 	// So instead we draw it here, and supress it within sprite::draw.
+@@ -4125,13 +4125,13 @@ void enemy::draw(BITMAP *dest)
+ 	bool prev_hide_hitbox = hide_hitbox;
+ 	hide_hitbox = true;
+ 	
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	
+ 	// cleanup / post-draw code should run no matter what `return` is hit
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+ 		hide_hitbox = prev_hide_hitbox;
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 
+ 	didScriptThisFrame = false; //Since there's no better place to put it
+@@ -4196,11 +4196,11 @@ void enemy::draw(BITMAP *dest)
+ 	{
+ 		if (canSee == DRAW_CLOAKED)
+ 		{
+-			sprite::drawcloaked(dest);
++			sprite::drawcloaked(dest, world_lights);
+ 		}
+ 		else if (canSee == DRAW_NORMAL)
+ 		{
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 		}
+ 		return;
+ 	}
+@@ -4215,11 +4215,11 @@ void enemy::draw(BITMAP *dest)
+ 				//if the enemy isn't totally invisible, or if it is, but Hero has the item needed to reveal it, draw it.
+ 				if (canSee == DRAW_CLOAKED)
+ 				{
+-					sprite::drawcloaked(dest);
++					sprite::drawcloaked(dest, world_lights);
+ 				}
+ 				else if (canSee == DRAW_NORMAL)
+ 				{
+-					sprite::draw(dest);
++					sprite::draw(dest, world_lights);
+ 				}
+ 			}	
+ 			return;
+@@ -4290,14 +4290,14 @@ void enemy::draw(BITMAP *dest)
+ 		{
+ 			sprite_flicker_transp_passes = (flickertransp < 0 ? game->get_spriteflickertransp() : flickertransp);
+ 			sprite_flicker_color = temp_flicker_color;
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 		}
+ 	}
+ 	else
+ 	{
+ 		if (canSee == DRAW_CLOAKED)
+ 		{
+-			sprite::drawcloaked(dest);
++			sprite::drawcloaked(dest, world_lights);
+ 		}
+ 		else if (canSee == DRAW_NORMAL)
+ 		{
+@@ -4306,14 +4306,14 @@ void enemy::draw(BITMAP *dest)
+ 				if ( frozentile > 0 ) tile = frozentile;
+ 				loadpalset(csBOSS,frozencset);
+ 			}
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 		}
+ 	}
+ 	cs=cshold;
+ }
+ 
+ //old zc bosses
+-void enemy::drawzcboss(BITMAP *dest)
++void enemy::drawzcboss(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	didScriptThisFrame = false; //Since there's no better place to put it
+ 	if(dont_draw())
+@@ -4326,7 +4326,7 @@ void enemy::drawzcboss(BITMAP *dest)
+ 		if(clk2>=19)
+ 		{
+ 			if(!(clk2&2))
+-				sprite::drawzcboss(dest);
++				sprite::drawzcboss(dest, world_lights);
+ 				
+ 			return;
+ 		}
+@@ -4384,7 +4384,7 @@ void enemy::drawzcboss(BITMAP *dest)
+ 			!(get_qr(qr_LENSSEESENEMIES) &&
+ 			  lensclk) && type!=eeGANON)
+ 	{
+-		sprite::drawcloaked(dest);
++		sprite::drawcloaked(dest, world_lights);
+ 	}
+ 	else
+ 	{
+@@ -4395,11 +4395,11 @@ void enemy::drawzcboss(BITMAP *dest)
+ 			{
+ 				sprite_flicker_transp_passes = (flickertransp < 0 ? game->get_spriteflickertransp() : flickertransp);
+ 				sprite_flicker_color = temp_flicker_color;
+-				sprite::drawzcboss(dest);
++				sprite::drawzcboss(dest, world_lights);
+ 			}
+ 		}
+ 		else
+-			sprite::drawzcboss(dest);
++			sprite::drawzcboss(dest, world_lights);
+ 	}
+ 	
+ 	cs=cshold;
+@@ -4408,7 +4408,7 @@ void enemy::drawzcboss(BITMAP *dest)
+ 
+ // similar to the overblock function--can do up to a 32x32 sprite
+ //will this play nicely with scripttile, solely using the modifications in sprite::draw()?
+-void enemy::drawblock(BITMAP *dest,int32_t mask)
++void enemy::drawblock(BITMAP *dest,int32_t mask, const script_world_light_targets* world_lights)
+ {
+ 	int32_t thold=tile;
+ 	int32_t t1=tile;
+@@ -4419,7 +4419,7 @@ void enemy::drawblock(BITMAP *dest,int32_t mask)
+ 	switch(mask)
+ 	{
+ 	case 1:
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		break;
+ 		
+ 	case 3:
+@@ -4427,10 +4427,10 @@ void enemy::drawblock(BITMAP *dest,int32_t mask)
+ 			zc_swap(t1,t2);
+ 			
+ 		tile=t1;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		tile=t2;
+ 		yofs+=16;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		yofs-=16;
+ 		break;
+ 		
+@@ -4441,10 +4441,10 @@ void enemy::drawblock(BITMAP *dest,int32_t mask)
+ 			zc_swap(t1,t2);
+ 			
+ 		tile=t1;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		tile=t2;
+ 		xofs+=16;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		xofs-=16;
+ 		break;
+ 		
+@@ -4462,17 +4462,17 @@ void enemy::drawblock(BITMAP *dest,int32_t mask)
+ 		}
+ 		
+ 		tile=t1;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		tile=t2;
+ 		yofs+=16;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		yofs-=16;
+ 		tile=t3;
+ 		xofs+=16;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		tile=t4;
+ 		yofs+=16;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		xofs-=16;
+ 		yofs-=16;
+ 		break;
+@@ -4502,17 +4502,17 @@ bool enemy::can_drawshadow() const
+ 	
+ 	return true;
+ }
+-void enemy::drawshadow(BITMAP *dest, bool translucent)
++void enemy::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(!can_drawshadow())
+ 		return;
+ 	if(enemycanfall(id, false) && shadowtile == 0)
+ 		shadowtile = sprite_data_buf.get(spr_shadow).tile;
+ 	
+-	sprite::drawshadow(dest,translucent);
++	sprite::drawshadow(dest,translucent, world_lights);
+ }
+ 
+-void enemy::masked_draw(BITMAP *dest,int32_t mx,int32_t my,int32_t mw,int32_t mh)
++void enemy::masked_draw(BITMAP *dest,int32_t mx,int32_t my,int32_t mw,int32_t mh, const script_world_light_targets* world_lights)
+ {
+ 	BITMAP *sub=create_sub_bitmap(dest,mx,my,mw,mh);
+ 	
+@@ -4520,13 +4520,13 @@ void enemy::masked_draw(BITMAP *dest,int32_t mx,int32_t my,int32_t mw,int32_t mh
+ 	{
+ 		xofs-=mx;
+ 		yofs-=my;
+-		enemy::draw(sub);
++		enemy::draw(sub, world_lights);
+ 		xofs+=mx;
+ 		yofs+=my;
+ 		destroy_bitmap(sub);
+ 	}
+ 	else
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ void enemy::init_size_flags()
+@@ -7973,12 +7973,12 @@ bool guy::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void guy::draw(BITMAP *dest)
++void guy::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+ 	
+ 	if(!mainguy || fadeclk<0 || fadeclk&1)
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ eFire::eFire(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -8036,10 +8036,10 @@ bool eFire::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eFire::draw(BITMAP *dest)
++void eFire::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eFire::takehit(weapon *w, weapon* realweap)
+@@ -8147,10 +8147,10 @@ bool eOther::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eOther::draw(BITMAP *dest)
++void eOther::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eOther::takehit(weapon *w, weapon* realweap)
+@@ -8258,10 +8258,10 @@ bool eScript::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eScript::draw(BITMAP *dest)
++void eScript::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eScript::takehit(weapon *w, weapon* realweap)
+@@ -8371,10 +8371,10 @@ bool eFriendly::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eFriendly::draw(BITMAP *dest)
++void eFriendly::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eFriendly::takehit(weapon *w, weapon* realweap)
+@@ -8523,10 +8523,10 @@ bool eGhini::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eGhini::draw(BITMAP *dest)
++void eGhini::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ void eGhini::kickbucket()
+@@ -8692,7 +8692,7 @@ bool eTektite::can_drawshadow() const
+ 	
+ 	return enemy::can_drawshadow();
+ }
+-void eTektite::drawshadow(BITMAP *dest,bool translucent)
++void eTektite::drawshadow(BITMAP *dest,bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(!can_drawshadow())
+ 		return;
+@@ -8732,14 +8732,14 @@ void eTektite::drawshadow(BITMAP *dest,bool translucent)
+ 	{
+ 		yofs+=zc_max(0,zc_min(clk2start-clk2,clk2));
+ 	}
+-	enemy::drawshadow(dest,translucent);
++	enemy::drawshadow(dest,translucent, world_lights);
+ 	yofs=tempy;
+ }
+ 
+-void eTektite::draw(BITMAP *dest)
++void eTektite::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eItemFairy::eItemFairy(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -8774,7 +8774,7 @@ bool eItemFairy::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eItemFairy::draw(BITMAP *dest)
++void eItemFairy::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	//these are here to bypass compiler warnings about unused arguments
+ 	dest=dest;
+@@ -8840,7 +8840,7 @@ bool ePeahat::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void ePeahat::drawshadow(BITMAP *dest, bool translucent)
++void ePeahat::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	flip = 0;
+ 	if(!can_drawshadow())
+@@ -8853,14 +8853,14 @@ void ePeahat::drawshadow(BITMAP *dest, bool translucent)
+ 		yofs+=8;
+ 		yofs+=int32_t(step/zslongToFix(dstep*10));
+ 	}
+-	enemy::drawshadow(dest,translucent);
++	enemy::drawshadow(dest,translucent, world_lights);
+ 	yofs=tempy;
+ }
+ 
+-void ePeahat::draw(BITMAP *dest)
++void ePeahat::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t ePeahat::takehit(weapon *w, weapon* realweap)
+@@ -9145,7 +9145,7 @@ bool eLeever::canplace(int32_t d2)
+ 	return true;
+ }
+ 
+-void eLeever::draw(BITMAP *dest)
++void eLeever::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ //  cs=d->cset;
+ 	cs=dcset;
+@@ -9160,7 +9160,7 @@ void eLeever::draw(BITMAP *dest)
+ 		}
+ 	}
+ 	
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eWallM::eWallM(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -9351,14 +9351,14 @@ void eWallM::grabhero()
+ 	superman=1;
+ }
+ 
+-void eWallM::draw(BITMAP *dest)
++void eWallM::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	dummy_bool[1]=hashero;
+ 	update_enemy_frame();
+ 	
+ 	if(misc>0 || fallclk||drownclk)
+ 	{
+-		masked_draw(dest,16,playing_field_offset+16,224,144);
++		masked_draw(dest,16,playing_field_offset+16,224,144, world_lights);
+ 	}
+ 	
+ 	//    enemy::draw(dest);
+@@ -9678,10 +9678,10 @@ bool eTrap::clip()
+ 	}
+ }
+ 
+-void eTrap::draw(BITMAP *dest)
++void eTrap::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eTrap::takehit(weapon*,weapon*)
+@@ -9826,10 +9826,10 @@ bool eTrap2::clip()
+ 	return false;
+ }
+ 
+-void eTrap2::draw(BITMAP *dest)
++void eTrap2::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eTrap2::takehit(weapon*,weapon*)
+@@ -9956,7 +9956,7 @@ bool eRock::can_drawshadow() const
+ 	
+ 	return clk2>=0;
+ }
+-void eRock::drawshadow(BITMAP *dest, bool translucent)
++void eRock::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(!can_drawshadow())
+ 		return;
+@@ -9970,18 +9970,18 @@ void eRock::drawshadow(BITMAP *dest, bool translucent)
+ 	
+ 	yofs+=8;
+ 	yofs+=zc_max(0,zc_min(29-clk3,clk3));
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ 	yofs=tempy;
+ }
+ 
+-void eRock::draw(BITMAP *dest)
++void eRock::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(clk2>=0 || fallclk||drownclk)
+ 	{
+ 		int32_t tempdir=dir;
+ 		dir=dummy_int[2];
+ 		update_enemy_frame();
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		dir=tempdir;
+ 	}
+ }
+@@ -10083,7 +10083,7 @@ bool eBoulder::can_drawshadow() const
+ 	
+ 	return clk2>=0;
+ }
+-void eBoulder::drawshadow(BITMAP *dest, bool translucent)
++void eBoulder::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(!can_drawshadow())
+ 		return;
+@@ -10095,21 +10095,21 @@ void eBoulder::drawshadow(BITMAP *dest, bool translucent)
+ 	
+ 	yofs+=8;
+ 	xofs-=8;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ 	xofs+=16;
+ 	++shadowtile;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ 	yofs+=16;
+ 	shadowtile+=20;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ 	xofs-=16;
+ 	--shadowtile;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ 	xofs+=8;
+ 	yofs=tempy;
+ }
+ 
+-void eBoulder::draw(BITMAP *dest)
++void eBoulder::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(clk2>=0 || fallclk||drownclk)
+ 	{
+@@ -10119,7 +10119,7 @@ void eBoulder::draw(BITMAP *dest)
+ 		dir=tempdir;
+ 		xofs-=8;
+ 		yofs-=8;
+-		drawblock(dest,15);
++		drawblock(dest,15, world_lights);
+ 		xofs+=8;
+ 		yofs+=8;
+ 		//    enemy::draw(dest);
+@@ -10260,10 +10260,10 @@ bool eProjectile::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eProjectile::draw(BITMAP *dest)
++void eProjectile::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eTrigger::eTrigger(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -10271,10 +10271,10 @@ eTrigger::eTrigger(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+ 	hxofs=1000;
+ }
+ 
+-void eTrigger::draw(BITMAP *dest)
++void eTrigger::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ void eTrigger::death_sfx()
+@@ -10346,10 +10346,10 @@ bool eNPC::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eNPC::draw(BITMAP *dest)
++void eNPC::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t eNPC::takehit(weapon*,weapon*)
+@@ -10454,24 +10454,24 @@ bool eSpinTile::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eSpinTile::draw(BITMAP *dest)
++void eSpinTile::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+ 	y-=(misc>>4);
+ 	yofs+=2;
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ 	yofs-=2;
+ 	y+=(misc>>4);
+ }
+ 
+-void eSpinTile::drawshadow(BITMAP *dest, bool translucent)
++void eSpinTile::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	flip = 0;
+ 	if(!can_drawshadow())
+ 		return;
+ 	shadowtile = sprite_data_buf.get(spr_shadow).tile+(clk%4);
+ 	yofs+=4;
+-	enemy::drawshadow(dest, translucent);
++	enemy::drawshadow(dest, translucent, world_lights);
+ 	yofs-=4;
+ }
+ 
+@@ -10618,13 +10618,13 @@ bool eZora::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eZora::draw(BITMAP *dest)
++void eZora::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if (isSubmerged())
+ 		return;
+ 		
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ bool eZora::isSubmerged() const
+@@ -11258,7 +11258,7 @@ bool eStalfos::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eStalfos::draw(BITMAP *dest)
++void eStalfos::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+ 	
+@@ -11267,14 +11267,14 @@ void eStalfos::draw(BITMAP *dest)
+ 		if ( do_animation )tile+=20;
+ 	}
+ 	
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ bool eStalfos::can_drawshadow() const
+ {
+ 	return enemy::can_drawshadow();
+ }
+-void eStalfos::drawshadow(BITMAP *dest, bool translucent)
++void eStalfos::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	int32_t tempy=yofs;
+ 	
+@@ -11319,7 +11319,7 @@ void eStalfos::drawshadow(BITMAP *dest, bool translucent)
+ 			shadowtile+=f2?1:0;
+ 		}
+ 	}
+-	enemy::drawshadow(dest, translucent);
++	enemy::drawshadow(dest, translucent, world_lights);
+ 	yofs=tempy;
+ }
+ 
+@@ -11670,7 +11670,7 @@ bool eKeese::can_drawshadow() const
+ 	
+ 	return enemy::can_drawshadow();
+ }
+-void eKeese::drawshadow(BITMAP *dest, bool translucent)
++void eKeese::drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	flip = 0;
+ 	if(!can_drawshadow())
+@@ -11684,14 +11684,14 @@ void eKeese::drawshadow(BITMAP *dest, bool translucent)
+ 		yofs+=int32_t(step/zslongToFix(dstep*10));
+ 	}
+ 	
+-	enemy::drawshadow(dest, translucent);
++	enemy::drawshadow(dest, translucent, world_lights);
+ 	yofs=tempy;
+ }
+ 
+-void eKeese::draw(BITMAP *dest)
++void eKeese::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ void eKeese::init_size_flags()
+@@ -12220,7 +12220,7 @@ void eWizzrobe::wizzrobe_newdir(int32_t homing)
+ 		newdir(4,homing,spw_wizzrobe);
+ }
+ 
+-void eWizzrobe::draw(BITMAP *dest)
++void eWizzrobe::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ //  if(d->misc1 && (misc==1 || misc==3) && (clk3&1) && hp>0 && !watch && !stunclk)                          // phasing
+ 	if(dmisc1 && (misc==1 || misc==3) && (clk3&1) && hp>0 && !watch && !stunclk && !frozenclock)                          // phasing
+@@ -12236,7 +12236,7 @@ void eWizzrobe::draw(BITMAP *dest)
+ 	dummy_int[1]=tempint;
+ 	dummy_bool[1]=tempbool1;
+ 	dummy_bool[2]=tempbool2;
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eDodongo::eDodongo(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -12282,24 +12282,24 @@ bool eDodongo::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eDodongo::draw(BITMAP *dest)
++void eDodongo::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	
+ 	if(clk<0)
+ 	{
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		return;
+ 	}
+ 	
+ 	update_enemy_frame();
+-	enemy::drawzcboss(dest);
++	enemy::drawzcboss(dest, world_lights);
+ 	
+ 	if(dummy_int[1]!=0)  //additional tiles
+ 	{
+ 		tile+=dummy_int[1]; //second tile is previous tile
+ 		xofs-=16;           //new xofs change
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		xofs+=16;
+ 	}
+ 	
+@@ -12415,22 +12415,22 @@ bool eDodongo2::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eDodongo2::draw(BITMAP *dest)
++void eDodongo2::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(clk<0)
+ 	{
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		return;
+ 	}
+ 	
+ 	int32_t tempx=xofs;
+ 	int32_t tempy=yofs;
+ 	update_enemy_frame();
+-	enemy::drawzcboss(dest);
++	enemy::drawzcboss(dest, world_lights);
+ 	tile+=dummy_int[1]; //second tile change
+ 	xofs+=dummy_int[2]; //new xofs change
+ 	yofs+=dummy_int[3]; //new yofs change
+-	enemy::drawzcboss(dest);
++	enemy::drawzcboss(dest, world_lights);
+ 	xofs=tempx;
+ 	yofs=tempy;
+ }
+@@ -12666,7 +12666,7 @@ bool eAquamentus::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eAquamentus::draw(BITMAP *dest)
++void eAquamentus::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(get_qr(qr_NEWENEMYTILES))
+ 	{
+@@ -12676,11 +12676,11 @@ void eAquamentus::draw(BITMAP *dest)
+ 		if(dying)
+ 		{
+ 			xofs=0;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 		}
+ 		else
+ 		{
+-			drawblock(dest,15);
++			drawblock(dest,15, world_lights);
+ 		}
+ 	}
+ 	else
+@@ -12690,29 +12690,29 @@ void eAquamentus::draw(BITMAP *dest)
+ 		
+ 		if(clk<0 || dying)
+ 		{
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 			return;
+ 		}
+ 		if ( do_animation ) 
+ 	{
+ 		// face (0=firing, 2=resting)
+ 		tile=o_tile+((clk3>0)?0:2);
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		// tail (
+ 		tile=o_tile+((clk&16)?1:3);
+ 		xofs=xblockofs;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		// body
+ 		yofs+=16;
+ 		xofs=0;
+ 		tile=o_tile+((clk&16)?20:22);
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		xofs=xblockofs;
+ 		tile=o_tile+((clk&16)?21:23);
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		yofs-=16;
+ 	}
+-	else enemy::draw(dest);
++	else enemy::draw(dest, world_lights);
+ 	}
+ }
+ 
+@@ -12840,13 +12840,13 @@ bool eGohma::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eGohma::draw(BITMAP *dest)
++void eGohma::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	
+ 	if(clk<0 || dying)
+ 	{
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		return;
+ 	}
+ 	
+@@ -12860,14 +12860,14 @@ void eGohma::draw(BITMAP *dest)
+ 		//      if(clk&16) tile=180;
+ 		//      else { tile=182; flip=1; }
+ 		tile+=(3*((clk&48)>>4));
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		
+ 		// right side
+ 		xofs=16;
+ 		//      tile=(180+182)-tile;
+ 		tile=o_tile;
+ 		tile+=(3*((clk&48)>>4))+2;
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		
+ 		// body
+ 		xofs=0;  //Gohma may need more adjustments for SIZEflags. -Z 14 Aug 2020
+@@ -12883,7 +12883,7 @@ void eGohma::draw(BITMAP *dest)
+ 		else
+ 			tile+=((clk3-132)&24)?4:1;
+ 			
+-		enemy::drawzcboss(dest);
++		enemy::drawzcboss(dest, world_lights);
+ 		
+ 	}
+ 	else
+@@ -12898,7 +12898,7 @@ void eGohma::draw(BITMAP *dest)
+ 			flip=1;
+ 		}
+ 		
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		
+ 		// right side
+ 		tile=o_tile;
+@@ -12907,7 +12907,7 @@ void eGohma::draw(BITMAP *dest)
+ 		if((clk&16)) tile+=2;
+ 		
+ 		//      tile=(180+182)-tile;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		
+ 		// body
+ 		tile=o_tile;
+@@ -12921,7 +12921,7 @@ void eGohma::draw(BITMAP *dest)
+ 			tile+=4;
+ 		else tile+=((clk3-132)&8)?3:1;
+ 		
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		
+ 	}
+ }
+@@ -12974,7 +12974,7 @@ bool eLilDig::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eLilDig::draw(BITMAP *dest)
++void eLilDig::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile = o_tile;
+ 	//    tile = 160;
+@@ -13037,7 +13037,7 @@ void eLilDig::draw(BITMAP *dest)
+ 		}
+ 	}
+ 	
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eBigDig::eBigDig(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)
+@@ -13110,14 +13110,14 @@ bool eBigDig::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void eBigDig::draw(BITMAP *dest)
++void eBigDig::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(anim!=aDIG)
+ 	{
+ 		update_enemy_frame();
+ 		xofs-=8;
+ 		yofs-=8;
+-		drawblock(dest,15);
++		drawblock(dest,15, world_lights);
+ 		xofs+=8;
+ 		yofs+=8;
+ 		return;
+@@ -13188,7 +13188,7 @@ void eBigDig::draw(BITMAP *dest)
+ 	
+ 	xofs-=8;
+ 	yofs-=8;
+-	drawblock(dest,15);
++	drawblock(dest,15, world_lights);
+ 	xofs+=8;
+ 	yofs+=8;
+ }
+@@ -13411,7 +13411,7 @@ int32_t eGanon::takehit(weapon *w, [[maybe_unused]] weapon* realweap)
+ 	return 0;
+ }
+ 
+-void eGanon::draw(BITMAP *dest)
++void eGanon::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	switch(misc)
+ 	{
+@@ -13426,12 +13426,12 @@ void eGanon::draw(BITMAP *dest)
+ 			{
+ 				int odraw = drawstyle;
+ 				drawstyle = 2;
+-				drawblock(dest,15);
++				drawblock(dest,15, world_lights);
+ 				drawstyle = odraw;
+ 			}
+ 			else
+ 			{
+-				drawblock(dest,15);
++				drawblock(dest,15, world_lights);
+ 			}
+ 			break;
+ 		
+@@ -13442,12 +13442,12 @@ void eGanon::draw(BITMAP *dest)
+ 			{
+ 				int odraw = drawstyle;
+ 				drawstyle = 2;
+-				drawblock(dest,15);
++				drawblock(dest,15, world_lights);
+ 				drawstyle = odraw;
+ 			}
+ 			else
+ 			{
+-				drawblock(dest,15);
++				drawblock(dest,15, world_lights);
+ 			}
+ 			break;
+ 		}
+@@ -13464,17 +13464,17 @@ void eGanon::draw(BITMAP *dest)
+ 		[[fallthrough]];
+ 	case 1:
+ 	case 3:
+-		drawblock(dest,15);
++		drawblock(dest,15, world_lights);
+ 		break;
+ 		
+ 	case 4:
+-		draw_guts(dest);
+-		draw_flash(dest);
++		draw_guts(dest, world_lights);
++		draw_flash(dest, world_lights);
+ 		break;
+ 	}
+ }
+ 
+-void eGanon::draw_guts(BITMAP *dest)
++void eGanon::draw_guts(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	const auto render_view = get_render_viewport();
+ 	int32_t c = zc_min(clk>>3,8);
+@@ -13489,7 +13489,7 @@ void eGanon::draw_guts(BITMAP *dest)
+ 	overtile16(dest,tile,x+16-c-render_view.x,y+16-c+playing_field_offset-render_view.y,9,0);
+ }
+ 
+-void eGanon::draw_flash(BITMAP *dest)
++void eGanon::draw_flash(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	const auto render_view = get_render_viewport();
+ 
+@@ -13802,7 +13802,7 @@ int32_t esMoldorm::takehit(weapon *w, weapon* realweap)
+ 	return 0;
+ }
+ 
+-void esMoldorm::draw(BITMAP *dest)
++void esMoldorm::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	int32_t fdiv = frate/4;
+@@ -13872,7 +13872,7 @@ void esMoldorm::draw(BITMAP *dest)
+ 	}
+ 	
+ 	if(clk>=0)
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ eLanmola::eLanmola(zfix X,zfix Y,int32_t Id,int32_t Clk) : eBaseLanmola(X,Y,Id,Clk)
+@@ -14146,7 +14146,7 @@ int32_t esLanmola::takehit(weapon *w, weapon* realweap)
+ 	return 0;
+ }
+ 
+-void esLanmola::draw(BITMAP *dest)
++void esLanmola::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	int32_t fdiv = frate/4;
+@@ -14200,7 +14200,7 @@ void esLanmola::draw(BITMAP *dest)
+ 	}
+ 	
+ 	if(clk>=0)
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ eManhandla::eManhandla(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,0)
+@@ -14452,7 +14452,7 @@ int32_t eManhandla::takehit(weapon *w, [[maybe_unused]] weapon* realweap)
+ 	return 1;
+ }
+ 
+-void eManhandla::draw(BITMAP *dest)
++void eManhandla::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	int32_t fdiv = frate/4;
+@@ -14508,7 +14508,7 @@ void eManhandla::draw(BITMAP *dest)
+ 			}
+ 			
+ 			tile+=f2;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 		}                                                       //manhandla 2, big body
+ 		else
+ 		{
+@@ -14558,7 +14558,7 @@ void eManhandla::draw(BITMAP *dest)
+ 			tile+=(f2*2);
+ 			xofs-=8;
+ 			yofs-=8;
+-			drawblock(dest,15);
++			drawblock(dest,15, world_lights);
+ 			xofs+=8;
+ 			yofs+=8;
+ 		}
+@@ -14567,19 +14567,19 @@ void eManhandla::draw(BITMAP *dest)
+ 	{
+ 		if(!dmisc2)
+ 		{
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 		}
+ 		else
+ 		{
+ 			xofs-=8;
+ 			yofs-=8;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 			xofs+=16;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 			yofs+=16;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 			xofs-=16;
+-			enemy::draw(dest);
++			enemy::draw(dest, world_lights);
+ 			xofs+=8;
+ 			yofs-=8;
+ 		}
+@@ -14627,7 +14627,7 @@ bool esManhandla::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void esManhandla::draw(BITMAP *dest)
++void esManhandla::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	int32_t fdiv = frate/4;
+@@ -14679,7 +14679,7 @@ void esManhandla::draw(BITMAP *dest)
+ 		}
+ 	}
+ 	
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ eGleeok::eGleeok(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk) //enemy((zfix)120,(zfix)48,Id,Clk)
+@@ -14859,13 +14859,13 @@ int32_t eGleeok::takehit(weapon*,weapon*)
+ 	return 0;
+ }
+ 
+-void eGleeok::draw(BITMAP *dest)
++void eGleeok::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	
+ 	if(dying)
+ 	{
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		return;
+ 	}
+ 	
+@@ -14919,10 +14919,10 @@ void eGleeok::draw(BITMAP *dest)
+ 		}
+ 	}
+ 	
+-	enemy::drawblock(dest,15);
++	enemy::drawblock(dest,15, world_lights);
+ }
+ 
+-void eGleeok::draw2(BITMAP *dest)
++void eGleeok::draw2(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	// the neck stub
+ 	tile=necktile;
+@@ -14938,9 +14938,9 @@ void eGleeok::draw2(BITMAP *dest)
+ 	{
+ 		mapscr* scr = get_scr(screen_spawned);
+ 		if((scr->flags3&fINVISROOM)&& !(current_item(itype_amulet)))
+-			sprite::drawcloaked(dest);
++			sprite::drawcloaked(dest, world_lights);
+ 		else
+-			sprite::draw(dest);
++			sprite::draw(dest, world_lights);
+ 	}
+ }
+ 
+@@ -15213,7 +15213,7 @@ int32_t esGleeok::takehit(weapon *w, weapon* realweap)
+ 	}
+ }
+ 
+-void esGleeok::draw(BITMAP *dest)
++void esGleeok::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	const auto render_view = get_render_viewport();
+ 	dmisc5=vbound(dmisc5,1,255);
+@@ -15256,9 +15256,9 @@ void esGleeok::draw(BITMAP *dest)
+ 	}
+ }
+ 
+-void esGleeok::draw2(BITMAP *dest)
++void esGleeok::draw2(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ ePatra::ePatra(zfix X,zfix Y,int32_t Id,int32_t Clk) : enemy(X,Y,Id,Clk)// enemy((zfix)128,(zfix)48,Id,Clk)
+@@ -16081,11 +16081,11 @@ void ePatra::FirePatraWeapon()
+ 	//11.80
+ }
+ 
+-void ePatra::draw(BITMAP *dest)
++void ePatra::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	update_enemy_frame();
+-	enemy::draw(dest);
++	enemy::draw(dest, world_lights);
+ }
+ 
+ int32_t ePatra::defend(int32_t wpnId, int32_t *power, int32_t edef)
+@@ -16199,7 +16199,7 @@ bool esPatra::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void esPatra::draw(BITMAP *dest)
++void esPatra::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	if(get_qr(qr_NEWENEMYTILES))
+ 	{
+@@ -16253,7 +16253,7 @@ void esPatra::draw(BITMAP *dest)
+ 	}
+ 	
+ 	if(clk>=0)
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ 
+@@ -16393,7 +16393,7 @@ bool ePatraBS::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void ePatraBS::draw(BITMAP *dest)
++void ePatraBS::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	
+@@ -16479,7 +16479,7 @@ void ePatraBS::draw(BITMAP *dest)
+ 		tile+=(2*(clk&3));
+ 		xofs-=8;
+ 		yofs-=8;
+-		drawblock(dest,15);
++		drawblock(dest,15, world_lights);
+ 		xofs+=8;
+ 		yofs+=8;
+ 	}
+@@ -16488,13 +16488,13 @@ void ePatraBS::draw(BITMAP *dest)
+ 		flip=(clk&1);
+ 		xofs-=8;
+ 		yofs-=8;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		xofs+=16;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		yofs+=16;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		xofs-=16;
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ 		xofs+=8;
+ 		yofs-=8;
+ 	}
+@@ -16592,7 +16592,7 @@ bool esPatraBS::animate(int32_t index)
+ 	return enemy::animate(index);
+ }
+ 
+-void esPatraBS::draw(BITMAP *dest)
++void esPatraBS::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+ 	tile=o_tile;
+ 	
+@@ -16648,7 +16648,7 @@ void esPatraBS::draw(BITMAP *dest)
+ 	}
+ 	
+ 	if(clk>=0)
+-		enemy::draw(dest);
++		enemy::draw(dest, world_lights);
+ }
+ 
+ void addEwpn(int32_t x,int32_t y,int32_t z,int32_t id,int32_t type,int32_t power,int32_t dir, int32_t parentid, byte script_generated, int32_t fakez)
+diff --git a/src/zc/guys.h b/src/zc/guys.h
+index 85c1b26..63b69bb 100644
+--- a/src/zc/guys.h
++++ b/src/zc/guys.h
+@@ -274,9 +274,9 @@ public:
+ 	virtual int32_t run_script(int32_t mode);
+ 	virtual ALLEGRO_COLOR hitboxColor(byte opacity = 255) const;
+ 	virtual optional<ScriptType> get_scrtype() const {return ScriptType::NPC;}
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
+ 	void set_summoner_parent(enemy* summoner);
+ protected:
+ 	
+@@ -301,10 +301,10 @@ protected:
+ 	int32_t defenditemclassNew(int32_t wpnId, int32_t *power, weapon *w, weapon* realweap = nullptr);
+ 	
+ 	bool dont_draw() const;
+-	virtual void drawzcboss(BITMAP *dest);
++	virtual void drawzcboss(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	// similar to the overblock function--can do up to a 32x32 sprite
+-	void drawblock(BITMAP *dest,int32_t mask);
+-	void masked_draw(BITMAP *dest,int32_t mx,int32_t my,int32_t mw,int32_t mh);
++	void drawblock(BITMAP *dest,int32_t mask, const script_world_light_targets* world_lights = nullptr);
++	void masked_draw(BITMAP *dest,int32_t mx,int32_t my,int32_t mw,int32_t mh, const script_world_light_targets* world_lights = nullptr);
+ 	virtual void init_size_flags();
+ 	
+ 	//                         --==**==--
+@@ -326,7 +326,7 @@ class guy : public enemy
+ public:
+ 	guy(zfix X,zfix Y,int32_t Id,int32_t Clk,bool mg);                // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool ignore_msg_freeze()
+ 	{
+ 		return true;
+@@ -340,7 +340,7 @@ public:
+ 	bool shield;
+ 	eFire(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void break_shield();
+ 	virtual void repair_shield();
+@@ -353,7 +353,7 @@ public:
+ 	bool shield;
+ 	eOther(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void break_shield();
+ 	virtual void repair_shield();
+@@ -366,7 +366,7 @@ public:
+ 	bool shield;
+ 	eScript(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void break_shield();
+ 	virtual void repair_shield();
+@@ -379,7 +379,7 @@ public:
+ 	bool shield;
+ 	eFriendly(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void break_shield();
+ 	virtual void repair_shield();
+@@ -394,7 +394,7 @@ public:
+ 	int32_t clk4, ox, oy, c;
+ 	eGhini(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual void kickbucket();
+ };
+ 
+@@ -409,8 +409,8 @@ public:
+ 	eTektite(zfix X,zfix Y,int32_t Id,int32_t Clk);                   // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest,bool translucent);
+-	virtual void draw(BITMAP *dest);
++	virtual void drawshadow(BITMAP *dest,bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eItemFairy : public enemy
+@@ -418,7 +418,7 @@ class eItemFairy : public enemy
+ public:
+ 	eItemFairy(zfix X,zfix Y,int32_t Id,int32_t Clk);                 // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class ePeahat : public enemy
+@@ -427,8 +427,8 @@ public:
+ 	int32_t ox, oy, c;
+ 	ePeahat(zfix X,zfix Y,int32_t Id,int32_t Clk);                    // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
+-	virtual void draw(BITMAP *dest);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void kickbucket();
+ };
+@@ -440,7 +440,7 @@ public:
+ 	eLeever(zfix X,zfix Y,int32_t Id,int32_t Clk);                    // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	bool canplace(int32_t d);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool isSubmerged() const;
+ };
+ 
+@@ -451,7 +451,7 @@ public:
+ 	virtual bool animate(int32_t index);
+ 	void wallm_crawl();
+ 	void grabhero();
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool isSubmerged() const;
+ };
+ 
+@@ -463,7 +463,7 @@ public:
+ 	virtual bool animate(int32_t index);
+ 	bool trapmove(int32_t ndir);
+ 	bool clip();
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -474,7 +474,7 @@ public:
+ 	virtual bool animate(int32_t index);
+ 	bool trapmove(int32_t ndir);
+ 	bool clip();
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -484,8 +484,8 @@ public:
+ 	eRock(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
+-	virtual void draw(BITMAP *dest);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void init_size_flags();
+ };
+@@ -496,8 +496,8 @@ public:
+ 	eBoulder(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
+-	virtual void draw(BITMAP *dest);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void init_size_flags();
+ };
+@@ -510,7 +510,7 @@ class eProjectile : public enemy
+ public:
+ 	eProjectile(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	
+ 	const int32_t minRange;
+ };
+@@ -519,7 +519,7 @@ class eTrigger : public enemy
+ {
+ public:
+ 	eTrigger(zfix X,zfix Y,int32_t Id,int32_t Clk);                   // : enemy(X,Y,Id,Clk)
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual void death_sfx();
+ };
+ 
+@@ -528,7 +528,7 @@ class eNPC : public enemy
+ public:
+ 	eNPC(zfix X,zfix Y,int32_t Id,int32_t Clk);                       // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -538,8 +538,8 @@ public:
+ 	eSpinTile(zfix X,zfix Y,int32_t Id,int32_t Clk);                       // : enemy(X,Y,Id,Clk)
+ 	virtual void facehero();
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eZora : public enemy
+@@ -548,7 +548,7 @@ public:
+ 	eZora(zfix X,zfix Y,int32_t Id,int32_t Clk);                      // : enemy(X,Y,Id,0)
+ 	virtual void facehero();
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool isSubmerged() const;
+ };
+ 
+@@ -568,11 +568,11 @@ public:
+ 	void charge_attack();
+ 	void eathero();
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	void vire_hop();
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
+ 	virtual void break_shield();
+ 	virtual void repair_shield();
+ };
+@@ -585,8 +585,8 @@ public:
+ 	eKeese(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual bool can_drawshadow() const;
+-	virtual void drawshadow(BITMAP *dest, bool translucent);
+-	virtual void draw(BITMAP *dest);
++	virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual void init_size_flags();
+ };
+ 
+@@ -602,7 +602,7 @@ public:
+ 	void wizzrobe_attack_for_real();
+ 	void wizzrobe_newdir(int32_t homing);
+ 	void submerge(bool set);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eDodongo : public enemy
+@@ -610,7 +610,7 @@ class eDodongo : public enemy
+ public:
+ 	eDodongo(zfix X,zfix Y,int32_t Id,int32_t Clk);                   // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -620,7 +620,7 @@ public:
+ 	int32_t previous_dir;
+ 	eDodongo2(zfix X,zfix Y,int32_t Id,int32_t Clk);                  // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -630,7 +630,7 @@ public:
+ 	int32_t clk4, fbx; //fireball x position
+ 	eAquamentus(zfix X,zfix Y,int32_t Id,int32_t Clk); // : enemy((zfix)176,(zfix)64,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	using enemy::hit;
+ 	virtual bool hit(weapon *w);
+ };
+@@ -641,7 +641,7 @@ public:
+ 	int32_t clk4; // Movement clk must be separate from animation clk because of the Clock item
+ 	eGohma(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy((zfix)128,(zfix)48,Id,0)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ };
+ 
+@@ -650,7 +650,7 @@ class eLilDig : public enemy
+ public:
+ 	eLilDig(zfix X,zfix Y,int32_t Id,int32_t Clk);                    // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eBigDig : public enemy
+@@ -658,7 +658,7 @@ class eBigDig : public enemy
+ public:
+ 	eBigDig(zfix X,zfix Y,int32_t Id,int32_t Clk);                    // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+ 	virtual void init_size_flags();
+ };
+@@ -675,9 +675,9 @@ public:
+ 	eGanon(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
+-	void draw_guts(BITMAP *dest);
+-	void draw_flash(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	void draw_guts(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	void draw_flash(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ void getBigTri(mapscr* scr, int32_t id2);
+@@ -700,7 +700,7 @@ public:
+ 	esMoldorm(zfix X,zfix Y,int32_t Id,int32_t Clk);                  // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	int32_t parentclk; //because of custom step speed, clk is not sufficient to keep track
+ 	//of when to check the parent Moldorm's direction, since the frequency
+ 	//of the parent's checking might not divide the Moldorm segment's
+@@ -731,7 +731,7 @@ public:
+ 	esLanmola(zfix X,zfix Y,int32_t Id,int32_t Clk);                  // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eManhandla : public enemy
+@@ -743,7 +743,7 @@ public:
+ 	eManhandla(zfix X,zfix Y,int32_t Id,int32_t Clk);                 // : enemy(X,Y,Id,0)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class esManhandla : public enemy
+@@ -752,7 +752,7 @@ public:
+ 	// use clk param to tell which arm it is
+ 	esManhandla(zfix X,zfix Y,int32_t Id,int32_t Clk);                // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class eGleeok : public enemy
+@@ -763,8 +763,8 @@ public:
+ 	eGleeok(zfix X,zfix Y,int32_t Id,int32_t Clk);                    // : enemy((zfix)120,(zfix)48,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
+-	virtual void draw2(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw2(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ // head class
+@@ -780,8 +780,8 @@ public:
+ 	esGleeok(zfix X,zfix Y,int32_t Id,int32_t Clk, sprite * prnt);                   // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual int32_t takehit(weapon *w, weapon* realweap = nullptr);
+-	virtual void draw(BITMAP *dest);
+-	virtual void draw2(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw2(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class ePatra : public enemy
+@@ -798,7 +798,7 @@ public:
+ 	ePatra(zfix X,zfix Y,int32_t Id,int32_t Clk);                     // : enemy((zfix)128,(zfix)48,Id,Clk)
+ 	virtual bool animate(int32_t index);
+ 	virtual void FirePatraWeapon();
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t defend(int32_t wpnId, int32_t *power, int32_t edef);
+ 	virtual int32_t defendNew(int32_t wpnId, int32_t *power, int32_t edef, byte unblockable);
+ 	virtual void init_size_flags();
+@@ -812,7 +812,7 @@ public:
+ 		clk5; //Firing clock
+ 	esPatra(zfix X,zfix Y,int32_t Id,int32_t Clk,sprite * prnt);                    // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ class ePatraBS : public enemy
+@@ -825,7 +825,7 @@ public:
+ 		clk5; //Firing clock
+ 	ePatraBS(zfix X,zfix Y,int32_t Id,int32_t Clk);                   // : enemy((zfix)128,(zfix)48,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual int32_t defend(int32_t wpnId, int32_t *power, int32_t edef);
+ 	virtual int32_t defendNew(int32_t wpnId, int32_t *power, int32_t edef, byte unblockable);
+ 	virtual void init_size_flags();
+@@ -839,7 +839,7 @@ public:
+ 		clk5; //Firing clock
+ 	esPatraBS(zfix X,zfix Y,int32_t Id,int32_t Clk,sprite * prnt);                  // : enemy(X,Y,Id,Clk)
+ 	virtual bool animate(int32_t index);
+-	virtual void draw(BITMAP *dest);
++	virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ };
+ 
+ void addEwpn(int32_t x,int32_t y,int32_t z,int32_t id,int32_t type,int32_t power,int32_t dir, int32_t parentid, byte script_gen = 0, int32_t fakez = 0);
+diff --git a/src/zc/hero.cpp b/src/zc/hero.cpp
+index 7d7db95..e217ac2 100644
+--- a/src/zc/hero.cpp
++++ b/src/zc/hero.cpp
+@@ -2163,12 +2163,12 @@ void HeroClass::draw_under(BITMAP* dest)
+ 	}
+ }
+ 
+-void HeroClass::drawshadow(BITMAP* dest, bool translucent)
++void HeroClass::drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+     int32_t tempy=yofs;
+     yofs+=8;
+     shadowtile = sprite_data_buf.get(spr_shadow).tile;
+-    sprite::drawshadow(dest,translucent);
++    sprite::drawshadow(dest,translucent, world_lights);
+     yofs=tempy;
+ }
+ 
+@@ -2784,15 +2784,15 @@ void HeroClass::position_hammer_for_triggers()
+ 		w->hyofs=4;
+ 	}
+ }
+-void HeroClass::draw(BITMAP* dest)
++void HeroClass::draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 	
+-	do_primitives(dest, SPLAYER_UNDER_PLAYER_DRAW);
++	do_primitives(dest, SPLAYER_UNDER_PLAYER_DRAW, 0, playing_field_offset, 0, world_lights);
+ 	int32_t oxofs = xofs, oyofs = yofs;
+ 	bool invisible = invis_timer || (hero_scr->flags3&fINVISHERO);
+ 	{
+@@ -2801,7 +2801,7 @@ void HeroClass::draw(BITMAP* dest)
+ 			if(!invisible)
+ 			{
+ 				if ( script_hero_cset > -1 ) cs = script_hero_cset;
+-					sprite::draw(dest);
++					sprite::draw(dest, world_lights);
+ 			}
+ 			goto herodraw_end;
+ 		}
+@@ -2977,14 +2977,14 @@ void HeroClass::draw(BITMAP* dest)
+ 						{
+ 							sprite_flicker_transp_passes = (flickertransp < 0 ? game->get_spriteflickertransp() : flickertransp);
+ 							sprite_flicker_color = temp_flicker_color;
+-							masked_draw(dest);
++							masked_draw(dest, world_lights);
+ 						}
+ 					}
+ 					else
+-						masked_draw(dest);
++						masked_draw(dest, world_lights);
+ 
+ 					//Prevent flickering -Z
+-					if (!getCanFlicker()) masked_draw(dest);
++					if (!getCanFlicker()) masked_draw(dest, world_lights);
+ 				}
+ 				
+ 				if(attack!=wHammer)
+@@ -3487,11 +3487,11 @@ void HeroClass::draw(BITMAP* dest)
+ 			{
+ 				sprite_flicker_transp_passes = (flickertransp < 0 ? game->get_spriteflickertransp() : flickertransp);
+ 				sprite_flicker_color = temp_flicker_color;
+-				masked_draw(dest);
++				masked_draw(dest, world_lights);
+ 			}
+ 		}
+ 		else
+-			masked_draw(dest);
++			masked_draw(dest, world_lights);
+ 		
+ 		//draw held items after Hero so they don't go behind his head
+ 		if(action==landhold1 || action==landhold2)
+@@ -3578,10 +3578,10 @@ void HeroClass::draw(BITMAP* dest)
+ herodraw_end:
+ 	xofs=oxofs;
+ 	yofs=oyofs;
+-	do_primitives(dest, SPLAYER_PLAYER_DRAW);
++	do_primitives(dest, SPLAYER_PLAYER_DRAW, 0, playing_field_offset, 0, world_lights);
+ }
+ 
+-void HeroClass::masked_draw(BITMAP* dest)
++void HeroClass::masked_draw(BITMAP* dest, const script_world_light_targets* world_lights)
+ {
+ 	// The first sprite::draw in this function uses sprite_flicker_color
+ 	// This is intended to be the player, handle this if this changes. -Moosh
+@@ -3601,7 +3601,7 @@ void HeroClass::masked_draw(BITMAP* dest)
+ 		{
+ 			yofs -= (playing_field_offset+16);
+ 			xofs -= 16;
+-			sprite::draw(sub);
++			sprite::draw(sub, world_lights);
+ 			if(lift_wpn)
+ 			{
+ 				handle_lift(false);
+@@ -3609,12 +3609,12 @@ void HeroClass::masked_draw(BITMAP* dest)
+ 				lift_wpn->has_shadow = false;
+ 				lift_wpn->z += z;
+ 				lift_wpn->fakez += fakez;
+-				lift_wpn->draw(sub);
++				lift_wpn->draw(sub, world_lights);
+ 				lift_wpn->has_shadow = shad;
+ 			}
+-			do_primitives(dest, SPLAYER_OVER_LIFT_WEAPON);
++			do_primitives(dest, SPLAYER_OVER_LIFT_WEAPON, 0, playing_field_offset, 0, world_lights);
+ 			prompt_draw(sub);
+-			do_primitives(dest, SPLAYER_OVER_PROMPT_COMBO);
++			do_primitives(dest, SPLAYER_OVER_PROMPT_COMBO, 0, playing_field_offset, 0, world_lights);
+ 			xofs+=16;
+ 			yofs += (playing_field_offset+16);
+ 			destroy_bitmap(sub);
+@@ -3622,7 +3622,7 @@ void HeroClass::masked_draw(BITMAP* dest)
+ 	}
+ 	else
+ 	{
+-		sprite::draw(dest);
++		sprite::draw(dest, world_lights);
+ 		if(lift_wpn)
+ 		{
+ 			handle_lift(false);
+@@ -3630,12 +3630,12 @@ void HeroClass::masked_draw(BITMAP* dest)
+ 			lift_wpn->has_shadow = false;
+ 			lift_wpn->z += z;
+ 			lift_wpn->fakez += fakez;
+-			lift_wpn->draw(dest);
++			lift_wpn->draw(dest, world_lights);
+ 			lift_wpn->has_shadow = shad;
+ 		}
+-		do_primitives(dest, SPLAYER_OVER_LIFT_WEAPON);
++		do_primitives(dest, SPLAYER_OVER_LIFT_WEAPON, 0, playing_field_offset, 0, world_lights);
+ 		prompt_draw(dest);
+-		do_primitives(dest, SPLAYER_OVER_PROMPT_COMBO);
++		do_primitives(dest, SPLAYER_OVER_PROMPT_COMBO, 0, playing_field_offset, 0, world_lights);
+ 	}
+ 	
+ 	if(lift_wpn)
+diff --git a/src/zc/hero.h b/src/zc/hero.h
+index a3a1a65..103c5dc 100644
+--- a/src/zc/hero.h
++++ b/src/zc/hero.h
+@@ -493,7 +493,7 @@ private:
+ 	void walkup2(bool opening);
+ 	void exitcave();
+ 	void stepout();
+-	void masked_draw(BITMAP *dest);
++	void masked_draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
+ 	void prompt_draw(BITMAP *dest);
+ 	void handle_triforce(mapscr* scr, int32_t id);
+ 	void getTriforce(int32_t id);
+@@ -537,8 +537,8 @@ public:
+ 	void setBunnyClock(int32_t v);
+ 	HeroClass();
+ 	void init();
+-	virtual void drawshadow(BITMAP* dest, bool translucent);
+-	virtual void draw(BITMAP* dest);
++	virtual void drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
++	virtual void draw(BITMAP* dest, const script_world_light_targets* world_lights = nullptr);
+ 	virtual bool animate(int32_t index);
+ 	virtual void post_animate();
+ 	void maybeOpenActiveSubscreen();
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 3d4b75b..6ee9262 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4365,7 +4365,7 @@ void do_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen_handle, i
+ 		{
+ 			do_scrolling_layer(bmp, type, screen_handle, x, y);
+ 			if(!type && !get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+-				if(mblock2.draw(bmp,layer))
++				if(mblock2.draw(bmp,layer, world_lights))
+ 					do_primitives(bmp, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, world_lights);
+ 		}
+ 	}
+@@ -4878,29 +4878,29 @@ static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, s
+ 		sprite* spr = *it;
+ 		if(spr == &Hero) // Draw the Hero
+ 		{
+-			decorations.draw2(dest,true);
+-			Hero.draw(dest);
+-			decorations.draw(dest,true);
++			decorations.draw2(dest,true, world_lights);
++			Hero.draw(dest, world_lights);
++			decorations.draw(dest,true, world_lights);
+ 			
+ 			// Draw enemies holding the Hero directly above the Hero
+ 			for(int32_t i=0; i<guys.Count(); i++)
+ 			{
+ 				auto e = ((enemy*)guys.spr(i));
+ 				if (e->hashero && (e->type == eeWALK || e->type == eeWALLM))
+-					e->draw(dest);
++					e->draw(dest, world_lights);
+ 			}
+ 		}
+ 		else if(spr == &mblock2) // Draw the moving pushblock
+ 		{
+-			mblock2.draw(dest, -1);
++			mblock2.draw(dest, -1, world_lights);
+ 			do_primitives(dest, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, world_lights);
+ 		}
+ 		else if(enemy* e = dynamic_cast<enemy*>(spr))
+ 		{
+-			e->draw(dest);
+-			e->draw2(dest); // used specifically for eGleeok/esGleeok
++			e->draw(dest, world_lights);
++			e->draw2(dest, world_lights); // used specifically for eGleeok/esGleeok
+ 		}
+-		else spr->draw(dest);
++		else spr->draw(dest, world_lights);
+ 		++it;
+ 	}
+ 	if(do_clip)
+@@ -5161,7 +5161,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	if (lenscheck(hero_scr, 0))
+ 	{
+ 		if(!get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+-			if(mblock2.draw(background,0))
++			if(mblock2.draw(background,0, &world_lights))
+ 				do_primitives(background, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, &world_lights);
+ 	}
+ 
+@@ -5196,9 +5196,9 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				cmby2=-16;
+ 			}
+ 			
+-			decorations.draw2(background,true);
+-			Hero.draw(background);
+-			decorations.draw(background,true);
++			decorations.draw2(background,true, &world_lights);
++			Hero.draw(background, &world_lights);
++			decorations.draw(background,true, &world_lights);
+ 			int32_t ccx = (int32_t)Hero.getClimbCoverX();
+ 			int32_t ccy = (int32_t)Hero.getClimbCoverY();
+ 			
+@@ -5216,9 +5216,9 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	if (get_qr(qr_HERO_DIVE_UNDER_LAYER_1) && Hero.isDiving())
+ 	{
+ 		Hero.draw_under(background);
+-		decorations.draw2(background,true);
+-		Hero.draw(background);
+-		decorations.draw(background,true);
++		decorations.draw2(background,true, &world_lights);
++		Hero.draw(background, &world_lights);
++		decorations.draw(background,true, &world_lights);
+ 		hero_draw_done = true;
+ 	}
+ 	
+@@ -5263,9 +5263,9 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				cmby2=-16;
+ 			}
+ 			
+-			decorations.draw2(background,true);
+-			Hero.draw(background);
+-			decorations.draw(background,true);
++			decorations.draw2(background,true, &world_lights);
++			Hero.draw(background, &world_lights);
++			decorations.draw(background,true, &world_lights);
+ 			int32_t ccx = (int32_t)(Hero.getClimbCoverX());
+ 			int32_t ccy = (int32_t)(Hero.getClimbCoverY());
+ 			
+@@ -5352,9 +5352,9 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		
+ 		if(Hero.isSwimming())
+ 		{
+-			decorations.draw2(dest,true);
+-			Hero.draw(dest);
+-			decorations.draw(dest,true);
++			decorations.draw2(dest,true, &world_lights);
++			Hero.draw(dest, &world_lights);
++			decorations.draw(dest,true, &world_lights);
+ 			hero_draw_done = true;
+ 		}
+ 	}
+@@ -5380,40 +5380,40 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				{
+ 					if (do_clip)
+ 					{
+-						Ewpns.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS));
+-						Lwpns.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS));
++						Ewpns.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS), &world_lights);
++						Lwpns.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS), &world_lights);
+ 					}
+ 					else
+ 					{
+-						Ewpns.drawshadow(dest,get_qr(qr_TRANSSHADOWS),true);
+-						Lwpns.drawshadow(dest,get_qr(qr_TRANSSHADOWS),true);
++						Ewpns.drawshadow(dest,get_qr(qr_TRANSSHADOWS),true, &world_lights);
++						Lwpns.drawshadow(dest,get_qr(qr_TRANSSHADOWS),true, &world_lights);
+ 					}
+ 				}
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Ewpns.spr(i))->behind)
+-						Ewpns.spr(i)->draw(dest);
++						Ewpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Lwpns.spr(i))->behind)
+-						Lwpns.spr(i)->draw(dest);
++						Lwpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+ 				if(get_qr(qr_SHADOWS)&&(!get_qr(qr_SHADOWSFLICKER)||global_frame&1))
+ 				{
+ 					if (do_clip)
+-						guys.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS)!=0);
++						guys.drawshadow_smooth_maze(dest,get_qr(qr_TRANSSHADOWS)!=0, &world_lights);
+ 					else
+-						guys.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0,true);
++						guys.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0,true, &world_lights);
+ 				}
+ 				if (do_clip)
+-					guys.draw_smooth_maze(dest);
++					guys.draw_smooth_maze(dest, &world_lights);
+ 				else
+-					guys.draw(dest,true);
++					guys.draw(dest,true, &world_lights);
+ 				if (do_clip)
+ 				{
+ 					int maze_screen = maze_state.scr->screen;
+@@ -5424,28 +5424,28 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				if (do_clip)
+ 					clear_clip_rect(dest);
+ 
+-				chainlinks.draw(dest,true);
++				chainlinks.draw(dest,true, &world_lights);
+ 				do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				//Lwpns.draw(dest,true);
+ 				
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+ 				{
+ 					if(!((weapon *)Ewpns.spr(i))->behind)
+-						Ewpns.spr(i)->draw(dest);
++						Ewpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(!((weapon *)Lwpns.spr(i))->behind)
+-						Lwpns.spr(i)->draw(dest);
++						Lwpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 
+ 				if (do_clip)
+-					items.draw_smooth_maze(dest);
++					items.draw_smooth_maze(dest, &world_lights);
+ 				else
+-					items.draw(dest,true);
++					items.draw(dest,true, &world_lights);
+ 				if (do_clip)
+ 				{
+ 					int maze_screen = maze_state.scr->screen;
+@@ -5461,35 +5461,35 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Ewpns.spr(i))->behind)
+-						Ewpns.spr(i)->draw(dest);
++						Ewpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_EWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 				for(int32_t i=0; i<Lwpns.Count(); i++)
+ 				{
+ 					if(((weapon *)Lwpns.spr(i))->behind)
+-						Lwpns.spr(i)->draw(dest);
++						Lwpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 				do_primitives(dest, SPLAYER_LWEAP_BEHIND_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				if(get_qr(qr_SHADOWS)&&(!get_qr(qr_SHADOWSFLICKER)||global_frame&1))
+ 				{
+-					guys.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0,true);
++					guys.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0,true, &world_lights);
+ 				}
+ 				
+-				items.draw(dest,false);
++				items.draw(dest,false, &world_lights);
+ 				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW, 0, playing_field_offset, 0, &world_lights);
+-				chainlinks.draw(dest,false);
++				chainlinks.draw(dest,false, &world_lights);
+ 				do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				//Lwpns.draw(dest,false);
+-				guys.draw(dest,false);
++				guys.draw(dest,false, &world_lights);
+ 				do_primitives(dest, SPLAYER_NPC_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 				
+ 				for(int32_t i=0; i<Ewpns.Count(); i++)
+ 				{
+ 					if(!((weapon *)Ewpns.spr(i))->behind)
+ 					{
+-						Ewpns.spr(i)->draw(dest);
++						Ewpns.spr(i)->draw(dest, &world_lights);
+ 					}
+ 				}
+ 				do_primitives(dest, SPLAYER_EWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+@@ -5498,38 +5498,38 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				{
+ 					if(!((weapon *)Lwpns.spr(i))->behind)
+ 					{
+-						Lwpns.spr(i)->draw(dest);
++						Lwpns.spr(i)->draw(dest, &world_lights);
+ 					}
+ 				}
+ 				do_primitives(dest, SPLAYER_LWEAP_FRONT_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			}
+ 			
+-			guys.draw2(dest,true);
++			guys.draw2(dest,true, &world_lights);
+ 		}
+ 		
+ 		if(mirror_portal.destdmap > -1)
+-			mirror_portal.draw(dest);
+-		portals.draw(dest,true);
++			mirror_portal.draw(dest, &world_lights);
++		portals.draw(dest,true, &world_lights);
+ 		
+ 		if(showhero && !is_cave_walking)
+ 		{
+ 			if(get_qr(qr_PUSHBLOCK_SPRITE_LAYER))
+ 			{
+-				mblock2.draw(dest,-1);
++				mblock2.draw(dest,-1, &world_lights);
+ 				do_primitives(dest, SPLAYER_MOVINGBLOCK, 0, playing_field_offset, 0, &world_lights);
+ 			}
+ 			if(!hero_draw_done)
+ 			{
+ 				if((Hero.getZ()>0 || Hero.getFakeZ()>0) &&(!get_qr(qr_SHADOWSFLICKER)||global_frame&1))
+ 				{
+-					Hero.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0);
++					Hero.drawshadow(dest,get_qr(qr_TRANSSHADOWS)!=0, &world_lights);
+ 				}
+ 				
+ 				if(Hero.getZ() <= (zfix)zinit.jump_hero_layer_threshold)
+ 				{
+-					decorations.draw2(dest,true);
+-					Hero.draw(dest);
+-					decorations.draw(dest,true);
++					decorations.draw2(dest,true, &world_lights);
++					Hero.draw(dest, &world_lights);
++					decorations.draw(dest,true, &world_lights);
+ 					hero_draw_done = true;
+ 				}
+ 			}
+@@ -5541,7 +5541,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			{
+ 				if(((eStalfos*)guys.spr(i))->hashero)
+ 				{
+-					guys.spr(i)->draw(dest);
++					guys.spr(i)->draw(dest, &world_lights);
+ 				}
+ 			}
+ 			
+@@ -5549,14 +5549,14 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			{
+ 				if(((eWallM*)guys.spr(i))->hashero)
+ 				{
+-					guys.spr(i)->draw(dest);
++					guys.spr(i)->draw(dest, &world_lights);
+ 				}
+ 			}
+ 			
+ 			if(guys.spr(i)->z+guys.spr(i)->fakez > Hero.getZ()+Hero.getFakeZ())
+ 			{
+ 				//Jumping enemies in front of Hero.
+-				guys.spr(i)->draw(dest);
++				guys.spr(i)->draw(dest, &world_lights);
+ 			}
+ 			do_primitives(dest, SPLAYER_NPC_ABOVEPLAYER_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 		}
+@@ -5666,21 +5666,21 @@ static void compose_scene(const scene_composition_targets& targets,
+ 		//Jumping Hero and jumping enemies are drawn on this layer.
+ 		if(Hero.getZ() > (zfix)zinit.jump_hero_layer_threshold)
+ 		{
+-			decorations.draw2(dest,false);
+-			Hero.draw(dest);
+-			chainlinks.draw(dest,true);
++			decorations.draw2(dest,false, &world_lights);
++			Hero.draw(dest, &world_lights);
++			chainlinks.draw(dest,true, &world_lights);
+ 			do_primitives(dest, SPLAYER_CHAINLINK_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+ 			for(int32_t i=0; i<Lwpns.Count(); i++)
+ 			{
+ 				if(Lwpns.spr(i)->z+Lwpns.spr(i)->fakez > (zfix)zinit.jump_hero_layer_threshold)
+ 				{
+-					Lwpns.spr(i)->draw(dest);
++					Lwpns.spr(i)->draw(dest, &world_lights);
+ 				}
+ 			}
+ 			do_primitives(dest, SPLAYER_LWEAP_ABOVE_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 			
+-			decorations.draw(dest,false);
++			decorations.draw(dest,false, &world_lights);
+ 		}
+ 		
+ 		if(!get_qr(qr_ENEMIESZAXIS)) for(int32_t i=0; i<guys.Count(); i++)
+@@ -5688,7 +5688,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 			sprite* s = guys.spr(i);
+ 			if((isflier(s->id)) || (s->z+s->fakez) > (zfix)zinit.jump_hero_layer_threshold)
+ 			{
+-				s->draw(dest);
++				s->draw(dest, &world_lights);
+ 			}
+ 		}
+ 		else
+@@ -5698,7 +5698,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 				sprite* s = guys.spr(i);
+ 				if((isflier(s->id)) || s->z > 0 || s->fakez > 0)
+ 				{
+-					s->draw(dest);
++					s->draw(dest, &world_lights);
+ 				}
+ 			}
+ 		}
+@@ -5711,7 +5711,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		auto const& itm = get_item_data(items.spr(i)->id);
+ 		if(itm.type == itype_fairy && itm.misc3)
+-			items.spr(i)->draw(dest);
++			items.spr(i)->draw(dest, &world_lights);
+ 	}
+ 	do_primitives(dest, SPLAYER_FAIRYITEM_DRAW, 0, playing_field_offset, 0, &world_lights);
+ 	
+diff --git a/src/zc/weapons.cpp b/src/zc/weapons.cpp
+index ebcc856..7e3f3e2 100644
+--- a/src/zc/weapons.cpp
++++ b/src/zc/weapons.cpp
+@@ -7478,18 +7478,18 @@ bool weapon::can_drawshadow() const
+ {
+ 	return (has_shadow && (z > 0||fakez > 0) && get_qr(qr_WEAPONSHADOWS));
+ }
+-void weapon::draw(BITMAP *dest)
++void weapon::draw(BITMAP *dest, const script_world_light_targets* world_lights)
+ {
+-	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, getUID());
++	do_primitives(dest, SPLAYER_SPRITE_TARGET_UNDER, 0, playing_field_offset, getUID(), world_lights);
+ 	ScopeExitHandler exit_handler([&]()
+ 	{
+-		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, getUID());
++		do_primitives(dest, SPLAYER_SPRITE_TARGET_OVER, 0, playing_field_offset, getUID(), world_lights);
+ 	});
+ 	
+ 	if(weapon_dying_frame) return;
+ 	if(fallclk || drownclk)
+ 	{
+-		sprite::draw(dest);
++		sprite::draw(dest, world_lights);
+ 		return;
+ 	}
+ 	bool suspt = (FFCore.system_suspend[susptLWEAPONS] && this->isLWeapon) || (FFCore.system_suspend[susptEWEAPONS] && !this->isLWeapon);
+@@ -7587,14 +7587,14 @@ void weapon::draw(BITMAP *dest)
+ 	// draw it
+ 	
+ 	if (get_qr(qr_OLD_WEAPON_DRAW_ANIMATE_TIMING) && can_drawshadow())
+-		sprite::drawshadow(dest, get_qr(qr_TRANSSHADOWS) != 0);
+-	sprite::draw(dest);
++		sprite::drawshadow(dest, get_qr(qr_TRANSSHADOWS) != 0, world_lights);
++	sprite::draw(dest, world_lights);
+ }
+-void weapon::drawshadow(BITMAP* dest, bool translucent)
++void weapon::drawshadow(BITMAP* dest, bool translucent, const script_world_light_targets* world_lights)
+ {
+ 	if(get_qr(qr_OLD_WEAPON_DRAW_ANIMATE_TIMING) || !can_drawshadow())
+ 		return;
+-	sprite::drawshadow(dest, translucent);
++	sprite::drawshadow(dest, translucent, world_lights);
+ }
+ 
+ void weapon::findcombotriggers()
+diff --git a/src/zc/weapons.h b/src/zc/weapons.h
+index ebba443..b23c9fd 100644
+--- a/src/zc/weapons.h
++++ b/src/zc/weapons.h
+@@ -180,8 +180,8 @@ public:
+ 	virtual bool hit(int32_t tx,int32_t ty,int32_t txsz,int32_t tysz);
+ 	void animate_graphics();
+ 	virtual bool can_drawshadow() const;
+-    virtual void draw(BITMAP *dest);
+-    virtual void drawshadow(BITMAP *dest, bool translucent);
++    virtual void draw(BITMAP *dest, const script_world_light_targets* world_lights = nullptr);
++    virtual void drawshadow(BITMAP *dest, bool translucent, const script_world_light_targets* world_lights = nullptr);
+     virtual void update_weapon_frame(int32_t change, int32_t orig);
+ 	virtual int32_t run_script(int32_t mode);
+ 	virtual ALLEGRO_COLOR hitboxColor(byte opacity = 255) const;
+diff --git a/src/zq/zquest.cpp b/src/zq/zquest.cpp
+index 417f4de..ef5f361 100644
+--- a/src/zq/zquest.cpp
++++ b/src/zq/zquest.cpp
+@@ -22015,4 +22015,7 @@ void do_primitives([[maybe_unused]] BITMAP *targetBitmap, [[maybe_unused]] int32
+ {
+ 	return;
+ }
+-
++void do_primitives(BITMAP*, int32_t, int32_t, int32_t, int32_t, const script_world_light_targets*)
++{
++	return;
++}
+diff --git a/tests/sprite_draw_context.cpp b/tests/sprite_draw_context.cpp
+new file mode 100644
+index 0000000..7fa678f
+--- /dev/null
++++ b/tests/sprite_draw_context.cpp
+@@ -0,0 +1,72 @@
++// Compile-time contract: every specialized monster keeps its own context-aware
++// virtual draw. This catches accidentally falling back to enemy's implementation.
++#include "zc/guys.h"
++#include "zc/hero.h"
++#include "zc/weapons.h"
++#include "items.h"
++#include "ffc.h"
++#include <type_traits>
++
++template<class T>
++using context_draw = void (T::*)(BITMAP*, const script_world_light_targets*);
++static_assert(std::is_same_v<decltype(&enemy::draw), context_draw<enemy>>);
++static_assert(std::is_same_v<decltype(&guy::draw), context_draw<guy>>);
++static_assert(std::is_same_v<decltype(&eFire::draw), context_draw<eFire>>);
++static_assert(std::is_same_v<decltype(&eOther::draw), context_draw<eOther>>);
++static_assert(std::is_same_v<decltype(&eScript::draw), context_draw<eScript>>);
++static_assert(std::is_same_v<decltype(&eFriendly::draw), context_draw<eFriendly>>);
++static_assert(std::is_same_v<decltype(&eGhini::draw), context_draw<eGhini>>);
++static_assert(std::is_same_v<decltype(&eTektite::draw), context_draw<eTektite>>);
++static_assert(std::is_same_v<decltype(&eItemFairy::draw), context_draw<eItemFairy>>);
++static_assert(std::is_same_v<decltype(&ePeahat::draw), context_draw<ePeahat>>);
++static_assert(std::is_same_v<decltype(&eLeever::draw), context_draw<eLeever>>);
++static_assert(std::is_same_v<decltype(&eWallM::draw), context_draw<eWallM>>);
++static_assert(std::is_same_v<decltype(&eTrap::draw), context_draw<eTrap>>);
++static_assert(std::is_same_v<decltype(&eTrap2::draw), context_draw<eTrap2>>);
++static_assert(std::is_same_v<decltype(&eRock::draw), context_draw<eRock>>);
++static_assert(std::is_same_v<decltype(&eBoulder::draw), context_draw<eBoulder>>);
++static_assert(std::is_same_v<decltype(&eProjectile::draw), context_draw<eProjectile>>);
++static_assert(std::is_same_v<decltype(&eTrigger::draw), context_draw<eTrigger>>);
++static_assert(std::is_same_v<decltype(&eNPC::draw), context_draw<eNPC>>);
++static_assert(std::is_same_v<decltype(&eSpinTile::draw), context_draw<eSpinTile>>);
++static_assert(std::is_same_v<decltype(&eZora::draw), context_draw<eZora>>);
++static_assert(std::is_same_v<decltype(&eStalfos::draw), context_draw<eStalfos>>);
++static_assert(std::is_same_v<decltype(&eKeese::draw), context_draw<eKeese>>);
++static_assert(std::is_same_v<decltype(&eWizzrobe::draw), context_draw<eWizzrobe>>);
++static_assert(std::is_same_v<decltype(&eDodongo::draw), context_draw<eDodongo>>);
++static_assert(std::is_same_v<decltype(&eDodongo2::draw), context_draw<eDodongo2>>);
++static_assert(std::is_same_v<decltype(&eAquamentus::draw), context_draw<eAquamentus>>);
++static_assert(std::is_same_v<decltype(&eGohma::draw), context_draw<eGohma>>);
++static_assert(std::is_same_v<decltype(&eLilDig::draw), context_draw<eLilDig>>);
++static_assert(std::is_same_v<decltype(&eBigDig::draw), context_draw<eBigDig>>);
++static_assert(std::is_same_v<decltype(&eGanon::draw), context_draw<eGanon>>);
++static_assert(std::is_same_v<decltype(&esMoldorm::draw), context_draw<esMoldorm>>);
++static_assert(std::is_same_v<decltype(&esLanmola::draw), context_draw<esLanmola>>);
++static_assert(std::is_same_v<decltype(&eManhandla::draw), context_draw<eManhandla>>);
++static_assert(std::is_same_v<decltype(&esManhandla::draw), context_draw<esManhandla>>);
++static_assert(std::is_same_v<decltype(&eGleeok::draw), context_draw<eGleeok>>);
++static_assert(std::is_same_v<decltype(&esGleeok::draw), context_draw<esGleeok>>);
++static_assert(std::is_same_v<decltype(&ePatra::draw), context_draw<ePatra>>);
++static_assert(std::is_same_v<decltype(&esPatra::draw), context_draw<esPatra>>);
++static_assert(std::is_same_v<decltype(&ePatraBS::draw), context_draw<ePatraBS>>);
++static_assert(std::is_same_v<decltype(&esPatraBS::draw), context_draw<esPatraBS>>);
++static_assert(std::is_same_v<decltype(&HeroClass::draw), context_draw<HeroClass>>);
++static_assert(std::is_same_v<decltype(&weapon::draw), context_draw<weapon>>);
++static_assert(std::is_same_v<decltype(&item::draw), context_draw<item>>);
++static_assert(std::is_same_v<decltype(&ffcdata::draw), context_draw<ffcdata>>);
++static_assert(std::is_same_v<decltype(&tempsprite_shadow::draw), context_draw<tempsprite_shadow>>);
++
++// Legacy expressions still compile; explicit contexts use the same virtual slot.
++static void source_compatibility(sprite& base, enemy& npc, HeroClass& hero,
++    movingblock& block, sprite_list& list, BITMAP* dest,
++    const script_world_light_targets* lights)
++{
++    base.draw(dest);
++    base.draw(dest, lights);
++    npc.draw(dest, lights);
++    hero.draw(dest, lights);
++    block.draw(dest, -1);
++    block.draw(dest, -1, lights);
++    list.draw(dest, true);
++    list.draw(dest, true, lights);
++}
+-- 
+2.52.0.windows.1
+

@@ -1,0 +1,112 @@
+From 9e90ec7ca0496253576880a88dd50af2be875af0 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:14:20 -0500
+Subject: [PATCH] refactor(zc): separate final screen overlays and bounded
+ frame copies
+
+---
+ src/zc/maps.cpp | 69 ++++++++++++++++++++++++++++++-------------------
+ 1 file changed, 42 insertions(+), 27 deletions(-)
+
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 672d4c6..e725d63 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4961,6 +4961,41 @@ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark, cons
+ 	draw_msgstr(7, dest);
+ }
+ 
++// Explicit legacy screen-space tail. Earlier HUD-under-sprite and message
++// phases intentionally remain in draw_screen: relocating them changes quests.
++// This boundary does not authorize scaling screen-space primitives with a world
++// camera. It runs once after world/lens composition, before POST_DRAW scripts.
++static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
++    const nearby_screens_t& nearby_screens, bool drawPassiveSubscreenSeparate,
++    bool old_layer_draw_order)
++{
++	// Draw some text on dest
++
++	set_clip_rect(dest, 0, 0, dest->w - 1, dest->h - 1);
++
++	if(!get_qr(qr_LAYER6_STRINGS_OVER_SUBSCREEN))
++		draw_msgstr(6, dest);
++
++	// Draw the subscreen, without clipping
++	if(get_qr(qr_SUBSCREENOVERSPRITES))
++	{
++		if (drawPassiveSubscreenSeparate)
++			blit(dest, framebuf_no_passive_subscreen, 0, 0, 0, 0, dest->w, dest->h);
++
++		put_passive_subscr(dest, 0, 0, game->should_show_time(), sspUP);
++
++		do_primitives(dest, 7);
++		if (drawPassiveSubscreenSeparate)
++			do_primitives(framebuf_no_passive_subscreen, 7);
++	}
++	else if (!old_layer_draw_order)
++		do_primitives(dest, 7);
++
++	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens);
++	if (drawPassiveSubscreenSeparate)
++		draw_screen_post_passive_subscreen(framebuf_no_passive_subscreen, any_dark, nearby_screens);
++}
++
+ // Draws to framebuf.
+ //
+ // But if drawPassiveSubscreenSeparate is true: framebuf_no_passive_subscreen will also contain all
+@@ -5242,13 +5277,16 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 
+ 	set_draw_screen_clip(dest);
+ 
+-	blit(scrollbuf, dest, 0, 0, 0, 0, 256, 232);
++	// Source scratch includes the legacy hidden bottom rows. Copy only the
++	// valid overlap; final targets need not share the scratch allocation size.
++	blit(scrollbuf, dest, 0, 0, 0, 0,
++		std::min(scrollbuf->w, dest->w), std::min(scrollbuf->h, dest->h));
+ 
+ 	// After this point, scrollbuf is no longer drawn to - so things like dosubscr have access to a "partially rendered" frame.
+ 	// I think only used for COOLSCROLL==0? Seems like a silly feature...
+ 	
+ 	// Draw some sprites onto dest
+-	set_clip_rect(dest,0,0,256,232);
++	set_clip_rect(dest, 0, 0, dest->w - 1, dest->h - 1);
+ 	
+ 	if(!(pricesdisplaybuf->clip))
+ 	{
+@@ -5708,31 +5746,8 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 		effects->consume_lens_clock(lensclk);
+ 	}
+ 
+-	// Draw some text on dest
+-	
+-	set_clip_rect(dest,0,0,256,232);
+-
+-	if(!get_qr(qr_LAYER6_STRINGS_OVER_SUBSCREEN))
+-		draw_msgstr(6);
+-
+-	// Draw the subscreen, without clipping
+-	if(get_qr(qr_SUBSCREENOVERSPRITES))
+-	{
+-		if (drawPassiveSubscreenSeparate)
+-			blit(dest, framebuf_no_passive_subscreen, 0, 0, 0, 0, dest->w, dest->h);
+-
+-		put_passive_subscr(dest, 0, 0, game->should_show_time(), sspUP);
+-
+-		do_primitives(dest, 7);
+-		if (drawPassiveSubscreenSeparate)
+-			do_primitives(framebuf_no_passive_subscreen, 7);
+-	}
+-	else if (!old_layer_draw_order)
+-		do_primitives(dest, 7);
+-
+-	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens);
+-	if (drawPassiveSubscreenSeparate)
+-		draw_screen_post_passive_subscreen(framebuf_no_passive_subscreen, any_dark, nearby_screens);
++	compose_screen_overlay_tail(dest, any_dark, nearby_screens,
++		drawPassiveSubscreenSeparate, old_layer_draw_order);
+ 
+ 	set_clip_rect(scrollbuf, 0, 0, scrollbuf->w, scrollbuf->h);
+ 	if(runGeneric) FFCore.runGenericPassiveEngine(SCR_TIMING_POST_DRAW);
+-- 
+2.52.0.windows.1
+

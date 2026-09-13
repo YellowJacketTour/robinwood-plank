@@ -1,0 +1,22 @@
+[
+  {
+    "name": "bow",
+    "errors": [],
+    "note": "Wall-clock snapshots, not frame-exact timing; screenshot overhead included."
+  },
+  {
+    "name": "bomb",
+    "errors": [],
+    "note": "Wall-clock snapshots, not frame-exact timing; screenshot overhead included."
+  },
+  {
+    "name": "wand",
+    "errors": [],
+    "note": "Wall-clock snapshots, not frame-exact timing; screenshot overhead included."
+  },
+  {
+    "name": "divine-fire",
+    "errors": [],
+    "note": "Wall-clock snapshots, not frame-exact timing; screenshot overhead included."
+  }
+]
