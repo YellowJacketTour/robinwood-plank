@@ -68,3 +68,19 @@ The reviewed promotion produced a new private release folder, `charmville-privat
 **The accepted package is not live.** This is local browser acceptance and artifact promotion, not proof of remote deployment. At this checkpoint, legacy CI checks pass and the new build for `30671ddb` is still running. Remote activation, live health/SHA confirmation and protected-route smoke checks remain release gates.
 
 This bounded alpha acceptance does not claim the entire game vision is complete. Independent guest collaboration, large-scale multiplayer, the full opening narrative, all menus and professions, advanced combat, streaming/theatres and the wider social platform still require their own implementation and acceptance evidence. Preserve those outstanding scopes rather than treating this package milestone as full game completion.
+
+## Live gated deployment — 2026-09-13
+
+This checkpoint supersedes the historical not-live statements above for release `alpha01-r03` only.
+
+- Master application revision: `69a86aae5dd3165cb4b03278261f68cb3b1ddefe`.
+- Deployment run [34767451691](https://github.com/YellowJacketTour/robinwood-plank/actions/runs/34767451691) completed successfully after the required database backup and migrations.
+- At 17:36 UTC, production health returned HTTP200, `ok:true`, and the exact revision above.
+- Nine production checks passed: exact health revision; world page; accepted runtime prefix; invitation page; administrator page; anonymous runtime HTTP401; anonymous runtime ticket HTTP401; anonymous invitation API HTTP401; production local fixture HTTP404.
+- The existing browser tab opened the live sign-in screen. Authenticated production gameplay and independent invited-user collaboration remain unverified. Local synthetic-account acceptance is not a substitute for these checks.
+
+Entry: https://plank.love/charmville/world?panel=play
+Invitation redemption: https://plank.love/charmville/access
+Administrator invitations: https://plank.love/charmville/access/admin
+
+The accepted runtime inventory and receipt hashes above remain unchanged. Follow-up crop guidance and debug-stripping work are isolated and are not part of this deployed package. They require new candidate assembly and acceptance before promotion.
