@@ -44,6 +44,15 @@ try{
  await page.keyboard.press('0');
  await page.waitForFunction(()=>window.charmvilleCameraActualZoom===1,null,{timeout:10000});
  const restored=await state();assert.deepEqual(restored.rect,normal.rect);
+ await page.waitForFunction(()=>window.charmvilleCameraPanReady===true);
+ await page.keyboard.down('d');await page.waitForTimeout(300);await page.keyboard.up('d');
+ const panned=await state();
+ await page.screenshot({path:output+'/panned.png'});
+ assert(panned.view.x>restored.view.x,'WASD pans live viewport');
+ assert(Number(panned.position.split('|')[0])>Number(restored.position.split('|')[0]),'Native simulation keeps ticking during pan');
+ assert.deepEqual(panned.position.split('|').slice(1,5),restored.position.split('|').slice(1,5),'Camera pan must not move hero');
+ await page.keyboard.press('0');
+ await page.waitForFunction(()=>window.charmvilleCameraPanX===0&&window.charmvilleCameraPanY===0);
  await page.screenshot({path:output+'/restored.png'});
  await page.getByRole('button',{name:'Map overview',exact:true}).click();
  await page.waitForFunction(()=>window.charmvilleMapOpen===true,null,{timeout:30000});
