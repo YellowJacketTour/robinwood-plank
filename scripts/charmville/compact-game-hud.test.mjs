@@ -39,7 +39,7 @@ test('native proximity guidance preserves permission and pending-state priority'
  assert.ok(start>=0&&end>start);
  const statements=source.slice(start,end);
  const evaluate=overrides=>{
-  const context={resourceMode:true,resourceReady:true,permittedAction:true,stages:[1],selectedPlot:0,activity:-1,nearPlot:false,pendingReceipt:false,authorization:1,presentationTask:2,...overrides};
+  const context={resourceMode:true,resourceReady:true,permittedAction:true,stages:[1],selectedPlot:0,activity:-1,nearPlot:false,pendingReceipt:false,authorization:1,presentationTask:2,fed:[false],cuttings:0,...overrides};
   runInNewContext(statements,context);return context.presentationTask;
  };
  for(const task of [1,2,3,7])assert.equal(evaluate({presentationTask:task}),12);
@@ -50,5 +50,7 @@ test('native proximity guidance preserves permission and pending-state priority'
  assert.equal(evaluate({activity:1,authorization:-1}),11);
  assert.equal(evaluate({presentationTask:4,stages:[3]}),4);
  assert.equal(evaluate({activity:1}),2);
+ assert.equal(evaluate({resourceMode:false,presentationTask:4,stages:[3],cuttings:1}),12);
+ assert.equal(evaluate({resourceMode:false,presentationTask:4,stages:[3],cuttings:1,nearPlot:true}),4);
  assert.match(source,/if\(presentationTask==12\)sprintf\(line,"Move closer to this bed"\);/);
 });

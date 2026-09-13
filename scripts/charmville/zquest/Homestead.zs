@@ -537,7 +537,7 @@ global script Active
                 }
                 if(stages[selectedPlot]==4)presentationTask=7;
                 if(resourceMode && resourceReady && !permittedAction && stages[selectedPlot]!=3)presentationTask=8;
-                if(activity<0 && !nearPlot && (presentationTask==1 || presentationTask==2 || presentationTask==3 || presentationTask==7))presentationTask=12;
+                if(activity<0 && !nearPlot && (presentationTask==1 || presentationTask==2 || presentationTask==3 || presentationTask==7 || (!resourceMode && stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)))presentationTask=12;
                 if(resourceMode && !resourceReady)presentationTask=9;
                 else if(resourceMode && pendingReceipt)presentationTask=10;
                 else if(resourceMode && activity>=0 && authorization<0)presentationTask=11;
@@ -564,7 +564,7 @@ global script Active
                 sprintf(line,"Bed %d  Berry %d  XP %d",selectedPlot+1,berries,harvests*10);
                 if(resourceMode)sprintf(line,"Bed %d  Seeds %d  Oran %d",selectedPlot+1,resourceSeeds,resourceProduce);
                 Screen->DrawString(6,4,157,0,0x01,-1,0,line);
-                if(stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
+                if(nearPlot && stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)sprintf(line,"D: feed soil (%d cuttings)",cuttings);
                 else if(stages[selectedPlot]==3 && fed[selectedPlot])sprintf(line,"Fed soil: next yield is 2");
                 else sprintf(line,"Cuttings %d Guests %d",cuttings,guests);
                 if(resourceMode)sprintf(line,"Players nearby %d",accountCount);
@@ -578,7 +578,7 @@ global script Active
                 if(resourceMode)uiGuests=accountCount;
                 file uiState=new file("/charmville/presentation-ui.txt","w");
                 if(uiState->isValid()){
-                    sprintf(presentationText,"1|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",welcome,presentationTask,selectedPlot+1,resourceMode?resourceProduce:berries,resourceMode?-1:harvests*10,cuttings,uiGuests,resourceMode?1:0,resourceMode?resourceSeeds:-1,fed[selectedPlot]?1:0,(!resourceMode && stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)?1:0,ticks,presentationTask>0?1:0);
+                    sprintf(presentationText,"1|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",welcome,presentationTask,selectedPlot+1,resourceMode?resourceProduce:berries,resourceMode?-1:harvests*10,cuttings,uiGuests,resourceMode?1:0,resourceMode?resourceSeeds:-1,fed[selectedPlot]?1:0,(!resourceMode && presentationTask!=12 && stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)?1:0,ticks,presentationTask>0?1:0);
                     uiState->WriteString(presentationText);uiState->Close();
                 }
             }

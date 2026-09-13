@@ -17,7 +17,7 @@ export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'capture-bridge.js': 'd4bfc3b1cf382cb0a6858fc7bf9b78f6f0f78e8fbc471ac02f3a4bd26042086c',
   'gameplay-video.mjs': 'b187c20f6d23a3dc8bd0c061a895d1222eb03c32b8823498984962445340c3b0',
   'gameplay-capture.mjs': 'd15358b7e8500c3d6bea07ed8d45d23ca2bdd2239411de8a410fded83763213f',
-  'compact-game-hud.mjs': '25c8c7834df13fd32b1dff53ce06c69c321b564d569331657aa088ef9bc0d56f',
+  'compact-game-hud.mjs': '1f193dc7e6063a12f086ea78ed5c19cbfeaa6d6222172f805c40bed78409fd2b',
   'display-controls.js': '3f12d54931afbee4874e3662d5a0a9e023203cf52abca45647b784bdd88d49d3',
   'controller-controls.js': '30a8ab50bb4770ff783c2138da3e2739e053b833c5fd9683fd1d581e8a8380e4',
 });
