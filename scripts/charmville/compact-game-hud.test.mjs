@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCompactHud,mountCompactHud} from './compact-game-hud.mjs';
+import {parseCompactHud,mountCompactHud,parseCropPresentation} from './compact-game-hud.mjs';
 
 test('parses local and account counters without inventing unavailable XP or seeds',()=>{
  assert.equal(parseCompactHud('1|2|1|1|0|0|0|0|0|-1|0|0|60|1').seeds,-1);
@@ -11,7 +11,7 @@ test('parses local and account counters without inventing unavailable XP or seed
 test('leases only visible valid HUD and removes stale readout on invalid native state',()=>{
  const el=()=>Object.assign(new EventTarget(),{style:{},hidden:true,setAttribute(){},remove(){},getBoundingClientRect:()=>({height:40})});
  const panel=el(),task=el(),button=el(),details=el(),stock=el(),care=el();
- panel.querySelector=s=>({'[data-task]':task,button,'#charm-crop-details':details,'[data-stock]':stock,'[data-care]':care})[s];
+ panel.querySelector=s=>({'[data-task]':task,'[aria-controls="charm-crop-details"]':button,'#charm-crop-details':details,'[data-stock]':stock,'[data-care]':care})[s];
  let poll,cleared=false;
  const view=Object.assign(new EventTarget(),{innerWidth:640,innerHeight:800,matchMedia:()=>({matches:false}),setInterval:fn=>(poll=fn,1),clearInterval:()=>{cleared=true;}});
  const canvas={getBoundingClientRect:()=>({left:20,top:50,bottom:500,width:500,height:450})};
@@ -53,4 +53,13 @@ test('native proximity guidance preserves permission and pending-state priority'
  assert.equal(evaluate({resourceMode:false,presentationTask:4,stages:[3],cuttings:1}),12);
  assert.equal(evaluate({resourceMode:false,presentationTask:4,stages:[3],cuttings:1,nearPlot:true}),4);
  assert.match(source,/if\(presentationTask==12\)sprintf\(line,"Move closer to this bed"\);/);
+});
+
+test('crop presentation binds names and choices to current run and bed',()=>{
+ const text='2|4|1|2|1|3|0|2|1|3|0';
+ assert.equal(parseCropPresentation(text,'4',2).crop,2);
+ assert.equal(parseCropPresentation(text,'5',2),null);
+ assert.equal(parseCropPresentation(text,'4',1),null);
+ assert.equal(parseCropPresentation(text.replace('|2|1|3|','|9|1|3|'),'4',2),null);
+ assert.equal(parseCropPresentation(text+'|0','4',2),null);
 });

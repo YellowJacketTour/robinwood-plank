@@ -5,6 +5,7 @@
 #include "CommittedAttackFrames.zh"
 #include "CaptureBall.zh"
 #include "FaintFrames.zh"
+#include "HeartCrop.zh"
 
 // Native, local tutorial prototype. No shared-account inventory authority.
 // Active is the engine's global per-frame script slot.
@@ -72,12 +73,12 @@ global script Active
         sprintf(message,"%d",sequence);cursor->WriteString(message);cursor->Close();
         printf("CHARMVILLE_CONTACT %d ACTION %d BED %d\n",sequence,action,bed);
     }
-    void publishLifecycle(int sequence,int id,int phase,int action,int bed)
+    void publishLifecycle(int sequence,int id,int phase,int action,int bed,int cropCode)
     {
         char32 path[80];char32 text[192];sprintf(path,"/charmville/lifecycle-%d.txt",sequence%64);
         file event=new file(path,"w");if(!event->isValid())return;
         int room=Game->HeroScreen;
-        sprintf(text,"%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",sequence,id,phase,action,bed,Game->GetCurDMap(),room,Hero->X-Region->WorldOffsetX(room),Hero->Y-Region->WorldOffsetY(room),Hero->Dir);event->WriteString(text);event->Close();
+        sprintf(text,"%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",sequence,id,phase,action,bed,Game->GetCurDMap(),room,Hero->X-Region->WorldOffsetX(room),Hero->Y-Region->WorldOffsetY(room),Hero->Dir);if(cropCode>0){char32 suffix[16];sprintf(suffix,"|%d",cropCode);strcat(text,suffix);}event->WriteString(text);event->Close();
         file cursor=new file("/charmville/lifecycle-sequence.txt","w");if(!cursor->isValid())return;sprintf(text,"%d",sequence);cursor->WriteString(text);cursor->Close();
         printf("CHARMVILLE_LIFECYCLE %d ID %d PHASE %d ACTION %d BED %d\n",sequence,id,phase,action,bed);
     }
@@ -180,7 +181,7 @@ global script Active
         websocket channel = new websocket("ws://localhost:3022");
         int sequence = 0;int positionSequence=0;int lastCorrection=0;int appliedCorrection=0;
         int activity=-1;int activityTick=0;int activityDir=DIR_DOWN;int lastToolFrame=-1;int contactSequence=0;
-        bool resourceMode=false;bool resourceReady=false;int resourceVersion=0;int resourcePhase[3];int resourcePermissions[3];int resourceSeeds=0;int resourceProduce=0;char32 resourceText[192];
+        bool resourceMode=false;bool resourceReady=false;int resourceVersion=0;bool resourceV2=false;int cropCodes[]={1,1,1};int cropChoices[]={1,1,1};int seedChoices[3];int cropBalances[4];int activityCropCode=0;int nativeRun=0;int resourcePhase[3];int resourcePermissions[3];int resourceSeeds=0;int resourceProduce=0;char32 resourceText[384];
         int localActionId=0;int lifecycleSequence=0;bool lifecycleStarted=false;bool contactSent=false;int authorization=-1;int actionStartTick=0;bool pendingReceipt=false;bool alignmentDone=false;
         int activityLife=0;int activityX=0;int activityY=0;
         int previousDMap=Game->GetCurDMap(); int previousScreen=Game->GetCurScreen();
@@ -191,6 +192,9 @@ global script Active
         // native text; no browser HUD value authorizes a gameplay action.
         int presentationLease=0;int presentationLeaseTick=-120;
         int presentationTask=0;char32 presentationText[192];
+        int heartColors[]={heartCropColor(45,39,35),heartCropColor(56,118,47),heartCropColor(133,185,69),heartCropColor(217,54,61),heartCropColor(255,135,89),heartCropColor(255,226,138)};
+        file protocol=new file("/charmville/resource-protocol.txt","w");if(protocol->isValid()){protocol->WriteString("2");protocol->Close();}
+        file runFile=new file("/charmville/action-run.txt","r");if(runFile->isValid()){runFile->ReadString(resourceText);runFile->Close();nativeRun=atoi(resourceText);}
         printf("CHARMVILLE_HOMESTEAD_ACTIVE\n");
         while (true)
         {
@@ -214,17 +218,28 @@ global script Active
                 }
             }
             if(ticks==1 || ticks%6==0){
-                file snapshot=new file("/charmville/resource-state.txt","r");
+                file snapshot=new file("/charmville/resource-state-v2.txt","r");
+                bool snapshotV2=snapshot->isValid();
+                if(!snapshotV2)snapshot=new file("/charmville/resource-state.txt","r");
                 if(snapshot->isValid()){
-                    resourceText[0]=0;snapshot->ReadString(resourceText);snapshot->Close();int version=field(resourceText,0);
-                    if(version>resourceVersion){
-                        resourceMode=true;resourceVersion=version;resourceReady=field(resourceText,1)==1;resourceSeeds=field(resourceText,3);resourceProduce=field(resourceText,4);
+                    resourceText[0]=0;snapshot->ReadString(resourceText);snapshot->Close();
+                    if(snapshotV2 && field(resourceText,1)!=1){
+                        file legacy=new file("/charmville/resource-state.txt","r");
+                        if(legacy->isValid()){resourceText[0]=0;legacy->ReadString(resourceText);legacy->Close();snapshotV2=false;}
+                    }
+                    int version=field(resourceText,0);
+                    if(version>resourceVersion && (!snapshotV2 || field(resourceText,14)==2)){
+                        resourceMode=true;resourceVersion=version;resourceV2=snapshotV2;resourceReady=field(resourceText,1)==1;resourceSeeds=field(resourceText,3);resourceProduce=field(resourceText,4);
                         for(int bed=0;bed<3;bed++){stages[bed]=field(resourceText,5+bed*2);resourcePhase[bed]=field(resourceText,6+bed*2);resourcePermissions[bed]=field(resourceText,11+bed);fed[bed]=false;}
+                        if(resourceV2){
+                            for(int bed=0;bed<3;bed++){cropCodes[bed]=field(resourceText,15+bed);seedChoices[bed]=field(resourceText,22+bed);if(activity<0 && (seedChoices[bed]&cropChoices[bed])==0)cropChoices[bed]=(seedChoices[bed]&1)!=0?1:2;}
+                            for(int balance=0;balance<4;balance++)cropBalances[balance]=field(resourceText,18+balance);
+                        }
                         if(field(resourceText,2)>=localActionId)pendingReceipt=false;
                         printf("CHARMVILLE_RESOURCE_STATE %d READY %d\n",version,resourceReady?1:0);
                     }
                 }
-                if(resourceMode && !resourceReady && activity>=0){if(lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;pendingReceipt=false;}
+                if(resourceMode && !resourceReady && activity>=0){if(lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot,activityCropCode);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;pendingReceipt=false;}
             }
             if(ticks==1 || ticks%2==0){
                 file peers=new file("/charmville/account-peers.txt","r");
@@ -253,7 +268,7 @@ global script Active
                             int origin=Game->GetCurScreen();
                             x+=(screen%16-origin%16)*256;
                             y+=(Floor(screen/16)-Floor(origin/16))*176;
-                            if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}
+                            if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot,activityCropCode);}
                             activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;Hero->X=x;Hero->Y=y;if(field(line,6)!=1)Hero->Dir=facing;
                             trailCount=0;trailHead=0;lastHeroX=x;lastHeroY=y;farmSpawned=true;
                             // A deferred airborne placement must remain retryable.
@@ -284,7 +299,7 @@ global script Active
             if(previousDMap!=Game->GetCurDMap() || previousScreen!=Game->GetCurScreen())
             {
                 for(int p=0;p<16;p++)life[p]=0;
-                if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}
+                if(resourceMode && activity>=0 && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot,activityCropCode);}
                 activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;
                 clearingReady=false;trailCount=0;trailHead=0;lastHeroX=Hero->X;lastHeroY=Hero->Y;
                 previousDMap=Game->GetCurDMap();previousScreen=Game->GetCurScreen();
@@ -379,6 +394,14 @@ global script Active
                     int nearest=100000;for(int bed=0;bed<3;bed++){int dx=plotXs[bed]+8-(Hero->X+8);int dy=plotY+8-(Hero->Y+8);int distance=dx*dx+dy*dy;if(distance<nearest){nearest=distance;selectedPlot=bed;}}
                 }
                 plotX=plotXs[selectedPlot];plotCenterX=plotX+8;
+                if(resourceV2 && activity<0 && stages[selectedPlot]==1){
+                    file choice=new file("/charmville/resource-crop-choice.txt","r");
+                    if(choice->isValid()){
+                        resourceText[0]=0;choice->ReadString(resourceText);choice->Close();
+                        int code=field(resourceText,2);
+                        if(field(resourceText,0)==nativeRun && field(resourceText,1)==selectedPlot && (code==1 || code==2) && (seedChoices[selectedPlot]&code)!=0)cropChoices[selectedPlot]=code;
+                    }
+                }
                 Screen->DrawOrigin=DRAW_ORIGIN_REGION;
                 // Browser-proven RT_CURRENT addresses the current layer's draw
                 // buffer. RT_SCREEN loses low-layer bitmap draws in this runtime.
@@ -448,7 +471,7 @@ global script Active
                 if(Input->KeyPress[KEY_E] || Hero->PressEx3)printf("CHARMVILLE_INTERACT BED %d NEAR %d ACTION %d WORK %d Z %d FZ %d\n",selectedPlot+1,nearPlot?1:0,Hero->Action,activity,Hero->Z,Hero->FakeZ);
                 if ((Input->KeyPress[KEY_E] || Hero->PressEx3) && nearPlot && permittedAction && Hero->Z==0 && Hero->FakeZ==0 && activity<0 && (!resourceMode || (resourceReady && !pendingReceipt)) && (stages[selectedPlot]!=3 || (!resourceMode && cuttings>0 && !fed[selectedPlot])) && (Hero->Action==LA_NONE || Hero->Action==LA_WALKING))
                 {
-                    activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityTick=0;lastToolFrame=-1;
+                    activity=stages[selectedPlot]==3?5:stages[selectedPlot];activityCropCode=resourceV2?(activity==1?cropChoices[selectedPlot]:cropCodes[selectedPlot]):0;activityTick=0;lastToolFrame=-1;
                     localActionId++;lifecycleStarted=false;contactSent=false;authorization=-1;actionStartTick=ticks;alignmentDone=false;
                     activityLife=Hero->HP;activityX=Hero->X;activityY=Hero->Y;
                     int dx=plotCenterX-(Hero->X+8);int dy=plotCenterY-(Hero->Y+8);
@@ -466,11 +489,11 @@ global script Active
                     }
                 }
                 if(activity>=0 && (!farmHere || Hero->Z!=0 || Hero->FakeZ!=0 || Hero->HP<activityLife || Hero->X!=activityX || Hero->Y!=activityY || (Hero->Action!=LA_NONE && Hero->Action!=LA_WALKING)))
-                {printf("CHARMVILLE_ACTION_CANCEL BED %d X %d/%d Y %d/%d HP %d/%d ACTION %d\n",selectedPlot+1,Hero->X,activityX,Hero->Y,activityY,Hero->HP,activityLife,Hero->Action);if(resourceMode && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                {printf("CHARMVILLE_ACTION_CANCEL BED %d X %d/%d Y %d/%d HP %d/%d ACTION %d\n",selectedPlot+1,Hero->X,activityX,Hero->Y,activityY,Hero->HP,activityLife,Hero->Action);if(resourceMode && lifecycleStarted && !contactSent){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot,activityCropCode);}activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 if(resourceMode && activity>=0 && activityTick==1){
-                    if(!lifecycleStarted){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,0,activity,selectedPlot);lifecycleStarted=true;}
+                    if(!lifecycleStarted){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,0,activity,selectedPlot,activityCropCode);lifecycleStarted=true;}
                     file auth=new file("/charmville/resource-authorization.txt","r");if(auth->isValid()){resourceText[0]=0;auth->ReadString(resourceText);auth->Close();if(field(resourceText,0)==localActionId){int decision=field(resourceText,1);if(authorization<0 && decision==1)activityTick=0;authorization=decision;}}
-                    if(authorization==0 || ticks-actionStartTick>600){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot);activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
+                    if(authorization==0 || ticks-actionStartTick>600){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,2,activity,selectedPlot,activityCropCode);activity=-1;Hero->ScriptTile=-1;Hero->ScriptFlip=-1;}
                 }
                 if(activity>=0)
                 {
@@ -512,7 +535,7 @@ global script Active
                     }
                     if(activityTick==28)
                     {
-                        if(resourceMode){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,1,activity,selectedPlot);contactSent=true;pendingReceipt=true;}
+                        if(resourceMode){lifecycleSequence++;publishLifecycle(lifecycleSequence,localActionId,1,activity,selectedPlot,activityCropCode);contactSent=true;pendingReceipt=true;}
                         else{
                         if(activity==4){
                             int yield=fed[selectedPlot]?2:1;berries+=yield;cuttings++;harvests++;stages[selectedPlot]=1;fed[selectedPlot]=false;
@@ -535,12 +558,13 @@ global script Active
                     if(!resourceMode && stages[bed]==3 && ticks-wateredTimes[bed]>=300){stages[bed]=4;printf("CHARMVILLE_CROP_READY BED %d\n",bed+1);}
                     int plantLayer=Hero->Y+16<plotFootY?6:farmGroundLayer;
                     Screen->DrawOrigin=DRAW_ORIGIN_REGION;
-                    if(stages[bed]==3){int age=resourceMode?resourcePhase[bed]*100:ticks-wateredTimes[bed];
+                    if(resourceV2 && cropCodes[bed]==2)drawHeartCrop(plantLayer,plotXs[bed],plotY,stages[bed],resourcePhase[bed],ticks,heartColors);
+                    else if(stages[bed]==3){int age=resourceMode?resourcePhase[bed]*100:ticks-wateredTimes[bed];
                         if(age<100)sprout->Blit(farmGroundLayer,RT_CURRENT,(Floor(ticks/32)%2)*16,0,16,16,plotXs[bed],plotY,16,16);
                         else if(age<200)berry->Blit(plantLayer,RT_CURRENT,(Floor(ticks/48)%2)*16,0,16,32,plotXs[bed],plotY-16,16,32);
                         else berry->Blit(plantLayer,RT_CURRENT,32+(Floor(ticks/64)%2)*16,0,16,32,plotXs[bed],plotY-16,16,32);
                     }
-                    if(stages[bed]==4)berry->Blit(plantLayer,RT_CURRENT,64+(Floor(ticks/96)%2)*16,0,16,32,plotXs[bed],plotY-16,16,32);
+                    if(stages[bed]==4 && (!resourceV2 || cropCodes[bed]!=2))berry->Blit(plantLayer,RT_CURRENT,64+(Floor(ticks/96)%2)*16,0,16,32,plotXs[bed],plotY-16,16,32);
                     Screen->DrawOrigin=DRAW_ORIGIN_DEFAULT;
                 }
                 if(farmHere){
@@ -594,6 +618,11 @@ global script Active
                 if(uiState->isValid()){
                     sprintf(presentationText,"1|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",welcome,presentationTask,selectedPlot+1,resourceMode?resourceProduce:berries,resourceMode?-1:harvests*10,cuttings,uiGuests,resourceMode?1:0,resourceMode?resourceSeeds:-1,fed[selectedPlot]?1:0,(!resourceMode && presentationTask!=12 && stages[selectedPlot]==3 && !fed[selectedPlot] && cuttings>0)?1:0,ticks,presentationTask>0?1:0);
                     uiState->WriteString(presentationText);uiState->Close();
+                    file cropUi=new file("/charmville/presentation-crop.txt","w");
+                    if(cropUi->isValid()){
+                        sprintf(presentationText,"%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",resourceV2?2:1,nativeRun,selectedPlot,cropCodes[selectedPlot],cropChoices[selectedPlot],stages[selectedPlot]==1?seedChoices[selectedPlot]:0,activity>=0?1:0,cropBalances[0],cropBalances[1],cropBalances[2],cropBalances[3]);
+                        cropUi->WriteString(presentationText);cropUi->Close();
+                    }
                 }
             }
             // Parent supplies only a visual selection, never inventory authority.
