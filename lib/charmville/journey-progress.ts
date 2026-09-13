@@ -32,6 +32,18 @@ export async function journeyProgress(pool:Pool,token:string):Promise<JourneyPro
     AND result->'yield'->>'face'='oran-berry'
     AND CASE WHEN jsonb_typeof(result->'yield'->'quantity')='number'
       THEN (result->'yield'->>'quantity')::numeric>0 ELSE false END
+   ) UNION ALL
+   SELECT 'home.crop.planted' WHERE EXISTS (
+    SELECT 1 FROM charmville_native_actions WHERE profile_id=$1 AND region_id='home:' || $1::text AND status='committed' AND kind='plant' AND crop_id IN ('oran-berry','burning-heart')
+   ) UNION ALL
+   SELECT 'home.crop.watered' WHERE EXISTS (
+    SELECT 1 FROM charmville_native_actions WHERE profile_id=$1 AND region_id='home:' || $1::text AND status='committed' AND kind='water' AND crop_id IN ('oran-berry','burning-heart')
+   ) UNION ALL
+   SELECT 'home.crop.harvested' WHERE EXISTS (
+    SELECT 1 FROM charmville_native_actions WHERE profile_id=$1 AND region_id='home:' || $1::text AND status='committed' AND kind='harvest' AND crop_id IN ('oran-berry','burning-heart')
+    AND result->'yield'->>'face'=crop_id
+    AND CASE WHEN jsonb_typeof(result->'yield'->'quantity')='number'
+      THEN (result->'yield'->>'quantity')::numeric>0 ELSE false END
    )`,[id]);
   await c.query('COMMIT');
   return {version:1,completed:rows.map(row=>row.key)};
