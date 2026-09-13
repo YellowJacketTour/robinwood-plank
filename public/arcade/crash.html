@@ -3926,6 +3926,21 @@ let lastReceiptPresentedRound = -1n;
 let scoreboardFromBlock = null;
 let scoreboardBusy = false;
 let scoreboardReadFailed = false;
+// A round whose verification cannot complete must not hold the table hostage.
+// "Retry the original event; never fabricate a result" is right; retrying it
+// forever is not. A 60s restart is survivable; a pruned block never comes back.
+let scoreboardStall = { rid: null, since: 0 };
+let scoreboardSeenRid = null, scoreboardSeenBlock = 0;
+function noteScoreboardStall(rid, blockNumber) {
+  const key = String(rid);
+  if (scoreboardStall.rid !== key) { scoreboardStall = { rid: key, since: performance.now() }; return; }
+  if (performance.now() - scoreboardStall.since < 45000) return;
+  // 45s failing the same round: skip its lottery honestly and let the next run.
+  if (publicStory.round === key) publicStory.reset();
+  publicCrashUntil = 0; lastScoreboardRound = rid; scoreboardFromBlock = blockNumber; scoreboardReadFailed = false;
+  scoreboardStall = { rid: null, since: 0 };
+  phaseState = "betting"; void refresh();
+}
 async function pollScoreboard() {
   if (!crash || scoreboardBusy || publicStory.phase==='lottery'||(publicPresentationLeadMs&&!publicClockAnchored)) return;
   scoreboardBusy = true;
@@ -3959,7 +3974,7 @@ async function pollScoreboard() {
     if(!scoreIsCurrent())return;
     const last = evs.find(event => event.args.roundId > lastScoreboardRound);
     if (!last) { scoreboardFromBlock = end + 1; return; }
-    const rid = last.args.roundId;
+    const rid = last.args.roundId; scoreboardSeenRid = rid; scoreboardSeenBlock = last.blockNumber;
     // Loading is provisional; an older queued settlement owns the next story.
     if(!publicStory.acceptSettlement(rid))return;
     if (rid > lastScoreboardRound) {
@@ -3987,7 +4002,16 @@ async function pollScoreboard() {
       });
       const quoteRead=scoreLottery?prefetch(async()=>{
         const draws=await consume(drawRead);
-        return draws[0]?scoreLottery.quote({blockTag:draws[0].blockNumber}):null;
+        if(!draws[0])return null;
+        // The quote AT the draw block is the exact prize the ball was drawn
+        // against. After a table restart the chain no longer holds state for
+        // blocks before it, so that read throws forever -- and this loop
+        // retried it forever: every tab open across a restart froze on
+        // "Reconnecting to verify result…" (measured: five minutes, no flight,
+        // no card). The latest quote is the same prize a beat later; use it
+        // when the historical one is gone.
+        try{return await scoreLottery.quote({blockTag:draws[0].blockNumber});}
+        catch{return scoreLottery.quote();}
       }):null;
       if(numberedRead)void numberedRead.then(({value:events})=>{
         const draw=events?.[0]?.args;
@@ -4127,7 +4151,7 @@ async function pollScoreboard() {
           }else numbered={ballCount:'0',drawnBall:'0',verified:draw.prize===0n};}
           const nextQuote = await consume(quoteRead);
           if(!scoreIsCurrent())return;
-          if(NUMBERED_LOTTERY&&numbered?.verified!==true)return;
+          if(NUMBERED_LOTTERY&&numbered?.verified!==true){noteScoreboardStall(rid,last.blockNumber);return;}
           if(participated||INVITE_TEST)publicStory.lottery(rid);
           else setTimeout(()=>{if(publicStory.close(rid))void refresh();},Math.max(0,publicCrashUntil-performance.now()));
           document.dispatchEvent(new CustomEvent("plank:lottery-result", {detail:{roundId:rid.toString(),participated,revealNotBefore:publicCrashUntil,spectatorShow:INVITE_TEST,testFunds:PRACTICE_FAST_TIMING,player:scoreSigner?.address||null,targetBps:lotteryTarget.toString(),myStake:lotteryStake.toString(),roundStake:rd.playerPool.toString(),hit:draw.hit,isWinner:!!signer&&draw.hit&&draw.winner.toLowerCase()===signer.address.toLowerCase(),lotteryAddress:LOTTERY_ADDR,...numbered,sample,threshold:draw.threshold.toString(),prize:ethers.formatEther(draw.prize),paid:ethers.formatEther(draw.winnerPaid),nextPrize:ethers.formatEther(nextQuote[1]),winner:draw.winner}}));
@@ -4136,9 +4160,9 @@ async function pollScoreboard() {
       if ($("statsPanel").classList.contains("show")) runStatsScan();
       lastScoreboardRound = rid;
       scoreboardFromBlock = last.blockNumber;
-      scoreboardReadFailed = false;
+      scoreboardReadFailed = false; scoreboardStall = { rid: null, since: 0 };
     }
-  } catch (_) { scoreboardReadFailed=true; /* Retry the original event; never fabricate a result. */ }
+  } catch (_) { scoreboardReadFailed=true; if(scoreboardSeenRid!==null)noteScoreboardStall(scoreboardSeenRid,scoreboardSeenBlock); /* Retry the original event; never fabricate a result -- but not forever. */ }
   finally { scoreboardBusy = false; }
 }
 
