@@ -212,6 +212,13 @@ const nextConfig: NextConfig = {
           { key: "Pragma", value: "no-cache" },
         ],
       },
+      // The arcade is deployed table-only, minutes apart, and its scripts are
+      // ES modules that import each other: a 4-hour browser cache left open
+      // tabs running one half of a fix. Revalidate (ETag) on every load instead.
+      {
+        source: "/arcade/:path*",
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+      },
       {
         source: "/",
         headers: [

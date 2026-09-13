@@ -5,8 +5,8 @@ import {lotteryDelay} from '../../public/arcade/presentation-timing.js';
 
 test('repeat cannot commit through a previous presentation or rush a closing book',()=>{
  assert.equal(canRepeatPublicRound({storyActive:true,remainingMs:30000}),false);
- assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:7999}),false);
- assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:8000}),true);
+ assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:4999}),false);
+ assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:5000}),true);
  assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:30000,reviewRemainingMs:1}),false);
  assert.equal(canRepeatPublicRound({storyActive:false,remainingMs:30000,reviewRemainingMs:0}),true);
  assert.equal(lotteryDelay(2600,2000),600);
