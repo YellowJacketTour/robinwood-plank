@@ -1,0 +1,13 @@
+# Home and world travel contract
+
+`scripts/charmville/travel-graph.mjs` is a pure, tested **logical foundation**, not a wired native map transport. Its `playable` flag permits a route in this contract; it does not prove a map is authored or deployed. Only home and meadow are enabled. Woodland, island and orbit are planned and always inaccessible, even with their required mount, boat or spacecraft.
+
+Every player has `home:<authenticated actor ID>`. The return-home gate derives the owner from authenticated identity, never a URL-selected owner. All players enter `meadow:public`. Visiting friends requires a later explicit invitation/permission policy; it is intentionally unsupported here. Home layout, actual quest DMap/screen bindings and collision-tested spawn positions must be authored and verified before activating this graph in the game.
+
+Logical coordinates use a 256 × 176 local playfield. A portal specifies its source, interaction radius, destination position, arrival facing and transport requirements. Walking through the home gate arrives facing down in the meadow; returning arrives facing up inside the garden. Arrivals are separated from outgoing triggers to prevent immediate bounce-back. Actual engine collision geometry must independently validate each spawn; graph bounds cannot establish walkability.
+
+The authoritative host supplies identity, source instance, position, owned transport capabilities and active action. Client claims are insufficient. A successful proposal provides `cancelActiveAction` and presentation cleanup signals. The host must atomically cancel the old action, release its reservations, clear tool/pose overrides, transfer presence and persist the destination before accepting destination input. Failed travel must leave actions and inventory untouched. The pure module changes neither state nor balances; it is not an authentication or persistence boundary.
+
+Next integration: bind home/meadow to authored maps; test all arrival positions against native collision; add server-issued transition IDs and idempotent application; replicate departures/arrivals; resume disconnected players at their committed position. Tower activation, destination discovery, boats, mounts and spacecraft need explicit unlock/boarding/landing states and assets before their routes become playable. Tower travel should reuse this contract rather than bypass ownership or action cancellation. Space is an expansion region, not a different account or economy.
+
+Run `node --test scripts/charmville/travel-graph.test.mjs`. Tests cover private ownership, shared arrival, spawn/facing, proximity, malformed coordinates, prototype-key input, gear requirements, unavailable future regions and cancellation proposals without caller mutation.

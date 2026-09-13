@@ -1,0 +1,341 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-13",
+  "note": "Status indicates work state, never percentage or certified completeness. References describe scope/current limitations, not passing evidence.",
+  "gates": [
+    {
+      "id": "GLOBAL-01",
+      "title": "Globally connected geography",
+      "status": "implementing",
+      "remaining": "Public routes use coherent addresses and coordinates. Walk both directions through every published seam; terrain, actors, projectiles and activity locations remain aligned. Copies of a place are never misrepresented as the same encounter.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-02",
+      "title": "Real camera zoom",
+      "status": "implementing",
+      "remaining": "Wheel, pinch, keyboard and controller change visible world extent with stable HUD and canvas. Collision, action timing and authoritative outcomes are invariant under zoom. No CSS scaling substitution.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md",
+        "docs/charmville-reconstruction/RENDERER-CUTOVER.md"
+      ],
+      "evidence": [
+        {
+          "implementationRef": "docs/charmville-reconstruction/source-evidence/0001-refactor-zc-separate-presentation-geometry-and-lens-.patch",
+          "artifactRef": "docs/charmville-reconstruction/NATIVE-PRESENTATION-GEOMETRY-EVIDENCE.md",
+          "version": "Native engine eee0c5e",
+          "procedure": "Compile geometry and frame-effect helpers to WASM, run assertions, compile maps.cpp and zelda.cpp normal translation units.",
+          "environment": "Local Windows Emscripten build; Node helper execution",
+          "limitations": "Only geometry and effect ownership. No complete renderer, linked candidate, live zoom or replay parity.",
+          "reviewedBy": "Codex implementation review",
+          "reviewedAt": "2026-09-13",
+          "result": "partial"
+        },
+        {
+          "implementationRef": "docs/charmville-reconstruction/source-evidence/0001-refactor-zc-pass-explicit-scene-composition-targets.patch",
+          "artifactRef": "docs/charmville-reconstruction/RENDERER-CUTOVER.md",
+          "version": "Native engine 0fa80b8 with staged 27f2ec4, 4eafcc0, 0404940 and 5d88acd",
+          "procedure": "Compile migrated native translation units; inject initial and resize allocation failures in WASM target-owner tests; compare scene ordering after target substitutions.",
+          "environment": "Local Windows Emscripten build and Node WASM tests",
+          "limitations": "Staged render coordinates, spotlight snapshots and target ownership only. Wider composition and live camera zoom not activated; no full visual/replay parity or crowd-capacity acceptance.",
+          "reviewedBy": "Codex implementation review",
+          "reviewedAt": "2026-09-13",
+          "result": "partial"
+        },
+        {
+          "implementationRef": "docs/charmville-reconstruction/source-evidence/0001-refactor-zc-support-paired-sprite-lighting-targets.patch",
+          "artifactRef": "docs/charmville-reconstruction/RENDERER-CUTOVER.md",
+          "version": "Native f851e09",
+          "procedure": "Compile player lighting/base sprite and editor sprite translation units; review legacy default dispatch and paired target fallbacks.",
+          "environment": "Local Windows Emscripten",
+          "limitations": "Paired glow extraction only. Full draw-context propagation, lifecycle, live zoom and replay parity remain pending.",
+          "reviewedBy": "Codex source review",
+          "reviewedAt": "2026-09-13",
+          "result": "partial"
+        },
+        {
+          "implementationRef": "docs/charmville-reconstruction/source-evidence/0001-feat-zc-add-bounded-world-camera-with-fixed-UI-and-m.patch",
+          "artifactRef": "docs/charmville-reconstruction/LIVE-CAMERA-RELEASE.md",
+          "version": "Native 0b80f9c; application 8b9fc5b",
+          "procedure": "Full WASM rebuild, isolated browser verification, fixed canvas and doubled visible extent assertions, visual review of HUD and party, live overview open and close.",
+          "environment": "Windows Chromium; local ports 3024 and 3025",
+          "limitations": "Validated Homestead region only. Physical touch and controller camera, full replay parity, global simulation and multiplayer load remain unverified.",
+          "reviewedBy": "Codex browser and source review",
+          "reviewedAt": "2026-09-13",
+          "result": "partial"
+        }
+      ]
+    },
+    {
+      "id": "GLOBAL-03",
+      "title": "Permanent home address",
+      "status": "implementing",
+      "remaining": "Profile, world map and physical entrance resolve to the same property. Logout and worker replacement preserve its state. Home supply policy fulfills the promise of a home for each eligible account.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-04",
+      "title": "Floors and interiors",
+      "status": "planned",
+      "remaining": "Doors, stairs, basements and upper floors connect authored safe landings. Identical X/Y on different floors do not collide, share proximity audio, reveal hidden actors or allow attacks through ceilings.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-05",
+      "title": "Twenty-friend social visit",
+      "status": "planned",
+      "remaining": "Exercise owner plus twenty authenticated visitors, rights, invites, arrivals, departures and return travel. Record device/server limits. Indoor companion presentation preserves roster identity without blocking circulation.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-06",
+      "title": "Outdoor six-creature party",
+      "status": "implementing",
+      "remaining": "Distinct creatures navigate corners, doorways and terrain. Formation compression/re-expansion, facing, depth and command feedback are legible. Deployment restrictions are disclosed, not silent disappearance.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-07",
+      "title": "Safe travel transaction",
+      "status": "implementing",
+      "remaining": "Reserve destination, validate permissions and geometry, commit one ownership epoch, then accept destination input. Test retry, timeout, crash, disconnect, full destination and invitation expiry. Failed travel preserves source custody.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-08",
+      "title": "Progress-preserving cooperation",
+      "status": "planned",
+      "remaining": "Joining never resets health, gear, roster, crops or quest progress. Shared credit uses recorded eligibility. A newcomer does not receive completed history merely by joining.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-09",
+      "title": "Story phase continuity",
+      "status": "planned",
+      "remaining": "Personal dialogue can vary without conflicting shared geometry. Materially different story instances are explicit. Friends understand why they cannot see or join a story phase.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-10",
+      "title": "Unified action/staged encounter",
+      "status": "implementing",
+      "remaining": "One creature and encounter carry HP, status, cooldowns, eligibility and contributions across views. Switching modes gives no extra actions, duplicate target or reset.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-11",
+      "title": "Solo/party turn-based mode",
+      "status": "planned",
+      "remaining": "All affected participants consent to the mode's timing. Disconnect, idle-player and timeout rules complete the encounter without deadlock or indefinite hostage turns.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-12",
+      "title": "Public hybrid combat",
+      "status": "planned",
+      "remaining": "Real-time participants and command-window participants settle on the same encounter timeline. Public combat does not pause because one viewer enters a staged interface. Duplicate command and reconciliation tests preserve outcomes.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-13",
+      "title": "Capture and loot custody",
+      "status": "implementing",
+      "remaining": "Capture commits once; competing attempts receive explicit results and declared resource settlement. Party loot eligibility and non-party rules follow the approved economic contract. Replays and reconnects do not remint rewards.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-14",
+      "title": "Battle presentation",
+      "status": "implementing",
+      "remaining": "Background allies reflect permitted real participants and committed actions. Correct anchors, facing, depth, contact frames, interruption and status effects work in every supported view. Flat sprites are not advertised as complete arbitrary-angle 3D.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-15",
+      "title": "Actual profile footage",
+      "status": "implementing",
+      "remaining": "A second device receives actual gameplay video and selected game audio. Live/offline/reconnecting/restricted states are accurate. Profile navigation does not stop the publisher's gameplay.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-16",
+      "title": "Broadcast privacy",
+      "status": "implementing",
+      "remaining": "Public/private/allowlist admission and active revocation work. Watching grants no game control. Private UI and unselected voice are excluded. Recording has separate consent, retention and access rules.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-17",
+      "title": "Shared theatres",
+      "status": "planned",
+      "remaining": "Profile and theatre subscribe to the same publication. Late joins, buffering, voice controls and angle switching remain coherent. Theatre controls never pause the actual game. Prevent accidental recursive self-capture.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-18",
+      "title": "Watch-to-play transition",
+      "status": "planned",
+      "remaining": "Watch a friend, request/accept a party invitation, reserve capacity, arrive safely, complete an activity and return while retaining social context. Denials preserve watching and explain the available next action.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-19",
+      "title": "Population and scale",
+      "status": "planned",
+      "remaining": "Publish separate measured limits for global connections, world population, local combatants, companions, entities and spectators. Load-test representative exploration, towns, farms and raids, including failure recovery. Millions of accounts is not millions of simultaneous combatants.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-20",
+      "title": "Global economy continuity",
+      "status": "implementing",
+      "remaining": "All worlds share declared issuance/custody rules. Inventory, satchel, Charmdex manifestations, reactions, market and production cannot create duplicate units through transfers or view changes. Purchases of Grain do not mint additional supply.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-21",
+      "title": "Collaborative workshop",
+      "status": "planned",
+      "remaining": "Friends can propose maps, art, scripts and code through versioned branches, diffs, review and isolated playable previews. Contributions and dependencies retain provenance; released versions are identifiable and recoverable.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-22",
+      "title": "Agent contribution access",
+      "status": "planned",
+      "remaining": "An external coding agent has scoped, revocable repository/preview capabilities. It receives no production secrets or implicit release/minting authority. Logs attribute proposals, approvals and deployed versions.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-23",
+      "title": "Safe extensibility",
+      "status": "planned",
+      "remaining": "Art, content, sandboxed behavior and privileged server changes have separate capability boundaries. Enforce CPU/memory/entity/spawn limits. Test malicious and malformed content. No “hack impossible” guarantee.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-24",
+      "title": "Versioned live upgrades",
+      "status": "planned",
+      "remaining": "Validate schema, assets, collision, economy changes and migrations before release. Existing homes, parties and encounters have version compatibility rules. Rollback does not duplicate rewards or blindly undo settled player trades.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "GLOBAL-25",
+      "title": "Complete experience quality",
+      "status": "implementing",
+      "remaining": "Visual, audio and interaction acceptance covers PC, mobile, gamepad, accessible navigation, loading, errors, recovery, localization layout and reduced motion. A functional button is insufficient if its purpose, state or feedback is unclear.",
+      "references": [
+        "docs/charmville-reconstruction/APPROVED-GLOBAL-COMPLETION-CONTRACT.md",
+        "docs/charmville-reconstruction/CURRENT-STATE.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "RETAINED-VISION",
+      "title": "Entire retained multi-title game and platform vision",
+      "status": "implementing",
+      "remaining": "All prior requirements remain required, including farming, creatures, professions, economy, social expression, communication, authored progression, world building, accessibility, and complete presentation. GLOBAL gates do not replace this scope. Reconcile every earlier acceptance requirement before acceptance.",
+      "references": [
+        "docs/charmville-reconstruction/USER-INTENT.md",
+        "docs/charmville-reconstruction/WORLD-MASTER-SPEC.md",
+        "docs/charmville-reconstruction/REQUIREMENT-COVERAGE-AUDIT.md"
+      ],
+      "evidence": [],
+      "scopeReconciliation": ""
+    }
+  ]
+}

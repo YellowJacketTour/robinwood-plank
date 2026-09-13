@@ -1,0 +1,309 @@
+From 4eafcc098df2a41b614476a44a5f46e14965f506 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:33:10 -0500
+Subject: [PATCH] refactor(zc): align specialized world drawing with render
+ viewport
+
+---
+ src/drawing.cpp    | 25 +++++++++++++------------
+ src/ffc.cpp        |  4 ++--
+ src/tiles.cpp      |  4 ++--
+ src/zc/guys.cpp    | 43 +++++++++++++++++++++++--------------------
+ src/zc/hero.cpp    | 17 ++++++++++-------
+ src/zc/weapons.cpp |  8 ++++----
+ 6 files changed, 54 insertions(+), 47 deletions(-)
+
+diff --git a/src/drawing.cpp b/src/drawing.cpp
+index a4b9884..9a07fc4 100644
+--- a/src/drawing.cpp
++++ b/src/drawing.cpp
+@@ -9,6 +9,7 @@
+ #include <type_traits>
+ 
+ #ifdef IS_PLAYER
++#include "zc/maps.h"
+ extern BITMAP *darkscr_bmp, *darkscr_bmp_trans;
+ 
+ #include "core/initdata.h"
+@@ -80,8 +81,8 @@ void doDarkroomCircle(int32_t cx, int32_t cy, word glowRad,BITMAP* dest, BITMAP*
+ 	if(!glowRad) return;
+ 
+ #ifdef IS_PLAYER
+-	cx -= viewport.x;
+-	cy -= viewport.y;
++	cx -= get_render_viewport().x;
++	cy -= get_render_viewport().y;
+ 	//Default bitmap handling
+ 	if(!dest) dest = darkscr_bmp;
+ 	if(dest == darkscr_bmp) transdest = darkscr_bmp_trans;
+@@ -102,8 +103,8 @@ void doDarkroomCircle(int32_t cx, int32_t cy, word glowRad,BITMAP* dest, BITMAP*
+ 	int offx = 0;
+ 	int offy = 0;
+ #ifdef IS_PLAYER
+-	offx = viewport.x;
+-	offy = viewport.y - playing_field_offset;
++	offx = get_render_viewport().x;
++	offy = get_render_viewport().y - playing_field_offset;
+ #endif
+ 
+ 	if(dest)
+@@ -125,8 +126,8 @@ void doDarkroomCone(int32_t sx, int32_t sy, word glowRad, int32_t dir, BITMAP* d
+ 	if(!glowRad) return;
+ 
+ 	#ifdef IS_PLAYER
+-	sx -= viewport.x;
+-	sy -= viewport.y;
++	sx -= get_render_viewport().x;
++	sy -= get_render_viewport().y;
+ 	//Default bitmap handling
+ 	if(!dest) dest = darkscr_bmp;
+ 	if(dest == darkscr_bmp) transdest = darkscr_bmp_trans;
+@@ -165,8 +166,8 @@ void doDarkroomCone(int32_t sx, int32_t sy, word glowRad, int32_t dir, BITMAP* d
+ 	int offx = 0;
+ 	int offy = 0;
+ #ifdef IS_PLAYER
+-	offx = viewport.x;
+-	offy = viewport.y - playing_field_offset;
++	offx = get_render_viewport().x;
++	offy = get_render_viewport().y - playing_field_offset;
+ #endif
+ 
+ 	if(dest)
+@@ -189,8 +190,8 @@ void doDarkroomSquare(int32_t cx, int32_t cy, word glowRad, BITMAP* dest, BITMAP
+ 
+ 
+ #ifdef IS_PLAYER
+-	cx -= viewport.x;
+-	cy -= viewport.y;
++	cx -= get_render_viewport().x;
++	cy -= get_render_viewport().y;
+ 	//Default bitmap handling
+ 	if(!dest) dest = darkscr_bmp;
+ 	if(dest == darkscr_bmp) transdest = darkscr_bmp_trans;
+@@ -211,8 +212,8 @@ void doDarkroomSquare(int32_t cx, int32_t cy, word glowRad, BITMAP* dest, BITMAP
+ 	int offx = 0;
+ 	int offy = 0;
+ #ifdef IS_PLAYER
+-	offx = viewport.x;
+-	offy = viewport.y - playing_field_offset;
++	offx = get_render_viewport().x;
++	offy = get_render_viewport().y - playing_field_offset;
+ #endif
+ 
+ 	if(dest)
+diff --git a/src/ffc.cpp b/src/ffc.cpp
+index 2c00d26..57e41b5 100644
+--- a/src/ffc.cpp
++++ b/src/ffc.cpp
+@@ -67,8 +67,8 @@ void ffcdata::draw_ffc(BITMAP* dest, int32_t xofs, int32_t yofs, bool overlay)
+ 	#endif
+ 	
+ #ifdef IS_PLAYER
+-	int32_t tx = x + xofs - viewport.x;
+-	int32_t ty = y + yofs - viewport.y;
++	int32_t tx = x + xofs - get_render_viewport().x;
++	int32_t ty = y + yofs - get_render_viewport().y;
+ #else
+ 	int32_t tx = x + xofs;
+ 	int32_t ty = y + yofs;
+diff --git a/src/tiles.cpp b/src/tiles.cpp
+index cac5aff..4ada30f 100644
+--- a/src/tiles.cpp
++++ b/src/tiles.cpp
+@@ -1972,8 +1972,8 @@ int32_t eyeball_combo_tile(const minicombo_drawing &c, int32_t x, int32_t y, int
+ 	x += combotile_add_x;
+ 	y += combotile_add_y;
+ #ifdef IS_PLAYER
+-	x += viewport.x;
+-	y += viewport.y;
++	x += get_render_viewport().x;
++	y += get_render_viewport().y;
+ #endif
+ 
+     switch(combo_class_buf[c.type].directional_change_type)
+diff --git a/src/zc/guys.cpp b/src/zc/guys.cpp
+index 68b9b1e..6dcfa24 100644
+--- a/src/zc/guys.cpp
++++ b/src/zc/guys.cpp
+@@ -13476,31 +13476,33 @@ void eGanon::draw(BITMAP *dest)
+ 
+ void eGanon::draw_guts(BITMAP *dest)
+ {
++	const auto render_view = get_render_viewport();
+ 	int32_t c = zc_min(clk>>3,8);
+ 	tile = clk<24 ? 74 : 75;
+-	overtile16(dest,tile,x+8-viewport.x,y+c+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+8-viewport.x,y+16-c+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+c-viewport.x,y+8+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+16-c-viewport.x,y+8+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+c-viewport.x,y+c+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+16-c-viewport.x,y+c+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+c-viewport.x,y+16-c+playing_field_offset-viewport.y,9,0);
+-	overtile16(dest,tile,x+16-c-viewport.x,y+16-c+playing_field_offset-viewport.y,9,0);
++	overtile16(dest,tile,x+8-render_view.x,y+c+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+8-render_view.x,y+16-c+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+c-render_view.x,y+8+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+16-c-render_view.x,y+8+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+c-render_view.x,y+c+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+16-c-render_view.x,y+c+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+c-render_view.x,y+16-c+playing_field_offset-render_view.y,9,0);
++	overtile16(dest,tile,x+16-c-render_view.x,y+16-c+playing_field_offset-render_view.y,9,0);
+ }
+ 
+ void eGanon::draw_flash(BITMAP *dest)
+ {
++	const auto render_view = get_render_viewport();
+ 
+ 	int32_t c = clk-(clk>>2);
+ 	cs = (global_frame&3)+6;
+-	overtile16(dest,194,x+8-viewport.x,y+8-clk+playing_field_offset-viewport.y,cs,0);
+-	overtile16(dest,194,x+8-viewport.x,y+8+clk+playing_field_offset-viewport.y,cs,2);
+-	overtile16(dest,195,x+8-clk-viewport.x,y+8+playing_field_offset-viewport.y,cs,0);
+-	overtile16(dest,195,x+8+clk-viewport.x,y+8+playing_field_offset-viewport.y,cs,1);
+-	overtile16(dest,196,x+8-c-viewport.x,y+8-c+playing_field_offset-viewport.y,cs,0);
+-	overtile16(dest,196,x+8+c-viewport.x,y+8-c+playing_field_offset-viewport.y,cs,1);
+-	overtile16(dest,196,x+8-c-viewport.x,y+8+c+playing_field_offset-viewport.y,cs,2);
+-	overtile16(dest,196,x+8+c-viewport.x,y+8+c+playing_field_offset-viewport.y,cs,3);
++	overtile16(dest,194,x+8-render_view.x,y+8-clk+playing_field_offset-render_view.y,cs,0);
++	overtile16(dest,194,x+8-render_view.x,y+8+clk+playing_field_offset-render_view.y,cs,2);
++	overtile16(dest,195,x+8-clk-render_view.x,y+8+playing_field_offset-render_view.y,cs,0);
++	overtile16(dest,195,x+8+clk-render_view.x,y+8+playing_field_offset-render_view.y,cs,1);
++	overtile16(dest,196,x+8-c-render_view.x,y+8-c+playing_field_offset-render_view.y,cs,0);
++	overtile16(dest,196,x+8+c-render_view.x,y+8-c+playing_field_offset-render_view.y,cs,1);
++	overtile16(dest,196,x+8-c-render_view.x,y+8+c+playing_field_offset-render_view.y,cs,2);
++	overtile16(dest,196,x+8+c-render_view.x,y+8+c+playing_field_offset-render_view.y,cs,3);
+ }
+ 
+ void getBigTri(mapscr* scr, int32_t id2)
+@@ -15213,6 +15215,7 @@ int32_t esGleeok::takehit(weapon *w, weapon* realweap)
+ 
+ void esGleeok::draw(BITMAP *dest)
+ {
++	const auto render_view = get_render_viewport();
+ 	dmisc5=vbound(dmisc5,1,255);
+ 	
+ 	switch(misc)
+@@ -15226,16 +15229,16 @@ void esGleeok::draw(BITMAP *dest)
+ 				if(get_qr(qr_NEWENEMYTILES))
+ 				{
+ 					if((scr->flags3&fINVISROOM)&& !(current_item(itype_amulet)))
+-						overtilecloaked16(dest,necktile+(i*dmisc7),nx[i]-4-viewport.x,ny[i]+playing_field_offset-viewport.y,0);
++						overtilecloaked16(dest,necktile+(i*dmisc7),nx[i]-4-render_view.x,ny[i]+playing_field_offset-render_view.y,0);
+ 					else
+-						overtile16(dest,necktile+(i*dmisc7),nx[i]-4-viewport.x,ny[i]+playing_field_offset-viewport.y,cs,0);
++						overtile16(dest,necktile+(i*dmisc7),nx[i]-4-render_view.x,ny[i]+playing_field_offset-render_view.y,cs,0);
+ 				}
+ 				else
+ 				{
+ 					if((scr->flags3&fINVISROOM)&& !(current_item(itype_amulet)))
+-						overtilecloaked16(dest,necktile,nx[i]-4-viewport.x,ny[i]+playing_field_offset-viewport.y,0);
++						overtilecloaked16(dest,necktile,nx[i]-4-render_view.x,ny[i]+playing_field_offset-render_view.y,0);
+ 					else
+-						overtile16(dest,necktile,nx[i]-4-viewport.x,ny[i]+playing_field_offset-viewport.y,cs,0);
++						overtile16(dest,necktile,nx[i]-4-render_view.x,ny[i]+playing_field_offset-render_view.y,cs,0);
+ 				}
+ 			}
+ 		}
+diff --git a/src/zc/hero.cpp b/src/zc/hero.cpp
+index f73eadc..a6dc944 100644
+--- a/src/zc/hero.cpp
++++ b/src/zc/hero.cpp
+@@ -2126,6 +2126,7 @@ void HeroClass::init()
+ 
+ void HeroClass::draw_under(BITMAP* dest)
+ {
++	const auto render_view = get_render_viewport();
+ 	int32_t c_raft=current_item_id(itype_raft);
+ 	int32_t c_ladder=current_item_id(itype_ladder);
+ 	
+@@ -2134,12 +2135,12 @@ void HeroClass::draw_under(BITMAP* dest)
+ 		auto const& raft_item = itemsbuf.get(c_raft);
+ 		if(((dir==left) || (dir==right)) && (get_qr(qr_RLFIX)))
+ 		{
+-			overtile16(dest, raft_item.tile, x - viewport.x, y+playing_field_offset+4 - viewport.y,
++			overtile16(dest, raft_item.tile, x - render_view.x, y+playing_field_offset+4 - render_view.y,
+ 				raft_item.csets&15, rotate_value((raft_item.misc_flags>>2)&3)^3);
+ 		}
+ 		else
+ 		{
+-			overtile16(dest, raft_item.tile, x - viewport.x, y+playing_field_offset+4 - viewport.y,
++			overtile16(dest, raft_item.tile, x - render_view.x, y+playing_field_offset+4 - render_view.y,
+ 				raft_item.csets&15, (raft_item.misc_flags>>2)&3);
+ 		}
+ 	}
+@@ -2149,12 +2150,12 @@ void HeroClass::draw_under(BITMAP* dest)
+ 		auto const& ladder_item = itemsbuf.get(c_ladder);
+ 		if((ladderdir>=left) && (get_qr(qr_RLFIX)))
+ 		{
+-			overtile16(dest, ladder_item.tile, ladderx - viewport.x, laddery+playing_field_offset - viewport.y,
++			overtile16(dest, ladder_item.tile, ladderx - render_view.x, laddery+playing_field_offset - render_view.y,
+ 				ladder_item.csets&15, rotate_value((ladder_item.misc_flags>>2)&3)^3);
+ 		}
+ 		else
+ 		{
+-			overtile16(dest, ladder_item.tile, ladderx - viewport.x, laddery+playing_field_offset - viewport.y,
++			overtile16(dest, ladder_item.tile, ladderx - render_view.x, laddery+playing_field_offset - render_view.y,
+ 				ladder_item.csets&15, (ladder_item.misc_flags>>2)&3);
+ 		}
+ 	}
+@@ -3644,12 +3645,13 @@ void HeroClass::masked_draw(BITMAP* dest)
+ }
+ void HeroClass::prompt_draw(BITMAP* dest)
+ {
++	const auto render_view = get_render_viewport();
+ 	if(!prompt_combo) return;
+ 	int32_t sx = real_x(x+xofs+prompt_x);
+ 	int32_t sy = real_y(y + yofs + prompt_y) - real_z(z + zofs);
+ 	sy -= fake_z(fakez);
+ 	if(combobuf[prompt_combo].animflags & AF_EDITOR_ONLY) return;
+-	overcombo(dest, sx - viewport.x, sy - viewport.y, prompt_combo, prompt_cset);
++	overcombo(dest, sx - render_view.x, sy - render_view.y, prompt_combo, prompt_cset);
+ 	return;
+ }
+ 
+@@ -6220,13 +6222,14 @@ ALLEGRO_COLOR HeroClass::hitboxColor(byte opacity) const
+ }
+ void HeroClass::draw_hitbox()
+ {
++	const auto render_view = get_render_viewport();
+ 	sprite::draw_hitbox();
+ 	if (!get_qr(qr_OLD_ITEM_HITBOXES) && info_bmp_enabled())
+ 	{
+ 		// Draw the new 'itembox'
+ 		start_info_bmp();
+-		int x0 = x + itembox_xofs - viewport.x;
+-		int y0 = y + playing_field_offset + itembox_yofs - (z + zofs) - fakez - viewport.y;
++		int x0 = x + itembox_xofs - render_view.x;
++		int y0 = y + playing_field_offset + itembox_yofs - (z + zofs) - fakez - render_view.y;
+ 		al_draw_int_rectangle(x0, y0, itembox_width, itembox_height, al_map_rgba(64,64,255,info_opacity), 1);
+ 		end_info_bmp();	
+ 	}
+diff --git a/src/zc/weapons.cpp b/src/zc/weapons.cpp
+index 72375e4..ebcc856 100644
+--- a/src/zc/weapons.cpp
++++ b/src/zc/weapons.cpp
+@@ -7516,8 +7516,8 @@ void weapon::draw(BITMAP *dest)
+ 				int32_t ofs=23-dead;
+ 				int32_t f = global_frame&3;
+ 				
+-				int beam_x = x - viewport.x;
+-				int beam_y = y + playing_field_offset - viewport.y;
++				int beam_x = x - get_render_viewport().x;
++				int beam_y = y + playing_field_offset - get_render_viewport().y;
+ 				if(!o_type || o_type == 4 || f==0 || (o_type>1 && f==3)) overtile16(dest,tile,beam_x-2-ofs,beam_y-2-ofs-(z+zofs)-fakez,cs,0);
+ 				
+ 				if(!o_type || o_type == 4 || f==2 || (o_type>1 && f==1)) overtile16(dest,tile,beam_x+2+ofs,beam_y-2-ofs-(z+zofs)-fakez,cs,1);
+@@ -7535,8 +7535,8 @@ void weapon::draw(BITMAP *dest)
+ 		case ewSBomb:
+ 		{
+ 			if(misc <= 0 || clk<misc-2) break;
+-			int x0 = x - viewport.x;
+-			int y0 = y - viewport.y;
++			int x0 = x - get_render_viewport().x;
++			int y0 = y - get_render_viewport().y;
+ 			overtile16(dest,tile,x0+((clk&1)?7:-7),y0+yofs-fakez-13-(z+zofs),cs,0);
+ 			overtile16(dest,tile,x0,y0+yofs-fakez-(z+zofs),cs,0);
+ 			overtile16(dest,tile,x0+((clk&1)?-14:14),y0+yofs-fakez-(z+zofs),cs,0);
+-- 
+2.52.0.windows.1
+

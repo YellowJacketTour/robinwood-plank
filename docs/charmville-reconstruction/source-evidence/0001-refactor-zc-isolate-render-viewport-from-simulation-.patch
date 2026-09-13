@@ -1,0 +1,418 @@
+From 27f2ec4de92c43a4cf73a66d97e94596ee1e1703 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 05:30:02 -0500
+Subject: [PATCH] refactor(zc): isolate render viewport from simulation
+ coordinates
+
+---
+ src/sprite.cpp  |  32 ++++++-------
+ src/zc/maps.cpp | 117 ++++++++++++++++++++++++++++--------------------
+ src/zc/maps.h   |  18 ++++++++
+ 3 files changed, 103 insertions(+), 64 deletions(-)
+
+diff --git a/src/sprite.cpp b/src/sprite.cpp
+index 1e21c7f..de8f383 100644
+--- a/src/sprite.cpp
++++ b/src/sprite.cpp
+@@ -1046,8 +1046,8 @@ void sprite::draw(BITMAP* dest)
+ #ifdef IS_PLAYER
+ 	if (dest == framebuf || dest == scrollbuf)
+ 	{
+-		sx -= viewport.x;
+-		sy -= viewport.y;
++		sx -= get_render_viewport().x;
++		sy -= get_render_viewport().y;
+ 	}
+ #endif
+     
+@@ -1504,8 +1504,8 @@ void sprite::draw_hitbox()
+ #ifdef IS_PLAYER
+ 	if(!info_bmp_enabled()) return;
+ 	start_info_bmp();
+-	int x0 = x + hxofs - viewport.x;
+-	int y0 = y + playing_field_offset + hyofs - (z + zofs) - fakez - viewport.y;
++	int x0 = x + hxofs - get_render_viewport().x;
++	int y0 = y + playing_field_offset + hyofs - (z + zofs) - fakez - get_render_viewport().y;
+ 	al_draw_int_rectangle(x0, y0, hit_width, hit_height, hitboxColor(info_opacity), 1);
+ 	end_info_bmp();
+ #endif
+@@ -1533,8 +1533,8 @@ void sprite::drawzcboss(BITMAP* dest)
+ #ifdef IS_PLAYER
+ 	if (dest == framebuf || dest == scrollbuf)
+ 	{
+-		sx -= viewport.x;
+-		sy -= viewport.y;
++		sx -= get_render_viewport().x;
++		sy -= get_render_viewport().y;
+ 	}
+ #endif
+ 
+@@ -1914,8 +1914,8 @@ void sprite::draw8(BITMAP* dest)
+ #ifdef IS_PLAYER
+ 	if (dest == framebuf || dest == scrollbuf)
+ 	{
+-		sx -= viewport.x;
+-		sy -= viewport.y;
++		sx -= get_render_viewport().x;
++		sy -= get_render_viewport().y;
+ 	}
+ #endif
+ 
+@@ -1951,8 +1951,8 @@ void sprite::drawcloaked(BITMAP* dest)
+ #ifdef IS_PLAYER
+ 	if (dest == framebuf || dest == scrollbuf)
+ 	{
+-		sx -= viewport.x;
+-		sy -= viewport.y;
++		sx -= get_render_viewport().x;
++		sy -= get_render_viewport().y;
+ 	}
+ #endif
+     
+@@ -2022,8 +2022,8 @@ void sprite::drawshadow(BITMAP* dest,bool translucent)
+ 	int32_t sx = real_x(x+xofs+shadowxofs)+(txsz-1)*8;
+ 	int32_t sy = real_y(y+yofs+shadowyofs)+(tysz-1)*16;
+ #ifdef IS_PLAYER
+-	sx -= viewport.x;
+-	sy -= viewport.y;
++	sx -= get_render_viewport().x;
++	sy -= get_render_viewport().y;
+ #endif
+ 
+ 	//int32_t sy1 = sx-56; //subscreen offset
+@@ -2275,7 +2275,7 @@ void sprite_list::draw_smooth_maze(BITMAP* dest)
+ 	for (int32_t i=0; i<count; i++)
+ 	{
+ 		if (sprites[i]->screen_spawned != maze_state.scr->screen)
+-			set_clip_rect(dest, sx - viewport.x, sy - viewport.y, sx + 256 - viewport.x, sy + 176 - viewport.y);
++			set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 		else
+ 			clear_clip_rect(dest);
+ 		sprites[i]->draw(dest);
+@@ -2310,7 +2310,7 @@ void sprite_list::drawshadow_smooth_maze(BITMAP* dest, bool translucent)
+ 	for (int32_t i=0; i<count; i++)
+ 	{
+ 		if (sprites[i]->screen_spawned != maze_state.scr->screen)
+-			set_clip_rect(dest, sx - viewport.x, sy - viewport.y, sx + 256 - viewport.x, sy + 176 - viewport.y);
++			set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 		sprites[i]->drawshadow(dest, translucent);
+ 	}
+ 
+@@ -2977,8 +2977,8 @@ void movingblock::draw(BITMAP *dest)
+ 		int32_t sx = real_x(x+xofs);
+ 		int32_t sy = real_x(y+yofs);
+ #ifdef IS_PLAYER
+-		sx -= viewport.x;
+-		sy -= viewport.y;
++		sx -= get_render_viewport().x;
++		sy -= get_render_viewport().y;
+ #endif
+         overcombo(dest, sx, sy, bcombo, cs);
+     }
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index e725d63..dd24617 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -58,6 +58,27 @@ static std::pair<const rpos_handle_t*, int> current_region_rpos_handles_scr[136]
+ extern std::set<rpos_t> lens_pushblocks_hidden;
+ 
+ viewport_t viewport;
++// Rendering runs on the game thread. Nested passes restore their parent's view;
++// no code assigns to the simulation viewport on behalf of this context.
++static std::optional<viewport_t> render_viewport_override;
++const viewport_t& get_render_viewport()
++{
++    return render_viewport_override ? *render_viewport_override : viewport;
++}
++render_viewport_scope::render_viewport_scope(const presentation_camera::geometry& geometry)
++    : previous_(render_viewport_override)
++{
++    const auto& r = geometry.world;
++    // Reject malformed/unbounded scratch requests while retaining parent state.
++    if (r.w > 0 && r.h > 0 && r.w <= 512 && r.h <= 464 &&
++        r.x >= -8192 && r.x <= 8192 && r.y >= -8192 && r.y <= 8192)
++        render_viewport_override = viewport_t{r.x, r.y, r.w, r.h};
++}
++render_viewport_scope::~render_viewport_scope()
++{
++    render_viewport_override = previous_;
++}
++
+ static int viewport_sprite_uid;
+ ViewportMode viewport_mode;
+ int world_w, world_h;
+@@ -4177,8 +4198,8 @@ void do_scrolling_layer(BITMAP *bmp, int32_t type, const screen_handle_t& screen
+ 		return;
+ 	}
+ 
+-	x -= viewport.x;
+-	y -= viewport.y - playing_field_offset;
++	x -= get_render_viewport().x;
++	y -= get_render_viewport().y - playing_field_offset;
+ 
+ 	bool over = true, transp = false;
+ 	int layer = screen_handle.layer;
+@@ -4371,8 +4392,8 @@ static void put_walkflags_a5(int32_t x, int32_t y, const screen_handles_t& scree
+ 	
+ 	if (c.type == cBRIDGE && get_qr(qr_OLD_BRIDGE_COMBOS)) return;
+ 	
+-	int32_t xx = x-viewport.x;
+-	int32_t yy = y+playing_field_offset-viewport.y;
++	int32_t xx = x-get_render_viewport().x;
++	int32_t yy = y+playing_field_offset-get_render_viewport().y;
+ 	
+ 	// Draw damage combos
+ 	bool dmg = combo_class_buf[c.type].modify_hp_amount;
+@@ -4466,8 +4487,8 @@ static void put_effectflags_a5(int32_t x, int32_t y, word cmbdat)
+ 	ALLEGRO_COLOR col_eff = al_map_rgba(85,255,85,info_opacity);
+ 	newcombo const &c = combobuf[cmbdat];
+ 	
+-	int32_t xx = x-viewport.x;
+-	int32_t yy = y+playing_field_offset-viewport.y;
++	int32_t xx = x-get_render_viewport().x;
++	int32_t yy = y+playing_field_offset-get_render_viewport().y;
+ 	
+ 	for(int32_t i=0; i<4; i++)
+ 	{
+@@ -4548,8 +4569,8 @@ void do_walkflags(int32_t x, int32_t y)
+ 	if (!show_walkflags || !info_bmp_enabled())
+ 		return;
+ 
+-	x += -viewport.x;
+-	y += playing_field_offset - viewport.y;
++	x += -get_render_viewport().x;
++	y += playing_field_offset - get_render_viewport().y;
+ 
+ 	start_info_bmp();
+ 
+@@ -4567,8 +4588,8 @@ static void put_trigger_prox_a5(zfix center_x, zfix center_y, newcombo const& cm
+ 		if (!trig.trigprox)
+ 			continue;
+ 
+-		float cx = center_x.getFloat() - viewport.x;
+-		float cy = center_y.getFloat() + playing_field_offset - viewport.y;
++		float cx = center_x.getFloat() - get_render_viewport().x;
++		float cy = center_y.getFloat() + playing_field_offset - get_render_viewport().y;
+ 		float r = trig.trigprox;
+ 		ALLEGRO_COLOR col = trig.trigger_flags.get(TRIGFLAG_INVERTPROX)
+ 			? al_map_rgba(255, 165, 0, info_opacity)
+@@ -4681,10 +4702,10 @@ static nearby_screens_t get_nearby_screens_scrolling_region(int extra_dist)
+ {
+ 	nearby_screens_t nearby_screens;
+ 
+-	int screens_x0 = (viewport.left() - extra_dist) / 256;
+-	int screens_x1 = (viewport.right() - 1 + extra_dist) / 256;
+-	int screens_y0 = (viewport.top() - extra_dist) / 176;
+-	int screens_y1 = (viewport.bottom() - 1 + extra_dist) / 176;
++	int screens_x0 = (get_render_viewport().left() - extra_dist) / 256;
++	int screens_x1 = (get_render_viewport().right() - 1 + extra_dist) / 256;
++	int screens_y0 = (get_render_viewport().top() - extra_dist) / 176;
++	int screens_y1 = (get_render_viewport().bottom() - 1 + extra_dist) / 176;
+ 
+ 	screens_x0 = std::clamp(screens_x0, 0, 15);
+ 	screens_x1 = std::clamp(screens_x1, 0, 15);
+@@ -4718,13 +4739,13 @@ static nearby_screens_t get_nearby_screens_smooth_maze(int extra_dist)
+ {
+ 	nearby_screens_t nearby_screens;
+ 
+-	int screens_x0 = (viewport.left() - extra_dist) / 256;
+-	int screens_x1 = (viewport.right() - 1 + extra_dist) / 256;
+-	int screens_y0 = (viewport.top() - extra_dist) / 176;
+-	int screens_y1 = (viewport.bottom() - 1 + extra_dist) / 176;
++	int screens_x0 = (get_render_viewport().left() - extra_dist) / 256;
++	int screens_x1 = (get_render_viewport().right() - 1 + extra_dist) / 256;
++	int screens_y0 = (get_render_viewport().top() - extra_dist) / 176;
++	int screens_y1 = (get_render_viewport().bottom() - 1 + extra_dist) / 176;
+ 
+-	if (viewport.left() < 0) screens_x0--;
+-	if (viewport.top() < 0) screens_y0--;
++	if (get_render_viewport().left() < 0) screens_x0--;
++	if (get_render_viewport().top() < 0) screens_y0--;
+ 
+ 	for (int x = screens_x0; x <= screens_x1; x++)
+ 	{
+@@ -4831,7 +4852,7 @@ static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, s
+ 	{
+ 		int maze_screen = maze_state.scr->screen;
+ 		auto [sx, sy] = translate_screen_coordinates_to_world(maze_screen);
+-		set_clip_rect(dest, sx - viewport.x, sy - viewport.y, sx + 256 - viewport.x, sy + 176 - viewport.y);
++		set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 	}
+ 	while(it != sprite_set.end() && (!checkz || (*it)->total_z() < upto_z))
+ 	{
+@@ -4881,9 +4902,9 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 		{
+ 			offy += playing_field_offset;
+ 			rectfill(darkscr_bmp,
+-				offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1, 0);
++				offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 			rectfill(darkscr_bmp_trans,
+-				offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1, 0);
++				offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 		}
+ 		else
+ 		{
+@@ -4891,11 +4912,11 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 			{
+ 				offy += playing_field_offset;
+ 				ditherrectfill(darkscr_bmp,
+-					offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1,
+-					0, game->get_dither_type(), game->get_dither_arg(), viewport.x, viewport.y - playing_field_offset);
++					offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1,
++					0, game->get_dither_type(), game->get_dither_arg(), get_render_viewport().x, get_render_viewport().y - playing_field_offset);
+ 				ditherrectfill(darkscr_bmp_trans,
+-					offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1,
+-					0, game->get_dither_type(), game->get_dither_arg(), viewport.x, viewport.y - playing_field_offset);
++					offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1,
++					0, game->get_dither_type(), game->get_dither_arg(), get_render_viewport().x, get_render_viewport().y - playing_field_offset);
+ 			}
+ 			any_trans |= bool(base_scr->flags9 & fDARK_TRANS);
+ 			any_nontrans |= !bool(base_scr->flags9 & fDARK_TRANS);
+@@ -4917,14 +4938,14 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 				{
+ 					// for non-trans screens, blit opaquely
+ 					masked_blit(darkscr_bmp, dest,
+-						offx - viewport.x, offy - viewport.y,
+-						offx - viewport.x, offy - viewport.y, 256, 176);
++						offx - get_render_viewport().x, offy - get_render_viewport().y,
++						offx - get_render_viewport().x, offy - get_render_viewport().y, 256, 176);
+ 				}
+ 				else if (!stacked_trans)
+ 				{
+ 					// if transparency shouldn't stack, clear sections where it would stack
+ 					rectfill(darkscr_bmp_trans,
+-						offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1, 0);
++						offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 				}
+ 			});
+ 			draw_trans_sprite(dest, darkscr_bmp_trans, 0, 0);
+@@ -5152,13 +5173,13 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 			int32_t ccx = (int32_t)Hero.getClimbCoverX();
+ 			int32_t ccy = (int32_t)Hero.getClimbCoverY();
+ 			
+-			overcombo(scrollbuf,ccx-viewport.x,ccy+cmby2+playing_field_offset-viewport.y,MAPCOMBO(ccx,ccy+cmby2),MAPCSET(ccx,ccy+cmby2));
+-			putcombo(scrollbuf,ccx-viewport.x,ccy+playing_field_offset-viewport.y,MAPCOMBO(ccx,ccy),MAPCSET(ccx,ccy));
++			overcombo(scrollbuf,ccx-get_render_viewport().x,ccy+cmby2+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx,ccy+cmby2),MAPCSET(ccx,ccy+cmby2));
++			putcombo(scrollbuf,ccx-get_render_viewport().x,ccy+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx,ccy),MAPCSET(ccx,ccy));
+ 			
+ 			if(int32_t(Hero.getX())&15)
+ 			{
+-				overcombo(scrollbuf,ccx+16-viewport.x,ccy+cmby2+playing_field_offset-viewport.y,MAPCOMBO(ccx+16,ccy+cmby2),MAPCSET(ccx+16,ccy+cmby2));
+-				putcombo(scrollbuf,ccx+16-viewport.x,ccy+playing_field_offset-viewport.y,MAPCOMBO(ccx+16,ccy),MAPCSET(ccx+16,ccy));
++				overcombo(scrollbuf,ccx+16-get_render_viewport().x,ccy+cmby2+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx+16,ccy+cmby2),MAPCSET(ccx+16,ccy+cmby2));
++				putcombo(scrollbuf,ccx+16-get_render_viewport().x,ccy+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx+16,ccy),MAPCSET(ccx+16,ccy));
+ 			}
+ 		}
+ 	}
+@@ -5219,13 +5240,13 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 			int32_t ccx = (int32_t)(Hero.getClimbCoverX());
+ 			int32_t ccy = (int32_t)(Hero.getClimbCoverY());
+ 			
+-			overcombo(scrollbuf,ccx-viewport.x,ccy+cmby2+playing_field_offset-viewport.y,MAPCOMBO(ccx,ccy+cmby2),MAPCSET(ccx,ccy+cmby2));
+-			putcombo(scrollbuf,ccx-viewport.x,ccy+playing_field_offset-viewport.y,MAPCOMBO(ccx,ccy),MAPCSET(ccx,ccy));
++			overcombo(scrollbuf,ccx-get_render_viewport().x,ccy+cmby2+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx,ccy+cmby2),MAPCSET(ccx,ccy+cmby2));
++			putcombo(scrollbuf,ccx-get_render_viewport().x,ccy+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx,ccy),MAPCSET(ccx,ccy));
+ 			
+ 			if(int32_t(Hero.getX())&15)
+ 			{
+-				overcombo(scrollbuf,ccx+16-viewport.x,ccy+cmby2+playing_field_offset-viewport.y,MAPCOMBO(ccx+16,ccy+cmby2),MAPCSET(ccx+16,ccy+cmby2));
+-				putcombo(scrollbuf,ccx+16-viewport.x,ccy+playing_field_offset-viewport.y,MAPCOMBO(ccx+16,ccy),MAPCSET(ccx+16,ccy));
++				overcombo(scrollbuf,ccx+16-get_render_viewport().x,ccy+cmby2+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx+16,ccy+cmby2),MAPCSET(ccx+16,ccy+cmby2));
++				putcombo(scrollbuf,ccx+16-get_render_viewport().x,ccy+playing_field_offset-get_render_viewport().y,MAPCOMBO(ccx+16,ccy),MAPCSET(ccx+16,ccy));
+ 			}
+ 		}
+ 	}
+@@ -5368,7 +5389,7 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 				{
+ 					int maze_screen = maze_state.scr->screen;
+ 					auto [sx, sy] = translate_screen_coordinates_to_world(maze_screen);
+-					set_clip_rect(dest, sx - viewport.x, sy - viewport.y, sx + 256 - viewport.x, sy + 176 - viewport.y);
++					set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 				}
+ 				do_primitives(dest, SPLAYER_NPC_DRAW);
+ 				if (do_clip)
+@@ -5400,7 +5421,7 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 				{
+ 					int maze_screen = maze_state.scr->screen;
+ 					auto [sx, sy] = translate_screen_coordinates_to_world(maze_screen);
+-					set_clip_rect(dest, sx - viewport.x, sy - viewport.y, sx + 256 - viewport.x, sy + 176 - viewport.y);
++					set_clip_rect(dest, sx - get_render_viewport().x, sy - get_render_viewport().y, sx + 256 - get_render_viewport().x, sy + 176 - get_render_viewport().y);
+ 				}
+ 				do_primitives(dest, SPLAYER_ITEMSPRITE_DRAW);
+ 				if (do_clip)
+@@ -5727,8 +5748,8 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 			if (!is_dark(base_scr))
+ 			{
+ 				offy += playing_field_offset;
+-				rectfill(darkscr_bmp, offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1, 0);
+-				rectfill(darkscr_bmp_trans, offx - viewport.x, offy - viewport.y, offx - viewport.x + 256 - 1, offy - viewport.y + 176 - 1, 0);
++				rectfill(darkscr_bmp, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
++				rectfill(darkscr_bmp_trans, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 			}
+ 		});
+ 	}
+@@ -7226,8 +7247,8 @@ void putscr(mapscr* scr, BITMAP* dest, int32_t x, int32_t y)
+ 	// is always the same no matter the value of scr.
+ 	int screen = get_screen_for_world_xy(x, y);
+ 
+-	x -= viewport.x;
+-	y -= viewport.y;
++	x -= get_render_viewport().x;
++	y -= get_render_viewport().y;
+ 
+ 	if (!scr->is_valid()||!show_layers[0]||scr->hidelayers & 1)
+ 	{
+@@ -7259,8 +7280,8 @@ static void putscrdoors(const nearby_screens_t& nearby_screens, BITMAP *dest, in
+ 		return;
+ 	}
+ 	
+-	x -= viewport.x;
+-	y -= viewport.y;
++	x -= get_render_viewport().x;
++	y -= get_render_viewport().y;
+ 
+ 	for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 		mapscr* scr = screen_handles[0].base_scr;
+@@ -7294,8 +7315,8 @@ void putscrdoors(mapscr* scr, BITMAP *dest, int32_t x, int32_t y)
+ 	if (!scr->is_valid() || !show_layers[0])
+ 		return;
+ 
+-	x -= viewport.x;
+-	y -= viewport.y;
++	x -= get_render_viewport().x;
++	y -= get_render_viewport().y;
+ 
+ 	if(scr->door[0]==dBOMBED)
+ 	{
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index e5d8b77..96ffc5b 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -29,6 +29,24 @@ extern int world_w, world_h;
+ //  - w, h is 256, 176
+ extern viewport_t viewport;
+ extern ViewportMode viewport_mode;
++// Render-only coordinates. Simulation, scripts and activation must use viewport.
++// Default is the current legacy viewport, not a snapshot from a prior frame.
++const viewport_t& get_render_viewport();
++// Staged cutover boundary; do not activate wider extents until all render paths,
++// scratch buffers and script coordinate conventions have been migrated.
++class render_viewport_scope
++{
++public:
++    explicit render_viewport_scope(const presentation_camera::geometry& geometry);
++    ~render_viewport_scope();
++    render_viewport_scope(const render_viewport_scope&) = delete;
++    render_viewport_scope& operator=(const render_viewport_scope&) = delete;
++    render_viewport_scope(render_viewport_scope&&) = delete;
++    render_viewport_scope& operator=(render_viewport_scope&&) = delete;
++private:
++    std::optional<viewport_t> previous_;
++};
++
+ // Geometry proposal only: the legacy draw pipeline is not yet zoom capable.
+ // This read-only boundary is intentionally not exported to scripts or browser input.
+ std::optional<presentation_camera::geometry> get_presentation_geometry(
+-- 
+2.52.0.windows.1
+

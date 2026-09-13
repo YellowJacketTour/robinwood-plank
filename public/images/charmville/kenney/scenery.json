@@ -1,0 +1,14 @@
+{
+  "author": "Kenney",
+  "source": "https://kenney.nl/assets/nature-kit",
+  "license": "CC0",
+  "modified": "Sourced trunk/crowns with authored leaf masses, natural materials, subdivision and shared crop camera",
+  "frameSize": [
+    256,
+    192
+  ],
+  "anchor": [
+    128.0,
+    132.444
+  ]
+}

@@ -1,0 +1,69 @@
+/* The world keeps one mounted renderer. Menus occupy its stage, never a second column. */
+.charm-world[data-playing=true] { height:100dvh; min-height:0; display:flex; flex-direction:column; gap:8px; overflow:hidden; padding:12px; }
+.charm-world > header { flex:none; margin:0; }
+.charm-world .world-help { position:absolute; right:16px; top:64px; z-index:30; max-width:min(520px,90vw); }
+.charm-world .world-help details[open] { max-height:65dvh; overflow:auto; background:var(--color-wood-950); }
+.charm-world .world-navigation { flex:none; margin:0; padding:6px; border-radius:8px; background:var(--color-forest-900); }
+.charm-world .world-navigation [role=tablist] { padding-right:90px; }
+.charm-world .world-navigation > p { margin-top:4px; padding-top:4px; }
+.charm-world .world-navigation > div:last-child:not([role=tablist]) { position:static; margin:6px 0 0; padding:0 8px; }
+.charm-world .world-navigation > div:last-child:not([role=tablist]) button { min-height:44px; font-size:12px; }
+.charm-world .world-journal { flex:none; font-size:12px; }
+.charm-world .world-journal > summary { cursor:pointer; padding:6px 12px; color:var(--color-gold-300); }
+.charm-world .world-journal[open] { max-height:35dvh; overflow:auto; }
+.charm-world .world-stage { position:relative; display:block; flex:1; min-height:0; }
+.charm-world .world-adventure { display:flex; flex-direction:column; height:100%; min-height:0; padding:0; overflow:hidden; border-radius:8px; }
+.charm-world .world-adventure > div:first-child { display:none; }
+.charm-world .world-adventure > details { margin:0; padding:0 12px; flex:none; }
+.charm-world .world-adventure > p { margin:0; padding:0 12px; flex:none; }
+.charm-world .world-adventure > iframe { flex:1; width:100%; height:0; min-height:0; border:0; border-radius:0; }
+.charm-world .world-adventure > section { flex:none; max-height:38%; overflow:auto; margin:0; }
+.charm-world .world-adventure > .world-encounter-drawer { flex:none; padding:8px 12px; background:var(--color-forest-900); color:var(--color-cream); }
+.world-encounter-drawer > summary { cursor:pointer; min-height:28px; }
+.world-encounter-drawer[open] { max-height:50%; overflow:auto; }
+.charm-world .world-menu { position:absolute; inset:0; z-index:20; overflow:auto; border:4px double var(--color-gold-300); border-radius:12px; padding:16px; background:var(--color-wood-900); box-shadow:inset 0 0 0 4px var(--color-wood-950); }
+.charm-world .world-menu > div:first-child { position:sticky; top:-16px; z-index:2; background:var(--color-wood-900); padding:8px; }
+.charm-world > p[role=status] { flex:none; max-height:15dvh; overflow:auto; margin:0; padding:8px; }
+@media(max-width:600px) {
+ .charm-world[data-playing=true] { padding:6px; gap:4px; }
+ .charm-world > header h1 { font-size:16px; }
+ .charm-world > header nav button,.charm-world > header nav a { min-height:36px; padding:6px; font-size:11px; }
+ .charm-world .world-help { top:55px; right:10px; }
+ .charm-world .world-navigation [role=tablist] { padding-right:0; padding-top:0; }
+ .charm-world .world-navigation > div:last-child:not([role=tablist]) { position:static; }
+ .charm-world .world-menu { padding:8px; }
+}
+
+.charm-world .world-arrival { position:absolute; inset:0; z-index:19; display:grid; align-items:center; overflow:auto; padding:clamp(16px,4vw,48px); border:3px double var(--color-gold-300); border-radius:12px; background:var(--color-forest-900); color:var(--color-cream); }
+.charm-world .world-arrival > div { max-width:760px; margin:auto; }
+
+/* Charmville game palette — scoped aliases documented in DESIGN.md. */
+.charm-world {
+ --game-night:#102F3A; --game-frame:#174955; --game-panel:#205966;
+ --game-edge:#75B7B3; --game-paper:#F2F7E6; --game-muted:#B7D5D2; --game-select:#F8D66D;
+ --color-wood-950:var(--game-night); --color-wood-900:var(--game-frame);
+ --color-wood-850:var(--game-panel); --color-wood-800:var(--game-panel); --color-wood-700:var(--game-frame);
+ --color-forest-900:var(--game-night); --color-forest-800:var(--game-frame);
+ --color-forest-700:var(--game-panel); --color-forest-600:var(--game-edge);
+ --color-cream:var(--game-paper); --color-cream-muted:var(--game-muted);
+ --color-gold-500:var(--game-select); --color-gold-400:var(--game-paper);
+ --color-gold-300:var(--game-paper); --color-gold-600:var(--game-edge);
+ --color-panel:var(--game-frame); --color-panel-soft:var(--game-panel); --color-panel-strong:var(--game-night);
+ --color-line:var(--game-edge); --color-line-strong:var(--game-edge); --color-on-gold:var(--game-night);
+ background:var(--game-night); color:var(--game-paper);
+}
+.charm-world .world-navigation { border:2px solid var(--game-edge); box-shadow:inset 0 0 0 3px var(--game-frame); border-radius:16px 16px 8px 8px; }
+.charm-world .world-navigation [role=tab] { border-radius:8px; font-size:14px; letter-spacing:.02em; }
+.charm-world .world-navigation [role=tab][aria-selected=true] { box-shadow:inset 0 -4px 0 color-mix(in srgb,var(--game-night) 20%,transparent); }
+.charm-world h1,.charm-world h2 { font-family:var(--font-nunito),system-ui,sans-serif; font-weight:800; letter-spacing:-.025em; }
+.charm-world button:focus-visible,.charm-world summary:focus-visible { outline:3px solid var(--game-select); outline-offset:3px; }
+
+/* Keep help out of the navigation hit targets on narrow screens. */
+.charm-world .world-help { position:static; align-self:flex-end; max-width:100%; flex:none; }
+.charm-world .world-navigation [role=tablist] { padding-right:0; }
+
+/* Social overlays preserve a visible, mounted world at every viewport size. */
+.charm-world .world-menu[data-social=true] { left:auto; width:min(520px,65%); }
+@media(max-width:600px) {
+ .charm-world .world-menu[data-social=true] { inset:auto 0 0; width:100%; max-height:65%; padding-bottom:max(8px,env(safe-area-inset-bottom)); }
+}

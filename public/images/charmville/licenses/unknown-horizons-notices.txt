@@ -1,0 +1,143 @@
+UNKNOWN HORIZONS
+----------------
+
+
+
+Our code is published under the terms of the  General Public License, version 2
+and later. Instead of listing individual years within the copyright notice of every
+file, all are dated from 2008, the year this project was initiated, to the current year.
+The license text is shipped with this program as doc/licenses/GPL
+(from now on, we abbreviate this as: "see GPL").
+For more information visit  http://www.gnu.org/copyleft/gpl.html .
+
+The file
+
+content/gui/images/cursors/cursor_pipette.png
+
+is derived from a file licensed by the GIMP team ( http://gimp.org ) under the
+terms of the GNU General Public License, version 2.
+
+
+The file
+
+/horizons/ext/enum.py
+
+is derived from  http://cheeseshop.python.org/pypi/enum version 0.4.3  which is
+licensed under the terms of the GNU General Public License, version 2 or later.
+
+
+/setup.py
+
+is derived from https://launchpad.net/python-distutils-extra
+which is licensed under the terms of the GNU General Public License, version 2.
+
+
+/tests/dummy.py
+
+is licensed by nosklo under the terms of the  MIT license.  Information can be
+obtained at http://www.opensource.org/licenses/mit-license.php .
+
+
+/horizons/ext/speaklater.py
+
+is licensed by Armin Ronacher under the terms of the 3-clause BSD license. See
+BSD_speaklater.
+
+
+/horizons/ext/polib.py
+
+is licensed by David Jean Louis under the terms of the MIT license. See
+MIT_polib.
+
+The files
+
+/horizons/network/darwin-x64/enet.so
+/horizons/network/darwin-x86/enet.so
+/horizons/network/freebsd-x64/enet.so
+/horizons/network/freebsd-x86/enet.so
+/horizons/network/linux-x64/enet.so
+/horizons/network/linux-x86/enet.so
+/horizons/network/windows-x64-26/enet.pyd
+/horizons/network/windows-x64-27/enet.pyd
+/horizons/network/windows-x86-26/enet.pyd
+/horizons/network/windows-x86-27/enet.pyd
+
+
+are licensend by Lee Salzman under the terms of this freeware license.
+http://enet.bespin.org/License.html
+
+
+
+Audio content obtained through the Freesound Project: ( http://freesound.org )
+
+chop.wav by hazure (used in content/audio/sounds/lumberjack*.ogg)
+timber.wav by hazure (used in content/audio/sounds/lumberjack*.ogg)
+
+The author of above tracks, hazure, kindly licensed these files under CC-BY-SA 3.0
+for us according to the following message.  We highly appreciate this favor.
+"You may use those two samples under the CC-BY-SA 3.0 license, and consider this
+ message as formal documentation of the permission given." ~ Feb 25, 2011.
+
+
+
+The font Linux Libertine is published under the terms of the
+General Public License with font exception (see GPL_fontexception)  and
+Open Font License (see OFL)  by the Libertine Open Fonts Project.
+For more information visit  http://linuxlibertine.sourceforge.net/
+and  http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=OFL
+
+
+
+Published under the terms of Public Domain are:
+
+"Sunrise Through Mist" by Fitz Hugh Lane used in the menu background.
+It has been obtained thanks to "The Athenaeum" ( http://the-athenaeum.org/ ).
+More details on the painting can be found at  http://the-athenaeum.org/art/detail.php?ID=13984 .
+
+"striking a Bell (15cm large)" by Stephan used in content/audio/sounds/ships_bell.ogg.
+More details can be found at  http://www.pdsounds.org/sounds/striking_a_bell_15cm_large .
+
+The file content/audio/music/Peer Gynt Suite No. 1, Op. 46 - I. Morning.ogg
+composed by Edvard Grieg performed by the Czech National Symphony Orchestra
+More details can be found at http://www.musopen.org/music/piece/1568
+
+
+Published under the terms of Creative Commons Attribution 3.0 Unported License
+(see CC-BY) are:
+
+"Ireland's Coast (Game Edition - LIVE PLAYERS)" by Matthew Pablo (http://www.matthewpablo.com)
+used as content/audio/music/irelands_coast.ogg . More details here:
+http://opengameart.org/content/irelands-coast-game-edition-live-players
+
+
+Published under the terms of Creative Commons Attribution Sharealike 3.0
+Unported License (see CC-BY-SA) are:
+
+"Trout School Animation" by Lamoot used in content/gfx/terrain/resources/as_fish0/ .
+More details on the work can be found at  http://opengameart.org/content/trout-school-animation .
+
+Old Pages/Flip with sound by yd: content/audio/sounds/flippage.ogg
+More details found here: http://opengameart.org/content/old-pagesflip-with-sound
+
+"Food Pack" by Clint Bellanger:
+content/gui/icons/buildmenu/048.png
+content/gui/icons/buildmenu/048_h.png
+content/gui/icons/buildmenu/greyscale/048.png
+More details found here: http://opengameart.org/content/food-pack
+
+"Training Map" by Clement Wu & Botanic from http://opengameart.org/content/training-map,
+"Kingdom Weapon Set" by Clint Bellanger from http://opengameart.org/content/kingdom-weapon-set,
+"Training Target" by p0ss from http://opengameart.org/content/training-target,
+"Wooden Weapon Training Set" by p0ss from http://opengameart.org/content/wooden-weapon-training-set
+used in content/gfx/buildings/settlers/barracks/as_barracks0/*,
+"Sheep (rigged, textured and animated)" by p0ss from http://opengameart.org/content/sheep-rigged-textured-and-animated
+
+
+Our own audiovisual media content is published under the terms of the
+Creative Commons Attribution Sharealike 3.0 Unported License (see CC-BY-SA).
+For more information visit  http://creativecommons.org/licenses/by-sa/3.0/legalcode .
+
+
+
+For further informations visit  http://unknown-horizons.org
+or contact us by sending a mail to  team@unknown-horizons.org .

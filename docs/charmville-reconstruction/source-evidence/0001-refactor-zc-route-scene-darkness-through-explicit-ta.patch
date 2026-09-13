@@ -1,0 +1,324 @@
+From 7d30cab2618db126d13389d6aef88a376652e079 Mon Sep 17 00:00:00 2001
+From: YellowJacketTour <279183353+YellowJacketTour@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 06:13:17 -0500
+Subject: [PATCH] refactor(zc): route scene darkness through explicit targets
+
+---
+ src/zc/hero.cpp |  9 ++++--
+ src/zc/hero.h   |  4 ++-
+ src/zc/maps.cpp | 83 ++++++++++++++++++++++++++++++-------------------
+ src/zc/maps.h   |  6 ++--
+ 4 files changed, 65 insertions(+), 37 deletions(-)
+
+diff --git a/src/zc/hero.cpp b/src/zc/hero.cpp
+index 8399fec..7d7db95 100644
+--- a/src/zc/hero.cpp
++++ b/src/zc/hero.cpp
+@@ -28293,7 +28293,8 @@ int32_t HeroClass::get_scroll_delay(int32_t scrolldir)
+ 	}
+ }
+ 
+-void HeroClass::calc_darkroom_hero(int32_t x1, int32_t y1)
++void HeroClass::calc_darkroom_hero(int32_t x1, int32_t y1,
++	BITMAP* darkness, BITMAP* translucent_darkness)
+ {
+ 	if(!get_qr(qr_NEW_DARKROOM)) return;
+ 	int32_t lampid = current_item_id(itype_lantern);
+@@ -28331,7 +28332,11 @@ void HeroClass::calc_darkroom_hero(int32_t x1, int32_t y1)
+ 				break;
+ 		}
+ 	}
+-	handle_lighting(hx, hy, lamp.misc1, lamp.misc2, dir, darkscr_bmp, NULL, -1, -1, -1, -1, wave_opt, wave_opt);
++	// Target selection does not repeat the eligibility check or magic charge above.
++	if (!darkness) darkness = darkscr_bmp;
++	if (!translucent_darkness) translucent_darkness = darkscr_bmp_trans;
++	handle_lighting(hx, hy, lamp.misc1, lamp.misc2, dir, darkness, translucent_darkness,
++		-1, -1, -1, -1, wave_opt, wave_opt);
+ }
+ 
+ struct nearby_scrolling_screen_t
+diff --git a/src/zc/hero.h b/src/zc/hero.h
+index 0e062b0..a3a1a65 100644
+--- a/src/zc/hero.h
++++ b/src/zc/hero.h
+@@ -469,7 +469,9 @@ public:
+ 	void run_scrolling_script_old(int32_t scrolldir, int32_t cx, int32_t sx, int32_t sy, bool end_frames, bool waitdraw);
+ 	void run_scrolling_script(int32_t scrolldir, int32_t cx, int32_t sx, int32_t sy, bool end_frames, bool waitdraw);
+ 	void run_generic_scrolling(int32_t timing);
+-	void calc_darkroom_hero(int32_t x1, int32_t y1);
++	// Includes lamp eligibility/payment: invoke once per legacy scene transaction.
++	void calc_darkroom_hero(int32_t x1, int32_t y1,
++		BITMAP* darkness = nullptr, BITMAP* translucent_darkness = nullptr);
+ 	void scrollscr(int32_t dir,int32_t destscr = -1, int32_t destdmap = -1);
+ 	int32_t defend(weapon *w);
+ 	virtual ALLEGRO_COLOR hitboxColor(byte opacity = 255) const;
+diff --git a/src/zc/maps.cpp b/src/zc/maps.cpp
+index 14000ca..72de465 100644
+--- a/src/zc/maps.cpp
++++ b/src/zc/maps.cpp
+@@ -4644,8 +4644,10 @@ void do_effectflags(mapscr* scr, int32_t x, int32_t y)
+ 	}
+ }
+ 
+-void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy)
++void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy, BITMAP* darkness, BITMAP* translucent_darkness)
+ {
++	if (!darkness) darkness = darkscr_bmp;
++	if (!translucent_darkness) translucent_darkness = darkscr_bmp_trans;
+ 	for (auto& handle : screen_handles)
+ 	{
+ 		mapscr* scr = handle.scr;
+@@ -4656,14 +4658,16 @@ void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy)
+ 			newcombo const& cmb = combobuf[scr->data[q]];
+ 			if(cmb.type == cTORCH)
+ 			{
+-				do_torch_combo(cmb, COMBOX(q)+8+offx, COMBOY(q)+8+offy, darkscr_bmp);
++				do_torch_combo(cmb, COMBOX(q)+8+offx, COMBOY(q)+8+offy, darkness, translucent_darkness);
+ 			}
+ 		}
+ 	}
+ }
+ 
+-void calc_darkroom_ffcs(mapscr* scr, int offx, int offy)
++void calc_darkroom_ffcs(mapscr* scr, int offx, int offy, BITMAP* darkness, BITMAP* translucent_darkness)
+ {
++	if (!darkness) darkness = darkscr_bmp;
++	if (!translucent_darkness) translucent_darkness = darkscr_bmp_trans;
+ 	word c = scr->numFFC();
+ 	for(int q = 0; q < c; ++q)
+ 	{
+@@ -4672,7 +4676,7 @@ void calc_darkroom_ffcs(mapscr* scr, int offx, int offy)
+ 		{
+ 			int cx = scr->ffcs[q].x.getInt()+(scr->ffEffectWidth(q)/2)+offx;
+ 			int cy = (scr->ffcs[q].y.getInt())+(scr->ffEffectHeight(q)/2)+offy;
+-			do_torch_combo(cmb, cx, cy, darkscr_bmp);
++			do_torch_combo(cmb, cx, cy, darkness, translucent_darkness);
+ 		}
+ 	}
+ }
+@@ -4888,7 +4892,14 @@ static void draw_sprites(BITMAP* dest, set<sprite*, SpriteSorter>& sprite_set, s
+ 		clear_clip_rect(dest);
+ }
+ 
+-static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
++struct scene_darkness_targets
++{
++    BITMAP* opaque;
++    BITMAP* translucent;
++};
++
++static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens,
++    const scene_darkness_targets& darkness)
+ {
+ 	do_primitives(dest, SPLAYER_DARKROOM_UNDER);
+ 	set_clip_rect(dest, 0, playing_field_offset, dest->w, dest->h);
+@@ -4901,9 +4912,9 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 		if (!is_dark(base_scr))
+ 		{
+ 			offy += playing_field_offset;
+-			rectfill(darkscr_bmp,
++			rectfill(darkness.opaque,
+ 				offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+-			rectfill(darkscr_bmp_trans,
++			rectfill(darkness.translucent,
+ 				offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 		}
+ 		else
+@@ -4911,10 +4922,10 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 			if (base_scr->flags9 & fDARK_DITHER)
+ 			{
+ 				offy += playing_field_offset;
+-				ditherrectfill(darkscr_bmp,
++				ditherrectfill(darkness.opaque,
+ 					offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1,
+ 					0, game->get_dither_type(), game->get_dither_arg(), get_render_viewport().x, get_render_viewport().y - playing_field_offset);
+-				ditherrectfill(darkscr_bmp_trans,
++				ditherrectfill(darkness.translucent,
+ 					offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1,
+ 					0, game->get_dither_type(), game->get_dither_arg(), get_render_viewport().x, get_render_viewport().y - playing_field_offset);
+ 			}
+@@ -4928,7 +4939,7 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 	{
+ 		if (any_nontrans)
+ 		{
+-			draw_trans_sprite(dest, darkscr_bmp, 0, 0);
++			draw_trans_sprite(dest, darkness.opaque, 0, 0);
+ 			bool stacked_trans = get_qr(qr_NEWDARK_TRANS_STACKING);
+ 			for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 				mapscr* base_scr = screen_handles[0].base_scr;
+@@ -4937,30 +4948,30 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 				if (!(base_scr->flags9 & fDARK_TRANS))
+ 				{
+ 					// for non-trans screens, blit opaquely
+-					masked_blit(darkscr_bmp, dest,
++					masked_blit(darkness.opaque, dest,
+ 						offx - get_render_viewport().x, offy - get_render_viewport().y,
+ 						offx - get_render_viewport().x, offy - get_render_viewport().y, 256, 176);
+ 				}
+ 				else if (!stacked_trans)
+ 				{
+ 					// if transparency shouldn't stack, clear sections where it would stack
+-					rectfill(darkscr_bmp_trans,
++					rectfill(darkness.translucent,
+ 						offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 				}
+ 			});
+-			draw_trans_sprite(dest, darkscr_bmp_trans, 0, 0);
++			draw_trans_sprite(dest, darkness.translucent, 0, 0);
+ 		}
+ 		else
+ 		{
+-			draw_trans_sprite(dest, darkscr_bmp, 0, 0);
++			draw_trans_sprite(dest, darkness.opaque, 0, 0);
+ 			if (get_qr(qr_NEWDARK_TRANS_STACKING))
+-				draw_trans_sprite(dest, darkscr_bmp_trans, 0, 0);
++				draw_trans_sprite(dest, darkness.translucent, 0, 0);
+ 		}
+ 	}
+ 	else
+ 	{
+-		masked_blit(darkscr_bmp, dest, 0, 0, 0, 0, dest->w, dest->h);
+-		draw_trans_sprite(dest, darkscr_bmp_trans, 0, 0);
++		masked_blit(darkness.opaque, dest, 0, 0, 0, 0, dest->w, dest->h);
++		draw_trans_sprite(dest, darkness.translucent, 0, 0);
+ 	}
+ 	color_map = trans_table;
+ 
+@@ -4968,7 +4979,8 @@ static void draw_darkroom(BITMAP* dest, const nearby_screens_t& nearby_screens)
+ 	do_primitives(dest, SPLAYER_DARKROOM_OVER);
+ }
+ 
+-static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark, const nearby_screens_t& nearby_screens)
++static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark,
++    const nearby_screens_t& nearby_screens, const scene_darkness_targets& darkness)
+ {
+ 	draw_msgstr(6, dest);
+ 
+@@ -4976,7 +4988,7 @@ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark, cons
+ 		draw_msgstr(6, dest);
+ 
+ 	if (get_qr(qr_NEW_DARKROOM) && !get_qr(qr_NEWDARK_L6) && any_dark)
+-		draw_darkroom(dest, nearby_screens);
++		draw_darkroom(dest, nearby_screens, darkness);
+ 
+ 	_do_current_ffc_layer(dest, 7);
+ 	draw_msgstr(7, dest);
+@@ -4988,6 +5000,7 @@ static void draw_screen_post_passive_subscreen(BITMAP* dest, bool any_dark, cons
+ // camera. It runs once after world/lens composition, before POST_DRAW scripts.
+ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+     const nearby_screens_t& nearby_screens, BITMAP* without_passive_subscreen,
++    const scene_darkness_targets& darkness,
+     bool drawPassiveSubscreenSeparate,
+     bool old_layer_draw_order)
+ {
+@@ -5013,19 +5026,21 @@ static void compose_screen_overlay_tail(BITMAP* dest, bool any_dark,
+ 	else if (!old_layer_draw_order)
+ 		do_primitives(dest, 7);
+ 
+-	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens);
++	draw_screen_post_passive_subscreen(dest, any_dark, nearby_screens, darkness);
+ 	if (drawPassiveSubscreenSeparate)
+-		draw_screen_post_passive_subscreen(without_passive_subscreen, any_dark, nearby_screens);
++		draw_screen_post_passive_subscreen(without_passive_subscreen, any_dark, nearby_screens, darkness);
+ }
+ 
+ // Explicit destinations for the single legacy scene composition pass. They are
+ // still legacy-sized at every call; later world targets must also migrate the
+-// remaining darkness/light/script RT_SCREEN globals before changing dimensions.
++// remaining hero lamp/script RT_SCREEN globals before changing dimensions.
+ struct scene_composition_targets
+ {
+     BITMAP* scene;
+     BITMAP* background;
+     BITMAP* without_passive_subscreen;
++    scene_darkness_targets darkness;
++    BITMAP* light;
+ };
+ 
+ static void compose_scene(const scene_composition_targets& targets,
+@@ -5689,9 +5704,9 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		color_map = trans_table2;
+ 		if(get_qr(qr_LIGHTBEAM_TRANSPARENT))
+-			draw_trans_sprite(dest, lightbeam_bmp, 0, playing_field_offset);
++			draw_trans_sprite(dest, targets.light, 0, playing_field_offset);
+ 		else
+-			masked_blit(lightbeam_bmp, dest, 0, 0, 0, playing_field_offset, dest->w,dest->h);
++			masked_blit(targets.light, dest, 0, 0, 0, playing_field_offset, dest->w,dest->h);
+ 		color_map = trans_table;
+ 	}
+ 
+@@ -5733,25 +5748,28 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	{
+ 		for_every_nearby_screen(get_nearby_screens(128), [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 			mapscr* base_scr = screen_handles[0].base_scr;
+-			calc_darkroom_combos(screen_handles, offx, offy + playing_field_offset);
+-			calc_darkroom_ffcs(base_scr, 0, playing_field_offset);
++			calc_darkroom_combos(screen_handles, offx, offy + playing_field_offset,
++				targets.darkness.opaque, targets.darkness.translucent);
++			calc_darkroom_ffcs(base_scr, 0, playing_field_offset,
++				targets.darkness.opaque, targets.darkness.translucent);
+ 		});
+ 		if(showhero)
+-			Hero.calc_darkroom_hero(0, -playing_field_offset);
++			Hero.calc_darkroom_hero(0, -playing_field_offset,
++				targets.darkness.opaque, targets.darkness.translucent);
+ 		for_every_nearby_screen(nearby_screens, [&](screen_handles_t screen_handles, int, int offx, int offy) {
+ 			mapscr* base_scr = screen_handles[0].base_scr;
+ 			if (!is_dark(base_scr))
+ 			{
+ 				offy += playing_field_offset;
+-				rectfill(darkscr_bmp, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+-				rectfill(darkscr_bmp_trans, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
++				rectfill(targets.darkness.opaque, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
++				rectfill(targets.darkness.translucent, offx - get_render_viewport().x, offy - get_render_viewport().y, offx - get_render_viewport().x + 256 - 1, offy - get_render_viewport().y + 176 - 1, 0);
+ 			}
+ 		});
+ 	}
+ 	
+ 	//Darkroom if under the subscreen
+ 	if(get_qr(qr_NEW_DARKROOM) && get_qr(qr_NEWDARK_L6) && any_dark)
+-		draw_darkroom(dest, nearby_screens);
++		draw_darkroom(dest, nearby_screens, targets.darkness);
+ 
+ 	if (is_in_scrolling_region() && lensclk && !FFCore.system_suspend[susptLENS])
+ 	{
+@@ -5763,7 +5781,7 @@ static void compose_scene(const scene_composition_targets& targets,
+ 	}
+ 
+ 	compose_screen_overlay_tail(dest, any_dark, nearby_screens,
+-		targets.without_passive_subscreen, drawPassiveSubscreenSeparate, old_layer_draw_order);
++		targets.without_passive_subscreen, targets.darkness, drawPassiveSubscreenSeparate, old_layer_draw_order);
+ 
+ 	set_clip_rect(background, 0, 0, background->w, background->h);
+ 	if(runGeneric) FFCore.runGenericPassiveEngine(SCR_TIMING_POST_DRAW);
+@@ -5794,7 +5812,8 @@ void draw_screen(bool showhero, bool runGeneric, bool drawPassiveSubscreenSepara
+ 	if(runGeneric) FFCore.runGenericPassiveEngine(SCR_TIMING_PRE_DRAW);
+ 
+ 	// Resolve the actual destinations after PRE_DRAW, preserving legacy timing.
+-	compose_scene({framebuf, scrollbuf, framebuf_no_passive_subscreen},
++	compose_scene({framebuf, scrollbuf, framebuf_no_passive_subscreen,
++		{darkscr_bmp, darkscr_bmp_trans}, lightbeam_bmp},
+ 		showhero, runGeneric, drawPassiveSubscreenSeparate,
+ 		classic_draw, old_layer_draw_order, effects);
+ }
+diff --git a/src/zc/maps.h b/src/zc/maps.h
+index 96ffc5b..cd83f49 100644
+--- a/src/zc/maps.h
++++ b/src/zc/maps.h
+@@ -510,8 +510,10 @@ void do_walkflags(const std::array<screen_handle_t, 7>& screen_handles ,int32_t
+ void do_walkflags(int32_t x, int32_t y);
+ void do_effectflags(mapscr* scr, int32_t x, int32_t y);
+ void do_script_draws(BITMAP *bmp, mapscr *scr, int32_t x, int32_t y, bool hideLayer7 = false);
+-void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy);
+-void calc_darkroom_ffcs(mapscr* scr, int offx, int offy);
++void calc_darkroom_combos(screen_handles_t screen_handles, int offx, int offy,
++    BITMAP* darkness = nullptr, BITMAP* translucent_darkness = nullptr);
++void calc_darkroom_ffcs(mapscr* scr, int offx, int offy,
++    BITMAP* darkness = nullptr, BITMAP* translucent_darkness = nullptr);
+ // Share effects only between views of the same presentation transaction. Null
+ // retains legacy independent draw calls (warps, cutscenes and message loops).
+ // This does not make the remaining draw pipeline pure or scripts repeat-safe.
+-- 
+2.52.0.windows.1
+
