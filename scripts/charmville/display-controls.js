@@ -42,29 +42,45 @@ function bindDisplayNavigation(surface,host,root,readZoom,writeZoom,ready=()=>tr
   writeZoom(readZoom()*Math.exp(-Math.max(-500,Math.min(500,delta))*.002));
  },{passive:false,capture:true});
  const zoomKeys=new Set(['+','=','-','_','0','PageUp','PageDown']);
+ const ownedKeys=new Set();
  const handle=event=>{
+  if(event.type==='keyup'){
+   if(ownedKeys.delete(event.key)){event.preventDefault();event.stopImmediatePropagation();}
+   return;
+  }
   if(blocked()||root.hidden||event.ctrlKey||event.metaKey||event.altKey||!zoomKeys.has(event.key))return;
   if(event.target!==surface&&root.activeElement!==surface)return;
   if(event.target?.tagName&&['INPUT','TEXTAREA','SELECT','BUTTON'].includes(event.target.tagName))return;
   event.preventDefault();event.stopImmediatePropagation();
-  if(event.type==='keyup')return;
+  ownedKeys.add(event.key);
   writeZoom(event.key==='0'?1:readZoom()*(['+','=','PageUp'].includes(event.key)?1.1:1/1.1));
  };
  host.addEventListener('keydown',handle,true);host.addEventListener('keyup',handle,true);
- let pinch=null;
+ host.addEventListener('blur',()=>ownedKeys.clear());
+ let pinch=null,pinchOwned=false;
  const distance=touches=>Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
  surface.addEventListener('touchstart',event=>{
+  if(pinchOwned){event.preventDefault();event.stopImmediatePropagation();}
   if(blocked()||event.touches.length!==2){pinch=null;return;}
+  // Release any native one-finger interaction before taking over both fingers.
+  // If cancellation cannot be represented, retain the native gesture instead.
+  if(typeof TouchEvent!=='function')return;
+  try{surface.dispatchEvent(new TouchEvent('touchcancel',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:event.touches}));}catch{return;}
+  pinchOwned=true;
   pinch={distance:distance(event.touches),zoom:readZoom()};
   event.preventDefault();event.stopImmediatePropagation();
  },{passive:false,capture:true});
  surface.addEventListener('touchmove',event=>{
+  if(pinchOwned){event.preventDefault();event.stopImmediatePropagation();}
   if(blocked()||!pinch||event.touches.length!==2)return;
   const current=distance(event.touches);
   if(pinch.distance>0&&Number.isFinite(current))writeZoom(pinch.zoom*current/pinch.distance);
   event.preventDefault();event.stopImmediatePropagation();
  },{passive:false,capture:true});
- for(const type of ['touchend','touchcancel'])surface.addEventListener(type,()=>{pinch=null;},{passive:false,capture:true});
+ for(const type of ['touchend','touchcancel'])surface.addEventListener(type,event=>{
+  pinch=null;
+  if(pinchOwned){event.preventDefault();event.stopImmediatePropagation();if(!event.touches?.length)pinchOwned=false;}
+ },{passive:false,capture:true});
 }
 // END native display navigation
 // Camera gestures never write CSS size. Only a capable native frame may accept
@@ -72,8 +88,11 @@ function bindDisplayNavigation(surface,host,root,readZoom,writeZoom,ready=()=>tr
 const camera=document.createElement('fieldset');camera.hidden=true;
 camera.innerHTML='<legend>World camera</legend><label>View distance <input aria-label="World camera zoom" type="range" min="50" max="100" step="5" value="100"></label><output aria-live="polite">100%</output><button type="button">Wide view</button><button type="button">Follow view</button><p>Wheel or pinch to see more land. + / − zoom; 0 resets. Window size stays fixed.</p>';
 panel.append(camera);
+const mapButton=document.createElement('button');mapButton.type='button';mapButton.hidden=true;mapButton.textContent='Map overview';panel.append(mapButton);
+const mapHelp=document.createElement('span');mapHelp.hidden=true;mapHelp.textContent='Arrows: pan · Z / X: zoom · Return to world: close';
+mapButton.onclick=()=>{if(window.charmvilleMapReady===true){if(window.charmvilleMapOpen===true)window.charmvilleCloseMap=true;else window.charmvilleOpenMap=true;for(const detail of header.querySelectorAll('details[open]'))detail.open=false;canvas.focus();}};
 const cameraSlider=camera.querySelector('input'),cameraOutput=camera.querySelector('output');
-const cameraReady=()=>window.charmvilleCameraReady===true;
+const cameraReady=()=>window.charmvilleCameraReady===true&&window.charmvilleMapOpen!==true;
 const readCamera=()=>Number.isFinite(window.charmvilleCameraZoom)?window.charmvilleCameraZoom:1;
 function requestCamera(value){
  if(!cameraReady()||!Number.isFinite(value))return;
@@ -84,14 +103,20 @@ cameraSlider.addEventListener('input',()=>requestCamera(Number(cameraSlider.valu
 camera.querySelectorAll('button')[0].onclick=()=>requestCamera(.5);
 camera.querySelectorAll('button')[1].onclick=()=>requestCamera(1);
 bindDisplayNavigation(canvas,window,document,readCamera,requestCamera,cameraReady);
-const cameraStatus=setInterval(()=>{
+const refreshCameraStatus=()=>{
+ mapButton.hidden=window.charmvilleMapReady!==true;
+ if(!mapButton.hidden&&mapButton.parentElement!==header)header.append(mapButton);
+ mapHelp.hidden=window.charmvilleMapOpen!==true;if(!mapHelp.hidden&&mapHelp.parentElement!==header)header.append(mapHelp);
+ mapButton.textContent=window.charmvilleMapOpen===true?'Return to world':'Map overview';
  camera.hidden=!cameraReady();
  if(camera.hidden)return;
  const actual=window.charmvilleCameraActualZoom;
  cameraOutput.textContent=Number.isFinite(actual)?`${Math.round(actual*100)}%`: 'Applying…';
  panel.querySelector('p').textContent='Game size scales the display. World camera changes how much land you see.';
-},250);
-addEventListener('pagehide',()=>clearInterval(cameraStatus),{once:true});
+};
+let cameraStatus=setInterval(refreshCameraStatus,250);
+addEventListener('pagehide',()=>{clearInterval(cameraStatus);cameraStatus=null;});
+addEventListener('pageshow',()=>{if(cameraStatus===null)cameraStatus=setInterval(refreshCameraStatus,250);refreshCameraStatus();});
 panel.querySelectorAll('button')[0].onclick=()=>setZoom(1);
 panel.querySelectorAll('button')[1].onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{output.textContent='Fullscreen unavailable in this browser';}};
 new MutationObserver(fit).observe(canvas,{attributes:true,attributeFilter:['width','height']});

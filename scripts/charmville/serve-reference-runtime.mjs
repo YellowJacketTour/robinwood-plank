@@ -5,7 +5,13 @@ import path from 'node:path';
 import {adventureUrl,diagnosticKits,homesteadUrl} from './adventure-entry.mjs';
 import {midiBankManifest} from './midi-bank.mjs';
 import {encodedStatic} from './static-encoding.mjs';
-const root=path.resolve('../charmville-references/zquest-web-runtime');
+import {fitNativeCanvas} from './native-canvas-layout.mjs';
+const rebuilt=process.argv.includes('--rebuilt');
+const candidateIndex=process.argv.indexOf('--candidate-root');
+const candidateRoot=candidateIndex>=0?process.argv[candidateIndex+1]:null;
+if(candidateIndex>=0&&(!rebuilt||!candidateRoot||candidateRoot.startsWith('--')))throw Error('Candidate root requires --rebuilt and an explicit directory');
+const runtimePort=candidateRoot?3025:(rebuilt?3024:3021);
+const root=path.resolve(candidateRoot||(rebuilt?'../charmville-references/zquest-classic/build_charmville_web/packages/web':'../charmville-references/zquest-web-runtime'));
 const contentRoot=path.resolve('../charmville-references/zquest-quest-snapshots');
 const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ico':'image/x-icon','.ogg':'audio/ogg'};
 const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:3022; worker-src 'self' blob:"};
@@ -16,7 +22,13 @@ http.createServer(async(req,res)=>{
   // The isolated account shell may embed these public reference documents.
   // No account routes, credentials or CORS access are introduced here.
   if(['/charmville/tutorial/','/play/'].includes(url.pathname))res.setHeader('Cross-Origin-Resource-Policy','cross-origin');
-  if(['/tutorial-bridge.js','/runtime-shell.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js','/follower-bridge.js','/action-event-bridge.js','/position-observer.js','/account-peers.js','/resource-bridge.js','/world-encounter.js','/capture-bridge.js'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
+  if(['/tutorial-bridge.js','/runtime-shell.css','/charmdex-device.css','/runtime-shell.mjs','/charmdex.js','/voice-notes.js','/follower-bridge.js','/action-event-bridge.js','/position-observer.js','/account-peers.js','/resource-bridge.js','/world-encounter.js','/capture-bridge.js','/gameplay-video.mjs','/gameplay-capture.mjs','/compact-game-hud.mjs'].includes(url.pathname)){res.writeHead(200,{...headers,'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});res.end(await readFile(new URL('.'+url.pathname,import.meta.url)));return;}
+  if(url.pathname.startsWith('/menu-art/')){
+   const name=url.pathname.slice('/menu-art/'.length);
+   if(!['poke_ball.png','macho_brace.png','berry_pouch.png','vs_seeker.png','coin_case.png','poke_doll.png','retro_mail.png'].includes(name)){res.writeHead(404,headers);res.end();return;}
+   const art=await readFile(path.resolve('public/charmville/reference-items/pokeemerald/graphics/items/icons',name));
+   res.writeHead(200,{...headers,'Content-Type':'image/png'});res.end(art);return;
+  }
   if(url.pathname==='/charmdex-catalog.json'){res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(await readFile('public/charmville/catalog/emoji-catalog.json'));return;}
   if(url.pathname.startsWith('/action-sprites/')){
    const name=url.pathname.slice('/action-sprites/'.length);
@@ -40,7 +52,9 @@ http.createServer(async(req,res)=>{
   if(url.pathname==='/reference-data/manifest.json'){
    const manifest={};
    for(const id of ['139','204','461']){const quest=JSON.parse(await readFile(path.join(contentRoot,`${id}-metadata.json`),'utf8'));manifest[quest.id]={...quest,images:[]};}
-   try{const quest=JSON.parse(await readFile(path.join(contentRoot,'homestead-metadata.json'),'utf8'));manifest[quest.id]=quest;}catch(error){if(error.code!=='ENOENT')throw error;}
+   for(const metadata of ['homestead-metadata.json','region-candidate-metadata.json','joined-homestead-metadata.json']){
+    try{const quest=JSON.parse(await readFile(path.join(contentRoot,metadata),'utf8'));manifest[quest.id]=quest;}catch(error){if(error.code!=='ENOENT')throw error;}
+   }
    res.writeHead(200,{...headers,'Content-Type':'application/json'});res.end(JSON.stringify(manifest));return;
   }
   const content=url.pathname.startsWith('/reference-data/');
@@ -54,8 +68,9 @@ http.createServer(async(req,res)=>{
   // Adapt the web wrapper only; WASM and original quest bytes remain unchanged.
   if(file===path.join(root,'main.js')){
    const original=await readFile(file,'utf8');
-   const adapted=original.replace('dataOrigin:"https://data.zquestclassic.com"','dataOrigin:location.origin+"/reference-data"');
+   let adapted=original.replace(/dataOrigin:\s*"https:\/\/data\.zquestclassic\.com"/,'dataOrigin:location.origin+"/reference-data"');
    if(adapted===original&&!original.includes('dataOrigin:location.origin+"/reference-data"'))throw Error('Unsupported upstream wrapper');
+   if(rebuilt&&process.env.CHARMVILLE_NATIVE_FRAME_CANDIDATE==='1'&&url.searchParams.get('gameFrame')==='1')adapted=fitNativeCanvas(adapted);
    res.writeHead(200,{...headers,'Content-Type':'text/javascript'});res.end(adapted);return;
   }
   if(path.extname(file)==='.html'){
@@ -64,7 +79,7 @@ http.createServer(async(req,res)=>{
     // SDL's suspended-audio fallback fails before a user gesture in this build.
     // Start the unchanged engine after a real click, in the required loader order.
     for(const script of ['main.js','zplayer.data.js','zplayer.js']) html=html.replace(`<script src="../${script}"></script>`,'');
-    html=html.replace('</head>','<link rel="stylesheet" href="/runtime-shell.css"></head>');
+    html=html.replace('</head>','<link rel="stylesheet" href="/runtime-shell.css"><link rel="stylesheet" href="/charmdex-device.css"></head>');
     html=html.replace('</body>',`<script>
      const help=document.createElement('details');
      Object.assign(document.querySelector('header').style,{zIndex:'10001'});
@@ -84,12 +99,12 @@ http.createServer(async(req,res)=>{
         await Promise.all(Array.from({length:6},async()=>{while(cursor<bank.patches.length){const patch=bank.patches[cursor++];const response=await fetch('/timidity/'+patch.name,{signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('MIDI instrument unavailable');const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.byteLength!==patch.bytes)throw Error('Incomplete MIDI instrument');loaded.push({name:patch.name,bytes});start.textContent='Loading instruments '+loaded.length+'/'+bank.patches.length;}}));
         (Module.preRun??=[]).push(()=>{for(const patch of loaded){const target=bank.virtualRoot+'/'+patch.name;FS.mkdirTree(target.slice(0,target.lastIndexOf('/')));FS.writeFile(target,patch.bytes);}for(const directory of new Set(loaded.map(patch=>patch.name.split('/')[0]))){if(!FS.analyzePath('/'+directory).exists)FS.symlink(bank.virtualRoot+'/'+directory,'/'+directory);}console.log('CHARMVILLE_MIDI_BANK_READY '+loaded.length);});
        }
-       if(src==='../zplayer.js' && new URLSearchParams(location.search).get('test')?.includes('/homestead/')){
-        const response=await fetch('/action-sprites/manifest.json');if(!response.ok)throw Error('Sprite manifest unavailable');const assets=await response.json();
-        const loaded=await Promise.all(assets.map(async asset=>{const response=await fetch('/action-sprites/'+asset.name);if(!response.ok)throw Error('Sprite unavailable');return {name:asset.name,bytes:new Uint8Array(await response.arrayBuffer())};}));
-        (Module.preRun??=[]).push(()=>{FS.mkdirTree('/charmville');for(const asset of loaded)FS.writeFile('/charmville/'+asset.name,asset.bytes);});
+       if(src==='../zplayer.js' && ['/homestead/','/homestead-region/'].some(part=>(new URLSearchParams(location.search).get('test')||'').includes(part))){
+        const response=await fetch('/action-sprites/manifest.json?refresh='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error('Sprite manifest unavailable');const assets=await response.json();
+        const loaded=await Promise.all(assets.map(async asset=>{const response=await fetch('/action-sprites/'+asset.name+'?v='+asset.runtimeSha256,{cache:'no-store'});if(!response.ok)throw Error('Sprite unavailable');const bytes=new Uint8Array(await response.arrayBuffer());if(asset.runtimeSha256){const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');if(digest!==asset.runtimeSha256)throw Error('Sprite version mismatch: '+asset.name);}return {name:asset.name,bytes};}));
+        (Module.preRun??=[]).push(()=>{for(const directory of ['/charmville','/Files/Homestead/charmville']){FS.mkdirTree(directory);for(const asset of loaded)FS.writeFile(directory+'/'+asset.name,asset.bytes);}console.log('CHARMVILLE_SPRITE_ASSETS '+loaded.filter(asset=>asset.name.startsWith('berry-')).map(asset=>asset.name+':'+asset.bytes[24]+'bit').join(' '));});
        }
-       await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});
+       await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src==='../main.js'&&${rebuilt}&&(new URLSearchParams(location.search).get('test')||'').includes('/homestead-region/')?src+'?gameFrame=1':src;script.onload=resolve;script.onerror=reject;document.body.append(script);});
       }start.remove();}
       catch{start.textContent='Loading failed â€” reload to retry';}
      },{once:true});
@@ -104,7 +119,7 @@ http.createServer(async(req,res)=>{
   if(compressed){res.end(compressed);return;}
   const stream=createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);
  }catch(error){res.writeHead(404,{...headers,'Content-Type':'text/plain'});res.end(`Reference resource unavailable: ${error.code||'content adapter error'}`);}
-}).listen(3021,'127.0.0.1',()=>console.log('Local reference runtime: http://localhost:3021/play/?open=quests/purezc/139&storage=idb'));
+}).listen(runtimePort,'127.0.0.1',()=>console.log(`Local ${candidateRoot?'candidate':rebuilt?'rebuilt':'reference'} runtime: http://localhost:${runtimePort}/play/`));
 
 
 
