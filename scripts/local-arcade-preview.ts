@@ -9,6 +9,13 @@ import {writePracticeClock} from './lib/practice-clock.js';
 
 const root = resolve('public');
 const provider = new JsonRpcProvider('http://127.0.0.1:8545');
+// hardhat node here mines on a 100ms interval with automine OFF, so a receipt
+// is never available synchronously and every tx.wait() costs one ethers polling
+// cycle -- 4000ms by default. The keeper waits on lock, randomness and settle
+// in sequence, so settlement landed 4-8s after close instead of ~0.5s and the
+// arcade discovered rounds after their own liftoff. anvil automines, so the
+// hosted table never saw this; this makes the dev rig behave the same.
+provider.pollingInterval=250;
 if ((await provider.getNetwork()).chainId !== 31337n) throw new Error('Practice requires chain 31337');
 const manifest = JSON.parse(await readFile(resolve(root, 'arcade/deploy-addresses.local.json'), 'utf8'));
 await writePracticeClock(provider,root,manifest.crash);

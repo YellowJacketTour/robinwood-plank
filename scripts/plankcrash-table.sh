@@ -67,7 +67,7 @@ trap cleanup EXIT INT TERM
 
 listening() { curl --silent --max-time 3 -o /dev/null "http://127.0.0.1:$1/" 2>/dev/null; }
 chain_up() {
-  curl --silent --max-time 3 -X POST "http://127.0.0.1:${anvil_port}" \
+  curl --silent --max-time 10 -X POST "http://127.0.0.1:${anvil_port}" \
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' 2>/dev/null \
     | grep -q '"result"'
@@ -119,8 +119,14 @@ fi
 #     multiplier climbing at a watchable pace and chain time tracking the wall
 #     clock; automine is what makes a bet or a guest funding land instantly.
 #     Without mixed mining, joining took 8.6 SECONDS. With it, 0.23s.
-#   --preserve-historical-states      the gateway reads old blocks; anvil
-#     prunes them by default and answers BlockOutOfRangeError.
+#   NO --preserve-historical-states   it was here because the gateway once
+#     binary-searched old blocks for the deploy; the manifest now carries
+#     deployedAtBlock, so nothing reads deep state. With it on, every 100ms
+#     block kept a full state snapshot: the dump grew from 24MB to 89MB in
+#     minutes, each 10s --state-interval rewrite stalled the RPC past the 3s
+#     health probe, the supervisor declared the chain dead and the table
+#     rebuilt itself every ~3 minutes forever. Bounded state, 60s dumps, and
+#     a 30k-block tx keeper (~50 min of history) keep it flat.
 #   --accounts 20                     the stack uses signers 0-4, 7, 8 and 9;
 #     anvil defaults to 10, leaving no headroom.
 #   --order fifo                      EDR mines in nonce order; anvil defaults
@@ -129,8 +135,8 @@ log "starting anvil"
 "$anvil_bin" \
   --port "$anvil_port" --host 127.0.0.1 --chain-id 31337 \
   --accounts 20 --balance 10000 --order fifo \
-  --state "$state_file" --state-interval 10 \
-  --preserve-historical-states --transaction-block-keeper 100000 \
+  --state "$state_file" --state-interval 60 \
+  --transaction-block-keeper 30000 \
   --block-time 0.1 --mixed-mining --silent \
   >> "$table_dir/anvil.log" 2>&1 &
 anvil_pid=$!
@@ -204,11 +210,14 @@ log "gateway up (pid $gateway_pid)"
 # the flock, and the next minute's cron tick rebuilds everything -- so a crash
 # is self-healing rather than a silent outage.
 log "table up; supervising"
+chain_strikes=0
 while :; do
   sleep 20
-  if ! kill -0 "$anvil_pid" 2>/dev/null || ! chain_up; then
-    log "chain unhealthy; exiting so the next tick rebuilds"; exit 1
-  fi
+  # A state dump can hold the RPC for a few seconds; one slow probe is not a
+  # dead chain. A dead PROCESS is, immediately.
+  if ! kill -0 "$anvil_pid" 2>/dev/null; then log "anvil process died; exiting so the next tick rebuilds"; exit 1; fi
+  if chain_up; then chain_strikes=0; else chain_strikes=$((chain_strikes+1)); log "chain probe failed ($chain_strikes/2)"; fi
+  if [ "$chain_strikes" -ge 2 ]; then log "chain unhealthy; exiting so the next tick rebuilds"; exit 1; fi
   if ! kill -0 "$preview_pid" 2>/dev/null || ! listening "$preview_port"; then
     log "preview unhealthy; exiting so the next tick rebuilds"; exit 1
   fi

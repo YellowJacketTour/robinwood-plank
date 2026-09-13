@@ -2417,7 +2417,9 @@ function frame() {
     document.querySelector(".stage").dataset.altitude = "0.000";
     // The exhaust/altitude sits on the pad (0) and only the gauge fills.
     targetFlightProgress = 0;
-    $("substatus").textContent = secsLeft > 0 ? "Betting open" : "Preparing launch…";
+    // In lead mode the intermission clock owns this line ("Launch in N"); a
+    // frame where it did not run showed a 50ms "Preparing launch…" flicker.
+    if(!publicPresentationLeadMs)$("substatus").textContent = secsLeft > 0 ? "Betting open" : "Preparing launch…";
   }
   if (publicFlightReplay) {
     const replay = publicFlightReplay;
@@ -2431,7 +2433,7 @@ function frame() {
     targetFlightProgress = 1 - 1 / (1 + (multiplier - 1) / 2.5);
     targetVelocityNorm = .18+.82*Math.min(1,Math.max(0,multiplier-1)/20);
     setMultReadout(multiplier.toFixed(2), "live");
-    $("substatus").textContent = replay.preview ? "Flight preview · no wager" : elapsed<1400 ? `Launch in ${Math.max(0,Math.ceil((1400-elapsed)/1000))}` : `Round ${replay.roundId} replay`;
+    $("substatus").textContent = replay.preview ? "Flight preview · no wager" : elapsed<1400 ? (replay.late ? "Ignition…" : `Launch in ${Math.max(0,Math.ceil((1400-elapsed)/1000))}`) : `Round ${replay.roundId} replay`;
     document.querySelector(".stage").dataset.presentation = elapsed<0?"countdown":elapsed<1400?"ignition":"flight";
     document.querySelector(".stage").dataset.altitude = targetFlightProgress.toFixed(3);
     if (flight.complete) { publicFlightReplay = null; phaseState = "crashed"; replay.complete(); }
@@ -4018,11 +4020,18 @@ async function pollScoreboard() {
             // It runs slightly behind the chain's wall clock, which is invisible,
             // where a missing launch is not.
             const anchoredStart = scheduledLiftoff - 1400;
+            // A round discovered AFTER its burn should have begun is late, and the
+            // intermission clock has already counted it down to the real liftoff.
+            // Re-anchoring it to now+1600 replayed a second 3-2-1 -- measured, the
+            // player saw "3,2,1, Verifying launch..." and then "3,2,1" again. So
+            // a late round starts its burn NOW: countdown (already shown) -> the
+            // 1400ms ignition -> flight, with no number restarting.
+            const late = !!publicPresentationLeadMs && !(anchoredStart > performance.now());
             const startedAt = publicPresentationLeadMs
-              ? (anchoredStart > performance.now() ? anchoredStart : performance.now() + 1600)
+              ? (late ? performance.now() : anchoredStart)
               : performance.now() + 1600;
             effectiveLiftoff = startedAt + 1400;
-            const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt, durationMs, complete };
+            const replay={ roundId: rid.toString(), endBps: Number(rd.crashBps), startedAt, durationMs, complete, late };
             timeout = setTimeout(() => { if(publicFlightReplay===replay)publicFlightReplay = null; complete(); },
               Math.max(0, startedAt - performance.now()) + 1400 + durationMs + 4900);
             publicFlightReplay = replay;

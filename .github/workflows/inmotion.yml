@@ -237,7 +237,6 @@ jobs:
           /tmp/foundry/anvil --port 8545 --host 127.0.0.1 --chain-id 31337 \
             --accounts 20 --balance 10000 --order fifo \
             --state /tmp/anvil-live-state.json \
-            --preserve-historical-states \
             --transaction-block-keeper 100000 \
             --block-time 0.1 --mixed-mining --silent &
           for _ in $(seq 1 60); do
@@ -1498,7 +1497,7 @@ jobs:
             echo "[provision] table is live; keeping its existing chain state"
           else
             # Nothing is SERVING, but that does not mean nothing is RUNNING. The
-            # supervisor starts anvil with --state-interval 10, so an anvil that
+            # supervisor starts anvil with --state-interval, so an anvil that
             # failed to load the state and a stale one from an earlier cron tick
             # both keep rewriting this exact file every ten seconds. Copying a
             # fresh seed underneath a live writer is how a 24MB seed became an
