@@ -43,3 +43,28 @@ The local mirror deliberately differs in origin and release identity. Do not pro
 ### Focused test harness correction
 
 The release world-refresh suite now passes all five tests. Its VM harness extracted the real `load` callback but omitted its imported `requestWorldEntry` helper. Supplying that real dependency corrected the four failures without changing gameplay code or weakening assertions. Targeted ESLint also passed. This is not a claim that the full release suite passes; other full-suite issues remain with the root integration lane.
+
+## Authenticated gameplay acceptance update
+
+The root agent subsequently observed the following in the same local protected mirror, using the real account flow and synthetic test content:
+
+- Cold start, home creation and starter creation completed.
+- Prepare → plant → water → harvest completed, and the resulting account state persisted after reload.
+- The Treecko follower sprite rendered in the game world.
+- Menus and fullscreen transitions retained the same running engine through approximately seven minutes of observation.
+- An explicit stamp on the test account's own synthetic post consumed Oran quantity 1 → 0 and produced exactly one receipt.
+- An anonymous request for the protected zplayer asset returned HTTP 401.
+
+These observations supersede the earlier pending list only for these specific paths. They do not establish independent invited-player behavior, population scale, all menu/gameplay features, or uninterrupted long-session operation. The subsequent acceptance record below completes renewal, revocation and candidate correspondence.
+
+Release verification checkpoint: required lint, TypeScript and build checks passed on detached `deb9fa81`. The subsequent origin-helper and PostgreSQL 9.6 compatibility changes at `30671ddb` still require their CI rerun; the older passing build does not validate those newer changes. Use the integration branch's current migration numbering and merged dev history as authoritative. Do not blindly copy or renumber migrations from the older main working checkout.
+
+## Accepted private runtime package
+
+The root agent completed all eight required browser acceptance checks: cold start, movement, farming/harvest, reload persistence, explicit social pinning, timed ticket renewal, anonymous denial and revocation denial. The existing runtime cookie received HTTP 403 after its grant was revoked; the grant was subsequently restored. Renewal was observed on the timed path, extending the earlier same-engine continuity evidence.
+
+The reviewed promotion produced a new private release folder, `charmville-private-release-alpha01-r03`, after verifying candidate correspondence and package hashes. Its inventory SHA-256 is `f5a039ca5d6db9ba3b9a19c27dd95cac266a2975accd7a387c35e09699bf7ff6`; the acceptance receipt SHA-256 is `603eed2d393e69f8174c396586f2faed68a5087c1e880ef13c1e62e73f3d3e59`. This supersedes the pending renewal/revocation and unpromoted-package statements above for this exact accepted package.
+
+**The accepted package is not live.** This is local browser acceptance and artifact promotion, not proof of remote deployment. At this checkpoint, legacy CI checks pass and the new build for `30671ddb` is still running. Remote activation, live health/SHA confirmation and protected-route smoke checks remain release gates.
+
+This bounded alpha acceptance does not claim the entire game vision is complete. Independent guest collaboration, large-scale multiplayer, the full opening narrative, all menus and professions, advanced combat, streaming/theatres and the wider social platform still require their own implementation and acceptance evidence. Preserve those outstanding scopes rather than treating this package milestone as full game completion.
