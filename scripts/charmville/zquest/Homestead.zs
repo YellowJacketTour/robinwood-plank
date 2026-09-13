@@ -537,6 +537,7 @@ global script Active
                 }
                 if(stages[selectedPlot]==4)presentationTask=7;
                 if(resourceMode && resourceReady && !permittedAction && stages[selectedPlot]!=3)presentationTask=8;
+                if(activity<0 && !nearPlot && (presentationTask==1 || presentationTask==2 || presentationTask==3 || presentationTask==7))presentationTask=12;
                 if(resourceMode && !resourceReady)presentationTask=9;
                 else if(resourceMode && pendingReceipt)presentationTask=10;
                 else if(resourceMode && activity>=0 && authorization<0)presentationTask=11;
@@ -554,6 +555,7 @@ global script Active
                 if (stages[selectedPlot]==4) sprintf(line,"E / D: gather your crop");
                 if(resourceMode && stages[selectedPlot]==3){if(resourcePhase[selectedPlot]==0)sprintf(line,"Sprouting... roots take hold");else if(resourcePhase[selectedPlot]==1)sprintf(line,"Growing... branches unfold");else sprintf(line,"Flowering... berries soon");}
                 if(resourceMode && resourceReady && !permittedAction && stages[selectedPlot]!=3)sprintf(line,"Viewing this bed");
+                if(presentationTask==12)sprintf(line,"Move closer to this bed");
                 if(resourceMode && !resourceReady)sprintf(line,"Join a place to tend these beds");
                 else if(resourceMode && pendingReceipt)sprintf(line,"Waiting for the world...");
                 else if(resourceMode && activity>=0 && authorization<0)sprintf(line,"Preparing your action...");

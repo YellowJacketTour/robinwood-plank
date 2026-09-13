@@ -20,7 +20,35 @@ test('leases only visible valid HUD and removes stale readout on invalid native 
  const fs={cwd:()=> '/',readFile:path=>path.endsWith('action-run.txt')?'run':state,writeFile:(...args)=>writes.push(args)};
  const dispose=mountCompactHud(root,{getFS:()=>fs});
  assert.equal(panel.hidden,false);assert.match(task.textContent,/Plant a seed/);assert.equal(writes.length,1);
- state='bad';poll();assert.equal(panel.hidden,true);assert.equal(writes.length,1);
- state='1|2|0|1|0|0|0|0|0|-1|0|0|80|0';poll();assert.equal(panel.hidden,true);assert.equal(writes.length,1);
+ state='1|2|12|1|0|0|0|0|0|-1|0|0|61|1';poll();
+ assert.equal(task.textContent,'Bed 1 · Move closer to this bed');
+ assert.doesNotMatch(task.textContent,/E \/ D|Interact/);
+ const writesAfterMove=writes.length;
+ state='bad';poll();assert.equal(panel.hidden,true);assert.equal(writes.length,writesAfterMove);
+ state='1|2|0|1|0|0|0|0|0|-1|0|0|80|0';poll();assert.equal(panel.hidden,true);assert.equal(writes.length,writesAfterMove);
  dispose();assert.equal(cleared,true);
+});
+
+// Execute the native task-priority statements unchanged; this is not a quest compile.
+test('native proximity guidance preserves permission and pending-state priority',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {runInNewContext}=await import('node:vm');
+ const source=await readFile(new URL('./zquest/Homestead.zs',import.meta.url),'utf8');
+ const start=source.indexOf('if(resourceMode && resourceReady && !permittedAction && stages[selectedPlot]!=3)presentationTask=8;');
+ const end=source.indexOf('if(!presentationAlive)',start);
+ assert.ok(start>=0&&end>start);
+ const statements=source.slice(start,end);
+ const evaluate=overrides=>{
+  const context={resourceMode:true,resourceReady:true,permittedAction:true,stages:[1],selectedPlot:0,activity:-1,nearPlot:false,pendingReceipt:false,authorization:1,presentationTask:2,...overrides};
+  runInNewContext(statements,context);return context.presentationTask;
+ };
+ for(const task of [1,2,3,7])assert.equal(evaluate({presentationTask:task}),12);
+ assert.equal(evaluate({nearPlot:true}),2);
+ assert.equal(evaluate({permittedAction:false}),8);
+ assert.equal(evaluate({resourceReady:false}),9);
+ assert.equal(evaluate({pendingReceipt:true}),10);
+ assert.equal(evaluate({activity:1,authorization:-1}),11);
+ assert.equal(evaluate({presentationTask:4,stages:[3]}),4);
+ assert.equal(evaluate({activity:1}),2);
+ assert.match(source,/if\(presentationTask==12\)sprintf\(line,"Move closer to this bed"\);/);
 });

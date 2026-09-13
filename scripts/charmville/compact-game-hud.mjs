@@ -1,4 +1,4 @@
-const tasks=['','Prepare soil','Plant a seed','Water the seed','Roots are sprouting','Your plant is growing','Berries are flowering','Gather your crop','View this bed','Join a place to grow','Waiting for the world','Preparing your action'];
+const tasks=['','Prepare soil','Plant a seed','Water the seed','Roots are sprouting','Your plant is growing','Berries are flowering','Gather your crop','View this bed','Join a place to grow','Waiting for the world','Preparing your action','Move closer to this bed'];
 
 export function parseCompactHud(text){
  const values=String(text).trim().split('|').map(Number);
