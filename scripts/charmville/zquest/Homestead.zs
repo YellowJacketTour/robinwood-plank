@@ -394,8 +394,6 @@ global script Active
                         tutorialAck=sequence;tutorialAdvance=field(line,2)==welcome;
                     }
                 }
-                file progress=new file("/charmville/tutorial-progress.txt","w");
-                if(progress->isValid()){sprintf(line,"%d|%d|%d",tutorialContext,welcome,tutorialAck);progress->WriteString(line);progress->Close();}
                 if(welcome<2 && farmHere)
                 {
                     Hero->InputUp=false;Hero->InputDown=false;Hero->InputLeft=false;Hero->InputRight=false;
@@ -423,8 +421,13 @@ global script Active
                             introUI->WriteString(presentationText);introUI->Close();
                         }
                     }
+                    // Publish the page and its acknowledgement together after advancing.
+                    file progress=new file("/charmville/tutorial-progress.txt","w");
+                    if(progress->isValid()){sprintf(line,"%d|%d|%d",tutorialContext,welcome,tutorialAck);progress->WriteString(line);progress->Close();}
                     Waitframe();continue;
                 }
+                file progress=new file("/charmville/tutorial-progress.txt","w");
+                if(progress->isValid()){sprintf(line,"%d|%d|%d",tutorialContext,welcome,tutorialAck);progress->WriteString(line);progress->Close();}
                 int reachX=plotCenterX-(Hero->X+8);int reachY=plotCenterY-(Hero->Y+8);
                 // One-tile tools must contact the selected bed, not work from
                 // two tiles away or diagonally beyond the directional sprite.
