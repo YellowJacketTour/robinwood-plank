@@ -27,3 +27,23 @@ test('growth art uses the crop duration and remains valid when timing is unavail
  assert.equal(nativeResourceProjection({...snapshot,beds:[{...bed,readyAt:null}]}).beds[0].growthVisualPhase,0);
  assert.equal(nativeResourceProjection({...snapshot,beds:[{...bed,growthDurationMs:0}]}).beds[0].growthVisualPhase,0);
 });
+
+const heartSnapshot:ResourceSnapshot={...snapshot,protocolVersion:2,beds:[{...snapshot.beds[0],stage:1,cropId:'burning-heart',plantCrops:['oran-berry','burning-heart']}],cropBalances:{'oran-berry':{seeds:'3',produce:'0'},'burning-heart':{seeds:'2',produce:'1'}}};
+test('projection cannot disguise Heart artwork as a legacy Oran bed',()=>{
+ assert.throws(()=>nativeResourceProjection(heartSnapshot),/Update the game/);
+ const p=nativeResourceProjection(heartSnapshot,undefined,0,2);
+ assert.equal(p.protocolVersion,2);assert.equal(p.beds[0].cropId,'burning-heart');
+ assert.deepEqual(p.beds[0].plantCrops,['oran-berry','burning-heart']);assert.equal(p.cropBalances?.['burning-heart'].seeds,2);
+ assert.throws(()=>nativeResourceProjection({...heartSnapshot,cropBalances:{}},undefined,0,2),/balance unavailable/);
+});
+test('only negotiated crop lifecycle forwards the explicit plant identity',async()=>{
+ const calls:Record<string,unknown>[]=[];const sent:Record<string,unknown>[]=[];
+ const options={read:async()=>heartSnapshot,actor:async()=>({sequence:3,regionEpoch:0}),post:async(body:object)=>{calls.push(body as Record<string,unknown>);},send:(body:object)=>sent.push(body as Record<string,unknown>),changed:()=>{},status:()=>{},uuid:()=> 'receipt'};
+ const legacy=createNativeResourceClient(options);
+ await legacy.observe({...event,action:'plant',protocolVersion:2,cropId:'burning-heart'});assert.equal(calls.length,0);assert(sent.some(v=>v.accepted===false));legacy.dispose();
+ const modern=createNativeResourceClient({...options,protocolVersion:()=>2});
+ await modern.observe({...event,action:'plant',protocolVersion:2,cropId:'burning-heart'});
+ assert.equal(calls[0].cropId,'burning-heart');
+ await modern.observe({...event,action:'plant',phase:'contact',sequence:2,protocolVersion:2,cropId:'burning-heart'});
+ assert.deepEqual(calls[1],{phase:'commit',requestId:'receipt'});modern.dispose();
+});
