@@ -216,8 +216,11 @@ const nextConfig: NextConfig = {
       // ES modules that import each other: a 4-hour browser cache left open
       // tabs running one half of a fix. Revalidate (ETag) on every load instead.
       {
-        source: "/arcade/:path*",
-        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+        // no-store (not no-cache): Cloudflare rewrites a no-cache into its 4-hour
+        // browser TTL; a no-store passes through untouched. vendor/ and art/
+        // (MBs of three/rapier/scenes that never change with a fix) stay cached.
+        source: "/arcade/:path((?!vendor/|art/).*)",
+        headers: [{ key: "Cache-Control", value: "no-store, no-cache, must-revalidate, private" }],
       },
       {
         source: "/",

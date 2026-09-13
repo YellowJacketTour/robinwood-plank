@@ -121,6 +121,19 @@ const plank=new Contract(manifest.plank,['function mint(address,uint256)','funct
 const json=(res:any,status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
 async function body(req:IncomingMessage){let data='';for await(const chunk of req){data+=chunk;if(data.length>65536)throw new Error('Request too large');}return JSON.parse(data||'{}');}
 const types:Record<string,string>={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.jpg':'image/jpeg','.webp':'image/webp','.woff2':'font/woff2','.ttf':'font/ttf','.wasm':'application/wasm','.mp3':'audio/mpeg'};
+// Cloudflare hands every /arcade asset a 4-hour browser TTL whatever the origin
+// says, so a table-only deploy reached an open phone hours late, and half-
+// updated (crash.html fresh, its css/js stale). The arcade's own entry links
+// and static imports are stamped with a fingerprint of the deployed files:
+// a new deploy is a new URL, the old cache is simply never asked. vendor/ and
+// art/ never change with a fix and keep their cache.
+const assetStamp=await (async()=>{const {createHash}=await import('node:crypto');const {readdir,stat}=await import('node:fs/promises');const h=createHash('sha256');
+  for(const f of (await readdir(resolve(root,'arcade'))).filter(f=>/\.(js|css|html)$/.test(f)).sort()){const st=await stat(resolve(root,'arcade',f));h.update(f+':'+st.size+':'+Math.floor(st.mtimeMs)+';');}
+  return h.digest('hex').slice(0,10);})();
+const stampAssets=(html:string)=>html
+  .replace(/(href|src)="((?!vendor\/|art\/|https?:)[A-Za-z0-9_./-]+\.(?:js|css))"/g,(_m,attr,file)=>`${attr}="${file}?v=${assetStamp}"`)
+  .replace(/from (['"])\.\/([A-Za-z0-9_./-]+\.js)\1/g,(_m,q,file)=>`from ${q}./${file}?v=${assetStamp}${q}`)
+  .replace(/import\((['"])\.\/([A-Za-z0-9_./-]+\.js)\1\)/g,(_m,q,file)=>`import(${q}./${file}?v=${assetStamp}${q})`);
 const landing=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PlankCrash · Friend test</title><link rel="stylesheet" href="/arcade/pocket-console.css"></head><body style="display:grid;place-items:center;min-height:100svh;color:var(--ink);text-align:center"><main><h1>PLANKCRASH</h1><p id="status">Joining the launch…</p><p>Simulated ETH · no cash value</p><button id="retry" hidden>Try again</button></main><script>
 async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
@@ -238,7 +251,7 @@ createServer(async(req,res)=>{
     const path=resolve(root,'.'+pathname);
     if(!path.startsWith(resolve(root,'arcade')+sep)||!types[extname(path)]||/\.json$/i.test(path)&&!pathname.startsWith('/arcade/abi/')||/\.html$/i.test(path)&&pathname!=='/arcade/crash.html'){json(res,404,{error:'Not found'});return;}
     let data=await readFile(path);
-    if(pathname==='/arcade/crash.html')data=Buffer.from(data.toString().replace('<head>','<head><meta name="plank-invite" content="simulated"><meta name="plank-invite-join" content="'+JOIN_PATH+'"><link rel="stylesheet" href="invite-play.css">'));
+    if(pathname==='/arcade/crash.html')data=Buffer.from(stampAssets(data.toString().replace('<head>','<head><meta name="plank-invite" content="simulated"><meta name="plank-invite-join" content="'+JOIN_PATH+'"><link rel="stylesheet" href="invite-play.css">')));
     res.setHeader('Content-Type',types[extname(path)]);res.end(data);
   }catch{if(!res.headersSent)json(res,400,{error:'Request could not be completed'});else res.end();}
 // Loopback stays mandatory; only the port is configurable, so a supervised
