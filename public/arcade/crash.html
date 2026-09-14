@@ -1163,7 +1163,9 @@ const edgeStateFresh = () => !!edgeState && performance.now() - edgeStateAt < 15
 async function pollEdgeState() {
   try { const r = await fetch("/api/invite/state", { cache: "no-store" }); if (!r.ok) return; const s = await r.json(); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {}
 }
-if (INVITE_TEST) { void pollEdgeState(); setInterval(pollEdgeState, 400); performance.setResourceTimingBufferSize?.(4000); }
+const USE_EDGE_SNAPSHOT = false;
+if (INVITE_TEST && USE_EDGE_SNAPSHOT) { void pollEdgeState(); setInterval(pollEdgeState, 400); }
+if (INVITE_TEST) performance.setResourceTimingBufferSize?.(4000);
 let inviteStartBlock = 0;
 let NUMBERED_LOTTERY = false;
 let FUNDED_CYCLE_LOTTERY = false;
@@ -4525,7 +4527,14 @@ async function refresh() {
     // chain reads per tick per player. The chain path stays for local/testnet
     // and for any tick the feed is stale on (>1.5s), so a dead feed degrades to
     // exactly the old behaviour, never to a frozen table.
-    const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = INVITE_TEST && edgeStateFresh()
+    // The snapshot is read on a different clock than the scoreboard's event
+    // scan, and the two disagreed by a block often enough that a round could be
+    // seen as 'betting' by refresh() before its RoundSettled had been presented
+    // -- the crash card skipped, the countdown re-anchored (owner: 'sometimes a
+    // multiplier card then lottery, other times not'). Both reads now come from
+    // the same chain head again; the gateway's sharedRead already makes that
+    // cheap for every player. The snapshot stays available for the edge design.
+    const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = USE_EDGE_SNAPSHOT && INVITE_TEST && edgeStateFresh()
       ? await readRoundSnapshotFromState(edgeState, readingCrash, readingWallet)
       : await readRoundSnapshot(readingProvider, readingCrash, readingWallet);
     if(publicPresentationLeadMs){
