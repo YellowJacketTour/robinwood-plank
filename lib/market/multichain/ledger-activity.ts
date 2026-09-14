@@ -290,14 +290,46 @@ export async function readLedgerActivity(input: {
   if (!hasPostgresConfig()) return null;
   const contract = input.contractAddress.toLowerCase();
 
-  const result = await postgresQuery<UnionRow>(
-    `SELECT * FROM (${UNION_SQL}) AS unioned
-     -- AUDIT lens 6 #6: block_number is text in the union; text ordering put
-     -- "9999999" above "10000000" and NULL stream rows first forever.
-     ORDER BY COALESCE(block_timestamp, to_timestamp(0)) DESC, block_number::numeric DESC NULLS LAST, log_index DESC
-     LIMIT $3`,
-    [input.chainSlug, contract, input.limit]
-  );
+  // THE FEED AND ITS COVERAGE ARE TWO READS OF THE SAME UNION. RUN THEM AS ONE.
+  //
+  // They were sequential: the feed query, then -- only after every row had
+  // been mapped -- the coverage aggregate. Neither depends on the other; both
+  // take exactly (chainSlug, contract). So the request paid the SUM of two
+  // full passes over eleven ledgers where it owed the MAX of one, and on a
+  // pool capped at PGPOOL_MAX=4 it held a connection for both, back to back.
+  //
+  // This is the read behind /api/market/multichain/activity for every EVM
+  // collection. Measured on production 2026-09-14: BAYC 200 @ 22.6 s, Beezie
+  // on Base 500 @ 22-25 s three times out of three -- the second pass pushed
+  // the request past the 15 s statement_timeout, and the timeout propagated
+  // as a 500. Migration 147 removes the Wyvern sequential scan that made each
+  // pass expensive; this removes the serialisation that doubled it.
+  //
+  // Promise.all rather than allSettled: both reads share one failure posture.
+  // If either cannot complete, the route must not answer with half a picture
+  // -- a feed whose coverage object silently vanished would read as "complete
+  // history, nothing recorded", the exact lie the coverage object exists to
+  // prevent. One rejection fails the whole read, as before.
+  const [result, coverageResult] = await Promise.all([
+    postgresQuery<UnionRow>(
+      `SELECT * FROM (${UNION_SQL}) AS unioned
+       -- AUDIT lens 6 #6: block_number is text in the union; text ordering put
+       -- "9999999" above "10000000" and NULL stream rows first forever.
+       ORDER BY COALESCE(block_timestamp, to_timestamp(0)) DESC, block_number::numeric DESC NULLS LAST, log_index DESC
+       LIMIT $3`,
+      [input.chainSlug, contract, input.limit]
+    ),
+    // Aggregate coverage counted the same way, unioned across all sources --
+    // a second, unlimited pass over the same normalized shape so "how much
+    // real history exists" isn't capped by the row `limit` above.
+    postgresQuery<{ venue_id: string; total: string; timestamped: string; oldest: Date | null; newest: Date | null }>(
+      `SELECT venue_id, COUNT(*)::text AS total, COUNT(block_timestamp)::text AS timestamped,
+              MIN(block_timestamp) AS oldest, MAX(block_timestamp) AS newest
+       FROM (${UNION_SQL}) AS unioned
+       GROUP BY venue_id`,
+      [input.chainSlug, contract]
+    ),
+  ]);
 
   const events = await Promise.all(
     result.rows.map(async (row): Promise<LedgerActivityEvent> => {
@@ -327,17 +359,7 @@ export async function readLedgerActivity(input: {
     })
   );
 
-  // Aggregate coverage counted the same way, unioned across all sources --
-  // a second, unlimited pass over the same normalized shape so "how much
-  // real history exists" isn't capped by the row `limit` above.
-  const coverageResult = await postgresQuery<{ venue_id: string; total: string; timestamped: string; oldest: Date | null; newest: Date | null }>(
-    `SELECT venue_id, COUNT(*)::text AS total, COUNT(block_timestamp)::text AS timestamped,
-            MIN(block_timestamp) AS oldest, MAX(block_timestamp) AS newest
-     FROM (${UNION_SQL}) AS unioned
-     GROUP BY venue_id`,
-    [input.chainSlug, contract]
-  );
-
+  // coverageResult was awaited alongside the feed above.
   const byVenue: Partial<Record<LedgerVenueId, number>> = {};
   let indexedEvents = 0;
   let timestampedEvents = 0;

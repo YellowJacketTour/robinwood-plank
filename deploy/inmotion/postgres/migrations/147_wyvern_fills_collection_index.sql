@@ -1,0 +1,48 @@
+-- plank_wyvern_fills was the one fill table the activity union could not seek.
+--
+-- WHAT RUNS
+-- ---------
+-- lib/market/multichain/ledger-activity.ts unions eleven ledgers for one
+-- collection's activity feed. Every fill-table branch has the same shape:
+--
+--     WHERE chain_slug = $1 AND nft_contract = $2
+--
+-- Eight of the nine fill tables carry a (chain_slug, nft_contract,
+-- block_number DESC) index for exactly that predicate: seaport (023),
+-- looksrare, blur, x2y2 (051), foundation, sudoswap, rarible, and
+-- cryptokitties leads with nft_contract. Wyvern (049) got only
+--
+--     (chain_slug, block_number DESC)
+--     (chain_slug, maker, block_number DESC)
+--
+-- so the branch's only option was to read every Wyvern fill on the chain and
+-- filter by contract. Wyvern is OpenSea's 2018-2022 protocol; on eth-mainnet
+-- the genesis-to-head index is the largest ledger this app holds.
+--
+-- MEASURED (EXPLAIN ANALYZE, BUFFERS; 1.5M seeded Wyvern rows, 5,000
+-- contracts, 30k for the probe collection)
+--
+--     Parallel Seq Scan on plank_wyvern_fills   42,538 buffers   ~57 ms
+--
+-- and the activity route runs the union TWICE per request -- once for the
+-- feed, once for the coverage aggregate -- so that is ~85,000 buffer reads a
+-- request from this one branch, on a shared host with PGPOOL_MAX=4 and a
+-- 15 s statement_timeout. Measured on production 2026-09-14:
+--
+--     eth-mainnet BAYC     200 @ 22.6 s
+--     base-mainnet Beezie  500 @ 22-25 s   (three of three tries)
+--
+-- The 500 is the ledger read exceeding statement_timeout and propagating to
+-- publicError; it is not the OpenSea fallback, which #504 already guarded.
+--
+-- WHY THIS SHAPE
+-- --------------
+-- Identical to the eight siblings: equality on chain_slug and nft_contract,
+-- then block_number DESC so the feed's "newest first" is an index walk rather
+-- than a sort. Plain CREATE INDEX, not CONCURRENTLY -- the migration runner
+-- wraps each file in a transaction and CONCURRENTLY cannot run inside one;
+-- same tradeoff migrations 108, 113 and 115 made, and the writer here is a
+-- bounded-pass backfill worker that retries.
+
+CREATE INDEX IF NOT EXISTS plank_wyvern_fills_collection_idx
+  ON plank_wyvern_fills (chain_slug, nft_contract, block_number DESC);

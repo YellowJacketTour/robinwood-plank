@@ -529,6 +529,37 @@ export async function GET(req: NextRequest) {
       },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    // PRIVATE DIAGNOSTICS, SAME AS THE HUB ROUTE.
+    //
+    // This route 500'd on production for a full day -- Beezie on Base, three
+    // of three tries, 22-25 s each -- and the API could not say why:
+    // publicError logs the real error server-side and returns only the
+    // generic message. The first diagnosis (an OpenSea rate limit, #504)
+    // was reasoned from the code rather than read from the failure, and it
+    // was wrong: the ledger union was exceeding statement_timeout. A route
+    // that cannot report its own failure to the person holding the door
+    // cookie turns every outage into a guess.
+    //
+    // A door/admin-preview holder gets the real failure text; the public
+    // still gets the generic message. Identical to
+    // app/api/market/multichain/route.ts.
+    const { cookies } = await import("next/headers");
+    const { verifyDoorCookieValue, DOOR_COOKIE_NAME } = await import("@/lib/market-preview-door");
+    const { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } = await import("@/lib/market-preview-auth");
+    const jar = await cookies().catch(() => null);
+    const privileged = jar
+      ? verifyDoorCookieValue(jar.get(DOOR_COOKIE_NAME)?.value) || verifyPreviewCookieValue(jar.get(MARKET_PREVIEW_COOKIE_NAME)?.value)
+      : false;
+    if (privileged) {
+      return NextResponse.json(
+        {
+          error: "INTERNAL",
+          message: "Failed to load multichain activity",
+          detail: (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 400),
+        },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      );
+    }
     return publicError(error, "Failed to load multichain activity");
   }
 }
