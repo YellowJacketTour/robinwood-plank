@@ -376,7 +376,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
 
   return <main ref={menuRoot} data-market-shell data-playing={identity?'true':'false'} data-world-tab={tab} className="charm-world min-h-screen bg-wood-950 p-3 text-cream sm:p-5">
     <header className="world-topbar">
-      <div className="world-brand"><span aria-hidden="true" className="world-brand-heart">♥</span><div><h1>CHARMVILLE</h1><p>{identity?(presence?.active?(presence.ownerHandle?'Homestead':'Public meadow'):'Choose your arrival'):'Your adventure awaits'}</p></div></div>
+      <div className="world-brand"><Image unoptimized alt="" aria-hidden="true" className="world-brand-heart" src="/charmville/items/burning-heart.svg" width={32} height={32}/><div><h1>CHARMVILLE</h1><p>{identity?(presence?.active?(presence.ownerHandle?'Homestead':'Public meadow'):'Choose your arrival'):'Your adventure awaits'}</p></div></div>
       <nav aria-label="World shortcuts"><button className={button} aria-label="Open game menu" aria-expanded={menuOpen||tab!=='play'} onClick={()=>{setTab('play');setMenuOpen(value=>!value);}}>Menu <kbd>Enter</kbd></button><button className={button} aria-label="World map" onClick={()=>selectTab('map')}><MenuArt panel="map"/></button><button className={button} aria-label="Toggle fullscreen" aria-pressed={fullscreen} onClick={toggleFullscreen}>⛶</button></nav>
     </header>
     {!identity?<section className="rounded-xl border border-line bg-panel p-5"><h2 className="font-display text-xl">Bring your account into the world</h2><p className="my-3 text-cream-muted">Sign in with your approved PlankSpace profile. Your saved inventory stays with your account.</p><button className={button} disabled={busy} onClick={enter}>{busy?"Signing in…":"Connect and sign in"}</button><Link className="ml-4 text-gold-300" href="/charmville/start">Create or finish your profile</Link></section>:
@@ -429,4 +429,5 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     {message&&<p role="status" className="mt-4 rounded-xl border border-line bg-panel p-4">{message}</p>}
   </main>;
 }
+
 

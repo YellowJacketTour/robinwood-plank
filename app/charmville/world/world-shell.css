@@ -129,3 +129,6 @@
 .charm-world .world-topbar { height:52px; min-height:52px; }
 .charm-world .world-topbar button,.charm-world .world-menu-heading button,.world-start-menu header button { min-height:44px; min-width:44px; }
 .world-start-menu header button { height:44px; }
+
+.charm-world .world-topbar .world-brand-heart { width:32px; height:32px; image-rendering:pixelated; flex-shrink:0; }
+
