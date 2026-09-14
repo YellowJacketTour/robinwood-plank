@@ -20,6 +20,8 @@ export type MeshCell =
 
 export type MeshSource =
   | "rolling-stats"
+  /** The activity feed's coverage count, off the request path (activity-coverage.ts). Subject jobs only. */
+  | "activity-coverage"
   | "opensea-stats"
   | "opensea-bulk"
   | "coingecko-nft"
