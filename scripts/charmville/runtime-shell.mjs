@@ -12,7 +12,7 @@ import {mountGameplayVideo} from './gameplay-video.mjs';
 import {mountCompactHud} from './compact-game-hud.mjs';
 let accountOrigin=null,captureAvailable=false;
 async function returnToAccountMenus(panel='inventory'){
-  if(!['inventory','companions','exchange','friends','social'].includes(panel))return;
+  if(!['menu','inventory','companions','exchange','friends','social'].includes(panel))return;
   if(window.parent===window){window.open('http://localhost:3017/charmville/world?panel='+panel,'_blank','noopener');return;}
   if(document.fullscreenElement)try{await document.exitFullscreen();}catch{/* The parent also checks its iframe fullscreen state. */}
   if(accountOrigin)window.parent.postMessage({type:'charmville:account-menu',panel},accountOrigin);
@@ -49,6 +49,7 @@ function openUnifiedMenu(){
   unifiedMenu.querySelector('[data-capture-reason]').hidden=captureAvailable;
   unifiedMenu.querySelector('[data-destination="gear"]').disabled=Boolean(document.querySelector('button.charm-runtime-enter'));
   for(const [key,code] of [['ArrowUp',38],['ArrowDown',40],['ArrowLeft',37],['ArrowRight',39],['z',90],['x',88],['d',68],['c',67],['q',81],['w',87],['Enter',13]])nativeKey(key,code,false);
+  if(accountOrigin&&window.parent!==window&&document.body.classList.contains('charm-hosted')){void returnToAccountMenus('menu');return;}
   const remembered=unifiedMenu.querySelector('[data-preview="true"]:not(:disabled)')||unifiedMenu.querySelector('button:not(:disabled)');
   unifiedMenu.showModal();remembered.focus();
 }
