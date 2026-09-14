@@ -163,6 +163,18 @@ function mountEquipmentReadout(root, settingsBody) {
   window.addEventListener('pagehide', () => clearInterval(timer), { once: true });
 }
 /* Presentation adapter only. All native controls and their event hooks survive. */
+/** Call only after the existing parent/origin handshake; never infer account mode
+ * from iframe placement alone. Idempotent refresh avoids recurring canvas resize. */
+export function compactHostedShell(root) {
+  if(root.body.classList.contains('charm-hosted'))return false;
+  root.body.classList.add('charm-hosted');
+  const menu=root.querySelector('.charm-account-menu');
+  if(menu)menu.textContent='Game menu';
+  const summary=root.querySelector('.charm-runtime-settings > summary');
+  if(summary)summary.textContent='Controls & settings';
+  root.defaultView?.dispatchEvent(new Event('resize'));
+  return true;
+}
 export function mountRuntimeShell(root = document) {
   const header = root.querySelector('header');
   const buttons = header?.querySelector('.panel-buttons');
@@ -177,6 +189,7 @@ export function mountRuntimeShell(root = document) {
     : '<strong>Charmville</strong><span>Explore, grow and play together</span>';
   header.prepend(brand);
   const accountMenu=root.createElement('button');accountMenu.type='button';accountMenu.textContent='Game menus';accountMenu.title='Account inventory, companions, exchange and friends';
+  accountMenu.className='charm-account-menu';
   accountMenu.style.background='var(--color-gold-500)';accountMenu.style.color='var(--color-on-gold)';accountMenu.onclick=openUnifiedMenu;
   brand.after(accountMenu);
   const fullscreenMenu=accountMenu.cloneNode(true);fullscreenMenu.onclick=openUnifiedMenu;root.querySelector('.charm-cinema-tools')?.prepend(fullscreenMenu);
@@ -203,7 +216,7 @@ export function mountRuntimeShell(root = document) {
   }
   const help = root.createElement('details');
   help.className = 'charm-runtime-help';
-  help.innerHTML = '<summary>Field guide · Controls</summary><div class="charm-runtime-controls"><p>Default keyboard controls. Use the game’s native menu to change keys.</p><dl><div data-kind="move"><dt>Explore</dt><dd><kbd>Arrow keys</kbd> Move</dd></div><div data-kind="combat"><dt>Adventure</dt><dd><kbd>Z</kbd> Sword · hold and release to spin<br><kbd>X</kbd> Equipped item</dd></div><div data-kind="grow"><dt>Homestead</dt><dd><kbd>D</kbd> Work the garden when nearby</dd></div><div data-kind="power"><dt>Power</dt><dd><kbd>T</kbd> Toggle aura</dd></div><div><dt>Equipment</dt><dd><kbd>Enter</kbd> Game menu · Gear opens adventure equipment<br><kbd>Q</kbd> / <kbd>W</kbd> Cycle items</dd></div></dl><p>On touchscreens, use the on-screen buttons. Display changes how the game fits the screen; Controller changes gamepad buttons. Camera zoom is still in development.</p><p>The town includes NPCs. The in-game Guests count shows other connected guests on your screen; it is not a public player count.</p></div>';
+  help.innerHTML = '<summary>Field guide · Controls</summary><div class="charm-runtime-controls"><p>Default keyboard controls. Use the game’s native menu to change keys.</p><dl><div data-kind="move"><dt>Explore</dt><dd><kbd>Arrow keys</kbd> Move</dd></div><div data-kind="combat"><dt>Adventure</dt><dd><kbd>Z</kbd> Sword · hold and release to spin<br><kbd>X</kbd> Equipped item</dd></div><div data-kind="grow"><dt>Homestead</dt><dd><kbd>E</kbd> Work the garden when nearby</dd></div><div data-kind="power"><dt>Power</dt><dd><kbd>T</kbd> Toggle aura</dd></div><div><dt>Equipment</dt><dd><kbd>Enter</kbd> Game menu · Gear opens adventure equipment<br><kbd>Q</kbd> / <kbd>W</kbd> Cycle items</dd></div></dl><p>On touchscreens, use the on-screen buttons. Display changes how the game fits the screen; Controller changes gamepad buttons. On the live world camera, WASD pans, wheel or pinch zooms, and 0 returns to your player.</p><p>The town includes NPCs. The in-game Guests count shows other connected guests on your screen; it is not a public player count.</p></div>';
   header.append(help);
   // Keep advanced runtime controls reachable without consuming the play area.
   const settings = root.createElement('details');
@@ -242,7 +255,7 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   const request = event.data;
   if (!request) return;
   if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;const reason=button.querySelector('[data-capture-reason]');if(reason)reason.hidden=captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
-  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;return;}
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
   if (!['charmdex', 'voice'].includes(request.panel)) return;
