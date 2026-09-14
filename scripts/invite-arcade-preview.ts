@@ -159,6 +159,16 @@ function sharedRead(method:string,params:unknown[],head:number):Promise<unknown>
   if(sharedReads.size>4000){for(const [k,v] of sharedReads)if(now-v.at>SHARED_READ_TTL_MS)sharedReads.delete(k);}
   return value;
 }
+// Keeper snapshot, shared by every /state read and every /feed stream within
+// a 100 ms window so N tabs cost the keeper one HTTP read per block.
+let keeperStateCache:{at:number,value:Promise<string>}|null=null;
+function keeperState():Promise<string>{
+  const now=Date.now();
+  if(keeperStateCache&&now-keeperStateCache.at<100)return keeperStateCache.value;
+  const value=fetch('http://127.0.0.1:8765/api/state',{signal:AbortSignal.timeout(2000)}).then(r=>r.text());
+  keeperStateCache={at:now,value};value.catch(()=>{keeperStateCache=null;});
+  return value;
+}
 const landing=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PlankCrash · Friend test</title><link rel="stylesheet" href="/arcade/pocket-console.css"></head><body style="display:grid;place-items:center;min-height:100svh;color:var(--ink);text-align:center"><main><h1>PLANKCRASH</h1><p id="status">Joining the launch…</p><p>Simulated ETH · no cash value</p><button id="retry" hidden>Try again</button></main><script>
 async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
@@ -239,6 +249,19 @@ createServer(async(req,res)=>{
     if(!guest && url.pathname!=='/arcade/pocket-console.css'){json(res,401,{error:'Invite session required'});return;}
     if(guest&&url.pathname==='/'&&req.method==='GET'){res.writeHead(302,{Location:TABLE_PATH}).end();return;}
     if(url.pathname==='/api/invite/clock'&&req.method==='GET'){json(res,200,{nowMs:Date.now()});return;}
+    // The keeper's round snapshot, one JSON per read and one SSE stream per
+    // tab: a phone follows the table on a single connection instead of 2.5
+    // RPC batches a second. Per-player fields (stake/target) stay on RPC.
+    if(url.pathname==='/api/invite/state'&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(await keeperState());return;}
+    if(url.pathname==='/api/invite/feed'&&req.method==='GET'){
+      const NL=String.fromCharCode(10);
+      res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
+      res.write('retry: 1500'+NL+NL);
+      let last='';let alive=true;req.on('close',()=>{alive=false;});
+      const pump=async()=>{while(alive){try{const s=await keeperState();if(s!==last){last=s;res.write('event: state'+NL+'data: '+s+NL+NL);}}catch{}await new Promise(r=>setTimeout(r,150));}};
+      const beat=setInterval(()=>{if(alive)res.write(': keepalive'+NL+NL);else clearInterval(beat);},15000);
+      void pump();return;
+    }
     if(url.pathname==='/api/invite/session'&&req.method==='GET'&&guest){
       // The arcade reads the session on every load and only POSTs join on a
       // 401 -- so after a table rebuild a returning tab never reached the

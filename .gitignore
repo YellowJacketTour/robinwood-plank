@@ -125,3 +125,6 @@ work/
 # Local Charmville diagnostics; durable verification is recorded in the handoff.
 .charmville-*.log
 .charmville-*-lint.json
+
+# staged edge assets (built by edge/plankcrash-edge/build.mjs)
+edge/plankcrash-edge/dist/

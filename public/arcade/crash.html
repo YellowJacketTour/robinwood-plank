@@ -1107,7 +1107,7 @@ import { mountLotteryMachine } from "./lottery-machine-3d.js";
 import * as THREE from "three";
 import { createFlightPlume } from "./flight-plume.js";
 import { advanceFlightMotion } from "./flight-motion.js";
-import { readRoundSnapshot, netRoundRake } from "./chain-snapshot.js";
+import { readRoundSnapshot, readRoundSnapshotFromState, netRoundRake } from "./chain-snapshot.js";
 import { publicFlightDuration, publicFlightAt, canCommitPublicRound, canRepeatPublicRound } from "./public-round-clock.js";
 import { CRASH_FINALE_MS, REDUCED_CRASH_FINALE_MS } from "./presentation-timing.js";
 import { settledReturn } from "./settled-return.js";
@@ -1155,6 +1155,21 @@ function setChainAction(stage, details = {}) {
 // static hosting) this silently keeps the hardcoded values -- never blocks
 // page load either way.
 const INVITE_TEST = document.querySelector('meta[name="plank-invite"]')?.content === 'simulated';
+let edgeState = null, edgeStateAt = 0, edgeFeed = null;
+const edgeStateFresh = () => !!edgeState && performance.now() - edgeStateAt < 1500;
+function connectEdgeFeed() {
+  if (!INVITE_TEST || edgeFeed || typeof EventSource === "undefined") return;
+  try {
+    edgeFeed = new EventSource("/api/invite/feed");
+    edgeFeed.addEventListener("state", (e) => { try { const s = JSON.parse(e.data); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {} });
+    edgeFeed.onerror = () => { /* EventSource retries by itself; the JSON poll below covers the gap */ };
+  } catch { edgeFeed = null; }
+}
+async function pollEdgeState() {
+  if (!INVITE_TEST || edgeStateFresh()) return;
+  try { const r = await fetch("/api/invite/state", { cache: "no-store" }); const s = await r.json(); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {}
+}
+if (INVITE_TEST) { connectEdgeFeed(); setInterval(pollEdgeState, 400); }
 let inviteStartBlock = 0;
 let NUMBERED_LOTTERY = false;
 let FUNDED_CYCLE_LOTTERY = false;
@@ -4512,7 +4527,13 @@ async function refresh() {
   roundRefreshBusy = true;
   const readingCrash = crash, readingProvider = provider, readingWallet = signer?.address || null;
   try {
-    const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = await readRoundSnapshot(readingProvider, readingCrash, readingWallet);
+    // Hosted table: one shared snapshot (SSE, JSON fallback) replaces the five
+    // chain reads per tick per player. The chain path stays for local/testnet
+    // and for any tick the feed is stale on (>1.5s), so a dead feed degrades to
+    // exactly the old behaviour, never to a frozen table.
+    const {roundId, round, blockNum, chainNow, seats, stake, target: myTarget} = INVITE_TEST && edgeStateFresh()
+      ? await readRoundSnapshotFromState(edgeState, readingCrash, readingWallet)
+      : await readRoundSnapshot(readingProvider, readingCrash, readingWallet);
     if(publicPresentationLeadMs){
       // The chain can have a deliberate epoch offset, and -- what this used to
       // miss -- that offset can CHANGE while a tab is open: every restart of the

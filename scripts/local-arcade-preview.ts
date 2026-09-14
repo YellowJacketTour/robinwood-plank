@@ -29,6 +29,10 @@ createServer(async (req,res) => {
   try {
     const url = new URL(req.url || '/', 'http://127.0.0.1:8765');
     res.setHeader('Cache-Control','no-store');
+    // One round snapshot for every player: the keeper already reads the head
+    // block and the current round each tick, so the table's N browsers read
+    // this JSON instead of ~20 eth_calls each through four hops.
+    if(url.pathname === '/api/state') { res.setHeader('Content-Type','application/json'); res.end(latestStateJson); return; }
     if(url.pathname === '/api/market/eth-price') {
       const p=await getEthUsdPrice();res.setHeader('Content-Type','application/json');
       res.end(JSON.stringify({ethUsd:p.usd||null,source:p.source,ageMs:Number.isFinite(p.ageMs)?p.ageMs:null}));return;
@@ -38,11 +42,27 @@ createServer(async (req,res) => {
     const data=await readFile(path);res.setHeader('Content-Type',types[extname(path)]||'application/octet-stream');res.end(data);
   } catch {res.writeHead(404).end('Not found');}
 }).listen(8765,'127.0.0.1',()=>console.log('Practice: http://127.0.0.1:8765/arcade/crash.html (test funds only)'));
+// Serialised round snapshot (BigInt -> decimal string, addresses/hashes stay 0x
+// strings); the arcade rebuilds BigInts client-side. Published every tick.
+let latestStateJson='{"ready":false}';
+const bigToJson=(_k:string,v:unknown)=>typeof v==='bigint'?v.toString():v;
+const isIndexKey=(k:string)=>k.length>0&&[...k].every(c=>c>='0'&&c<='9');
+async function publishState(id:bigint,round:any,block:{number:number,hash:string|null,timestamp:number}){
+  try{
+    const seatCount=await game.seatCount(id,{blockTag:block.number});
+    const fields:Record<string,unknown>={};
+    const obj=typeof round?.toObject==='function'?round.toObject():round;
+    for(const [k,v] of Object.entries(obj))if(!isIndexKey(k))fields[k]=v;
+    latestStateJson=JSON.stringify({ready:true,blockNum:block.number,blockHash:block.hash,chainNow:block.timestamp,roundId:id,round:fields,seatCount,publishedAtMs:Date.now()},bigToJson);
+  }catch(err){console.error('Practice state:',err instanceof Error?err.message:String(err));}
+}
 for (;;) {
   try {
     // A disclosed simulated seat keeps the unattended free-test show running.
     // It follows the real contract rules and is never enabled on a real chain.
-    const id=await game.currentRoundId(),round=await game.rounds(id),now=BigInt((await provider.getBlock('latest'))!.timestamp);
+    const head=(await provider.getBlock('latest'))!;
+    const id=await game.currentRoundId({blockTag:head.number}),round=await game.rounds(id,{blockTag:head.number}),now=BigInt(head.timestamp);
+    void publishState(id,round,{number:head.number,hash:head.hash,timestamp:head.timestamp});
     if(manifest.testRig&&Number(round.phase)===0&&now<round.bettingEndsAt&&now>=round.bettingEndsAt-10n&&await game.seatCount(id)===0n){
       // At the bare minimum stake the crew's contribution rounds to zero and no
       // lottery draw is ever funded: spectators saw 'No funded draw this round'

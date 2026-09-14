@@ -1,0 +1,23 @@
+{
+  // PlankCrash edge: Astra's arcade served as Cloudflare Workers static assets
+  // (free, unmetered, HTTP/3 + Brotli at the edge) on plank.love/arcade/*.
+  // Passenger/Next on the shared host no longer serve a single arcade byte.
+  // The gateway-owned paths (crash.html/table.html, the guest manifest, the
+  // practice clock, /api/invite/*) pass through to origin unchanged.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "plankcrash-edge",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-28",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "none",
+    "html_handling": "none"
+  },
+  "routes": [
+    { "pattern": "plank.love/arcade/*", "zone_name": "plank.love" }
+  ],
+  "workers_dev": false,
+  "observability": { "enabled": true }
+}
