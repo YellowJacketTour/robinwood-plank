@@ -1,4 +1,5 @@
 import { observedFloorChanges24h, floorSubjectKey } from "@/lib/market/multichain/observed-floor-change";
+import { floorChangeStatusFor } from "@/lib/market/multichain/window-activity";
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshotsPage } from "@/lib/market/multichain/store";
@@ -293,11 +294,7 @@ async function buildHubIndex(req: Request) {
       holderCount: nativeHolders,
       floorChangePct: nativeFloorChange?.changePct ?? null,
       floorChangeEvidence: nativeFloorChange,
-      floorChangeStatus: nativeFloorChange
-        ? "observed-24h"
-        : nativeFloor != null
-          ? "collecting-baseline"
-          : null,
+      floorChangeStatus: floorChangeStatusFor(nativeFloorChange, nativeFloor != null),
       isNativeHome: true,
       primaryVenue: primaryVenueForCollection("robinhood", "marketplank"),
     };
@@ -445,7 +442,7 @@ async function buildHubIndex(req: Request) {
         // comparison or the previous refresh is not a 24-hour floor history.
         floorChangePct: floorChange?.changePct ?? null,
         floorChangeEvidence: floorChange ?? null,
-        floorChangeStatus: floorChange ? "observed-24h" : c.floorPriceWei ? "collecting-baseline" : null,
+        floorChangeStatus: floorChangeStatusFor(floorChange, c.floorPriceWei != null),
         isNativeHome: false,
         // Real venue-registry lookup (Issue 4, inline completeness UX --
         // see docs/marketplank/GROK-FINDINGS-biggest-issues-unified-

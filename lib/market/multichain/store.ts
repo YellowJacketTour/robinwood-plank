@@ -797,6 +797,10 @@ export type FloorChangeObservation = {
   currentObservedAt: string;
   comparisonObservedAt: string;
   changePct: number;
+  /** "24h": the comparison is at least 24 hours old. "first-observation": the
+   * whole observed history is younger than 24h and the comparison is its
+   * earliest row -- a real change over a shorter, stated span. */
+  basis: "24h" | "first-observation";
 };
 
 /** Persist an exact executable floor without confusing it with a sale price. */
@@ -1001,7 +1005,16 @@ export async function writeSnapshot(
     // the floor; (c) a null floor from a source that never owned the floor
     // (DAS, a supply-only adapter) leaves floor columns and the miss count
     // alone, exactly as before.
-    `INSERT INTO plank_multichain_snapshots
+    // 2026-09-14: this writer -- the one behind every adapter floor (sync,
+    // EVM log scan, OpenSea bulk scan, Helius) -- never recorded a floor
+    // observation, so plank_collection_floor_observations held rows only for
+    // the OpenSea stream, CryptoPunks and the home collection, and the 24h
+    // change could never form for anything else. The observation is now
+    // written in the SAME statement, from the floor as finally stored (the
+    // RETURNING row, after the miss/clear CASEs), so the displayed floor and
+    // the latest observation cannot disagree. One round trip, as before.
+    `WITH snap AS (
+     INSERT INTO plank_multichain_snapshots
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error,
         floor_observed_at, floor_miss_count)
      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL, CASE WHEN $8::boolean THEN NOW() ELSE NULL END, 0)
@@ -1050,7 +1063,20 @@ export async function writeSnapshot(
          ELSE plank_multichain_snapshots.previous_floor_price_wei
        END,
        synced_at = NOW(),
-       sync_error = NULL`,
+       sync_error = NULL
+     RETURNING collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, listed_count
+     )
+     INSERT INTO plank_collection_floor_observations (collection_id, price_atomic, currency, marketplace, listed_count, source)
+     SELECT collection_id, floor_price_wei::numeric, floor_price_currency, floor_price_marketplace, listed_count, 'write-snapshot'
+       FROM snap
+      WHERE $8::boolean AND floor_price_wei IS NOT NULL AND floor_price_wei::numeric > 0
+        AND floor_price_currency IS NOT NULL AND floor_price_marketplace IS NOT NULL
+     ON CONFLICT (collection_id, marketplace, observation_bucket) DO UPDATE SET
+       price_atomic = EXCLUDED.price_atomic,
+       currency = EXCLUDED.currency,
+       listed_count = EXCLUDED.listed_count,
+       source = EXCLUDED.source,
+       observed_at = NOW()`,
     [
       collectionId,
       nonzeroWei(snapshot.floorPriceWei),
