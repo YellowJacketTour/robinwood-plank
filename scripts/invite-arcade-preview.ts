@@ -214,6 +214,16 @@ createServer(async(req,res)=>{
     if(!guest && url.pathname!=='/arcade/pocket-console.css'){json(res,401,{error:'Invite session required'});return;}
     if(guest&&url.pathname==='/'&&req.method==='GET'){res.writeHead(302,{Location:TABLE_PATH}).end();return;}
     if(url.pathname==='/api/invite/clock'&&req.method==='GET'){json(res,200,{nowMs:Date.now()});return;}
+    if(url.pathname==='/api/invite/session'&&req.method==='GET'&&guest){
+      // The arcade reads the session on every load and only POSTs join on a
+      // 401 -- so after a table rebuild a returning tab never reached the
+      // rejoin top-up above and sat at 0.0000 (measured 2026-09-13). Same
+      // rule here: below the floor, or no PLANK, is funded like a first join.
+      const g=guest;
+      try{const [eth,plankBal]=await Promise.all([rpc.getBalance(g.address),plank.balanceOf(g.address).catch(()=>0n)]);
+        if(eth<refillFloor||plankBal===0n){const topUp=funding.then(async()=>{if(eth<refillFloor)await(await funder.sendTransaction({to:g.address,value:guestGrant})).wait();if(plankBal===0n)await(await plank.mint(g.address,parseEther('5000'))).wait();});funding=topUp.catch(()=>{});await topUp;g.refilled=Date.now();void persistSessions();}
+      }catch{/* the session still answers; the dock's Refill remains the manual path */}
+    }
     if(url.pathname==='/api/invite/session'&&req.method==='GET'){
       json(res,200,{address:guest!.address,key:guest!.key,invite:token,simulated:true});return;
     }
