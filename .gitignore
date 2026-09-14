@@ -128,3 +128,4 @@ work/
 
 # staged edge assets (built by edge/plankcrash-edge/build.mjs)
 edge/plankcrash-edge/dist/
+hardhat.table.config.ts

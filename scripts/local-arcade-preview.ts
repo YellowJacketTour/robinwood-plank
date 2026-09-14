@@ -8,7 +8,8 @@ import { getEthUsdPrice } from '../lib/eth-price.js';
 import {writePracticeClock} from './lib/practice-clock.js';
 
 const root = resolve('public');
-const provider = new JsonRpcProvider('http://127.0.0.1:8545');
+// PLANK_PRACTICE_RPC_URL: the table's own anvil when 8545 is taken (workstation host).
+const provider = new JsonRpcProvider(process.env.PLANK_PRACTICE_RPC_URL?.trim() || 'http://127.0.0.1:8545');
 // hardhat node here mines on a 100ms interval with automine OFF, so a receipt
 // is never available synchronously and every tx.wait() costs one ethers polling
 // cycle -- 4000ms by default. The keeper waits on lock, randomness and settle
