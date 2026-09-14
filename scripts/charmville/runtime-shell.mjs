@@ -274,7 +274,7 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   const request = event.data;
   if (!request) return;
   if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;const reason=button.querySelector('[data-capture-reason]');if(reason)reason.hidden=captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
-  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);return;}
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);window.parent.postMessage({type:'charmville:menu-capabilities',panels:['gear','map','settings']},accountOrigin);return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
   if (!['charmdex', 'voice','gear','map','settings'].includes(request.panel)) return;
