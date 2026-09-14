@@ -1155,21 +1155,25 @@ function setChainAction(stage, details = {}) {
 // static hosting) this silently keeps the hardcoded values -- never blocks
 // page load either way.
 const INVITE_TEST = document.querySelector('meta[name="plank-invite"]')?.content === 'simulated';
-let edgeState = null, edgeStateAt = 0, edgeFeed = null;
+let edgeState = null, edgeStateAt = 0;
 const edgeStateFresh = () => !!edgeState && performance.now() - edgeStateAt < 1500;
-function connectEdgeFeed() {
-  if (!INVITE_TEST || edgeFeed || typeof EventSource === "undefined") return;
-  try {
-    edgeFeed = new EventSource("/api/invite/feed");
-    edgeFeed.addEventListener("state", (e) => { try { const s = JSON.parse(e.data); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {} });
-    edgeFeed.onerror = () => { /* EventSource retries by itself; the JSON poll below covers the gap */ };
-  } catch { edgeFeed = null; }
+// One held request per tab: the gateway answers the moment the round-relevant
+// part of the snapshot changes (or after 8 s), so a phone follows the table
+// with ~1 request/second and ~100 ms discovery. SSE was tried first and never
+// flushed through the site's rewrite proxy; a held request works everywhere.
+async function runEdgeLongPoll() {
+  let since = "", failures = 0;
+  while (INVITE_TEST) {
+    try {
+      const r = await fetch("/api/invite/state?wait=1&since=" + encodeURIComponent(since), { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const s = await r.json();
+      if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); }
+      since = r.headers.get("X-State-Signature") || since; failures = 0;
+    } catch { failures++; await new Promise(res => setTimeout(res, Math.min(4000, 300 * failures))); }
+  }
 }
-async function pollEdgeState() {
-  if (!INVITE_TEST || edgeStateFresh()) return;
-  try { const r = await fetch("/api/invite/state", { cache: "no-store" }); const s = await r.json(); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {}
-}
-if (INVITE_TEST) { connectEdgeFeed(); setInterval(pollEdgeState, 400); }
+if (INVITE_TEST) { void runEdgeLongPoll(); performance.setResourceTimingBufferSize?.(4000); }
 let inviteStartBlock = 0;
 let NUMBERED_LOTTERY = false;
 let FUNDED_CYCLE_LOTTERY = false;

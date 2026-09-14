@@ -159,6 +159,11 @@ function sharedRead(method:string,params:unknown[],head:number):Promise<unknown>
   if(sharedReads.size>4000){for(const [k,v] of sharedReads)if(now-v.at>SHARED_READ_TTL_MS)sharedReads.delete(k);}
   return value;
 }
+// What a waiting tab cares about: round, phase, seats, the chain second and
+// the pool. The head block advances every 100 ms and is deliberately excluded.
+function stateSignature(body:string):string{
+  try{const s=JSON.parse(body);if(!s?.ready)return 'not-ready';const r=s.round||{};return [s.roundId,r.phase,s.seatCount,s.chainNow,r.playerPool,r.crashBps,r.bettingEndsAt].join('|');}catch{return 'bad';}
+}
 // Keeper snapshot, shared by every /state read and every /feed stream within
 // a 100 ms window so N tabs cost the keeper one HTTP read per block.
 let keeperStateCache:{at:number,value:Promise<string>}|null=null;
@@ -252,7 +257,17 @@ createServer(async(req,res)=>{
     // The keeper's round snapshot, one JSON per read and one SSE stream per
     // tab: a phone follows the table on a single connection instead of 2.5
     // RPC batches a second. Per-player fields (stake/target) stay on RPC.
-    if(url.pathname==='/api/invite/state'&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(await keeperState());return;}
+    if(url.pathname==='/api/invite/state'&&req.method==='GET'){
+      // Long-poll variant: ?wait=1&since=<signature> holds the request (up to
+      // 8 s) until the round-relevant part of the snapshot changes. Measured:
+      // SSE never flushes through the site's rewrite proxy (0 bytes in 12 s),
+      // while a held request streams nothing and works through every proxy.
+      // A tab makes ~1 request per second and sees a change within ~100 ms.
+      const wait=url.searchParams.get('wait')==='1';const since=url.searchParams.get('since')||'';
+      let body=await keeperState();
+      if(wait){const until=Date.now()+8000;while(stateSignature(body)===since&&Date.now()<until&&!req.destroyed){await new Promise(r=>setTimeout(r,100));body=await keeperState();}}
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-State-Signature':stateSignature(body)});res.end(body);return;
+    }
     if(url.pathname==='/api/invite/feed'&&req.method==='GET'){
       const NL=String.fromCharCode(10);
       res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
