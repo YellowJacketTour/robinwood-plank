@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "burning-heart.warmth",
+  "itemDefinition": "burning-heart",
+  "master": {
+    "path": "/charmville/items/burning-heart.svg",
+    "sha256": "11ee70a1d40140b65a203e25ef15e95cfd8b3ef78d76bf0e3df36c8ca63601ed"
+  },
+  "animated": {
+    "path": "/charmville/stickers/burning-heart.svg",
+    "sha256": "2715ace575bf534cff72ac6d6ec3186dba326a8521ab99041943b7edc6acafbf",
+    "format": "image/svg+xml",
+    "cycleMs": 3200,
+    "maximumTranslationPixels": 1,
+    "minimumOpacity": 0.9
+  },
+  "staticFallback": "/charmville/items/burning-heart.svg",
+  "reducedMotion": "prefers-reduced-motion: reduce disables all animation",
+  "source": "Charmville original artwork",
+  "message": "Christian love, generosity and conviction rooted in Christ and the gospels; a little love grown and freely given.",
+  "authority": "presentation-only",
+  "usage": "Opt-in social sticker presentation. Does not mint, consume, transfer or pin an item.",
+  "acceptance": {
+    "sourceSilhouettePreserved": true,
+    "browserPlaybackReviewed": false,
+    "allGameAnimationsComplete": false
+  }
+}
