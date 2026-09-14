@@ -180,11 +180,15 @@ const FEED_INDEXES = [
   ["plank_sudoswap_fills_feed_idx", "(chain_slug, nft_contract, block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC)"],
   ["plank_rarible_fills_feed_idx", "(chain_slug, nft_contract, block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC)"],
   ["plank_cryptokitties_fills_feed_idx", "(chain_slug, nft_contract, block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC)"],
-  ["plank_market_events_feed_idx", "(chain_slug, lower(collection_key), block_timestamp DESC NULLS LAST, block_number DESC NULLS LAST, event_index DESC)"],
-  ["plank_market_events_stream_feed_idx", "(chain_slug, lower(collection_key), block_timestamp DESC NULLS LAST, sub_index DESC) WHERE (venue_id = 'opensea-stream'::text)"],
+  // plank_market_events deliberately has NO feed index in 148. CREATE INDEX
+  // on it needs a SHARE lock, which the notification-maintenance lock
+  // (SHARE UPDATE EXCLUSIVE, held by another role) refuses -- the
+  // notification-migration-integration test proved a must-apply migration
+  // cannot touch that table. Its two branches stay exact (same ORDER BY) and
+  // sort what they read today, until the runner's deferral is generalised.
 ] as const;
 
-test("migration 148 created all eleven sort-covering indexes with the exact key", SKIP, async () => {
+test("migration 148 created all nine fill-table sort-covering indexes with the exact key", SKIP, async () => {
   const r = await postgresQuery<{ indexname: string; indexdef: string }>(
     `SELECT indexname, indexdef FROM pg_indexes WHERE indexname LIKE '%\\_feed\\_idx'`
   );

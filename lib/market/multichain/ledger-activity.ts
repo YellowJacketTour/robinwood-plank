@@ -250,11 +250,20 @@ export const UNION_SQL = `
  * With the exact key: BAYC 0/0, Beezie 0/0. `block_timestamp DESC NULLS LAST`
  * is the same order as `COALESCE(block_timestamp, epoch) DESC` for every real
  * timestamp, and unlike the COALESCE expression it is indexable -- migration
- * 148 gives every branch an index of exactly this shape, which is what lets
- * the planner stop after N rows instead of reading the collection's history
- * and sorting it. Production is PostgreSQL 9.6: without the tie-break column
- * IN the index there is no incremental sort to fall back on, and the branch
- * would read every row.
+ * 148 gives each of the nine FILL branches an index of exactly this shape,
+ * which is what lets the planner stop after N rows instead of reading the
+ * collection's history and sorting it. Production is PostgreSQL 9.6: without
+ * the tie-break column IN the index there is no incremental sort to fall
+ * back on, and the branch reads every row.
+ *
+ * The two plank_market_events branches have NO such index yet. CREATE INDEX
+ * on that table needs a SHARE lock, which the notification-maintenance lock
+ * another role holds (SHARE UPDATE EXCLUSIVE) refuses; a must-apply
+ * migration cannot take it, and the notification-migration-integration test
+ * proved that before it reached production. Those two branches keep the
+ * exact key -- so the feed stays exact -- and read what they read today,
+ * then sort. Strictly no worse than before; the index is a cost question,
+ * never a correctness one. See migration 148's header.
  *
  * The parenthesised subselects are required: ORDER BY / LIMIT inside a
  * UNION ALL member is only legal in that form.

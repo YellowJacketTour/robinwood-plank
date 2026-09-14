@@ -66,6 +66,27 @@
 --
 -- Plain CREATE INDEX, not CONCURRENTLY: the migration runner wraps each file
 -- in a transaction. Same tradeoff as 108, 113, 115 and 147.
+--
+-- WHY plank_market_events IS NOT IN THIS FILE
+-- -------------------------------------------
+-- The two market_events branches of the feed (wallet transfers and the
+-- OpenSea stream) want the same treatment, and a first draft of this file
+-- gave it to them. It failed test/market/notification-migration-integration
+-- .test.ts in CI and locally: that test holds plank_market_events in SHARE
+-- UPDATE EXCLUSIVE mode -- the lock another role's notification maintenance
+-- holds in production -- and asserts every migration after 110 still
+-- installs. CREATE INDEX needs SHARE, which that lock refuses, so the runner
+-- waited on lock_timeout and the deploy would have failed outright.
+--
+-- That is the runner's `--defer-locked-notifications` mechanism telling the
+-- truth: a migration that must succeed during maintenance cannot take a lock
+-- on that table. The market_events indexes therefore need the deferral
+-- mechanism generalised to index migrations, with the test taught to accept
+-- a deferrable migration reported PENDING. That is a separate change; until
+-- it lands the two market_events branches read exactly what they read today
+-- and sort it, while the nine fill branches below read 50 rows each. Strictly
+-- better than before, never worse, and the feed's exactness does not depend
+-- on any index -- only its cost does.
 
 -- Nine fill ledgers. block_number is NOT NULL on every fill table.
 CREATE INDEX IF NOT EXISTS plank_seaport_fills_feed_idx
@@ -86,18 +107,3 @@ CREATE INDEX IF NOT EXISTS plank_rarible_fills_feed_idx
   ON plank_rarible_fills (chain_slug, nft_contract, block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC);
 CREATE INDEX IF NOT EXISTS plank_cryptokitties_fills_feed_idx
   ON plank_cryptokitties_fills (chain_slug, nft_contract, block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC);
-
--- The transfer/mint branch of plank_market_events. block_number is nullable
--- here (stream-venue transfers carry none), hence NULLS LAST on it as well.
--- event_type is filtered during the ordered scan, not placed in the key: an
--- IN-list in the key would need two scans merged, which loses the index
--- order on 9.6.
-CREATE INDEX IF NOT EXISTS plank_market_events_feed_idx
-  ON plank_market_events (chain_slug, lower(collection_key), block_timestamp DESC NULLS LAST, block_number DESC NULLS LAST, event_index DESC);
-
--- The OpenSea-stream sale branch: its tie-break is sub_index, so it needs
--- its own key. Partial, because stream rows are tiny by construction -- they
--- exist only until the on-chain fill indexer catches the same transaction.
-CREATE INDEX IF NOT EXISTS plank_market_events_stream_feed_idx
-  ON plank_market_events (chain_slug, lower(collection_key), block_timestamp DESC NULLS LAST, sub_index DESC)
-  WHERE venue_id = 'opensea-stream';
