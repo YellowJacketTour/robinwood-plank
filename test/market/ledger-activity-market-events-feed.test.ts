@@ -12,15 +12,17 @@ import { hasPostgresConfig, postgresQuery } from "../../lib/postgres";
  * walks them without a Sort node, and they are partial on exactly the branch
  * predicate so they cannot serve a row the branch would not return.
  *
- * ledger-activity.ts imports `server-only`; its SQL is read from source text.
+ * The feed SQL is read from ledger-union-sql.ts as source text.
  */
 const SKIP = { skip: !hasPostgresConfig() };
-const SRC = readFileSync("lib/market/multichain/ledger-activity.ts", "utf8");
+// The SQL lives in ledger-union-sql.ts (no `server-only`) since the coverage
+// count moved to the worker; the feed text is read from there.
+const SRC = readFileSync("lib/market/multichain/ledger-union-sql.ts", "utf8");
 const MIGRATION = readFileSync("deploy/inmotion/postgres/migrations/149_market_events_feed_indexes.sql", "utf8");
 
 function sqlConstant(name: string): string {
   const start = SRC.indexOf(`export const ${name} = \``);
-  assert.ok(start >= 0, `${name} not found in ledger-activity.ts`);
+  assert.ok(start >= 0, `${name} not found in ledger-union-sql.ts`);
   const end = SRC.indexOf("`;", start);
   return SRC.slice(start, end);
 }

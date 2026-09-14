@@ -108,17 +108,10 @@ test("the planner uses the index for the union's Wyvern predicate", SKIP, async 
 
 // --- 2. the concurrency -----------------------------------------------------
 
-test("the feed and coverage reads are issued as one Promise.all", () => {
-  assert.match(
-    LEDGER_SRC,
-    /const \[result, coverageResult\] = await Promise\.all\(\[/,
-    "the two full passes over the union must be one awaited group"
-  );
-});
-
 /**
  * The function body is sliced from its `export` to the NEXT `export`, not to
- * the next `\n}`. The first version used `[\s\S]*?\n\}` and stopped at the
+ * the next newline-brace. The first version used a lazy match to the first
+ * newline-brace and stopped at the
  * first NESTED closing brace -- a mutation that awaited a query directly
  * before the group sat outside the truncated slice and SURVIVED. Same trap
  * this repo has hit before: a test reading a smaller region than it claims.
@@ -131,68 +124,37 @@ function readLedgerActivityBody(): string {
   return next >= 0 ? LEDGER_SRC.slice(start, start + 1 + next) : LEDGER_SRC.slice(start);
 }
 
-test("neither read is awaited separately before the group", () => {
-  // The regression: someone re-inlines `const coverageResult = await
-  // postgresQuery(...)` after the feed and the stage silently serialises.
-  const fn = readLedgerActivityBody();
-  assert.match(fn, /Promise\.all\(\[/, "the body slice must reach the group, or this test measures nothing");
-  const awaitedQueries = [...fn.matchAll(/= await postgresQuery</g)].length;
-  assert.equal(
-    awaitedQueries,
-    0,
-    `found ${awaitedQueries} directly-awaited postgresQuery in readLedgerActivity -- both must go through the Promise.all`
-  );
-});
-
 /**
- * The concurrency contract, driven. The real function cannot be handed a
- * fake pool, so the exact composition is exercised against a probe -- with
- * the SEQUENTIAL shape as a control, because without it the assertion could
- * not tell the two apart and would prove nothing.
+ * #508 issued the feed and the coverage COUNT as one Promise.all so neither
+ * serialised the other. On production's 167M-row plank_market_events the
+ * COUNT alone exceeded the 15 s statement_timeout, so the pair still
+ * answered 500 (BAYC, Beezie, Azuki, 2026-09-14, with the bounded feed
+ * live). The count now runs in the mesh worker and the request path reads
+ * it from the durable KV: exactly ONE query here, the bounded feed, and no
+ * Promise.all to reason about. activity-coverage.test.ts holds the rest.
  */
-test("Promise.all issues both before either completes; the sequential control does not", async () => {
-  const started: string[] = [];
-  const finished: string[] = [];
-  const read = (name: string, ms: number) => async () => {
-    started.push(name);
-    await new Promise((r) => setTimeout(r, ms));
-    finished.push(name);
-    return name;
-  };
-  await Promise.all([read("feed", 30)(), read("coverage", 10)()]);
-  assert.deepEqual(finished, ["coverage", "feed"], "parallel completes in DURATION order");
-
-  const s2: string[] = [];
-  const f2: string[] = [];
-  const seq = (name: string, ms: number) => async () => {
-    s2.push(name);
-    await new Promise((r) => setTimeout(r, ms));
-    f2.push(name);
-  };
-  await seq("feed", 30)();
-  await seq("coverage", 10)();
-  assert.deepEqual(f2, ["feed", "coverage"], "sequential completes in ISSUE order -- the shapes are distinguishable");
+test("the request path is one bounded feed query; the coverage count is not awaited here", () => {
+  const fn = readLedgerActivityBody();
+  assert.equal([...fn.matchAll(/postgresQuery</g)].length, 1, "one query: the feed");
+  assert.match(fn, /= await postgresQuery<UnionRow>\(/, "the feed is awaited directly -- there is nothing to group it with");
+  assert.doesNotMatch(fn, /Promise\.all\(\[\s*postgresQuery/, "no second pass over the union");
+  assert.doesNotMatch(fn, /coverageResult/, "the count result no longer exists on this path");
+  assert.match(fn, /readActivityCoverage\(/);
 });
 
-test("one failure still fails the whole read -- coverage must never silently vanish", async () => {
-  // Promise.all, not allSettled. A feed whose coverage object disappeared
-  // would render as "complete history, nothing recorded" -- the lie the
-  // coverage object exists to prevent.
-  await assert.rejects(
-    () => Promise.all([Promise.resolve([]), Promise.reject(new Error("canceling statement due to statement timeout"))]),
-    /statement timeout/
-  );
-  assert.match(LEDGER_SRC, /Promise\.all\(\[\s*postgresQuery<UnionRow>/, "must be Promise.all, not allSettled");
-  // Match the CALL, not the word: the body's own comment says "Promise.all
-  // rather than allSettled", and a bare /allSettled/ read that prose as code.
-  assert.doesNotMatch(
-    readLedgerActivityBody(),
-    /Promise\.allSettled\(/,
-    "allSettled would let a timed-out coverage read pass as an empty one"
-  );
+test("a failed feed read still fails the whole read -- never half a page", () => {
+  const fn = readLedgerActivityBody();
+  // The feed statement: from `postgresQuery<UnionRow>(` to its terminating
+  // `;`. No `.catch` may sit on it -- a swallowed timeout would answer with
+  // an empty page presented as the truth.
+  const at = fn.indexOf("postgresQuery<UnionRow>(");
+  assert.ok(at >= 0);
+  // To the call's closing `\n  );` -- not the first `;`, which sits inside a
+  // SQL comment ("text in the union; text ordering ...").
+  const statement = fn.slice(at, fn.indexOf("\n  );", at));
+  assert.doesNotMatch(statement, /\.catch\(/, "the feed query's rejection propagates");
+  assert.match(statement, /LIMIT \$3/, "the slice reached the whole statement");
 });
-
-// --- 3. the diagnostics -----------------------------------------------------
 
 test("the activity route reports the real failure to a door holder", () => {
   const outerCatch = /\} catch \(error\) \{[\s\S]*?publicError\(error, "Failed to load multichain activity"\);\s*\}\s*\}\s*$/.exec(ROUTE_SRC)?.[0] ?? "";
