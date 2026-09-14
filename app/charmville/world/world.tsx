@@ -16,6 +16,7 @@ import FirstSteps from "./first-steps";
 import {useTutorialBridge} from "./tutorial-bridge";
 import HomePermissions from "../start/home-permissions";
 import FriendsTravelPanel from "./friends-panel";
+import ItemDex from "./item-dex";
 import {useMenuGamepad} from "./use-menu-gamepad";
 import {attachLocalPlaytestWallet} from "@/lib/charmville/local-playtest-client";
 import InventoryPanel from "./inventory-panel";
@@ -36,9 +37,9 @@ import {requestWorldEntry} from "@/lib/charmville/world-entry-client";
 type Presence = { profileId:string; regionId:string; ownerHandle:string|null; revision:string; expiresAt:string;
   active:boolean; peers:Array<{profileId:string;handle:string}>; reason:string|null };
 type Session = { identity:GameIdentity; token:string };
-const tabs=[['play','Play'],['companions','Party'],['inventory','Bag'],['exchange','Exchange'],['friends','Friends'],['social','Social'],['journal','Journal'],['map','Map'],['settings','Options'],['workshop','Workshop']] as const;
+const tabs=[['play','Play'],['companions','Party'],['inventory','Bag'],['dex','Dex'],['exchange','Exchange'],['friends','Co-op'],['social','Social'],['journal','Journal'],['map','Map'],['settings','Options'],['workshop','Workshop']] as const;
 type WorldTab=typeof tabs[number][0];
-const menuArt:Record<WorldTab,string>={play:'bicycle',companions:'poke_ball',inventory:'berry_pouch',exchange:'coin_case',friends:'harbor_mail',social:'heart',journal:'retro_mail',map:'town_map',settings:'devon_scope',workshop:'mech_mail'};
+const menuArt:Record<WorldTab,string>={play:'bicycle',companions:'poke_ball',inventory:'berry_pouch',dex:'pokeblock_case',exchange:'coin_case',friends:'harbor_mail',social:'heart',journal:'retro_mail',map:'town_map',settings:'devon_scope',workshop:'mech_mail'};
 function MenuArt({panel}:{panel:WorldTab}){return <Image unoptimized alt="" width={32} height={32} src={panel==='social'?'/charmville/items/burning-heart.svg':panel==='inventory'?'/charmville/items/satchel.svg':`/charmville/reference-items/pokeemerald/graphics/items/icons/${menuArt[panel]}.png`}/>;}
 const button = "min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 
@@ -63,6 +64,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   const [camera,setCamera]=useState(false);
   const [fullscreen,setFullscreen]=useState(false);
   const [tab,setTab]=useState<WorldTab>('play');
+  const [coopPage,setCoopPage]=useState<'travel'|'invitations'>('travel');
   const [menuOpen,setMenuOpen]=useState(false);
   const [nativePanels,setNativePanels]=useState<string[]>([]);
   const selectTab=useCallback((next:WorldTab)=>{setMenuOpen(false);setTab(next);},[]);
@@ -411,12 +413,14 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
         <header className="world-menu-heading"><div><MenuArt panel={tab}/><h2>{tabs.find(([id])=>id===tab)?.[1]}</h2></div><button className={button} onClick={returnToPlay}>Close <kbd>Esc</kbd></button></header>
         <nav className="world-pocket-rail" role="tablist" aria-label="Game and account">{tabs.map(([id,label],index)=><button key={id} id={`tab-${id}`} role="tab" aria-selected={tab===id} aria-controls={`panel-${id}`} tabIndex={tab===id?0:-1} title={label} onClick={()=>selectTab(id)} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else return;event.preventDefault();selectTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}><MenuArt panel={id}/><span>{label}</span></button>)}</nav>
         <div id="panel-journal" role="tabpanel" aria-labelledby="tab-journal" hidden={tab!=='journal'}>    {sessionToken&&<div className="world-journal"><FirstSteps onPlay={returnToPlay} inventory={inventory} onOpenFreshSatchel={async()=>{if(!await load())throw Error('Your Satchel could not be refreshed. Try again.');setTab('inventory');}} onSatchel={()=>setTab('inventory')} onExchange={()=>setTab('exchange')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}:${journeyRevision}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></div>}</div>
+        <div id="panel-dex" role="tabpanel" aria-labelledby="tab-dex" hidden={tab!=='dex'}><ItemDex active={tab==='dex'}/></div>
         <div id="panel-map" role="tabpanel" aria-labelledby="tab-map" hidden={tab!=='map'}>{nativePanels.includes('map')&&<button className={button} onClick={()=>openPanel('map')}>Open live world camera</button>}<RegionMap state={regionMap}/></div>
-        <div id="panel-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden={tab!=='workshop'}><ContributionPanel/></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={tab!=='settings'} className="world-options"><ControlGuide/>{tab==='settings'&&process.env.NODE_ENV!=='production'&&<GameplayVideoCheck token={sessionToken} getCanvas={()=>{try{const doc=frame.current?.contentDocument;if(!doc||doc.querySelector('.charm-runtime-enter')||doc.documentElement.classList.contains('charm-arrival-pending'))return null;return doc.querySelector('canvas');}catch{return null;}}}/>} {nativePanels.includes('settings')&&<button className={button} onClick={()=>openPanel('settings')}>Adventure controls & sound</button>}{sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}<button className={button} onClick={toggleFullscreen}>Toggle fullscreen</button><button className={button} onClick={()=>openPanel('voice')}>Voice note</button><button className={button} onClick={()=>openPanel('charmdex')}>Discover charms</button><Link className={button} href="/plankspace">Open PlankSpace</Link><p>{resourceStatus||movementStatus}</p><p>{tutorialStatus}</p></div>
+        <div id="panel-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden={tab!=='workshop'}><ContributionPanel/></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={tab!=='settings'} className="world-options"><ControlGuide/>{tab==='settings'&&process.env.NODE_ENV!=='production'&&<GameplayVideoCheck token={sessionToken} getCanvas={()=>{try{const doc=frame.current?.contentDocument;if(!doc||doc.querySelector('.charm-runtime-enter')||doc.documentElement.classList.contains('charm-arrival-pending'))return null;return doc.querySelector('canvas');}catch{return null;}}}/>} {nativePanels.includes('settings')&&<button className={button} onClick={()=>openPanel('settings')}>Adventure controls & sound</button>}{sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}<button className={button} onClick={toggleFullscreen}>Toggle fullscreen</button><button className={button} onClick={()=>openPanel('voice')}>Voice note</button><button className={button} onClick={()=>selectTab('dex')}>Discover items</button><Link className={button} href="/plankspace">Open PlankSpace</Link><p>{resourceStatus||movementStatus}</p><p>{tutorialStatus}</p></div>
         <div id="panel-social" role="tabpanel" aria-labelledby="tab-social" hidden={tab!=='social'}>{sessionToken&&<SocialPanel key={identity.profileId} token={sessionToken} active={tab==='social'} onPinned={()=>void load()}/>}</div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
-        <FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>
-        {address&&tab==='friends'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
+        <div className="world-coop-pages" aria-label="Co-op pages"><button className={button} aria-pressed={coopPage==='travel'} onClick={()=>setCoopPage('travel')}>Travel together</button><button className={button} aria-pressed={coopPage==='invitations'} onClick={()=>setCoopPage('invitations')}>My invitations</button></div>
+        {coopPage==='travel'&&<FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>}
+        {address&&tab==='friends'&&coopPage==='invitations'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>
         <div id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden={tab!=='inventory'}>

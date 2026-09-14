@@ -43,11 +43,14 @@ export default function GameplayVideoCheck({getCanvas, token}: {getCanvas: () =>
     const run: Run = {closed: false, clients: [], capture: null, tracks: [], timeout: null, sample: null, frameCallback: null};
     current.current = run; setActiveToken(token); setFrames(0); setDecoded(null); setStatus('Connecting two admitted local sessions…');
     const fail = (reason: string) => {if (current.current === run) stop(reason);};
+    let stage: 'capture' | 'publisher' | 'receiver' | 'publication' | 'subscription' = 'capture';
     run.timeout = setTimeout(() => fail('The 60-second local check finished. Capture and peer connections are stopped.'), 60000);
     try {
       run.capture = captureGameplay(canvas, {frameRate: 15, onStop: () => fail('Game capture ended or rendering was interrupted.')});
+      stage = 'publisher';
       const owner = await createGameplayBroadcastClient({url: 'ws://127.0.0.1:3035/broadcast', token, onEnded: () => fail('Local publication ended.'), onError: () => fail('Local media negotiation failed.')});
       if (run.closed) {owner.close(); return;} run.clients.push(owner);
+      stage = 'receiver';
       const receiver = await createGameplayBroadcastClient({url: 'ws://127.0.0.1:3035/broadcast', token,
         onEnded: () => fail('Local viewing authorization ended.'), onError: () => fail('Local media negotiation failed.'),
         onTrack: (_id, track) => {
@@ -73,11 +76,22 @@ export default function GameplayVideoCheck({getCanvas, token}: {getCanvas: () =>
         },
       });
       if (run.closed) {receiver.close(); return;} run.clients.push(receiver);
+      stage = 'publication';
       const publicationId = await owner.publish(run.capture.stream);
       if (run.closed) return;
+      stage = 'subscription';
       await receiver.subscribe(publicationId);
       if (!run.closed) setStatus('Connected. Waiting for the first received video frame…');
-    } catch {fail('Local video check could not connect. Confirm that the admitted development signaling gateway is running on port 3035.');}
+    } catch {
+      const failures = {
+        capture: 'The game canvas could not be captured. No other screen was shared. Start the game and check canvas capture support.',
+        publisher: 'Publisher sign-in or signaling failed. Check local admission, browser connection policy and the gateway on port 3035.',
+        receiver: 'The receiving session could not authenticate. Check local admission and the development signaling gateway.',
+        publication: 'The gateway could not start this publication. A previous publication may still be active or admission may have changed.',
+        subscription: 'The receiving session could not join this publication. Check current viewing permission and media connection support.',
+      };
+      fail(failures[stage]);
+    }
   }
 
   if (process.env.NODE_ENV === 'production') return null;
