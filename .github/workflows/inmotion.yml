@@ -2048,8 +2048,7 @@ jobs:
           ps -o pid=,rss=,args= -u "$me" | awk '$2>700000 && /node/ && !/plankcrash|next-server|passenger|anvil/ {print $1}' | xargs -r kill -KILL 2>/dev/null || true
           echo "== after: $(ps -o rss= -u "$me" | awk '{s+=$1} END {printf "%.0f MB, %d procs", s/1024, NR}')"
           touch "$app_dir/current/tmp/restart.txt" 2>/dev/null || true
-          for i in 1 2 3; do sleep 15; printf 'home %s table %s%s' "$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: Mozilla/5.0' https://plank.love/)" "$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: Mozilla/5.0' https://plank.love/table)" "$(printf '
-')"; done
+          for i in 1 2 3; do sleep 15; h="$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" https://plank.love/)"; t="$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" https://plank.love/table)"; echo "home $h table $t"; done
           REMOTE
           }
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if run_remote; then exit 0; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done; exit 1
