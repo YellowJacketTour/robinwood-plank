@@ -368,3 +368,12 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
   .lottery-prize-summary>div{flex:0 1 auto;min-width:0;text-align:left}
   .lottery-prize-summary .lottery-amount{white-space:nowrap;font-size:22px}
 }
+
+/* Phones: the Game tools drawer is a full-width sheet. Its containing block is
+   the menu toggle near the right edge, so an absolute 358px-wide drawer ran
+   30px off the LEFT of a 390px screen and every line was clipped ("AME TOOLS",
+   "OOL 0.000 ETH") -- measured 2026-09-14. Fixed to the viewport instead. */
+@media(max-width:540px){
+  body .console-drawer{position:fixed;left:max(10px,env(safe-area-inset-left));right:max(10px,env(safe-area-inset-right));top:max(66px,env(safe-area-inset-top));width:auto;max-width:none;max-height:calc(100dvh - 80px - env(safe-area-inset-top) - env(safe-area-inset-bottom));padding:14px 14px 18px;box-sizing:border-box;z-index:60}
+  body .console-drawer .live-board,body .console-drawer .scoreboard{margin:10px 0}
+}
