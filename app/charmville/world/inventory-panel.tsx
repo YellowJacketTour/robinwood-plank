@@ -16,6 +16,8 @@ export default function InventoryPanel({inventory,busy,onSetup,onRefresh}:{inven
  const selected=rows.find(stack=>stack.face===selection[pocket])??rows[0]??null;
  const artwork=selected?itemArt(selected.face):undefined;
  const focusRow=(index:number)=>root.current?.querySelectorAll<HTMLButtonElement>('[data-bag-row]')[index]?.focus();
+ const focusPocket=()=>root.current?.querySelector<HTMLButtonElement>(`[data-pocket="${pocket}"]`)?.focus();
+ const focusRefresh=()=>{const refresh=root.current?.querySelector<HTMLButtonElement>('[data-bag-refresh]');if(refresh&&!refresh.disabled)refresh.focus();else focusPocket();};
  const switchPocket=(next:Pocket,focusItems=false)=>{
   setPocket(next);
   requestAnimationFrame(()=>{
@@ -29,6 +31,8 @@ export default function InventoryPanel({inventory,busy,onSetup,onRefresh}:{inven
   if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End'].includes(key))return;
   event.preventDefault();event.stopPropagation();
   if(key==='ArrowLeft'||key==='ArrowRight'){switchPocket(pocket==='charms'?'seeds':'charms',true);return;}
+  if(key==='ArrowUp'&&index===0){focusPocket();return;}
+  if(key==='ArrowDown'&&index===rows.length-1){focusRefresh();return;}
   const next=key==='Home'?0:key==='End'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(key==='ArrowDown'?1:-1)));
   focusRow(next);
  };
@@ -42,7 +46,7 @@ export default function InventoryPanel({inventory,busy,onSetup,onRefresh}:{inven
     {pockets.map(({id,label})=><button key={id} type="button" id={`${uid}-${id}`} role="tab" data-pocket={id} aria-selected={pocket===id} aria-controls={`${uid}-contents`} tabIndex={pocket===id?0:-1} onClick={()=>setPocket(id)} onKeyDown={event=>{
      if(event.altKey||event.ctrlKey||event.metaKey)return;
      if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();event.stopPropagation();switchPocket(event.key==='Home'?'charms':event.key==='End'?'seeds':pocket==='charms'?'seeds':'charms');}
-     else if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();focusRow(Math.max(0,rows.findIndex(row=>row.face===selected?.face)));}
+     else if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();if(rows.length)focusRow(Math.max(0,rows.findIndex(row=>row.face===selected?.face)));else focusRefresh();}
     }}><span aria-hidden="true">{id==='charms'?'◆':'❧'}</span>{label}</button>)}
    </div>
    <div className={styles.body} id={`${uid}-contents`} role="tabpanel" aria-labelledby={`${uid}-${pocket}`}>
@@ -67,6 +71,6 @@ export default function InventoryPanel({inventory,busy,onSetup,onRefresh}:{inven
     {selected&&<span className={styles.owned}>{selected.qty}<small>owned</small></span>}
    </div>
   </>:<div className={styles.setup}><p>Set up your home to start collecting supplies and charms.</p><button type="button" className={styles.button} onClick={onSetup}>Open Party setup</button></div>}
-  <footer className={styles.footer}><p><span>↑↓</span> Choose <span>←→</span> Pocket · Inspecting uses nothing</p><button type="button" className={styles.button} disabled={busy} onClick={onRefresh}>{busy?'Refreshing…':'Refresh'}</button></footer>
+  <footer className={styles.footer}><p><span>↑↓</span> Choose <span>←→</span> Pocket · Inspecting uses nothing</p><button type="button" className={styles.button} data-bag-refresh disabled={busy} onKeyDown={event=>{if(event.key==='ArrowUp'&&!event.altKey&&!event.ctrlKey&&!event.metaKey){event.preventDefault();event.stopPropagation();if(rows.length)focusRow(rows.length-1);else focusPocket();}}} onClick={onRefresh}>{busy?'Refreshing…':'Refresh'}</button></footer>
  </section>;
 }

@@ -1,22 +1,23 @@
 import { postgresPool } from "@/lib/postgres";
 import { charmSocial } from "@/lib/charmville/social";
 import { YardError } from "@/lib/charmville/errors";
-import {localHeartSocialPolicy} from "@/lib/charmville/social-policy";
+import {heartSocialPolicy} from "@/lib/charmville/social-policy";
+import {acceptedHeartCapability} from "@/lib/charmville/accepted-heart-capability";
+import {requireRuntimeRequestOrigin} from "@/lib/charmville/runtime-request-origin";
 import {socialCustodyItems} from "@/lib/charmville/social-items";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control":"private, no-store" };
 async function handle(request: Request, write: boolean) {
   try {
-    if (write && request.headers.get("origin") && request.headers.get("origin") !== new URL(request.url).origin)
-      throw new YardError("Use Charmdex on PlankSpace",403);
+    if(write)requireRuntimeRequestOrigin(request,{allowMissing:true});
     let raw: unknown;
     if (write) {
       const body = await request.text();
       if (body.length>2048) throw new YardError("Action too large",413);
       try { raw=JSON.parse(body); } catch { throw new YardError("Invalid pin",400); }
     }
-    const policy=localHeartSocialPolicy(request);
+    const policy=heartSocialPolicy(request,process.env,await acceptedHeartCapability());
     const result=await charmSocial(postgresPool(),request.headers.get("authorization")?.replace(/^Bearer\s+/i,"") ?? "",raw,policy);
     return Response.json(write?result:{...result,enabledItems:socialCustodyItems(policy).map(item=>item.id)},{headers});
   } catch (error) {

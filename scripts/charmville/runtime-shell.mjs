@@ -249,6 +249,24 @@ export function mountRuntimeShell(root = document) {
   });
 }
 if (typeof document !== 'undefined') {mountRuntimeShell();mountCompactHud(document,{isOverlayBlocked:()=>nativeEquipment||Boolean(document.querySelector('dialog[open]'))});}
+/** Closed command vocabulary; caller has already verified parent and origin. */
+export function openNativeToolPanel(panel,root,host,openGear){
+  if(!['gear','map','settings'].includes(panel))return false;
+  if(root.querySelector('dialog[open]'))return false;
+  if(panel==='gear'){
+    if(root.querySelector('button.charm-runtime-enter'))return false;
+    openGear();return true;
+  }
+  if(panel==='map'){
+    if(host.charmvilleMapReady!==true)return false;
+    if(host.charmvilleMapOpen!==true)host.charmvilleOpenMap=true;
+    for(const detail of root.querySelectorAll('header details[open]'))detail.open=false;
+    root.querySelector('canvas')?.focus({preventScroll:true});return true;
+  }
+  const settings=root.querySelector('.charm-runtime-settings');
+  if(!settings)return false;
+  settings.open=true;settings.querySelector('summary')?.focus({preventScroll:true});return true;
+}
 // UI-only bridge from the local account shell. No account credentials, inventory
 // mutations, arbitrary selectors or gameplay input are accepted by the quest.
 if (typeof window !== 'undefined') window.addEventListener('message', event => {
@@ -256,11 +274,14 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   const request = event.data;
   if (!request) return;
   if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;const reason=button.querySelector('[data-capture-reason]');if(reason)reason.hidden=captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
-  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);return;}
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);window.parent.postMessage({type:'charmville:menu-capabilities',panels:['gear','map','settings']},accountOrigin);return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
-  if (!['charmdex', 'voice'].includes(request.panel)) return;
+  if (!['charmdex', 'voice','gear','map','settings'].includes(request.panel)) return;
   if(unifiedMenu?.open)unifiedMenu.close();
+  if(['gear','map','settings'].includes(request.panel)){
+    openNativeToolPanel(request.panel,document,window,()=>{if(nativeEquipment)return;nativeEquipment=true;nativeKey('Enter',13,true);setTimeout(()=>nativeKey('Enter',13,false),100);});return;
+  }
   const selected = request.panel === 'voice' ? 'dialog.voice-notes' : 'dialog.charmdex:not(.voice-notes)';
   for (const dialog of document.querySelectorAll('dialog.charmdex[open]')) {
     if (!dialog.matches(selected)) dialog.close();

@@ -3,16 +3,15 @@ import {FAMILY_ENTITLEMENT_VERSION} from "./family-entitlement";
 import {requireRuntimeRequestOrigin} from "./runtime-request-origin";
 
 type Environment = Record<string,string|undefined>;
-/** Production deliberately cannot opt in yet: native crop identity/art and
- * supported-client negotiation have not passed acceptance. Local developers
- * must explicitly enable this version; migration alone never issues supply. */
-export function familyAcceptanceEnabled(env:Environment):boolean {
-  return env.NODE_ENV === "development" &&
-    env.CHARMVILLE_FAMILY_OPENING_VERSION === FAMILY_ENTITLEMENT_VERSION;
+/** The route supplies acceptedRelease only from selected immutable package
+ * verification. Local developers explicitly opt in; migration alone cannot. */
+export function familyAcceptanceEnabled(env:Environment,acceptedRelease=false):boolean {
+  return (env.NODE_ENV === "production"&&acceptedRelease===true)||(env.NODE_ENV === "development" &&
+    env.CHARMVILLE_FAMILY_OPENING_VERSION === FAMILY_ENTITLEMENT_VERSION);
 }
 
-export async function readFamilyAcceptance(request:Request, env:Environment=process.env):Promise<string> {
-  if (!familyAcceptanceEnabled(env)) throw new YardError("Family opening is not available yet",409);
+export async function readFamilyAcceptance(request:Request, env:Environment=process.env,acceptedRelease=false):Promise<string> {
+  if (!familyAcceptanceEnabled(env,acceptedRelease)) throw new YardError("Family opening is not available yet",409);
   requireRuntimeRequestOrigin(request,{env});
   if (request.method !== "POST") throw new YardError("Accept the family gift explicitly",405);
   const authorization=request.headers.get("authorization")??"";
