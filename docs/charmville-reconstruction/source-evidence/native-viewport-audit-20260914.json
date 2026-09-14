@@ -1,0 +1,132 @@
+{
+  "kind": "native-viewport-source-binary-audit",
+  "acceptedRelease": false,
+  "wideViewportComplete": false,
+  "engineRevision": "bfc91163fa512183cfed41b65db5d0f602aa2b78",
+  "sources": [
+    {
+      "file": "src/zc/maps.cpp",
+      "line": 5865,
+      "sha256": "249581f3913a7d59791e433c6ba47b9aee9407863ea55569c1a246cd4a89de26",
+      "context": [
+        "static std::optional<presentation_camera::geometry> get_world_camera_geometry(double zoom, int pan_x, int pan_y)",
+        "{",
+        "auto geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, zoom);"
+      ]
+    },
+    {
+      "file": "src/zc/maps.cpp",
+      "line": 5995,
+      "sha256": "249581f3913a7d59791e433c6ba47b9aee9407863ea55569c1a246cd4a89de26",
+      "context": [
+        "stretch_blit(scene, framebuf, 0, playing_field_offset, geometry->world.w, geometry->world.h,",
+        "0, playing_field_offset, 256, viewport.h);",
+        "auto legacy_geometry = get_presentation_geometry({0, playing_field_offset, 256, viewport.h}, 1.0);"
+      ]
+    },
+    {
+      "file": "src/zc/maps.cpp",
+      "line": 5947,
+      "sha256": "249581f3913a7d59791e433c6ba47b9aee9407863ea55569c1a246cd4a89de26",
+      "context": [
+        "window.charmvilleCameraViewport = ({x:$1,y:$2,width:$3,height:$4,targetX:0,targetY:$5,targetWidth:256,targetHeight:$6});",
+        "}, geometry ? geometry->requested_zoom : 1.0, r.x,r.y,r.w,r.h,playing_field_offset,viewport.h);",
+        "#endif"
+      ]
+    },
+    {
+      "file": "src/zc/zelda.cpp",
+      "line": 3898,
+      "sha256": "29242402d416c863975f53fd9692248e953cdc735920877d5e763caa505992c1",
+      "context": [
+        "presentbuf = create_bitmap_ex(8,256,224);",
+        "clear_bitmap(presentbuf);",
+        "script_menu_buf = create_bitmap_ex(8,256,224);"
+      ]
+    },
+    {
+      "file": "src/zc/zc_sys.cpp",
+      "line": 3322,
+      "sha256": "5d84bbea81acd59df06f5c4f2597fab71e0128b3995327920a4b2e7e37395a9a",
+      "context": [
+        "blit(source, presentbuf, 0, 0, 0, 0, presentbuf->w, presentbuf->h);",
+        "framebuf_composed_since_present = false;",
+        ""
+      ]
+    },
+    {
+      "file": "src/zc/zc_sys.cpp",
+      "line": 5694,
+      "sha256": "5d84bbea81acd59df06f5c4f2597fab71e0128b3995327920a4b2e7e37395a9a",
+      "context": [
+        "int target_bitmap_height = show_bottom_8px ? 232 : 224;",
+        "if (framebuf->h != target_bitmap_height)",
+        "{"
+      ]
+    },
+    {
+      "file": "src/zc/render.cpp",
+      "line": 84,
+      "sha256": "21ac0edd82e87d58c9ea962ede17cd75ac21c445ffdef89bfe8661f6a98ec917",
+      "context": [
+        "rti_game.bitmap = create_a5_bitmap(framebuf->w, framebuf->h);",
+        "rti_game.set_size(framebuf->w, framebuf->h);",
+        "rti_game.a4_bitmap = presentbuf;"
+      ]
+    },
+    {
+      "file": "src/zc/render.cpp",
+      "line": 149,
+      "sha256": "21ac0edd82e87d58c9ea962ede17cd75ac21c445ffdef89bfe8661f6a98ec917",
+      "context": [
+        "float yscale = (float)resy/(h+6);",
+        "bool keep_aspect_ratio = !stretchGame;",
+        "if (keep_aspect_ratio)"
+      ]
+    },
+    {
+      "file": "src/zc/render.cpp",
+      "line": 64,
+      "sha256": "21ac0edd82e87d58c9ea962ede17cd75ac21c445ffdef89bfe8661f6a98ec917",
+      "context": [
+        "return rti_game.rel_mouse().first;",
+        "}",
+        "int window_mouse_y()"
+      ]
+    },
+    {
+      "file": "src/zc/presentation_targets.h",
+      "line": 103,
+      "sha256": "b9ba635abd01b424cfd9e157c4d3445e92750069a1fedfad3f4f893eba3f53ab",
+      "context": [
+        "static bool valid(surface_extent e) { return e.w > 0 && e.h > 0 && e.w <= 512 && e.h <= 464; }",
+        "static surface_extent extent_for(scratch_spec s, std::size_t plane)",
+        "{"
+      ]
+    }
+  ],
+  "engine": {
+    "bytes": 125105388,
+    "sha256": "2eb5c73ceda2641c03155b18421c5808a59e52baa4b30e6380e17337bd6ee4d9",
+    "coreSha256": "5c6578ffcb0570f37a631cbdee1d70fc80f8df8a95c34f13562f1de3baf6ed96",
+    "validated": true,
+    "debugSections": [
+      "name",
+      ".debug_loc",
+      ".debug_abbrev",
+      ".debug_info",
+      ".debug_ranges",
+      ".debug_str",
+      ".debug_line",
+      ".debug_aranges"
+    ]
+  },
+  "candidate": {
+    "bytes": 19967606,
+    "sha256": "2c15b009a9ed1e080a1aaeff92cece4151162aeac96bfabbb575f56bce7c84aa",
+    "coreSha256": "5c6578ffcb0570f37a631cbdee1d70fc80f8df8a95c34f13562f1de3baf6ed96",
+    "validated": true,
+    "debugSections": []
+  },
+  "matchingExecutableCore": true
+}
