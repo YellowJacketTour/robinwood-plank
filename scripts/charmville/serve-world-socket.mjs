@@ -1,9 +1,9 @@
 import {WebSocketServer} from 'ws';
+import {localSocketConfig} from './local-socket-config.mjs';
 
 // Local transport gateway. Existing authenticated HTTP transactions remain authority.
-const upstream='http://localhost:3017';
-const origins=new Set(['http://localhost:3017','http://127.0.0.1:3017']);
-const server=new WebSocketServer({host:'127.0.0.1',port:3023,maxPayload:4096,perMessageDeflate:false,verifyClient:({origin},done)=>done(origins.has(origin))});
+const {upstream,origins,port}=localSocketConfig();
+const server=new WebSocketServer({host:'127.0.0.1',port,maxPayload:4096,perMessageDeflate:false,verifyClient:({origin},done)=>done(origins.has(origin))});
 server.on('connection',socket=>{
  if(server.clients.size>32){socket.close(1013,'Local capacity reached');return;}
  let token='',authenticated=false,reading=false,writing=false,closed=false;
@@ -48,4 +48,4 @@ server.on('connection',socket=>{
  socket.on('close',()=>{closed=true;token='';abort.abort();clearInterval(tick);clearInterval(encounterTick);clearTimeout(deadline);});
  socket.on('error',()=>socket.close());
 });
-console.log('Authenticated local world socket listening on ws://127.0.0.1:3023 (10 Hz target, 32 connections).');
+console.log(`Authenticated local world socket listening on ws://127.0.0.1:${port}, upstream ${upstream} (10 Hz target, 32 connections).`);

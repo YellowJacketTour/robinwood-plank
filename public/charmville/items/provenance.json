@@ -1,4 +1,17 @@
 {
+  "burning-heart": {
+    "source": "Charmville original vector artwork",
+    "path": "public/charmville/items/burning-heart.svg",
+    "nativeGrid": [32, 32],
+    "purpose": "Love grown, freely given, and kept alight. Heart and flame share one connected silhouette.",
+    "derivativeOfNintendoArtwork": false
+  },
+  "satchel": {
+    "source": "Charmville original vector artwork",
+    "path": "public/charmville/items/satchel.svg",
+    "nativeGrid": [64, 64],
+    "derivativeOfNintendoArtwork": false
+  },
   "oran-berry": {
     "source": "pret/pokeemerald",
     "path": "graphics/items/icons/oran_berry.png",

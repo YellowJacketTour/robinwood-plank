@@ -232,3 +232,14 @@ body.charm-runtime {
 .charm-runtime.charm-hosted.charm-cinema:not(.charm-cinema-menu) > header { display:flex; }
 .charm-runtime.charm-hosted .charm-runtime-settings-body { max-height:calc(100dvh - 64px); overscroll-behavior:contain; }
 .charm-runtime.charm-hosted canvas { image-rendering:pixelated; }
+
+/* A modern host explicitly negotiates ownership of menu/map/options. Retain the
+   native start/retry button until loading finishes; standalone/older hosts keep
+   their rail. Settings float above the same canvas rather than resizing it. */
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)) > header { display:none; }
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)):has(.charm-runtime-settings[open]) > header {
+ display:flex; position:fixed; right:8px; top:8px; width:min(640px,calc(100vw - 16px));
+ z-index:10002; background:transparent; border:0; padding:0; justify-content:flex-end;
+}
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)) > header > :not(.charm-runtime-settings) { display:none!important; }
+.charm-runtime.charm-hosted-immersive .charm-runtime-settings-body { max-height:calc(100dvh - 76px); }

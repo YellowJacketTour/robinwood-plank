@@ -166,9 +166,12 @@ function mountEquipmentReadout(root, settingsBody) {
 /* Presentation adapter only. All native controls and their event hooks survive. */
 /** Call only after the existing parent/origin handshake; never infer account mode
  * from iframe placement alone. Idempotent refresh avoids recurring canvas resize. */
-export function compactHostedShell(root) {
-  if(root.body.classList.contains('charm-hosted'))return false;
+export function compactHostedShell(root, menuSuite = false) {
+  const compacted=root.body.classList.contains('charm-hosted');
+  const immersive=menuSuite===true&&!root.body.classList.contains('charm-hosted-immersive');
+  if(compacted&&!immersive)return false;
   root.body.classList.add('charm-hosted');
+  if(immersive)root.body.classList.add('charm-hosted-immersive');
   const menu=root.querySelector('.charm-account-menu');
   if(menu)menu.textContent='Game menu';
   const summary=root.querySelector('.charm-runtime-settings > summary');
@@ -245,7 +248,11 @@ export function mountRuntimeShell(root = document) {
   header.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     const open = [...header.querySelectorAll('details[open]')].pop();
-    if (open) { open.open = false; open.querySelector('summary').focus(); event.stopPropagation(); }
+    if (open) { open.open = false;
+      const immersive=root.body.classList.contains('charm-hosted-immersive')&&!header.querySelector('button.charm-runtime-enter');
+      (immersive&&open===settings?root.querySelector('canvas'):open.querySelector('summary'))?.focus({preventScroll:true});
+      event.stopPropagation();
+    }
   });
 }
 if (typeof document !== 'undefined') {mountRuntimeShell();mountCompactHud(document,{isOverlayBlocked:()=>nativeEquipment||Boolean(document.querySelector('dialog[open]'))});}
@@ -274,7 +281,7 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   const request = event.data;
   if (!request) return;
   if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;const reason=button.querySelector('[data-capture-reason]');if(reason)reason.hidden=captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
-  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document);window.parent.postMessage({type:'charmville:menu-capabilities',panels:['gear','map','settings']},accountOrigin);return;}
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document,request.menuSuite===true);window.parent.postMessage({type:'charmville:menu-capabilities',panels:['gear','map','settings']},accountOrigin);return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
   if (!['charmdex', 'voice','gear','map','settings'].includes(request.panel)) return;
