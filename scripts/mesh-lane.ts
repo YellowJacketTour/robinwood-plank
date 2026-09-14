@@ -688,6 +688,20 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       console.log("[mesh-lane] cryptokitties-fills-live", JSON.stringify(scan));
       return;
     }
+    if (source === "cryptopunks-fills") {
+      const { scanChainForCryptoPunksFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptopunks-scan");
+      const scan = await scanChainForCryptoPunksFillsViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptopunks-fills-live", JSON.stringify(scan));
+      return;
+    }
+    if (source === "cryptopunks-fills-genesis") {
+      const { scanChainForCryptoPunksFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptopunks-scan");
+      const scan = await scanChainForCryptoPunksFillsGenesisBackfillViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptopunks-fills-genesis", JSON.stringify(scan));
+      return;
+    }
     if (source === "cryptokitties-fills-genesis") {
       const { scanChainForCryptoKittiesFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptokitties-scan");
       const scan = await scanChainForCryptoKittiesFillsGenesisBackfillViaHypersync(chain);

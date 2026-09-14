@@ -69,7 +69,8 @@ export type LedgerVenueId =
   | "foundation"
   | "sudoswap"
   | "rarible"
-  | "cryptokitties-auction";
+  | "cryptokitties-auction"
+  | "cryptopunks-market";
 
 export type LedgerActivityEvent = {
   kind: LedgerActivityKind;

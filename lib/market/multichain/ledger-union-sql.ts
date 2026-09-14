@@ -7,7 +7,7 @@
  * to the worker (activity-coverage.ts) precisely so the request path never
  * pays for it; the SQL it counts over lives here, where both can import it.
  *
- * UNION_SQL: the unbounded eleven-venue union -- counts and derivations.
+ * UNION_SQL: the unbounded twelve-venue union -- counts and derivations.
  * FEED_UNION_SQL: the same branches, each bounded to the exact global key.
  */
 
@@ -104,6 +104,14 @@ export const UNION_SQL = `
          seller, winner, token_id::text, NULL,
          NULL, total_price_wei::text
   FROM plank_cryptokitties_fills
+  WHERE chain_slug = $1 AND nft_contract = $2
+
+  UNION ALL
+  SELECT 'sale', 'cryptopunks-market',
+         tx_hash, log_index, block_number::text, block_timestamp,
+         seller, buyer, token_id::text, NULL,
+         NULL, price_wei::text
+  FROM plank_cryptopunks_fills
   WHERE chain_slug = $1 AND nft_contract = $2
 `;
 
@@ -341,6 +349,16 @@ export const FEED_UNION_SQL = `
          seller, winner, token_id::text, NULL,
          NULL, total_price_wei::text
    FROM plank_cryptokitties_fills
+   WHERE chain_slug = $1 AND nft_contract = $2
+   ORDER BY block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC
+   LIMIT $3)
+
+  UNION ALL
+  (SELECT 'sale', 'cryptopunks-market',
+         tx_hash, log_index, block_number::text, block_timestamp,
+         seller, buyer, token_id::text, NULL,
+         NULL, price_wei::text
+   FROM plank_cryptopunks_fills
    WHERE chain_slug = $1 AND nft_contract = $2
    ORDER BY block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC
    LIMIT $3)

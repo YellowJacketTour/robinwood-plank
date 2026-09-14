@@ -55,6 +55,7 @@ export const VENUE_LABEL: Record<LedgerVenueId, string> = {
   sudoswap: "Sudoswap (AMM pool)",
   rarible: "Rarible",
   "cryptokitties-auction": "CryptoKitties",
+  "cryptopunks-market": "CryptoPunks market",
 };
 
 export function kindColor(kind: string): string {

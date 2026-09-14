@@ -108,7 +108,7 @@ test("every bounded branch orders by the exact global key, then LIMIT $3", () =>
   // Fill tables: block_number is NOT NULL, so no NULLS LAST on it.
   const fillOrder = /ORDER BY block_timestamp DESC NULLS LAST, block_number DESC, log_index DESC\s+LIMIT \$3\)/g;
   const fills = [...FEED_UNION_SQL.matchAll(fillOrder)].length;
-  assert.equal(fills, 9, `nine fill ledgers must each carry the exact key; found ${fills}`);
+  assert.equal(fills, 10, `ten fill ledgers (nine plus the CryptoPunks market) must each carry the exact key; found ${fills}`);
   // market_events transfer branch: block_number IS nullable, tie-break is event_index.
   assert.match(
     FEED_UNION_SQL,
@@ -124,7 +124,7 @@ test("every bounded branch orders by the exact global key, then LIMIT $3", () =>
   // Eleven venue branches, plus the two NULL-timestamp sub-branches of
   // plank_market_events (see MARKET_EVENTS_TS_BOUND's header): thirteen.
   const limits = [...FEED_UNION_SQL.matchAll(/LIMIT \$3\)/g)].length;
-  assert.equal(limits, 13, `eleven venue branches plus two NULL-timestamp sub-branches must be bounded; found ${limits}`);
+  assert.equal(limits, 14, `twelve venue branches plus two NULL-timestamp sub-branches must be bounded; found ${limits}`);
 });
 
 test("both plank_market_events branches are bounded by the SAME transfer-walk timestamp, with the index that exists", () => {
@@ -155,13 +155,13 @@ test("the bounded and unbounded unions project the same columns in the same orde
   // (`plank_seaport_fill` + `s`) and the lookahead never sees the alias.
   // Digits too: plank_x2y2_fills.
   const branches = (s: string) => [...s.matchAll(/FROM plank_[a-z0-9_]+\b(?! [bf]\b)/g)].length;
-  assert.equal(branches(UNION_SQL), 11, "eleven venue branches, unbounded");
-  assert.equal(branches(FEED_UNION_SQL), 13, "eleven venue branches plus two NULL-timestamp sub-branches, bounded");
+  assert.equal(branches(UNION_SQL), 12, "twelve venue branches, unbounded");
+  assert.equal(branches(FEED_UNION_SQL), 14, "twelve venue branches plus two NULL-timestamp sub-branches, bounded");
   // And the projected column list of every branch matches: same aliases, same order.
   const projection = (s: string) => [...s.matchAll(/SELECT[\s\S]*?\n\s+FROM plank_(?!market_events b)/g)].map((m) => m[0].replace(/^\(?SELECT\s+'[a-z]+'(?: AS [a-z_]+)?,\s*'[a-z-]+'(?: AS [a-z_]+)?,/, "").replace(/\s+/g, " ").replace(/\b(e|f|b)\./g, "").trim());
   const feedShapes = new Set(projection(FEED_UNION_SQL).map((p) => p.replace(/CASE WHEN[\s\S]*?END/, "kind")));
   assert.ok(feedShapes.size >= 1, "the projection extractor found the branches");
-  for (const venue of ["'wallet-transfer'", "'opensea-stream'", "'seaport'", "'wyvern'", "'looksrare'", "'blur'", "'x2y2'", "'foundation'", "'sudoswap'", "'rarible'", "'cryptokitties-auction'"]) {
+  for (const venue of ["'wallet-transfer'", "'opensea-stream'", "'seaport'", "'wyvern'", "'looksrare'", "'blur'", "'x2y2'", "'foundation'", "'sudoswap'", "'rarible'", "'cryptokitties-auction'", "'cryptopunks-market'"]) {
     assert.ok(FEED_UNION_SQL.includes(venue), `bounded union is missing the ${venue} branch`);
     assert.ok(UNION_SQL.includes(venue), `unbounded union is missing the ${venue} branch`);
   }
