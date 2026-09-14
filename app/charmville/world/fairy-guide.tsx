@@ -1,21 +1,24 @@
 "use client";
 
-import Image from 'next/image';
 import {useEffect,useRef,useState} from 'react';
 import {FAMILY_OPENING,fairyGuidePage,type GuideAction} from '@/lib/charmville/fairy-guide';
 import {parseStoryBookmark,storyBookmarkKey,type StoryBookmark} from '@/lib/charmville/story-bookmark';
 import styles from './fairy-guide.module.css';
+import FairyPortrait from './fairy-portrait';
+import {FAIRY_SKINS,isFairySkin,type FairySkin} from '@/lib/charmville/fairy-presentation';
 
 /** Journal companion. Native follower/healing capability is intentionally not implied. */
 export default function FairyGuide({profileId,completed,atHome,busy,onAction}:{profileId:string;completed:readonly string[]|null;atHome:boolean;busy:boolean;onAction:(action:GuideAction)=>void}) {
  const [story,setStory]=useState<number|null>(null);
+ const [skinState,setSkin]=useState<{profileId:string;skin:FairySkin}>({profileId,skin:'blue'});
+ const skin=skinState.profileId===profileId?skinState.skin:'blue';
  const [saved,setSaved]=useState<{profileId:string;bookmark:StoryBookmark|null}|null>(null);
  const bookmark=saved?.profileId===profileId?saved.bookmark:null;
  const nextButton=useRef<HTMLButtonElement>(null),readButton=useRef<HTMLButtonElement>(null),wasReading=useRef(false);
  useEffect(()=>{
   const key=storyBookmarkKey(profileId);
-  const read=()=>{let value:StoryBookmark|null=null;try{value=key?parseStoryBookmark(localStorage.getItem(key)):null;}catch{/* Storage may be unavailable in private browsing. */}setSaved({profileId,bookmark:value});};
-  read();const change=(event:StorageEvent)=>{if(event.key===key)read();};
+  const read=()=>{let value:StoryBookmark|null=null;let look:FairySkin='blue';try{value=key?parseStoryBookmark(localStorage.getItem(key)):null;const stored=key?localStorage.getItem(`${key}:look`):null;if(isFairySkin(stored))look=stored;}catch{/* Storage may be unavailable in private browsing. */}setSaved({profileId,bookmark:value});setSkin({profileId,skin:look});};
+  read();const change=(event:StorageEvent)=>{if(event.key===key||event.key===`${key}:look`)read();};
   window.addEventListener('storage',change);return()=>window.removeEventListener('storage',change);
  },[profileId]);
  useEffect(()=>{
@@ -28,6 +31,10 @@ export default function FairyGuide({profileId,completed,atHome,busy,onAction}:{p
  };
  const turn=(page:number)=>{remember(page);setStory(page);};
  const advance=()=>{if(story===null)return;if(story===FAMILY_OPENING.length-1){remember(0,true);setStory(null);}else turn(story+1);};
+ const chooseSkin=(id:FairySkin)=>{
+  setSkin({profileId,skin:id});const key=storyBookmarkKey(profileId);
+  try{if(key)localStorage.setItem(`${key}:look`,id);}catch{/* The selected color remains usable for this visit. */}
+ };
  const guide=fairyGuidePage(completed,atHome);
  const beat=story===null?null:FAMILY_OPENING[story];
  return <section className={styles.guide} aria-label="Your fairy guide" onKeyDown={event=>{
@@ -40,7 +47,7 @@ export default function FairyGuide({profileId,completed,atHome,busy,onAction}:{p
    else setStory(null);
   }
  }}>
-  <div className={styles.portrait}><Image src="/charmville/items/love-fairy-guide.svg" width={96} height={96} alt="A small golden fairy with leaf-shaped wings"/><span>YOUR GUIDE</span></div>
+  <div className={styles.portrait}><FairyPortrait skin={skin} attention={story!==null}/><span>YOUR GUIDE</span><label className={styles.look}>Look<select aria-label="Fairy appearance" value={skin} onChange={event=>{const choice=FAIRY_SKINS.find(([id])=>id===event.target.value);if(choice)chooseSkin(choice[0]);}}>{FAIRY_SKINS.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label></div>
   <div className={styles.page}>
    <p className={styles.chapter}>{beat?'A GIFT FROM HOME':completed===null?'YOUR JOURNAL':completed.length===0?'A NEW ADVENTURE':'YOUR NEXT CHAPTER'}</p>
    <h3>{beat?beat.speaker:guide.title}</h3>

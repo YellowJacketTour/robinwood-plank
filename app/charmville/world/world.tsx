@@ -253,6 +253,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     }
     finally{if(!controller.signal.aborted&&version===generation.current){inFlight.current=null;setBusy(false);}}
   },[clear]);
+  const beginHomeLessons=useCallback(()=>{void load().then(loaded=>{if(loaded)selectTab('journal');});},[load,selectTab]);
 
   const openTestProfile=useCallback(async(test:{wallet:string;token:string})=>{
     if(!localRuntime||!['localhost','127.0.0.1'].includes(window.location.hostname)||!/^0x[a-f0-9]{40}$/.test(test.wallet)||! /^[a-f0-9]{64}$/.test(test.token))throw Error('Local test profile unavailable');
@@ -397,7 +398,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
       {tab==='play'&&!presence?.active&&<section className="world-arrival" aria-label="Choose your arrival">
         <div><p className="text-xs font-bold tracking-wide text-gold-300">CHARMVILLE · YOUR JOURNEY</p>
         <h2 className="my-3 font-display text-2xl">{inventory?'Welcome back, '+identity.handle:'A home. A companion. A world to explore.'}</h2>
-        <p className="mb-5 max-w-xl text-cream-muted">{inventory?'Enter your homestead to tend your crops and prepare your party, or meet other players in the meadow.':'Begin in Party to claim your home and choose your first companion. Your supplies and companions stay with your account.'}</p>
+        <p className="mb-5 max-w-xl text-cream-muted">{inventory?'Enter your homestead to tend your crops and prepare your party, or meet other players in the meadow.':'Claim your home, then follow your fairy guide through your first garden. Your supplies and companions stay with your account.'}</p>
         <div className="flex flex-wrap gap-3"><button id="arrival-primary" className={`${button} bg-gold-500 text-wood-950`} disabled={busy} onClick={()=>{if(inventory)void load({destination:'home',handle:identity.handle});else setTab('companions');}}>{busy?'Checking your arrival…':inventory?'Enter my home':'Begin my journey'}</button>
         <button className={button} disabled={busy} onClick={()=>void load({destination:'public'})}>Visit the public meadow</button>
         <button className={button} disabled={busy} onClick={()=>setTab('friends')}>Visit a friend</button></div>
@@ -427,7 +428,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
         <InventoryPanel inventory={inventory} busy={busy} onSetup={()=>setTab('companions')} onRefresh={()=>void load()}/>
         <p className="mt-2 text-sm text-cream-muted">Seeds grow into charms. Equipment is available in the adventure’s native item menu.</p>
         </div>
-        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={load} onEnterHome={()=>{setTab("play");void load({destination:"home",handle:identity.handle});}} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');void openAdventure().then(opened=>{if(opened)requestAnimationFrame(()=>frame.current?.focus());});}} />}</div>
+        <div id="panel-companions" role="tabpanel" aria-labelledby="tab-companions" hidden={tab!=='companions'}>{address&&<CompanionPanel key={`companion:${address}`} wallet={address} handle={identity.handle} onHomeReady={beginHomeLessons} onEnterHome={()=>{setTab("play");void load({destination:"home",handle:identity.handle});}} onFollower={updateFollower} onFollowers={updateFollowers} onFormation={updateFormation} onTestProfile={openTestProfile} onPlay={()=>{setTab('play');void openAdventure().then(opened=>{if(opened)requestAnimationFrame(()=>frame.current?.focus());});}} />}</div>
         <div id="panel-exchange" role="tabpanel" aria-labelledby="tab-exchange" hidden={tab!=='exchange'}>{address&&<ExchangePanel key={`${address}:${identity.handle}`} wallet={address} handle={identity.handle} onChanged={()=>void load()} />}</div>
       </aside>
     </div></>}

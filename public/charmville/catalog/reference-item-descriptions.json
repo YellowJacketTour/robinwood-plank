@@ -1,0 +1,1897 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/pret/pokeemerald",
+    "revision": "5eff78649e7170a877b961ef0b3da13b81a16038",
+    "path": "src/data/text/item_descriptions.h",
+    "sha256": "b989d1bc007b3b4ebb37782c498d667bdf269530fd45182f0e4bdb4d171afcb9"
+  },
+  "meaning": "Original game effect; does not claim implemented Charmville behavior",
+  "items": {
+    "pokeemerald:ITEM_NONE": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_MASTER_BALL": {
+      "text": "The best BALL that catches a POKéMON without fail.",
+      "symbol": "sMasterBallDesc",
+      "line": 5
+    },
+    "pokeemerald:ITEM_ULTRA_BALL": {
+      "text": "A better BALL with a higher catch rate than a GREAT BALL.",
+      "symbol": "sUltraBallDesc",
+      "line": 10
+    },
+    "pokeemerald:ITEM_GREAT_BALL": {
+      "text": "A good BALL with a higher catch rate than a POKé BALL.",
+      "symbol": "sGreatBallDesc",
+      "line": 15
+    },
+    "pokeemerald:ITEM_POKE_BALL": {
+      "text": "A tool used for catching wild POKéMON.",
+      "symbol": "sPokeBallDesc",
+      "line": 20
+    },
+    "pokeemerald:ITEM_SAFARI_BALL": {
+      "text": "A special BALL that is used only in the SAFARI ZONE.",
+      "symbol": "sSafariBallDesc",
+      "line": 25
+    },
+    "pokeemerald:ITEM_NET_BALL": {
+      "text": "A BALL that works well on WATER- and BUG-type POKéMON.",
+      "symbol": "sNetBallDesc",
+      "line": 30
+    },
+    "pokeemerald:ITEM_DIVE_BALL": {
+      "text": "A BALL that works better on POKéMON on the ocean floor.",
+      "symbol": "sDiveBallDesc",
+      "line": 35
+    },
+    "pokeemerald:ITEM_NEST_BALL": {
+      "text": "A BALL that works better on weaker POKéMON.",
+      "symbol": "sNestBallDesc",
+      "line": 40
+    },
+    "pokeemerald:ITEM_REPEAT_BALL": {
+      "text": "A BALL that works better on POKéMON caught before.",
+      "symbol": "sRepeatBallDesc",
+      "line": 45
+    },
+    "pokeemerald:ITEM_TIMER_BALL": {
+      "text": "A BALL that gains power in battles taking many turns.",
+      "symbol": "sTimerBallDesc",
+      "line": 50
+    },
+    "pokeemerald:ITEM_LUXURY_BALL": {
+      "text": "A cozy BALL that makes POKéMON more friendly.",
+      "symbol": "sLuxuryBallDesc",
+      "line": 55
+    },
+    "pokeemerald:ITEM_PREMIER_BALL": {
+      "text": "A rare BALL made in commemoration of some event.",
+      "symbol": "sPremierBallDesc",
+      "line": 60
+    },
+    "pokeemerald:ITEM_POTION": {
+      "text": "Restores the HP of a POKéMON by 20 points.",
+      "symbol": "sPotionDesc",
+      "line": 66
+    },
+    "pokeemerald:ITEM_ANTIDOTE": {
+      "text": "Heals a poisoned POKéMON.",
+      "symbol": "sAntidoteDesc",
+      "line": 71
+    },
+    "pokeemerald:ITEM_BURN_HEAL": {
+      "text": "Heals POKéMON of a burn.",
+      "symbol": "sBurnHealDesc",
+      "line": 75
+    },
+    "pokeemerald:ITEM_ICE_HEAL": {
+      "text": "Defrosts a frozen POKéMON.",
+      "symbol": "sIceHealDesc",
+      "line": 79
+    },
+    "pokeemerald:ITEM_AWAKENING": {
+      "text": "Awakens a sleeping POKéMON.",
+      "symbol": "sAwakeningDesc",
+      "line": 83
+    },
+    "pokeemerald:ITEM_PARALYZE_HEAL": {
+      "text": "Heals a paralyzed POKéMON.",
+      "symbol": "sParalyzeHealDesc",
+      "line": 87
+    },
+    "pokeemerald:ITEM_FULL_RESTORE": {
+      "text": "Fully restores the HP and status of a POKéMON.",
+      "symbol": "sFullRestoreDesc",
+      "line": 91
+    },
+    "pokeemerald:ITEM_MAX_POTION": {
+      "text": "Fully restores the HP of a POKéMON.",
+      "symbol": "sMaxPotionDesc",
+      "line": 96
+    },
+    "pokeemerald:ITEM_HYPER_POTION": {
+      "text": "Restores the HP of a POKéMON by 200 points.",
+      "symbol": "sHyperPotionDesc",
+      "line": 100
+    },
+    "pokeemerald:ITEM_SUPER_POTION": {
+      "text": "Restores the HP of a POKéMON by 50 points.",
+      "symbol": "sSuperPotionDesc",
+      "line": 105
+    },
+    "pokeemerald:ITEM_FULL_HEAL": {
+      "text": "Heals all the status problems of one POKéMON.",
+      "symbol": "sFullHealDesc",
+      "line": 110
+    },
+    "pokeemerald:ITEM_REVIVE": {
+      "text": "Revives a fainted POKéMON with half its HP.",
+      "symbol": "sReviveDesc",
+      "line": 115
+    },
+    "pokeemerald:ITEM_MAX_REVIVE": {
+      "text": "Revives a fainted POKéMON with all its HP.",
+      "symbol": "sMaxReviveDesc",
+      "line": 120
+    },
+    "pokeemerald:ITEM_FRESH_WATER": {
+      "text": "A mineral water that restores HP by 50 points.",
+      "symbol": "sFreshWaterDesc",
+      "line": 125
+    },
+    "pokeemerald:ITEM_SODA_POP": {
+      "text": "A fizzy soda drink that restores HP by 60 points.",
+      "symbol": "sSodaPopDesc",
+      "line": 130
+    },
+    "pokeemerald:ITEM_LEMONADE": {
+      "text": "A very sweet drink that restores HP by 80 points.",
+      "symbol": "sLemonadeDesc",
+      "line": 135
+    },
+    "pokeemerald:ITEM_MOOMOO_MILK": {
+      "text": "A nutritious milk that restores HP by 100 points.",
+      "symbol": "sMoomooMilkDesc",
+      "line": 140
+    },
+    "pokeemerald:ITEM_ENERGY_POWDER": {
+      "text": "A bitter powder that restores HP by 50 points.",
+      "symbol": "sEnergyPowderDesc",
+      "line": 145
+    },
+    "pokeemerald:ITEM_ENERGY_ROOT": {
+      "text": "A bitter root that restores HP by 200 points.",
+      "symbol": "sEnergyRootDesc",
+      "line": 150
+    },
+    "pokeemerald:ITEM_HEAL_POWDER": {
+      "text": "A bitter powder that heals all status problems.",
+      "symbol": "sHealPowderDesc",
+      "line": 155
+    },
+    "pokeemerald:ITEM_REVIVAL_HERB": {
+      "text": "A very bitter herb that revives a fainted POKéMON.",
+      "symbol": "sRevivalHerbDesc",
+      "line": 160
+    },
+    "pokeemerald:ITEM_ETHER": {
+      "text": "Restores the PP of a selected move by 10.",
+      "symbol": "sEtherDesc",
+      "line": 165
+    },
+    "pokeemerald:ITEM_MAX_ETHER": {
+      "text": "Fully restores the PP of a selected move.",
+      "symbol": "sMaxEtherDesc",
+      "line": 170
+    },
+    "pokeemerald:ITEM_ELIXIR": {
+      "text": "Restores the PP of all moves by 10.",
+      "symbol": "sElixirDesc",
+      "line": 175
+    },
+    "pokeemerald:ITEM_MAX_ELIXIR": {
+      "text": "Fully restores the PP of a POKéMON's moves.",
+      "symbol": "sMaxElixirDesc",
+      "line": 179
+    },
+    "pokeemerald:ITEM_LAVA_COOKIE": {
+      "text": "A local specialty that heals all status problems.",
+      "symbol": "sLavaCookieDesc",
+      "line": 184
+    },
+    "pokeemerald:ITEM_BLUE_FLUTE": {
+      "text": "A glass flute that awakens sleeping POKéMON.",
+      "symbol": "sBlueFluteDesc",
+      "line": 189
+    },
+    "pokeemerald:ITEM_YELLOW_FLUTE": {
+      "text": "A glass flute that snaps POKéMON out of confusion.",
+      "symbol": "sYellowFluteDesc",
+      "line": 194
+    },
+    "pokeemerald:ITEM_RED_FLUTE": {
+      "text": "A glass flute that snaps POKéMON out of attraction.",
+      "symbol": "sRedFluteDesc",
+      "line": 199
+    },
+    "pokeemerald:ITEM_BLACK_FLUTE": {
+      "text": "A glass flute that keeps away wild POKéMON.",
+      "symbol": "sBlackFluteDesc",
+      "line": 204
+    },
+    "pokeemerald:ITEM_WHITE_FLUTE": {
+      "text": "A glass flute that lures wild POKéMON.",
+      "symbol": "sWhiteFluteDesc",
+      "line": 209
+    },
+    "pokeemerald:ITEM_BERRY_JUICE": {
+      "text": "A 100% pure juice that restores HP by 20 points.",
+      "symbol": "sBerryJuiceDesc",
+      "line": 213
+    },
+    "pokeemerald:ITEM_SACRED_ASH": {
+      "text": "Fully revives and restores all fainted POKéMON.",
+      "symbol": "sSacredAshDesc",
+      "line": 218
+    },
+    "pokeemerald:ITEM_SHOAL_SALT": {
+      "text": "Salt obtained from deep inside the SHOAL CAVE.",
+      "symbol": "sShoalSaltDesc",
+      "line": 224
+    },
+    "pokeemerald:ITEM_SHOAL_SHELL": {
+      "text": "A seashell found deep inside the SHOAL CAVE.",
+      "symbol": "sShoalShellDesc",
+      "line": 229
+    },
+    "pokeemerald:ITEM_RED_SHARD": {
+      "text": "A shard from an ancient item. Can be sold cheaply.",
+      "symbol": "sRedShardDesc",
+      "line": 234
+    },
+    "pokeemerald:ITEM_BLUE_SHARD": {
+      "text": "A shard from an ancient item. Can be sold cheaply.",
+      "symbol": "sBlueShardDesc",
+      "line": 239
+    },
+    "pokeemerald:ITEM_YELLOW_SHARD": {
+      "text": "A shard from an ancient item. Can be sold cheaply.",
+      "symbol": "sYellowShardDesc",
+      "line": 244
+    },
+    "pokeemerald:ITEM_GREEN_SHARD": {
+      "text": "A shard from an ancient item. Can be sold cheaply.",
+      "symbol": "sGreenShardDesc",
+      "line": 249
+    },
+    "pokeemerald:ITEM_034": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_035": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_036": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_037": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_038": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_039": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_03A": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_03B": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_03C": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_03D": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_03E": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_HP_UP": {
+      "text": "Raises the base HP of one POKéMON.",
+      "symbol": "sHPUpDesc",
+      "line": 255
+    },
+    "pokeemerald:ITEM_PROTEIN": {
+      "text": "Raises the base ATTACK stat of one POKéMON.",
+      "symbol": "sProteinDesc",
+      "line": 259
+    },
+    "pokeemerald:ITEM_IRON": {
+      "text": "Raises the base DEFENSE stat of one POKéMON.",
+      "symbol": "sIronDesc",
+      "line": 264
+    },
+    "pokeemerald:ITEM_CARBOS": {
+      "text": "Raises the base SPEED stat of one POKéMON.",
+      "symbol": "sCarbosDesc",
+      "line": 269
+    },
+    "pokeemerald:ITEM_CALCIUM": {
+      "text": "Raises the base SP. ATK stat of one POKéMON.",
+      "symbol": "sCalciumDesc",
+      "line": 274
+    },
+    "pokeemerald:ITEM_RARE_CANDY": {
+      "text": "Raises the level of a POKéMON by one.",
+      "symbol": "sRareCandyDesc",
+      "line": 279
+    },
+    "pokeemerald:ITEM_PP_UP": {
+      "text": "Raises the maximum PP of a selected move.",
+      "symbol": "sPPUpDesc",
+      "line": 284
+    },
+    "pokeemerald:ITEM_ZINC": {
+      "text": "Raises the base SP. DEF stat of one POKéMON.",
+      "symbol": "sZincDesc",
+      "line": 289
+    },
+    "pokeemerald:ITEM_PP_MAX": {
+      "text": "Raises the PP of a move to its maximum points.",
+      "symbol": "sPPMaxDesc",
+      "line": 294
+    },
+    "pokeemerald:ITEM_048": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_GUARD_SPEC": {
+      "text": "Prevents stat reduction when used in battle.",
+      "symbol": "sGuardSpecDesc",
+      "line": 300
+    },
+    "pokeemerald:ITEM_DIRE_HIT": {
+      "text": "Raises the critical-hit ratio during one battle.",
+      "symbol": "sDireHitDesc",
+      "line": 305
+    },
+    "pokeemerald:ITEM_X_ATTACK": {
+      "text": "Raises the stat ATTACK during one battle.",
+      "symbol": "sXAttackDesc",
+      "line": 310
+    },
+    "pokeemerald:ITEM_X_DEFEND": {
+      "text": "Raises the stat DEFENSE during one battle.",
+      "symbol": "sXDefendDesc",
+      "line": 315
+    },
+    "pokeemerald:ITEM_X_SPEED": {
+      "text": "Raises the stat SPEED during one battle.",
+      "symbol": "sXSpeedDesc",
+      "line": 320
+    },
+    "pokeemerald:ITEM_X_ACCURACY": {
+      "text": "Raises accuracy of attack moves during one battle.",
+      "symbol": "sXAccuracyDesc",
+      "line": 325
+    },
+    "pokeemerald:ITEM_X_SPECIAL": {
+      "text": "Raises the stat SP. ATK during one battle.",
+      "symbol": "sXSpecialDesc",
+      "line": 330
+    },
+    "pokeemerald:ITEM_POKE_DOLL": {
+      "text": "Use to flee from any battle with a wild POKéMON.",
+      "symbol": "sPokeDollDesc",
+      "line": 335
+    },
+    "pokeemerald:ITEM_FLUFFY_TAIL": {
+      "text": "Use to flee from any battle with a wild POKéMON.",
+      "symbol": "sFluffyTailDesc",
+      "line": 340
+    },
+    "pokeemerald:ITEM_052": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_SUPER_REPEL": {
+      "text": "Repels weak wild POKéMON for 200 steps.",
+      "symbol": "sSuperRepelDesc",
+      "line": 346
+    },
+    "pokeemerald:ITEM_MAX_REPEL": {
+      "text": "Repels weak wild POKéMON for 250 steps.",
+      "symbol": "sMaxRepelDesc",
+      "line": 351
+    },
+    "pokeemerald:ITEM_ESCAPE_ROPE": {
+      "text": "Use to escape instantly from a cave or a dungeon.",
+      "symbol": "sEscapeRopeDesc",
+      "line": 356
+    },
+    "pokeemerald:ITEM_REPEL": {
+      "text": "Repels weak wild POKéMON for 100 steps.",
+      "symbol": "sRepelDesc",
+      "line": 361
+    },
+    "pokeemerald:ITEM_057": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_058": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_059": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_05A": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_05B": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_05C": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_SUN_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sSunStoneDesc",
+      "line": 367
+    },
+    "pokeemerald:ITEM_MOON_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sMoonStoneDesc",
+      "line": 372
+    },
+    "pokeemerald:ITEM_FIRE_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sFireStoneDesc",
+      "line": 377
+    },
+    "pokeemerald:ITEM_THUNDER_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sThunderStoneDesc",
+      "line": 382
+    },
+    "pokeemerald:ITEM_WATER_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sWaterStoneDesc",
+      "line": 387
+    },
+    "pokeemerald:ITEM_LEAF_STONE": {
+      "text": "Makes certain species of POKéMON evolve.",
+      "symbol": "sLeafStoneDesc",
+      "line": 392
+    },
+    "pokeemerald:ITEM_063": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_064": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_065": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_066": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_TINY_MUSHROOM": {
+      "text": "A plain mushroom that would sell at a cheap price.",
+      "symbol": "sTinyMushroomDesc",
+      "line": 398
+    },
+    "pokeemerald:ITEM_BIG_MUSHROOM": {
+      "text": "A rare mushroom that would sell at a high price.",
+      "symbol": "sBigMushroomDesc",
+      "line": 403
+    },
+    "pokeemerald:ITEM_069": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_PEARL": {
+      "text": "A pretty pearl that would sell at a cheap price.",
+      "symbol": "sPearlDesc",
+      "line": 408
+    },
+    "pokeemerald:ITEM_BIG_PEARL": {
+      "text": "A lovely large pearl that would sell at a high price.",
+      "symbol": "sBigPearlDesc",
+      "line": 413
+    },
+    "pokeemerald:ITEM_STARDUST": {
+      "text": "Beautiful red sand. Can be sold at a high price.",
+      "symbol": "sStardustDesc",
+      "line": 418
+    },
+    "pokeemerald:ITEM_STAR_PIECE": {
+      "text": "A red gem shard. It would sell for a very high price.",
+      "symbol": "sStarPieceDesc",
+      "line": 423
+    },
+    "pokeemerald:ITEM_NUGGET": {
+      "text": "A nugget of pure gold. Can be sold at a high price.",
+      "symbol": "sNuggetDesc",
+      "line": 428
+    },
+    "pokeemerald:ITEM_HEART_SCALE": {
+      "text": "A lovely scale. It is coveted by collectors.",
+      "symbol": "sHeartScaleDesc",
+      "line": 433
+    },
+    "pokeemerald:ITEM_070": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_071": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_072": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_073": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_074": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_075": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_076": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_077": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_078": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_ORANGE_MAIL": {
+      "text": "A ZIGZAGOON-print MAIL to be held by a POKéMON.",
+      "symbol": "sOrangeMailDesc",
+      "line": 439
+    },
+    "pokeemerald:ITEM_HARBOR_MAIL": {
+      "text": "A WINGULL-print MAIL to be held by a POKéMON.",
+      "symbol": "sHarborMailDesc",
+      "line": 444
+    },
+    "pokeemerald:ITEM_GLITTER_MAIL": {
+      "text": "A PIKACHU-print MAIL to be held by a POKéMON.",
+      "symbol": "sGlitterMailDesc",
+      "line": 449
+    },
+    "pokeemerald:ITEM_MECH_MAIL": {
+      "text": "A MAGNEMITE-print MAIL to be held by a POKéMON.",
+      "symbol": "sMechMailDesc",
+      "line": 454
+    },
+    "pokeemerald:ITEM_WOOD_MAIL": {
+      "text": "A SLAKOTH-print MAIL to be held by a POKéMON.",
+      "symbol": "sWoodMailDesc",
+      "line": 459
+    },
+    "pokeemerald:ITEM_WAVE_MAIL": {
+      "text": "A WAILMER-print MAIL to be held by a POKéMON.",
+      "symbol": "sWaveMailDesc",
+      "line": 464
+    },
+    "pokeemerald:ITEM_BEAD_MAIL": {
+      "text": "MAIL featuring a sketch of the holding POKéMON.",
+      "symbol": "sBeadMailDesc",
+      "line": 469
+    },
+    "pokeemerald:ITEM_SHADOW_MAIL": {
+      "text": "A DUSKULL-print MAIL to be held by a POKéMON.",
+      "symbol": "sShadowMailDesc",
+      "line": 474
+    },
+    "pokeemerald:ITEM_TROPIC_MAIL": {
+      "text": "A BELLOSSOM-print MAIL to be held by a POKéMON.",
+      "symbol": "sTropicMailDesc",
+      "line": 479
+    },
+    "pokeemerald:ITEM_DREAM_MAIL": {
+      "text": "MAIL featuring a sketch of the holding POKéMON.",
+      "symbol": "sDreamMailDesc",
+      "line": 484
+    },
+    "pokeemerald:ITEM_FAB_MAIL": {
+      "text": "A gorgeous-print MAIL to be held by a POKéMON.",
+      "symbol": "sFabMailDesc",
+      "line": 489
+    },
+    "pokeemerald:ITEM_RETRO_MAIL": {
+      "text": "MAIL featuring the drawings of three POKéMON.",
+      "symbol": "sRetroMailDesc",
+      "line": 494
+    },
+    "pokeemerald:ITEM_CHERI_BERRY": {
+      "text": "A hold item that heals paralysis in battle.",
+      "symbol": "sCheriBerryDesc",
+      "line": 500
+    },
+    "pokeemerald:ITEM_CHESTO_BERRY": {
+      "text": "A hold item that awakens POKéMON in battle.",
+      "symbol": "sChestoBerryDesc",
+      "line": 505
+    },
+    "pokeemerald:ITEM_PECHA_BERRY": {
+      "text": "A hold item that heals poisoning in battle.",
+      "symbol": "sPechaBerryDesc",
+      "line": 510
+    },
+    "pokeemerald:ITEM_RAWST_BERRY": {
+      "text": "A hold item that heals a burn in battle.",
+      "symbol": "sRawstBerryDesc",
+      "line": 515
+    },
+    "pokeemerald:ITEM_ASPEAR_BERRY": {
+      "text": "A hold item that defrosts POKéMON in battle.",
+      "symbol": "sAspearBerryDesc",
+      "line": 520
+    },
+    "pokeemerald:ITEM_LEPPA_BERRY": {
+      "text": "A hold item that restores 10 PP in battle.",
+      "symbol": "sLeppaBerryDesc",
+      "line": 525
+    },
+    "pokeemerald:ITEM_ORAN_BERRY": {
+      "text": "A hold item that restores 10 HP in battle.",
+      "symbol": "sOranBerryDesc",
+      "line": 530
+    },
+    "pokeemerald:ITEM_PERSIM_BERRY": {
+      "text": "A hold item that heals confusion in battle.",
+      "symbol": "sPersimBerryDesc",
+      "line": 535
+    },
+    "pokeemerald:ITEM_LUM_BERRY": {
+      "text": "A hold item that heals any status problem in battle.",
+      "symbol": "sLumBerryDesc",
+      "line": 540
+    },
+    "pokeemerald:ITEM_SITRUS_BERRY": {
+      "text": "A hold item that restores 30 HP in battle.",
+      "symbol": "sSitrusBerryDesc",
+      "line": 545
+    },
+    "pokeemerald:ITEM_FIGY_BERRY": {
+      "text": "A hold item that restores HP but may confuse.",
+      "symbol": "sFigyBerryDesc",
+      "line": 550
+    },
+    "pokeemerald:ITEM_WIKI_BERRY": {
+      "text": "A hold item that restores HP but may confuse.",
+      "symbol": "sWikiBerryDesc",
+      "line": 555
+    },
+    "pokeemerald:ITEM_MAGO_BERRY": {
+      "text": "A hold item that restores HP but may confuse.",
+      "symbol": "sMagoBerryDesc",
+      "line": 560
+    },
+    "pokeemerald:ITEM_AGUAV_BERRY": {
+      "text": "A hold item that restores HP but may confuse.",
+      "symbol": "sAguavBerryDesc",
+      "line": 565
+    },
+    "pokeemerald:ITEM_IAPAPA_BERRY": {
+      "text": "A hold item that restores HP but may confuse.",
+      "symbol": "sIapapaBerryDesc",
+      "line": 570
+    },
+    "pokeemerald:ITEM_RAZZ_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow RAZZ.",
+      "symbol": "sRazzBerryDesc",
+      "line": 575
+    },
+    "pokeemerald:ITEM_BLUK_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow BLUK.",
+      "symbol": "sBlukBerryDesc",
+      "line": 580
+    },
+    "pokeemerald:ITEM_NANAB_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow NANAB.",
+      "symbol": "sNanabBerryDesc",
+      "line": 585
+    },
+    "pokeemerald:ITEM_WEPEAR_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow WEPEAR.",
+      "symbol": "sWepearBerryDesc",
+      "line": 590
+    },
+    "pokeemerald:ITEM_PINAP_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow PINAP.",
+      "symbol": "sPinapBerryDesc",
+      "line": 595
+    },
+    "pokeemerald:ITEM_POMEG_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base HP.",
+      "symbol": "sPomegBerryDesc",
+      "line": 600
+    },
+    "pokeemerald:ITEM_KELPSY_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base ATTACK.",
+      "symbol": "sKelpsyBerryDesc",
+      "line": 605
+    },
+    "pokeemerald:ITEM_QUALOT_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base DEFENSE.",
+      "symbol": "sQualotBerryDesc",
+      "line": 610
+    },
+    "pokeemerald:ITEM_HONDEW_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base SP. ATK.",
+      "symbol": "sHondewBerryDesc",
+      "line": 615
+    },
+    "pokeemerald:ITEM_GREPA_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base SP. DEF.",
+      "symbol": "sGrepaBerryDesc",
+      "line": 620
+    },
+    "pokeemerald:ITEM_TAMATO_BERRY": {
+      "text": "Makes a POKéMON friendly but lowers base SPEED.",
+      "symbol": "sTamatoBerryDesc",
+      "line": 625
+    },
+    "pokeemerald:ITEM_CORNN_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow CORNN.",
+      "symbol": "sCornnBerryDesc",
+      "line": 630
+    },
+    "pokeemerald:ITEM_MAGOST_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow MAGOST.",
+      "symbol": "sMagostBerryDesc",
+      "line": 635
+    },
+    "pokeemerald:ITEM_RABUTA_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow RABUTA.",
+      "symbol": "sRabutaBerryDesc",
+      "line": 640
+    },
+    "pokeemerald:ITEM_NOMEL_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow NOMEL.",
+      "symbol": "sNomelBerryDesc",
+      "line": 645
+    },
+    "pokeemerald:ITEM_SPELON_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow SPELON.",
+      "symbol": "sSpelonBerryDesc",
+      "line": 650
+    },
+    "pokeemerald:ITEM_PAMTRE_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow PAMTRE.",
+      "symbol": "sPamtreBerryDesc",
+      "line": 655
+    },
+    "pokeemerald:ITEM_WATMEL_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow WATMEL.",
+      "symbol": "sWatmelBerryDesc",
+      "line": 660
+    },
+    "pokeemerald:ITEM_DURIN_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow DURIN.",
+      "symbol": "sDurinBerryDesc",
+      "line": 665
+    },
+    "pokeemerald:ITEM_BELUE_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow BELUE.",
+      "symbol": "sBelueBerryDesc",
+      "line": 670
+    },
+    "pokeemerald:ITEM_LIECHI_BERRY": {
+      "text": "A hold item that raises ATTACK in a pinch.",
+      "symbol": "sLiechiBerryDesc",
+      "line": 675
+    },
+    "pokeemerald:ITEM_GANLON_BERRY": {
+      "text": "A hold item that raises DEFENSE in a pinch.",
+      "symbol": "sGanlonBerryDesc",
+      "line": 680
+    },
+    "pokeemerald:ITEM_SALAC_BERRY": {
+      "text": "A hold item that raises SPEED in a pinch.",
+      "symbol": "sSalacBerryDesc",
+      "line": 685
+    },
+    "pokeemerald:ITEM_PETAYA_BERRY": {
+      "text": "A hold item that raises SP. ATK in a pinch.",
+      "symbol": "sPetayaBerryDesc",
+      "line": 690
+    },
+    "pokeemerald:ITEM_APICOT_BERRY": {
+      "text": "A hold item that raises SP. DEF in a pinch.",
+      "symbol": "sApicotBerryDesc",
+      "line": 695
+    },
+    "pokeemerald:ITEM_LANSAT_BERRY": {
+      "text": "A hold item that ups the critical- hit rate in a pinch.",
+      "symbol": "sLansatBerryDesc",
+      "line": 700
+    },
+    "pokeemerald:ITEM_STARF_BERRY": {
+      "text": "A hold item that sharply boosts a stat in a pinch.",
+      "symbol": "sStarfBerryDesc",
+      "line": 705
+    },
+    "pokeemerald:ITEM_ENIGMA_BERRY": {
+      "text": "{POKEBLOCK} ingredient. Plant in loamy soil to grow a mystery.",
+      "symbol": "sEnigmaBerryDesc",
+      "line": 710
+    },
+    "pokeemerald:ITEM_UNUSED_BERRY_1": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_UNUSED_BERRY_2": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_UNUSED_BERRY_3": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_BRIGHT_POWDER": {
+      "text": "A hold item that casts a glare to reduce accuracy.",
+      "symbol": "sBrightPowderDesc",
+      "line": 716
+    },
+    "pokeemerald:ITEM_WHITE_HERB": {
+      "text": "A hold item that restores any lowered stat.",
+      "symbol": "sWhiteHerbDesc",
+      "line": 721
+    },
+    "pokeemerald:ITEM_MACHO_BRACE": {
+      "text": "A hold item that promotes growth, but reduces SPEED.",
+      "symbol": "sMachoBraceDesc",
+      "line": 726
+    },
+    "pokeemerald:ITEM_EXP_SHARE": {
+      "text": "A hold item that gets EXP. points from battles.",
+      "symbol": "sExpShareDesc",
+      "line": 731
+    },
+    "pokeemerald:ITEM_QUICK_CLAW": {
+      "text": "A hold item that occasionally allows the first strike.",
+      "symbol": "sQuickClawDesc",
+      "line": 736
+    },
+    "pokeemerald:ITEM_SOOTHE_BELL": {
+      "text": "A hold item that calms spirits and fosters friendship.",
+      "symbol": "sSootheBellDesc",
+      "line": 741
+    },
+    "pokeemerald:ITEM_MENTAL_HERB": {
+      "text": "A hold item that snaps POKéMON out of infatuation.",
+      "symbol": "sMentalHerbDesc",
+      "line": 746
+    },
+    "pokeemerald:ITEM_CHOICE_BAND": {
+      "text": "Raises a move's power, but permits only that move.",
+      "symbol": "sChoiceBandDesc",
+      "line": 751
+    },
+    "pokeemerald:ITEM_KINGS_ROCK": {
+      "text": "A hold item that may cause flinching when the foe is hit.",
+      "symbol": "sKingsRockDesc",
+      "line": 756
+    },
+    "pokeemerald:ITEM_SILVER_POWDER": {
+      "text": "A hold item that raises the power of BUG-type moves.",
+      "symbol": "sSilverPowderDesc",
+      "line": 761
+    },
+    "pokeemerald:ITEM_AMULET_COIN": {
+      "text": "Doubles money in battle if the holder takes part.",
+      "symbol": "sAmuletCoinDesc",
+      "line": 766
+    },
+    "pokeemerald:ITEM_CLEANSE_TAG": {
+      "text": "A hold item that helps repel wild POKéMON.",
+      "symbol": "sCleanseTagDesc",
+      "line": 771
+    },
+    "pokeemerald:ITEM_SOUL_DEW": {
+      "text": "Hold item: raises SP. ATK & SP. DEF of LATIOS & LATIAS.",
+      "symbol": "sSoulDewDesc",
+      "line": 776
+    },
+    "pokeemerald:ITEM_DEEP_SEA_TOOTH": {
+      "text": "A hold item that raises the SP. ATK of CLAMPERL.",
+      "symbol": "sDeepSeaToothDesc",
+      "line": 781
+    },
+    "pokeemerald:ITEM_DEEP_SEA_SCALE": {
+      "text": "A hold item that raises the SP. DEF of CLAMPERL.",
+      "symbol": "sDeepSeaScaleDesc",
+      "line": 786
+    },
+    "pokeemerald:ITEM_SMOKE_BALL": {
+      "text": "A hold item that assures fleeing from wild POKéMON.",
+      "symbol": "sSmokeBallDesc",
+      "line": 791
+    },
+    "pokeemerald:ITEM_EVERSTONE": {
+      "text": "A wondrous hold item that prevents evolution.",
+      "symbol": "sEverstoneDesc",
+      "line": 796
+    },
+    "pokeemerald:ITEM_FOCUS_BAND": {
+      "text": "A hold item that occasionally prevents fainting.",
+      "symbol": "sFocusBandDesc",
+      "line": 801
+    },
+    "pokeemerald:ITEM_LUCKY_EGG": {
+      "text": "A hold item that boosts EXP. points earned in battle.",
+      "symbol": "sLuckyEggDesc",
+      "line": 806
+    },
+    "pokeemerald:ITEM_SCOPE_LENS": {
+      "text": "A hold item that improves the critical-hit rate.",
+      "symbol": "sScopeLensDesc",
+      "line": 811
+    },
+    "pokeemerald:ITEM_METAL_COAT": {
+      "text": "A hold item that raises the power of STEEL-type moves.",
+      "symbol": "sMetalCoatDesc",
+      "line": 816
+    },
+    "pokeemerald:ITEM_LEFTOVERS": {
+      "text": "A hold item that gradually restores HP in battle.",
+      "symbol": "sLeftoversDesc",
+      "line": 821
+    },
+    "pokeemerald:ITEM_DRAGON_SCALE": {
+      "text": "A strange scale held by DRAGON- type POKéMON.",
+      "symbol": "sDragonScaleDesc",
+      "line": 826
+    },
+    "pokeemerald:ITEM_LIGHT_BALL": {
+      "text": "A hold item that raises the SP. ATK of PIKACHU.",
+      "symbol": "sLightBallDesc",
+      "line": 831
+    },
+    "pokeemerald:ITEM_SOFT_SAND": {
+      "text": "A hold item that raises the power of GROUND-type moves.",
+      "symbol": "sSoftSandDesc",
+      "line": 836
+    },
+    "pokeemerald:ITEM_HARD_STONE": {
+      "text": "A hold item that raises the power of ROCK-type moves.",
+      "symbol": "sHardStoneDesc",
+      "line": 841
+    },
+    "pokeemerald:ITEM_MIRACLE_SEED": {
+      "text": "A hold item that raises the power of GRASS-type moves.",
+      "symbol": "sMiracleSeedDesc",
+      "line": 846
+    },
+    "pokeemerald:ITEM_BLACK_GLASSES": {
+      "text": "A hold item that raises the power of DARK-type moves.",
+      "symbol": "sBlackGlassesDesc",
+      "line": 851
+    },
+    "pokeemerald:ITEM_BLACK_BELT": {
+      "text": "A hold item that boosts FIGHTING- type moves.",
+      "symbol": "sBlackBeltDesc",
+      "line": 856
+    },
+    "pokeemerald:ITEM_MAGNET": {
+      "text": "A hold item that boosts ELECTRIC- type moves.",
+      "symbol": "sMagnetDesc",
+      "line": 861
+    },
+    "pokeemerald:ITEM_MYSTIC_WATER": {
+      "text": "A hold item that raises the power of WATER-type moves.",
+      "symbol": "sMysticWaterDesc",
+      "line": 866
+    },
+    "pokeemerald:ITEM_SHARP_BEAK": {
+      "text": "A hold item that raises the power of FLYING-type moves.",
+      "symbol": "sSharpBeakDesc",
+      "line": 871
+    },
+    "pokeemerald:ITEM_POISON_BARB": {
+      "text": "A hold item that raises the power of POISON-type moves.",
+      "symbol": "sPoisonBarbDesc",
+      "line": 876
+    },
+    "pokeemerald:ITEM_NEVER_MELT_ICE": {
+      "text": "A hold item that raises the power of ICE-type moves.",
+      "symbol": "sNeverMeltIceDesc",
+      "line": 881
+    },
+    "pokeemerald:ITEM_SPELL_TAG": {
+      "text": "A hold item that raises the power of GHOST-type moves.",
+      "symbol": "sSpellTagDesc",
+      "line": 886
+    },
+    "pokeemerald:ITEM_TWISTED_SPOON": {
+      "text": "A hold item that boosts PSYCHIC- type moves.",
+      "symbol": "sTwistedSpoonDesc",
+      "line": 891
+    },
+    "pokeemerald:ITEM_CHARCOAL": {
+      "text": "A hold item that raises the power of FIRE-type moves.",
+      "symbol": "sCharcoalDesc",
+      "line": 896
+    },
+    "pokeemerald:ITEM_DRAGON_FANG": {
+      "text": "A hold item that raises the power of DRAGON-type moves.",
+      "symbol": "sDragonFangDesc",
+      "line": 901
+    },
+    "pokeemerald:ITEM_SILK_SCARF": {
+      "text": "A hold item that raises the power of NORMAL-type moves.",
+      "symbol": "sSilkScarfDesc",
+      "line": 906
+    },
+    "pokeemerald:ITEM_UP_GRADE": {
+      "text": "A peculiar box made by SILPH CO.",
+      "symbol": "sUpGradeDesc",
+      "line": 911
+    },
+    "pokeemerald:ITEM_SHELL_BELL": {
+      "text": "A hold item that restores HP upon striking the foe.",
+      "symbol": "sShellBellDesc",
+      "line": 915
+    },
+    "pokeemerald:ITEM_SEA_INCENSE": {
+      "text": "A hold item that slightly boosts WATER-type moves.",
+      "symbol": "sSeaIncenseDesc",
+      "line": 920
+    },
+    "pokeemerald:ITEM_LAX_INCENSE": {
+      "text": "A hold item that slightly lowers the foe's accuracy.",
+      "symbol": "sLaxIncenseDesc",
+      "line": 925
+    },
+    "pokeemerald:ITEM_LUCKY_PUNCH": {
+      "text": "A hold item that raises CHANSEY's critical-hit rate.",
+      "symbol": "sLuckyPunchDesc",
+      "line": 930
+    },
+    "pokeemerald:ITEM_METAL_POWDER": {
+      "text": "A hold item that raises DITTO's DEFENSE.",
+      "symbol": "sMetalPowderDesc",
+      "line": 935
+    },
+    "pokeemerald:ITEM_THICK_CLUB": {
+      "text": "A hold item that raises CUBONE or MAROWAK's ATTACK.",
+      "symbol": "sThickClubDesc",
+      "line": 940
+    },
+    "pokeemerald:ITEM_STICK": {
+      "text": "A hold item that raises FARFETCH'D's critical-hit ratio.",
+      "symbol": "sStickDesc",
+      "line": 945
+    },
+    "pokeemerald:ITEM_0E2": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E3": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E4": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E5": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E6": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E7": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E8": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0E9": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0EA": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0EB": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0EC": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0ED": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0EE": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0EF": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F0": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F1": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F2": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F3": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F4": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F5": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F6": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F7": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F8": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0F9": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0FA": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0FB": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0FC": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_0FD": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_RED_SCARF": {
+      "text": "A hold item that raises COOL in CONTESTS.",
+      "symbol": "sRedScarfDesc",
+      "line": 950
+    },
+    "pokeemerald:ITEM_BLUE_SCARF": {
+      "text": "A hold item that raises BEAUTY in CONTESTS.",
+      "symbol": "sBlueScarfDesc",
+      "line": 955
+    },
+    "pokeemerald:ITEM_PINK_SCARF": {
+      "text": "A hold item that raises CUTE in CONTESTS.",
+      "symbol": "sPinkScarfDesc",
+      "line": 960
+    },
+    "pokeemerald:ITEM_GREEN_SCARF": {
+      "text": "A hold item that raises SMART in CONTESTS.",
+      "symbol": "sGreenScarfDesc",
+      "line": 965
+    },
+    "pokeemerald:ITEM_YELLOW_SCARF": {
+      "text": "A hold item that raises TOUGH in CONTESTS.",
+      "symbol": "sYellowScarfDesc",
+      "line": 970
+    },
+    "pokeemerald:ITEM_MACH_BIKE": {
+      "text": "A folding bicycle that doubles your speed or better.",
+      "symbol": "sMachBikeDesc",
+      "line": 976
+    },
+    "pokeemerald:ITEM_COIN_CASE": {
+      "text": "A case that holds up to 9,999 COINS.",
+      "symbol": "sCoinCaseDesc",
+      "line": 981
+    },
+    "pokeemerald:ITEM_ITEMFINDER": {
+      "text": "A device that signals an invisible item by sound.",
+      "symbol": "sItemfinderDesc",
+      "line": 985
+    },
+    "pokeemerald:ITEM_OLD_ROD": {
+      "text": "Use by any body of water to fish for wild POKéMON.",
+      "symbol": "sOldRodDesc",
+      "line": 990
+    },
+    "pokeemerald:ITEM_GOOD_ROD": {
+      "text": "A decent fishing rod for catching wild POKéMON.",
+      "symbol": "sGoodRodDesc",
+      "line": 995
+    },
+    "pokeemerald:ITEM_SUPER_ROD": {
+      "text": "The best fishing rod for catching wild POKéMON.",
+      "symbol": "sSuperRodDesc",
+      "line": 1000
+    },
+    "pokeemerald:ITEM_SS_TICKET": {
+      "text": "The ticket required for sailing on a ferry.",
+      "symbol": "sSSTicketDesc",
+      "line": 1005
+    },
+    "pokeemerald:ITEM_CONTEST_PASS": {
+      "text": "The pass required for entering POKéMON CONTESTS.",
+      "symbol": "sContestPassDesc",
+      "line": 1010
+    },
+    "pokeemerald:ITEM_10B": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_WAILMER_PAIL": {
+      "text": "A tool used for watering BERRIES and plants.",
+      "symbol": "sWailmerPailDesc",
+      "line": 1015
+    },
+    "pokeemerald:ITEM_DEVON_GOODS": {
+      "text": "A package that contains DEVON's machine parts.",
+      "symbol": "sDevonGoodsDesc",
+      "line": 1020
+    },
+    "pokeemerald:ITEM_SOOT_SACK": {
+      "text": "A sack used to gather and hold volcanic ash.",
+      "symbol": "sSootSackDesc",
+      "line": 1025
+    },
+    "pokeemerald:ITEM_BASEMENT_KEY": {
+      "text": "The key for NEW MAUVILLE beneath MAUVILLE CITY.",
+      "symbol": "sBasementKeyDesc",
+      "line": 1030
+    },
+    "pokeemerald:ITEM_ACRO_BIKE": {
+      "text": "A folding bicycle capable of jumps and wheelies.",
+      "symbol": "sAcroBikeDesc",
+      "line": 1035
+    },
+    "pokeemerald:ITEM_POKEBLOCK_CASE": {
+      "text": "A case for holding {POKEBLOCK}S made with a BERRY BLENDER.",
+      "symbol": "sPokeblockCaseDesc",
+      "line": 1040
+    },
+    "pokeemerald:ITEM_LETTER": {
+      "text": "A letter to STEVEN from the PRESIDENT of the DEVON CORP.",
+      "symbol": "sLetterDesc",
+      "line": 1045
+    },
+    "pokeemerald:ITEM_EON_TICKET": {
+      "text": "The ticket for a ferry to a distant southern island.",
+      "symbol": "sEonTicketDesc",
+      "line": 1050
+    },
+    "pokeemerald:ITEM_RED_ORB": {
+      "text": "A red, glowing orb said to contain an ancient power.",
+      "symbol": "sRedOrbDesc",
+      "line": 1055
+    },
+    "pokeemerald:ITEM_BLUE_ORB": {
+      "text": "A blue, glowing orb said to contain an ancient power.",
+      "symbol": "sBlueOrbDesc",
+      "line": 1060
+    },
+    "pokeemerald:ITEM_SCANNER": {
+      "text": "A device found inside the ABANDONED SHIP.",
+      "symbol": "sScannerDesc",
+      "line": 1065
+    },
+    "pokeemerald:ITEM_GO_GOGGLES": {
+      "text": "Nifty goggles that protect eyes from desert sandstorms.",
+      "symbol": "sGoGogglesDesc",
+      "line": 1070
+    },
+    "pokeemerald:ITEM_METEORITE": {
+      "text": "A meteorite found at METEOR FALLS.",
+      "symbol": "sMeteoriteDesc",
+      "line": 1075
+    },
+    "pokeemerald:ITEM_ROOM_1_KEY": {
+      "text": "A key that opens a door inside the ABANDONED SHIP.",
+      "symbol": "sRoom1KeyDesc",
+      "line": 1079
+    },
+    "pokeemerald:ITEM_ROOM_2_KEY": {
+      "text": "A key that opens a door inside the ABANDONED SHIP.",
+      "symbol": "sRoom2KeyDesc",
+      "line": 1084
+    },
+    "pokeemerald:ITEM_ROOM_4_KEY": {
+      "text": "A key that opens a door inside the ABANDONED SHIP.",
+      "symbol": "sRoom4KeyDesc",
+      "line": 1089
+    },
+    "pokeemerald:ITEM_ROOM_6_KEY": {
+      "text": "A key that opens a door inside the ABANDONED SHIP.",
+      "symbol": "sRoom6KeyDesc",
+      "line": 1094
+    },
+    "pokeemerald:ITEM_STORAGE_KEY": {
+      "text": "The key to the storage inside the ABANDONED SHIP.",
+      "symbol": "sStorageKeyDesc",
+      "line": 1099
+    },
+    "pokeemerald:ITEM_ROOT_FOSSIL": {
+      "text": "A fossil of an ancient, seafloor- dwelling POKéMON.",
+      "symbol": "sRootFossilDesc",
+      "line": 1104
+    },
+    "pokeemerald:ITEM_CLAW_FOSSIL": {
+      "text": "A fossil of an ancient, seafloor- dwelling POKéMON.",
+      "symbol": "sClawFossilDesc",
+      "line": 1109
+    },
+    "pokeemerald:ITEM_DEVON_SCOPE": {
+      "text": "A device by DEVON that signals any unseeable POKéMON.",
+      "symbol": "sDevonScopeDesc",
+      "line": 1114
+    },
+    "pokeemerald:ITEM_TM_FOCUS_PUNCH": {
+      "text": "Powerful, but makes the user flinch if hit by the foe.",
+      "symbol": "sTM01Desc",
+      "line": 1120
+    },
+    "pokeemerald:ITEM_TM_DRAGON_CLAW": {
+      "text": "Hooks and slashes the foe with long, sharp claws.",
+      "symbol": "sTM02Desc",
+      "line": 1125
+    },
+    "pokeemerald:ITEM_TM_WATER_PULSE": {
+      "text": "Generates an ultrasonic wave that may confuse.",
+      "symbol": "sTM03Desc",
+      "line": 1130
+    },
+    "pokeemerald:ITEM_TM_CALM_MIND": {
+      "text": "Raises SP. ATK and SP. DEF by focusing the mind.",
+      "symbol": "sTM04Desc",
+      "line": 1135
+    },
+    "pokeemerald:ITEM_TM_ROAR": {
+      "text": "A savage roar that makes the foe flee to end the battle.",
+      "symbol": "sTM05Desc",
+      "line": 1140
+    },
+    "pokeemerald:ITEM_TM_TOXIC": {
+      "text": "Poisons the foe with a toxin that gradually worsens.",
+      "symbol": "sTM06Desc",
+      "line": 1145
+    },
+    "pokeemerald:ITEM_TM_HAIL": {
+      "text": "Creates a hailstorm that damages all types except ICE.",
+      "symbol": "sTM07Desc",
+      "line": 1150
+    },
+    "pokeemerald:ITEM_TM_BULK_UP": {
+      "text": "Bulks up the body to boost both ATTACK & DEFENSE.",
+      "symbol": "sTM08Desc",
+      "line": 1155
+    },
+    "pokeemerald:ITEM_TM_BULLET_SEED": {
+      "text": "Shoots 2 to 5 seeds in a row to strike the foe.",
+      "symbol": "sTM09Desc",
+      "line": 1160
+    },
+    "pokeemerald:ITEM_TM_HIDDEN_POWER": {
+      "text": "The attack power varies among different POKéMON.",
+      "symbol": "sTM10Desc",
+      "line": 1165
+    },
+    "pokeemerald:ITEM_TM_SUNNY_DAY": {
+      "text": "Raises the power of FIRE-type moves for 5 turns.",
+      "symbol": "sTM11Desc",
+      "line": 1170
+    },
+    "pokeemerald:ITEM_TM_TAUNT": {
+      "text": "Enrages the foe so it can only use attack moves.",
+      "symbol": "sTM12Desc",
+      "line": 1175
+    },
+    "pokeemerald:ITEM_TM_ICE_BEAM": {
+      "text": "Fires an icy cold beam that may freeze the foe.",
+      "symbol": "sTM13Desc",
+      "line": 1180
+    },
+    "pokeemerald:ITEM_TM_BLIZZARD": {
+      "text": "A brutal snow-and- wind attack that may freeze the foe.",
+      "symbol": "sTM14Desc",
+      "line": 1185
+    },
+    "pokeemerald:ITEM_TM_HYPER_BEAM": {
+      "text": "Powerful, but needs recharging the next turn.",
+      "symbol": "sTM15Desc",
+      "line": 1190
+    },
+    "pokeemerald:ITEM_TM_LIGHT_SCREEN": {
+      "text": "Creates a wall of light that lowers SP. ATK damage.",
+      "symbol": "sTM16Desc",
+      "line": 1195
+    },
+    "pokeemerald:ITEM_TM_PROTECT": {
+      "text": "Negates all damage, but may fail if used in succession.",
+      "symbol": "sTM17Desc",
+      "line": 1200
+    },
+    "pokeemerald:ITEM_TM_RAIN_DANCE": {
+      "text": "Raises the power of WATER-type moves for 5 turns.",
+      "symbol": "sTM18Desc",
+      "line": 1205
+    },
+    "pokeemerald:ITEM_TM_GIGA_DRAIN": {
+      "text": "Recovers half the HP of the damage this move inflicts.",
+      "symbol": "sTM19Desc",
+      "line": 1210
+    },
+    "pokeemerald:ITEM_TM_SAFEGUARD": {
+      "text": "Prevents status abnormality with a mystical power.",
+      "symbol": "sTM20Desc",
+      "line": 1215
+    },
+    "pokeemerald:ITEM_TM_FRUSTRATION": {
+      "text": "The less the user likes you, the more powerful this move.",
+      "symbol": "sTM21Desc",
+      "line": 1220
+    },
+    "pokeemerald:ITEM_TM_SOLAR_BEAM": {
+      "text": "Absorbs sunlight in the 1st turn, then attacks next turn.",
+      "symbol": "sTM22Desc",
+      "line": 1225
+    },
+    "pokeemerald:ITEM_TM_IRON_TAIL": {
+      "text": "Slams the foe with a hard tail. It may lower DEFENSE.",
+      "symbol": "sTM23Desc",
+      "line": 1230
+    },
+    "pokeemerald:ITEM_TM_THUNDERBOLT": {
+      "text": "A powerful electric attack that may cause paralysis.",
+      "symbol": "sTM24Desc",
+      "line": 1235
+    },
+    "pokeemerald:ITEM_TM_THUNDER": {
+      "text": "Strikes the foe with a thunderbolt. It may paralyze.",
+      "symbol": "sTM25Desc",
+      "line": 1240
+    },
+    "pokeemerald:ITEM_TM_EARTHQUAKE": {
+      "text": "Causes a quake that has no effect on flying foes.",
+      "symbol": "sTM26Desc",
+      "line": 1245
+    },
+    "pokeemerald:ITEM_TM_RETURN": {
+      "text": "The more the user likes you, the more powerful this move.",
+      "symbol": "sTM27Desc",
+      "line": 1250
+    },
+    "pokeemerald:ITEM_TM_DIG": {
+      "text": "Digs underground the 1st turn, then strikes next turn.",
+      "symbol": "sTM28Desc",
+      "line": 1255
+    },
+    "pokeemerald:ITEM_TM_PSYCHIC": {
+      "text": "A powerful psychic attack that may lower SP. DEF.",
+      "symbol": "sTM29Desc",
+      "line": 1260
+    },
+    "pokeemerald:ITEM_TM_SHADOW_BALL": {
+      "text": "Hurls a dark lump at the foe. It may lower SP. DEF.",
+      "symbol": "sTM30Desc",
+      "line": 1265
+    },
+    "pokeemerald:ITEM_TM_BRICK_BREAK": {
+      "text": "Destroys barriers like LIGHT SCREEN and causes damage.",
+      "symbol": "sTM31Desc",
+      "line": 1270
+    },
+    "pokeemerald:ITEM_TM_DOUBLE_TEAM": {
+      "text": "Creates illusory copies to enhance elusiveness.",
+      "symbol": "sTM32Desc",
+      "line": 1275
+    },
+    "pokeemerald:ITEM_TM_REFLECT": {
+      "text": "Creates a wall of light that weakens physical attacks.",
+      "symbol": "sTM33Desc",
+      "line": 1280
+    },
+    "pokeemerald:ITEM_TM_SHOCK_WAVE": {
+      "text": "Zaps the foe with a jolt of electricity that never misses.",
+      "symbol": "sTM34Desc",
+      "line": 1285
+    },
+    "pokeemerald:ITEM_TM_FLAMETHROWER": {
+      "text": "Looses a stream of fire that may burn the foe.",
+      "symbol": "sTM35Desc",
+      "line": 1290
+    },
+    "pokeemerald:ITEM_TM_SLUDGE_BOMB": {
+      "text": "Hurls sludge at the foe. It may poison the foe.",
+      "symbol": "sTM36Desc",
+      "line": 1295
+    },
+    "pokeemerald:ITEM_TM_SANDSTORM": {
+      "text": "Causes a sandstorm that hits the foe over several turns.",
+      "symbol": "sTM37Desc",
+      "line": 1300
+    },
+    "pokeemerald:ITEM_TM_FIRE_BLAST": {
+      "text": "A powerful fire attack that may burn the foe.",
+      "symbol": "sTM38Desc",
+      "line": 1305
+    },
+    "pokeemerald:ITEM_TM_ROCK_TOMB": {
+      "text": "Stops the foe from moving with rocks. May lower SPEED.",
+      "symbol": "sTM39Desc",
+      "line": 1310
+    },
+    "pokeemerald:ITEM_TM_AERIAL_ACE": {
+      "text": "An extremely fast attack that can't be avoided.",
+      "symbol": "sTM40Desc",
+      "line": 1315
+    },
+    "pokeemerald:ITEM_TM_TORMENT": {
+      "text": "Prevents the foe from using the same move in a row.",
+      "symbol": "sTM41Desc",
+      "line": 1320
+    },
+    "pokeemerald:ITEM_TM_FACADE": {
+      "text": "Raises ATTACK when poisoned, burned, or paralyzed.",
+      "symbol": "sTM42Desc",
+      "line": 1325
+    },
+    "pokeemerald:ITEM_TM_SECRET_POWER": {
+      "text": "Adds an effect to attack depending on the location.",
+      "symbol": "sTM43Desc",
+      "line": 1330
+    },
+    "pokeemerald:ITEM_TM_REST": {
+      "text": "The user sleeps for 2 turns to restore health and status.",
+      "symbol": "sTM44Desc",
+      "line": 1335
+    },
+    "pokeemerald:ITEM_TM_ATTRACT": {
+      "text": "Makes it tough to attack a foe of the opposite gender.",
+      "symbol": "sTM45Desc",
+      "line": 1340
+    },
+    "pokeemerald:ITEM_TM_THIEF": {
+      "text": "While attacking, it may steal the foe's held item.",
+      "symbol": "sTM46Desc",
+      "line": 1345
+    },
+    "pokeemerald:ITEM_TM_STEEL_WING": {
+      "text": "Spreads hard- edged wings and slams into the foe.",
+      "symbol": "sTM47Desc",
+      "line": 1350
+    },
+    "pokeemerald:ITEM_TM_SKILL_SWAP": {
+      "text": "Switches abilities with the foe on the turn this is used.",
+      "symbol": "sTM48Desc",
+      "line": 1355
+    },
+    "pokeemerald:ITEM_TM_SNATCH": {
+      "text": "Steals the effects of the move the foe is trying to use.",
+      "symbol": "sTM49Desc",
+      "line": 1360
+    },
+    "pokeemerald:ITEM_TM_OVERHEAT": {
+      "text": "Enables full-power attack, but sharply lowers SP. ATK.",
+      "symbol": "sTM50Desc",
+      "line": 1365
+    },
+    "pokeemerald:ITEM_HM_CUT": {
+      "text": "Attacks the foe with sharp blades or claws.",
+      "symbol": "sHM01Desc",
+      "line": 1371
+    },
+    "pokeemerald:ITEM_HM_FLY": {
+      "text": "Flies up on the first turn, then attacks next turn.",
+      "symbol": "sHM02Desc",
+      "line": 1376
+    },
+    "pokeemerald:ITEM_HM_SURF": {
+      "text": "Creates a huge wave, then crashes it down on the foe.",
+      "symbol": "sHM03Desc",
+      "line": 1381
+    },
+    "pokeemerald:ITEM_HM_STRENGTH": {
+      "text": "Builds enormous power, then slams the foe.",
+      "symbol": "sHM04Desc",
+      "line": 1386
+    },
+    "pokeemerald:ITEM_HM_FLASH": {
+      "text": "Looses a powerful blast of light that reduces accuracy.",
+      "symbol": "sHM05Desc",
+      "line": 1391
+    },
+    "pokeemerald:ITEM_HM_ROCK_SMASH": {
+      "text": "A rock-crushingly tough attack that may lower DEFENSE.",
+      "symbol": "sHM06Desc",
+      "line": 1396
+    },
+    "pokeemerald:ITEM_HM_WATERFALL": {
+      "text": "Attacks the foe with enough power to climb waterfalls.",
+      "symbol": "sHM07Desc",
+      "line": 1401
+    },
+    "pokeemerald:ITEM_HM_DIVE": {
+      "text": "Dives underwater the 1st turn, then attacks next turn.",
+      "symbol": "sHM08Desc",
+      "line": 1406
+    },
+    "pokeemerald:ITEM_15B": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_15C": {
+      "text": "?????",
+      "symbol": "sDummyDesc",
+      "line": 1
+    },
+    "pokeemerald:ITEM_OAKS_PARCEL": {
+      "text": "A parcel for PROF. OAK from a POKéMON MART's clerk.",
+      "symbol": "sOaksParcelDesc",
+      "line": 1412
+    },
+    "pokeemerald:ITEM_POKE_FLUTE": {
+      "text": "A sweet-sounding flute that awakens POKéMON.",
+      "symbol": "sPokeFluteDesc",
+      "line": 1417
+    },
+    "pokeemerald:ITEM_SECRET_KEY": {
+      "text": "The key to the CINNABAR ISLAND GYM's entrance.",
+      "symbol": "sSecretKeyDesc",
+      "line": 1422
+    },
+    "pokeemerald:ITEM_BIKE_VOUCHER": {
+      "text": "A voucher for obtaining a bicycle from the BIKE SHOP.",
+      "symbol": "sBikeVoucherDesc",
+      "line": 1427
+    },
+    "pokeemerald:ITEM_GOLD_TEETH": {
+      "text": "Gold dentures lost by the SAFARI ZONE's WARDEN.",
+      "symbol": "sGoldTeethDesc",
+      "line": 1432
+    },
+    "pokeemerald:ITEM_OLD_AMBER": {
+      "text": "A stone containing the genes of an ancient POKéMON.",
+      "symbol": "sOldAmberDesc",
+      "line": 1437
+    },
+    "pokeemerald:ITEM_CARD_KEY": {
+      "text": "A card-type door key used in SILPH CO's office.",
+      "symbol": "sCardKeyDesc",
+      "line": 1442
+    },
+    "pokeemerald:ITEM_LIFT_KEY": {
+      "text": "An elevator key used in TEAM ROCKET's HIDEOUT.",
+      "symbol": "sLiftKeyDesc",
+      "line": 1447
+    },
+    "pokeemerald:ITEM_HELIX_FOSSIL": {
+      "text": "A piece of an ancient marine POKéMON's seashell.",
+      "symbol": "sHelixFossilDesc",
+      "line": 1452
+    },
+    "pokeemerald:ITEM_DOME_FOSSIL": {
+      "text": "A piece of an ancient marine POKéMON's shell.",
+      "symbol": "sDomeFossilDesc",
+      "line": 1457
+    },
+    "pokeemerald:ITEM_SILPH_SCOPE": {
+      "text": "SILPH CO's scope makes unseeable POKéMON visible.",
+      "symbol": "sSilphScopeDesc",
+      "line": 1462
+    },
+    "pokeemerald:ITEM_BICYCLE": {
+      "text": "A folding bicycle that is faster than the RUNNING SHOES.",
+      "symbol": "sBicycleDesc",
+      "line": 1467
+    },
+    "pokeemerald:ITEM_TOWN_MAP": {
+      "text": "Can be viewed anytime. Shows your present location.",
+      "symbol": "sTownMapDesc",
+      "line": 1472
+    },
+    "pokeemerald:ITEM_VS_SEEKER": {
+      "text": "A rechargeable unit that flags battle- ready TRAINERS.",
+      "symbol": "sVSSeekerDesc",
+      "line": 1477
+    },
+    "pokeemerald:ITEM_FAME_CHECKER": {
+      "text": "Stores information on famous people for instant recall.",
+      "symbol": "sFameCheckerDesc",
+      "line": 1482
+    },
+    "pokeemerald:ITEM_TM_CASE": {
+      "text": "A convenient case that holds TMs and HMs.",
+      "symbol": "sTMCaseDesc",
+      "line": 1487
+    },
+    "pokeemerald:ITEM_BERRY_POUCH": {
+      "text": "A convenient container that holds BERRIES.",
+      "symbol": "sBerryPouchDesc",
+      "line": 1492
+    },
+    "pokeemerald:ITEM_TEACHY_TV": {
+      "text": "A TV set tuned to an advice program for TRAINERS.",
+      "symbol": "sTeachyTVDesc",
+      "line": 1497
+    },
+    "pokeemerald:ITEM_TRI_PASS": {
+      "text": "A pass for ferries between ONE, TWO, and THREE ISLAND.",
+      "symbol": "sTriPassDesc",
+      "line": 1502
+    },
+    "pokeemerald:ITEM_RAINBOW_PASS": {
+      "text": "For ferries serving VERMILION and the SEVII ISLANDS.",
+      "symbol": "sRainbowPassDesc",
+      "line": 1507
+    },
+    "pokeemerald:ITEM_TEA": {
+      "text": "A thirst-quenching tea prepared by an old lady.",
+      "symbol": "sTeaDesc",
+      "line": 1512
+    },
+    "pokeemerald:ITEM_MYSTIC_TICKET": {
+      "text": "A ticket required to board the ship to NAVEL ROCK.",
+      "symbol": "sMysticTicketDesc",
+      "line": 1517
+    },
+    "pokeemerald:ITEM_AURORA_TICKET": {
+      "text": "A ticket required to board the ship to BIRTH ISLAND.",
+      "symbol": "sAuroraTicketDesc",
+      "line": 1522
+    },
+    "pokeemerald:ITEM_POWDER_JAR": {
+      "text": "Stores BERRY POWDER made using a BERRY CRUSHER.",
+      "symbol": "sPowderJarDesc",
+      "line": 1527
+    },
+    "pokeemerald:ITEM_RUBY": {
+      "text": "An exquisite, red- glowing gem that symbolizes passion.",
+      "symbol": "sRubyDesc",
+      "line": 1532
+    },
+    "pokeemerald:ITEM_SAPPHIRE": {
+      "text": "A brilliant blue gem that symbolizes honesty.",
+      "symbol": "sSapphireDesc",
+      "line": 1537
+    },
+    "pokeemerald:ITEM_MAGMA_EMBLEM": {
+      "text": "A medal-like item in the same shape as TEAM MAGMA's mark.",
+      "symbol": "sMagmaEmblemDesc",
+      "line": 1543
+    },
+    "pokeemerald:ITEM_OLD_SEA_MAP": {
+      "text": "A faded sea chart that shows the way to a certain island.",
+      "symbol": "sOldSeaMapDesc",
+      "line": 1548
+    }
+  }
+}
