@@ -265,18 +265,14 @@ createServer(async(req,res)=>{
       // A tab makes ~1 request per second and sees a change within ~100 ms.
       const wait=url.searchParams.get('wait')==='1';const since=url.searchParams.get('since')||'';
       let body=await keeperState();
-      if(wait){const until=Date.now()+8000;while(stateSignature(body)===since&&Date.now()<until&&!req.destroyed){await new Promise(r=>setTimeout(r,100));body=await keeperState();}}
+      void wait; void since; // never hold: see /feed above
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-State-Signature':stateSignature(body)});res.end(body);return;
     }
-    if(url.pathname==='/api/invite/feed'&&req.method==='GET'){
-      const NL=String.fromCharCode(10);
-      res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
-      res.write('retry: 1500'+NL+NL);
-      let last='';let alive=true;req.on('close',()=>{alive=false;});
-      const pump=async()=>{while(alive){try{const s=await keeperState();if(s!==last){last=s;res.write('event: state'+NL+'data: '+s+NL+NL);}}catch{}await new Promise(r=>setTimeout(r,150));}};
-      const beat=setInterval(()=>{if(alive)res.write(': keepalive'+NL+NL);else clearInterval(beat);},15000);
-      void pump();return;
-    }
+    // Held connections (SSE, long-poll) through the site's rewrite proxy filled
+    // Passenger's request queue and took the whole site to 503 (2026-09-14).
+    // Nothing is ever held here: /feed answers 204 (EventSource stops on 204)
+    // and /state answers at once. Freshness comes from a cheap 400 ms poll.
+    if(url.pathname==='/api/invite/feed'&&req.method==='GET'){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
     if(url.pathname==='/api/invite/session'&&req.method==='GET'&&guest){
       // The arcade reads the session on every load and only POSTs join on a
       // 401 -- so after a table rebuild a returning tab never reached the

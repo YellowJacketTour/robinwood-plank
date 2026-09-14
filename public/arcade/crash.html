@@ -1157,23 +1157,13 @@ function setChainAction(stage, details = {}) {
 const INVITE_TEST = document.querySelector('meta[name="plank-invite"]')?.content === 'simulated';
 let edgeState = null, edgeStateAt = 0;
 const edgeStateFresh = () => !!edgeState && performance.now() - edgeStateAt < 1500;
-// One held request per tab: the gateway answers the moment the round-relevant
-// part of the snapshot changes (or after 8 s), so a phone follows the table
-// with ~1 request/second and ~100 ms discovery. SSE was tried first and never
-// flushed through the site's rewrite proxy; a held request works everywhere.
-async function runEdgeLongPoll() {
-  let since = "", failures = 0;
-  while (INVITE_TEST) {
-    try {
-      const r = await fetch("/api/invite/state?wait=1&since=" + encodeURIComponent(since), { cache: "no-store" });
-      if (!r.ok) throw new Error(String(r.status));
-      const s = await r.json();
-      if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); }
-      since = r.headers.get("X-State-Signature") || since; failures = 0;
-    } catch { failures++; await new Promise(res => setTimeout(res, Math.min(4000, 300 * failures))); }
-  }
+// A plain 400 ms poll of one small JSON. Held connections (SSE, long-poll)
+// were tried and filled Passenger's request queue behind the site's rewrite
+// proxy -- the whole site answered 503. Nothing is held; one read per tick.
+async function pollEdgeState() {
+  try { const r = await fetch("/api/invite/state", { cache: "no-store" }); if (!r.ok) return; const s = await r.json(); if (s && s.ready) { edgeState = s; edgeStateAt = performance.now(); } } catch {}
 }
-if (INVITE_TEST) { void runEdgeLongPoll(); performance.setResourceTimingBufferSize?.(4000); }
+if (INVITE_TEST) { void pollEdgeState(); setInterval(pollEdgeState, 400); performance.setResourceTimingBufferSize?.(4000); }
 let inviteStartBlock = 0;
 let NUMBERED_LOTTERY = false;
 let FUNDED_CYCLE_LOTTERY = false;
