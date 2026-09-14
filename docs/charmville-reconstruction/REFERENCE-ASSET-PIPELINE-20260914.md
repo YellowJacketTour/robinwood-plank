@@ -32,3 +32,23 @@ Acceptance: palette test verifies CRC validation, different native colors, ident
 ## Remaining coverage
 
 Inventory icons require separate held, thrown, pickup, terrain, crafting and animation definitions. Each gameplay binding needs anchors, timing, collision/hit timing, source rights and visual review. Three existing PMD starter catalogs contain 107 animation labels / 102 physical sequences, not universal move coverage. National species identifiers and Emerald internal IDs require explicit mapping. No new remote artwork was copied by this research inventory.
+
+## Extended source comparison
+
+Nine additional repositories are pinned in the same inventory with observation times. GitHub root README/license/attribution documents have content hashes and immutable URLs. GitLab entries pin HEAD and cite the official pack registry; their per-file license audit remains pending. No ROM was obtained or extracted.
+
+| Source | Actual availability / integration lesson | Release stage |
+|---|---|---|
+| [Majora's Mask](https://github.com/zeldaret/mm) | WIP decompilation; README explicitly excludes required assets and requires a prior game copy. Study actor/state and scene structures, not an asset download pack. | Research only |
+| [Minish Cap](https://github.com/zeldaret/tmc) | Decompilation; README likewise excludes required assets. | Research only |
+| [Shipwright](https://github.com/HarbourMasters/Shipwright) | Native port built on libultraship; requires a supported user ROM and extracts assets into o2r archives. Custom archives separate presentation from engine. | Architecture reference; not an art grant |
+| [FireRed](https://github.com/pret/pokefirered) | Decompilation targeting original ROMs. Useful sibling item/menu format comparison. | Source inspection; per-file art review pending |
+| [Crystal](https://github.com/pret/pokecrystal) | Disassembly targeting original ROMs; not an Emerald schema. | Source inspection; separate format adapter needed |
+| [Red/Blue](https://github.com/pret/pokered) | Disassembly targeting original ROMs. | Source inspection; separate format adapter needed |
+| [Tuxemon](https://github.com/Tuxemon/Tuxemon) | Original creature RPG with JSON data, Tiled maps, input support and documented art attributions. Code GPLv3; asset terms are recorded separately in ATTRIBUTIONS.md, including CC BY-SA. | Strong original-art candidate; per-file obligations and animation completeness audit pending |
+| [Trillium](https://gitlab.com/maxmraz/trillium/) | Solarus pack; official registry identifies MIT/CC-BY. Existing local revision matches remote pin. | Prefer for original world expansion after file attribution review |
+| [MIT Starter](https://gitlab.com/Splyth/solarus-mit-starter-quest) | Solarus starter; registry identifies MIT/CC-BY/CC0. | Prefer for portable original interface/world foundations after review |
+
+These are not interchangeable renderers. Keep adapters at import time: decode native indices and palettes, resolve source identifiers, preserve direction/timing/anchor metadata, then bind the reviewed presentation to a separate Charmville gameplay identity. A source repository changing its engine, archive or animation format must not mutate economic custody or gameplay rules.
+
+Priority: finish the already-preserved Emerald item palette/description bindings; curate original Trillium/Tuxemon assets with attribution and complete animation contracts; use ROM-dependent Zelda projects as documented structural research rather than promising direct artwork availability. Every inventory entry remains shippingApproved=false until its specific review is complete.

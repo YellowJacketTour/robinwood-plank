@@ -151,6 +151,148 @@
       "shippingApproved": false,
       "rightsStatus": "Repository availability and credits do not establish a blanket right to ship every depicted franchise asset; per-file review required",
       "animationStatus": "Source file inventory only; no claim of gameplay move, timing, layering or direction coverage"
+    },
+    {
+      "repository": "https://github.com/zeldaret/mm",
+      "commit": "486055ebec4c45f3020bfaa5d040698d6c2b85e4",
+      "observedAt": "2026-09-14T02:06:54.138Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/zeldaret/mm/486055ebec4c45f3020bfaa5d040698d6c2b85e4/README.md",
+          "sha256": "715f099e5afeb036ce3cb7f28223d8693031c4baa0f9f8296dfd839b3e4acce9",
+          "gitBlobSha": "0a809bbdace76dc49879d33af3d389580dfc28fe"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/pret/pokefirered",
+      "commit": "c75f352304d529f6ba92d4f74b9cf8b5c3810788",
+      "observedAt": "2026-09-14T02:06:55.565Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/pret/pokefirered/c75f352304d529f6ba92d4f74b9cf8b5c3810788/README.md",
+          "sha256": "ab59004406fa7c682aed5f7d034e527ac9b9c8cf4a0257920b1340bc25e99f3d",
+          "gitBlobSha": "819422657623aae0cb0d2d0d23893b2927fcf0d7"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/pret/pokecrystal",
+      "commit": "7a7881d0d62e0ddbd82dcf10e7116807487ac651",
+      "observedAt": "2026-09-14T02:06:56.946Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/pret/pokecrystal/7a7881d0d62e0ddbd82dcf10e7116807487ac651/README.md",
+          "sha256": "94ef6e9d391b4d65c2f3f1d8c39aee7350a9b17ea062a824c01d8b19ceba6298",
+          "gitBlobSha": "d339ff525336f3c564c033afc4b57f4e93e321bb"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/pret/pokered",
+      "commit": "a1a22aaf84d1675bcdbaeb194592379d586d838e",
+      "observedAt": "2026-09-14T02:06:58.388Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/pret/pokered/a1a22aaf84d1675bcdbaeb194592379d586d838e/README.md",
+          "sha256": "84a3c89fc54d7e5bedf8f2c8b61a6c4a9efccde611de2235f626dc43c347d243",
+          "gitBlobSha": "acd59984d7e6ca33b125a9e5581a159f2483e315"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/HarbourMasters/Shipwright",
+      "commit": "ea348bc9fbfb6407a6c9bd8864df4d10c6d46b05",
+      "observedAt": "2026-09-14T02:06:59.726Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/HarbourMasters/Shipwright/ea348bc9fbfb6407a6c9bd8864df4d10c6d46b05/README.md",
+          "sha256": "4a847f248daf9012c5823066eb6a2ec5b1ae461fa66f0b0f838a0ffff0bd6be0",
+          "gitBlobSha": "4dd7f0315b82ecc6fc1e11774917051aee033a73"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/zeldaret/tmc",
+      "commit": "5ab63f00e522ff69c5bc987e379f0163943f2833",
+      "observedAt": "2026-09-14T02:07:01.647Z",
+      "documentPins": [
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/zeldaret/tmc/5ab63f00e522ff69c5bc987e379f0163943f2833/README.md",
+          "sha256": "6b5272cac4d7aa8bdd15bf717d7fc57d4efabf3433ffa312a6ff4854fd765134",
+          "gitBlobSha": "653c182421588fb46404f3bbfdd37d6fac0ab795"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://github.com/Tuxemon/Tuxemon",
+      "commit": "59a34164f442ddecbaee4c436e3f1a5ba9474e29",
+      "observedAt": "2026-09-14T02:07:03.524Z",
+      "documentPins": [
+        {
+          "path": "ATTRIBUTIONS.md",
+          "url": "https://raw.githubusercontent.com/Tuxemon/Tuxemon/59a34164f442ddecbaee4c436e3f1a5ba9474e29/ATTRIBUTIONS.md",
+          "sha256": "f5288fc4ddd4169fcef55f174bde084ee2937e09e54b0f2f5d4069f69291087d",
+          "gitBlobSha": "8e0d5ed661027264d17c30d4dcfce0142a206897"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/Tuxemon/Tuxemon/59a34164f442ddecbaee4c436e3f1a5ba9474e29/LICENSE",
+          "sha256": "fb8df8e46706f4377fa16ac22f4b5a8662651f0818e833bc80850b325e47d4ac",
+          "gitBlobSha": "86fde5d9778118937e44d028c90b34388c5f4398"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/Tuxemon/Tuxemon/59a34164f442ddecbaee4c436e3f1a5ba9474e29/README.md",
+          "sha256": "5710884dae7190182636e54a456d4414918548056c2f440a08c9bca61f151025",
+          "gitBlobSha": "94957b78e260aa8bdf003e5ff9bcfca2921e0528"
+        }
+      ],
+      "shippingApproved": false,
+      "scope": "Root documentation only; no artwork downloaded",
+      "rightsStatus": "Per-file review required; code license does not grant franchise artwork rights"
+    },
+    {
+      "repository": "https://gitlab.com/maxmraz/trillium",
+      "commit": "9577d8c8a933547688d83db11bb904fb0f19e76e",
+      "observedAt": "2026-09-14T02:07:27.288Z",
+      "shippingApproved": false,
+      "scope": "Repository HEAD metadata and official Solarus resource-pack documentation",
+      "rightsStatus": "Official Solarus catalog identifies MIT/CC-BY (starter also CC0). Per-file attribution audit still required",
+      "documentation": "https://docs.solarus-games.org/resources/resource-packs/"
+    },
+    {
+      "repository": "https://gitlab.com/Splyth/solarus-mit-starter-quest",
+      "commit": "e92bb2a8289df106bb318cc9f1b06a4d82bbf26f",
+      "observedAt": "2026-09-14T02:07:27.816Z",
+      "shippingApproved": false,
+      "scope": "Repository HEAD metadata and official Solarus resource-pack documentation",
+      "rightsStatus": "Official Solarus catalog identifies MIT/CC-BY (starter also CC0). Per-file attribution audit still required",
+      "documentation": "https://docs.solarus-games.org/resources/resource-packs/"
     }
   ]
 }
