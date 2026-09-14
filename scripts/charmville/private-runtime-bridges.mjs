@@ -4,9 +4,9 @@ import { privateRuntimeConfig } from './private-runtime-adapter.mjs';
 // Canonical LF source identities. Inventories separately verify exact package bytes.
 export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'tutorial-bridge.js': 'e42e8d7ea6dd4d08970adcee7a4614a7ecd1b0b90c9bca33863b03a778f1079b',
-  'runtime-shell.css': 'e055b964de3a618f71f71fb8eee57a500bfaed0169882c4acde4f9dd1b7b6a1f',
+  'runtime-shell.css': '158e1abdb60e2274ba5ede58b2cb8dbbb13675b3cadf0f278746561e2cbe2d6c',
   'charmdex-device.css': '1db48cd7fba5e812941d83938ef9249aa618baa6af51e085b39d970af420bef4',
-  'runtime-shell.mjs': 'dfd7e1a38df9ea496a5da0175c60c340d73661e1bcb7b941e384ca83b1b42330',
+  'runtime-shell.mjs': '91302405ddb8d56250fa2ce5c1fae744b4b261b604b5e1b4d102044025357845',
   'charmdex.js': 'd38cd5f9020766c65a296943e0c59d654c6ae4f2e0712217aa09e2fc0466c06d',
   'voice-notes.js': '1c504fc60e6d445c5f7acf3e45d76f12240aec9973a0538d1d14c9a819e0e67e',
   'follower-bridge.js': '4da08da432397a65435a142b3a840c42ececf7bea73151289efe863ec2dfd52d',
@@ -19,7 +19,7 @@ export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'gameplay-video.mjs': 'b187c20f6d23a3dc8bd0c061a895d1222eb03c32b8823498984962445340c3b0',
   'gameplay-capture.mjs': 'd15358b7e8500c3d6bea07ed8d45d23ca2bdd2239411de8a410fded83763213f',
   'compact-game-hud.mjs': '1d4a1cc472b86df2db037f41ecd7c9539ffe393a6332d875812d4ff5834b2d82',
-  'display-controls.js': '45a01be7ac20dd3235b3edf120c6e2c49bf8f975c99bd12b715e1f91fdddd56e',
+  'display-controls.js': '0f2de7b51bfb225be7d08cb5def9c6ae96efcf9cead329c6d9754c3b38ebbba6',
   'controller-controls.js': '06bb7e6671c2adae84a224912795600bcb412f24e4d77c53c5eb4e41a70164f8',
 });
 function replaceCount(source, before, after, expected) {
