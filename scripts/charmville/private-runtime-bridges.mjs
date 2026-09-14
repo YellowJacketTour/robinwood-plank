@@ -6,7 +6,7 @@ export const PRIVATE_BRIDGE_HASHES = Object.freeze({
   'tutorial-bridge.js': 'e42e8d7ea6dd4d08970adcee7a4614a7ecd1b0b90c9bca33863b03a778f1079b',
   'runtime-shell.css': '1f9680c4d8d1d270578e5ca2c2a05b38c22d2a671f9831545874d27bc119390b',
   'charmdex-device.css': '1db48cd7fba5e812941d83938ef9249aa618baa6af51e085b39d970af420bef4',
-  'runtime-shell.mjs': '264bdbb8bacd88f6b4b7bac3dcef601fe86ce8db65ee1a3fe87ee78b77671c95',
+  'runtime-shell.mjs': '4015fbf824639034ad145a535a9a59a177b694abb60d7a1038aad80979d1e17c',
   'charmdex.js': 'd38cd5f9020766c65a296943e0c59d654c6ae4f2e0712217aa09e2fc0466c06d',
   'voice-notes.js': '1c504fc60e6d445c5f7acf3e45d76f12240aec9973a0538d1d14c9a819e0e67e',
   'follower-bridge.js': '4da08da432397a65435a142b3a840c42ececf7bea73151289efe863ec2dfd52d',
