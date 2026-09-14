@@ -5,6 +5,7 @@ import './world-shell.css';
 import {createCaptureStream} from "./capture-stream";
 
 import Link from "next/link";
+import Image from "next/image";
 import SocialPanel from "./social-panel";
 import SpectatorSettings from './spectator-settings';
 import RegionMap from "./region-map";
@@ -36,7 +37,7 @@ type Session = { identity:GameIdentity; token:string };
 const tabs=[['play','Play'],['companions','Party'],['inventory','Bag'],['exchange','Exchange'],['friends','Friends'],['social','Social'],['journal','Journal'],['map','Map'],['settings','Options']] as const;
 type WorldTab=typeof tabs[number][0];
 const menuArt:Record<WorldTab,string>={play:'bicycle',companions:'poke_ball',inventory:'berry_pouch',exchange:'coin_case',friends:'harbor_mail',social:'heart',journal:'retro_mail',map:'town_map',settings:'devon_scope'};
-function MenuArt({panel}:{panel:WorldTab}){return <img alt="" width={32} height={32} src={panel==='social'?'/charmville/items/burning-heart.svg':`/charmville/reference-items/pokeemerald/graphics/items/icons/${menuArt[panel]}.png`}/>;}
+function MenuArt({panel}:{panel:WorldTab}){return <Image unoptimized alt="" width={32} height={32} src={panel==='social'?'/charmville/items/burning-heart.svg':`/charmville/reference-items/pokeemerald/graphics/items/icons/${menuArt[panel]}.png`}/>;}
 const button = "min-h-11 rounded-lg border border-line px-4 py-2 text-gold-300 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 
 const subscribeOrigin=()=>()=>{};
@@ -82,6 +83,18 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     window.addEventListener('keydown',back);
     return()=>window.removeEventListener('keydown',back);
   },[tab,menuOpen,returnToPlay,presence?.active]);
+  useEffect(()=>{
+    if(!menuOpen)return;
+    document.getElementById('world-menu-first')?.focus({preventScroll:true});
+    const trap=(event:KeyboardEvent)=>{
+      if(event.key!=='Tab')return;
+      const controls=Array.from(document.querySelectorAll<HTMLButtonElement>('.world-start-menu button')).filter(button=>!button.disabled);
+      const first=controls[0],last=controls.at(-1);
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+    };
+    window.addEventListener('keydown',trap);return()=>window.removeEventListener('keydown',trap);
+  },[menuOpen]);
   useNativeContactObserver(frame,runtimeOrigin);
   const frameReady=useRef(false);
   const encounterSnapshot=useRef<unknown>(null);
@@ -280,6 +293,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
       if(event.data?.type==='charmville:capture-request'){if(captureAvailable.current)window.dispatchEvent(new Event('charmville:capture-request'));return;}
       if(event.data?.type==='charmville:follower-ready'){updateCaptureAvailability(captureAvailable.current);updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);return;}
       if(event.data?.type!=='charmville:account-menu')return;
+      if(event.data.panel==='menu'){setTab('play');setMenuOpen(true);return;}
       const panel=event.data.panel;
       if(!tabs.some(([id])=>id===panel)||panel==='play')return;
       if(document.fullscreenElement===frame.current)void document.exitFullscreen().catch(()=>{});
