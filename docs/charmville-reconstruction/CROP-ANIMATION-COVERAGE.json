@@ -1,0 +1,27 @@
+{
+ "schemaVersion":1,
+ "source":"scripts/charmville/zquest/Homestead.zs",
+ "scope":"Native cultivation presentation; not proof of every rendered frame",
+ "crops":["oran-berry","burning-heart"],
+ "directions":["up","down","left","right"],
+ "actions":[
+  {"id":"prepare","nativeCode":0,"art":"hoe-fg.png + hoe-bg.png","body":"native pound windup, stab contact","frameSequence":[0,1,2,3,4,5,6,7]},
+  {"id":"plant","nativeCode":1,"art":"native directional body; held seed prop absent","body":"native idle/stab","frameSequence":[]},
+  {"id":"water","nativeCode":2,"art":"water-fg.png + water-bg.png + targeted droplets","body":"native idle/stab","frameSequence":[0,1,4,4,4,4,5]},
+  {"id":"harvest","nativeCode":4,"art":"native directional body; held harvest prop absent","body":"native idle/stab","frameSequence":[]}
+ ],
+ "stages":["soil","planted","sprout","growing","flowering","ripe"],
+ "coveragePolicy":{"sourceContract":"validated by companion test","visualFrames":"unverified","mobileZoom":"unverified","allDirectionsLive":"unverified"},
+ "invariants":[
+  {"id":"locked-facing","anchor":"Hero->Dir=activityDir;"},
+  {"id":"native-directional-body","anchor":"Hero->GetOriginalTile(pose,activityDir)+Hero->TileMod"},
+  {"id":"directional-tool-row","anchor":"activityDir==DIR_UP?4:(activityDir==DIR_LEFT?5:(activityDir==DIR_DOWN?6:7))"},
+  {"id":"avoid-empty-water-frames","anchor":"int waterFrames[]={0,1,4,4,4,4,5};"},
+  {"id":"contact-tick","anchor":"if(activityTick==28)"},
+  {"id":"ground-foot-depth","anchor":"int plantLayer=Hero->Y+16<plotFootY?6:farmGroundLayer;"},
+  {"id":"distinct-heart-renderer","anchor":"drawHeartCrop(plantLayer,plotXs[bed],plotY,stages[bed],resourcePhase[bed],ticks,heartColors)"},
+  {"id":"displacement-cancels","anchor":"Hero->X!=activityX || Hero->Y!=activityY"},
+  {"id":"single-axis-contact","anchor":"Min(Abs(reachX),Abs(reachY))<=8"}
+ ],
+ "knownGaps":["Planting and harvesting have no validated held-item prop sprite.","Palette matching requires visual review on each destination palette.","Source contracts do not prove occlusion, animation comfort or correct appearance at every zoom.","Feeding is local-only in this native script; it is not included as a verified shared-economy activity."]
+}
