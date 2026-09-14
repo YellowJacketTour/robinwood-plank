@@ -162,7 +162,11 @@ type TrackedCollection = {
   volume30dUsd?: string | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
-  floorChangeStatus?: "observed-24h" | "collecting-baseline" | null;
+  floorChangeStatus?: "observed-24h" | "observed-since-first" | "collecting-baseline" | null;
+  /** The two endpoints behind floorChangePct. basis "first-observation" means
+   * the history is younger than 24h and the change is measured from its
+   * first observation at comparisonObservedAt -- shown with that span. */
+  floorChangeEvidence?: { comparisonObservedAt: string; basis: "24h" | "first-observation" } | null;
   /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
   totalSupply: number | null;
   listedCount: number | null;
@@ -263,6 +267,28 @@ function displayFloorWei(c: TrackedCollection): string | null {
   return isZeroWei(c.floorPriceWei) ? null : c.floorPriceWei;
 }
 /** 0.0% with no 24h volume/sales is a stored zero, not a measured flat tape. */
+/** "since 3h" / "since 45m" for a change measured from the first observation. */
+export function sinceLabel(comparisonObservedAt: string, now: number = Date.now()): string {
+  const at = Date.parse(comparisonObservedAt);
+  if (!Number.isFinite(at)) return "since first seen";
+  const minutes = Math.max(0, Math.round((now - at) / 60_000));
+  if (minutes < 60) return `since ${minutes}m`;
+  return `since ${Math.round(minutes / 60)}h`;
+}
+
+/** The window's volume in USD for ranking: native wei priced through the
+ * live rate, or the stored USD figure when that is all the chain has. */
+export function volumeUsdForSort(
+  c: TrackedCollection,
+  window: "24h" | "7d" | "30d",
+  toUsd: (wei: string | null, symbol: string | null) => number | null,
+): number | null {
+  const display = windowVolumeDisplay(windowActivity(c, window));
+  if (display.kind === "native") return toUsd(display.wei, chainNativeAsset(c.chainSlug));
+  if (display.kind === "usd") return Number(display.usd);
+  return null;
+}
+
 function displayChangePct(c: TrackedCollection): number | null {
   if (c.floorChangePct == null || !Number.isFinite(c.floorChangePct)) return null;
   if (c.floorChangePct === 0 && isZeroWei(c.volume24hWei) && !(c.sales24h != null && c.sales24h > 0)) {
@@ -653,6 +679,9 @@ function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddres
  * for OpenSea's plain volume-desc "Trending" default.
  */
 type SortColumn = "grade" | "demand" | "name" | "floor" | "change" | "volume" | "sales" | "listed" | "holders";
+/** The one default, used by the initial state AND the URL sync: a sort equal
+ * to it is omitted from the query string, any other is written. */
+const DEFAULT_SORT_COLUMN: SortColumn = "volume";
 type SortDir = "asc" | "desc";
 
 /** Column -> the direction that reads as "most interesting first" on a first click, e.g. Volume/Floor/Sales/Holders/Listed/Grade default to descending (biggest first), Name defaults A-Z (ascending), matching every real marketplace rankings table checked in this session's research. */
@@ -727,9 +756,11 @@ function compareByColumn(
     case "change":
       return compareNullable(a.floorChangePct, b.floorChangePct, dir);
     case "volume": {
-      const va = toUsd(windowVolumeWei(a, window), chainNativeAsset(a.chainSlug));
-      const vb = toUsd(windowVolumeWei(b, window), chainNativeAsset(b.chainSlug));
-      return compareNullable(va, vb, dir);
+      // Through windowVolumeDisplay, not the raw wei: a collection whose
+      // volume is known only in USD (Beezie on Base -- settlement in USDC,
+      // no native wei to price) sorted LAST under a wei-only comparator
+      // with $112K of real sales. USD is the one axis every chain shares.
+      return compareNullable(volumeUsdForSort(a, window, toUsd), volumeUsdForSort(b, window, toUsd), dir);
     }
     case "sales":
       return compareNullable(windowSales(a, window), windowSales(b, window), dir);
@@ -1202,8 +1233,8 @@ export default function GlobalMarketHub() {
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
   const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  // Default = "grade" desc: gradeScore() descending -- the volume-primary/
-  // floor-secondary pattern state-of-the-art multichain marketplaces
+  // Sort: DEFAULT_SORT_COLUMN (24h volume) desc. Grade stays a clickable
+  // column -- the volume-primary/floor-secondary pattern state-of-the-art multichain marketplaces
   // (OpenSea Trending, Blur, Magic Eden) converge on, now weighted by real
   // art/tradeability instead of raw activity alone (see gradeScore's own
   // header). Every column of the rankings table below is a real clickable
@@ -1211,7 +1242,13 @@ export default function GlobalMarketHub() {
   // shared sort concept driving both the rankings table AND the browsable
   // grid beneath it, same "one filter concept, not two" discipline
   // chainFilter already follows, not a second parallel sort control.
-  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || "grade");
+  // Default: 24h volume. Grade is a percentile within the eligible set, so a
+  // top-N sorted by grade is all "A" by construction and carries no
+  // information at the top of the page; and the server's page order leads
+  // with the home collection, which under a grade sort sat at #1 with zero
+  // volume and zero sales above a collection that did $112K that day
+  // (live, 2026-09-14). Volume ranks by what happened.
+  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || DEFAULT_SORT_COLUMN);
   const [sortDir, setSortDir] = useState<SortDir>(() => (searchParams.get("dir") as SortDir) || "desc");
   /** Clicking a header: same column flips direction, a new column adopts its own sensible default direction (DEFAULT_SORT_DIR) -- the standard sortable-table interaction every real rankings page (OpenSea/Blur/Tensor/Magic Eden) uses. */
   const toggleSort = (column: SortColumn) => {
@@ -1307,6 +1344,7 @@ export default function GlobalMarketHub() {
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
   const [initialChainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  const [initialChainLiveFloors, setChainLiveFloors] = useState<Record<string, number> | null>(null);
   // Per-chain honesty block from the index response (Batch E6): statsCapable + lane health.
   const [chainMeta, setChainMeta] = useState<Record<string, HubChainMeta> | null>(null);
   // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
@@ -1314,17 +1352,19 @@ export default function GlobalMarketHub() {
   // whose count grew pulses its badge for a few seconds.
   const liveCounts = useLiveChainCounts(15_000);
   const chainCounts = Object.keys(liveCounts.counts).length > 0 ? liveCounts.counts : initialChainCounts;
+  const chainLiveFloors = Object.keys(liveCounts.withFloor).length > 0 ? liveCounts.withFloor : initialChainLiveFloors;
   const countDelta = (slug: string): number => liveCounts.deltas[slug] ?? 0;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await swrJson<{ counts: Record<string, number> }>("/api/market/multichain/chain-counts", {
+        const data = await swrJson<{ counts: Record<string, number>; withFloor?: Record<string, number> }>("/api/market/multichain/chain-counts", {
           ttlMs: 60_000,
           swrMs: 600_000,
           session: true,
         });
         if (!cancelled && data.counts) setChainCounts(data.counts);
+        if (!cancelled && data.withFloor) setChainLiveFloors(data.withFloor);
       } catch {
         // Badges just keep showing the client-side-tally fallback.
       }
@@ -1949,7 +1989,7 @@ export default function GlobalMarketHub() {
     const params = new URLSearchParams();
     if (chainFilter.size > 0) params.set("chains", [...chainFilter].join(","));
     if (search.trim()) params.set("q", search.trim());
-    if (sortColumn !== "grade") params.set("sort", sortColumn);
+    if (sortColumn !== DEFAULT_SORT_COLUMN) params.set("sort", sortColumn);
     if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
     if (onlyTradeable) params.set("tradeable", "1");
     if (onlyArt) params.set("art", "1");
@@ -2006,6 +2046,14 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
+  // Grade is a percentile within the eligible set, so a top-N sorted by
+  // volume or by grade is usually one letter throughout. A column that reads
+  // "A" on every visible row carries no information; the header says so
+  // rather than letting the letter pass for a distinction.
+  const uniformGrade = useMemo(() => {
+    const letters = new Set(rankings.map((c) => gradeLetter(gradeBreakdown(c, hasArt(c), toUsd, gradeCtx), gradeCtx)).filter((l): l is "A" | "B" | "C" | "D" => l != null));
+    return rankings.length >= 3 && letters.size === 1 ? [...letters][0] : null;
+  }, [rankings, gradeCtx, toUsd]);
   // Subscribe to committed changes across the catalog. Reconnect snapshots
   // cover rendered rows; ordinary messages refresh the changed collections.
   useMarketRealtime([], async (change) => {
@@ -2531,7 +2579,16 @@ export default function GlobalMarketHub() {
                       opacity: active ? 0.85 : 0.55,
                     }}
                   >
-                    {count}
+                    {chainLiveFloors?.[slug] != null ? (
+                      // Lead with what the tab will show priced; the tracked
+                      // total stays, muted, in the "of" idiom the table uses.
+                      <span title={`${chainLiveFloors[slug].toLocaleString()} collections with a live floor, of ${count.toLocaleString()} tracked on this chain`}>
+                        {chainLiveFloors[slug].toLocaleString()}
+                        <span className="ml-1 font-normal opacity-60">of {count.toLocaleString()}</span>
+                      </span>
+                    ) : (
+                      count
+                    )}
                     {countDelta(slug) > 0 && <span className="ml-1 rounded bg-emerald-400/20 px-1 text-[10px] text-emerald-300 animate-plank-glow">+{countDelta(slug)}</span>}
                   </span>
                 </button>
@@ -2617,7 +2674,13 @@ export default function GlobalMarketHub() {
                     Holders
                   </SortableTh>
                   <SortableTh column="grade" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="w-9">
-                    Grade
+                    {uniformGrade ? (
+                      <span title={`Every row in view grades ${uniformGrade}: grade is a percentile across all eligible collections, and this view holds only its top. Sort by Grade to spread the field, or widen the view.`}>
+                        Grade <span className="font-normal opacity-60">· all {uniformGrade}</span>
+                      </span>
+                    ) : (
+                      "Grade"
+                    )}
                   </SortableTh>
                 </tr>
               </thead>
@@ -2774,7 +2837,20 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? (
-                          `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                          c.floorChangeStatus === "observed-since-first" && c.floorChangeEvidence ? (
+                            // A real change over a span shorter than 24h,
+                            // labelled with that span -- never passed off
+                            // as a day's move, never hidden as "collecting".
+                            <span
+                              className="inline-flex items-baseline gap-1"
+                              title={`Measured from this collection's first floor observation at ${c.floorChangeEvidence.comparisonObservedAt}; a full 24h pair forms once tracking is a day old.`}
+                            >
+                              {`${changeArrow}${Math.abs(change).toFixed(1)}%`}
+                              <span className="font-normal text-[0.6rem] text-foreground/50">{sinceLabel(c.floorChangeEvidence.comparisonObservedAt)}</span>
+                            </span>
+                          ) : (
+                            `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                          )
                         ) : c.floorChangeStatus === "collecting-baseline" ? (
                           // The seventh dash cell -- multi-line, which is why
                           // single-line greps missed it. Its reason was already

@@ -230,14 +230,34 @@ export function resolveHoleKind(input: {
  * flat, and `underived` when the row has trades but no comparable pair --
  * never a claim that nobody looked.
  */
+export type FloorChangeStatus = "observed-24h" | "observed-since-first" | "collecting-baseline" | null;
+
+/**
+ * The server's statement about a row's floor change, from the observation
+ * reader's result. "observed-24h": two endpoints at least 24h apart.
+ * "observed-since-first": the history is younger than 24h and the change is
+ * measured from its first observation -- a real number over a stated span,
+ * shown as such. "collecting-baseline" is now only the moment between a floor
+ * being written and its first observation landing, which the writers make
+ * the same statement; after migration 150 seeds the catalog it should be
+ * rare enough to notice. null: no floor at all.
+ */
+export function floorChangeStatusFor(
+  change: { basis: "24h" | "first-observation" } | null | undefined,
+  hasFloor: boolean,
+): FloorChangeStatus {
+  if (change) return change.basis === "24h" ? "observed-24h" : "observed-since-first";
+  return hasFloor ? "collecting-baseline" : null;
+}
+
 export function changeHoleKindFor(input: {
-  floorChangeStatus: "observed-24h" | "collecting-baseline" | null | undefined;
+  floorChangeStatus: FloorChangeStatus | undefined;
   /** The raw server value, BEFORE display suppression. */
   rawChangePct: number | null | undefined;
   /** Sales in the window; a change with trades behind it is derivable. */
   sales: number | null | undefined;
 }): "unfetched" | "underived" | "none" {
-  if (input.floorChangeStatus === "observed-24h") {
+  if (input.floorChangeStatus === "observed-24h" || input.floorChangeStatus === "observed-since-first") {
     // Two real endpoints. If the server measured exactly 0 the floor did not
     // move, and "0.0%" is the true statement -- reported as `none`, the kind
     // that renders a real value rather than a hole.

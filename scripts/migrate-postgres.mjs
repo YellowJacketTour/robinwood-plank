@@ -89,11 +89,30 @@ try {
     const applied = await client.query("SELECT version FROM plank_schema_migrations");
     const appliedSet = new Set(applied.rows.map((row) => row.version));
     const pending = files.filter((file) => !appliedSet.has(file));
+    // A deferrable optional migration (reviewed text, additive, on the
+    // maintenance-locked table -- see notification-migration-policy.mjs) can
+    // stay PENDING for as long as the lock is held: 2026-09-14, migration 149
+    // sat behind an anti-wraparound autovacuum of a 110 GB table. Counting it
+    // as "pending" here made EVERY deploy take the 1h42m pre-migration
+    // backup for a CREATE INDEX IF NOT EXISTS that a backup protects nothing
+    // against. Exit 3 -- the backup gate -- is for REQUIRED pending
+    // migrations only; optional ones are reported and exit 0. When the lock
+    // finally lifts, the optional migration applies on that deploy without
+    // a fresh dump, which is the right cost for an additive index.
+    const optional = [];
+    const required = [];
+    for (const file of pending) {
+      const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
+      (notificationDeferralCandidate(true, file, sql) ? optional : required).push(file);
+    }
     if (pending.length === 0) {
       console.log("[postgres-migrate] check: schema is current, nothing pending");
       process.exitCode = 0;
+    } else if (required.length === 0) {
+      console.log(`[postgres-migrate] check: required schema is current; ${optional.length} optional pending (deferrable, additive, no backup gate): ${optional.join(", ")}`);
+      process.exitCode = 0;
     } else {
-      console.log(`[postgres-migrate] check: ${pending.length} pending: ${pending.join(", ")}`);
+      console.log(`[postgres-migrate] check: ${required.length} pending: ${required.join(", ")}${optional.length ? ` (plus ${optional.length} optional: ${optional.join(", ")})` : ""}`);
       process.exitCode = 3;
     }
     client.release();
@@ -142,7 +161,7 @@ try {
       await client.query("ROLLBACK");
       if (await canDeferNotificationLock(client, deferrable, error)) {
         deferred.push(file);
-        console.warn(`[postgres-migrate] PENDING ${file}: other-role maintenance lock; delivery uses periodic resync until migration succeeds`);
+        console.warn(`[postgres-migrate] PENDING ${file}: other-role maintenance lock on plank_market_events; retried on the next deploy, the feature it serves runs in its fallback mode until then`);
         continue;
       }
       throw error;

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 export type LiveChainCounts = {
   counts: Record<string, number>;
+  /** Per-chain collections with a live floor -- what a chip leads with. */
+  withFloor: Record<string, number>;
   total: number;
   asOf: string | null;
   /** Per-chain increase since the previous poll (only positive deltas; cleared after ~4 s). */
@@ -16,7 +18,7 @@ export type LiveChainCounts = {
  * per-chain increase so the UI can pulse it. Pauses when the tab is hidden.
  */
 export function useLiveChainCounts(intervalMs = 15_000, enabled = true): LiveChainCounts {
-  const [state, setState] = useState<LiveChainCounts>({ counts: {}, total: 0, asOf: null, deltas: {} });
+  const [state, setState] = useState<LiveChainCounts>({ counts: {}, withFloor: {}, total: 0, asOf: null, deltas: {} });
   const prev = useRef<Record<string, number> | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -28,7 +30,7 @@ export function useLiveChainCounts(intervalMs = 15_000, enabled = true): LiveCha
       try {
         const res = await fetch("/api/market/multichain/chain-counts", { cache: "no-store", priority: "low" } as RequestInit);
         if (!res.ok) return;
-        const data = (await res.json()) as { counts?: Record<string, number>; total?: number; asOf?: string };
+        const data = (await res.json()) as { counts?: Record<string, number>; withFloor?: Record<string, number>; total?: number; asOf?: string };
         if (stopped || !data.counts) return;
         const deltas: Record<string, number> = {};
         if (prev.current) {
@@ -38,7 +40,7 @@ export function useLiveChainCounts(intervalMs = 15_000, enabled = true): LiveCha
           }
         }
         prev.current = data.counts;
-        setState({ counts: data.counts, total: data.total ?? 0, asOf: data.asOf ?? null, deltas });
+        setState({ counts: data.counts, withFloor: data.withFloor ?? {}, total: data.total ?? 0, asOf: data.asOf ?? null, deltas });
         if (Object.keys(deltas).length > 0) {
           if (clearTimer.current) clearTimeout(clearTimer.current);
           clearTimer.current = setTimeout(() => setState((s) => ({ ...s, deltas: {} })), 4_000);

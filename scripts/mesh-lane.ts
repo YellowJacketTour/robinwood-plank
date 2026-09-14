@@ -155,6 +155,17 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
   }
 
   try {
+    if (source === "activity-coverage") {
+      // The activity feed's coverage count, off the request path (see
+      // lib/market/multichain/activity-coverage.ts). A subject job names
+      // one collection; the count runs here under the worker's statement
+      // budget and lands in the durable KV the route reads.
+      if (!subject) throw new Error("activity-coverage requires a subject (collection contract)");
+      const { computeAndStoreActivityCoverage } = await import("../lib/market/multichain/activity-coverage");
+      const counted = await computeAndStoreActivityCoverage(chain, subject);
+      console.log("[mesh-lane] activity-coverage", JSON.stringify({ chain, subject, indexedEvents: counted.indexedEvents, newest: counted.newestTimestamp }));
+      return;
+    }
     if (source === "cryptopunks-native") {
       const { syncCryptoPunksNativeBook } = await import("../lib/market/multichain/native-market-adapters/cryptopunks");
       console.log("[mesh-lane] cryptopunks-native", JSON.stringify(await syncCryptoPunksNativeBook()));
@@ -675,6 +686,20 @@ async function main(source: MeshSource = argvSource, chain: string = argvChain, 
       const scan = await scanChainForCryptoKittiesFillsViaHypersync(chain);
       if (scan.error) throw new Error(scan.error);
       console.log("[mesh-lane] cryptokitties-fills-live", JSON.stringify(scan));
+      return;
+    }
+    if (source === "cryptopunks-fills") {
+      const { scanChainForCryptoPunksFillsViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptopunks-scan");
+      const scan = await scanChainForCryptoPunksFillsViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptopunks-fills-live", JSON.stringify(scan));
+      return;
+    }
+    if (source === "cryptopunks-fills-genesis") {
+      const { scanChainForCryptoPunksFillsGenesisBackfillViaHypersync } = await import("../lib/market/multichain/discovery/hypersync-cryptopunks-scan");
+      const scan = await scanChainForCryptoPunksFillsGenesisBackfillViaHypersync(chain);
+      if (scan.error) throw new Error(scan.error);
+      console.log("[mesh-lane] cryptopunks-fills-genesis", JSON.stringify(scan));
       return;
     }
     if (source === "cryptokitties-fills-genesis") {

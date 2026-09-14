@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { openSeaFloorCurrency, openSeaVolumeWei } from "@/lib/market/multichain/opensea-stats-units";
 import { pickOpenSeaKey } from "@/lib/market/multichain/discovery/opensea-key-pool";
 import {
   updateCollectionMarketStats,
@@ -35,6 +36,7 @@ function nativeToWei(v: number | undefined): string | null {
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return null;
   return BigInt(Math.round(v * 1e18)).toString();
 }
+
 
 /**
  * CryptoPunks predates ERC-721 and Seaport (see the identical guard and
@@ -215,8 +217,8 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
 
   const osHeaders = { "x-api-key": openSeaApiKey, accept: "application/json" };
   type OpenSeaCollectionStats = {
-    total?: { num_owners?: number; floor_price?: number; listed_count?: number };
-    intervals?: Array<{ interval: string; volume?: number; sales?: number }>;
+    total?: { num_owners?: number; floor_price?: number; floor_price_symbol?: string; listed_count?: number };
+    intervals?: Array<{ interval: string; volume?: number; volume_symbol?: string; sales?: number }>;
   };
   const stats = await getOrRefresh<OpenSeaCollectionStats | null>(
     `opensea-collection-stats:${osChain}:${slug}`,
@@ -234,13 +236,18 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     const oneDay = stats.intervals?.find((i) => i.interval === "one_day");
     const sevenDay = stats.intervals?.find((i) => i.interval === "seven_day");
     const thirtyDay = stats.intervals?.find((i) => i.interval === "thirty_day");
+    const nativeSymbol = foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ?? "ETH";
     if (oneDay || sevenDay || thirtyDay) {
+      // volume_*_wei is the chain's native unit by contract. OpenSea converts
+      // volume to the chain's native token (volume_symbol, "ETH" for Beezie
+      // whose floor is USDC) -- a volume in any other symbol cannot be stored
+      // as wei and is left null rather than mislabelled.
       await updateCollectionMarketStats(chainSlug, contractAddress, {
-        volume24hWei: nativeToWei(oneDay?.volume),
+        volume24hWei: openSeaVolumeWei(oneDay, nativeSymbol, nativeToWei),
         sales24h: oneDay?.sales ?? null,
-        volume7dWei: nativeToWei(sevenDay?.volume),
+        volume7dWei: openSeaVolumeWei(sevenDay, nativeSymbol, nativeToWei),
         sales7d: sevenDay?.sales ?? null,
-        volume30dWei: nativeToWei(thirtyDay?.volume),
+        volume30dWei: openSeaVolumeWei(thirtyDay, nativeSymbol, nativeToWei),
         sales30d: thirtyDay?.sales ?? null,
         currentFloorPriceWei: null,
       }).catch(() => {});
@@ -252,10 +259,15 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     }
     const floorWei = nativeToWei(stats.total?.floor_price);
     if (floorWei) {
-      const currency = foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ?? "ETH";
+      // The floor is "denominated in the currency named by floor_price_symbol"
+      // (OpenSea's own docs). Before 2026-09-14 this wrote the chain's native
+      // symbol regardless: Beezie on Base, listed in USDC, was stored as
+      // "25 ETH" and displayed at $62.7K -- a wrong number shown with full
+      // confidence. The symbol OpenSea sends is the currency; the native
+      // symbol is only the fallback when OpenSea omits it.
       await updateCollectionFloorOnly(chainSlug, contractAddress, {
         floorPriceWei: floorWei,
-        floorPriceCurrency: currency,
+        floorPriceCurrency: openSeaFloorCurrency(stats.total?.floor_price_symbol, nativeSymbol),
         floorPriceMarketplace: "opensea",
       }).catch(() => {});
       filled = true;

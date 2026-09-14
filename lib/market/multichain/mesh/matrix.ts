@@ -20,6 +20,8 @@ export type MeshCell =
 
 export type MeshSource =
   | "rolling-stats"
+  /** The activity feed's coverage count, off the request path (activity-coverage.ts). Subject jobs only. */
+  | "activity-coverage"
   | "opensea-stats"
   | "opensea-bulk"
   | "coingecko-nft"
@@ -46,6 +48,8 @@ export type MeshSource =
   | "rarible-fills-genesis"
   | "cryptokitties-fills"
   | "cryptokitties-fills-genesis"
+  | "cryptopunks-fills"
+  | "cryptopunks-fills-genesis"
   | "native-robinwood"
   | "hypersync-discovery"
   | "hypersync-backfill"
@@ -201,6 +205,22 @@ export const MESH_LANES: MeshLane[] = [
     cells: ["volume24h", "sales24h"] as MeshCell[],
     sliceSec: 180,
     notes: "Independent genesis-block-to-head CryptoKitties native-auction fill cursor; never advances the live cursor.",
+  },
+  {
+    id: "cryptopunks-live:eth-mainnet",
+    source: "cryptopunks-fills" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 120,
+    notes: "CryptoPunks market PunkBought live cursor (acceptBid sales priced from the prior PunkBidEntered); the only venue the Punks ever trade on natively.",
+  },
+  {
+    id: "cryptopunks-genesis:eth-mainnet",
+    source: "cryptopunks-fills-genesis" as const,
+    chainSlug: "eth-mainnet",
+    cells: ["volume24h", "sales24h"] as MeshCell[],
+    sliceSec: 180,
+    notes: "Independent genesis-block-to-head CryptoPunks market fill cursor; never advances the live cursor.",
   },
   {
     id: "foundation-live:eth-mainnet",

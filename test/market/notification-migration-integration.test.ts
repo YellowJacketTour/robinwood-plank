@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -50,6 +50,17 @@ test('real blocked migrations roll back, remain pending, permit required schema,
   // plank_market_events alone and 149 to exist.
   for(const file of all.filter(f=>parseInt(f,10)>110&&!optional.includes(f)))assert.ok(applied.includes(file),`${file} required, applied`);
   assert.equal((await inspect.query("SELECT count(*)::int AS n FROM pg_indexes WHERE tablename='plank_market_events' AND indexname LIKE '%_feed_idx'")).rows[0].n,0,'failed transaction leaves no partially built feed index');
+  // --check with ONLY optional migrations pending exits 0 (no backup gate)
+  // and names them; add one required migration and it exits 3 naming that
+  // one -- the exact decision the deploy's pre-migration backup keys on.
+  const check=await run(['--check']);
+  assert.match(check.stdout,/check: required schema is current; 2 optional pending \(deferrable, additive, no backup gate\): 110_market_change_notifications\.sql, 149_market_events_feed_indexes\.sql/);
+  await writeFile(path.join(migrations,'998_zz_required_probe.sql'),'SELECT 1;\n');
+  const gated=await run(['--check']).then(()=>null,(e:{code?:number;stdout?:string})=>e);
+  assert.ok(gated,'a required pending migration must make --check exit non-zero');
+  assert.equal(gated!.code,3);
+  assert.match(gated!.stdout??'',/check: 1 pending: 998_zz_required_probe\.sql \(plus 2 optional: 110_market_change_notifications\.sql, 149_market_events_feed_indexes\.sql\)/);
+  await rm(path.join(migrations,'998_zz_required_probe.sql'));
   assert.equal((await inspect.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname LIKE 'plank_changes_%'")).rows[0].n,0,'failed transaction leaves no partially installed triggers');
   assert.equal((await blocker.query('SELECT 1 AS alive')).rows[0].alive,1,'maintenance session is never terminated');
   await blocker.query('ROLLBACK');
