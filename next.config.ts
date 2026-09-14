@@ -111,7 +111,11 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION?.trim() || undefined,
   poweredByHeader: false,
   async rewrites() {
-    const gateway = `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}`;
+    // The invite gateway normally binds loopback on this host. PLANK_INVITE_UPSTREAM
+    // (build-time) points every gateway route at another origin instead -- the
+    // table running off this account behind a Cloudflare Tunnel -- so the site
+    // keeps its URLs while the chain, keeper and gateway live elsewhere.
+    const gateway = (process.env.PLANK_INVITE_UPSTREAM || "").replace(/\/$/, "") || `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}`;
     return {
       // beforeFiles: these two exist (or not) in public/ by accident of which
       // release the running preview started in, so a plain rewrite is not
@@ -153,9 +157,9 @@ const nextConfig: NextConfig = {
       // What only the gateway can serve is the INVITE: the session, the
       // capability-filtered RPC, the funded guest wallet, and the one page it
       // stamps with <meta name="plank-invite"> to turn INVITE_TEST on.
-      { source: "/api/invite/:path*", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/api/invite/:path*` },
-      { source: "/table", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/` },
-      { source: "/arcade/table.html", destination: `http://127.0.0.1:${process.env.PLANK_INVITE_PORT || "8766"}/arcade/crash.html` },
+      { source: "/api/invite/:path*", destination: `${gateway}/api/invite/:path*` },
+      { source: "/table", destination: `${gateway}/` },
+      { source: "/arcade/table.html", destination: `${gateway}/arcade/crash.html` },
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
       ],

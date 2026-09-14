@@ -159,6 +159,9 @@ jobs:
       PGPASSWORD: github-actions-postgres
       PGPOOL_MAX: 4
       NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
+      # Set to e.g. https://plank-table.<zone> to route /table and /api/invite/* to a
+      # table running off this host behind a Cloudflare Tunnel (see next.config.ts).
+      PLANK_INVITE_UPSTREAM: ${{ vars.PLANK_INVITE_UPSTREAM }}
       NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
       NEXT_PUBLIC_GLOBAL_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_GLOBAL_MARKET_ENABLED || 'false' }}
       # As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
