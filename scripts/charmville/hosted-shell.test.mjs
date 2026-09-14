@@ -12,3 +12,12 @@ test('accepted host compacts menu once without repeated resize or removing contr
  assert.equal(compactHostedShell(root),true);assert.equal(menu.textContent,'Game menu');assert.equal(summary.textContent,'Controls & settings');
  assert.equal(compactHostedShell(root),false);assert.equal(resizes,1);
 });
+
+test('immersive menu ownership is explicit, can upgrade once, and does not resize on repeated handshakes',()=>{
+ const classes=new Set();let resizes=0;
+ const root={body:{classList:{contains:key=>classes.has(key),add:key=>classes.add(key)}},querySelector:()=>null,defaultView:{dispatchEvent(){resizes++;}}};
+ compactHostedShell(root);assert.equal(classes.has('charm-hosted-immersive'),false);
+ compactHostedShell(root,'true');assert.equal(classes.has('charm-hosted-immersive'),false);
+ assert.equal(compactHostedShell(root,true),true);assert.equal(classes.has('charm-hosted-immersive'),true);
+ assert.equal(compactHostedShell(root,true),false);assert.equal(resizes,2);
+});
