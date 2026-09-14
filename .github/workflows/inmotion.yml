@@ -1989,12 +1989,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          # The host resets SSH while it is throttled; keep knocking.
-          for attempt in 1 2 3 4 5 6 7 8; do
-            if ssh -o ConnectTimeout=20 -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" true 2>/dev/null; then break; fi
-            echo "ssh attempt $attempt failed; waiting"; sleep 20
-          done
-          ssh -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          # The host resets SSH sessions at the door while it is throttled: retry
+          # the WHOLE session -- a probe that succeeds says nothing about the next.
+          run_remote() { ssh -o ConnectTimeout=25 -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
           app_dir="$1"
           echo "== date: $(date -u +%FT%TZ)  current -> $(readlink -f "$app_dir/current")"
           echo "== disk"; df -h "$HOME" | tail -1; du -sh "$app_dir/shared/plankcrash" 2>/dev/null
@@ -2007,6 +2004,8 @@ jobs:
           echo "== restart touch"; mkdir -p "$app_dir/current/tmp"; touch "$app_dir/current/tmp/restart.txt" "$app_dir/tmp/restart.txt" 2>/dev/null; sleep 25
           for i in 1 2 3 4; do printf 'home %s\n' "$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: Mozilla/5.0' https://plank.love/)"; sleep 10; done
           REMOTE
+          }
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if run_remote; then exit 0; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done; exit 1
   diagnose-market-locks:
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'diagnose-market-locks'
     runs-on: ubuntu-latest
