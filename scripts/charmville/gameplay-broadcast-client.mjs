@@ -9,6 +9,7 @@ export async function createGameplayBroadcastClient({url,token,onTrack=()=>{},on
  if(!['ws:','wss:'].includes(endpoint.protocol)||!['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname)||endpoint.pathname!=='/broadcast'||endpoint.search||endpoint.hash||endpoint.username||endpoint.password)throw Error('A loopback broadcast gateway is required');
  if(!/^[a-f0-9]{64}$/i.test(token)||typeof WebSocketImpl!=='function'||renewMs<100||renewMs>5000||requestTimeoutMs<100||requestTimeoutMs>10000)throw Error('Invalid local broadcast options');
  const socket=new WebSocketImpl(url),publications=new Map(),pending=new Map();
+ const validId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(value);
  let closed=false,nextId=1,connectionId='',profileId='',chain=Promise.resolve(),renewing=false,timer;
  let resolveReady,rejectReady;
  const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
@@ -52,9 +53,9 @@ export async function createGameplayBroadcastClient({url,token,onTrack=()=>{},on
  socket.onclose=()=>shutdown('Signaling connection closed');
  socket.onmessage=event=>{
   if(closed)return;
-  let message;try{if(typeof event.data!=='string'||event.data.length>65536)throw Error();message=JSON.parse(event.data);}catch{shutdown('Invalid gateway response');return;}
+  let message;try{if(typeof event.data!=='string'||event.data.length>65536)throw Error();message=JSON.parse(event.data);if(!message||typeof message!=='object'||Array.isArray(message))throw Error();}catch{shutdown('Invalid gateway response');return;}
   if(message.type==='broadcast:ready'){
-   if(connectionId||typeof message.connectionId!=='string'||typeof message.profileId!=='string'){shutdown('Invalid gateway identity');return;}
+   if(connectionId||!validId(message.connectionId)||typeof message.profileId!=='string'||!/^[1-9]\d{0,17}$/.test(message.profileId)){shutdown('Invalid gateway identity');return;}
    connectionId=message.connectionId;profileId=message.profileId;clearTimeout(readyTimeout);resolveReady();return;
   }
   if(message.type==='broadcast:result'||message.type==='broadcast:error'){
@@ -63,7 +64,7 @@ export async function createGameplayBroadcastClient({url,token,onTrack=()=>{},on
   }
   if(message.type==='broadcast:ended'){end(message.publicationId,'Publication ended');return;}
   if(message.type==='broadcast:subscriber'){
-   const entry=publications.get(message.publicationId);if(!entry||entry.role!=='publisher'||entry.peers.has(message.viewerConnectionId))return;
+   const entry=publications.get(message.publicationId);if(!entry||entry.role!=='publisher'||!validId(message.viewerConnectionId)||entry.peers.has(message.viewerConnectionId))return;
    try{const peer=addPeer(entry,message.viewerConnectionId);void peer.start().catch(()=>{peer.close('Offer failed');report('Offer failed');});}catch{report('Local peer preview capacity reached');}return;
   }
   if(message.type==='broadcast:signal')void routeSignal(message).catch(()=>report('Media negotiation failed'));
@@ -84,12 +85,13 @@ export async function createGameplayBroadcastClient({url,token,onTrack=()=>{},on
    if(tracks.filter(track=>track.kind==='video').length!==1||tracks.length>2||tracks.some(track=>!['video','audio'].includes(track.kind)||track.readyState!=='live'))throw Error('Choose one live gameplay video source');
    const result=await request({type:'start',ownerId:profileId});
    if(closed)throw Error('Broadcast client closed');
+   if(!validId(result?.id)){shutdown('Invalid publication response');throw Error('Invalid publication response');}
    publications.set(result.id,{id:result.id,role:'publisher',stream,peers:new Map(),queued:[]});return result.id;
   },
   async subscribe(publicationId){
    if(typeof publicationId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(publicationId)||publications.has(publicationId)||publications.size>=8)throw Error('Invalid or duplicate publication');
    const entry={id:publicationId,role:'viewer',publisher:'',peers:new Map(),queued:[]};publications.set(publicationId,entry);
-   try{const result=await request({type:'subscribe',publicationId});if(closed||publications.get(publicationId)!==entry)throw Error('Subscription ended');entry.publisher=result.publisherConnectionId;addPeer(entry,entry.publisher);for(const message of entry.queued.splice(0))await routeSignal(message);return publicationId;}
+   try{const result=await request({type:'subscribe',publicationId});if(closed||publications.get(publicationId)!==entry)throw Error('Subscription ended');if(!validId(result?.publisherConnectionId))throw Error('Invalid publisher response');entry.publisher=result.publisherConnectionId;addPeer(entry,entry.publisher);for(const message of entry.queued.splice(0))await routeSignal(message);return publicationId;}
    catch(error){end(publicationId,'Subscription rejected');throw error;}
   },
   close:()=>shutdown('closed'),

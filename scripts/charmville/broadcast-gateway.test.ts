@@ -68,3 +68,20 @@ test('bounds frames, expires pending authentication and rejects unbounded config
     assert.equal(await closed, 1009);
   } finally {await gateway.close();}
 });
+
+test('rate-limits authenticated bursts and closes revoked sessions while idle', async () => {
+  let admitted = true;
+  const gateway = await startBroadcastGateway({port: 0, origins: [origin], refreshMs: 100,
+    authenticate: async () => '1',
+    resolve: async (_token, ownerId) => {if (!admitted) throw Error('expired'); return {profileId: '1', ownerId, revision: '0', mode: 'public', allowedIds: []};},
+  });
+  try {
+    const fast = connect(gateway.url); await fast.ready(); fast.send({type: 'authenticate', token: first}); await fast.next('broadcast:ready');
+    const limited = new Promise(resolve => fast.socket.once('close', resolve));
+    for (let requestId = 1; requestId <= 100; requestId++) fast.send({type: 'unsupported', requestId});
+    assert.equal(await limited, 1008);
+    const idle = connect(gateway.url); await idle.ready(); idle.send({type: 'authenticate', token: first}); await idle.next('broadcast:ready');
+    const revoked = new Promise(resolve => idle.socket.once('close', resolve)); admitted = false;
+    assert.equal(await revoked, 1008);
+  } finally {await gateway.close();}
+});
