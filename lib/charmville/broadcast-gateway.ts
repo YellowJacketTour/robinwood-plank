@@ -25,7 +25,7 @@ export async function startBroadcastGateway(options: BroadcastGatewayOptions) {
   const maxConnections = options.maxConnections ?? 32;
   const authTimeout = options.authTimeoutMs ?? 5000;
   const refreshMs = options.refreshMs ?? 3000;
-  if (!Number.isInteger(maxConnections) || maxConnections < 1 || maxConnections > 128 || authTimeout < 100 || authTimeout > 10000 || refreshMs < 100 || refreshMs > 5000) throw Error('Invalid gateway bounds');
+  if (!Number.isInteger(maxConnections) || maxConnections < 1 || maxConnections > 128 || !Number.isInteger(authTimeout) || !Number.isInteger(refreshMs) || authTimeout < 100 || authTimeout > 10000 || refreshMs < 100 || refreshMs > 5000) throw Error('Invalid gateway bounds');
   const connections = new Map<string, Connection>();
   const server = createServer((_request, response) => {response.writeHead(404, {'Cache-Control': 'no-store'}); response.end();});
   const sockets = new WebSocketServer({noServer: true, maxPayload: 40960, perMessageDeflate: false});
@@ -90,6 +90,9 @@ export async function startBroadcastGateway(options: BroadcastGatewayOptions) {
       await handle.receive(message);
     });
   });
+  // No background lease timer exists until the listener is owned successfully.
+  // A port conflict must not leave an unreachable gateway polling forever.
+  await new Promise<void>((resolve, reject) => {server.once('error', reject); server.listen(options.port ?? 3025, '127.0.0.1', () => {server.removeListener('error', reject); resolve();});});
   const refresh = setInterval(() => {
     protocol.sweep();
     for (const connection of connections.values()) {
@@ -103,7 +106,6 @@ export async function startBroadcastGateway(options: BroadcastGatewayOptions) {
     }
   }, refreshMs);
   refresh.unref();
-  await new Promise<void>((resolve, reject) => {server.once('error', reject); server.listen(options.port ?? 3025, '127.0.0.1', () => {server.removeListener('error', reject); resolve();});});
   const address = server.address();
   if (!address || typeof address === 'string') throw Error('Missing loopback address');
   return {
