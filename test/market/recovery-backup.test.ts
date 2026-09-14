@@ -23,7 +23,10 @@ test("recovery accepts only the exact recent completed archive for the unchanged
     await assert.rejects(verifyRecoveryBackup({ ...input, expectedBytes: "8" }), /exact completed/);
     await assert.rejects(verifyRecoveryBackup({ ...input, baseRelease: "b".repeat(40) }), /active release changed/);
     await assert.rejects(verifyRecoveryBackup({ ...input, databaseName: "another_db" }), /database does not match/);
-    await assert.rejects(verifyRecoveryBackup({ ...input, now: now + 2 * 60 * 60_000 }), /two hours/);
+    await assert.rejects(verifyRecoveryBackup({ ...input, now: now + 8 * 60 * 60_000 + 1 }), /eight hours/);
+    // A backup that took hours to make and is a few hours old is exactly the
+    // one the recovery path exists for.
+    assert.equal((await verifyRecoveryBackup({ ...input, now: now + 7 * 60 * 60_000 })).bytes, input.expectedBytes);
     await assert.rejects(verifyRecoveryBackup({ ...input, backupName: `../${backupName}` }), /exact backup basename/);
     await assert.rejects(verifyRecoveryBackup({ ...input, inspectArchive: async () => { throw new Error("invalid archive"); } }), /invalid archive/);
     await fs.writeFile(path.join(backupDir, backupName), "bad!!test");

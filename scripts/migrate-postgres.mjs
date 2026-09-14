@@ -153,4 +153,4 @@ try {
   await pool.end();
 }
 
-console.log(deferred.length ? `[postgres-migrate] required schema ready; optional notifications PENDING: ${deferred.join(", ")}` : "[postgres-migrate] schema is current");
+console.log(deferred.length ? `[postgres-migrate] required schema ready; optional migrations PENDING: ${deferred.join(", ")}` : "[postgres-migrate] schema is current");

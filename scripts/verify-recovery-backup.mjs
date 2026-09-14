@@ -5,7 +5,14 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 const exec = promisify(execFile);
-const MAX_AGE_MS = 2 * 60 * 60_000;
+// Measured from the backup's START (its name is its start time). 2026-09-14:
+// a 36.3 GB pre-migration dump took 1h42m, the job that took it was killed
+// during the migration, and a two-hour window left 18 minutes to notice and
+// re-dispatch -- the recovery path existed and could not be used. Eight
+// hours from start fits a backup that takes hours plus a working day's
+// response; the byte count and base-release checks below are what make a
+// reuse safe, the age is only a sanity cap on how stale a rollback could be.
+const MAX_AGE_MS = 8 * 60 * 60_000;
 
 export async function verifyRecoveryBackup({ appDir, backupName, expectedBytes, baseRelease, databaseName, now = Date.now(), inspectArchive }) {
   const match = /^predeploy-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.dump$/.exec(backupName ?? "");
@@ -13,7 +20,7 @@ export async function verifyRecoveryBackup({ appDir, backupName, expectedBytes, 
     throw new Error("Recovery requires an exact backup basename, successful-run byte count and base release SHA.");
   }
   const started = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]), Number(match[7]));
-  if (started > now || now - started > MAX_AGE_MS) throw new Error("Recovery backup must have started within the last two hours.");
+  if (started > now || now - started > MAX_AGE_MS) throw new Error("Recovery backup must have started within the last eight hours.");
   const root = await fs.realpath(path.join(appDir, "shared", "backups"));
   const file = path.join(root, backupName);
   const stat = await fs.lstat(file, { bigint: true });

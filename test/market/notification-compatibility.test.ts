@@ -2,18 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 // @ts-expect-error standalone deployment module
-import { notificationDeferralCandidate, canDeferNotificationLock } from '../../scripts/notification-migration-policy.mjs';
+import { notificationDeferralCandidate, canDeferNotificationLock, OPTIONAL_LOCKED_TABLE_MIGRATIONS } from '../../scripts/notification-migration-policy.mjs';
 import { Client } from 'pg';
 import { MarketChangeFeed } from '../../lib/market/multichain/edge/change-feed';
 import { hasPostgresConfig, closePostgres } from '../../lib/postgres';
 import type { MarketChange } from '../../lib/market/multichain/edge/change-protocol';
 
-test('only the exact reviewed optional migration can defer; required migrations and non-lock failures stay fatal', async()=>{
+test('only the exact reviewed optional migrations can defer; required migrations and non-lock failures stay fatal', async()=>{
+ const optional=Object.keys(OPTIONAL_LOCKED_TABLE_MIGRATIONS as Record<string,string>);
+ assert.deepEqual(optional,['110_market_change_notifications.sql','149_market_events_feed_indexes.sql']);
+ for(const file of optional){
+  const sql=await readFile(`deploy/inmotion/postgres/migrations/${file}`,'utf8');
+  assert.equal(notificationDeferralCandidate(true,file,sql),true,`${file} exact text defers`);
+  assert.equal(notificationDeferralCandidate(false,file,sql),false,`${file} needs the flag`);
+  assert.equal(notificationDeferralCandidate(true,file,sql+'\nSELECT 1;'),false,`${file} edited text is not the reviewed text`);
+  assert.equal(notificationDeferralCandidate(true,file,sql.replace(/\r?\n/g,'\r\n')),true,`${file} line endings do not change identity`);
+ }
  const sql=await readFile('deploy/inmotion/postgres/migrations/110_market_change_notifications.sql','utf8');
- assert.equal(notificationDeferralCandidate(true,'110_market_change_notifications.sql',sql),true);
- assert.equal(notificationDeferralCandidate(false,'110_market_change_notifications.sql',sql),false);
  assert.equal(notificationDeferralCandidate(true,'111_discovery.sql',sql),false);
- assert.equal(notificationDeferralCandidate(true,'110_market_change_notifications.sql',sql+'\nSELECT 1;'),false);
+ assert.equal(notificationDeferralCandidate(true,'148_activity_feed_bounded_indexes.sql',await readFile('deploy/inmotion/postgres/migrations/148_activity_feed_bounded_indexes.sql','utf8')),false,'148 must apply; it is not deferrable');
  let reads=0;
  const client={query:async()=>{reads++;return {rows:[{blocked:true}]};}};
  assert.equal(await canDeferNotificationLock(client,true,{code:'42P01'}),false);
