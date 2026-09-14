@@ -1,6 +1,6 @@
 # Burning Heart: minimal complete vertical slice
 
-Planning only, grounded in release 69a86aae. No new crop, grant or artwork is implemented by this document. Keep private admission and the accepted Oran release operational throughout.
+Original dependency plan, grounded in release 69a86aae. The local development implementation is now exercised end to end; see the September 13 acceptance update below. Production activation and full narrative remain pending. Keep private admission and the accepted Oran release operational throughout.
 
 ## Outcome
 
@@ -38,3 +38,22 @@ Keep pending action's crop and resource revision fixed. An action created before
 - Explicit pin on an authorized synthetic post consumes one Heart once, retains post identity during refresh, survives reload and handles uncertain retry with the same request ID. Insufficient stock, invisible post and revoked admission lose nothing.
 - Oran cultivation, care and pins remain operational. Private runtime anonymous/revoked access still fails.
 - Only after focused transactional and visible acceptance: new immutable package and normal release checks. This does not complete the full opening narrative, shared town or overall game.
+
+
+## September 13 local acceptance update
+
+Synthetic account26, same browser tab22 on localhost3018, candidate `alpha01-heart-native` (inventory `f0b2d40005cb475017f662f713d599a52a922a4a48dd50a210858bbd49b3def7`):
+
+1. Claimed home, chose Treecko, enabled following, completed the two-page native introduction.
+2. Explicitly accepted the family gift in Journey; displayed receipt showed3 Heart seeds. No inventory was inserted to fake this result.
+3. Inspected the distinct original Heart SVG in Satchel. The initial stale opening balance was fixed by refreshing authoritative inventory before opening Satchel; the final live check showed three Heart seeds and zero spent Hearts correctly.
+4. Native E tilled, planted Heart and watered. Server bed0 changed to `burning-heart`; Heart seeds3→2, Oran seeds stayed3.
+5. Observed planted, flowering and ripe native art with a stable soil anchor. Intermediate sprout/bud code is compiled but not every frame/direction has visual acceptance.
+6. Native E harvested: Heart seeds returned to3, Heart produce0→1, bed returned to prepared stage.
+7. Opened in-game Social, chose Heart and explicitly confirmed a pin on the synthetic friend's post. Basket1→0; post Heart count0→1; Oran remained distinct.
+8. Returned to the still-running native world. Seed selector changed to Oran without spending a seed. Journey showed First harvest complete even with zero Heart stock, based on the committed receipt.
+
+Local-only flags control family, nativev2 and socialv2. Production remains on the existing release. Migration147/148 applied only to the isolated acceptance database. New art is original code-native/SVG work; it does not claim to be a recovered Nintendo asset. The exact whole-frame timing, all directions, touch/gamepad selection, reload-at-every-contact, anonymous/revocation regression and release promotion remain required. Parent characters/cinematics, girl hero coverage, Kakariko, Exchange eligibility and full MMO scale are not completed by this slice.
+
+9. Traveled to the public meadow; committed first-harvest progress remained complete after spending the Heart. Family Open Satchel refreshed successfully. Focused contract tests, TypeScript and lint checks passed; these do not substitute for remaining release gates.
+
