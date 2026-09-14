@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hasMultichainStore, getChainCounts } from "@/lib/market/multichain/store";
+import { hasMultichainStore, getChainCounts, getChainLiveFloorCounts } from "@/lib/market/multichain/store";
 import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "NOT_CONFIGURED" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
   try {
-    const counts = await getChainCounts();
+    // `counts` stays the tracked total (the live-delta animation keys on it);
+    // `withFloor` is how many of those a visitor will find priced.
+    const [counts, withFloor] = await Promise.all([getChainCounts(), getChainLiveFloorCounts()]);
     const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
     // `asOf` is when THIS count was measured. useLiveChainCounts already
     // reads it but the route never sent one, so the hub could not tell a
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
     // only the 10s HTTP cache sits in front, so a moving asOf is the proof
     // the number is current.
     return NextResponse.json(
-      { counts, total, asOf: new Date().toISOString() },
+      { counts, withFloor, total, asOf: new Date().toISOString() },
       { headers: { "Cache-Control": "public, max-age=10, s-maxage=10, stale-while-revalidate=30" } }
     );
   } catch (error) {
