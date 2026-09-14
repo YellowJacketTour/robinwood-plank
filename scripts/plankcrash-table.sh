@@ -157,6 +157,28 @@ if [ -s "$seed" ] && [ -n "$want_seed" ] && { [ ! -s "$state_file" ] || [ "$want
   printf '%s' "$want_seed" > "$seed_marker"
 fi
 
+# ── a torn state file must not take the table down ──────────────────────────
+# anvil rewrites anvil-state.json in place every --state-interval; a kill that
+# lands mid-write (two deploys restarting the table within a minute did it on
+# 2026-09-13) leaves a truncated file, and anvil then refuses to start at all
+# ("invalid value" for --state) -- forever, every minute, while /table is 500.
+# Validate before starting: fall back to the copy taken at the last healthy
+# boot, and only then to the release seed. Guests and the invite link stay;
+# the gateway re-funds a returning guest whose balance is gone.
+state_loads() { [ -s "$1" ] && "$node_bin" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$1" >/dev/null 2>&1; }
+if [ -s "$state_file" ] && ! state_loads "$state_file"; then
+  torn="$table_dir/anvil-state.torn-$(date -u +%Y%m%dT%H%M%SZ).json"
+  mv -f "$state_file" "$torn"
+  if state_loads "$state_file.good"; then
+    log "state file was torn (kept as $(basename "$torn")); restoring the last healthy copy"
+    cp "$state_file.good" "$state_file"
+  elif [ -s "$seed" ]; then
+    log "state file was torn (kept as $(basename "$torn")) and no healthy copy exists; reseeding from the release"
+    cp "$seed" "$state_file" && printf '%s' "$want_seed" > "$seed_marker"
+  fi
+  chmod 600 "$state_file" 2>/dev/null || true
+fi
+
 # anvil.log is append-only; the FATAL branch below re-prints its tail with a
 # fresh timestamp, and last time that resurrected a week-old "trailing
 # characters" error while the real failure was elsewhere. Start each run clean.
@@ -171,6 +193,8 @@ log "starting anvil"
   >> "$table_dir/anvil.log" 2>&1 &
 anvil_pid=$!
 for _ in $(seq 1 40); do chain_up && break; sleep 1; done
+# The file anvil just loaded is known-good: keep it as the fallback for a torn one.
+if chain_up; then cp -f "$state_file" "$state_file.good" 2>/dev/null || true; fi
 if ! chain_up; then
   # anvil writes its own reason to anvil.log and nothing ever read it, so a
   # failure here looked identical whether the binary could not run, the port
