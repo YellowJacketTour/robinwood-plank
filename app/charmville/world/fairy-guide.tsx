@@ -47,7 +47,7 @@ export default function FairyGuide({profileId,completed,atHome,busy,onAction}:{p
    else setStory(null);
   }
  }}>
-  <div className={styles.portrait}><FairyPortrait skin={skin} attention={story!==null}/><span>YOUR GUIDE</span><details className={styles.look}><summary>Look</summary><div role="group" aria-label="Guide color">{FAIRY_SKINS.map(([id,label])=><button key={id} type="button" aria-pressed={skin===id} onClick={()=>chooseSkin(id)}>{label}</button>)}</div><small>On this browser</small></details></div>
+  <div className={styles.portrait}><FairyPortrait skin={skin} attention={story!==null}/><span>YOUR GUIDE</span><label className={styles.look}>Look<select aria-label="Fairy appearance" value={skin} onChange={event=>{const choice=FAIRY_SKINS.find(([id])=>id===event.target.value);if(choice)chooseSkin(choice[0]);}}>{FAIRY_SKINS.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label></div>
   <div className={styles.page}>
    <p className={styles.chapter}>{beat?'A GIFT FROM HOME':completed===null?'YOUR JOURNAL':completed.length===0?'A NEW ADVENTURE':'YOUR NEXT CHAPTER'}</p>
    <h3>{beat?beat.speaker:guide.title}</h3>
