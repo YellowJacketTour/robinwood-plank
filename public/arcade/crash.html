@@ -1309,8 +1309,11 @@ try {
 // 240Hz physics world). Phones start at 1.0x with the cheap shadow filter and
 // the low post tier; the governor can still lift the ratio when frames allow.
 const PHONE_GPU = matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) <= 540;
-const resolutionGovernor = createResolutionGovernor(PHONE_GPU ? 1 : 1.5);
-renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1,PHONE_GPU?1:1.5));
+// Owner on the 1.0x cut: 'resolution really low'. Phones keep the full 1.5x
+// (the post chain and shadow filter are where the frames went); the governor
+// lowers it only if the device cannot hold 58fps.
+const resolutionGovernor = createResolutionGovernor(1.5);
+renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1,1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -4025,7 +4028,16 @@ async function pollScoreboard() {
       }):null;
       if(numberedRead)void numberedRead.then(({value:events})=>{
         const draw=events?.[0]?.args;
-        if(scoreIsCurrent()&&draw)document.dispatchEvent(new CustomEvent("plank:lottery-prepare",{detail:{roundId:rid.toString(),ballCount:draw.ballCount.toString(),drawnBall:draw.drawnBall.toString()}}));
+        if(scoreIsCurrent()&&draw){
+          // Building the machine (meshes, ball atlas, Rapier init) is main-thread
+          // work. A desktop hides it under the flight; a phone froze mid-climb
+          // (owner: "at a certain height it seems to freeze"). On phones the
+          // build starts at the crash beat, inside the 2.6s finale instead.
+          const prepare=()=>{if(scoreIsCurrent())document.dispatchEvent(new CustomEvent("plank:lottery-prepare",{detail:{roundId:rid.toString(),ballCount:draw.ballCount.toString(),drawnBall:draw.drawnBall.toString()}}));};
+          const r=publicFlightReplay&&publicFlightReplay.roundId===rid.toString()?publicFlightReplay:null;
+          const untilCrash=r?Math.max(0,r.startedAt+1400+r.durationMs-performance.now()):0;
+          if(PHONE_GPU&&untilCrash>0)setTimeout(prepare,untilCrash+50);else prepare();
+        }
       }).catch(()=>{});
       let participated=false,lotteryStake=0n,lotteryTarget=0n;
       if (rd.crashBps > 0n && lastFlightPresentedRound !== rid) {

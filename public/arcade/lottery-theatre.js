@@ -116,7 +116,7 @@ function show(result,scheduled=false){
 
       amount.textContent=money(value);amount.title=`${value} ETH`;
 
-      dialog.querySelector('.lottery-amount-label').textContent=(result.hit?'Winner credited':'Next winner prize')+(result.testFunds?' · test ETH':'');
+      dialog.querySelector('.lottery-amount-label').textContent=matchMedia('(max-width:540px)').matches?(result.hit?'Winner credited':'Next prize'):(result.hit?'Winner credited':'Next winner prize')+(result.testFunds?' · test ETH':'');
 
       if(!previewResult(result)&&numbered&&BigInt(shown.ballCount)>0n&&BigInt(result.roundStake)>0n){
 

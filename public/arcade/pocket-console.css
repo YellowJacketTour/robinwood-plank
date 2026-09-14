@@ -355,3 +355,16 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
   .lottery-details{font-size:12px}
   .lottery-next,.lottery-collect{font-size:15px;min-height:44px;padding:10px 24px}
 }
+
+/* The prize sculpture is a fixed thumbnail, never a layout participant.
+   `.lottery-theatre canvas{width:100%;height:100%}` (0,1,1) outranked
+   `.lottery-prize-art{width:132px}` (0,1,0): on an iPhone the tray filled
+   the card and squeezed the prize text into a one-character column off the
+   edge (owner screenshot 2026-09-14). */
+.lottery-theatre .lottery-prize-art{width:132px!important;height:104px!important;flex:0 0 132px!important;max-width:40%}
+@media(max-width:540px){
+  .lottery-theatre .lottery-prize-art{width:96px!important;height:80px!important;flex:0 0 96px!important}
+  .lottery-prize-summary{flex-wrap:nowrap;align-items:center;justify-content:center;gap:12px;max-width:100%;overflow:hidden}
+  .lottery-prize-summary>div{flex:0 1 auto;min-width:0;text-align:left}
+  .lottery-prize-summary .lottery-amount{white-space:nowrap;font-size:22px}
+}

@@ -14,7 +14,7 @@ export function mountLotteryMachine(canvas,{result=null,onReady=()=>{},paused=fa
   const radius=population.radius,path=t=>dispensePosition(t,radius);
   const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
   const phone=matchMedia('(pointer:coarse)').matches&&Math.min(screen.width,screen.height)<=540;
-  renderer.setPixelRatio(Math.min(devicePixelRatio||1,phone?1:1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;
   renderer.shadowMap.enabled=true;renderer.shadowMap.type=phone?THREE.PCFShadowMap:THREE.PCFSoftShadowMap;
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(36,1,.1,30);
@@ -123,7 +123,7 @@ export function mountLotteryMachine(canvas,{result=null,onReady=()=>{},paused=fa
   function frame(now){
     raf=null;if(stopped||document.hidden)return;previous=now;const previousElapsed=elapsed;
     if(physics&&playing){startedAt??=now;elapsed=Math.min(8,Math.max(0,(now-startedAt)/1000));}
-    const width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight),ratio=renderRatio(width,height,devicePixelRatio||1,phone?1:1.5);
+    const width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight),ratio=renderRatio(width,height,devicePixelRatio||1,1.5);
     // Compare CSS dimensions, not rounded device pixels: Three floors its buffer.
     if(width!==drawingWidth||height!==drawingHeight||ratio!==drawingRatio){drawingWidth=width;drawingHeight=height;drawingRatio=ratio;renderer.setPixelRatio(ratio);renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix();canvas.dataset.bufferResizes=String(Number(canvas.dataset.bufferResizes||0)+1);}
     const t=result&&playing?(reduced.matches?(elapsed>=4.8?5:0):elapsed):0;
