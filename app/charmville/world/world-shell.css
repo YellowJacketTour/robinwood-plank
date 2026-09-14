@@ -93,6 +93,10 @@
 .world-start-menu nav { display:grid; }
 .world-start-menu nav button { min-height:44px; display:grid; grid-template-columns:36px 1fr 12px; align-items:center; gap:8px; text-align:left; font-size:15px; font-weight:800; border:2px solid transparent; padding:2px 8px; border-radius:3px; }
 .world-start-menu img,.world-pocket-rail img,.world-menu-heading img { image-rendering:pixelated; object-fit:contain; }
+/* Emerald item masters are 24px. A 32px nearest-neighbour resize gives
+   alternating one/two-pixel edges; retain their native grid in menu slots. */
+.world-start-menu img,.world-menu-heading img { width:24px; height:24px; display:block; flex:none; justify-self:center; }
+.world-start-menu img[src$=".svg"],.world-menu-heading img[src$=".svg"] { width:32px; height:32px; }
 .world-start-menu nav button:hover,.world-start-menu nav button:focus-visible { background:var(--game-select); border-color:var(--game-frame); outline:0; }
 .world-continue { border-top:2px solid var(--game-edge); width:100%; min-height:40px; display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:800; }
 .charm-world .world-menu { position:absolute; inset:12px; max-width:1000px; margin:auto; border:6px double var(--game-edge); border-radius:5px; padding:0; background:var(--game-night); display:flex; flex-direction:column; gap:0; overflow:hidden; box-shadow:0 6px 24px #0008; }
