@@ -8,13 +8,23 @@ Four separately created, approved profiles held four independent wallet-session 
 
 Changing the first owner's policy to private ended that publication for all four clients without ending the other publications. A new private publication rejected another profile. Changing to an allowlist admitted only the listed profile. Revoking the fourth profile's game admission closed its connection and publication while the other three stayed connected. Source capture ownership was conserved: signaling cleanup did not stop caller-owned source tracks.
 
-**Evidence boundary:** PostgreSQL, authentication, WebSocket transport and policy changes were real. Media peer objects were test doubles. This is four-identity signaling acceptance, not four rendered players or four actual video decoders. The previous same-browser self-view proved real video separately (410 presented/408 decoded frames before explicit Stop). These two pieces of evidence must not be combined into a claim that four independent browsers streamed video.
+**Signaling-test boundary:** PostgreSQL, authentication, WebSocket transport and policy changes were real. Media peer objects in that test were doubles. A separate actual-video harness below now supplies additional evidence. Neither test represents four rendered game players or remote WAN play.
 
 Run with a loopback disposable database URL in `CHARMVILLE_BROADCAST_TEST_DATABASE_URL`:
 
 ```
 npx tsx --test scripts/charmville/broadcast-four-profile-pg.test.ts
 ```
+
+## Actual four-context video acceptance
+
+`npx tsx scripts/charmville/verify-four-browser-media.ts` passed using the same disposable database guard and a separately generated schema. Four isolated headless Chromium contexts each authenticated a different approved profile and published a labeled synthetic 256×176 canvas at 15 fps. Each context received the other three sources through the real `captureGameplay` → `createGameplayBroadcastClient` → `createGameplayPeer` → browser WebRTC pipeline.
+
+All **12 video receivers** reached at least **16 decoded frames** in the recorded run. Pixel samples verified that each received image matched its publisher's distinct source color, within codec tolerance. Four screenshots show the labeled local canvas alongside the three received sources. Changing the first publisher to private ended that publication in all cooperating clients and cleared its received video source.
+
+Evidence is written to `work/four-browser-media-20260914/evidence.json` and `profile-1.png` through `profile-4.png`. The first screenshot was visually inspected. TypeScript and focused lint passed. No user browser tab was opened, closed or driven by this harness; all contexts were headless and disposed after the run.
+
+This proves real local multi-context authenticated video transport. The sources are deliberately synthetic; these are not four game worlds or game avatars. All contexts ran on one machine over loopback networking. Mobile devices, remote WAN/NAT traversal, long-duration load and relay-enforced privacy against uncooperative receivers remain untested.
 
 ## Public broadcasting: next concrete dependency
 
