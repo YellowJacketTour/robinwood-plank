@@ -176,7 +176,7 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
           { key: "Permissions-Policy", value: ['camera=()', 'geolocation=()', ...['microphone','cross-origin-isolated','keyboard-map','gamepad','fullscreen'].map(feature => `${feature}=(self${process.env.NODE_ENV === "development" ? ' "http://localhost:3021" "http://localhost:3024"' : ''})`)].join(', ') },
           { key: "Content-Security-Policy", value: process.env.NODE_ENV === "development"
-            ? securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021 http://localhost:3024").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:3023")
+            ? securityHeaders.find(header => header.key === "Content-Security-Policy")!.value.replace("frame-src 'self'", "frame-src 'self' http://localhost:3021 http://localhost:3024").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:3023 ws://127.0.0.1:3035")
             : securityHeaders.find(header => header.key === "Content-Security-Policy")!.value },
         ],
       },
@@ -460,3 +460,4 @@ export default nextConfig;
 
 // Enable Cloudflare bindings during `next dev`.
 initOpenNextCloudflareForDev();
+
