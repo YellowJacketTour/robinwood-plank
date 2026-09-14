@@ -187,7 +187,7 @@ log "starting anvil"
 "$anvil_bin" \
   --port "$anvil_port" --host 127.0.0.1 --chain-id 31337 \
   --accounts 20 --balance 10000 --order fifo \
-  --state "$state_file" --state-interval 60 \
+  --state "$state_file" --state-interval 300 \
   --transaction-block-keeper 6000 \
   --block-time 0.1 --mixed-mining --silent \
   >> "$table_dir/anvil.log" 2>&1 &

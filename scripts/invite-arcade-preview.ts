@@ -153,7 +153,7 @@ function sharedRead(method:string,params:unknown[],head:number):Promise<unknown>
   const key=method+' '+JSON.stringify(params);
   const now=Date.now();const hit=sharedReads.get(key);
   if(hit&&hit.head===head&&now-hit.at<SHARED_READ_TTL_MS)return hit.value;
-  const value=rpc.send(method,params);
+  const value=Promise.race([rpc.send(method,params),new Promise((_r,reject)=>setTimeout(()=>reject(new Error('Chain read timed out')),6000))]);
   sharedReads.set(key,{head,at:now,value});
   value.catch(()=>{if(sharedReads.get(key)?.value===value)sharedReads.delete(key);});
   if(sharedReads.size>4000){for(const [k,v] of sharedReads)if(now-v.at>SHARED_READ_TTL_MS)sharedReads.delete(k);}
@@ -293,7 +293,11 @@ createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/invite/rpc'&&req.method==='POST'){
       const input=await body(req),batch=Array.isArray(input)?input:[input];
-      if(!batch.length||batch.length>40||inflight>=32){json(res,429,{error:'Busy, retry shortly'});return;}
+      // 32 in flight was sized for one player; a 60 s anvil state dump stalled
+      // every read for seconds, the counter pinned, and every other tab got 429
+      // (measured: 144 x 429 in four minutes, p90 8 s). Shared reads now fail
+      // fast (6 s) instead of holding a slot, and the cap fits a public table.
+      if(!batch.length||batch.length>40||inflight>=256){json(res,429,{error:'Busy, retry shortly'});return;}
       const g=guest!;if(Date.now()-g.window>10000){g.window=Date.now();g.count=0;g.writes=0;}
       g.count+=batch.length;if(g.count>1600){json(res,429,{error:'Request limit'});return;}
       inflight++;
