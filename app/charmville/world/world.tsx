@@ -364,7 +364,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   function sendPanel(){
     if(!pendingPanel.current||!frameReady.current||!frame.current?.contentWindow)return;
     frame.current.contentWindow.postMessage({type:'charmville:open-panel',panel:pendingPanel.current},runtimeOrigin);
-    frame.current.focus({preventScroll:true});
+    requestAnimationFrame(()=>frame.current?.focus({preventScroll:true}));
     pendingPanel.current=null;
   }
   function openPanel(panel:'charmdex'|'voice'|'gear'|'map'|'settings'){
