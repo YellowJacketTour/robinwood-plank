@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-14T01:57:30.755Z",
+  "scope": "Pinned public repository metadata and documentation fingerprints. No new artwork downloaded.",
+  "sources": [
+    {
+      "repository": "https://github.com/pret/pokeemerald",
+      "commit": "5eff78649e7170a877b961ef0b3da13b81a16038",
+      "defaultBranch": "master",
+      "treeComplete": true,
+      "countInterpretation": "exact matching file paths in pinned recursive tree",
+      "counts": {
+        "indexedFiles": 11555,
+        "pngFiles": 4076,
+        "gifFiles": 0,
+        "svgFiles": 0,
+        "itemPngFiles": 218,
+        "animationXmlFiles": 0,
+        "animationSheets": 0,
+        "offsetSheets": 0,
+        "creditOrLicenseDocuments": 16
+      },
+      "topLevelSpriteDirectories": null,
+      "documentPins": [
+        {
+          "path": "README.md",
+          "gitBlobSha": "d9148b32ecffeb596b70cc3510be4de5fea7ab33",
+          "sha256": "5ed60cb1aaa9ec6f7c01bea7f166a8208d287799d566dec550d2ed5d067426dd",
+          "bytes": 383,
+          "url": "https://raw.githubusercontent.com/pret/pokeemerald/5eff78649e7170a877b961ef0b3da13b81a16038/README.md"
+        }
+      ],
+      "shippingApproved": false,
+      "rightsStatus": "Repository availability and credits do not establish a blanket right to ship every depicted franchise asset; per-file review required",
+      "animationStatus": "Source file inventory only; no claim of gameplay move, timing, layering or direction coverage"
+    },
+    {
+      "repository": "https://github.com/rh-hideout/pokeemerald-expansion",
+      "commit": "083b15cd6db8cade17c3f83f20807b3c8af6ad0d",
+      "defaultBranch": "master",
+      "treeComplete": true,
+      "countInterpretation": "exact matching file paths in pinned recursive tree",
+      "counts": {
+        "indexedFiles": 30100,
+        "pngFiles": 11339,
+        "gifFiles": 17,
+        "svgFiles": 0,
+        "itemPngFiles": 619,
+        "animationXmlFiles": 0,
+        "animationSheets": 0,
+        "offsetSheets": 0,
+        "creditOrLicenseDocuments": 24
+      },
+      "topLevelSpriteDirectories": null,
+      "documentPins": [
+        {
+          "path": "CREDITS.md",
+          "gitBlobSha": "818d928822c360fb11ae1467dab0a1a56ae2f752",
+          "sha256": "fcbe3c3bdeb477a02d307c7b7a4437aadbd518b07392f679f07134dafd209a6e",
+          "bytes": 31586,
+          "url": "https://raw.githubusercontent.com/rh-hideout/pokeemerald-expansion/083b15cd6db8cade17c3f83f20807b3c8af6ad0d/CREDITS.md"
+        },
+        {
+          "path": "README.md",
+          "gitBlobSha": "3c77243accb844f82e1e0a5d606530dd5b9f5aba",
+          "sha256": "8881a5d77e30fe40a4ab4de7ab077961d109e4d3b32baee06a650fd3b256ed18",
+          "bytes": 4502,
+          "url": "https://raw.githubusercontent.com/rh-hideout/pokeemerald-expansion/083b15cd6db8cade17c3f83f20807b3c8af6ad0d/README.md"
+        }
+      ],
+      "shippingApproved": false,
+      "rightsStatus": "Repository availability and credits do not establish a blanket right to ship every depicted franchise asset; per-file review required",
+      "animationStatus": "Source file inventory only; no claim of gameplay move, timing, layering or direction coverage"
+    },
+    {
+      "repository": "https://github.com/PMDCollab/SpriteCollab",
+      "commit": "64606f173f540d93fa67fa63671a56555268c958",
+      "defaultBranch": "master",
+      "treeComplete": false,
+      "countInterpretation": "lower bounds from truncated recursive tree",
+      "counts": {
+        "indexedFiles": 73640,
+        "pngFiles": 69063,
+        "gifFiles": 0,
+        "svgFiles": 0,
+        "itemPngFiles": 0,
+        "animationXmlFiles": 425,
+        "animationSheets": 6971,
+        "offsetSheets": 6971,
+        "creditOrLicenseDocuments": 4151
+      },
+      "topLevelSpriteDirectories": {
+        "count": 983,
+        "complete": true,
+        "meaning": "top-level source directories; not a count of complete species animations"
+      },
+      "documentPins": [
+        {
+          "path": "LICENSE.md",
+          "gitBlobSha": "2d957ecc26984781602d44e0bb7b813e18370996",
+          "sha256": "284233a8bc62ac54d878552845ef66ab94b25112e6fc8f902fcdfa6149748c31",
+          "bytes": 17607,
+          "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/64606f173f540d93fa67fa63671a56555268c958/LICENSE.md"
+        },
+        {
+          "path": "README.md",
+          "gitBlobSha": "3b886dcd96977aa891e123e66895dade6299e25d",
+          "sha256": "a3da413054b0cf19427bf87a1ab1401f153fce9aaa9e27e865b91ef589d37b92",
+          "bytes": 5789,
+          "url": "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/64606f173f540d93fa67fa63671a56555268c958/README.md"
+        }
+      ],
+      "shippingApproved": false,
+      "rightsStatus": "CC-BY-NC-4.0 submission terms; repository also identifies official Chunsoft sprites; per-file attribution and underlying rights review required",
+      "animationStatus": "Source file inventory only; no claim of gameplay move, timing, layering or direction coverage"
+    },
+    {
+      "repository": "https://github.com/TeamAquasHideout/Team-Aquas-Asset-Repo",
+      "commit": "d1b3b396175548f93128ca2e88f32e3188c8e453",
+      "defaultBranch": "main",
+      "treeComplete": true,
+      "countInterpretation": "exact matching file paths in pinned recursive tree",
+      "counts": {
+        "indexedFiles": 16011,
+        "pngFiles": 7380,
+        "gifFiles": 109,
+        "svgFiles": 0,
+        "itemPngFiles": 327,
+        "animationXmlFiles": 0,
+        "animationSheets": 0,
+        "offsetSheets": 0,
+        "creditOrLicenseDocuments": 296
+      },
+      "topLevelSpriteDirectories": null,
+      "documentPins": [
+        {
+          "path": "README.md",
+          "gitBlobSha": "d5800ebf09fe18ea027fbf6386ef532658005fac",
+          "sha256": "fbb2a6a256b572ab27a6fbfb69e932889a71dae7694acfae40aa0e39c9fb8bdf",
+          "bytes": 4893,
+          "url": "https://raw.githubusercontent.com/TeamAquasHideout/Team-Aquas-Asset-Repo/d1b3b396175548f93128ca2e88f32e3188c8e453/README.md"
+        },
+        {
+          "path": "README_sample.md",
+          "gitBlobSha": "81ff2beed865526d5c5620671c934e84fc2cd2e8",
+          "sha256": "88842d4ec240a157149b9fb22c6c2a9107d18ea604606c358d99a97c5849024d",
+          "bytes": 272,
+          "url": "https://raw.githubusercontent.com/TeamAquasHideout/Team-Aquas-Asset-Repo/d1b3b396175548f93128ca2e88f32e3188c8e453/README_sample.md"
+        }
+      ],
+      "shippingApproved": false,
+      "rightsStatus": "Repository availability and credits do not establish a blanket right to ship every depicted franchise asset; per-file review required",
+      "animationStatus": "Source file inventory only; no claim of gameplay move, timing, layering or direction coverage"
+    }
+  ]
+}
