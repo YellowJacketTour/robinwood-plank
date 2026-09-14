@@ -355,3 +355,19 @@ Returning-player browser reload also verified that the completed introduction do
 See REQUIREMENT-COVERAGE-AUDIT.md for title-by-title coverage and full progression dependencies. Recovery entry documents now distinguish historical prototypes from current account integrations. Initial working tree contained only work/ (370 files, about 27 MB of logs, test helpers and candidates); it was preserved and not bulk-committed. The reusable tutorial bridge regression was promoted into test/market.
 
 Implemented arrival selection overlay: native controls are inert until account admission is active; direct home/setup/public/friend paths are available. Live fresh-account test confirmed arrival gating and public admission. On-screen Continue introduction advanced the actual native dialogue, Begin exploring completed it, and POST tutorial returned 200. The bridge uses context, native receipt sequence and expected page to avoid double advancement; completed controls are hidden explicitly despite runtime button styles. Native context nonce is bounded to 100,000 for conservative engine numeric compatibility. Encounter owners can release after leaving interaction range without losing ownership/revision checks; PostgreSQL regression verifies another nearby player can claim immediately and HP/status remain unchanged. These fixes do not complete the tutorial campaign, distinct maps, general shared combat or the 113 queue items.
+
+## September 14 — Co-op, fairy guide, item archive and media acceptance
+
+This checkpoint does not advance the whole-game release bar. It replaces no unverified requirement with a percentage estimate.
+
+| Track | Verified scope | Still required |
+|---|---|---|
+| Co-op navigation | Local game menu separates Travel together / My invitations from Social; same-tab invitation UI observed | Four visible game clients, party joining UX and shared combat |
+| Beginning | Fresh synthetic account claims home and lands in Journal; authoritative receipts select soil/seeding/watering/harvest guidance; no item or companion grant from reading | Title cinematic, avatar selection/parity, native soulbound fairy following/healing, authored Kakariko arrival |
+| Fairy presentation | Four-wing orb, idle/attention states, three local colors, reduced motion; story A/Right, B, resume observed live | Authentic source rig unavailable without extraction; runtime follower and account skin custody |
+| Item Dex | 435 source identities; 308 mapped non-placeholder entries browse in game, 319 palette derivatives and 377 descriptions in archive; native palette correction visually observed | Source items remain references, not newly minted economy items; recipes/drop tables/use/custody need explicit integration |
+| Broadcast transport | Four isolated headless browser identities, twelve real WebRTC receivers, source-color continuity and decoded frames; disposable PostgreSQL authorization | WAN/TURN, server-controlled relay privacy, four gameplay sources, public streaming deployment and load acceptance |
+| Native viewport | Native engine compiled aspect planning, independent output lifecycle and opt-in producer | Candidate visual acceptance, browser aspect negotiation, unsupported effects and modal fallback; no accepted binary changed |
+| Mobile menus | Marketing spacing isolated from game components; compact appearance selector | Full device/gameplay matrix remains |
+
+Evidence: `FAIRY-GUIDE-AND-OPENING-20260914.md`, `NAVI-FAIRY-SOURCE-RESEARCH.md`, `FOUR-PROFILE-MEDIA-ACCEPTANCE-20260914.md`, `REFERENCE-ASSET-PIPELINE-20260914.md`, `NATIVE-ASPECT-IMPLEMENTATION-20260914.md`. Existing completion contract remains authoritative. Current local changes are not a claim of master deployment.
