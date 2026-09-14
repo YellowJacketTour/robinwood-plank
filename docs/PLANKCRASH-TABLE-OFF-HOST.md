@@ -16,6 +16,13 @@ Tunnel**, while plank.love keeps every URL. Nothing here costs money.
 | Site routing | `next.config.ts` + `inmotion.yml` | build-time `PLANK_INVITE_UPSTREAM` points `/table`, `/arcade/table.html`, `/api/invite/*`, the practice clock and the guest manifest at an external origin |
 | Edge Worker (arcade assets off Passenger) | `edge/plankcrash-edge/` | dry-run validated; `npx wrangler deploy` |
 
+## Proof (2026-09-14, this workstation, same arcade build as plank.love)
+
+Three staked rounds in a real browser against the local table: bet → scorecard at the crash
+instant (0 ms) → lottery, every round; 0 reconnects; liftoff 2–4 ms from schedule; RPC p50
+**24 ms** / p90 39 ms (the shared host measured 145–173 ms p50 and 8 s p90 under its stalls);
+0 HTTP errors. `start-table.cmd` is idempotent (skips anything already listening).
+
 ## The three actions only you can take (each is blocked for the agent by policy)
 
 1. **Create and run the tunnel** (uses the account whose cert is in `~/.cloudflared`; zone `gr0v3.online`):
