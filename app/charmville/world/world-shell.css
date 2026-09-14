@@ -119,3 +119,6 @@
  .charm-world .world-menu > [role=tabpanel]:not([hidden]) { padding:8px; }
  .charm-world .world-menu[data-social=true] { inset:18% 4px 4px; width:auto; max-height:none; }
 }
+.charm-world .world-menu { bottom:auto; max-height:calc(100% - 24px); }
+.charm-world .world-menu > [role=tabpanel]:not([hidden]) { flex:0 1 auto; max-height:calc(100dvh - 180px); }
+@media(max-width:600px){.charm-world .world-menu{max-height:calc(100% - 8px)}.charm-world .world-menu[data-social=true]{bottom:4px;max-height:82%;}.charm-world .world-menu > [role=tabpanel]:not([hidden]){max-height:calc(100dvh - 160px);}}
