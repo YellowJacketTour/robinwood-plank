@@ -2001,6 +2001,7 @@ jobs:
           echo "== processes (rss MB)"; ps -o rss=,etimes=,cmd= -u "$(id -un)" --sort=-rss | awk '{printf "%6.0f MB %7ss  ", $1/1024, $2; $1=""; $2=""; print substr($0,1,150)}' | head -25
           echo "== totals"; ps -o rss= -u "$(id -un)" | awk '{s+=$1} END {printf "rss total %.0f MB, %d procs\n", s/1024, NR}'; ulimit -a | grep -Ei 'processes|virtual|memory' || true
           echo "== passenger logs"; for f in "$HOME"/logs/*passenger* "$HOME"/logs/*error* "$app_dir"/logs/*.log "$app_dir"/current/log/*.log; do [ -f "$f" ] && { echo "--- $f ($(stat -c %y "$f" | cut -c1-19))"; tail -n 40 "$f" | cut -c1-300; }; done 2>/dev/null
+          echo "== table logs"; for f in "$app_dir"/shared/plankcrash/gateway.log "$app_dir"/shared/plankcrash/preview.log "$app_dir"/shared/plankcrash/anvil.log "$app_dir"/logs/plankcrash-table.log; do [ -f "$f" ] && { echo "--- $f ($(stat -c %y "$f" | cut -c1-19))"; tail -n 30 "$f" | cut -c1-240; }; done 2>/dev/null
           echo "== stderr.log candidates"; ls -la "$HOME"/logs 2>/dev/null | tail -20; ls -la "$app_dir" 2>/dev/null | head -20
           echo "== app boot check"; cd "$app_dir/current" && ls -la tmp 2>/dev/null; head -c 600 Passengerfile.json 2>/dev/null; echo; ls -la deploy/inmotion 2>/dev/null | head
           echo "== restart touch"; mkdir -p "$app_dir/current/tmp"; touch "$app_dir/current/tmp/restart.txt" "$app_dir/tmp/restart.txt" 2>/dev/null; sleep 25
