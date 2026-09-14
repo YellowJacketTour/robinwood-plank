@@ -158,3 +158,18 @@ process ceiling, the 4 h cache fight, per-client chain polling, deploy coupling.
 - [UTSUBO-100] https://www.utsubo.com/blog/threejs-best-practices-100-tips
 - [ESBUILD-478] https://github.com/evanw/esbuild/issues/478
 - [CF-WORKERS-PRICING] https://developers.cloudflare.com/workers/platform/pricing/
+
+## 6. Addendum (2026-09-14 16:00Z) — "no limits" stack, decided against the exact platform
+
+Researched every way to host the chain without the shared account:
+
+| Option | Verdict for PlankCrash |
+|---|---|
+| **Workstation/VM + Cloudflare Tunnel** (built, seeded, measured 24 ms RPC) | Optimal and free; the tunnel process is the only step left |
+| Oracle Always-Free A1 / GCP e2-micro | Same files, permanent; needs an account signup |
+| Cloudflare Containers | Persistent processes, but Workers Paid ($5/mo) — not free |
+| Koyeb / Render free | Scale to zero after idle; no persistent disk — a chain cannot live there |
+| Tenderly Virtual TestNets | Managed EVM with cheatcodes; 2,000 TU per write on the free plan — the keeper's ~10 writes/round exhaust it in hours |
+| EVM in a Durable Object (`@ethereumjs/vm`, SQLite DO) | Pure-Cloudflare and free at our volume; a JSON-RPC subset + keeper-in-DO rebuild (days), still deployed with `wrangler deploy` |
+
+Sources: Cloudflare Containers pricing (developers.cloudflare.com/containers/pricing), Durable Objects free tier changelog (2025-04-07), Koyeb free tier (srvrlss.io/provider/koyeb), Tenderly TU pricing (docs.tenderly.co/pricing), @ethereumjs/vm (npmjs.com/package/@ethereumjs/vm).
