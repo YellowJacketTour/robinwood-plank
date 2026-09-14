@@ -250,7 +250,9 @@ createServer(async(req,res)=>{
       res.setHeader('Set-Cookie',`plank_guest=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${secure?'; Secure':''}`);
       json(res,200,{ok:true});return;
     }
-    if((url.pathname==='/'||url.pathname==='/arcade/crash.html')&&req.method==='GET'&&!guest){res.setHeader('Content-Type','text/html');res.end(landing);return;}
+    // HTML is never cacheable here: a browser that kept a landing page or an
+    // error page served through a proxy showed it for hours (measured).
+    if((url.pathname==='/'||url.pathname==='/arcade/crash.html')&&req.method==='GET'&&!guest){res.setHeader('Content-Type','text/html');res.setHeader('Cache-Control','no-store');res.end(landing);return;}
     if(!guest && url.pathname!=='/arcade/pocket-console.css'){json(res,401,{error:'Invite session required'});return;}
     if(guest&&url.pathname==='/'&&req.method==='GET'){res.writeHead(302,{Location:TABLE_PATH}).end();return;}
     if(url.pathname==='/api/invite/clock'&&req.method==='GET'){json(res,200,{nowMs:Date.now()});return;}
@@ -325,7 +327,7 @@ createServer(async(req,res)=>{
     if(!path.startsWith(resolve(root,'arcade')+sep)||!types[extname(path)]||/\.json$/i.test(path)&&!pathname.startsWith('/arcade/abi/')||/\.html$/i.test(path)&&pathname!=='/arcade/crash.html'){json(res,404,{error:'Not found'});return;}
     let data=await readFile(path);
     if(pathname==='/arcade/crash.html')data=Buffer.from(stampAssets(data.toString().replace('<head>','<head><meta name="plank-invite" content="simulated"><meta name="plank-invite-join" content="'+JOIN_PATH+'"><link rel="stylesheet" href="invite-play.css">')));
-    res.setHeader('Content-Type',types[extname(path)]);res.end(data);
+    res.setHeader('Content-Type',types[extname(path)]);if(pathname==='/arcade/crash.html')res.setHeader('Cache-Control','no-store');res.end(data);
   }catch{if(!res.headersSent)json(res,400,{error:'Request could not be completed'});else res.end();}
 // Loopback stays mandatory; only the port is configurable, so a supervised
 // service can run beside an existing gateway without stopping a live test.
