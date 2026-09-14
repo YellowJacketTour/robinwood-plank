@@ -46,7 +46,7 @@ export default function FirstSteps({token,refreshKey,handle,busy,location,profil
   const peers=location?.active?location.peers.filter(peer=>peer.profileId!==profileId):[];
   const text=!setup?'Checking your saved home and companion.':!setup.homeClaimed?'Claim your home in Party setup. Your supplies and progress belong to your PlankSpace account.':harvested&&!setup.companion?'Choose a partner in Party, then select Walk with me to explore together.':atHome?'Start with your planting beds. Grow crops and gather them into your Bag. When you are ready, head to the shared meadow.':inPublic?'Meet signed-in players in this region. Open Co-op to meet people here, or return home to tend your garden. Your journey does not require a battle.':'Enter your own home to grow crops and prepare your party before meeting others.';
   return <section data-market-shell aria-label="Your next adventure" className="mb-3 rounded-xl border border-line-strong bg-forest-900 p-3 text-cream sm:p-4">
-    <FairyGuide key={token} completed={setup?.completed??null} atHome={atHome} busy={busy||error} onAction={action=>{
+    <FairyGuide key={`guide:${profileId}`} profileId={profileId} completed={setup?.completed??null} atHome={atHome} busy={busy||error} onAction={action=>{
       if(action==='setup'||action==='party')onSetup();
       else if(action==='home')onHome();
       else if(action==='public')onPublic();
@@ -75,7 +75,7 @@ export default function FirstSteps({token,refreshKey,handle,busy,location,profil
       </div>
     </nav>}
     {harvested&&<p className="mt-2 text-sm text-cream-muted">Your harvest is yours to keep or use in supported activities. Check the Exchange for tradable items. Keep some supplies for your next planting.</p>}
-    {setup?.homeClaimed&&<FamilyGiftPanel key={token} token={token} onSatchel={onOpenFreshSatchel??onSatchel}/>}
+    {setup?.homeClaimed&&<FamilyGiftPanel key={`family:${profileId}`} token={token} onSatchel={onOpenFreshSatchel??onSatchel}/>}
     <details className="mt-2 text-xs text-cream-muted"><summary className="min-h-11 cursor-pointer py-3">Journey & location details</summary>
     {setup?.companion&&<p className="text-sm">{text}</p>}
     <p className="mt-3">{setup?'Completed lessons stay in your journal. Check each bed in the world for its current condition.':'Your saved lessons have not loaded yet.'}</p>

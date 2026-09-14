@@ -13,6 +13,7 @@
 .actions button:disabled{opacity:.5;}
 .actions button:focus-visible{outline:3px solid var(--color-forest-700);outline-offset:2px;}
 .counter{font-size:11px;font-variant-numeric:tabular-nums;color:var(--color-wood-700);}
+.readingHelp{margin:10px 0 0!important;font-size:10px;line-height:1.45;color:var(--color-wood-700)!important;}
 @keyframes float{0%,100%{transform:translateY(2px)}50%{transform:translateY(-2px)}}
 @media(prefers-reduced-motion:reduce){.portrait img{animation:none;}}
 @media(max-width:420px){.guide{grid-template-columns:64px minmax(0,1fr)}.portrait{padding:4px}.portrait img{width:60px;height:60px}.portrait span{font-size:8px;letter-spacing:0}.page{padding:10px}.page h3{font-size:16px}.dialogue{font-size:13px}.actions{gap:6px}.actions button{padding:6px 9px}}

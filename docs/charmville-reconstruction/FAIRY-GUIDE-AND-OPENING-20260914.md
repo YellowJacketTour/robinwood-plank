@@ -8,6 +8,14 @@ The guide begins with home setup, then soil, seed, water, harvest, a partner, an
 
 The fairy illustration is original SVG source, not a extracted third-party character. The fixed art box has alpha padding. Its optional two-pixel float honors reduced-motion. Dialogue has no forced timer or typing delay. Back, Next, Close story, and the current action are keyboard/touch buttons of at least 44px height. Instructions remain literal and separate from flavor.
 
+The reader now bookmarks its page locally by numeric profile ID. This stores only a validated version, page and read-to-end flag; no session token, wallet address, name, inventory or server checkpoint. Reopening explicitly offers Continue or Read again, never automatically interrupts a returning player. Corrupt/unavailable browser storage falls back to the first page. This preference is browser-local, not cross-device story persistence.
+
+Keyboard A/right advances, B/Escape closes the reader, and left returns a page. Advancing keeps focus on Next; closing returns focus to the opening button. Controller A uses that focused action. Controller B now gives the focused reader/dialog a cancelable Escape before falling back to the game-menu Back action. The guide consumes only its active story controls, so normal Journal navigation remains available.
+
+## Actual title-flow audit
+
+`app/charmville/start/start.tsx` authenticates the existing PlankSpace account and loads account/home permissions. It does not currently implement character presentation selection. `world.tsx` uses existing account/home presence for arrival and holds the persistent native iframe. `tutorial-bridge.ts` loads a server-backed completed boolean for the native introduction. `scripts/charmville/tutorial-bridge.js` drives two native pages with a nonce and acknowledged sequence; returning players bypass them. None of those is a complete cinematic checkpoint graph, boy/girl character chooser, or fairy custody system. The Journal reader adds usable storytelling now while preserving those boundaries, rather than converting a browser bookmark into new-account authority.
+
 ## Approved narrative direction
 
 The fictional hero is seven. Girl and boy presentations have identical abilities and tutorial treatment. Loving parents give the hero a genuinely independent beginning; their confidence is gently absurd, while the child's vulnerability remains sincere. The faith foundation is Christian love, generosity, forgiveness and conviction expressed in conduct. No player receives economic or gameplay advantages for a declaration of faith. Original prose uses affectionate absurdity and economical theatrical dialogue, never copied lines or imitation presented as an author's work. Love and friendship are not prices, spending obligations, or promises of financial return.
