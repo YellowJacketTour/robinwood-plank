@@ -43,6 +43,7 @@ on:
           - deploy-table
           - diagnose-app
           - relieve-host
+          - export-table-state
           - configure-plankspace-x
           - diagnose-market-locks
       rebuild_seed:
@@ -2052,6 +2053,53 @@ jobs:
           REMOTE
           }
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if run_remote; then exit 0; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done; exit 1
+
+  # Copy the live table's chain state, guest sessions, invite token and
+  # manifest out of the host as a workflow artifact (retained 1 day), so the
+  # same table -- same economy, same invite link -- can be run elsewhere.
+  export-table-state:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'export-table-state'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+          printf '%s' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"; echo >> "$HOME/.ssh/inmotion"
+          printf '%s' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"; echo >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+      - name: Pack the table state on the host and fetch it
+        shell: bash
+        run: |
+          set -uo pipefail
+          port="${INMOTION_PORT:-2222}"; target="${INMOTION_USER}@${INMOTION_HOST}"
+          pack() { ssh -o ConnectTimeout=25 -i "$HOME/.ssh/inmotion" -p "$port" "$target" bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"; d="$app_dir/shared/plankcrash"
+          # a consistent copy: pause new dumps by copying the last healthy file too
+          tar -C "$d" -czf "$app_dir/incoming/table-state.tgz" anvil-state.json anvil-state.json.good state/invite-sessions.json state/invite-token.txt state/seed.fingerprint 2>/dev/null || tar -C "$d" -czf "$app_dir/incoming/table-state.tgz" anvil-state.json state
+          ls -la "$app_dir/incoming/table-state.tgz"
+          REMOTE
+          }
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if pack; then break; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done
+          for attempt in 1 2 3 4 5 6; do if scp -o ConnectTimeout=25 -i "$HOME/.ssh/inmotion" -P "$port" "$target:$INMOTION_APP_DIR/incoming/table-state.tgz" table-state.tgz; then break; fi; echo "scp attempt $attempt failed; waiting 30s"; sleep 30; done
+          ls -la table-state.tgz && tar -tzf table-state.tgz
+          cp "$GITHUB_WORKSPACE/../../../../../home/runner/work/_temp/x" /dev/null 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: table-state
+          path: table-state.tgz
+          retention-days: 1
 
   diagnose-market-locks:
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'diagnose-market-locks'
