@@ -18,3 +18,14 @@ test('native tool commands preserve loading/modal guards and open map without to
  modal=true;assert.equal(open('gear',root,host,()=>gear++),false);
  assert.equal(open('canvas',root,host,()=>gear++),false);assert.ok(focus>0);
 });
+test('menu capability advertisement is limited to the accepted parent handshake',()=>{
+ let listener;const sent=[];const parent={postMessage:(message,origin)=>sent.push({message,origin})};
+ const window={parent,addEventListener:(type,fn)=>{if(type==='message')listener=fn;}};
+ runInNewContext(source.slice(source.indexOf('// UI-only bridge from the local account shell')),{window,document:{},compactHostedShell(){},accountOrigin:null});
+ listener({source:{},origin:'http://localhost:3017',get data(){throw Error('foreign source read');}});
+ listener({source:parent,origin:'https://other.test',get data(){throw Error('foreign origin read');}});
+ assert.equal(sent.length,0);
+ listener({source:parent,origin:'http://localhost:3017',data:{type:'charmville:host-ready'}});
+ assert.equal(sent.length,1);assert.equal(sent[0].origin,'http://localhost:3017');
+ assert.equal(sent[0].message.type,'charmville:menu-capabilities');assert.deepEqual(Array.from(sent[0].message.panels),['gear','map','settings']);
+});
