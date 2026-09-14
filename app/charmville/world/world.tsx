@@ -62,6 +62,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   const [fullscreen,setFullscreen]=useState(false);
   const [tab,setTab]=useState<WorldTab>('play');
   const [menuOpen,setMenuOpen]=useState(false);
+  const [nativePanels,setNativePanels]=useState<string[]>([]);
   const selectTab=useCallback((next:WorldTab)=>{setMenuOpen(false);setTab(next);},[]);
   const frame=useRef<HTMLIFrameElement|null>(null);
   const menuRoot=useRef<HTMLElement|null>(null);
@@ -135,7 +136,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     followerSpecies.current=[277,280,283,25,133,286].includes(speciesId)?speciesId:0;
     if(frameReady.current)frame.current?.contentWindow?.postMessage({type:'charmville:follower',speciesId:followerSpecies.current},runtimeOrigin);
   },[runtimeOrigin]);
-  const pendingPanel=useRef<'charmdex'|'voice'|null>(null);
+  const pendingPanel=useRef<'charmdex'|'voice'|'gear'|'map'|'settings'|null>(null);
   const session=useRef<Session|null>(null);
   const [sessionToken,setSessionToken]=useState<string|null>(null);
   const tutorialStatus=useTutorialBridge(frame,sessionToken,runtimeOrigin);
@@ -290,6 +291,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   useEffect(()=>{
     const returnToMenus=(event:MessageEvent)=>{
       if(!runtimeOrigin||event.origin!==runtimeOrigin||event.source!==frame.current?.contentWindow)return;
+      if(event.data?.type==='charmville:menu-capabilities'){setNativePanels(Array.isArray(event.data.panels)?event.data.panels.filter((panel:unknown)=>['gear','map','settings'].includes(String(panel))):[]);return;}
       if(event.data?.type==='charmville:capture-request'){if(captureAvailable.current)window.dispatchEvent(new Event('charmville:capture-request'));return;}
       if(event.data?.type==='charmville:follower-ready'){updateCaptureAvailability(captureAvailable.current);updateFollower(followerSpecies.current);updateFollowers(partySpecies.current,partyCreatureIds.current);updateFormation(followerFormation.current);updateEncounter(encounterSnapshot.current);return;}
       if(event.data?.type!=='charmville:account-menu')return;
@@ -364,9 +366,9 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     frame.current.contentWindow.postMessage({type:'charmville:open-panel',panel:pendingPanel.current},runtimeOrigin);
     pendingPanel.current=null;
   }
-  function openPanel(panel:'charmdex'|'voice'){
+  function openPanel(panel:'charmdex'|'voice'|'gear'|'map'|'settings'){
     if(!runtimeUrl){setMessage("The adventure runtime is not ready on this deployment.");return;}
-    pendingPanel.current=panel;setTab('play');
+    pendingPanel.current=panel;setMenuOpen(false);setTab('play');
     if(camera)sendPanel();else {frameReady.current=false;void openAdventure();}
   }
 
@@ -399,15 +401,15 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
       {menuOpen&&<section className="world-start-menu" role="dialog" aria-modal="true" aria-label="Game menu">
         <header><span>CHARMDEX</span><button onClick={returnToPlay} aria-label="Close game menu">×</button></header>
         <p className="world-trainer">@{identity.handle}</p>
-        <nav aria-label="Adventure tools">{tabs.filter(([id])=>id!=='play').map(([id,label],index)=><button id={index===0?'world-menu-first':undefined} key={id} onClick={()=>selectTab(id)}><MenuArt panel={id}/><span>{label}</span><span aria-hidden="true">›</span></button>)}</nav>
+        <nav aria-label="Adventure tools" onKeyDown={event=>{if(!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;event.preventDefault();buttons[next]?.focus();}}>{tabs.filter(([id])=>id!=='play').map(([id,label],index)=><button id={index===0?'world-menu-first':undefined} key={id} onClick={()=>selectTab(id)}><MenuArt panel={id}/><span>{label}</span><span aria-hidden="true">›</span></button>)}{nativePanels.includes('gear')&&<button onClick={()=>openPanel('gear')}><Image unoptimized alt="" width={32} height={32} src="/charmville/reference-items/pokeemerald/graphics/items/icons/macho_brace.png"/><span>Gear</span><span aria-hidden="true">›</span></button>}</nav>
         <button className="world-continue" onClick={returnToPlay}>Return to adventure <kbd>B</kbd></button>
       </section>}
       <aside data-social={tab==='social'} className={tab==='play'?'hidden':'world-menu'} aria-label="Account world controls">
         <header className="world-menu-heading"><div><MenuArt panel={tab}/><h2>{tabs.find(([id])=>id===tab)?.[1]}</h2></div><button className={button} onClick={returnToPlay}>Close <kbd>Esc</kbd></button></header>
         <nav className="world-pocket-rail" role="tablist" aria-label="Game and account">{tabs.map(([id,label],index)=><button key={id} id={`tab-${id}`} role="tab" aria-selected={tab===id} aria-controls={`panel-${id}`} tabIndex={tab===id?0:-1} title={label} onClick={()=>selectTab(id)} onKeyDown={event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index+tabs.length-1)%tabs.length;else return;event.preventDefault();selectTab(tabs[next][0]);document.getElementById(`tab-${tabs[next][0]}`)?.focus();}}><MenuArt panel={id}/><span>{label}</span></button>)}</nav>
         <div id="panel-journal" role="tabpanel" aria-labelledby="tab-journal" hidden={tab!=='journal'}>    {sessionToken&&<div className="world-journal"><FirstSteps onPlay={returnToPlay} inventory={inventory} onOpenFreshSatchel={async()=>{if(!await load())throw Error('Your Satchel could not be refreshed. Try again.');setTab('inventory');}} onSatchel={()=>setTab('inventory')} onExchange={()=>setTab('exchange')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}:${journeyRevision}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></div>}</div>
-        <div id="panel-map" role="tabpanel" aria-labelledby="tab-map" hidden={tab!=='map'}><RegionMap state={regionMap}/></div>
-        <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={tab!=='settings'} className="world-options"><ControlGuide/>{sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}<button className={button} onClick={toggleFullscreen}>Toggle fullscreen</button><button className={button} onClick={()=>openPanel('voice')}>Voice note</button><button className={button} onClick={()=>openPanel('charmdex')}>Discover charms</button><Link className={button} href="/plankspace">Open PlankSpace</Link><p>{resourceStatus||movementStatus}</p><p>{tutorialStatus}</p></div>
+        <div id="panel-map" role="tabpanel" aria-labelledby="tab-map" hidden={tab!=='map'}>{nativePanels.includes('map')&&<button className={button} onClick={()=>openPanel('map')}>Open live world camera</button>}<RegionMap state={regionMap}/></div>
+        <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={tab!=='settings'} className="world-options"><ControlGuide/>{nativePanels.includes('settings')&&<button className={button} onClick={()=>openPanel('settings')}>Adventure controls & sound</button>}{sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}<button className={button} onClick={toggleFullscreen}>Toggle fullscreen</button><button className={button} onClick={()=>openPanel('voice')}>Voice note</button><button className={button} onClick={()=>openPanel('charmdex')}>Discover charms</button><Link className={button} href="/plankspace">Open PlankSpace</Link><p>{resourceStatus||movementStatus}</p><p>{tutorialStatus}</p></div>
         <div id="panel-social" role="tabpanel" aria-labelledby="tab-social" hidden={tab!=='social'}>{sessionToken&&<SocialPanel key={identity.profileId} token={sessionToken} active={tab==='social'} onPinned={()=>void load()}/>}</div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
         <FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>
