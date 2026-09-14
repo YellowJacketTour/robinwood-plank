@@ -89,10 +89,15 @@ test("the planner uses the index for the union's Wyvern predicate", SKIP, async 
     ["eth-mainnet", "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"]
   );
   const text = plan.rows.map((r) => r["QUERY PLAN"]).join("\n");
+  // Either Wyvern index serves this predicate: 147's (chain_slug,
+  // nft_contract, block_number) or 148's sort-covering feed index, which has
+  // the same equality prefix. The property is "index-served", not "served by
+  // this one index" -- asserting a single name broke the moment a second
+  // valid index existed, for a reason that had nothing to do with the read.
   assert.match(
     text,
-    /plank_wyvern_fills_collection_idx/,
-    `the planner ignored the Wyvern index on ${rows} rows -- present-but-unused is the same outage as absent. Plan:\n${text}`
+    /Index Scan using plank_wyvern_fills_(collection|feed)_idx/,
+    `the planner ignored both Wyvern indexes on ${rows} rows -- present-but-unused is the same outage as absent. Plan:\n${text}`
   );
   assert.doesNotMatch(
     text,
