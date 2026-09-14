@@ -162,7 +162,11 @@ type TrackedCollection = {
   volume30dUsd?: string | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
-  floorChangeStatus?: "observed-24h" | "collecting-baseline" | null;
+  floorChangeStatus?: "observed-24h" | "observed-since-first" | "collecting-baseline" | null;
+  /** The two endpoints behind floorChangePct. basis "first-observation" means
+   * the history is younger than 24h and the change is measured from its
+   * first observation at comparisonObservedAt -- shown with that span. */
+  floorChangeEvidence?: { comparisonObservedAt: string; basis: "24h" | "first-observation" } | null;
   /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
   totalSupply: number | null;
   listedCount: number | null;
@@ -263,6 +267,15 @@ function displayFloorWei(c: TrackedCollection): string | null {
   return isZeroWei(c.floorPriceWei) ? null : c.floorPriceWei;
 }
 /** 0.0% with no 24h volume/sales is a stored zero, not a measured flat tape. */
+/** "since 3h" / "since 45m" for a change measured from the first observation. */
+export function sinceLabel(comparisonObservedAt: string, now: number = Date.now()): string {
+  const at = Date.parse(comparisonObservedAt);
+  if (!Number.isFinite(at)) return "since first seen";
+  const minutes = Math.max(0, Math.round((now - at) / 60_000));
+  if (minutes < 60) return `since ${minutes}m`;
+  return `since ${Math.round(minutes / 60)}h`;
+}
+
 function displayChangePct(c: TrackedCollection): number | null {
   if (c.floorChangePct == null || !Number.isFinite(c.floorChangePct)) return null;
   if (c.floorChangePct === 0 && isZeroWei(c.volume24hWei) && !(c.sales24h != null && c.sales24h > 0)) {
@@ -2774,7 +2787,20 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? (
-                          `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                          c.floorChangeStatus === "observed-since-first" && c.floorChangeEvidence ? (
+                            // A real change over a span shorter than 24h,
+                            // labelled with that span -- never passed off
+                            // as a day's move, never hidden as "collecting".
+                            <span
+                              className="inline-flex items-baseline gap-1"
+                              title={`Measured from this collection's first floor observation at ${c.floorChangeEvidence.comparisonObservedAt}; a full 24h pair forms once tracking is a day old.`}
+                            >
+                              {`${changeArrow}${Math.abs(change).toFixed(1)}%`}
+                              <span className="font-normal text-[0.6rem] text-foreground/50">{sinceLabel(c.floorChangeEvidence.comparisonObservedAt)}</span>
+                            </span>
+                          ) : (
+                            `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                          )
                         ) : c.floorChangeStatus === "collecting-baseline" ? (
                           // The seventh dash cell -- multi-line, which is why
                           // single-line greps missed it. Its reason was already
