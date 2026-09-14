@@ -212,6 +212,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
       if(controller.signal.aborted||version!==generation.current)return;
       setInventory(yard.inventory);
       if(next.reason==="permission-revoked")setMessage("Your home invitation changed. Return to the public meadow.");
+      return true;
     }catch(error){
       if(!controller.signal.aborted&&version===generation.current){
         if((error as {status?:number}).status===401){
@@ -370,7 +371,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
     </div>
     {tutorialStatus&&<p role="status">{tutorialStatus}</p>}
     {sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}
-    {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps onPlay={()=>{document.querySelector<HTMLDetailsElement>(".world-journal")?.removeAttribute("open");frame.current?.focus();}} inventory={inventory} onSatchel={()=>setTab('inventory')} onExchange={()=>setTab('exchange')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}:${journeyRevision}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
+    {tab==='play'&&sessionToken&&<details className="world-journal"><summary>Journey · Home & first steps</summary><FirstSteps onPlay={()=>{document.querySelector<HTMLDetailsElement>(".world-journal")?.removeAttribute("open");frame.current?.focus();}} inventory={inventory} onOpenFreshSatchel={async()=>{if(!await load())throw Error('Your Satchel could not be refreshed. Try again.');setTab('inventory');}} onSatchel={()=>setTab('inventory')} onExchange={()=>setTab('exchange')} key={identity.profileId} token={sessionToken} refreshKey={`${tab}:${presence?.revision??'0'}:${inventory!==null}:${journeyRevision}`} handle={identity.handle} profileId={identity.profileId} busy={busy} location={presence} onSetup={()=>setTab('companions')} onHome={()=>void load({destination:'home',handle:identity.handle})} onPublic={()=>void load({destination:'public'})} onFriends={()=>setTab('friends')}/></details>}
     <div className={`world-stage grid gap-4 ${tab!=='play'?'xl:grid-cols-[minmax(320px,1fr)_minmax(0,1.2fr)]':''}`}>
       <section id="panel-play" inert={tab!=='play'||!presence?.active} aria-hidden={tab!=='play'||!presence?.active} role="tabpanel" aria-labelledby="tab-play" className={`world-adventure min-w-0 self-start rounded-xl border border-line bg-panel p-3 ${tab!=='play'&&tab!=='social'?'hidden xl:block':''}`} aria-label="Native adventure camera">
         <div className="mb-2 flex items-center justify-between gap-2"><h2 className="font-display text-xl text-gold-300">Adventure</h2><span className="text-xs text-cream-muted">Enter · Game menus</span></div>

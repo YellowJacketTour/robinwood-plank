@@ -7,13 +7,13 @@ import FamilyGiftPanel from './family-gift-panel';
 
 type Setup = {token:string;homeClaimed:boolean; companion:boolean; completed:string[]};
 type Props = {
-  token:string; refreshKey:string; handle:string; busy:boolean; inventory:YardInventory|null; onSatchel:()=>void; onExchange:()=>void;
+  token:string; refreshKey:string; handle:string; busy:boolean; inventory:YardInventory|null; onSatchel:()=>void; onOpenFreshSatchel?:()=>Promise<void>; onExchange:()=>void;
   location:{active:boolean;ownerHandle:string|null;peers:Array<{profileId:string;handle:string}>}|null;
   profileId:string; onSetup:()=>void; onHome:()=>void; onPublic:()=>void; onFriends:()=>void; onPlay:()=>void;
 };
 const action="min-h-11 rounded-lg border border-line-strong bg-gold-500 px-4 py-2 font-bold text-wood-950 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
 const secondary="min-h-11 rounded-lg border border-line-strong bg-forest-800 px-4 py-2 font-bold text-cream hover:bg-forest-700 focus-visible:outline-2 focus-visible:outline-gold-300 disabled:opacity-50";
-export default function FirstSteps({token,refreshKey,handle,busy,location,profileId,onSetup,onHome,onPublic,onFriends,onPlay,inventory,onSatchel,onExchange}:Props){
+export default function FirstSteps({token,refreshKey,handle,busy,location,profileId,onSetup,onHome,onPublic,onFriends,onPlay,inventory,onSatchel,onOpenFreshSatchel,onExchange}:Props){
   const [snapshot,setSetup]=useState<Setup|null>(null);
   const setup=snapshot?.token===token?snapshot:null;
   const [error,setError]=useState(false);
@@ -81,7 +81,7 @@ export default function FirstSteps({token,refreshKey,handle,busy,location,profil
       </div>
     </nav>}
     {harvested&&<p className="mt-2 text-sm text-cream-muted">Your harvest is yours to keep or use in supported activities. Check the Exchange for tradable items. Keep some supplies for your next planting.</p>}
-    {setup?.homeClaimed&&<FamilyGiftPanel key={token} token={token} onSatchel={onSatchel}/>}
+    {setup?.homeClaimed&&<FamilyGiftPanel key={token} token={token} onSatchel={onOpenFreshSatchel??onSatchel}/>}
     <details className="mt-2 text-xs text-cream-muted"><summary className="min-h-11 cursor-pointer py-3">Journey & location details</summary>
     {setup?.companion&&<p className="text-sm">{text}</p>}
     <p className="mt-3">{setup?'Completed lessons stay in your journal. Check each bed in the world for its current condition.':'Your saved lessons have not loaded yet.'}</p>
