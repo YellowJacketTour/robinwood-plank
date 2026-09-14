@@ -139,3 +139,6 @@
  .charm-world[data-playing=true] .world-start-menu { padding-block:8px!important; }
 }
 
+/* Co-op has one focused page at a time, with the same pocket selection language. */
+.world-coop-pages { display:flex; gap:6px; padding-bottom:10px; border-bottom:1px solid var(--game-edge); }
+.charm-world .world-coop-pages button[aria-pressed=true] { background:var(--game-select); color:var(--game-night); border-color:var(--game-select); box-shadow:inset 0 -3px 0 var(--game-edge); }

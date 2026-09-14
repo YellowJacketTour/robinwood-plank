@@ -8,6 +8,7 @@ export default function FriendsTravelPanel({handle,profileId,presence,busy,onTra
 }){
  const [visitor,setVisitor]=useState('');
  const [error,setError]=useState('');
+ const nearby=nearbyVisitTargets(presence,profileId);
  const visiting=!!presence?.active&&!!presence.ownerHandle&&presence.ownerHandle!==handle;
  function visit(value:string){const target=visitHandle(value);if(!target){setError('Use a player handle: up to 40 letters, numbers or underscores.');return;}setError('');onTravel({destination:'home',handle:target});}
  return <section className="rounded-xl border border-line bg-panel p-4" aria-label="Co-op travel">
@@ -27,6 +28,6 @@ export default function FriendsTravelPanel({handle,profileId,presence,busy,onTra
   <p id="visit-permissions" className="mt-3 text-sm text-cream-muted">Your friend must invite you first. Visiting permits exploring; tending needs a separate invitation. Harvesting, building and storage are not included.</p>
   <h3 className="mt-4 font-bold">Players here</h3>
   <p className="my-2 text-sm text-cream-muted">{presence?.active?'Nearby account presence refreshes every 30 seconds. A player appearing here is not an invitation to their home.':'Join a location to meet other signed-in players.'}</p>
-  <ul className="space-y-2">{nearbyVisitTargets(presence,profileId).map(peer=><li key={peer.profileId} className="flex flex-wrap items-center justify-between gap-2"><span>@{peer.handle}</span><button type="button" className={button} disabled={busy} onClick={()=>{setVisitor(peer.handle);visit(peer.handle);}} aria-label={`Visit ${peer.handle}’s home`}>Visit home</button></li>)}</ul>
+  {presence?.active&&nearby.length===0&&<p className="my-2 text-sm text-cream-muted">No other players are here yet. Share your handle with a friend and save their invitation in My invitations.</p>}<ul className="space-y-2">{nearby.map(peer=><li key={peer.profileId} className="flex flex-wrap items-center justify-between gap-2"><span>@{peer.handle}</span><button type="button" className={button} disabled={busy} onClick={()=>{setVisitor(peer.handle);visit(peer.handle);}} aria-label={`Visit ${peer.handle}’s home`}>Visit home</button></li>)}</ul>
  </section>;
 }
