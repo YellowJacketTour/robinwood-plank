@@ -1,5 +1,15 @@
 # Bounded native wide viewport task
 
+## Current checkpoint — 2026-09-14
+
+The earlier renderer-cutover notes describe intermediate commits, not the current engine. Audited sibling checkout `../charmville-references/zquest-classic` is at `bfc91163fa512183cfed41b65db5d0f602aa2b78`. It already includes bounded zoom/pan and owned world targets (`0b80f9c`, `a18aa02`, `bfc9116`). `src/zc/maps.cpp:5852–6005` prepares one world composition, retains legacy activation geometry, projects sprites into owned targets, and composites it into a fixed 256-wide playfield. The last step, not absence of camera support, explains the remaining side framing.
+
+This pass adds a **browser-facing improvement**, not a new native binary: modern hosts explicitly send `menuSuite: true`, allowing the redundant native header to collapse after the start/retry button is removed. Controls/settings become an overlay. Opening them does not change canvas geometry. Older hosts and standalone play retain their controls. The fit logic recovers the header and padding area, preserves 768×690 backbuffer dimensions and uniform scale, and reserves touch-control space. Tests cover startup, older hosts, stable settings sizing, no immersive over-zoom cropping, and portrait/landscape bounds.
+
+The source checkpoint contains pre-existing uncommitted `src/zc/crt_filter.cpp` and `web/package-lock.json` changes. They were preserved; no blanket native commit, rebuild or accepted-package mutation was performed.
+
+**Still not complete:** a viewport-shaped native presentation target. The active path still calls `stretch_blit(..., 0, playing_field_offset, 256, viewport.h)` into the fixed frame. Changing only CSS, enlarging the browser backbuffer, or removing black with cropping cannot reveal additional native world area. A full-width target must also preserve fixed UI layout, script-overlay classification and inverse pointer coordinates. The prior portable geometry/target tests are useful, but do not establish the visual acceptance of that future target.
+
 ## Objective
 
 Show additional live world area on wide displays while preserving source pixel proportions, simulation coordinates, action anchors and all menus. Do not stretch a fixed framebuffer to fill the browser. Begin with one explicit desktop aspect ratio and retain the existing viewport as a fallback.
@@ -26,4 +36,4 @@ Show additional live world area on wide displays while preserving source pixel p
 
 ## Explicit non-completion
 
-No viewport implementation or native binary change is included with this task. The crop coverage JSON records structural anchors only: its direction×action×crop matrix contains32 visual cases still requiring recorded live observation. Plant and harvest held props are real outstanding artwork gaps, not completed animations merely because an action receipt succeeds.
+No new wide-aspect viewport implementation or native binary change is included with this task. Existing bounded zoom/pan is acknowledged above; it is distinct from filling a wider aspect ratio. The crop coverage JSON records structural anchors only: its direction×action×crop matrix contains32 visual cases still requiring recorded live observation. Plant and harvest held props are real outstanding artwork gaps, not completed animations merely because an action receipt succeeds.
