@@ -6,9 +6,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client } from 'pg';
 import { hasPostgresConfig, postgresPool, closePostgres } from '../../lib/postgres';
+// @ts-expect-error standalone deployment module
+import { OPTIONAL_LOCKED_TABLE_MIGRATIONS } from '../../scripts/notification-migration-policy.mjs';
 const exec=promisify(execFile);
 
-test('real blocked migration rolls back, remains pending, permits required schema, then installs on retry', {skip:!hasPostgresConfig(),timeout:60000},async()=>{
+test('real blocked migrations roll back, remain pending, permit required schema, then install on retry', {skip:!hasPostgresConfig(),timeout:60000},async()=>{
  const suffix=String(Date.now()); const db=`notify_compat_${suffix}`;const role=`notify_lock_${suffix}`;
  const admin=new Client(postgresPool().options);let inspect:Client|undefined;let blocker:Client|undefined;
  const workRoot=path.resolve('work');await mkdir(workRoot,{recursive:true});const root=await mkdtemp(path.join(workRoot,'notify-compat-'));
@@ -31,16 +33,31 @@ test('real blocked migration rolls back, remains pending, permits required schem
   await blocker.query('BEGIN');await blocker.query('LOCK TABLE plank_market_events IN SHARE UPDATE EXCLUSIVE MODE');
   for(const file of all.filter(f=>parseInt(f,10)>=110))await copyFile(path.join('deploy/inmotion/postgres/migrations',file),path.join(migrations,file));
   const result=await run(['--defer-locked-notifications']);
-  assert.match(result.stdout,/required schema ready; optional notifications PENDING/);
+  assert.match(result.stdout,/required schema ready; optional migrations PENDING/);
   const applied=(await inspect.query('SELECT version FROM plank_schema_migrations')).rows.map(r=>r.version);
-  assert.equal(applied.includes('110_market_change_notifications.sql'),false);
-  for(const file of all.filter(f=>parseInt(f,10)>110))assert.ok(applied.includes(file));
+  // Every deferrable migration must actually be exercised here: it exists on
+  // disk, was reported PENDING by name, and was not recorded as applied. A
+  // hash pinned to a file that is not shipped would be a dead entry.
+  const optional=Object.keys(OPTIONAL_LOCKED_TABLE_MIGRATIONS as Record<string,string>);
+  assert.ok(optional.length>=2,'policy lists 110 and 149');
+  for(const file of optional){
+    assert.ok(all.includes(file),`${file} is shipped`);
+    assert.ok(result.stdout.includes(`PENDING ${file}:`)||result.stderr.includes(`PENDING ${file}:`),`${file} reported PENDING by name`);
+    assert.equal(applied.includes(file),false,`${file} deferred, not recorded`);
+  }
+  // Every other migration after 110 -- 148's fill-table indexes included --
+  // installs behind the lock. This is the assertion that forced 148 to leave
+  // plank_market_events alone and 149 to exist.
+  for(const file of all.filter(f=>parseInt(f,10)>110&&!optional.includes(f)))assert.ok(applied.includes(file),`${file} required, applied`);
+  assert.equal((await inspect.query("SELECT count(*)::int AS n FROM pg_indexes WHERE tablename='plank_market_events' AND indexname LIKE '%_feed_idx'")).rows[0].n,0,'failed transaction leaves no partially built feed index');
   assert.equal((await inspect.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname LIKE 'plank_changes_%'")).rows[0].n,0,'failed transaction leaves no partially installed triggers');
   assert.equal((await blocker.query('SELECT 1 AS alive')).rows[0].alive,1,'maintenance session is never terminated');
   await blocker.query('ROLLBACK');
   await run();
   assert.equal((await inspect.query("SELECT count(*)::int AS n FROM plank_schema_migrations WHERE version='110_market_change_notifications.sql'")).rows[0].n,1);
   assert.ok((await inspect.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname LIKE 'plank_changes_%'")).rows[0].n>=27);
+  for(const file of optional)assert.equal((await inspect.query("SELECT count(*)::int AS n FROM plank_schema_migrations WHERE version=$1",[file])).rows[0].n,1,`${file} installed on retry`);
+  assert.deepEqual((await inspect.query("SELECT indexname FROM pg_indexes WHERE tablename='plank_market_events' AND indexname LIKE '%_feed_idx' ORDER BY 1")).rows.map(r=>r.indexname),['plank_market_events_stream_feed_idx','plank_market_events_transfer_feed_idx']);
  } finally {
   await blocker?.end().catch(()=>{});await inspect?.end().catch(()=>{});
   await admin.query(`DROP DATABASE IF EXISTS "${db}"`).catch(()=>{});await admin.query(`DROP ROLE IF EXISTS "${role}"`).catch(()=>{});await admin.end();await closePostgres();
