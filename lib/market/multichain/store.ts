@@ -1811,6 +1811,23 @@ export async function getChainCounts(): Promise<Record<string, number>> {
   return out;
 }
 
+/**
+ * Per-chain count of collections with a LIVE floor -- the number a chain
+ * chip should lead with. "130,582 tracked" is true and answers a question
+ * nobody on a rankings page is asking; "4,210 with a live floor" is what
+ * the tab will actually show once opened. Read from the rank table's stored
+ * has_floor (the same column the default sort tie-breaks on), one grouped
+ * pass over the rank table; cached by the route.
+ */
+export async function getChainLiveFloorCounts(): Promise<Record<string, number>> {
+  const result = await postgresQuery<{ chain_slug: string; with_floor: string }>(
+    `SELECT chain_slug, COUNT(*) FILTER (WHERE has_floor) AS with_floor FROM plank_market_hub_rank GROUP BY chain_slug`
+  );
+  const out: Record<string, number> = {};
+  for (const row of result.rows) out[row.chain_slug] = Number(row.with_floor);
+  return out;
+}
+
 export type ActivityRankEntry = { contractAddress: string; totalTransfers: number };
 
 /**

@@ -276,6 +276,19 @@ export function sinceLabel(comparisonObservedAt: string, now: number = Date.now(
   return `since ${Math.round(minutes / 60)}h`;
 }
 
+/** The window's volume in USD for ranking: native wei priced through the
+ * live rate, or the stored USD figure when that is all the chain has. */
+export function volumeUsdForSort(
+  c: TrackedCollection,
+  window: "24h" | "7d" | "30d",
+  toUsd: (wei: string | null, symbol: string | null) => number | null,
+): number | null {
+  const display = windowVolumeDisplay(windowActivity(c, window));
+  if (display.kind === "native") return toUsd(display.wei, chainNativeAsset(c.chainSlug));
+  if (display.kind === "usd") return Number(display.usd);
+  return null;
+}
+
 function displayChangePct(c: TrackedCollection): number | null {
   if (c.floorChangePct == null || !Number.isFinite(c.floorChangePct)) return null;
   if (c.floorChangePct === 0 && isZeroWei(c.volume24hWei) && !(c.sales24h != null && c.sales24h > 0)) {
@@ -740,9 +753,11 @@ function compareByColumn(
     case "change":
       return compareNullable(a.floorChangePct, b.floorChangePct, dir);
     case "volume": {
-      const va = toUsd(windowVolumeWei(a, window), chainNativeAsset(a.chainSlug));
-      const vb = toUsd(windowVolumeWei(b, window), chainNativeAsset(b.chainSlug));
-      return compareNullable(va, vb, dir);
+      // Through windowVolumeDisplay, not the raw wei: a collection whose
+      // volume is known only in USD (Beezie on Base -- settlement in USDC,
+      // no native wei to price) sorted LAST under a wei-only comparator
+      // with $112K of real sales. USD is the one axis every chain shares.
+      return compareNullable(volumeUsdForSort(a, window, toUsd), volumeUsdForSort(b, window, toUsd), dir);
     }
     case "sales":
       return compareNullable(windowSales(a, window), windowSales(b, window), dir);
@@ -1224,7 +1239,13 @@ export default function GlobalMarketHub() {
   // shared sort concept driving both the rankings table AND the browsable
   // grid beneath it, same "one filter concept, not two" discipline
   // chainFilter already follows, not a second parallel sort control.
-  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || "grade");
+  // Default: 24h volume. Grade is a percentile within the eligible set, so a
+  // top-N sorted by grade is all "A" by construction and carries no
+  // information at the top of the page; and the server's page order leads
+  // with the home collection, which under a grade sort sat at #1 with zero
+  // volume and zero sales above a collection that did $112K that day
+  // (live, 2026-09-14). Volume ranks by what happened.
+  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || "volume");
   const [sortDir, setSortDir] = useState<SortDir>(() => (searchParams.get("dir") as SortDir) || "desc");
   /** Clicking a header: same column flips direction, a new column adopts its own sensible default direction (DEFAULT_SORT_DIR) -- the standard sortable-table interaction every real rankings page (OpenSea/Blur/Tensor/Magic Eden) uses. */
   const toggleSort = (column: SortColumn) => {
@@ -1320,6 +1341,7 @@ export default function GlobalMarketHub() {
   // first response lands; badges fall back to the old client-side tally for
   // that one frame so nothing flashes to 0.
   const [initialChainCounts, setChainCounts] = useState<Record<string, number> | null>(null);
+  const [initialChainLiveFloors, setChainLiveFloors] = useState<Record<string, number> | null>(null);
   // Per-chain honesty block from the index response (Batch E6): statsCapable + lane health.
   const [chainMeta, setChainMeta] = useState<Record<string, HubChainMeta> | null>(null);
   // Live counts (2026-09-06, owner: "I am not seeing the chains' number of
@@ -1327,17 +1349,19 @@ export default function GlobalMarketHub() {
   // whose count grew pulses its badge for a few seconds.
   const liveCounts = useLiveChainCounts(15_000);
   const chainCounts = Object.keys(liveCounts.counts).length > 0 ? liveCounts.counts : initialChainCounts;
+  const chainLiveFloors = Object.keys(liveCounts.withFloor).length > 0 ? liveCounts.withFloor : initialChainLiveFloors;
   const countDelta = (slug: string): number => liveCounts.deltas[slug] ?? 0;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await swrJson<{ counts: Record<string, number> }>("/api/market/multichain/chain-counts", {
+        const data = await swrJson<{ counts: Record<string, number>; withFloor?: Record<string, number> }>("/api/market/multichain/chain-counts", {
           ttlMs: 60_000,
           swrMs: 600_000,
           session: true,
         });
         if (!cancelled && data.counts) setChainCounts(data.counts);
+        if (!cancelled && data.withFloor) setChainLiveFloors(data.withFloor);
       } catch {
         // Badges just keep showing the client-side-tally fallback.
       }
@@ -2544,7 +2568,16 @@ export default function GlobalMarketHub() {
                       opacity: active ? 0.85 : 0.55,
                     }}
                   >
-                    {count}
+                    {chainLiveFloors?.[slug] != null ? (
+                      // Lead with what the tab will show priced; the tracked
+                      // total stays, muted, in the "of" idiom the table uses.
+                      <span title={`${chainLiveFloors[slug].toLocaleString()} collections with a live floor, of ${count.toLocaleString()} tracked on this chain`}>
+                        {chainLiveFloors[slug].toLocaleString()}
+                        <span className="ml-1 font-normal opacity-60">of {count.toLocaleString()}</span>
+                      </span>
+                    ) : (
+                      count
+                    )}
                     {countDelta(slug) > 0 && <span className="ml-1 rounded bg-emerald-400/20 px-1 text-[10px] text-emerald-300 animate-plank-glow">+{countDelta(slug)}</span>}
                   </span>
                 </button>
