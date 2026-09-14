@@ -32,3 +32,9 @@ Validated existing packs can produce an offline four-direction playback review, 
 Production build, TypeScript and lint passed on the merged candidate before the final development-only CSP correction; final targeted lint/type checks passed after that correction. Full suite produced286contractpasses and2018marketpasses with126database-dependent skips, plus one obsolete green-stem art expectation. The replacement asserts real32px raster bounds, a clear2pxborder, one connected silhouette and provenance; its2focusedtests pass. Akasha250passes. Separate new media tests7pass, art/runtime tests11pass, and the four-profile real PostgreSQL test passes without skips.
 
 PR507 is a candidate for dev, not a deployed master release. Remaining gates: coordinated native viewport implementation, complete animation review, actual Kakariko resources/onboarding, four independent rendered clients, remote media relay/privacy acceptance and team-hosted contribution review/publishing. No claim of completion of the total game scope.
+
+## Final live checks
+
+Explicit Stop halted the received-video check at410presented/408decodedframes and cleared its source. The native Controls overlay opened from host Options without resizing the game; Escape returned to gameplay. The same tab remains open.
+
+Implementation reference: [MDN canvas captureStream](https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream) describes direct canvas MediaStream capture; [MDN RTCPeerConnection](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection) documents the offer/answer/ICE media connection used here. These references support the APIs, not claims of production privacy or unbounded scale.
