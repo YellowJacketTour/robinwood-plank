@@ -621,14 +621,25 @@ jobs:
           # connection, not a bad artifact, yet it failed the whole deploy and
           # left production a commit behind. These are idempotent: the upload
           # writes to a SHA-named path and the mkdir is -p.
+          #
+          # Pace, do not wall. 2026-09-14: three master deploys in a row
+          # (f297502d, 8734d5c1 and its re-run) died here on
+          # `kex_exchange_identification: read: Connection reset by peer` --
+          # the shared host refusing sshd a fork while its cron workers held
+          # 4.2 GB / 37 procs -- after 3 attempts in 60 s. The diagnose-app
+          # op, run minutes later against the same host, got its session on
+          # attempt 3 of a 12 x 30 s loop, the loop every other SSH op in this
+          # file already uses. The old budget was a limit on the deploy, not
+          # on the host. Same 12 x 30 s here: six minutes is well inside the
+          # job's timeout and long enough for a fork-throttle episode to ease.
           retry() {
             local attempt
-            for attempt in 1 2 3; do
+            for attempt in $(seq 1 12); do
               if "$@"; then return 0; fi
-              echo "::warning::transfer attempt $attempt failed, retrying in $((attempt * 10))s"
-              sleep $((attempt * 10))
+              echo "::warning::transfer attempt $attempt failed, retrying in 30s"
+              sleep 30
             done
-            echo "::error::transfer failed after 3 attempts"
+            echo "::error::transfer failed after 12 attempts (6 minutes); the host is refusing SSH sessions -- see the diagnose-app op"
             return 1
           }
 
