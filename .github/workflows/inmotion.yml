@@ -813,15 +813,14 @@ jobs:
             test "$RECOVERY_BACKUP_BYTES" = '-'
             test "$RECOVERY_BASE_RELEASE" = '-'
           fi
-          # pg_dump can be silent for several minutes. Keep transport traffic
-          # flowing so the hosting edge cannot reap a healthy backup/migration
-          # session as idle (the prior failure repeated at ~4m25s).
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
-            -i "$HOME/.ssh/inmotion" -p "$port" \
-            "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" "$RECOVERY_BACKUP_NAME" "$RECOVERY_BACKUP_BYTES" "$RECOVERY_BASE_RELEASE" "${CHARMVILLE_RUNTIME_RELEASE:--}" "${CHARMVILLE_ADMIN_WALLETS:--}" <<'REMOTE'
+          # The remote script is read into a variable so the session can be
+          # re-opened. Its first line is a sentinel: if the sentinel never
+          # printed, nothing ran on the host and the session was refused at
+          # the door -- the only case that is retried (below).
+          remote_script=$(cat <<'REMOTE'
           set -euo pipefail
           trap 'status=$?; echo "Remote activation failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
+          echo "[deploy] remote activation session admitted at $(date -u +%FT%TZ)"
           app_dir="$1"
           release_sha="$2"
           node_bin="$3"
@@ -1052,6 +1051,39 @@ jobs:
           pkill -f "ops/plankcrash-table/arcade-preview.mjs" || true
           pkill -f "plankcrash/bin/anvil" || true
           REMOTE
+          )
+
+          # Pace at the door, never past it. 2026-09-14: after the upload step
+          # learned to wait out the host's fork throttle, the deploy died HERE
+          # on `kex_exchange_identification: read: Connection reset by peer`
+          # (exit 255, no remote output) -- one bare ssh, no retry. A session
+          # refused at the door ran nothing, so re-opening it is free. A
+          # session that was admitted and then failed is NOT retried: what it
+          # did (backup, migrations, activation) is exactly what a re-run of
+          # this job would redo, and that is the operator's call, not a loop's.
+          # pg_dump can be silent for several minutes. Keep transport traffic
+          # flowing so the hosting edge cannot reap a healthy backup/migration
+          # session as idle (the prior failure repeated at ~4m25s).
+          activation_log="$RUNNER_TEMP/remote-activation.log"
+          for attempt in $(seq 1 12); do
+            rc=0
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o ConnectTimeout=25 \
+              -i "$HOME/.ssh/inmotion" -p "$port" \
+              "${INMOTION_USER}@${INMOTION_HOST}" \
+              bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" "$RECOVERY_BACKUP_NAME" "$RECOVERY_BACKUP_BYTES" "$RECOVERY_BASE_RELEASE" "${CHARMVILLE_RUNTIME_RELEASE:--}" "${CHARMVILLE_ADMIN_WALLETS:--}" \
+              <<<"$remote_script" 2>&1 | tee "$activation_log" || rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ]; then break; fi
+            if grep -q "remote activation session admitted" "$activation_log"; then
+              echo "::error::remote activation was admitted and failed (exit $rc); not retried -- re-run this job once the cause is read"
+              exit "$rc"
+            fi
+            if [ "$attempt" -ge 12 ]; then
+              echo "::error::the host refused the activation session 12 times over 6 minutes (last exit $rc); see the diagnose-app op"
+              exit "$rc"
+            fi
+            echo "::warning::activation session refused at the door (exit $rc, attempt $attempt); retrying in 30s"
+            sleep 30
+          done
 
       - name: Verify public health or roll back
         shell: bash
