@@ -103,7 +103,7 @@ on:
         required: false
         type: string
       recovery_backup_name:
-        description: Optional exact completed predeploy backup basename from a failed migration run; must be under two hours old.
+        description: Optional exact completed predeploy backup basename from a failed migration run; must have started within the last eight hours.
         required: false
         type: string
       recovery_backup_bytes:
@@ -495,7 +495,17 @@ jobs:
     # canceled") before activation, leaving production on a stale release.
     # Keep the safety gate, but give the backup a window that cannot be the
     # thing that blocks a release.
-    timeout-minutes: 120
+    #
+    # 2026-09-14: it was the thing again. The dump was 36.3 GB and took 1h42m
+    # (12:01 -> 13:43) on a host under fork throttle; the migration that
+    # followed (nine CREATE INDEX on the fill ledgers, PostgreSQL 9.6) had run
+    # 11 minutes when this cap fired at 120 and rolled it back -- and the
+    # completed backup then aged past its own two-hour reuse window before a
+    # re-run could start. The job's budget must fit the measured backup plus
+    # a real migration plus activation, not the backup alone. 360 is the
+    # platform maximum; the pacing is the backup's own progress lines, and
+    # a run that is genuinely stuck is still ended here.
+    timeout-minutes: 360
     environment: inmotion-staging
     env:
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
