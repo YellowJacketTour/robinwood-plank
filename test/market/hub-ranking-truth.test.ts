@@ -10,8 +10,19 @@ const ROUTE = readFileSync("app/api/market/multichain/chain-counts/route.ts", "u
 const SKIP = { skip: !hasPostgresConfig() };
 
 test("the hub ranks by 24h volume by default, not by a grade that is uniform at the top", () => {
-  assert.match(HUB, /useState<SortColumn>\(\(\) => \(searchParams\.get\("sort"\) as SortColumn\) \|\| "volume"\)/);
+  assert.match(HUB, /const DEFAULT_SORT_COLUMN: SortColumn = "volume";/);
+  assert.match(HUB, /useState<SortColumn>\(\(\) => \(searchParams\.get\("sort"\) as SortColumn\) \|\| DEFAULT_SORT_COLUMN\)/);
+  // The URL sync omits exactly the default -- a link with no ?sort= must
+  // restore the same view the default renders.
+  assert.match(HUB, /if \(sortColumn !== DEFAULT_SORT_COLUMN\) params\.set\("sort", sortColumn\);/);
+  assert.doesNotMatch(HUB, /sortColumn !== "grade"\)/, "the URL sync must not assume a stale default");
   assert.doesNotMatch(HUB, /\|\| "grade"\)/, "grade must not be the default");
+});
+
+test("a grade column that is one letter throughout the view says so in its header", () => {
+  assert.match(HUB, /const uniformGrade = useMemo\(/);
+  assert.match(HUB, /letters\.size === 1 \? \[\.\.\.letters\]\[0\] : null/);
+  assert.match(HUB, /Grade <span className="font-normal opacity-60">· all \{uniformGrade\}<\/span>/);
 });
 
 test("the volume sort prices USD-only volumes (a USDC-settled collection must not sort last)", () => {

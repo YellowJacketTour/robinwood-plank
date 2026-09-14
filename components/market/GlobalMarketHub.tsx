@@ -679,6 +679,9 @@ function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddres
  * for OpenSea's plain volume-desc "Trending" default.
  */
 type SortColumn = "grade" | "demand" | "name" | "floor" | "change" | "volume" | "sales" | "listed" | "holders";
+/** The one default, used by the initial state AND the URL sync: a sort equal
+ * to it is omitted from the query string, any other is written. */
+const DEFAULT_SORT_COLUMN: SortColumn = "volume";
 type SortDir = "asc" | "desc";
 
 /** Column -> the direction that reads as "most interesting first" on a first click, e.g. Volume/Floor/Sales/Holders/Listed/Grade default to descending (biggest first), Name defaults A-Z (ascending), matching every real marketplace rankings table checked in this session's research. */
@@ -1230,8 +1233,8 @@ export default function GlobalMarketHub() {
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
   const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  // Default = "grade" desc: gradeScore() descending -- the volume-primary/
-  // floor-secondary pattern state-of-the-art multichain marketplaces
+  // Sort: DEFAULT_SORT_COLUMN (24h volume) desc. Grade stays a clickable
+  // column -- the volume-primary/floor-secondary pattern state-of-the-art multichain marketplaces
   // (OpenSea Trending, Blur, Magic Eden) converge on, now weighted by real
   // art/tradeability instead of raw activity alone (see gradeScore's own
   // header). Every column of the rankings table below is a real clickable
@@ -1245,7 +1248,7 @@ export default function GlobalMarketHub() {
   // with the home collection, which under a grade sort sat at #1 with zero
   // volume and zero sales above a collection that did $112K that day
   // (live, 2026-09-14). Volume ranks by what happened.
-  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || "volume");
+  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || DEFAULT_SORT_COLUMN);
   const [sortDir, setSortDir] = useState<SortDir>(() => (searchParams.get("dir") as SortDir) || "desc");
   /** Clicking a header: same column flips direction, a new column adopts its own sensible default direction (DEFAULT_SORT_DIR) -- the standard sortable-table interaction every real rankings page (OpenSea/Blur/Tensor/Magic Eden) uses. */
   const toggleSort = (column: SortColumn) => {
@@ -1986,7 +1989,7 @@ export default function GlobalMarketHub() {
     const params = new URLSearchParams();
     if (chainFilter.size > 0) params.set("chains", [...chainFilter].join(","));
     if (search.trim()) params.set("q", search.trim());
-    if (sortColumn !== "grade") params.set("sort", sortColumn);
+    if (sortColumn !== DEFAULT_SORT_COLUMN) params.set("sort", sortColumn);
     if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
     if (onlyTradeable) params.set("tradeable", "1");
     if (onlyArt) params.set("art", "1");
@@ -2043,6 +2046,14 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
+  // Grade is a percentile within the eligible set, so a top-N sorted by
+  // volume or by grade is usually one letter throughout. A column that reads
+  // "A" on every visible row carries no information; the header says so
+  // rather than letting the letter pass for a distinction.
+  const uniformGrade = useMemo(() => {
+    const letters = new Set(rankings.map((c) => gradeLetter(gradeBreakdown(c, hasArt(c), toUsd, gradeCtx), gradeCtx)).filter((l): l is "A" | "B" | "C" | "D" => l != null));
+    return rankings.length >= 3 && letters.size === 1 ? [...letters][0] : null;
+  }, [rankings, gradeCtx, toUsd]);
   // Subscribe to committed changes across the catalog. Reconnect snapshots
   // cover rendered rows; ordinary messages refresh the changed collections.
   useMarketRealtime([], async (change) => {
@@ -2663,7 +2674,13 @@ export default function GlobalMarketHub() {
                     Holders
                   </SortableTh>
                   <SortableTh column="grade" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="w-9">
-                    Grade
+                    {uniformGrade ? (
+                      <span title={`Every row in view grades ${uniformGrade}: grade is a percentile across all eligible collections, and this view holds only its top. Sort by Grade to spread the field, or widen the view.`}>
+                        Grade <span className="font-normal opacity-60">· all {uniformGrade}</span>
+                      </span>
+                    ) : (
+                      "Grade"
+                    )}
                   </SortableTh>
                 </tr>
               </thead>
