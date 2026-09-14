@@ -29,5 +29,5 @@ export async function readRuntimeRelease(root:string, release:string, options:{l
   // The native package is independently verified and staged by the release
   // workflow; Next must not infer a copy of the whole checkout from this root.
   const roots=Object.fromEntries(['repo','runtime','content','sprite'].map(key=>[key,path.join(/* turbopackIgnore: true */ absolute,key)])) as RuntimeRoots;
-  return {manifest:JSON.parse(inventory),roots,configuredRelease:release};
+  return {manifest:JSON.parse(inventory),roots,configuredRelease:release,receipt};
 }
