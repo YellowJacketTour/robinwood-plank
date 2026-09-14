@@ -34,7 +34,7 @@ export function createLaunchEnvironment(THREE) {
   function texture(bytes,color=false){const t=new THREE.DataTexture(bytes,size,size,THREE.RGBAFormat);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3,3);t.magFilter=THREE.LinearFilter;t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;if(color)t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;textures.add(t);return t;}
   const steelMap=texture(surface,true),roughMap=texture(rough),normalMap=texture(normals);
   for(const m of [steel,edge,dark]){m.map=steelMap;m.roughnessMap=roughMap;m.normalMap=normalMap;m.normalScale=new THREE.Vector2(.42,.42);}
-  new THREE.TextureLoader().load('./art/launch/titanium.png', map=>{
+  new THREE.TextureLoader().load('./art/launch/titanium.webp', map=>{
     map.colorSpace=THREE.SRGBColorSpace;map.wrapS=map.wrapT=THREE.RepeatWrapping;map.repeat.set(2,2);textures.add(map);
     for(const material of [steel,edge,dark]){material.map=map;material.needsUpdate=true;}
   });

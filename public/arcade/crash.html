@@ -1325,7 +1325,7 @@ camera.position.set(0, 6, 26);
 camera.lookAt(0, 8, 0);
 const coastMaterial=new THREE.MeshBasicMaterial({transparent:true,depthWrite:false,fog:false});
 const coastBackdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),coastMaterial);coastBackdrop.position.z=-90;coastBackdrop.renderOrder=-9;scene.add(coastBackdrop);
-new THREE.TextureLoader().load('art/launch-coast.png',texture=>{
+new THREE.TextureLoader().load('art/launch-coast.webp',texture=>{
   texture.colorSpace=THREE.SRGBColorSpace;coastMaterial.map=texture;coastMaterial.needsUpdate=true;
   const reflection=texture.clone();reflection.mapping=THREE.EquirectangularReflectionMapping;reflection.needsUpdate=true;
   const pmrem=new THREE.PMREMGenerator(renderer);const env=pmrem.fromEquirectangular(reflection);scene.environment=env.texture;scene.environmentIntensity=.75;pmrem.dispose();reflection.dispose();
@@ -1335,7 +1335,7 @@ const cosmicBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cosmicMater
 cosmicBackdrop.position.z = -95;
 cosmicBackdrop.renderOrder = -10;
 scene.add(cosmicBackdrop);
-new THREE.TextureLoader().load('art/cosmic-relics.png', texture => {
+new THREE.TextureLoader().load('art/cosmic-relics.webp', texture => {
   texture.colorSpace = THREE.SRGBColorSpace;
   cosmicMaterial.map = texture;
   cosmicMaterial.needsUpdate = true;
@@ -1677,7 +1677,7 @@ function loadChalkstronautArt(src) {
   img.src = src;
 }
 // Upright paint mapped onto an actual thick, beveled wooden character.
-new THREE.TextureLoader().load('art/chalkstronaut-front.png',tex=>{
+new THREE.TextureLoader().load('art/chalkstronaut-front.webp',tex=>{
   tex.colorSpace=THREE.SRGBColorSpace;tex.offset.set(.07,.065);tex.repeat.set(.80,.87);tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
   const shape=new THREE.Shape();shape.moveTo(-.78,-2.2);shape.lineTo(.77,-2.18);shape.lineTo(.80,2.16);shape.lineTo(.56,2.23);shape.lineTo(-.78,2.20);shape.closePath();
   const group=new THREE.Group();

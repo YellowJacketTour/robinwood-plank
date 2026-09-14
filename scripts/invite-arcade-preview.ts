@@ -131,9 +131,34 @@ const assetStamp=await (async()=>{const {createHash}=await import('node:crypto')
   for(const f of (await readdir(resolve(root,'arcade'))).filter(f=>/\.(js|css|html)$/.test(f)).sort()){const st=await stat(resolve(root,'arcade',f));h.update(f+':'+st.size+':'+Math.floor(st.mtimeMs)+';');}
   return h.digest('hex').slice(0,10);})();
 const stampAssets=(html:string)=>html
-  .replace(/(href|src)="((?!vendor\/|art\/|https?:)[A-Za-z0-9_./-]+\.(?:js|css))"/g,(_m,attr,file)=>`${attr}="${file}?v=${assetStamp}"`)
-  .replace(/from (['"])\.\/([A-Za-z0-9_./-]+\.js)\1/g,(_m,q,file)=>`from ${q}./${file}?v=${assetStamp}${q}`)
-  .replace(/import\((['"])\.\/([A-Za-z0-9_./-]+\.js)\1\)/g,(_m,q,file)=>`import(${q}./${file}?v=${assetStamp}${q})`);
+  // Entry links only. Stamping the module specifiers inside crash.html loaded
+  // every shared module TWICE (once as ./x.js?v=.. from crash.html, once as
+  // ./x.js from lottery-theatre.js): two instances of rapier, three, and every
+  // singleton -- measured 54 script requests / 6 MB decoded on one page load.
+  // The no-store header on /arcade/* (verified passing Cloudflare) makes the
+  // nested graph fresh on its own; the entry stamp defeats a stale HTML cache.
+  .replace(/(href|src)="((?!vendor\/|art\/|https?:)[A-Za-z0-9_./-]+\.(?:js|css))"/g,(_m,attr,file)=>`${attr}="${file}?v=${assetStamp}"`);
+// Every player's arcade polls the same ~20 reads at 2.5 Hz. Unshared, N players
+// are N x that on anvil and the queue behind Passenger -- measured in-page RPC
+// averages of 1.1 s for a hop that costs 150 ms alone. Reads that are pure
+// functions of the chain head (eth_call at latest, logs, blocks, balances,
+// counts) are memoised per head block and in-flight calls coalesce, so the
+// whole table costs anvil one read per block per distinct call, whatever N is.
+// Writes, receipts and nonces are never shared. The map is bounded by its TTL.
+const SHARED_READ_METHODS=new Set(['eth_call','eth_getLogs','eth_getBlockByNumber','eth_getBalance','eth_getStorageAt','eth_getCode','eth_chainId','eth_blockNumber','eth_gasPrice','eth_maxPriorityFeePerGas','eth_feeHistory','eth_estimateGas']);
+const sharedReads=new Map<string,{head:number,at:number,value:Promise<unknown>}>();
+const SHARED_READ_TTL_MS=400;
+function sharedRead(method:string,params:unknown[],head:number):Promise<unknown>{
+  if(!SHARED_READ_METHODS.has(method))return rpc.send(method,params);
+  const key=method+' '+JSON.stringify(params);
+  const now=Date.now();const hit=sharedReads.get(key);
+  if(hit&&hit.head===head&&now-hit.at<SHARED_READ_TTL_MS)return hit.value;
+  const value=rpc.send(method,params);
+  sharedReads.set(key,{head,at:now,value});
+  value.catch(()=>{if(sharedReads.get(key)?.value===value)sharedReads.delete(key);});
+  if(sharedReads.size>4000){for(const [k,v] of sharedReads)if(now-v.at>SHARED_READ_TTL_MS)sharedReads.delete(k);}
+  return value;
+}
 const landing=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PlankCrash · Friend test</title><link rel="stylesheet" href="/arcade/pocket-console.css"></head><body style="display:grid;place-items:center;min-height:100svh;color:var(--ink);text-align:center"><main><h1>PLANKCRASH</h1><p id="status">Joining the launch…</p><p>Simulated ETH · no cash value</p><button id="retry" hidden>Try again</button></main><script>
 async function join(){try{const token=new URLSearchParams(location.hash.slice(1)).get('invite');const r=await fetch('/api/invite/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error(r.status===403?'Open the invite link from your friend.':r.status===503?'The test chain is down. Ask the host to restart it.':'The test is busy. Try again shortly.');location.replace('${TABLE_PATH}');}catch(e){document.getElementById('status').textContent=e.message;document.getElementById('retry').hidden=false;}}document.getElementById('retry').onclick=join;join();</script></body></html>`;
 createServer(async(req,res)=>{
@@ -246,7 +271,7 @@ createServer(async(req,res)=>{
             if(call?.jsonrpc!=='2.0')throw new Error('Invalid RPC envelope');
             if(call.method==='eth_sendRawTransaction'&&++g.writes>8)throw new Error('Action limit');
             policy.validate(call.method,call.params||[],g.address,latest);
-            return {jsonrpc:'2.0',id,result:await rpc.send(call.method,call.params||[])};
+            return {jsonrpc:'2.0',id,result:await sharedRead(call.method,call.params||[],latest)};
           }catch(error:any){return {jsonrpc:'2.0',id,error:{code:-32000,message:error.shortMessage||error.message||'Request rejected',...(error.info?.error?.data?{data:error.info.error.data}:{})}};}
         }));
         json(res,200,Array.isArray(input)?replies:replies[0]);
