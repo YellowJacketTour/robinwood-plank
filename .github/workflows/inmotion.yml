@@ -1989,6 +1989,11 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          # The host resets SSH while it is throttled; keep knocking.
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if ssh -o ConnectTimeout=20 -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" true 2>/dev/null; then break; fi
+            echo "ssh attempt $attempt failed; waiting"; sleep 20
+          done
           ssh -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
           app_dir="$1"
           echo "== date: $(date -u +%FT%TZ)  current -> $(readlink -f "$app_dir/current")"
