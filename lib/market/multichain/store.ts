@@ -942,6 +942,8 @@ export async function getObservedFloorChange24h(
     currentObservedAt: row.current_at,
     comparisonObservedAt: row.comparison_at,
     changePct: (Number(current - comparison) / Number(comparison)) * 100,
+    // This reader only ever compares against an observation at least 24h old.
+    basis: "24h",
   };
 }
 
