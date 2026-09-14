@@ -132,3 +132,10 @@
 
 .charm-world .world-topbar .world-brand-heart { width:32px; height:32px; image-rendering:pixelated; flex-shrink:0; }
 
+/* The marketing mobile section rule adds 40px top/bottom with !important.
+   These game-stage surfaces own their spacing and must not inherit that rule. */
+@media(max-width:639px) {
+ .charm-world[data-playing=true] .world-adventure { padding-block:0!important; }
+ .charm-world[data-playing=true] .world-start-menu { padding-block:8px!important; }
+}
+
