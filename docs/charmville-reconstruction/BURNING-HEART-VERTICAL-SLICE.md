@@ -57,3 +57,4 @@ Local-only flags control family, nativev2 and socialv2. Production remains on th
 
 9. Traveled to the public meadow; committed first-harvest progress remained complete after spending the Heart. Family Open Satchel refreshed successfully. Focused contract tests, TypeScript and lint checks passed; these do not substitute for remaining release gates.
 
+`nFinal visual limitation: map overview opens, but the current native view still contains substantial black framing. This pass does not accept framing or claim the complete continuous-world camera requirement is finished. Returned the same tab to adventure afterward.
