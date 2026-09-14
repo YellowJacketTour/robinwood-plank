@@ -60,6 +60,8 @@ test("captured storage swaps into full party, fights and restores HP PP without 
   const before=(await pool.query('SELECT * FROM charmville_creature_vitals WHERE creature_id=$1',[success.creatureId])).rows[0];const combatBefore=(await pool.query('SELECT * FROM charmville_creature_combat WHERE creature_id=$1',[success.creatureId])).rows[0];
   await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds' WHERE profile_id=$1",[owner]);
   const presence=await worldPresence(pool,tokens[0]);await worldPresence(pool,tokens[0],{destination:'home',handle:'p0',revision:presence.revision});await nativeActor(pool,tokens[0]);
+  // Seed a legacy saved home encounter explicitly: new safe homes never spawn wild creatures.
+  await pool.query("INSERT INTO charmville_encounters(id,region_id,geometry_revision,species_id,level,hp_iv,hp,max_hp) SELECT $1,$2,geometry_revision,species_id,level,hp_iv,max_hp,max_hp FROM charmville_encounters WHERE id=$3",[randomUUID(),`home:${owner}`,e.encounter.id]);
   let home=await worldEncounter(pool,tokens[0]);for(const action of ['claim','enter-turn'])home=await worldEncounter(pool,tokens[0],{action,requestId:randomUUID(),encounterId:home.encounter.id,revision:home.encounter.revision,actorEpoch:home.actorEpoch});
   const battle=await turnBattle(pool,tokens[0]);assert.ok(battle.eligible.some(v=>v.id===success.creatureId));
   const attack=await turnBattle(pool,tokens[0],{action:'attack',requestId:randomUUID(),encounterId:home.encounter.id,revision:battle.revision,actorEpoch:home.actorEpoch,creatureId:success.creatureId,moveId:33});assert.equal(attack.partner?.move.pp,combatBefore.pp-1);
