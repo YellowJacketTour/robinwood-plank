@@ -36,7 +36,7 @@ import {requestWorldEntry} from "@/lib/charmville/world-entry-client";
 type Presence = { profileId:string; regionId:string; ownerHandle:string|null; revision:string; expiresAt:string;
   active:boolean; peers:Array<{profileId:string;handle:string}>; reason:string|null };
 type Session = { identity:GameIdentity; token:string };
-const tabs=[['play','Play'],['companions','Party'],['inventory','Bag'],['exchange','Exchange'],['friends','Friends'],['social','Social'],['journal','Journal'],['map','Map'],['settings','Options'],['workshop','Workshop']] as const;
+const tabs=[['play','Play'],['companions','Party'],['inventory','Bag'],['exchange','Exchange'],['friends','Co-op'],['social','Social'],['journal','Journal'],['map','Map'],['settings','Options'],['workshop','Workshop']] as const;
 type WorldTab=typeof tabs[number][0];
 const menuArt:Record<WorldTab,string>={play:'bicycle',companions:'poke_ball',inventory:'berry_pouch',exchange:'coin_case',friends:'harbor_mail',social:'heart',journal:'retro_mail',map:'town_map',settings:'devon_scope',workshop:'mech_mail'};
 function MenuArt({panel}:{panel:WorldTab}){return <Image unoptimized alt="" width={32} height={32} src={panel==='social'?'/charmville/items/burning-heart.svg':panel==='inventory'?'/charmville/items/satchel.svg':`/charmville/reference-items/pokeemerald/graphics/items/icons/${menuArt[panel]}.png`}/>;}
@@ -63,6 +63,7 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
   const [camera,setCamera]=useState(false);
   const [fullscreen,setFullscreen]=useState(false);
   const [tab,setTab]=useState<WorldTab>('play');
+  const [coopPage,setCoopPage]=useState<'travel'|'invitations'>('travel');
   const [menuOpen,setMenuOpen]=useState(false);
   const [nativePanels,setNativePanels]=useState<string[]>([]);
   const selectTab=useCallback((next:WorldTab)=>{setMenuOpen(false);setTab(next);},[]);
@@ -415,8 +416,9 @@ export default function World({localRuntime,runtimePrefix}:{localRuntime:boolean
         <div id="panel-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden={tab!=='workshop'}><ContributionPanel/></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={tab!=='settings'} className="world-options"><ControlGuide/>{tab==='settings'&&process.env.NODE_ENV!=='production'&&<GameplayVideoCheck token={sessionToken} getCanvas={()=>{try{const doc=frame.current?.contentDocument;if(!doc||doc.querySelector('.charm-runtime-enter')||doc.documentElement.classList.contains('charm-arrival-pending'))return null;return doc.querySelector('canvas');}catch{return null;}}}/>} {nativePanels.includes('settings')&&<button className={button} onClick={()=>openPanel('settings')}>Adventure controls & sound</button>}{sessionToken&&<SpectatorSettings key={identity.profileId} handle={identity.handle} token={sessionToken}/>}<button className={button} onClick={toggleFullscreen}>Toggle fullscreen</button><button className={button} onClick={()=>openPanel('voice')}>Voice note</button><button className={button} onClick={()=>openPanel('charmdex')}>Discover charms</button><Link className={button} href="/plankspace">Open PlankSpace</Link><p>{resourceStatus||movementStatus}</p><p>{tutorialStatus}</p></div>
         <div id="panel-social" role="tabpanel" aria-labelledby="tab-social" hidden={tab!=='social'}>{sessionToken&&<SocialPanel key={identity.profileId} token={sessionToken} active={tab==='social'} onPinned={()=>void load()}/>}</div>
         <div id="panel-friends" role="tabpanel" aria-labelledby="tab-friends" hidden={tab!=='friends'} className="space-y-4">
-        <FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>
-        {address&&tab==='friends'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
+        <div className="flex gap-2" aria-label="Co-op pages"><button className={button} aria-pressed={coopPage==='travel'} onClick={()=>setCoopPage('travel')}>Travel together</button><button className={button} aria-pressed={coopPage==='invitations'} onClick={()=>setCoopPage('invitations')}>My invitations</button></div>
+        {coopPage==='travel'&&<FriendsTravelPanel key={identity.profileId} handle={identity.handle} profileId={identity.profileId} presence={presence} busy={busy} onTravel={destination=>void load(destination)} onPlay={returnToPlay}/>}
+        {address&&tab==='friends'&&coopPage==='invitations'&&<HomePermissions key={`${address}:${identity.handle}`} handle={identity.handle} wallet={address} />}
         <button className={button} disabled={busy} onClick={()=>void load()}>Refresh account</button>
         </div>
         <div id="panel-inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden={tab!=='inventory'}>

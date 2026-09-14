@@ -10,9 +10,9 @@ export default function FriendsTravelPanel({handle,profileId,presence,busy,onTra
  const [error,setError]=useState('');
  const visiting=!!presence?.active&&!!presence.ownerHandle&&presence.ownerHandle!==handle;
  function visit(value:string){const target=visitHandle(value);if(!target){setError('Use a player handle: up to 40 letters, numbers or underscores.');return;}setError('');onTravel({destination:'home',handle:target});}
- return <section className="rounded-xl border border-line bg-panel p-4" aria-label="Friends and travel">
-  <h2 className="font-display text-xl">Your next doorstep</h2>
-  <p className="mt-2 text-cream-muted" role="status">{busy?'Checking your destination…':travelLabel(presence,handle)}</p>
+ return <section className="rounded-xl border border-line bg-panel p-4" aria-label="Co-op travel">
+  <h2 className="font-display text-xl">Meet in the world</h2>
+  <p className="mt-2 text-sm text-cream-muted">Visit homes and meet nearby players here. Posts and charm reactions are in Social.</p><p className="mt-2 text-cream-muted" role="status">{busy?'Checking your destination…':travelLabel(presence,handle)}</p>
   <div className="my-3 flex flex-wrap gap-2">
    {presence?.active&&<button type="button" className={button} disabled={busy} onClick={onPlay}>{visiting?'Explore this home':'Continue playing'}</button>}
    <button type="button" className={button} disabled={busy} onClick={()=>onTravel({destination:'home',handle})}>{visiting?'Return to my home':'Go home'}</button>
