@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "id": "love-fairy-guide",
+  "role": "journal-guide-presentation",
+  "origin": "original-source-informed-art",
+  "isExtractedNavi": false,
+  "staticAsset": "/charmville/items/love-fairy-guide.svg",
+  "liveRenderer": "app/charmville/world/fairy-portrait.tsx",
+  "viewBox": [0, 0, 96, 96],
+  "anchor": [48, 52],
+  "wingCount": 4,
+  "states": ["idle", "attention"],
+  "skins": ["blue", "gold", "green"],
+  "reducedMotion": "complete-still-silhouette",
+  "externalAssets": [],
+  "grantsOwnership": false,
+  "affectsSimulation": false,
+  "sourceReferences": [
+    "https://github.com/zeldaret/oot/blob/cbe814b25455f14a343a7457c4b1c92af40ede6a/src/overlays/actors/ovl_En_Elf/z_en_elf.c",
+    "https://github.com/zeldaret/oot/blob/cbe814b25455f14a343a7457c4b1c92af40ede6a/assets/xml/objects/gameplay_keep.xml",
+    "https://github.com/HarbourMasters/Shipwright/blob/ea348bc9fbfb6407a6c9bd8864df4d10c6d46b05/soh/soh/Enhancements/cosmetics/CosmeticsEditor.cpp"
+  ]
+}
