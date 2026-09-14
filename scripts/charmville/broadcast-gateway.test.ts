@@ -85,3 +85,22 @@ test('rate-limits authenticated bursts and closes revoked sessions while idle', 
     assert.equal(await revoked, 1008);
   } finally {await gateway.close();}
 });
+
+
+test('rejects non-finite/fractional timer bounds and starts no lease timer after a port conflict', async t => {
+  const options = {port: 0, origins: [origin], authenticate: async () => '1', resolve: async (_token: string, ownerId: string) => ({profileId: '1', ownerId, revision: '0', mode: 'public' as const, allowedIds: []})};
+  for (const invalid of [NaN, Infinity, 100.5]) {
+    await assert.rejects(startBroadcastGateway({...options, authTimeoutMs: invalid}), /Invalid gateway bounds/);
+    await assert.rejects(startBroadcastGateway({...options, refreshMs: invalid}), /Invalid gateway bounds/);
+  }
+  const gateway = await startBroadcastGateway(options);
+  const interval = t.mock.method(globalThis, 'setInterval');
+  try {
+    await assert.rejects(startBroadcastGateway({...options, port: Number(new URL(gateway.url).port)}), {code: 'EADDRINUSE'});
+    assert.equal(interval.mock.callCount(), 0);
+    const client = connect(gateway.url); await client.ready();
+    client.send({type: 'authenticate', token: first});
+    assert.equal((await client.next('broadcast:ready')).profileId, '1');
+    client.socket.terminate();
+  } finally {await gateway.close();}
+});
