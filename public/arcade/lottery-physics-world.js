@@ -4,7 +4,10 @@ import {dispensePosition} from './lottery-trajectory.js';
 let initialization;
 export async function createLotteryWorld({colliders,positions,radius}) {
   await (initialization??=RAPIER.init());
-  const world=new RAPIER.World({x:0,y:-9.81,z:0});world.timestep=1/240;world.integrationParameters.numSolverIterations=16;world.integrationParameters.maxCcdSubsteps=4;world.integrationParameters.allowedLinearError=.0005;
+  const world=new RAPIER.World({x:0,y:-9.81,z:0});// Phone cores (<=6) get a 120Hz world with half the solver iterations: the
+  // balls still settle honestly, the worker stops starving the renderer.
+  const phoneCores=(globalThis.navigator?.hardwareConcurrency||8)<=6;
+  world.timestep=phoneCores?1/120:1/240;world.integrationParameters.numSolverIterations=phoneCores?8:16;world.integrationParameters.maxCcdSubsteps=4;world.integrationParameters.allowedLinearError=.0005;
   let bowlBody=null;
   for(const {vertices,indices,driven} of colliders){
     const body=driven?world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased()):undefined;

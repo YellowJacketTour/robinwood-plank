@@ -1303,12 +1303,18 @@ try {
   document.body.prepend(notice);
   throw error;
 }
-const resolutionGovernor = createResolutionGovernor();
-renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1));
+// A phone GPU is not a desktop GPU: owner measured the table 'extremely laggy'
+// on an iPhone at the desktop defaults (1.5x ratio through bloom, god-rays,
+// lens-flare and soft shadows, plus the lottery machine's own renderer and a
+// 240Hz physics world). Phones start at 1.0x with the cheap shadow filter and
+// the low post tier; the governor can still lift the ratio when frames allow.
+const PHONE_GPU = matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) <= 540;
+const resolutionGovernor = createResolutionGovernor(PHONE_GPU ? 1 : 1.5);
+renderer.setPixelRatio(renderRatio(canvas.clientWidth,canvas.clientHeight,window.devicePixelRatio||1,PHONE_GPU?1:1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
-renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=PHONE_GPU?THREE.PCFShadowMap:THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
@@ -5114,7 +5120,7 @@ function privateApplySettledFlightTarget(crashAltitude) {
 }
 let privateLastDeckShape = "";
 let privateMotionPreference = localStorage.getItem("plank-alpha:motion") || "system";
-let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || "balanced";
+let privateQualityPreference = localStorage.getItem("plank-alpha:quality") || (matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) <= 540 ? "low" : "balanced");
 
 function privateMotionReduced() {
   return privateMotionPreference === "reduced" || (privateMotionPreference === "system" && prefersReducedMotion);

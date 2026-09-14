@@ -341,3 +341,17 @@ body:not([data-playtest="true"]) .console-menu,body:not([data-playtest="true"]) 
   .lottery-theatre[open]{height:auto;max-height:calc(100svh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
   html,body{overflow-x:hidden;max-width:100vw}
 }
+
+/* Phone lottery card: explicit type sizes so the reveal reads the same on
+   every handset (owner: text after the ball reveal 'improperly sized and
+   proportioned' on an iPhone). Nothing here inherits from the machine. */
+@media(max-width:540px){
+  .lottery-theatre h2{font:750 22px/1.2 system-ui;margin:6px 0 4px;text-align:center}
+  .lottery-theatre .lottery-odds{font:400 14px/1.4 system-ui;margin:0 0 6px;text-align:center}
+  .lottery-prize-summary{gap:10px;padding:0 4px}
+  .lottery-prize-summary .lottery-amount{font:750 24px/1.2 system-ui;text-align:left}
+  .lottery-amount-label{font:500 11px/1.3 system-ui;display:block}
+  .lottery-status{font:500 12px/1.4 system-ui;text-align:center}
+  .lottery-details{font-size:12px}
+  .lottery-next,.lottery-collect{font-size:15px;min-height:44px;padding:10px 24px}
+}
