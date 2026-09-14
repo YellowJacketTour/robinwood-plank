@@ -42,6 +42,7 @@ on:
           - deploy-mesh
           - deploy-table
           - diagnose-app
+          - relieve-host
           - configure-plankspace-x
           - diagnose-market-locks
       rebuild_seed:
@@ -2006,6 +2007,53 @@ jobs:
           REMOTE
           }
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if run_remote; then exit 0; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done; exit 1
+  # Shared-account relief valve: end leaked >700 MB cron workers (they respawn
+  # fresh), restart Passenger, report. Used when plank.love answers 500/503
+  # with 'fork: retry: Resource temporarily unavailable' in the logs.
+  relieve-host:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'relieve-host'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+          printf '%s' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"; echo >> "$HOME/.ssh/inmotion"
+          printf '%s' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"; echo >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+      - name: Relieve the host
+        shell: bash
+        run: |
+          set -uo pipefail
+          run_remote() { ssh -o ConnectTimeout=25 -i "$HOME/.ssh/inmotion" -p "${INMOTION_PORT:-2222}" "${INMOTION_USER}@${INMOTION_HOST}" bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          app_dir="$1"
+          me="$(id -un)"
+          echo "== before: $(ps -o rss= -u "$me" | awk '{s+=$1} END {printf "%.0f MB, %d procs", s/1024, NR}')"
+          # Relief valve for a shared account at its memory/process ceiling: end
+          # the bloated cron-supervised node workers (anything over 700 MB that is
+          # not the site, Passenger or the table). Their cron lines respawn them
+          # fresh within a minute; nothing is lost but a leaked heap.
+          ps -o pid=,rss=,args= -u "$me" | awk '$2>700000 && /node/ && !/plankcrash|next-server|passenger|anvil/ {print $1, int($2/1024) "MB", substr($0, index($0,$3), 120)}' | while read -r pid mb cmd; do echo "ending $pid ($mb) $cmd"; kill -TERM "$pid" 2>/dev/null || true; done
+          sleep 8
+          ps -o pid=,rss=,args= -u "$me" | awk '$2>700000 && /node/ && !/plankcrash|next-server|passenger|anvil/ {print $1}' | xargs -r kill -KILL 2>/dev/null || true
+          echo "== after: $(ps -o rss= -u "$me" | awk '{s+=$1} END {printf "%.0f MB, %d procs", s/1024, NR}')"
+          touch "$app_dir/current/tmp/restart.txt" 2>/dev/null || true
+          for i in 1 2 3; do sleep 15; printf 'home %s table %s%s' "$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: Mozilla/5.0' https://plank.love/)" "$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: Mozilla/5.0' https://plank.love/table)" "$(printf '
+')"; done
+          REMOTE
+          }
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do if run_remote; then exit 0; fi; echo "ssh attempt $attempt failed; waiting 30s"; sleep 30; done; exit 1
+
   diagnose-market-locks:
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'diagnose-market-locks'
     runs-on: ubuntu-latest
