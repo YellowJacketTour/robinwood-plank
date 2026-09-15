@@ -8,11 +8,20 @@ import { upsertTrackedCollection, listTrackedCollections, getTrackedCollection, 
 import { getCollectionAsync } from "../../lib/market/collections-server";
 
 const SKIP = { skip: !hasPostgresConfig() };
-const SRC = readFileSync("lib/market/collections-server.ts", "utf8");
+// Line endings normalized: this repo checks out CRLF on Windows, and the
+// body slice below searches for "\n}\n". On a CRLF checkout that matched
+// nothing, leaving a two-character string that every assertion then
+// "passed" against -- a test that measured nothing while reporting green.
+const SRC = readFileSync("lib/market/collections-server.ts", "utf8").replace(/\r\n/g, "\n");
 
 test("the auto-discovered lookup reads ONE row by its key, never the whole catalog", () => {
   const fn = SRC.slice(SRC.indexOf("export async function getCollectionAsync"));
-  const body = fn.slice(0, fn.indexOf("\n}\n") + 3);
+  const end = fn.indexOf("\n}\n");
+  // Guard the slice itself: if it ever fails to find the end of the function,
+  // say so loudly instead of asserting against a fragment.
+  assert.ok(end > 0, "the function body must be locatable, or the assertions below measure nothing");
+  const body = fn.slice(0, end + 3);
+  assert.ok(body.length > 200, `the body slice is implausibly short (${body.length} chars) -- it is not reading the function`);
   // The comments deliberately NAME the old call (explaining what was removed
   // and why). Strip them so this reads the code, not the prose about it.
   const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");

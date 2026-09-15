@@ -429,10 +429,22 @@ test("wallet-summary windows the foreign lane only -- the Robinhood lane is alre
     /\.slice\(0, MAX_COLLECTIONS\)/,
     "a slice that always starts at 0 is a ceiling no offset can move"
   );
+  // The Robinhood lane must take the same offset, or its own tail stays
+  // unreachable. It used to do that by slicing a JS array of EVERY tracked
+  // collection on every chain; it now pushes the same window into SQL
+  // (listTrackedCollectionsForChain, LIMIT/OFFSET on the
+  // (chain_slug, contract_address) unique index) so the request stops
+  // reading 300,351 rows to answer it. The property is the window, not the
+  // mechanism -- so assert the window, and assert the scan cannot return.
   assert.match(
     WALLET_SRC,
-    /robinhoodCollections\.slice\(offset, offset \+ MAX_COLLECTIONS\)/,
+    /listTrackedCollectionsForChain\(ROBINHOOD_CHAIN_SLUG, \{ offset, limit: MAX_COLLECTIONS \}\)/,
     "the Robinhood lane must take the same offset, or its own tail stays unreachable"
+  );
+  assert.doesNotMatch(
+    WALLET_SRC,
+    /\blistTrackedCollections\(/,
+    "reading the whole catalog to serve one chain's window is the scan this replaced"
   );
 });
 
