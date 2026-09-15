@@ -1,11 +1,20 @@
-export type Lifecycle={type:'charmville:action-lifecycle';sessionId:string;localActionId:number;sequence:number;phase:'begin'|'contact'|'cancel';action:'till'|'plant'|'water'|'harvest';plotIndex:number;dmap:number;screen:number;x:number;y:number;direction:number};
+export type Lifecycle={type:'charmville:action-lifecycle';sessionId:string;localActionId:number;sequence:number;phase:'begin'|'contact'|'cancel';action:'till'|'plant'|'water'|'harvest';plotIndex:number;dmap:number;screen:number;x:number;y:number;direction:number;protocolVersion?:2;cropId?:string};
 export function readLifecycle(raw:unknown):Lifecycle|null{
  const p=raw as Lifecycle|null;
  if(!p||p.type!=='charmville:action-lifecycle'||typeof p.sessionId!=='string'||!/^[a-f0-9-]{36}$/i.test(p.sessionId)||!Number.isSafeInteger(p.localActionId)||p.localActionId<1||!Number.isSafeInteger(p.sequence)||p.sequence<1||!['begin','contact','cancel'].includes(p.phase)||!['till','plant','water','harvest'].includes(p.action)||!Number.isInteger(p.plotIndex)||p.plotIndex<0||p.plotIndex>2||p.dmap!==4||p.screen!==63||![p.x,p.y].every(Number.isFinite)||!Number.isInteger(p.direction)||p.direction<0||p.direction>3)return null;
+ if(p.protocolVersion!==undefined&&p.protocolVersion!==2)return null;
+ if(p.cropId!==undefined&&(p.protocolVersion!==2||!['oran-berry','burning-heart'].includes(p.cropId)))return null;
+ if(p.protocolVersion===2&&p.action==='plant'&&!p.cropId)return null;
  return p;
 }
-export type ResourceSnapshot={regionId:string;serverNow:string;beds:{id:number;stage:number;revision:string;readyAt:string|null;planterId:string|null;cropId?:string;growthDurationMs?:number;allowedActions?:string[]}[];seeds:string;produce:string};
-export function nativeResourceProjection(snapshot:ResourceSnapshot,sessionId?:string,resolvedLocalActionId=0){
+export type ResourceSnapshot={regionId:string;serverNow:string;beds:{id:number;stage:number;revision:string;readyAt:string|null;planterId:string|null;cropId?:string;growthDurationMs?:number;allowedActions?:string[];plantCrops?:string[]}[];seeds:string;produce:string;protocolVersion?:number;cropBalances?:Record<string,{seeds:string;produce:string}>};
+export function nativeResourceProjection(snapshot:ResourceSnapshot,sessionId?:string,resolvedLocalActionId=0,protocolVersion?:2){
+ const version2=protocolVersion===2&&snapshot.protocolVersion===2;
+ if(snapshot.beds.some(b=>!['oran-berry',...(version2?['burning-heart']:[])].includes(b.cropId??'oran-berry')))throw Error('Update the game to display these crops.');
+ const quantity=(raw:string)=>{if(!/^\d+$/.test(raw))throw Error('Crop balance unavailable.');return Number(BigInt(raw)>200000n?200000n:BigInt(raw));};
+ const cropBalances=version2?Object.fromEntries(['oran-berry','burning-heart'].map(id=>{
+  const balance=snapshot.cropBalances?.[id];if(!balance)throw Error('Crop balance unavailable.');return [id,{seeds:quantity(balance.seeds),produce:quantity(balance.produce)}];
+ })):undefined;
  const now=Date.parse(snapshot.serverNow);
  const growthPhase=(bed:ResourceSnapshot['beds'][number])=>{
   if(bed.stage!==3)return 0;
@@ -14,15 +23,15 @@ export function nativeResourceProjection(snapshot:ResourceSnapshot,sessionId?:st
   if(!Number.isFinite(now)||!Number.isFinite(ready)||!Number.isFinite(duration)||duration<=0)return 0;
   return Math.max(0,Math.min(2,Math.floor(3*(1-(ready-now)/duration))));
  };
- return {type:'charmville:resource-state',active:true,sessionId,resolvedLocalActionId,beds:snapshot.beds.map(b=>({id:b.id,stage:b.stage,allowedActions:(b.allowedActions??[]).filter(a=>['till','plant','water','harvest'].includes(a)),growthVisualPhase:growthPhase(b)})),seeds:Math.min(200000,Number(snapshot.seeds)),produce:Math.min(200000,Number(snapshot.produce))};
+ return {type:'charmville:resource-state',active:true,sessionId,resolvedLocalActionId,beds:snapshot.beds.map(b=>({id:b.id,stage:b.stage,allowedActions:(b.allowedActions??[]).filter(a=>['till','plant','water','harvest'].includes(a)),growthVisualPhase:growthPhase(b),...(version2?{cropId:b.cropId??'oran-berry',plantCrops:(b.plantCrops??[]).filter(id=>['oran-berry','burning-heart'].includes(id))}:{})})),seeds:quantity(snapshot.seeds),produce:quantity(snapshot.produce),...(version2?{protocolVersion:2,cropBalances}:{})};
 }
 /** One native action at a time; acknowledgments are projections, never authority. */
-export function createNativeResourceClient(o:{read:()=>Promise<ResourceSnapshot>;actor:()=>Promise<{sequence:number;regionEpoch:number}>;post:(body:object)=>Promise<unknown>;send:(body:object)=>void;changed:()=>void;status:(message:string)=>void;uuid:()=>string}){
+export function createNativeResourceClient(o:{read:()=>Promise<ResourceSnapshot>;actor:()=>Promise<{sequence:number;regionEpoch:number}>;post:(body:object)=>Promise<unknown>;send:(body:object)=>void;changed:()=>void;status:(message:string)=>void;uuid:()=>string;protocolVersion?:()=>2|undefined}){
  let dead=false,current:{event:Lifecycle;id:string;cancelled:boolean;ready:Promise<void>}|null=null,reading=false,session='',sequence=0,readVersion=0;
  const send=(body:object)=>{if(!dead)o.send(body);};
  async function refresh(resolved?:Lifecycle){
   const version=++readVersion;const state=await o.read();if(dead)return;
-  if(version===readVersion)send(nativeResourceProjection(state,resolved?.sessionId,resolved?.localActionId));return state;
+  if(version===readVersion)send(nativeResourceProjection(state,resolved?.sessionId,resolved?.localActionId,o.protocolVersion?.()));return state;
  }
  async function observe(raw:unknown){
   const e=readLifecycle(raw);if(!e||dead)return;
@@ -34,8 +43,10 @@ export function createNativeResourceClient(o:{read:()=>Promise<ResourceSnapshot>
    pending.ready=(async()=>{
     try{
      const state=await refresh();const actor=await o.actor();if(dead||pending.cancelled)return;
+     if(e.protocolVersion===2&&(o.protocolVersion?.()!==2||state?.protocolVersion!==2))throw Error('Refresh the game before using these crops.');
+     if(e.protocolVersion!==2&&state?.beds.some(b=>b.cropId&&b.cropId!=='oran-berry'))throw Error('Update the game to use these crops.');
      const bed=state?.beds.find(b=>b.id===e.plotIndex);if(!bed)throw Error('This bed is unavailable.');
-     await o.post({phase:'begin',requestId:pending.id,bedId:e.plotIndex,kind:e.action,resourceRevision:bed.revision,regionEpoch:actor.regionEpoch,sequence:actor.sequence});
+     await o.post({phase:'begin',requestId:pending.id,bedId:e.plotIndex,kind:e.action,resourceRevision:bed.revision,regionEpoch:actor.regionEpoch,sequence:actor.sequence,...(e.protocolVersion===2&&e.action==='plant'?{cropId:e.cropId}:{})});
      if(dead||pending.cancelled){await o.post({phase:'cancel',requestId:pending.id});return;}
      send({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:true});o.status('Working…');
     }catch(error){if(!dead){send({type:'charmville:action-authorization',sessionId:e.sessionId,localActionId:e.localActionId,accepted:false});o.status(error instanceof Error?error.message:'Could not start this action.');}if(current===pending)current=null;}

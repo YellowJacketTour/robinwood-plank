@@ -1,0 +1,15 @@
+.fairy{--fairy-core:#fff;--fairy-wing:#dceaff;--fairy-aura:#789bff;display:block;width:96px;height:96px;overflow:visible;contain:layout paint;}
+.fairy[data-skin=gold]{--fairy-wing:var(--color-cream);--fairy-aura:var(--color-gold-400);}
+.fairy[data-skin=green]{--fairy-wing:var(--color-cream);--fairy-aura:#a9c784;}
+.hover{animation:hover 3s ease-in-out infinite;transform-origin:48px 52px;}
+.upperLeft,.upperRight,.lowerLeft,.lowerRight{transform-box:view-box;transform-origin:48px 52px;}
+.upperLeft{animation:left .55s ease-in-out infinite;}.upperRight{animation:right .55s ease-in-out infinite;}
+.lowerLeft{animation:left .55s ease-in-out -.13s infinite;}.lowerRight{animation:right .55s ease-in-out -.13s infinite;}
+.aura{animation:breathe 2.8s ease-in-out infinite;transform-origin:48px 52px;}
+.fairy[data-attention=true] .aura{animation:attend 1.6s ease-in-out infinite;}
+@keyframes hover{0%,100%{transform:translate(0,2px)}50%{transform:translate(0,-2px)}}
+@keyframes left{0%,100%{transform:rotate(-8deg) scaleX(.88)}50%{transform:rotate(5deg) scaleX(1)}}
+@keyframes right{0%,100%{transform:rotate(8deg) scaleX(.88)}50%{transform:rotate(-5deg) scaleX(1)}}
+@keyframes breathe{0%,100%{opacity:.7;transform:scale(.93)}50%{opacity:.9;transform:scale(1)}}
+@keyframes attend{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.12)}}
+@media(prefers-reduced-motion:reduce){.hover,.upperLeft,.upperRight,.lowerLeft,.lowerRight,.aura,.fairy[data-attention=true] .aura{animation:none;}}

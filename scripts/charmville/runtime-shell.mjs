@@ -12,7 +12,7 @@ import {mountGameplayVideo} from './gameplay-video.mjs';
 import {mountCompactHud} from './compact-game-hud.mjs';
 let accountOrigin=null,captureAvailable=false;
 async function returnToAccountMenus(panel='inventory'){
-  if(!['inventory','companions','exchange','friends','social'].includes(panel))return;
+  if(!['menu','inventory','companions','exchange','friends','social'].includes(panel))return;
   if(window.parent===window){window.open('http://localhost:3017/charmville/world?panel='+panel,'_blank','noopener');return;}
   if(document.fullscreenElement)try{await document.exitFullscreen();}catch{/* The parent also checks its iframe fullscreen state. */}
   if(accountOrigin)window.parent.postMessage({type:'charmville:account-menu',panel},accountOrigin);
@@ -49,6 +49,7 @@ function openUnifiedMenu(){
   unifiedMenu.querySelector('[data-capture-reason]').hidden=captureAvailable;
   unifiedMenu.querySelector('[data-destination="gear"]').disabled=Boolean(document.querySelector('button.charm-runtime-enter'));
   for(const [key,code] of [['ArrowUp',38],['ArrowDown',40],['ArrowLeft',37],['ArrowRight',39],['z',90],['x',88],['d',68],['c',67],['q',81],['w',87],['Enter',13]])nativeKey(key,code,false);
+  if(accountOrigin&&window.parent!==window&&document.body.classList.contains('charm-hosted')){void returnToAccountMenus('menu');return;}
   const remembered=unifiedMenu.querySelector('[data-preview="true"]:not(:disabled)')||unifiedMenu.querySelector('button:not(:disabled)');
   unifiedMenu.showModal();remembered.focus();
 }
@@ -163,6 +164,21 @@ function mountEquipmentReadout(root, settingsBody) {
   window.addEventListener('pagehide', () => clearInterval(timer), { once: true });
 }
 /* Presentation adapter only. All native controls and their event hooks survive. */
+/** Call only after the existing parent/origin handshake; never infer account mode
+ * from iframe placement alone. Idempotent refresh avoids recurring canvas resize. */
+export function compactHostedShell(root, menuSuite = false) {
+  const compacted=root.body.classList.contains('charm-hosted');
+  const immersive=menuSuite===true&&!root.body.classList.contains('charm-hosted-immersive');
+  if(compacted&&!immersive)return false;
+  root.body.classList.add('charm-hosted');
+  if(immersive)root.body.classList.add('charm-hosted-immersive');
+  const menu=root.querySelector('.charm-account-menu');
+  if(menu)menu.textContent='Game menu';
+  const summary=root.querySelector('.charm-runtime-settings > summary');
+  if(summary)summary.textContent='Controls & settings';
+  root.defaultView?.dispatchEvent(new Event('resize'));
+  return true;
+}
 export function mountRuntimeShell(root = document) {
   const header = root.querySelector('header');
   const buttons = header?.querySelector('.panel-buttons');
@@ -177,6 +193,7 @@ export function mountRuntimeShell(root = document) {
     : '<strong>Charmville</strong><span>Explore, grow and play together</span>';
   header.prepend(brand);
   const accountMenu=root.createElement('button');accountMenu.type='button';accountMenu.textContent='Game menus';accountMenu.title='Account inventory, companions, exchange and friends';
+  accountMenu.className='charm-account-menu';
   accountMenu.style.background='var(--color-gold-500)';accountMenu.style.color='var(--color-on-gold)';accountMenu.onclick=openUnifiedMenu;
   brand.after(accountMenu);
   const fullscreenMenu=accountMenu.cloneNode(true);fullscreenMenu.onclick=openUnifiedMenu;root.querySelector('.charm-cinema-tools')?.prepend(fullscreenMenu);
@@ -203,7 +220,7 @@ export function mountRuntimeShell(root = document) {
   }
   const help = root.createElement('details');
   help.className = 'charm-runtime-help';
-  help.innerHTML = '<summary>Field guide · Controls</summary><div class="charm-runtime-controls"><p>Default keyboard controls. Use the game’s native menu to change keys.</p><dl><div data-kind="move"><dt>Explore</dt><dd><kbd>Arrow keys</kbd> Move</dd></div><div data-kind="combat"><dt>Adventure</dt><dd><kbd>Z</kbd> Sword · hold and release to spin<br><kbd>X</kbd> Equipped item</dd></div><div data-kind="grow"><dt>Homestead</dt><dd><kbd>D</kbd> Work the garden when nearby</dd></div><div data-kind="power"><dt>Power</dt><dd><kbd>T</kbd> Toggle aura</dd></div><div><dt>Equipment</dt><dd><kbd>Enter</kbd> Game menu · Gear opens adventure equipment<br><kbd>Q</kbd> / <kbd>W</kbd> Cycle items</dd></div></dl><p>On touchscreens, use the on-screen buttons. Display changes how the game fits the screen; Controller changes gamepad buttons. Camera zoom is still in development.</p><p>The town includes NPCs. The in-game Guests count shows other connected guests on your screen; it is not a public player count.</p></div>';
+  help.innerHTML = '<summary>Field guide · Controls</summary><div class="charm-runtime-controls"><p>Default keyboard controls. Use the game’s native menu to change keys.</p><dl><div data-kind="move"><dt>Explore</dt><dd><kbd>Arrow keys</kbd> Move</dd></div><div data-kind="combat"><dt>Adventure</dt><dd><kbd>Z</kbd> Sword · hold and release to spin<br><kbd>X</kbd> Equipped item</dd></div><div data-kind="grow"><dt>Homestead</dt><dd><kbd>E</kbd> Work the garden when nearby</dd></div><div data-kind="power"><dt>Power</dt><dd><kbd>T</kbd> Toggle aura</dd></div><div><dt>Equipment</dt><dd><kbd>Enter</kbd> Game menu · Gear opens adventure equipment<br><kbd>Q</kbd> / <kbd>W</kbd> Cycle items</dd></div></dl><p>On touchscreens, use the on-screen buttons. Display changes how the game fits the screen; Controller changes gamepad buttons. On the live world camera, WASD pans, wheel or pinch zooms, and 0 returns to your player.</p><p>The town includes NPCs. The in-game Guests count shows other connected guests on your screen; it is not a public player count.</p></div>';
   header.append(help);
   // Keep advanced runtime controls reachable without consuming the play area.
   const settings = root.createElement('details');
@@ -231,10 +248,32 @@ export function mountRuntimeShell(root = document) {
   header.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     const open = [...header.querySelectorAll('details[open]')].pop();
-    if (open) { open.open = false; open.querySelector('summary').focus(); event.stopPropagation(); }
+    if (open) { open.open = false;
+      const immersive=root.body.classList.contains('charm-hosted-immersive')&&!header.querySelector('button.charm-runtime-enter');
+      (immersive&&open===settings?root.querySelector('canvas'):open.querySelector('summary'))?.focus({preventScroll:true});
+      event.stopPropagation();
+    }
   });
 }
 if (typeof document !== 'undefined') {mountRuntimeShell();mountCompactHud(document,{isOverlayBlocked:()=>nativeEquipment||Boolean(document.querySelector('dialog[open]'))});}
+/** Closed command vocabulary; caller has already verified parent and origin. */
+export function openNativeToolPanel(panel,root,host,openGear){
+  if(!['gear','map','settings'].includes(panel))return false;
+  if(root.querySelector('dialog[open]'))return false;
+  if(panel==='gear'){
+    if(root.querySelector('button.charm-runtime-enter'))return false;
+    openGear();return true;
+  }
+  if(panel==='map'){
+    if(host.charmvilleMapReady!==true)return false;
+    if(host.charmvilleMapOpen!==true)host.charmvilleOpenMap=true;
+    for(const detail of root.querySelectorAll('header details[open]'))detail.open=false;
+    root.querySelector('canvas')?.focus({preventScroll:true});return true;
+  }
+  const settings=root.querySelector('.charm-runtime-settings');
+  if(!settings)return false;
+  settings.open=true;settings.querySelector('summary')?.focus({preventScroll:true});return true;
+}
 // UI-only bridge from the local account shell. No account credentials, inventory
 // mutations, arbitrary selectors or gameplay input are accepted by the quest.
 if (typeof window !== 'undefined') window.addEventListener('message', event => {
@@ -242,11 +281,14 @@ if (typeof window !== 'undefined') window.addEventListener('message', event => {
   const request = event.data;
   if (!request) return;
   if(request.type==='charmville:capture-availability'&&typeof request.available==='boolean'){accountOrigin=event.origin;captureAvailable=request.available;const button=unifiedMenu?.querySelector('[data-destination="capture"]');if(button){const hadFocus=document.activeElement===button;button.disabled=!captureAvailable;const reason=button.querySelector('[data-capture-reason]');if(reason)reason.hidden=captureAvailable;if(button.disabled&&hadFocus)unifiedMenu.querySelector('[data-menu-close]')?.focus();}return;}
-  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;return;}
+  if(request.type==='charmville:host-ready'){accountOrigin=event.origin;compactHostedShell(document,request.menuSuite===true);window.parent.postMessage({type:'charmville:menu-capabilities',panels:['gear','map','settings']},accountOrigin);return;}
   if(request.type !== 'charmville:open-panel') return;
   accountOrigin=event.origin;
-  if (!['charmdex', 'voice'].includes(request.panel)) return;
+  if (!['charmdex', 'voice','gear','map','settings'].includes(request.panel)) return;
   if(unifiedMenu?.open)unifiedMenu.close();
+  if(['gear','map','settings'].includes(request.panel)){
+    openNativeToolPanel(request.panel,document,window,()=>{if(nativeEquipment)return;nativeEquipment=true;nativeKey('Enter',13,true);setTimeout(()=>nativeKey('Enter',13,false),100);});return;
+  }
   const selected = request.panel === 'voice' ? 'dialog.voice-notes' : 'dialog.charmdex:not(.voice-notes)';
   for (const dialog of document.querySelectorAll('dialog.charmdex[open]')) {
     if (!dialog.matches(selected)) dialog.close();

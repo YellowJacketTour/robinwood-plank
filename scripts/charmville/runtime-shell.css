@@ -219,3 +219,27 @@ body.charm-runtime {
 .charm-runtime .charm-runtime-controls dl > div { background:var(--color-cream); color:var(--color-wood-950); border:2px solid var(--color-line-strong); border-left:6px solid var(--color-gold-500); border-radius:6px; padding:14px; }
 .charm-runtime .charm-runtime-controls dt { color:var(--color-wood-950); font-size:17px; }
 .charm-runtime .charm-runtime-controls kbd { background:var(--color-wood-950); color:var(--color-cream); min-width:18px; text-align:center; box-shadow:0 2px 0 var(--color-wood-700); }
+
+/* Accepted host owns the title/navigation/fullscreen controls. Keep one compact
+   native menu rail; settings open above the canvas rather than changing its size.
+   Native framebuffer/aspect ratio remains intact: this never crops world pixels. */
+.charm-runtime.charm-hosted > header { flex-wrap:nowrap; gap:8px; min-height:44px; padding:4px 8px; box-sizing:border-box; }
+.charm-runtime.charm-hosted > header > .charm-runtime-brand { display:none; }
+.charm-runtime.charm-hosted > header > .charm-account-menu { margin-right:auto; }
+.charm-runtime.charm-hosted > header > .charm-runtime-settings { flex:0 1 auto; }
+.charm-runtime.charm-hosted > header > .charm-runtime-settings[open] { flex-basis:auto; }
+.charm-runtime.charm-hosted .charm-cinema-tools { display:none; }
+.charm-runtime.charm-hosted.charm-cinema:not(.charm-cinema-menu) > header { display:flex; }
+.charm-runtime.charm-hosted .charm-runtime-settings-body { max-height:calc(100dvh - 64px); overscroll-behavior:contain; }
+.charm-runtime.charm-hosted canvas { image-rendering:pixelated; }
+
+/* A modern host explicitly negotiates ownership of menu/map/options. Retain the
+   native start/retry button until loading finishes; standalone/older hosts keep
+   their rail. Settings float above the same canvas rather than resizing it. */
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)) > header { display:none; }
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)):has(.charm-runtime-settings[open]) > header {
+ display:flex; position:fixed; right:8px; top:8px; width:min(640px,calc(100vw - 16px));
+ z-index:10002; background:transparent; border:0; padding:0; justify-content:flex-end;
+}
+.charm-runtime.charm-hosted.charm-hosted-immersive:not(:has(button.charm-runtime-enter)) > header > :not(.charm-runtime-settings) { display:none!important; }
+.charm-runtime.charm-hosted-immersive .charm-runtime-settings-body { max-height:calc(100dvh - 76px); }

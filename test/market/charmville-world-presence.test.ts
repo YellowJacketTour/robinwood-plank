@@ -42,10 +42,16 @@ test("PostgreSQL world admission isolates homes, rejects stale travel, expires a
  const connectionString=process.env.CHARMVILLE_TEST_DATABASE_URL!;assert.ok(["127.0.0.1","localhost"].includes(new URL(connectionString).hostname));
  const admin=new Pool({connectionString});const schema=`world_${randomUUID().replaceAll("-","")}`;await admin.query(`CREATE SCHEMA ${schema}`);const pool=new Pool({connectionString,options:`-c search_path=${schema}`});
  try{
-  for(const file of ["090_plankspace_native.sql","116_charmville_soil.sql","118_charmville_home_access.sql","120_charmville_world_presence.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,"utf8"));
+  for(const file of ["090_plankspace_native.sql","116_charmville_soil.sql","118_charmville_home_access.sql","120_charmville_world_presence.sql","144_charmville_private_admission.sql"])await pool.query(await readFile(`deploy/inmotion/postgres/migrations/${file}`,"utf8"));
   const ids:string[]=[];const tokens=["1".repeat(64),"2".repeat(64),"3".repeat(64)];
   for(let i=0;i<3;i++){const wallet=`0x${i+1}`.padEnd(42,String(i+1));const p=await pool.query("INSERT INTO plankspace_profiles(wallet,handle,display_name,moderation_status) VALUES($1,$2,$2,'approved') RETURNING id::text",[wallet,`p${i}`]);ids.push(p.rows[0].id);await pool.query("INSERT INTO plankspace_wallet_sessions(token_hash,wallet,expires_at) VALUES($1,$2,$3)",[createHash("sha256").update(tokens[i]).digest("hex"),wallet,new Date(Date.now()+3600000).toISOString()]);await pool.query("INSERT INTO charmville_yards(profile_id) VALUES($1)",[ids[i]]);}
   const own=await worldPresence(pool,tokens[0],{destination:"home",handle:"p0",revision:"0"});assert.equal(own.regionId,`home:${ids[0]}`);
+  await assert.rejects(worldPresence(pool,tokens[1],{destination:"public",revision:"0"}),/invite-only/,"a home invitation is not private-alpha admission");
+  for(const id of ids.slice(1))await pool.query("INSERT INTO charmville_admission_grants(profile_id,granted_by_profile_id,expires_at) VALUES($1,$2,clock_timestamp()+interval '1 hour')",[id,ids[0]]);
+  await pool.query("UPDATE charmville_yards SET grain=profile_id*10");
+  await pool.query("INSERT INTO charmville_stacks(profile_id,face_id,qty) SELECT profile_id,'stalk',profile_id FROM charmville_yards");
+  const custody=async()=>({yards:(await pool.query("SELECT * FROM charmville_yards ORDER BY profile_id")).rows,stacks:(await pool.query("SELECT * FROM charmville_stacks ORDER BY profile_id,face_id")).rows,receipts:(await pool.query("SELECT * FROM charmville_receipts ORDER BY id")).rows});
+  const originalCustody=await custody();
   await assert.rejects(worldPresence(pool,tokens[1],{destination:"home",handle:"p0",revision:"0"}),/permission/);
   await homeAccess(pool,"p0",tokens[0],parseHomeGrant({visitor:"p1",revoke:false,revision:"0",rights:["visit","help"],containers:[],expiresAt:new Date(Date.now()+3600000).toISOString()}));
   let friend=await worldPresence(pool,tokens[1],{destination:"home",handle:"p0",revision:"0"});assert.equal(friend.peers[0].handle,"p0");
@@ -56,6 +62,20 @@ test("PostgreSQL world admission isolates homes, rejects stale travel, expires a
   await assert.rejects(worldPresence(pool,tokens[1],{destination:"public",revision:"0"}),/changed/);
   await assert.rejects(worldPresence(pool,tokens[1],{destination:"public",revision:friend.revision}),/wait/);
   const action=async()=>{const c=await pool.connect();try{await c.query("BEGIN");await requireWorldHome(c,ids[1],ids[0],"help");await c.query("COMMIT");}catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}};
+  await action();
+  // Leaving a friend's home never adopts their yard or inventory. Return to
+  // the visitor's own home, then re-enter through the same permission gate.
+  await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds' WHERE profile_id=$1",[ids[1]]);
+  const returned=await worldPresence(pool,tokens[1],{destination:"home",handle:"p1",revision:friend.revision});
+  assert.equal(returned.regionId,`home:${ids[1]}`);
+  assert.equal(returned.ownerHandle,"p1");
+  assert.equal(returned.peers.length,0);
+  assert.equal((await worldPresence(pool,tokens[0])).peers.length,0);
+  await assert.rejects(action(),/Enter this home/);
+  assert.deepEqual(await custody(),originalCustody,"visiting and returning must not move, mint or debit inventory");
+  await pool.query("UPDATE charmville_world_presence SET changed_at=clock_timestamp()-interval '2 seconds' WHERE profile_id=$1",[ids[1]]);
+  friend=await worldPresence(pool,tokens[1],{destination:"home",handle:"p0",revision:returned.revision});
+  assert.equal(friend.regionId,`home:${ids[0]}`);
   await action();
   await homeAccess(pool,"p0",tokens[0],parseHomeGrant({visitor:"p1",revoke:true,revision:"1"}));
   await assert.rejects(worldPresence(pool,tokens[1],{destination:"home",handle:"p0",revision:"0"}),/permission/,"retry rechecks revoked permission");
@@ -72,5 +92,6 @@ test("PostgreSQL world admission isolates homes, rejects stale travel, expires a
   assert.equal((await worldPresence(pool,tokens[0])).reason,"expired");
   await assert.rejects(action());
   await assert.rejects(worldPresence(pool,"invalid"));
+  assert.deepEqual(await custody(),originalCustody,"expiry, revocation and travel retries preserve ownership and receipts");
  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

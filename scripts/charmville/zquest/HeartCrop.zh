@@ -1,0 +1,48 @@
+// Original Charmville pixel crop artwork, authored as native drawing primitives.
+// Ground anchor: x,y is the soil tile origin; every stage ends at y+15.
+// Uses closest quest palette colors, never changes global palette or collision.
+int heartCropColor(int r,int g,int b)
+{
+    paldata world=new paldata();world->LoadMainPalette();
+    paldata level=new paldata();level->LoadLevelPalette(Game->DMapPalette[Game->GetCurDMap()]);
+    int scale=Game->FFRules[qr_SCRIPTS_6_BIT_COLOR]?4:1;
+    int best=1;int score=1000000;
+    for(int j=1;j<256;j++){
+        int cr=level->R[j]>=0?level->R[j]:world->R[j];
+        int cg=level->G[j]>=0?level->G[j]:world->G[j];
+        int cb=level->B[j]>=0?level->B[j]:world->B[j];
+        int dr=cr-Floor(r/scale);int dg=cg-Floor(g/scale);int db=cb-Floor(b/scale);
+        int distance=dr*dr+dg*dg+db*db;if(distance<score){score=distance;best=j;}
+    }
+    return best;
+}
+void drawHeartCrop(int layer,int x,int y,int stage,int phase,int tick,int[] colors)
+{
+    if(stage<2)return;
+    int dark=colors[0];int leaf=colors[1];int light=colors[2];
+    int red=colors[3];int glow=colors[4];int gold=colors[5];
+    // Planted seed is visible before watering; no mature fruit is implied.
+    if(stage==2){Screen->Rectangle(layer,x+6,y+10,x+9,y+13,dark);Screen->Rectangle(layer,x+7,y+10,x+8,y+12,red);Screen->Rectangle(layer,x+7,y+10,x+7,y+10,gold);return;}
+    int height=stage==4?15:(phase==0?4:(phase==1?9:13));
+    Screen->Rectangle(layer,x+7,y+15-height,x+8,y+14,dark);
+    Screen->Rectangle(layer,x+7,y+15-height,x+7,y+13,leaf);
+    Screen->Rectangle(layer,x+3,y+11,x+6,y+12,dark);Screen->Rectangle(layer,x+4,y+10,x+6,y+11,leaf);
+    Screen->Rectangle(layer,x+9,y+9,x+12,y+10,dark);Screen->Rectangle(layer,x+9,y+8,x+11,y+9,light);
+    if(stage==3&&phase==0)return;
+    if(stage==3&&phase==1){Screen->Rectangle(layer,x+6,y+3,x+9,y+6,dark);Screen->Rectangle(layer,x+7,y+2,x+8,y+5,light);return;}
+    int top=y-7;
+    // A recognizable heart blossom, with stable lobes and a pointed base.
+    Screen->Rectangle(layer,x+4,top,x+6,top,dark);Screen->Rectangle(layer,x+9,top,x+11,top,dark);
+    Screen->Rectangle(layer,x+3,top+1,x+12,top+2,dark);Screen->Rectangle(layer,x+2,top+3,x+13,top+5,dark);
+    for(int row=0;row<5;row++)Screen->Rectangle(layer,x+3+row,top+6+row,x+12-row,top+6+row,dark);
+    Screen->Rectangle(layer,x+4,top+1,x+6,top+2,red);Screen->Rectangle(layer,x+9,top+1,x+11,top+2,red);
+    Screen->Rectangle(layer,x+3,top+3,x+12,top+5,red);
+    for(int row=0;row<4;row++)Screen->Rectangle(layer,x+4+row,top+6+row,x+11-row,top+6+row,red);
+    Screen->Rectangle(layer,x+4,top+2,x+5,top+3,glow);Screen->Rectangle(layer,x+4,top+4,x+4,top+4,gold);
+    if(stage==4){
+        int flicker=Floor(tick/12)%2;
+        Screen->Rectangle(layer,x+7,top-3-flicker,x+8,top-1,gold);
+        Screen->Rectangle(layer,x+6,top-2,x+9,top-1,glow);
+        Screen->Rectangle(layer,x+7,top-2,x+8,top,gold);
+    }
+}

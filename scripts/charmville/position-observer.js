@@ -17,9 +17,13 @@ function presentArrival(pending){
 presentArrival(arrivalPending);
 function observeStandaloneArrival(position){
  if(!standaloneArrival||!arrivalPending)return;
- // This is the authored Homestead.zs clearing placement, observed after native
- // application. Never infer readiness from arbitrary stillness or move the hero.
- if(position.dmap===4&&position.screen===63&&position.x===16&&position.y===72&&position.z===0&&position.fakeZ===0){presentArrival(false);arrivalFailed=false;return;}
+ // A run-bound native receipt survives movement between browser samples.
+ // Older packages without this protocol retain their coordinate fallback.
+ const root=typeof FS==='undefined'?null:FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/';
+ const hasReceipt=root&&FS.analyzePath(root+'arrival-ready.txt').exists;
+ const ready=hasReceipt?Number(FS.readFile(root+'arrival-ready.txt',{encoding:'utf8'}).replace(/\0/g,''))===run:
+  position.dmap===4&&position.screen===63&&position.x===16&&position.y===72&&position.z===0&&position.fakeZ===0;
+ if(run!==null&&ready){presentArrival(false);arrivalFailed=false;return;}
  if(arrivalStarted&&Date.now()-arrivalStarted>15000&&!arrivalFailed){
   arrivalFailed=true;
   const notice=document.getElementById('charm-arrival-status');
@@ -45,7 +49,6 @@ window.addEventListener('message',event=>{
  try{FS.writeFile(FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/position-correction.txt',[c.sequence,c.dmap,c.screen,c.x,c.y,c.direction,c.reason==='rejected'?1:0].join('|'));lastCorrection=c.sequence;}catch{}
 });
 function poll(){
- observeStandaloneArrival({});
  if(typeof FS==='undefined'||(parent===window&&!standaloneArrival))return;
  try{
   const root=FS.cwd().replace(/\/$/,'')+'/Files/Homestead/charmville/';
@@ -53,6 +56,7 @@ function poll(){
   const generation=Number(FS.readFile(root+'action-run.txt',{encoding:'utf8'}).replace(/\0/g,''));
   if(!Number.isSafeInteger(generation)||generation<1)return;
   if(run!==generation){run=generation;lastSequence=0;lastCorrection=0;sessionId=crypto.randomUUID();arrivalStarted=Date.now();arrivalFailed=false;presentArrival(parent!==window||standaloneArrival);}
+  observeStandaloneArrival({});
   const latest=FS.readFile(root+'position.txt',{encoding:'utf8'}).replace(/\0/g,'');
   const latestSequence=Number(latest.split('|',1)[0]);
   if(!Number.isSafeInteger(latestSequence)||latestSequence<=lastSequence)return;

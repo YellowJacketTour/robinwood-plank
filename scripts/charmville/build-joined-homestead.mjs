@@ -8,7 +8,7 @@ await mkdir(out,{recursive:true});
 await cp(path.join(refs,'zquest-native-212/runtime'),runtime,{recursive:true});
 const quest=path.join(out,'Homestead.qst');
 await copyFile(path.join(refs,'charmville-native-homestead/template.qst'),quest);
-for(const name of ['ActionPalettes','ExtraFollowerFrames','FollowerScale','CommittedAttackFrames','CaptureBall','FaintFrames'])await copyFile(`scripts/charmville/zquest/${name}.zh`,path.join(runtime,`include/${name}.zh`));
+for(const name of ['ActionPalettes','ExtraFollowerFrames','FollowerScale','CommittedAttackFrames','CaptureBall','FaintFrames','HeartCrop'])await copyFile(`scripts/charmville/zquest/${name}.zh`,path.join(runtime,`include/${name}.zh`));
 const setup=`
         int joinedMap=Game->LoadDMapData(4)->Map;
         int joinedScreen=Game->HeroScreen;

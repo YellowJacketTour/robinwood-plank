@@ -67,3 +67,78 @@
 @media(max-width:600px) {
  .charm-world .world-menu[data-social=true] { inset:auto 0 0; width:100%; max-height:65%; padding-bottom:max(8px,env(safe-area-inset-bottom)); }
 }
+
+/* Cartridge shell: one world, one tool surface. No dashboard above the renderer. */
+.charm-world[data-playing=true] { position:fixed; inset:0; width:100%; height:100dvh; padding:0; gap:0; isolation:isolate; }
+.charm-world .world-topbar { height:48px; min-height:48px; display:flex; align-items:center; justify-content:space-between; padding:4px 12px; border-bottom:2px solid var(--game-edge); background:var(--game-night); z-index:24; }
+.world-brand { display:flex; align-items:center; gap:8px; min-width:0; }
+.world-brand-heart { color:var(--game-select); font-size:25px; text-shadow:2px 2px var(--game-frame); }
+.charm-world .world-brand h1 { font-size:13px; line-height:1.1; letter-spacing:.12em; }
+.world-brand p { font-size:11px; color:var(--game-muted); line-height:1.2; }
+.world-topbar nav { display:flex; align-items:center; gap:5px; }
+.charm-world .world-topbar button { min-height:36px; height:36px; padding:4px 10px; border-radius:4px; font-size:12px; display:flex; align-items:center; gap:6px; }
+.world-topbar img { width:24px; height:24px; image-rendering:pixelated; }
+.charm-world kbd { font:inherit; font-size:10px; border:1px solid currentColor; border-radius:3px; padding:1px 4px; opacity:.7; }
+.charm-world .world-stage { flex:1; min-height:0; width:100%; height:0; }
+.charm-world .world-adventure { border:0; border-radius:0; width:100%; height:100%; display:flex!important; }
+.charm-world .world-adventure > p[role=status] { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.charm-world .world-adventure > iframe { width:100%; flex:1; height:0; min-height:0; }
+.charm-world .world-encounter-drawer { position:absolute; bottom:0; left:0; z-index:5; max-width:480px; width:auto; padding:2px 10px; border:1px solid var(--game-edge); border-radius:0 6px 0 0; font-size:11px; }
+.charm-world .world-encounter-drawer > summary { min-height:24px; }
+.charm-world .world-encounter-drawer[open] { max-height:60%; width:min(480px,100%); }
+.charm-world .world-start-menu { position:absolute; top:12px; right:12px; width:min(290px,calc(100% - 24px)); max-height:calc(100% - 24px); overflow:auto; z-index:30; background:var(--game-paper); color:var(--game-night); border:6px double var(--game-frame); border-radius:4px; box-shadow:0 5px 0 var(--game-night),0 12px 32px #0006; padding:8px; }
+.world-start-menu header { display:flex; align-items:center; justify-content:space-between; font-weight:900; letter-spacing:.1em; border-bottom:2px solid var(--game-edge); }
+.world-start-menu header button { width:32px; height:32px; font-size:24px; }
+.world-trainer { font-size:11px; overflow:hidden; text-overflow:ellipsis; padding:5px 2px; opacity:.7; }
+.world-start-menu nav { display:grid; }
+.world-start-menu nav button { min-height:44px; display:grid; grid-template-columns:36px 1fr 12px; align-items:center; gap:8px; text-align:left; font-size:15px; font-weight:800; border:2px solid transparent; padding:2px 8px; border-radius:3px; }
+.world-start-menu img,.world-pocket-rail img,.world-menu-heading img { image-rendering:pixelated; object-fit:contain; }
+/* Emerald item masters are 24px. A 32px nearest-neighbour resize gives
+   alternating one/two-pixel edges; retain their native grid in menu slots. */
+.world-start-menu img,.world-menu-heading img { width:24px; height:24px; display:block; flex:none; justify-self:center; }
+.world-start-menu img[src$=".svg"],.world-menu-heading img[src$=".svg"] { width:32px; height:32px; }
+.world-start-menu nav button:hover,.world-start-menu nav button:focus-visible { background:var(--game-select); border-color:var(--game-frame); outline:0; }
+.world-continue { border-top:2px solid var(--game-edge); width:100%; min-height:40px; display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:800; }
+.charm-world .world-menu { position:absolute; inset:12px; max-width:1000px; margin:auto; border:6px double var(--game-edge); border-radius:5px; padding:0; background:var(--game-night); display:flex; flex-direction:column; gap:0; overflow:hidden; box-shadow:0 6px 24px #0008; }
+.charm-world .world-menu-heading { flex:none; display:flex; align-items:center; justify-content:space-between; padding:4px 10px; min-height:44px; background:var(--game-frame); }
+.world-menu-heading > div { display:flex; align-items:center; gap:8px; }
+.charm-world .world-menu-heading h2 { font-size:17px; letter-spacing:.03em; }
+.charm-world .world-menu-heading button { min-height:32px; padding:4px 8px; font-size:12px; }
+.world-pocket-rail { display:flex; flex:none; overflow-x:auto; background:var(--game-paper); color:var(--game-night); border-bottom:3px solid var(--game-edge); scrollbar-width:thin; }
+.world-pocket-rail button { flex:1; min-width:62px; min-height:52px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:10px; font-weight:800; border-bottom:3px solid transparent; }
+.world-pocket-rail img { width:24px; height:24px; }
+.world-pocket-rail button[aria-selected=true] { background:var(--game-select); border-color:var(--game-frame); }
+.charm-world .world-menu > [role=tabpanel]:not([hidden]) { flex:1; min-height:0; overflow:auto; padding:12px; position:static; background:var(--game-night); }
+.charm-world .world-menu > [hidden] { display:none!important; }
+.charm-world .world-options { gap:12px; }
+.world-options > * { margin-bottom:10px; }
+.charm-world .world-journal { max-height:none; }
+.charm-world .world-menu[data-social=true] { width:min(520px,75%); margin-right:0; }
+.charm-world > p[role=status] { position:absolute; bottom:32px; left:12px; right:12px; z-index:35; max-height:90px; font-size:12px; }
+@media(max-width:600px) {
+ .charm-world .world-topbar { padding:4px 6px; }
+ .world-topbar kbd { display:none; }
+ .charm-world .world-menu { inset:4px; border-width:4px; }
+ .world-pocket-rail button { min-width:54px; }
+ .charm-world .world-menu > [role=tabpanel]:not([hidden]) { padding:8px; }
+ .charm-world .world-menu[data-social=true] { inset:18% 4px 4px; width:auto; max-height:none; }
+}
+.charm-world .world-menu { bottom:auto; max-height:calc(100% - 24px); }
+.charm-world .world-menu > [role=tabpanel]:not([hidden]) { flex:0 1 auto; max-height:calc(100dvh - 180px); }
+@media(max-width:600px){.charm-world .world-menu{max-height:calc(100% - 8px)}.charm-world .world-menu[data-social=true]{bottom:4px;max-height:82%;}.charm-world .world-menu > [role=tabpanel]:not([hidden]){max-height:calc(100dvh - 160px);}}
+.charm-world .world-topbar { height:52px; min-height:52px; }
+.charm-world .world-topbar button,.charm-world .world-menu-heading button,.world-start-menu header button { min-height:44px; min-width:44px; }
+.world-start-menu header button { height:44px; }
+
+.charm-world .world-topbar .world-brand-heart { width:32px; height:32px; image-rendering:pixelated; flex-shrink:0; }
+
+/* The marketing mobile section rule adds 40px top/bottom with !important.
+   These game-stage surfaces own their spacing and must not inherit that rule. */
+@media(max-width:639px) {
+ .charm-world[data-playing=true] .world-adventure { padding-block:0!important; }
+ .charm-world[data-playing=true] .world-start-menu { padding-block:8px!important; }
+}
+
+/* Co-op has one focused page at a time, with the same pocket selection language. */
+.world-coop-pages { display:flex; gap:6px; padding-bottom:10px; border-bottom:1px solid var(--game-edge); }
+.charm-world .world-coop-pages button[aria-pressed=true] { background:var(--game-select); color:var(--game-night); border-color:var(--game-select); box-shadow:inset 0 -3px 0 var(--game-edge); }

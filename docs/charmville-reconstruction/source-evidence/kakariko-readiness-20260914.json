@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "source": "https://github.com/snesrev/zelda3",
+  "revision": "fbbb3f967a51fafe642e6140d0753979e73b4090",
+  "expectedRevision": "fbbb3f967a51fafe642e6140d0753979e73b4090",
+  "areas": [
+    {
+      "sourceArea": 24,
+      "name": "Kakariko NW"
+    },
+    {
+      "sourceArea": 25,
+      "name": "Kakariko NE"
+    },
+    {
+      "sourceArea": 32,
+      "name": "Kakariko SW"
+    },
+    {
+      "sourceArea": 33,
+      "name": "Kakariko SE"
+    }
+  ],
+  "inputs": {
+    "rom": false,
+    "compiledAssets": false,
+    "villageAreaHeadYaml": false
+  },
+  "readyForSceneAdmission": false,
+  "blockers": [
+    "No source resource package found at documented input paths.",
+    "No decoded area-head metadata found at the documented output path.",
+    "Rendered artwork, collision semantics, entrances, service bindings and redistribution provenance require acceptance."
+  ],
+  "notPerformed": [
+    "ROM search outside the named checkout",
+    "resource download",
+    "native quest modification",
+    "travel admission",
+    "account changes"
+  ]
+}

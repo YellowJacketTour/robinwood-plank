@@ -5,11 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {exportPrivateRuntime} from './export-private-runtime.mjs';
 import {adaptPrivateHtml,adaptPrivateMain,privateRuntimeConfig} from './private-runtime-adapter.mjs';
 import {midiBankManifest} from './midi-bank.mjs';
+import {stripWasmDebugBytes} from './strip-wasm-debug.mjs';
 
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 /** Assemble into a NEW directory. A candidate marker deliberately cannot pass
  * the serving gate: browser acceptance and release promotion remain separate. */
-export async function assemblePrivateRuntime({input,output,release,accountOrigin,localMirror=false,relocateBridge}) {
+export async function assemblePrivateRuntime({input,output,release,accountOrigin,localMirror=false,relocateBridge,stripPlayerDebug=false}) {
+  if(typeof stripPlayerDebug!=='boolean')throw Error('Debug stripping must be explicitly boolean');
   privateRuntimeConfig({release,accountOrigin,localMirror});
   if(typeof relocateBridge!=='function')throw Error('Reviewed bridge relocator required');
   const source=path.resolve(input),target=path.resolve(output);
@@ -21,6 +23,7 @@ export async function assemblePrivateRuntime({input,output,release,accountOrigin
   await exportPrivateRuntime({manifest:inventory,roots,output:target});
   // The exporter marker remains input-only throughout a failed transformation.
   const files=inventory.files.map(entry=>({...entry}));
+  const binaryTransform=stripPlayerDebug?await stripCandidatePlayerDebug(target,files):null;
   const options={release,accountOrigin,localMirror};
   async function transform(entry,fn) {
     const filename=path.join(target,entry.root,entry.path);
@@ -49,9 +52,26 @@ export async function assemblePrivateRuntime({input,output,release,accountOrigin
   await writeFile(path.join(target,'inventory.json'),encoded);
   const result={schemaVersion:1,kind:'charmville-runtime-candidate',readyToServe:false,release,accountOrigin,
     inventorySha256:digest(encoded),files:files.length,servedFiles:files.filter(entry=>entry.role==='served').length,
+    ...(binaryTransform?{binaryTransforms:[binaryTransform]}:{}),
     pending:['Authenticated cold-cache browser and worker acceptance','Inventory coverage against actual network requests','Reviewed release promotion']};
   await writeFile(path.join(target,'PACKAGE-COMPLETE.json'),JSON.stringify(result,null,2)+'\n');
   return result;
+}
+
+/** Only called on the freshly exported candidate directory, never the source
+ * or deploy staging path. Inventory identity changes before candidate hashing. */
+export async function stripCandidatePlayerDebug(target,files) {
+  const marker=JSON.parse(await readFile(path.join(target,'PACKAGE-COMPLETE.json'),'utf8'));
+  if(marker.kind!=='private-runtime-input-package'||marker.readyToServe!==false)throw Error('Only unaccepted input-copy targets may be transformed');
+  const matches=files.filter(e=>e.role==='served'&&e.route==='/zplayer.wasm');
+  if(matches.length!==1||matches[0].root!=='runtime'||matches[0].path!=='zplayer.wasm')throw Error('Exactly one canonical player binary required');
+  const entry=matches[0],filename=path.join(target,'runtime','zplayer.wasm');
+  const original=await readFile(filename);
+  if(original.length!==entry.bytes||digest(original)!==entry.sha256)throw Error('Candidate player identity mismatch');
+  const {output,receipt}=stripWasmDebugBytes(original);
+  await writeFile(filename,output);
+  entry.bytes=output.length;entry.sha256=receipt.outputSha256;
+  return {route:entry.route,...receipt};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

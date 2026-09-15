@@ -64,3 +64,14 @@ test('embedded scene waits for the native acknowledgment of this run placement',
  f.files.set(f.root+'position.txt','2|4|63|16|72|1|0|0|1');f.poll();assert(!f.classes.has('charm-arrival-pending'));
  f.files.set(f.root+'action-run.txt','2');f.poll();assert(f.classes.has('charm-arrival-pending'));
 });
+
+ test('native arrival receipt allows already moving hero but rejects a previous run',()=>{
+ const f=fixture(true);f.files.set(f.root+'arrival-ready.txt','0');
+ f.files.set(f.root+'position.txt','1|4|63|16|72|1|0|0|0');f.poll();
+ assert(f.classes.has('charm-arrival-pending'));
+ f.files.set(f.root+'arrival-ready.txt','1');
+ f.files.set(f.root+'position.txt','2|4|63|24|72|3|0|0|0');f.poll();
+ assert(!f.classes.has('charm-arrival-pending'));
+ f.files.set(f.root+'action-run.txt','2');f.poll();
+ assert(f.classes.has('charm-arrival-pending'));
+ });

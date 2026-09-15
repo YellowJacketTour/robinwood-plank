@@ -3,20 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import SocialCharmBasket, { type BasketPin, type BasketPinResult, type BasketPost } from "./social-charm-basket";
 import styles from "./social-charm-basket.module.css";
+import { SOCIAL_ITEMS, socialItemDefinition } from "@/lib/charmville/social-items";
 
 type SocialData = {
-  posts: { id: string; body: string; authorHandle: string; authorName: string | null; createdAt: string; oranPins: string }[];
+  posts: { id: string; body: string; authorHandle: string; authorName: string | null; createdAt: string; oranPins: string; pins?: Record<string,string> }[];
   basket: { face: string; qty: string }[];
+  enabledItems?: string[];
 };
 type Props = { token: string; active: boolean; onPinned?: () => void };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const count = (value: unknown): value is string => typeof value === "string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
 function socialData(value: unknown): value is SocialData {
+  if(!record(value))return false;
+  const enabled=value.enabledItems??SOCIAL_ITEMS.map(item=>item.id);
+  if(!Array.isArray(enabled)||enabled.length>2||!enabled.every(id=>!!socialItemDefinition(id))||new Set(enabled).size!==enabled.length)return false;
   return record(value) && Array.isArray(value.posts) && value.posts.length <= 30 && value.posts.every(post =>
     record(post) && typeof post.id === "string" && /^[1-9]\d{0,17}$/.test(post.id) && typeof post.body === "string" &&
     typeof post.authorHandle === "string" && (post.authorName === null || typeof post.authorName === "string") &&
-    typeof post.createdAt === "string" && count(post.oranPins)) && Array.isArray(value.basket) && value.basket.every(item =>
-      record(item) && item.face === "oran-berry" && count(item.qty));
+    typeof post.createdAt === "string" && count(post.oranPins) && (post.pins === undefined ||
+      (record(post.pins) && Object.entries(post.pins).every(([id, qty]) => enabled.includes(id) && count(qty))))) &&
+    Array.isArray(value.basket) && value.basket.length <= enabled.length && value.basket.every(item =>
+      record(item) && enabled.includes(item.face) && count(item.qty)) &&
+    new Set(value.basket.map(item => item.face)).size === value.basket.length;
 }
 
 /** Identity changes discard the former account's private basket immediately. */
@@ -40,7 +48,7 @@ function SocialAccountPanel({ token, active, onPinned }: Props) {
     setLoading(true); setError("");
     try {
       const response = await fetch("/api/charmville/social", {
-        headers: { authorization: `Bearer ${token}` }, cache: "no-store", mode: "same-origin", redirect: "error", signal: abort.signal,
+        headers: { authorization: `Bearer ${token}`, "x-charmville-social-protocol":"social-items-v2" }, cache: "no-store", mode: "same-origin", redirect: "error", signal: abort.signal,
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The feed could not be loaded.");
@@ -62,7 +70,7 @@ function SocialAccountPanel({ token, active, onPinned }: Props) {
     // A feed read begun before this spend cannot restore its old balance afterward.
     controller.current?.abort(); ++epoch.current; setLoading(false);
     const response = await fetch("/api/charmville/social", {
-      method: "POST", headers: { authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      method: "POST", headers: { authorization: `Bearer ${token}`, "Content-Type": "application/json", "x-charmville-social-protocol":"social-items-v2" },
       body: JSON.stringify({ postId: command.postId, face: command.face, requestId: command.requestId }),
       mode: "same-origin", redirect: "error",
     });
@@ -77,21 +85,23 @@ function SocialAccountPanel({ token, active, onPinned }: Props) {
     return { remainingQuantity: Number(result.remaining) };
   }
 
-  const oranQuantity = Number(data?.basket.find(item => item.face === "oran-berry")?.qty ?? 0);
+  const enabledItems=(data?.enabledItems??SOCIAL_ITEMS.map(item=>item.id)).map(id=>socialItemDefinition(id)!).filter(Boolean);
+  const charms = enabledItems.map(item => ({ ...item, quantity: Number(data?.basket.find(balance => balance.face === item.id)?.qty ?? 0) }));
   return <div hidden={!active} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     {target ? <SocialCharmBasket key={target.id} post={target}
-      charms={[{ id: "oran-berry", name: "Oran Berry", image: "/charmville/items/oran-berry.png", quantity: Number.isSafeInteger(oranQuantity) ? oranQuantity : 0, description: "Grown at home. Useful on your journey, or a little gift pinned to a post." }]}
+      charms={charms}
       onPin={pin} onClose={() => { setTarget(null); void refresh(); }} onPinned={() => onPinned?.()} />
       : <section className={styles.basket} aria-label="PlankSpace public posts" aria-busy={loading}>
         <header className={styles.header}><div><span className={styles.eyebrow}>Charmdex · PlankSpace</span><h2>Public posts</h2></div>
           <button type="button" disabled={loading || !token} onClick={() => void refresh()}>{loading ? "Refreshing…" : "Refresh"}</button></header>
-        <p className={styles.hint}>A little of your adventure, shared. Pin an owned Oran Berry without leaving the game.</p>
+        <p className={styles.hint}>A little of your adventure, shared. Pin an owned charm without leaving the game.</p>
         {error && <p role="alert">{error}</p>}
         {!token && <p>Sign in to open your account’s charm basket.</p>}
         {data?.posts.length === 0 && <p className={styles.empty}>No public posts are available yet.</p>}
         <div className={styles.feed}>{data?.posts.map(post => <article key={post.id} className={styles.post}>
           <strong>{post.authorName || post.authorHandle}</strong><span className={styles.byline}> @{post.authorHandle}</span>
-          <p>{post.body}</p><div className={styles.postActions}><span>{post.oranPins} Oran pins</span>
+          <p>{post.body}</p><div className={styles.postActions}><span>{enabledItems.map(item =>
+            <span key={item.id}>{post.pins?.[item.id] ?? (item.id === "oran-berry" ? post.oranPins : "0")} {item.name} pins </span>)}</span>
             <button type="button" onClick={() => setTarget({ id: post.id, author: post.authorHandle, excerpt: post.body })}>Open charm basket</button>
           </div></article>)}</div>
       </section>}

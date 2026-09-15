@@ -20,7 +20,12 @@ export function useMenuGamepad(root:RefObject<HTMLElement|null>,enabled:boolean,
     const edge=(i:number)=>pressed.has(i)&&!previous.has(i);
     const controls=Array.from(modal.querySelectorAll<HTMLElement>('button,summary,a[href],input,select,textarea,[tabindex]')).filter(e=>e.tabIndex>=0&&!e.matches(':disabled,[aria-disabled="true"]')&&e.getClientRects().length>0&&!e.closest('[hidden],[inert]'));
     const current=focused instanceof HTMLElement&&modal.contains(focused)?focused:null;
-    if(edge(1))onBack();
+    if(edge(1)){
+     // A local reader/dialog gets first refusal before closing the whole menu.
+     const back=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});
+     if(current)current.dispatchEvent(back);
+     if(!back.defaultPrevented)onBack();
+    }
     else if(edge(0)){if(current&&controls.includes(current))current.click();else controls[0]?.focus();}
     else{const direction=[12,13,14,15].find(edge);if(direction!==undefined){
      const key={12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'}[direction]!;

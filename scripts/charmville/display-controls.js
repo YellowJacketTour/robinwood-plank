@@ -20,10 +20,13 @@ function fit(){
  const w=canvas.width||256,h=canvas.height||224;
  const mobile=matchMedia('(hover:none)').matches;
  const portrait=mobile&&innerWidth<=600;
- const availableWidth=Math.max(128,innerWidth-(mobile&&!portrait?220:16));
- const availableHeight=Math.max(112,innerHeight-header.getBoundingClientRect().height-(portrait?200:(document.fullscreenElement?48:20)));
+ // The negotiated host owns navigation. Its native settings rail is an overlay;
+ // it must never resize the world when opened or closed. Keep loading reachable.
+ const immersive=document.body.classList.contains('charm-hosted-immersive')&&!header.querySelector('button.charm-runtime-enter');
+ const availableWidth=Math.max(128,innerWidth-(mobile&&!portrait?220:(immersive?0:16)));
+ const availableHeight=Math.max(112,innerHeight-(immersive?0:header.getBoundingClientRect().height)-(portrait?200:(immersive?0:(document.fullscreenElement?48:20))));
  let scale=Math.min(availableWidth/w,availableHeight/h)*zoom;
- if(document.fullscreenElement)scale=Math.min(scale,availableWidth/w,availableHeight/h);
+ if(document.fullscreenElement||immersive)scale=Math.min(scale,availableWidth/w,availableHeight/h);
  if(pixels.checked&&scale>=1)scale=Math.floor(scale);
  canvas.style.setProperty('--charm-width',`${Math.round(w*scale)}px`);
  canvas.style.setProperty('--charm-height',`${Math.round(h*scale)}px`);

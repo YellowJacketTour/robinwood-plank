@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="crispEdges">
+ <title>Charmville satchel</title>
+ <path fill="#1B120A" d="M18 5h28v5h5v7h6v40h-5v5H12v-5H7V17h6v-7h5z"/>
+ <path fill="#AF761D" d="M21 8h22v4h5v7h-7v-6H23v6h-7v-7h5z"/>
+ <path fill="#24693F" d="M13 20h38v6h3v28h-5v5H15v-5h-5V26h3z"/>
+ <path fill="#123322" d="M15 25h34v30H15z"/>
+ <path fill="#E9B43F" d="M12 20h40v11h-6v5H18v-5h-6z"/>
+ <path fill="#F8D98A" d="M15 20h34v6H15z"/>
+ <path fill="#1B120A" d="M27 27h10v17H27z"/>
+ <path fill="#AF761D" d="M29 29h6v13h-6z"/>
+ <path fill="#FFF2CF" d="M30 32h4v5h-4z"/>
+ <path fill="#E9B43F" d="M16 45h7v3h-7zm25 0h7v3h-7zM18 53h28v2H18z"/>
+</svg>
