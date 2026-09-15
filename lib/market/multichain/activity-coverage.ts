@@ -1,6 +1,7 @@
 import { postgresQuery } from "@/lib/postgres";
 import { durableKv } from "@/lib/market/durable-kv";
 import { enqueueDataJob } from "@/lib/market/multichain/control-plane";
+import { DEMAND_PRIORITY } from "@/lib/market/multichain/collection-demand";
 import { UNION_SQL } from "./ledger-union-sql";
 
 /**
@@ -64,7 +65,16 @@ export async function requestActivityCoverage(chainSlug: string, contractAddress
     source: ACTIVITY_COVERAGE_SOURCE,
     chainSlug,
     subject,
-    priority: 40,
+    // DETAIL_PAGE, not a bare number. MEASURED live 2026-09-14: at priority
+    // 40 these jobs were enqueued correctly and then NEVER claimed -- five of
+    // them sat queued with 0 attempts for over four hours while the worker
+    // happily completed other sources. The plain claim orders by
+    // `priority DESC` and the standing lane jobs re-enqueue every tick at
+    // 20-60, so a 40 is starved by construction: below BACKGROUND (50), and
+    // permanently behind work that renews itself. This count is what a
+    // visitor is waiting to see on a collection page, which is exactly what
+    // DETAIL_PAGE (95) means in this ladder.
+    priority: DEMAND_PRIORITY.DETAIL_PAGE,
   });
 }
 
