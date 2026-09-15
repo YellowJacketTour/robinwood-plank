@@ -60,11 +60,24 @@ export async function getCollectionAsync(slug: string): Promise<MarketCollection
 
   if (!/^0x[0-9a-fA-F]{40}$/.test(slug)) return undefined;
 
-  const { listTrackedCollections } = await import("@/lib/market/multichain/store");
-  const all = await listTrackedCollections().catch(() => []);
-  const found = all.find(
-    (c) => c.chainSlug === "robinhood" && c.contractAddress.toLowerCase() === slug.toLowerCase()
-  );
+  // ONE ROW, BY ITS KEY. This used to call listTrackedCollections() -- every
+  // tracked collection on every chain, 300,351 rows on production as of
+  // 2026-09-14 -- and then scan the array in JavaScript for a single
+  // Robinhood-chain contract. Nine routes call this function (activity,
+  // listings, offers, my-listings, native-collection, orders x2), so every
+  // one of those requests paid a full-table read plus a 300k-element walk to
+  // answer a lookup the table's own (chain_slug, contract_address) key
+  // answers directly.
+  //
+  // MEASURED on production, /api/market/multichain/activity: 8.0 s for
+  // Azuki, and the SAME 8.0 s with limit=5 as with limit=39 -- a fixed
+  // per-request cost that had nothing to do with the feed the route was
+  // asked for. getTrackedCollection is the exact single-row reader that
+  // already existed for this; it normalizes the address the same way the
+  // scan's toLowerCase() did (Robinhood Chain is EVM, so normalization is
+  // lowercasing), making this the same lookup, not a narrower one.
+  const { getTrackedCollection } = await import("@/lib/market/multichain/store");
+  const found = await getTrackedCollection("robinhood", slug).catch(() => null);
   if (!found) return undefined;
 
   const { MARKET_DEFAULT_FEE_BPS } = await import("@/lib/constants");

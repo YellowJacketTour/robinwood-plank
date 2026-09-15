@@ -53,7 +53,7 @@ import { pickAlchemyKey } from "@/lib/market/multichain/discovery/alchemy-key-po
 import { publicError, rateLimit } from "@/lib/security";
 import { resolveOwnedTokenIds } from "@/lib/market/multichain/owned-token-resolver";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
-import { listTrackedCollections } from "@/lib/market/multichain/store";
+import { listTrackedCollectionsForChain } from "@/lib/market/multichain/store";
 import { getListings, getOffers } from "@/lib/market/orders-store";
 import { ROBINHOOD_CHAIN_SLUG, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { edgeRead } from "@/lib/market/multichain/edge/read-gateway";
@@ -128,7 +128,7 @@ async function fetchOwnedAll(owner: string): Promise<OwnedItem[]> {
  * already built for the single-collection "My tokens" tab
  * (resolveOwnedTokenIds, now exported from there rather than duplicated
  * here). Run once per Robinhood-Chain collection this deployment tracks
- * (plank_multichain_collections, via listTrackedCollections), bounded to
+ * (plank_multichain_collections, via listTrackedCollectionsForChain), bounded to
  * MAX_COLLECTIONS same as the foreign fan-out -- a wallet touching many
  * auto-discovered collections still can't blow up one request.
  *
@@ -146,11 +146,16 @@ async function fetchOwnedRobinhood(
   const rpcUrl = ROBINHOOD_RPC_URLS[0];
   if (!rpcUrl) return { owned: [], truncated: false, trackedCount: 0, scannedThrough: offset };
 
-  const tracked = await listTrackedCollections().catch(() => []);
-  const robinhoodCollections = tracked.filter((c) => isRobinhoodChainSlug(c.chainSlug));
-  const bounded = robinhoodCollections.slice(offset, offset + MAX_COLLECTIONS);
+  // ONE CHAIN'S ROWS, ONE WINDOW. This used to read every tracked collection
+  // on every chain (listTrackedCollections, 300,351 rows on production as of
+  // 2026-09-14) and then filter in JavaScript down to the Robinhood-Chain
+  // ones it wanted -- on every wallet-summary request. The database can do
+  // both: the WHERE is served by the (chain_slug, contract_address) unique
+  // index, which also gives the ORDER BY for free, and the count comes back
+  // with the page so `trackedCount`/`truncated` stay exactly as before.
+  const { collections: bounded, totalCount } = await listTrackedCollectionsForChain(ROBINHOOD_CHAIN_SLUG, { offset, limit: MAX_COLLECTIONS }).catch(() => ({ collections: [], totalCount: 0 }));
   const scannedThrough = offset + bounded.length;
-  const truncated = scannedThrough < robinhoodCollections.length;
+  const truncated = scannedThrough < totalCount;
 
   const results = await Promise.all(
     bounded.map(async (c): Promise<OwnedItem[]> => {
@@ -167,7 +172,7 @@ async function fetchOwnedRobinhood(
       }
     })
   );
-  return { owned: results.flat(), truncated, trackedCount: robinhoodCollections.length, scannedThrough };
+  return { owned: results.flat(), truncated, trackedCount: totalCount, scannedThrough };
 }
 
 /**

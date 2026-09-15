@@ -201,6 +201,40 @@ export async function listCollectionsForSync(
  * confirm a collection is real/tracked before accepting a signed order
  * against it.
  */
+/**
+ * One chain's tracked collections, a window at a time, with that chain's
+ * total -- for a caller that must walk a chain's whole list but must not
+ * read every other chain's to do it.
+ *
+ * wallet-summary's Robinhood fan-out called listTrackedCollections() (every
+ * row on every chain, 300,351 on production 2026-09-14) and then filtered in
+ * JavaScript to the one chain it wanted, on every request. The count comes
+ * back with the page so the caller can still report `trackedCount` and
+ * decide `truncated` without a second pass.
+ */
+export async function listTrackedCollectionsForChain(
+  chainSlug: string,
+  input: { offset?: number; limit?: number } = {}
+): Promise<{ collections: TrackedCollection[]; totalCount: number }> {
+  const limit = Math.max(1, Math.trunc(input.limit ?? 50));
+  const offset = Math.max(0, Math.trunc(input.offset ?? 0));
+  const [page, total] = await Promise.all([
+    postgresQuery<CollectionRow>(
+      `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, token_standard
+         FROM plank_multichain_collections
+        WHERE chain_slug = $1
+        ORDER BY contract_address
+        LIMIT $2 OFFSET $3`,
+      [chainSlug, limit, offset]
+    ),
+    postgresQuery<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM plank_multichain_collections WHERE chain_slug = $1`,
+      [chainSlug]
+    ),
+  ]);
+  return { collections: page.rows.map(rowToCollection), totalCount: Number(total.rows[0]?.n ?? 0) };
+}
+
 export async function getTrackedCollection(chainSlug: string, contractAddress: string): Promise<TrackedCollection | null> {
   const result = await postgresQuery<CollectionRow>(
     `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address, creator_ens, token_standard
