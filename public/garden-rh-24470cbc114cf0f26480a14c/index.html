@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>Garden Exchange · Robinhood sim</title>
+<style>
+:root{
+  --bg:#080A08;--surf:#0c100c;--ink:#d8f5de;--muted:rgba(216,245,222,.55);
+  --pop:#00C805;--popb:#15803d;--gold:#c4a35a;--err:#ff5c6c;--line:#1a3a22;
+  --chip:#101820;--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);min-height:100%}
+button:not(:disabled),[role=button]:not(:disabled){cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.55}
+a{color:var(--pop)}
+.head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(8,10,8,.92);backdrop-filter:blur(12px);z-index:20;flex-wrap:wrap}
+.logo{font-weight:650;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.nav{display:flex;gap:2px;flex-wrap:wrap}
+.nav button{background:none;border:none;color:var(--muted);padding:8px 10px;border-radius:10px;font:inherit;min-height:40px}
+.nav button.on{color:var(--pop);background:rgba(0,200,5,.12);border:1px solid var(--popb)}
+.nav button .d{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:6px;opacity:.7}
+.right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.pill{border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:8px 12px;font:12px var(--mono);min-height:40px}
+.shell{max-width:1120px;margin:0 auto;padding:18px 16px 80px}
+.banner h1{font-size:28px;margin:4px 0 8px;letter-spacing:-.02em}
+.banner p{color:var(--muted);max-width:62ch;margin:0 0 10px}
+.facts{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 16px}
+.facts b{display:flex;flex-direction:column;font:600 18px var(--mono)}
+.facts small{color:var(--muted);font:11px var(--font);font-weight:400}
+.tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:14px;margin-bottom:16px;overflow-x:auto}
+.tabs button{background:none;border:none;color:var(--muted);padding:8px 12px;border-radius:10px;font:inherit;flex:1 0 max-content;min-height:40px}
+.tabs button.on{color:var(--ink);background:rgba(0,200,5,.15);border:1px solid var(--popb)}
+.card,.panel{background:rgba(12,20,14,.78);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:12px}
+.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.hs{background:rgba(12,20,14,.78);border:1px solid var(--line);border-radius:14px;padding:12px}
+.hs .k{color:var(--muted);font-size:11px}
+.hs .v{font:600 22px/1.1 var(--mono);margin-top:4px}
+.hs .v.pop{color:var(--pop)}
+.hs .f{color:var(--muted);font-size:12px;margin-top:4px}
+.leg{margin:10px 0}
+.leg .lbl{color:var(--muted);font-size:12px;margin-bottom:4px}
+.row{display:flex;gap:8px}
+.row input,.row select{flex:1;min-height:44px;background:var(--chip);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:8px 12px;font:16px var(--mono)}
+.go{width:100%;min-height:48px;border:none;border-radius:14px;background:var(--pop);color:#041204;font:650 15px var(--font);margin-top:10px}
+.btn{min-height:40px;border:1px solid var(--popb);background:rgba(0,200,5,.12);color:var(--pop);border-radius:12px;padding:8px 12px;font:inherit}
+.btn.gold{border-color:#6b5420;color:var(--gold);background:rgba(196,163,90,.08)}
+.hint{color:var(--muted);font-size:12px;margin-top:8px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;color:var(--muted);font-weight:500;padding:6px 4px;border-bottom:1px solid var(--line)}
+.tbl td{padding:8px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.tbl td.r,.tbl th.r{text-align:right}
+.tbl tr.on td{background:rgba(0,200,5,.1)}
+.tbl tbody tr[data-pick]{cursor:pointer}
+.ok{color:var(--pop)} .bad{color:var(--err)}
+.session{padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px;font-size:13px}
+.session.open{border-color:var(--popb)}
+.session b{display:block}
+.mark{display:inline-block;font:600 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.mark.hold{color:var(--pop);border-color:var(--popb)}
+.mark.rest{color:var(--muted)}
+.mark.refuse{color:var(--err)}
+.chip{display:inline-block;font:600 10px var(--mono);padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-right:6px}
+.chip.exec{color:var(--pop);border-color:var(--popb)}
+.chip.block{color:var(--gold);border-color:#6b5420}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#101820;border:1px solid var(--popb);padding:10px 16px;border-radius:12px;z-index:40}
+.modalbg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal{background:#0c100c;border:1px solid var(--line);border-radius:18px;max-width:520px;width:100%;padding:18px}
+.modal h3{margin:0 0 8px}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.kv span{color:var(--muted)}
+.foot{max-width:1120px;margin:0 auto;padding:8px 16px 24px;color:var(--muted);font-size:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:720px){.hero,.grid2{grid-template-columns:1fr 1fr}.banner h1{font-size:22px}}
+@media(max-width:430px){.hero,.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="head">
+  <div class="logo">Garden Exchange</div>
+  <nav class="nav" id="nav"></nav>
+  <div class="right">
+    <span class="pill">Robinhood Chain · 4663</span>
+    <button class="pill" id="wallet" type="button">Connect</button>
+  </div>
+</header>
+<main class="shell" id="main"></main>
+<footer class="foot">
+  Hidden sim for owner + Bullish. noindex. Integer ledger twin of garden.rs. Witness 9mm, never wrap.
+  Disabled controls never sign. Vinedresser ranks; no unattended vault.
+</footer>
+<script>
+(function(){
+const FLOAT_BPS=500n, DRIP_VAULT=9000n, LOYALTY=1000n, GENESIS=5n, MIN_ROW=1000n, K=720n;
+const ATTRIB_MINT=5000n, PAYER=4000n, CREATOR=2000n, REF=2000n;
+const USDG_TO=1000n;
+function mApply(u,dh,k){k=k<1n?1n:k;dh=dh<0n?0n:dh;return (u*dh)/(dh+k)}
+function navMint(dep,s,v){if(dep<=0n)throw Error("deposit too small");const units=s===0n?dep/GENESIS:(dep*s)/v;if(units===0n)throw Error("too small");const cut=s===0n?0n:(units*FLOAT_BPS)/10000n;return {units,cut,minted:units-cut}}
+function navRedeem(u,s,v){if(s===0n||u>s)throw Error("cannot redeem");return u===s?v:(u*v)/s}
+function waterfall(raw){const loyalty=(raw*LOYALTY)/10000n, rest=raw-loyalty, vault=(rest*DRIP_VAULT)/10000n;return {loyalty,rest,vault,incident:rest-vault}}
+function xyk(ri,ro,amt,feeBps){const b=10000n-feeBps;return (amt*b*ro)/(ri*10000n+amt*b)}
+function fmt(v,dec,d){const n=10n**BigInt(dec);const neg=v<0n;if(neg)v=-v;const i=v/n,f=v%n;let fs=f.toString().padStart(dec,"0").slice(0,d);return (neg?"-":"")+i.toString()+"."+fs}
+function fmtFlwrs(v){return fmt(v,3,3)}
+function fmtNav(v,s){if(s===0n)return "—";return "$"+(Number(v)/Number(s)).toFixed(6)}
+function lvr(sig){return (sig*sig)/8}
+function edge(sig,fee){return fee-lvr(sig)}
+function fmtApr(x){if(!isFinite(x))return "∞";const p=x*100;return (p>0?"+":"")+p.toFixed(1)+"%"}
+
+const BOOK=[
+  {id:"hims",p:"HIMS/USDG",v:"Uniswap V3",fee:3.41,sig:0.647,tvl:1189261,native:false},
+  {id:"cat",p:"CASHCAT/WETH",v:"Uniswap V3",fee:2.665,sig:2.841,tvl:2176017,native:true},
+  {id:"nvda",p:"NVDA/USDG",v:"Uniswap V3",fee:0.944,sig:0.274,tvl:7110315,native:false,sess:{o:0.425,c:0.231}},
+  {id:"googl",p:"GOOGL/USDG",v:"Uniswap V3",fee:0.889,sig:0.942,tvl:1159908,native:false},
+  {id:"gme",p:"GME/USDG",v:"Uniswap V3",fee:0.559,sig:0.511,tvl:653576,native:false},
+  {id:"spy",p:"SPY/WETH",v:"Uniswap V3",fee:0.473,sig:0.175,tvl:1741572,native:false},
+  {id:"spcx",p:"SPCX/USDG",v:"Uniswap V3",fee:0.509,sig:0.636,tvl:3395765,native:false},
+  {id:"aapl",p:"AAPL/USDG",v:"Uniswap V3",fee:0.446,sig:0.304,tvl:419119,native:false},
+  {id:"msft",p:"MSFT/USDG",v:"Uniswap V3",fee:0.239,sig:0.838,tvl:850358,native:false},
+  {id:"amc",p:"AMC/USDG",v:"Uniswap V3",fee:0.313,sig:1.221,tvl:1915641,native:false},
+  {id:"qqq",p:"QQQ/USDG",v:"Uniswap V3",fee:0.091,sig:0.345,tvl:1491305,native:false},
+  {id:"sgov",p:"SGOV/USDG",v:"Uniswap V3",fee:0.089,sig:1.057,tvl:4771310,native:false},
+];
+const NINE=[
+  {p:"ETH/USDG",v:"9mm V2",feeEst:0.813},
+  {p:"NVDA/USDG",v:"9mm V3",feeEst:2.232},
+  {p:"HOOD/USDG",v:"9mm Infinity Bin",feeEst:0.985},
+];
+const POOLS=[
+  {id:"u3",v:"Uniswap V3",pair:"ETH/USDG",fee:5n,r0:1840n*10n**18n,r1:7330000n*10n**6n,tvl:"14,600,000",vol:"42,100,000",w:"Deepest WETH/USDG. Observes feeGrowth; never wraps the NFT."},
+  {id:"u4",v:"Uniswap V4",pair:"ETH/USDG",fee:30n,r0:920n*10n**18n,r1:3680000n*10n**6n,tvl:"7,360,000",vol:"18,400,000",w:"PoolManager 0x8366…0951. Hooks observed, not forked."},
+  {id:"9v2",v:"9mm V2",pair:"ETH/USDG",fee:17n,r0:210n*10n**18n,r1:840000n*10n**6n,tvl:"1,680,000",vol:"2,200,000",w:"Holder rev-share stays on 9mm. Factory cited as Creator."},
+  {id:"9v3",v:"9mm V3",pair:"NVDA/USDG",fee:25n,r0:12400n*10n**18n,r1:1860000n*10n**6n,tvl:"3,720,000",vol:"9,100,000",w:"Session-gated. Circadian desk refuses Garden flow while cash is closed."},
+  {id:"9bin",v:"9mm Infinity Bin",pair:"HOOD/USDG",fee:20n,r0:84000n*10n**18n,r1:1260000n*10n**6n,tvl:"2,520,000",vol:"3,400,000",w:"Bin lattice. Official Pancake Infinity Bin is n/a on 4663."},
+];
+
+function cashOpen(now){
+  const fmt=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+  const p=fmt.formatToParts(now); const g=t=>p.find(x=>x.type===t)?.value||"";
+  const wd=g("weekday"), mins=+g("hour")*60+(+g("minute"));
+  const we=wd==="Sat"||wd==="Sun";
+  const open=!we && mins>=9*60+30 && mins<16*60;
+  return {open,label:open?"US cash tape OPEN":"US cash tape CLOSED",next:open?"Session ends 16:00 ET":we?"Opens Monday 09:30 ET":mins<9*60+30?"Opens 09:30 ET":"Opens next weekday 09:30 ET"};
+}
+
+const S={
+  connected:false, addr:null, surface:"swap",
+  height:10080n, vault:125000n*1000n, sOut:20000n*1000n,
+  loyalty:2800n*1000n, incident:4200n*1000n,
+  bal:{eth:12n*10n**18n, usdg:25000n*10n**6n, flwrs:0n, oil:0n, nvda:40n*10n**18n},
+  rows:[{id:"g1",kind:"planted",owner:"grove",units:12000n*1000n,h:8400n,acc:420n*1000n}],
+  fills:[{k:"mint",d:"Genesis grove · s_out = Σ live row units"}],
+  pick:"nvda", size:10000, pending:null, toast:null
+};
+
+const NAV=[
+  {id:"trade",label:"Trade",home:"swap",tabs:[["swap","Swap"],["terminal","Terminal"],["limit","Limit"],["dca","DCA"]]},
+  {id:"garden",label:"Garden",home:"garden",tabs:[]},
+  {id:"pools",label:"Pools",home:"pools",tabs:[["pools","Provide"],["vinedresser","Vinedresser"]]},
+  {id:"explore",label:"Explore",home:"explore",tabs:[]},
+  {id:"portfolio",label:"Portfolio",home:"portfolio",tabs:[]},
+  {id:"launch",label:"Launchpad",home:"launch",tabs:[]},
+  {id:"labs",label:"Labs",home:"perps",tabs:[["perps","Perps"],["vol","Vol perps"]]},
+  {id:"docs",label:"Docs",home:"docs",tabs:[]},
+];
+
+function toast(t){S.toast=t; render(); setTimeout(()=>{S.toast=null;render()},3800)}
+function need(){if(!S.connected) throw Error("connect first")}
+function review(title, lines, run){S.pending={title,lines,run}; render()}
+
+function connect(){
+  S.connected=true; S.addr="0x7a12Garden4663a11cE00C80500F1e1d"; S.surface="garden";
+  toast("Local simulator · isolated ledger, no mainnet coins");
+}
+function mint(usdg6){
+  need(); const dep=usdg6/USDG_TO; const {cut,minted}=navMint(dep,S.sOut,S.vault);
+  S.vault+=dep; S.sOut+=minted; S.bal.usdg-=usdg6; S.bal.flwrs+=minted;
+  S.fills.unshift({k:"mint",d:"Claim minted "+minted+" mojo · float "+cut+" · s_out += minted"});
+}
+function burn(u){
+  need(); const rel=navRedeem(u,S.sOut,S.vault); S.vault-=rel; S.sOut-=u; S.bal.flwrs-=u; S.bal.usdg+=rel*USDG_TO;
+  S.fills.unshift({k:"burn",d:"$FLWRS burned — destroyed, not sold. Vault released "+rel+" mojo."});
+}
+function plant(u){
+  need(); if(u<MIN_ROW) throw Error("MIN_ROW_UNITS is 1 $FLWRS");
+  S.bal.flwrs-=u; S.rows.unshift({id:"r"+Date.now(),kind:"planted",owner:"you",units:u,h:S.height,acc:0n});
+  S.fills.unshift({k:"plant",d:"Planted "+u+" mojo at height "+S.height+". m(0)=0."});
+}
+function drip(usdg6){
+  const w=waterfall(usdg6/USDG_TO); S.vault+=w.vault; S.incident+=w.incident; S.loyalty+=w.loyalty;
+  S.fills.unshift({k:"drip",d:"Fee: loyalty "+w.loyalty+", vault "+w.vault+", incident "+w.incident+". s_out unchanged."});
+}
+function swap(amtWei){
+  need(); const p=POOLS[0]; const out=xyk(p.r0,p.r1,amtWei,p.fee);
+  S.bal.eth-=amtWei; S.bal.usdg+=out; drip((out*p.fee)/10000n);
+  S.fills.unshift({k:"swap",d:"ETH→USDG on "+p.v+". Fee dripped; s_out unchanged."});
+  return out;
+}
+
+function h(s){return s.replace(/[&<>"]/g,c=>({"&":"&","<":"<",">":">","\"":"""}[c]))}
+
+function renderNav(){
+  document.getElementById("nav").innerHTML=NAV.map(b=>{
+    const on=b.home===S.surface||(b.tabs||[]).some(t=>t[0]===S.surface);
+    return `<button type="button" class="${on?"on":""}" data-go="${b.home}"><i class="d"></i>${b.label}</button>`;
+  }).join("");
+  document.getElementById("wallet").textContent=S.connected?(S.addr.slice(0,6)+"…"+S.addr.slice(-4)):"Connect";
+}
+
+function sessionBar(){
+  const s=cashOpen(new Date());
+  return `<div class="session ${s.open?"open":""}"><b>${s.label}</b>${s.next}. Tokenized stocks refuse Garden-originated flow while the cash tape is closed.</div>`;
+}
+
+function banner(eye,title,detail){
+  return `<section class="banner"><span class="chip exec">Executable</span><div><span style="color:var(--muted);font-size:12px">${eye}</span><h1>${title}</h1><p>${detail}</p></div>
+  <div class="facts"><b>${Number(S.height).toLocaleString()}<small>ledger height</small></b><b>${POOLS.length}<small>witnessed pools</small></b><b>4663<small>chain id</small></b></div></section>`;
+}
+
+function tabsFor(){
+  const b=NAV.find(x=>x.home===S.surface||(x.tabs||[]).some(t=>t[0]===S.surface));
+  if(!b||!b.tabs.length) return "";
+  return `<div class="tabs">${b.tabs.map(t=>`<button type="button" class="${t[0]===S.surface?"on":""}" data-go="${t[0]}">${t[1]}</button>`).join("")}</div>`;
+}
+
+function viewSwap(){
+  const p=POOLS[0]; const amt=1n*10n**18n; const out=xyk(p.r0,p.r1,amt,p.fee);
+  return banner("Trade","Swap ETH, USDG and tokenized stocks","Pick an asset, see the output this tab computed itself from live pool reserves, then review the exact intent before your wallet signs it.")
+  +sessionBar()+tabsFor()+`
+  <div class="card" style="max-width:460px;margin:0 auto">
+    <div class="leg"><div class="lbl">You pay</div><div class="row"><input id="sw" value="1"><select disabled><option>ETH</option></select></div></div>
+    <div class="leg"><div class="lbl">You receive (quoted)</div><div class="row"><input disabled value="${fmt(out,6,2)}"><select disabled><option>USDG</option></select></div></div>
+    <p class="hint">Venue ${p.v} · ${Number(p.fee)/100}% · integer xyk. A fee never mints.</p>
+    <button class="go" id="doSwap" ${S.connected?"":"disabled"}>${S.connected?"Review swap":"Connect to review"}</button>
+  </div>
+  <div class="panel"><h3>Witnessed route</h3>${POOLS.map(x=>`<p class="hint"><b style="color:var(--pop)">${x.v}</b> — ${x.w}</p>`).join("")}</div>`;
+}
+function viewLimit(){return banner("Trade / exact price","Name your price","A limit states the exact amounts in and out — no slippage.")+tabsFor()+`<div class="card"><p>The build path exists in OfferLedger.sol and is undeployed. A form that cannot settle is not offered.</p><button class="go" disabled>Disabled — this control never signs</button></div>`}
+function viewDca(){return banner("Trade / on a schedule","Plan repeat buys, sign each one","Nothing runs unattended.")+tabsFor()+`<div class="card"><span class="chip block">Blocked</span><p>Unattended crank is not deployed on 4663. Every due step is signed by you.</p><button class="go" disabled>Disabled — this control never signs</button></div>`}
+function viewTerm(){return banner("Trade / terminal","Chart, depth and an order ticket","The same pools as Swap.")+tabsFor()+`<div class="panel"><p class="hint">Candles would be built only from confirmed reserve generations. Preview.</p></div>`+viewSwap().split(tabsFor())[1]}
+
+function viewGarden(){
+  const nav=fmtNav(S.vault,S.sOut);
+  return banner("Garden","Use the suite. Be credited with a redeemable claim.","A contribution mints $FLWRS you can always burn back for your share of the vault. Fees never mint.")
+  +`<div class="hero">
+    <div class="hs"><div class="k">NAV</div><div class="v pop">${nav}</div><div class="f">vault / s_out</div></div>
+    <div class="hs"><div class="k">Vault</div><div class="v">${fmtFlwrs(S.vault)}</div><div class="f">stable mojo</div></div>
+    <div class="hs"><div class="k">s_out</div><div class="v">${fmtFlwrs(S.sOut)}</div><div class="f">credits, not deposits</div></div>
+    <div class="hs"><div class="k">Your $FLWRS</div><div class="v">${fmtFlwrs(S.bal.flwrs)}</div><div class="f">${S.connected?"connected":"connect to mint"}</div></div>
+  </div>
+  <div class="grid2">
+    <div class="panel"><h3>Mint a claim</h3><p class="hint">USDG → vault. s_out += minted, not units. Float 500 bps after genesis.</p>
+      <div class="row"><input id="dep" value="1000"></div>
+      <button class="go" id="doMint" ${S.connected?"":"disabled"}>${S.connected?"Review mint":"Connect to review"}</button>
+    </div>
+    <div class="panel"><h3>Burn $FLWRS</h3><p class="hint">Destroyed, not sold. No counterparty.</p>
+      <div class="row"><input id="red" value="100"></div>
+      <button class="go" id="doBurn" ${S.connected?"":"disabled"}>Review burn</button>
+    </div>
+    <div class="panel"><h3>Plant a row</h3><p class="hint">m(Δh)=units·Δh/(Δh+K). m(0)=0. MIN_ROW=1 $FLWRS.</p>
+      <div class="row"><input id="pl" value="10"></div>
+      <button class="go" id="doPlant" ${S.connected?"":"disabled"}>Review plant</button>
+    </div>
+    <div class="panel"><h3>Drip a fee</h3><p class="hint">loyalty_split then drip_split. Never a bare 81%.</p>
+      <div class="row"><input id="dr" value="100"></div>
+      <button class="go" id="doDrip" ${S.connected?"":"disabled"}>Review drip</button>
+    </div>
+  </div>
+  <div class="panel"><h3>Rows</h3>
+    <table class="tbl"><thead><tr><th>Kind</th><th class="r">Units</th><th class="r">Age</th></tr></thead><tbody>
+    ${S.rows.map(r=>`<tr><td>${r.kind}</td><td class="r">${fmtFlwrs(r.units)}</td><td class="r">${S.height-r.h}h</td></tr>`).join("")}
+    </tbody></table>
+  </div>`;
+}
+
+function viewPools(){
+  return banner("Liquidity","Venues every quote is drawn from","9mm V2/V3/Infinity, Uniswap V3/V4 — witnessed, never wrapped.")
+  +tabsFor()+`<div class="panel"><h3>Witness, not wrap</h3><p>Garden observes feeGrowth. It does not fork their liquidity, wrap their NFTs, or compete for their bps. 9mm holder rev-share continues on 9mm.</p>
+  <button class="btn" data-go="vinedresser">Open Vinedresser</button></div>`
+  +POOLS.map(p=>`<div class="panel"><h3>${p.v} · ${p.pair}</h3><p class="hint">${p.w}</p>
+    <p>Fee ${Number(p.fee)/100}% · TVL $${p.tvl} · 24h $${p.vol}</p>
+    <button class="btn" disabled>Add liquidity — refused</button>
+    <button class="btn gold" disabled>Remove — refused</button>
+    <button class="btn" data-go="vinedresser">Rank it</button>
+  </div>`).join("");
+}
+
+function rank(dep, open){
+  return BOOK.map(b=>{
+    const sig=b.sess?(open?b.sess.o:b.sess.c):b.sig;
+    const f=b.tvl/(b.tvl+dep); const fee=b.fee*f; const lv=lvr(sig)*(b.native?f*f:1);
+    const net=fee-lv; const counsel=net<=0?"Rest":"Hold";
+    return {...b,sig,fee,lv,net,counsel};
+  }).sort((a,c)=>c.net-a.net);
+}
+
+function viewVine(){
+  const s=cashOpen(new Date());
+  const rows=rank(S.size,s.open);
+  const pick=rows.find(r=>r.id===S.pick)||rows[0];
+  const hold=rows.filter(r=>r.counsel==="Hold").length;
+  const rest=rows.filter(r=>r.counsel==="Rest").length;
+  return banner("Liquidity / Vinedresser","Rank every pool by what you keep","Net edge after LVR, session-aware σ, reflexive size. You sign. The NFT stays on the venue. No unattended vault.")
+  +tabsFor()+sessionBar()+`
+  <div class="hero">
+    <div class="hs"><div class="k">Hold</div><div class="v pop">${hold}</div><div class="f">net edge covers LVR</div></div>
+    <div class="hs"><div class="k">Rest</div><div class="v">${rest}</div><div class="f">leave until the edge returns</div></div>
+    <div class="hs"><div class="k">Your size</div><div class="v">$${S.size.toLocaleString()}</div><div class="f">equities: no f² damping</div></div>
+    <div class="hs"><div class="k">Custody</div><div class="v">none</div><div class="f">NFT stays on the venue</div></div>
+  </div>
+  <div class="panel"><h3>The Vinedresser</h3>
+    <p>net edge = fee − LVR, LVR = σ²/8, σ from the path. An estimate may inform. It may not authorize.</p>
+    <label class="hint">Size the deposit · USD<br><input id="sz" type="range" min="100" max="2000000" step="100" value="${S.size}" style="width:100%;accent-color:var(--pop)"></label>
+  </div>
+  <div class="panel"><h3>Measured book · 2026-09-15</h3>
+    <div style="overflow:auto"><table class="tbl"><thead><tr><th>Pair</th><th>Venue</th><th class="r">Fee</th><th class="r">LVR</th><th class="r">Net</th><th>Counsel</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr data-pick="${r.id}" class="${r.id===pick.id?"on":""}"><td>${r.p}</td><td>${r.v}</td><td class="r">${fmtApr(r.fee)}</td><td class="r">${fmtApr(r.lv)}</td><td class="r ${r.net>=0?"ok":"bad"}">${fmtApr(r.net)}</td><td><span class="mark ${r.counsel==="Hold"?"hold":"rest"}">${r.counsel}</span></td></tr>`).join("")}
+    </tbody></table></div>
+  </div>
+  <div class="panel"><h3>${pick.p} · ${pick.v}</h3>
+    <p class="hint">${pick.id==="sgov"?"The chain's only stable-stable pool, and the only net-negative. Rest is the product.":pick.sess?"Session split: cash-open σ 0.425 vs overnight 0.231 — 3.4× on LVR. Counsel uses the live regime.":"Measured OnChain / GT-DENSE. Path σ, never two endpoints."}</p>
+    <button class="go" id="doCounsel" ${S.connected?"":"disabled"}>${S.connected?"Review · "+pick.counsel:"Connect to review"}</button>
+  </div>
+  <div class="panel"><h3>9mm · witnessed, not yet dense</h3>
+    <p class="hint">Until a 168-bar path exists on the 9mm pool itself, the Vinedresser will rank the estimate and refuse to size.</p>
+    <table class="tbl"><thead><tr><th>Pair</th><th>Venue</th><th class="r">Est. fee APR</th><th>Counsel</th></tr></thead><tbody>
+    ${NINE.map(n=>`<tr><td>${n.p}</td><td>${n.v}</td><td class="r">${fmtApr(n.feeEst)}</td><td><span class="mark refuse">Refuse</span></td></tr>`).join("")}
+    </tbody></table>
+  </div>
+  <div class="panel"><span class="chip block">Blocked</span><h3>No unattended vault.</h3>
+    <p>A custody vault that holds the NFT and rebalances while you sleep is a different machine. The Vinedresser ranks and counsels. Positions stay in your wallet. 9mm does not change a contract.</p>
+  </div>`;
+}
+
+function viewExplore(){
+  return banner("Explore","Every venue, with its exact reserves","Pool ids and fee tiers as Robinhood Chain reports them.")
+  +`<div class="panel"><table class="tbl"><thead><tr><th>Venue</th><th>Pair</th><th class="r">Fee</th><th class="r">TVL</th></tr></thead><tbody>
+  ${POOLS.map(p=>`<tr><td>${p.v}</td><td>${p.pair}</td><td class="r">${Number(p.fee)/100}%</td><td class="r">$${p.tvl}</td></tr>`).join("")}
+  </tbody></table></div>`;
+}
+function viewPort(){
+  return banner("Your position","What you hold and where it came from","Claims, rows and fills in one ledger.")
+  +`<div class="hero">
+    <div class="hs"><div class="k">$FLWRS</div><div class="v pop">${fmtFlwrs(S.bal.flwrs)}</div><div class="f">${fmtNav(S.vault,S.sOut)}</div></div>
+    <div class="hs"><div class="k">USDG</div><div class="v">${fmt(S.bal.usdg,6,2)}</div><div class="f">settlement stable</div></div>
+    <div class="hs"><div class="k">ETH</div><div class="v">${fmt(S.bal.eth,18,4)}</div><div class="f">native on 4663</div></div>
+    <div class="hs"><div class="k">$OIL</div><div class="v">${fmt(S.bal.oil,3,2)}</div><div class="f">not backing · no peg</div></div>
+  </div>
+  <div class="panel"><h3>Activity</h3><table class="tbl"><tbody>${S.fills.slice(0,16).map(f=>`<tr><td>${f.k}</td><td>${h(f.d)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function viewLaunch(){return banner("Launchpad","Commit, clear at one price, redeem a real floor","Launchpad.sol is written and undeployed on 4663.")+`<div class="panel"><span class="chip block">Blocked</span><h3>There is nothing to commit to yet.</h3><p>A form that cannot settle is not shown. Disabled controls never sign.</p></div>`}
+function viewPerps(vol){
+  return banner("Labs",vol?"Realized-volatility payoff":"Leverage on a lattice credit position",vol?"Session-aware: NVDA sigma is 3.4× higher in the cash open.":"Runway occupies the liquidation-price slot. Positions die when carry is exhausted.")
+  +tabsFor()+`<div class="panel"><span class="chip block">Blocked</span>
+    <p><b>No liquidation price.</b> The column is removed, not blanked. Carry-default is unpullable.</p>
+    <p class="hint">Preview computed locally. The open path is not deployed.</p>
+    <button class="go" disabled>Disabled — this control never signs</button>
+  </div>`;
+}
+function viewDocs(){
+  return banner("Docs","The trust model, and how to check it yourself","Who you actually trust, what each module proves, and the words this protocol forbids.")
+  +`<div class="panel"><h3>Forbidden words</h3>
+    <p><b>sell / cash out</b> — the exit burns $FLWRS. There is no counterparty.</p>
+    <p><b>a bare 81%</b> — loyalty_split then drip_split. Print both hops.</p>
+    <p><b>liquidation price</b> — lattice credit has runway.</p>
+    <p><b>keeper / auto-compound</b> — nothing runs while you sleep. Counsel is signed.</p>
+    <p><b>JARVIS</b> — that was a decision engine in another repo. Here it is the Vinedresser.</p>
+  </div>
+  <div class="panel"><h3>How to check</h3>
+    <table class="tbl"><tbody>
+      <tr><td>Two mints, one burn</td><td>garden.rs nav_mint_v3 / nav_redeem</td></tr>
+      <tr><td>Fee never mints</td><td>drip writes vault only; s_out unchanged</td></tr>
+      <tr><td>m(Δh)=units·Δh/(Δh+K)</td><td>m(0)=0 · m(K)=half</td></tr>
+      <tr><td>net_edge = fee − σ²/8</td><td>path_sigma, never two endpoints</td></tr>
+      <tr><td>SGOV/USDG</td><td>only net-negative (−5.1%). Rest is the product.</td></tr>
+    </tbody></table>
+  </div>`;
+}
+
+function body(){
+  switch(S.surface){
+    case "swap": return viewSwap();
+    case "terminal": return viewTerm();
+    case "limit": return viewLimit();
+    case "dca": return viewDca();
+    case "garden": return viewGarden();
+    case "pools": return viewPools();
+    case "vinedresser": return viewVine();
+    case "explore": return viewExplore();
+    case "portfolio": return viewPort();
+    case "launch": return viewLaunch();
+    case "perps": return viewPerps(false);
+    case "vol": return viewPerps(true);
+    case "docs": return viewDocs();
+    default: return viewSwap();
+  }
+}
+
+function modalHtml(){
+  if(!S.pending) return "";
+  const p=S.pending;
+  return `<div class="modalbg" id="mbg"><div class="modal">
+    <h3>Review · WYSIWYS</h3>
+    <p class="hint">${h(p.title)}</p>
+    ${p.lines.map(l=>`<div class="kv"><span>${h(l.k)}</span><b>${h(l.v)}</b></div>`).join("")}
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn" id="cancel">Cancel</button>
+      <button class="go" id="approve" style="margin:0;flex:1">Approve</button>
+    </div>
+  </div></div>`;
+}
+
+function render(){
+  renderNav();
+  document.getElementById("main").innerHTML=body()+(S.toast?`<div class="toast">${h(S.toast)}</div>`:"")+modalHtml();
+}
+
+document.body.addEventListener("click",e=>{
+  const t=e.target.closest("[data-go],[data-pick],#wallet,#doSwap,#doMint,#doBurn,#doPlant,#doDrip,#doCounsel,#approve,#cancel,#mbg");
+  if(!t) return;
+  if(t.id==="wallet"){ S.connected? (S.connected=false,S.addr=null,S.surface="swap") : connect(); render(); return; }
+  if(t.dataset.go){ S.surface=t.dataset.go; render(); return; }
+  if(t.dataset.pick){ S.pick=t.dataset.pick; render(); return; }
+  if(t.id==="cancel"||t.id==="mbg"){ if(t.id==="mbg"&&e.target.id!=="mbg")return; S.pending=null; render(); return; }
+  if(t.id==="approve"&&S.pending){ try{ S.pending.run(); S.pending=null; toast("confirmed on the local ledger"); }catch(err){ toast(String(err.message||err)); } render(); return; }
+  if(t.id==="doSwap"){
+    const p=POOLS[0]; const amt=1n*10n**18n; const out=xyk(p.r0,p.r1,amt,p.fee);
+    review("Swap ETH → USDG",[
+      {k:"You pay",v:"1.000000 ETH"},{k:"You receive (quoted)",v:fmt(out,6,2)+" USDG"},
+      {k:"Venue",v:p.v+" · "+(Number(p.fee)/100)+"%"},{k:"Garden fee path",v:"venue fee → USDG → loyalty then drip. s_out unchanged."}
+    ],()=>swap(amt)); return;
+  }
+  if(t.id==="doMint"){
+    const n=BigInt(Math.round((+document.getElementById("dep").value||0)*1e6));
+    review("Mint $FLWRS claim",[{k:"You pay",v:fmt(n,6,2)+" USDG"},{k:"Language",v:"credited, not deposited."}],()=>mint(n)); return;
+  }
+  if(t.id==="doBurn"){
+    const n=BigInt(Math.round((+document.getElementById("red").value||0)*1000));
+    review("Burn $FLWRS",[{k:"You burn",v:fmtFlwrs(n)+" $FLWRS"},{k:"Forbidden",v:"sell, sold, cash out"}],()=>burn(n)); return;
+  }
+  if(t.id==="doPlant"){
+    const n=BigInt(Math.round((+document.getElementById("pl").value||0)*1000));
+    review("Plant a row",[{k:"Units",v:fmtFlwrs(n)},{k:"m(0)",v:"0"}],()=>plant(n)); return;
+  }
+  if(t.id==="doDrip"){
+    const n=BigInt(Math.round((+document.getElementById("dr").value||0)*1e6));
+    review("Drip a fee",[{k:"Amount",v:fmt(n,6,2)+" USDG"},{k:"Path",v:"loyalty_split then drip_split"}],()=>drip(n)); return;
+  }
+  if(t.id==="doCounsel"){
+    const s=cashOpen(new Date()); const rows=rank(S.size,s.open); const pick=rows.find(r=>r.id===S.pick)||rows[0];
+    review("Vinedresser counsel · "+pick.p,[
+      {k:"Counsel",v:pick.counsel},{k:"Net after size",v:fmtApr(pick.net)},
+      {k:"Custody",v:"None. The position stays on the venue."},
+      {k:"9mm / venue fee",v:"Untouched. Their rev-share continues to their holders."}
+    ],()=>S.fills.unshift({k:"counsel",d:pick.counsel+" "+pick.p+" · net "+fmtApr(pick.net)+" after $"+S.size.toLocaleString()}));
+    return;
+  }
+});
+document.body.addEventListener("input",e=>{
+  if(e.target.id==="sz"){ S.size=+e.target.value; render(); }
+});
+render();
+})();
+</script>
+</body>
+</html>
