@@ -286,7 +286,31 @@ dialog::backdrop{background:rgba(4,6,4,.72)}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
 }
+html:not(.in) .wrap{display:none}
+.lock{position:fixed;inset:0;background:#080A08;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px}
+html.in .lock{display:none}
+.lockbox{width:min(420px,100%);background:rgba(12,20,14,.92);border:1px solid var(--line2);border-radius:18px;padding:22px}
+.lockbox h2{margin:0 0 6px;font-size:22px;letter-spacing:-.02em}
+.lockbox p{color:var(--ink3);margin:0 0 16px;font-size:13px;line-height:1.45}
+.lockbox label{display:block;font:500 11px var(--m);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:10px 0 6px}
+.lockbox input{width:100%;min-height:44px;background:var(--chip,#101820);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:8px 12px;font:16px var(--m)}
+.lockbox .go{margin-top:14px}
+.lockerr{color:var(--end,#ff5c6c);font-size:12px;min-height:16px;margin-top:8px}
+
 </style>
+
+<div class="lock" id="lock" role="dialog" aria-modal="true" aria-labelledby="locktitle">
+  <form class="lockbox" id="lockform" autocomplete="on">
+    <h2 id="locktitle">Garden Exchange</h2>
+    <p>Collaborator access. The suite stays behind this door. Disabled controls never sign.</p>
+    <label for="lockuser">User</label>
+    <input id="lockuser" name="username" autocomplete="username" required>
+    <label for="lockpass">Password</label>
+    <input id="lockpass" name="password" type="password" autocomplete="current-password" required>
+    <div class="lockerr" id="lockerr" aria-live="polite"></div>
+    <button class="go" type="submit">Enter</button>
+  </form>
+</div>
 
 <div class="wrap">
   <div class="top">
@@ -1623,7 +1647,36 @@ document.addEventListener('input', ev => {
 function bytes(b64){ const s=atob(b64), a=new Uint8Array(s.length);
   for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a; }
 
+function admitted(){
+  try { return sessionStorage.getItem('garden-collab-in') === '1'; } catch(_){ return false; }
+}
+function admit(){
+  try { sessionStorage.setItem('garden-collab-in', '1'); } catch(_){}
+  document.documentElement.classList.add('in');
+}
+function refuseLock(){
+  const err=document.getElementById('lockerr');
+  if(err) err.textContent='Refused.';
+  const p=document.getElementById('lockpass');
+  if(p){ p.value=''; p.focus(); }
+}
+
 (async function boot(){
+  if(admitted()) admit();
+  else {
+    await new Promise(resolve => {
+      const form=document.getElementById('lockform');
+      const user=document.getElementById('lockuser');
+      user && user.focus();
+      form.addEventListener('submit', ev => {
+        ev.preventDefault();
+        const u=(document.getElementById('lockuser').value||'').trim();
+        const p=document.getElementById('lockpass').value||'';
+        if(u==='SNACKS' && p==='FACTS'){ admit(); resolve(); }
+        else refuseLock();
+      });
+    });
+  }
   try { const c=localStorage.getItem('garden-host-chain'); if(c&&CHAINS[c]) S.chain=c; } catch(_){}
   const mod = await WebAssembly.instantiate(bytes(WASM_B64), {});
   X = mod.instance.exports;
