@@ -1,468 +1,1654 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!-- The page is UTF-8 and says so. Without this it renders correctly from a file://
+     URL (where the browser sniffs) but MOJIBAKES over HTTP, because a server that
+     sends no charset leaves the default to the browser and every "·", "→" and "—"
+     in the copy arrives as latin-1 noise. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive">
-<title>Garden Exchange · Robinhood sim</title>
+<title>Garden Exchange</title>
+<!-- NO external stylesheet, NO webfont. The host this page is served from sends
+     `style-src 'self' 'unsafe-inline'` and `font-src 'self' data:`
+     (robinwood-plank/next.config.ts:119-124 applies securityHeaders to `/:path*`,
+     which includes everything under public/). A Google Fonts <link> would be
+     silently blocked there and the page would render in Times New Roman on the
+     one host it is meant to be read on. System stacks are the fix; relying on a
+     CDN font is how a page looks right locally and wrong where it ships. -->
 <style>
+/* ── COLOUR LAW ────────────────────────────────────────────────────────────
+   Robinhood's identity is ONE near-radioactive green on near-black. The green
+   (#00C805) is the brand signal and is spent on GROWTH and on the executable
+   grade — never decoratively. Red (--end) is spent ONLY on a terminated or
+   forfeited state. The ungrown future is GREY, never red
+   (docs/VISION-chia-garden-complete-2026-09-15.md:§6.5, "grey the future").
+   The evidence hues are carried over from app/src/Evidence.tsx's vocabulary:
+   pop=verified, gold=a stated refusal, muted=silence.                       */
 :root{
-  --bg:#080A08;--surf:#0c100c;--ink:#d8f5de;--muted:rgba(216,245,222,.55);
-  --pop:#00C805;--popb:#15803d;--gold:#c4a35a;--err:#ff5c6c;--line:#1a3a22;
-  --chip:#101820;--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --bg:#080A08; --surf:#101310; --surf2:#161A16; --surf3:#1C211C;
+  --line:#232823; --line2:#2F362F;
+  --ink:#F2F5F0; --ink2:#A8B0A6; --ink3:#6E766C;
+  --grow:#00C805; --grow2:#3BE843; --growdim:#0A3A12;
+  --end:#FF5A47; --sun:#E0B45C; --cool:#7FA6DC;
+  --info:#7FA6DC; --infobg:#12181F;
+  --sh:0 1px 2px rgba(0,0,0,.5),0 2px 10px rgba(0,0,0,.35);
+  --shl:0 2px 8px rgba(0,0,0,.55),0 16px 40px rgba(0,0,0,.45);
+  --m:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --s:"Inter Tight",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 }
+/* The page commits to one look — a terminal on near-black — so it paints its
+   own ground explicitly rather than borrowing the host's theme. */
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);min-height:100%}
-button:not(:disabled),[role=button]:not(:disabled){cursor:pointer}
-button:disabled{cursor:not-allowed;opacity:.55}
-a{color:var(--pop)}
-.head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(8,10,8,.92);backdrop-filter:blur(12px);z-index:20;flex-wrap:wrap}
-.logo{font-weight:650;display:flex;align-items:center;gap:8px;white-space:nowrap}
-.nav{display:flex;gap:2px;flex-wrap:wrap}
-.nav button{background:none;border:none;color:var(--muted);padding:8px 10px;border-radius:10px;font:inherit;min-height:40px}
-.nav button.on{color:var(--pop);background:rgba(0,200,5,.12);border:1px solid var(--popb)}
-.nav button .d{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:6px;opacity:.7}
-.right{margin-left:auto;display:flex;gap:8px;align-items:center}
-.pill{border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:8px 12px;font:12px var(--mono);min-height:40px}
-.shell{max-width:1120px;margin:0 auto;padding:18px 16px 80px}
-.banner h1{font-size:28px;margin:4px 0 8px;letter-spacing:-.02em}
-.banner p{color:var(--muted);max-width:62ch;margin:0 0 10px}
-.facts{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 16px}
-.facts b{display:flex;flex-direction:column;font:600 18px var(--mono)}
-.facts small{color:var(--muted);font:11px var(--font);font-weight:400}
-.tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:14px;margin-bottom:16px;overflow-x:auto}
-.tabs button{background:none;border:none;color:var(--muted);padding:8px 12px;border-radius:10px;font:inherit;flex:1 0 max-content;min-height:40px}
-.tabs button.on{color:var(--ink);background:rgba(0,200,5,.15);border:1px solid var(--popb)}
-.card,.panel{background:rgba(12,20,14,.78);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:12px}
-.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
-.hs{background:rgba(12,20,14,.78);border:1px solid var(--line);border-radius:14px;padding:12px}
-.hs .k{color:var(--muted);font-size:11px}
-.hs .v{font:600 22px/1.1 var(--mono);margin-top:4px}
-.hs .v.pop{color:var(--pop)}
-.hs .f{color:var(--muted);font-size:12px;margin-top:4px}
-.leg{margin:10px 0}
-.leg .lbl{color:var(--muted);font-size:12px;margin-bottom:4px}
-.row{display:flex;gap:8px}
-.row input,.row select{flex:1;min-height:44px;background:var(--chip);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:8px 12px;font:16px var(--mono)}
-.go{width:100%;min-height:48px;border:none;border-radius:14px;background:var(--pop);color:#041204;font:650 15px var(--font);margin-top:10px}
-.btn{min-height:40px;border:1px solid var(--popb);background:rgba(0,200,5,.12);color:var(--pop);border-radius:12px;padding:8px 12px;font:inherit}
-.btn.gold{border-color:#6b5420;color:var(--gold);background:rgba(196,163,90,.08)}
-.hint{color:var(--muted);font-size:12px;margin-top:8px}
-.tbl{width:100%;border-collapse:collapse;font-size:13px}
-.tbl th{text-align:left;color:var(--muted);font-weight:500;padding:6px 4px;border-bottom:1px solid var(--line)}
-.tbl td{padding:8px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
-.tbl td.r,.tbl th.r{text-align:right}
-.tbl tr.on td{background:rgba(0,200,5,.1)}
-.tbl tbody tr[data-pick]{cursor:pointer}
-.ok{color:var(--pop)} .bad{color:var(--err)}
-.session{padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px;font-size:13px}
-.session.open{border-color:var(--popb)}
-.session b{display:block}
-.mark{display:inline-block;font:600 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-.mark.hold{color:var(--pop);border-color:var(--popb)}
-.mark.rest{color:var(--muted)}
-.mark.refuse{color:var(--err)}
-.chip{display:inline-block;font:600 10px var(--mono);padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-right:6px}
-.chip.exec{color:var(--pop);border-color:var(--popb)}
-.chip.block{color:var(--gold);border-color:#6b5420}
-.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#101820;border:1px solid var(--popb);padding:10px 16px;border-radius:12px;z-index:40}
-.modalbg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
-.modal{background:#0c100c;border:1px solid var(--line);border-radius:18px;max-width:520px;width:100%;padding:18px}
-.modal h3{margin:0 0 8px}
-.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
-.kv span{color:var(--muted)}
-.foot{max-width:1120px;margin:0 auto;padding:8px 16px 24px;color:var(--muted);font-size:12px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:720px){.hero,.grid2{grid-template-columns:1fr 1fr}.banner h1{font-size:22px}}
-@media(max-width:430px){.hero,.grid2{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-<header class="head">
-  <div class="logo">Garden Exchange</div>
-  <nav class="nav" id="nav"></nav>
-  <div class="right">
-    <span class="pill">Robinhood Chain · 4663</span>
-    <button class="pill" id="wallet" type="button">Connect</button>
-  </div>
-</header>
-<main class="shell" id="main"></main>
-<footer class="foot">
-  Hidden sim for owner + Bullish. noindex. Integer ledger twin of garden.rs. Witness 9mm, never wrap.
-  Disabled controls never sign. Vinedresser ranks; no unattended vault.
-</footer>
-<script>
-(function(){
-const FLOAT_BPS=500n, DRIP_VAULT=9000n, LOYALTY=1000n, GENESIS=5n, MIN_ROW=1000n, K=720n;
-const ATTRIB_MINT=5000n, PAYER=4000n, CREATOR=2000n, REF=2000n;
-const USDG_TO=1000n;
-function mApply(u,dh,k){k=k<1n?1n:k;dh=dh<0n?0n:dh;return (u*dh)/(dh+k)}
-function navMint(dep,s,v){if(dep<=0n)throw Error("deposit too small");const units=s===0n?dep/GENESIS:(dep*s)/v;if(units===0n)throw Error("too small");const cut=s===0n?0n:(units*FLOAT_BPS)/10000n;return {units,cut,minted:units-cut}}
-function navRedeem(u,s,v){if(s===0n||u>s)throw Error("cannot redeem");return u===s?v:(u*v)/s}
-function waterfall(raw){const loyalty=(raw*LOYALTY)/10000n, rest=raw-loyalty, vault=(rest*DRIP_VAULT)/10000n;return {loyalty,rest,vault,incident:rest-vault}}
-function xyk(ri,ro,amt,feeBps){const b=10000n-feeBps;return (amt*b*ro)/(ri*10000n+amt*b)}
-function fmt(v,dec,d){const n=10n**BigInt(dec);const neg=v<0n;if(neg)v=-v;const i=v/n,f=v%n;let fs=f.toString().padStart(dec,"0").slice(0,d);return (neg?"-":"")+i.toString()+"."+fs}
-function fmtFlwrs(v){return fmt(v,3,3)}
-function fmtNav(v,s){if(s===0n)return "—";return "$"+(Number(v)/Number(s)).toFixed(6)}
-function lvr(sig){return (sig*sig)/8}
-function edge(sig,fee){return fee-lvr(sig)}
-function fmtApr(x){if(!isFinite(x))return "∞";const p=x*100;return (p>0?"+":"")+p.toFixed(1)+"%"}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--s);
+  padding-left:16px;padding-right:16px;padding-block:0;
+  background-image:radial-gradient(900px 480px at 50% -14%,rgba(0,200,5,.07),transparent 64%)}
+.wrap{max-width:1080px;margin:0 auto;padding-bottom:110px}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--grow);outline-offset:3px;border-radius:8px}
+.num{font-family:var(--m);font-variant-numeric:tabular-nums}
+svg{max-width:100%}
+code{font:12px var(--m);color:var(--ink2)}
 
-const BOOK=[
-  {id:"hims",p:"HIMS/USDG",v:"Uniswap V3",fee:3.41,sig:0.647,tvl:1189261,native:false},
-  {id:"cat",p:"CASHCAT/WETH",v:"Uniswap V3",fee:2.665,sig:2.841,tvl:2176017,native:true},
-  {id:"nvda",p:"NVDA/USDG",v:"Uniswap V3",fee:0.944,sig:0.274,tvl:7110315,native:false,sess:{o:0.425,c:0.231}},
-  {id:"googl",p:"GOOGL/USDG",v:"Uniswap V3",fee:0.889,sig:0.942,tvl:1159908,native:false},
-  {id:"gme",p:"GME/USDG",v:"Uniswap V3",fee:0.559,sig:0.511,tvl:653576,native:false},
-  {id:"spy",p:"SPY/WETH",v:"Uniswap V3",fee:0.473,sig:0.175,tvl:1741572,native:false},
-  {id:"spcx",p:"SPCX/USDG",v:"Uniswap V3",fee:0.509,sig:0.636,tvl:3395765,native:false},
-  {id:"aapl",p:"AAPL/USDG",v:"Uniswap V3",fee:0.446,sig:0.304,tvl:419119,native:false},
-  {id:"msft",p:"MSFT/USDG",v:"Uniswap V3",fee:0.239,sig:0.838,tvl:850358,native:false},
-  {id:"amc",p:"AMC/USDG",v:"Uniswap V3",fee:0.313,sig:1.221,tvl:1915641,native:false},
-  {id:"qqq",p:"QQQ/USDG",v:"Uniswap V3",fee:0.091,sig:0.345,tvl:1491305,native:false},
-  {id:"sgov",p:"SGOV/USDG",v:"Uniswap V3",fee:0.089,sig:1.057,tvl:4771310,native:false},
-];
-const NINE=[
-  {p:"ETH/USDG",v:"9mm V2",feeEst:0.813},
-  {p:"NVDA/USDG",v:"9mm V3",feeEst:2.232},
-  {p:"HOOD/USDG",v:"9mm Infinity Bin",feeEst:0.985},
-];
-const POOLS=[
-  {id:"u3",v:"Uniswap V3",pair:"ETH/USDG",fee:5n,r0:1840n*10n**18n,r1:7330000n*10n**6n,tvl:"14,600,000",vol:"42,100,000",w:"Deepest WETH/USDG. Observes feeGrowth; never wraps the NFT."},
-  {id:"u4",v:"Uniswap V4",pair:"ETH/USDG",fee:30n,r0:920n*10n**18n,r1:3680000n*10n**6n,tvl:"7,360,000",vol:"18,400,000",w:"PoolManager 0x8366…0951. Hooks observed, not forked."},
-  {id:"9v2",v:"9mm V2",pair:"ETH/USDG",fee:17n,r0:210n*10n**18n,r1:840000n*10n**6n,tvl:"1,680,000",vol:"2,200,000",w:"Holder rev-share stays on 9mm. Factory cited as Creator."},
-  {id:"9v3",v:"9mm V3",pair:"NVDA/USDG",fee:25n,r0:12400n*10n**18n,r1:1860000n*10n**6n,tvl:"3,720,000",vol:"9,100,000",w:"Session-gated. Circadian desk refuses Garden flow while cash is closed."},
-  {id:"9bin",v:"9mm Infinity Bin",pair:"HOOD/USDG",fee:20n,r0:84000n*10n**18n,r1:1260000n*10n**6n,tvl:"2,520,000",vol:"3,400,000",w:"Bin lattice. Official Pancake Infinity Bin is n/a on 4663."},
-];
+/* ── Chrome ─────────────────────────────────────────────────────────────── */
+.top{display:flex;align-items:center;gap:12px;padding:16px 0 12px;flex-wrap:wrap}
+.mark{width:30px;height:30px;border-radius:9px;background:var(--grow);flex:0 0 auto;
+  display:grid;place-items:center;color:#04140A;font:700 16px var(--s)}
+.top h1{font-size:18px;letter-spacing:-.03em}
+.top .sub{font:500 11px var(--m);color:var(--ink3);letter-spacing:.06em;text-transform:uppercase}
+.topr{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chain{position:relative}
+.chain>button{cursor:pointer;min-height:40px}
+.chain-pop{position:absolute;right:0;top:calc(100% + 8px);width:min(420px,86vw);background:var(--surf);border:1px solid var(--line2);border-radius:12px;padding:12px;z-index:40;box-shadow:0 16px 40px rgba(0,0,0,.45)}
+.chain-pop>b{display:block;font-size:12px;margin-bottom:4px}
+.chain-pop>p{color:var(--ink3);font-size:12px;margin:0 0 10px;line-height:1.45}
+.chain-opt{display:block;width:100%;text-align:left;background:transparent;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:10px 12px;margin-bottom:6px;min-height:48px}
+.chain-opt.on{border-color:var(--grow);background:rgba(0,200,5,.1)}
+.chain-opt b{display:block;font-size:13px}
+.chain-opt small{display:block;color:var(--ink3);font-size:11px;margin-top:3px;line-height:1.4}
+.chip{display:flex;align-items:center;gap:7px;font:500 11.5px var(--m);
+  color:var(--ink2);background:var(--surf);border:1px solid var(--line);
+  padding:7px 11px;border-radius:999px;cursor:pointer}
+.chip b{color:var(--ink);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%}
+.dot.open{background:var(--grow)} .dot.closed{background:var(--ink3)}
 
-function cashOpen(now){
-  const fmt=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
-  const p=fmt.formatToParts(now); const g=t=>p.find(x=>x.type===t)?.value||"";
-  const wd=g("weekday"), mins=+g("hour")*60+(+g("minute"));
-  const we=wd==="Sat"||wd==="Sun";
-  const open=!we && mins>=9*60+30 && mins<16*60;
-  return {open,label:open?"US cash tape OPEN":"US cash tape CLOSED",next:open?"Session ends 16:00 ET":we?"Opens Monday 09:30 ET":mins<9*60+30?"Opens 09:30 ET":"Opens next weekday 09:30 ET"};
+/* The hero is SHARE PRICE — Ondo format, 6 decimals, ABSOLUTE daily delta.
+   docs/DESIGN-frontend-mapping-2026-09-15.md:25-27. */
+.hero{background:linear-gradient(180deg,var(--surf),var(--bg));
+  border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shl)}
+.hl{font:500 11px var(--m);color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
+.hv{font:600 clamp(30px,7.5vw,44px)/1 var(--m);letter-spacing:-.035em;margin:9px 0 5px;
+  font-variant-numeric:tabular-nums}
+.hs{font:500 13px var(--m);color:var(--ink2)}
+.foot{font:500 11.5px var(--s);color:var(--ink3);margin-top:9px;line-height:1.5}
+.up{color:var(--grow)} .dn{color:var(--end)}
+.herorow{display:grid;gap:18px;align-items:center}
+@media(min-width:760px){.herorow{grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr)}}
+.holdrow{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;padding-top:14px;
+  border-top:1px solid var(--line)}
+.hold .k{font:600 18px var(--m);letter-spacing:-.02em}
+.hold .l{font:500 11px var(--s);color:var(--ink3)}
+
+/* ── Nav. Order is EARNED: sorted by evidence tier, never declared.
+   app/src/chia/nav.ts:250-257, tier table :228-230. ───────────────────── */
+.tabs{display:flex;gap:5px;overflow-x:auto;padding:16px 0 4px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:0 0 auto;border:1px solid transparent;background:none;color:var(--ink2);
+  font:500 13.5px var(--s);padding:9px 14px;border-radius:10px;cursor:pointer;
+  display:flex;align-items:center;gap:7px}
+.tabs button:hover{color:var(--ink);background:var(--surf2)}
+.tabs button[aria-current="true"]{background:var(--surf);border-color:var(--line2);
+  color:var(--ink);box-shadow:var(--sh);font-weight:600}
+.tabs button i{width:5px;height:5px;border-radius:50%;font-style:normal;flex:0 0 auto}
+.tabs button i.executable{background:var(--grow)}
+.tabs button i.read{background:var(--cool)}
+.tabs button i.blocked{background:var(--sun)}
+.tabs button i.unavailable{background:var(--ink3)}
+.tabs button i.preview{background:var(--ink3);opacity:.5}
+
+/* ── Surface banner. Static orientation copy ONLY; no string here may state
+   what is or is not executable — that is rendered live.
+   app/src/ChiaApp.tsx:1546-1547. ────────────────────────────────────────── */
+.banner{margin-top:14px;padding:15px 17px;background:var(--surf);border:1px solid var(--line);
+  border-radius:13px}
+.banner .eyebrow{font:600 10px var(--m);letter-spacing:.12em;text-transform:uppercase;color:var(--grow)}
+.banner h2{font-size:17px;margin:6px 0 5px}
+.banner p{margin:0;font-size:13.5px;color:var(--ink2);line-height:1.55}
+.bfacts{display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;padding-top:11px;
+  border-top:1px solid var(--line);font:500 11px var(--m);color:var(--ink3)}
+.bfacts b{color:var(--ink2);font-weight:600}
+
+.grid{display:grid;gap:13px;margin-top:14px}
+@media(min-width:760px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:13px;
+  padding:18px;box-shadow:var(--sh);min-width:0}
+.card>h2{font-size:14.5px;display:flex;align-items:center;gap:9px;margin-bottom:3px;flex-wrap:wrap}
+.cap{font:500 12px var(--s);color:var(--ink3);margin-bottom:14px;line-height:1.5}
+.card h3{font:600 12px var(--s);color:var(--ink2);margin:16px 0 8px;
+  letter-spacing:.02em;text-transform:uppercase;font-size:10.5px}
+
+/* ── The five-state evidence vocabulary, verbatim from app/src/ChiaApp.tsx:3246-3256.
+   Colour is the vocabulary too (app/src/Evidence.tsx:14-15). ─────────────── */
+.pill{display:inline-flex;align-items:center;gap:5px;font:600 9.5px/1 var(--m);
+  letter-spacing:.09em;text-transform:uppercase;padding:5px 8px;border-radius:999px;
+  border:1px solid currentColor;margin-left:auto;white-space:nowrap;cursor:help}
+.pill i{width:5px;height:5px;border-radius:50%;background:currentColor;font-style:normal;flex:0 0 auto}
+.p-executable{color:var(--grow);background:rgba(0,200,5,.09)}
+.p-read{color:var(--cool)}
+.p-preview{color:var(--ink3)}
+.p-blocked{color:var(--sun);background:rgba(224,180,92,.08)}
+.p-unavailable{color:var(--ink3);border-style:dashed}
+
+.attrs{display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 14px}
+.attr{font:500 10px var(--m);color:var(--ink2);background:var(--surf2);
+  padding:4px 8px;border-radius:6px;border:1px solid var(--line)}
+
+.amt{display:flex;align-items:baseline;gap:8px;background:var(--surf2);
+  border:1px solid var(--line);border-radius:11px;padding:13px 15px;margin-bottom:10px}
+.amt span{font:500 14px var(--m);color:var(--ink3)}
+.amt input{flex:1;min-width:0;background:none;border:0;padding:0;color:var(--ink);
+  font:600 clamp(18px,5vw,25px) var(--m);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.amt input:focus{outline:none}
+.quick{display:flex;gap:6px;margin-bottom:11px;flex-wrap:wrap}
+.quick button{flex:1 1 auto;min-width:58px;background:var(--surf2);border:1px solid var(--line);
+  color:var(--ink2);font:500 12px var(--m);padding:8px;border-radius:8px;cursor:pointer}
+.quick button:hover{color:var(--ink);border-color:var(--line2)}
+
+.go{width:100%;padding:14px;border-radius:11px;border:0;background:var(--grow);color:#04140A;
+  font:600 15px var(--s);cursor:pointer}
+.go:hover{background:var(--grow2)}
+.go:disabled{background:var(--surf2);color:var(--ink3);cursor:not-allowed;border:1px solid var(--line)}
+.go.sec{background:var(--surf2);color:var(--ink);border:1px solid var(--line2)}
+.go.sec:hover{border-color:var(--grow);color:var(--ink)}
+.go.sm{width:auto;padding:7px 12px;font-size:12.5px;margin:0}
+.go+.go{margin-top:8px}
+.trio{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.trio .go{margin-top:0;flex:1 1 90px;padding:12px 8px;font-size:13.5px}
+
+/* NO_CONTROL_WHILE_REFUSED — the surface refuses to draw the button at all,
+   because a disabled button reads as "soon".
+   app/src/chia/writeControls.ts:99-109. */
+.nodraw{background:var(--surf2);border:1px dashed var(--line2);border-radius:11px;
+  padding:13px 15px;font-size:12.5px;color:var(--ink2);line-height:1.55}
+.nodraw b{color:var(--sun);display:block;font:600 10px var(--m);letter-spacing:.1em;
+  text-transform:uppercase;margin-bottom:5px}
+
+.prev{margin-top:11px;padding:12px 14px;background:var(--surf2);border-radius:10px;
+  border:1px solid var(--line)}
+.pl{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px;
+  align-items:baseline}
+.pl span{color:var(--ink2);min-width:0}
+.pl b{font:500 13px var(--m);text-align:right;white-space:nowrap}
+.pl.tot{border-top:1px solid var(--line);margin-top:5px;padding-top:9px}
+.pl.tot b{font-size:14.5px;font-weight:600}
+/* Principal and forfeited yield: two distinctly-styled rows, NEVER netted.
+   docs/DESIGN-frontend-mapping-2026-09-15.md:44-48. */
+.pl.prin b{color:var(--ink);font-weight:600}
+.pl.forf b{color:var(--end)}
+.pl.forf span{color:var(--end);opacity:.85}
+.pl.gain b{color:var(--grow)}
+.stamp{font:500 10.5px var(--m);color:var(--ink3);margin-top:8px;display:flex;
+  align-items:center;gap:5px;flex-wrap:wrap;line-height:1.6}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.stat{background:var(--surf);padding:12px 11px;min-width:0}
+.stat .l{font:500 9.5px var(--m);color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
+.stat .v{font:600 16px var(--m);letter-spacing:-.02em;margin-top:4px;
+  font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat .v.pop{color:var(--grow)}
+
+.flow{width:100%;height:auto;display:block;margin-top:6px}
+.flow text{font-family:var(--m);font-size:10px;fill:var(--ink2)}
+.flow text.n{fill:var(--ink);font-weight:600;font-size:11px}
+.flow text.big{fill:var(--grow);font-weight:600;font-size:13px}
+.flow text.lbl{fill:var(--ink3);font-size:9px;letter-spacing:.06em}
+
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font:600 9.5px var(--m);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink3);padding:0 9px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 9px;border-bottom:1px solid var(--line);font:500 12.5px var(--m);white-space:nowrap}
+tr:last-child td{border:0}
+.scroll{overflow-x:auto;margin:0 -4px}
+
+.led{font:12px/1.7 var(--m);color:var(--ink2);max-height:240px;overflow-y:auto}
+.led div{padding:6px 0;border-bottom:1px solid var(--line);display:flex;gap:11px}
+.led div:last-child{border:0}
+.led .t{color:var(--ink3);flex:0 0 52px}
+.led .m{color:var(--ink)}
+.why{font-size:12px;color:var(--ink3);margin-top:11px;line-height:1.6}
+.why b{color:var(--ink2)}
+.empty{text-align:center;padding:26px 14px;color:var(--ink3);font-size:13px}
+
+.info{display:flex;gap:10px;background:var(--infobg);border-radius:10px;padding:12px 14px;
+  font-size:12.5px;color:var(--ink2);margin-top:12px;line-height:1.55;
+  border:1px solid rgba(127,166,220,.18)}
+.info i{color:var(--info);font-style:normal;font-weight:700;flex:0 0 auto}
+.info b{color:var(--ink)}
+.warnbox{background:rgba(224,180,92,.07);border:1px solid rgba(224,180,92,.25)}
+.warnbox i{color:var(--sun)}
+
+details.disc{margin-top:11px}
+details.disc>summary{cursor:pointer;font:500 11.5px var(--s);color:var(--ink3);
+  list-style:none;display:flex;gap:6px;align-items:center}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"\203A";display:inline-block;transition:transform .15s;
+  font-size:15px;line-height:1}
+details.disc[open]>summary::before{transform:rotate(90deg)}
+details.disc>summary:hover{color:var(--ink2)}
+.discbody{padding-top:9px}
+.formula{font:500 11px/1.75 var(--m);color:var(--ink2);background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:11px 13px;overflow-x:auto;white-space:pre}
+.cite{font:500 10px var(--m);color:var(--ink3);letter-spacing:.02em}
+.cite b{color:var(--grow);font-weight:600}
+
+.curvewrap{touch-action:none;cursor:ew-resize;user-select:none;-webkit-user-select:none}
+.curvewrap svg{display:block}
+.rails{display:flex;justify-content:space-between;gap:8px;font:500 10.5px var(--m);
+  color:var(--ink3);margin-top:4px}
+input[type=range]{width:100%;accent-color:var(--grow);margin:8px 0 2px}
+
+dialog{border:0;border-radius:15px;padding:0;background:var(--surf);color:var(--ink);
+  max-width:460px;width:calc(100% - 32px);box-shadow:var(--shl);border:1px solid var(--line2)}
+dialog::backdrop{background:rgba(4,6,4,.72)}
+.dlg{padding:21px}
+.dlg h2{font-size:15.5px;margin-bottom:6px}
+.dlgbig{font:600 clamp(23px,7vw,29px)/1 var(--m);color:var(--end);margin:14px 0 4px;
+  letter-spacing:-.03em}
+.ack{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--ink2);
+  background:var(--surf2);border-radius:9px;padding:12px;margin-top:14px;line-height:1.55}
+.ack input{margin-top:3px;accent-color:var(--grow);flex:0 0 auto}
+
+/* The supply-chain rail: activity → fee → stable → vault → NAV. The owner's
+   objection #2 is that the product framed this as "adding money". It is not a
+   deposit; it is a contribution that CONVERTS. */
+.chain{display:grid;gap:8px;margin-top:4px}
+.chain .step{display:flex;gap:11px;align-items:flex-start;padding:11px 13px;
+  background:var(--surf2);border:1px solid var(--line);border-radius:10px}
+.chain .n{width:20px;height:20px;border-radius:50%;background:var(--growdim);color:var(--grow);
+  font:600 10px var(--m);display:grid;place-items:center;flex:0 0 auto;margin-top:1px}
+.chain .step.on{border-color:var(--grow);background:rgba(0,200,5,.05)}
+.chain .step.on .n{background:var(--grow);color:#04140A}
+.chain .tt{font:600 12.5px var(--s);color:var(--ink)}
+.chain .dd{font:500 11.5px var(--s);color:var(--ink3);margin-top:3px;line-height:1.5}
+.chain .vv{margin-left:auto;font:600 13px var(--m);color:var(--grow);white-space:nowrap;
+  text-align:right}
+
+.rowcard{background:var(--surf2);border:1px solid var(--line);border-radius:10px;
+  padding:13px 14px;margin-bottom:9px}
+.rowcard .rh{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+.rowcard .rt{font:600 13px var(--m)}
+.rowcard .rs{font:500 11px var(--m);color:var(--ink3)}
+.bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin:9px 0 6px}
+.bar div{height:100%;background:var(--grow);transition:width .2s}
+
+.fade{transition:opacity .3s ease}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
 }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="mark">G</div>
+    <div><h1>Garden Exchange</h1><div class="sub" id="chainlbl">Robinhood Chain · 4663</div></div>
+    <div class="topr">
+      <div class="chain">
+        <button class="chip" id="chainbtn" type="button" aria-haspopup="listbox" aria-expanded="false">Robinhood · 4663</button>
+        <div class="chain-pop" id="chainpop" hidden role="listbox" aria-label="Settlement chain"></div>
+      </div>
+      <button class="chip" id="clk"></button>
+      <button class="chip" id="bal"></button>
+    </div>
+  </div>
+  <div id="hero"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+  <div id="legend"></div>
+</div>
+<dialog id="gate"><div class="dlg" id="gatebody"></div></dialog>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE ENGINE IS RUST. THIS FILE CONTAINS NO PROTOCOL ARITHMETIC.
+
+   Every protocol number this page displays is computed by
+   `programs/exchange-core`, compiled to wasm32 and inlined below as base64.
+   The same Rust emits `evm/differential/vectors.json`, and
+   `sim/verify-page-math.js` lifts the payload back out of this very file and
+   drives it against those vectors — so the page and the contracts are not two
+   implementations that agree, they are one implementation.
+
+   The rule for everything below: JavaScript may listen for events, set
+   attributes, and FORMAT a number Rust already computed. If a line of it does
+   arithmetic on a protocol quantity, that is a bug.
+
+   THE ONE DECLARED EXCEPTION is `S.amm`, the toy counterparty that stands in
+   for a swap venue so that the fee reaching the garden has a plausible source.
+   It is labelled as such everywhere it surfaces, and nothing the GARDEN does is
+   computed from it: the fee it produces enters the protocol only by being handed
+   to `R.dripSplit` / `R.loyaltySplit`, which are Rust.
+
+   Rebuild with `sim/build-real-garden.sh`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const WASM_B64 = /*WASM_B64_BEGIN*/"AGFzbQEAAAAB4gEgYAJ/fwBgAX8AYAN+fn4Bf2AEfn5+fgF/YAF+AX9gAXwBf2ADf39/AGAAAX9gBX5+fn5+AX9gBX9+fn5+AGAEf39/fwBgBH9+fn8AYAV/f39/fwBgAn9+AGAEfn5/fwF/YAV8fH98fAF/YAR8fH98AX9gAn9/AX9gB35+fn5+fn4Bf2ADfn5/AX9gA39/fAF8YAd8fH98fHx/AX9gBXx8fHx8AX9gDn5+fn5+fn5+fn5+fn5/AX9gAABgAnx/AGACf3wAYAR/f398AGABfwF/YAJ/fwF8YAF8AXxgBH9+fn4AAz49DAAEDQ4BAQICAgMBAgcPBAgQEQMEBQMJAwgSEwcFFBUWFxgZAQUKGhsBBgEAAAAcBgodAAAGAAAJCx4LHwQFAXABAwMFAwEAEQYZA38BQYCAwAALfwBBuIrAAAt/AEHAisAACwfAAyAGbWVtb3J5AgALYXR0cmliX2xlZ3MAAg1hdHRyaWJfc2hhcmVzAAQLYmF0Y2hfY2xhaW0ABwxiYXRjaF9yZWRlZW0ACAxjYXJyeV9hbW91bnQACQpjYXJyeV9yYXRlAAoSY2FycnlfcnVud2F5X3Nsb3RzAAwJY29uc3RhbnRzAA0GZGVjaWRlAA4KZHJpcF9zcGxpdAAPC2VkZ2VfbWFyZ2luABAHZWRnZV9vZgARDmxvZ19yZXR1cm5fYnBzABITbG95YWx0eV9pbmRleF9kZWx0YQATDWxveWFsdHlfc3BsaXQAFAdsdnJfYXByABUHbV9hcHBseQAWC25hdl9taW50X3YzABgKbmF2X3JlZGVlbQAZC29pbF9hZHZhbmNlABoIb2lsX21pbnQAGwdvdXRfcHRyABwKcGF0aF9zaWdtYQAdEXBvc3RfZGVwb3NpdF9lZGdlAB8OcmViYWxhbmNlX2RyYWcAIApyb3dfc2V0dGxlACEMc2VyaWVzX2JlZ2luACILc2VyaWVzX3B1c2gAIw1zZXNzaW9uX3NpZ21hACUKX19kYXRhX2VuZAMBC19faGVhcF9iYXNlAwIJCAEAQQELAjc0DAEDCoCGAT2XCAIIfwF+IwBBIGsiCCQAIAhBFGohBgJ/AkACQCADIARqQQFrQQAgA2txrSACQQFqIgogASgCACICQQF0IgkgCSAKSRsiCkEIQQQgBEEBRhsiCSAJIApJGyIM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IAAgATYCDCABKAIIIgEtAAkaIABBAiABLQAIEDUAC5YGAQV/IABBCGshASABIABBBGsoAgAiA0F4cSIAaiECAkACQCADQQFxDQAgA0ECcUUNASABKAIAIgMgAGohACABIANrIgFBiIrAACgCAEYEQCACKAIEQQNxQQNHDQFBgIrAACAANgIAIAIgAigCBEF+cTYCBCABIABBAXI2AgQgAiAANgIADwsgASADEC0LAkACQAJAAkACQCACKAIEIgNBAnFFBEAgAkGMisAAKAIARg0CIAJBiIrAACgCAEYNAyACIANBeHEiAhAtIAEgACACaiIAQQFyNgIEIAAgAWogADYCACABQYiKwAAoAgBHDQFBgIrAACAANgIADwsgAiADQX5xNgIEIAEgAEEBcjYCBCAAIAFqIAA2AgALIABBgAJJDQIgASAAEDZBACEBQaCKwABBoIrAACgCAEEBayIANgIAIAANBEHoh8AAKAIAIgAEQANAIAFBAWohASAAKAIIIgANAAsLQaCKwABB/x8gASABQf8fTRs2AgAPC0GMisAAIAE2AgBBhIrAAEGEisAAKAIAIABqIgA2AgAgASAAQQFyNgIEQYiKwAAoAgAgAUYEQEGAisAAQQA2AgBBiIrAAEEANgIACyAAQZiKwAAoAgAiA00NA0GMisAAKAIAIgJFDQNBACEAQYSKwAAoAgAiBEEpSQ0CQeCHwAAhAQNAIAIgASgCACIFTwRAIAIgBSABKAIEakkNBAsgASgCCCEBDAALAAtBiIrAACABNgIAQYCKwABBgIrAACgCACAAaiIANgIAIAEgAEEBcjYCBCAAIAFqIAA2AgAPCwJAQfiJwAAoAgAiAkEBIABBA3Z0IgNxRQRAQfiJwAAgAiADcjYCACAAQfgBcUHwh8AAaiIAIQIMAQsgAEH4AXEiAEHwh8AAaiECIABB+IfAAGooAgAhAAsgAiABNgIIIAAgATYCDCABIAI2AgwgASAANgIIDwtB6IfAACgCACIBBEADQCAAQQFqIQAgASgCCCIBDQALC0GgisAAQf8fIAAgAEH/H00bNgIAIAMgBE8NAEGYisAAQX82AgALCwwAIABB3QAgARAqAAuEAwEEfyAAKAIMIQICQAJAAkAgAUGAAk8EQCAAKAIYIQMCQAJAIAAgAkYEQCAAQRRBECAAKAIUIgIbaigCACIB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QdiIwAA2AgBB4IjAAEHYiMAANgIAQeyIwABB4IjAADYCAEHoiMAAQeCIwAA2AgBB9IjAAEHoiMAANgIAQfCIwABB6IjAADYCAEH8iMAAQfCIwAA2AgBBhInAAEH4iMAANgIAQfiIwABB8IjAADYCAEGMicAAQYCJwAA2AgBBgInAAEH4iMAANgIAQZSJwABBiInAADYCAEGIicAAQYCJwAA2AgBBnInAAEGQicAANgIAQZCJwABBiInAADYCAEGkicAAQZiJwAA2AgBBmInAAEGQicAANgIAQayJwABBoInAADYCAEGgicAAQZiJwAA2AgBBtInAAEGoicAANgIAQaiJwABBoInAADYCAEG8icAAQbCJwAA2AgBBsInAAEGoicAANgIAQcSJwABBuInAADYCAEG4icAAQbCJwAA2AgBBzInAAEHAicAANgIAQcCJwABBuInAADYCAEHUicAAQciJwAA2AgBByInAAEHAicAANgIAQdyJwABB0InAADYCAEHQicAAQciJwAA2AgBB5InAAEHYicAANgIAQdiJwABB0InAADYCAEHsicAAQeCJwAA2AgBB4InAAEHYicAANgIAQfSJwABB6InAADYCAEHoicAAQeCJwAA2AgBBjIrAACACNgIAQfCJwABB6InAADYCAEGEisAAIAFBKGsiADYCACACIABBAXI2AgQgACACakEoNgIEQZiKwABBgICAATYCAAwICyACIARNDQAgAyAESw0AIAAoAgxFDQMLQZyKwABBnIrAACgCACIAIAIgACACSRs2AgAgASACaiEDQeCHwAAhAAJAAkADQCADIAAoAgAiBkcEQCAAKAIIIgANAQwCCwsgACgCDEUNAQtB4IfAACEAA0ACQCAEIAAoAgAiA08EQCADIAAoAgRqIgYgBEsNAQsgACgCCCEADAELC0GMisAAIAI2AgBBhIrAACABQShrIgA2AgAgAiAAQQFyNgIEIAAgAmpBKDYCBEGYisAAQYCAgAE2AgAgBCAGQSBrQXhxQQhrIgAgACAEQRBqSRsiA0EbNgIEQeCHwAApAgAhCSADQRBqQeiHwAApAgA3AgAgA0EIaiIAIAk3AgBB5IfAACABNgIAQeCHwAAgAjYCAEHoh8AAIAA2AgBB7IfAAEEANgIAIANBHGohAANAIABBBzYCACAGIABBBGoiAEsNAAsg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IQIMAQsgAUIgiCIKIAIgAiADQv////8PgyICgCIMIAN+fUIghoQgAoAiBEIghiABQv////8PgyAKIAMgBH59QiCGhCIBIAKAIgOEIQogASACIAN+fSEBIARCIIggDIQhDEIAIQILIAcgATcDECAHIAo3AwAgByACNwMYIAcgDDcDCCAFQbABaiQAIAcpAwAhASAAIAcpAwg3AwggACABNwMAIAdBIGokAAtWAQF+AkAgA0HAAHFFBEAgA0UNASACIANBP3GtIgSGIAFBACADa0E/ca2IhCECIAEgBIYhAQwBCyABIANBP3GthiECQgAhAQsgACABNwMAIAAgAjcDCAuXAwMCfgJ8An8CQAJAAn8gAL0iAUKAgICAgICACFkEQCABQv/////////3/wBWDQNBgXghBiABQiCIIgJCgIDA/wNSBEAgAqcMAgtBgIDA/wMgAacNARpEAAAAAAAAAAAPCyAARAAAAAAAAAAAYQRARAAAAAAAAPC/IAAgAKKjDwsgAUIAUw0BQct3IQYgAEQAAAAAAABQQ6K9IgFCIIinC0HiviVqIgVBFHYgBmq3IQQgAUL/////D4MgBUH//z9xQZ7Bmv8Daq1CIIaEv0QAAAAAAADwv6AiACAARAAAAAAAAABAoKMhAyAERAAA4P5CLuY/oiAAIAREdjx5Ne856j2iIAMgACAARAAAAAAAAOA/oqIiBCADIAOiIgMgA6IiACAAIABEn8Z40Amawz+iRK94jh3Fccw/oKJEBPqXmZmZ2T+goiADIAAgACAARERSPt8S8cI/okTeA8uWZEbHP6CiRFmTIpQkSdI/oKJEk1VVVVVV5T+goqCgoqAgBKGgoA8LIAAgAKFEAAAAAAAAAACjIQALIAALVgEBfgJAIANBwABxRQRAIANFDQEgAkEAIANrQT9xrYYgASADQT9xrSIEiIQhASACIASIIQIMAQsgAiADQT9xrYghAUIAIQILIAAgATcDACAAIAI3AwgLagEFfiADQv////8PgyIEIAFC/////w+DIgV+IQYgACAGIAQgAUIgiCIHfiAFIANCIIgiBH4iBXwiAUIghnwiCDcDACAAIAYgCFatIAQgB34gASAFVK1CIIYgAUIgiIR8fCACIAN+fDcDCAsL3QUDAEGAgMAAC8EFgwAQACQAAADWAAAAEQAAAIMAEAAkAAAA4gAAAAgAAACDABAAJAAAAOIAAAAwAAAAgwAQACQAAADpAAAACQAAAIMAEAAkAAAANwAAAAgAAABjYXBhY2l0eSBvdmVyZmxvd3Byb2dyYW1zXGV4Y2hhbmdlLWNvcmVcc3JjXGxldi5ycwBwcm9ncmFtc1xleGNoYW5nZS1jb3JlXHNyY1xnYXJkZW4ucnMAL3J1c3RjLzRhNGVmNDkzZTNhMTQ4OGM2ZTMyMTU3MDIzODA4NGIzODk0OGY2ZGIvbGlicmFyeS9hbGxvYy9zcmMvcmF3X3ZlYy9tb2QucnMAL3J1c3QvZGVwcy9kbG1hbGxvYy0wLjIuMTEvc3JjL2RsbWFsbG9jLnJzAKgAEABQAAAAHAAAAAUAAABhdHRlbXB0IHRvIGFkZCB3aXRoIG92ZXJmbG93YXR0ZW1wdCB0byBtdWx0aXBseSB3aXRoIG92ZXJmbG93YXR0ZW1wdCB0byBzdWJ0cmFjdCB3aXRoIG92ZXJmbG93AABhABAAIQAAAHEAAAAIAAAAgwAQACQAAACyAAAAEwAAAIMAEAAkAAAA5QEAABYAAACDABAAJAAAAOsBAAASAAAAgwAQACQAAACDAAAACQAAAIMAEAAkAAAAhQAAABsAAACDABAAJAAAACMCAAAUAAAAgwAQACQAAAApAgAAFgAAAIMAEAAkAAAAKQIAAAkAAACDABAAJAAAAC0CAAAYAAAAgwAQACQAAAAmAAAABQAAAGFzc2VydGlvbiBmYWlsZWQ6IHBzaXplID49IHNpemUgKyBtaW5fb3ZlcmhlYWQAAPkAEAAqAAAAsQQAAAkAAABhc3NlcnRpb24gZmFpbGVkOiBwc2l6ZSA8PSBzaXplICsgbWF4X292ZXJoZWFkAAD5ABAAKgAAALcEAAANAEHIhcAACwEIAEHUhcAACwEB"/*WASM_B64_END*/;
+
+let X, MEM, OUT;
+/* Results cross through a scratch buffer in linear memory, little-endian.
+   u128 arrives as two u64 limbs because wasm32 has no 128-bit ABI type. */
+const u64 = k => MEM.getBigUint64(OUT + 8 * k, true);
+const u128 = k => u64(k) | (u64(k + 1) << 64n);
+const f64_ = k => MEM.getFloat64(OUT + 8 * k, true);
+/* `b` is the marshalling step at the boundary — a type conversion, not
+   arithmetic: it changes how a value is represented for the call, never what
+   the value is. */
+const b  = v => typeof v === 'bigint' ? v : BigInt(Math.round(Number(v)));
+const lo = v => b(v) & 0xffffffffffffffffn, hi = v => b(v) >> 64n;
+
+/* A refusal is a first-class outcome: where the Rust returns Err, the export
+   returns 0 and writes nothing, and the page must SAY SO rather than render a
+   plausible zero. */
+class Refused extends Error {}
+const need = (rc, what) => { if (rc === 0) throw new Refused(what); return rc; };
+
+/* ── The Rust surface, named once ─────────────────────────────────────────── */
+const R = {
+  /* ORDER MATTERS AND IS NOT ALPHABETICAL: lib.rs:70-71 documents
+     OUT[0]=loyalty, OUT[1]=rest. Reading these two the other way round silently
+     inverts the whole waterfall — the carve becomes the vault's share and the
+     page reports a 9% vault on a 81% one. It renders plausibly either way,
+     which is exactly why the order is named here. */
+  loyaltySplit(a){ need(X.loyalty_split(b(a)),'loyalty_split');
+    return {loyalty:u64(0), rest:u64(1)}; },
+  dripSplit(a){ need(X.drip_split(b(a)),'drip_split'); return [u64(0),u64(1)]; },
+  attribLegs(a){ need(X.attrib_legs(b(a)),'attrib_legs'); return [u64(0),u64(1),u64(2)]; },
+  mApply(u,dh,k){ need(X.m_apply(lo(u),hi(u),b(dh),b(k)),'m_apply'); return u128(0); },
+  navMint(d,s,v){ if(X.nav_mint_v3(b(d),lo(s),hi(s),b(v))===0) return null;
+    return {units:u128(0), cut:u128(2), mint:u128(4)}; },
+  navRedeem(u,vault,sup){ if(X.nav_redeem(lo(u),hi(u),b(vault),lo(sup),hi(sup))===0) return null;
+    return u128(0); },
+  loyaltyIndexDelta(inflow,w){ if(X.loyalty_index_delta(lo(inflow),hi(inflow),lo(w),hi(w))===0)
+    return null; return u128(0); },
+  oilMint(d,bps){ if(X.oil_mint(lo(d),hi(d),Number(bps))===0) return null; return u128(0); },
+  carryAmount(bor,r,d){ need(X.carry_amount(b(bor),b(r),b(d)),'carry_amount'); return u64(0); },
+  /* 2 = dies at OUT[0]; 1 = never dies of carry (stated, never a big number). */
+  runwaySlots(bor,r,bond){ const rc=X.carry_runway_slots(b(bor),b(r),b(bond));
+    if(rc===0) throw new Refused('carry_runway_slots'); return rc===2? u64(0) : null; },
+  carryRate(u,r0,rmax,knee){ need(X.carry_rate(b(u),b(r0),b(rmax),b(knee)),'carry_rate'); return u64(0); },
+  batchClaim(c,s,t){ if(X.batch_claim(b(c),b(s),b(t))===0) return null; return u64(0); },
+  batchRedeem(t,res,s){ if(X.batch_redeem(b(t),b(res),b(s))===0) return null; return u64(0); },
+  logReturnBps(crossed,step){ need(X.log_return_bps(Number(crossed),Number(step)),'log_return_bps'); return u64(0); },
+  lvrApr(sig){ X.lvr_apr(sig); return f64_(0); },
+  drag(gas,gwei,nativeUsd,pos,perYear){
+    if(X.rebalance_drag(gas,gwei,nativeUsd,pos,perYear)===0) return null; return f64_(0); },
+  pathSigma(prices,barsPerYear){ X.series_begin();
+    for(const p of prices) X.series_push(p,0);
+    if(X.path_sigma(barsPerYear)===0) return null; return f64_(0); },
+  sessionSigma(prices,opens,barsPerYear){ X.series_begin();
+    for(let i=0;i<prices.length;i++) X.series_push(prices[i], opens[i]?1:0);
+    if(X.session_sigma(barsPerYear)===0) return null;
+    return {open:f64_(0), closed:f64_(1), blended:f64_(2),
+            barsOpen:Number(u64(3)), barsClosed:Number(u64(4))}; },
+  edge(sig,fee,prov,inc){ need(X.edge_of(sig,fee,prov,inc),'edge_of');
+    return {sigma:f64_(0), lvr:f64_(1), net:f64_(2), netIncl:f64_(3),
+            coverage:f64_(4), actionable:u64(5)===1n}; },
+  postDepositEdge(sig,fee,prov,inc,tvl,dep,native){
+    need(X.post_deposit_edge(sig,fee,prov,inc,tvl,dep,native?1:0),'post_deposit_edge');
+    return {sigma:f64_(0), lvr:f64_(1), net:f64_(2), netIncl:f64_(3),
+            coverage:f64_(4), actionable:u64(5)===1n}; },
+  /* 1=Hold(manage) 2=HoldUnmanaged 3=Exit 4=Refuse. The page maps these to
+     words and decides nothing itself. */
+  decide(sig,fee,prov,inc,drag){ return X.decide(sig,fee,prov,inc,drag); },
+  /* The WHOLE exit judgement: the masterchef delta, the warm-up branch, the
+     sole-staker rule and the subtraction. All four are protocol policy and all
+     four come from Rust. */
+  rowSettle(units,unstakeUnits,index,snapshot,w,plantH,now,k,oilBps){
+    if(X.row_settle(lo(units),hi(units),lo(unstakeUnits),hi(unstakeUnits),
+                    lo(index),hi(index),lo(snapshot),hi(snapshot),lo(w),hi(w),
+                    b(plantH),b(now),b(k),Number(oilBps))===0) return null;
+    return {returned:u128(0), acc:u128(2), kept:u128(4), forfeit:u128(6),
+            oil:u128(8), warm:u64(10)===1n, sole:u64(11)===1n}; },
+  /* $OIL's only sink: burn it to move a row along its own maturity curve. */
+  oilAdvance(acc,dh,k,burn,phiBps){
+    if(X.oil_advance(lo(acc),hi(acc),b(dh),b(k),lo(burn),hi(burn),b(phiBps))===0) return null;
+    return {applied:u128(0), before:u128(2), after:u128(4),
+            dh:u64(6), full:u64(7)===1n, unspent:u128(8)}; },
+  /* The ratified 40/20/20/20; the treasury leg absorbs every rounding remainder. */
+  attribShares(minted,selfDealing,noReferrer){
+    if(X.attrib_shares(lo(minted),hi(minted),selfDealing?1:0,noReferrer?1:0)===0) return null;
+    return {payer:u128(0), creator:u128(2), referrer:u128(4), treasury:u128(6)}; },
+  edgeMargin(amount,pLow,pHigh){
+    if(X.edge_margin(b(amount),lo(pLow),hi(pLow),lo(pHigh),hi(pHigh))===0) return null;
+    return u64(0); },
+  consts(){ X.constants(); return {
+    K: u64(0), WARM: u64(1), FLOAT_BPS: u64(2), DRIP_VAULT_BPS: u64(3),
+    LOYALTY_FEE_BPS: u64(4), OIL_MAX_BPS: u64(5), INDEX_SCALE: u128(6),
+    GENESIS: u64(8), CARRY_PERIOD_SLOTS: u64(9), R_MAX_CEILING_BPS: u64(10),
+    OIL_PHI_MAX_BPS: u64(11), MIN_ROW_UNITS: u128(12), ATTRIB_PAYER_BPS: u64(14) }; }
+};
+const PROV = {OnChain:0, Indexed:1, Estimate:2};
+const ACTION = {1:'Manage', 2:'Hold unmanaged', 3:'Exit', 4:'Not enough evidence'};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FORMATTING — presentation only. None of this decides a protocol quantity.
+   The page works in 6 decimals because 18 makes every number unreadable in a
+   browser; the ARITHMETIC that produced them is the contract's, at full width.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const U = 1000000n;
+const N  = v => Number(v)/1e6;
+const money = v => '$'+N(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const tok   = v => N(v).toLocaleString(undefined,{minimumFractionDigits:4,maximumFractionDigits:4});
+const tok2  = v => N(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const usd0  = n => '$'+Math.round(n).toLocaleString();
+const pct   = (x,d=1) => (x*100).toFixed(d)+'%';
+/* Ondo's format: 6 decimals, chosen so the change is visible at the refresh rate. */
+const navFmt= x => '$'+x.toLocaleString(undefined,{minimumFractionDigits:6,maximumFractionDigits:6});
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let C;                                   // the Rust constants, loaded at boot
+const dy = s => Number(s)/86400;
+function dur(sec){
+  sec=Math.max(0,Math.floor(sec));
+  const d=Math.floor(sec/86400), h=Math.floor(sec%86400/3600), m=Math.floor(sec%3600/60);
+  if(d>=1) return d+'d '+h+'h';
+  if(h>=1) return h+'h '+m+'m';
+  return m+'m';
+}
+/* Blocks are the protocol's clock. The page displays them as blocks and, where
+   a human needs a duration, converts at the Chia block time the constants imply.
+   This is a UNIT conversion for display, not a protocol quantity. */
+const BLOCK_SEC = 18.75;
+const blocksToWords = bl => dur(Number(bl)*BLOCK_SEC);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STATE. Holds balances and history. Every transition calls into R.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const CHAINS = {
+  robinhood: {
+    id:'robinhood', label:'Robinhood Chain', short:'Robinhood', net:'4663',
+    native:'ETH', quote:'USDG',
+    signer:'EIP-1193 injected · chain 4663',
+    enforcement:'evm/src/GardenCore.sol · FLWRS.sol · OIL.sol',
+    rust:'programs/exchange-core (wasm in this file)'
+  },
+  chia: {
+    id:'chia', label:'Chia', short:'Chia', net:'testnet11',
+    native:'TXCH', quote:'CAT',
+    signer:'Goby · Sage WalletConnect',
+    enforcement:'chia/puzzles/garden.clsp · amm_pool.clsp · spend bundle',
+    rust:'programs/exchange-core (wasm in this file)'
+  }
+};
+function adapter(){ return CHAINS[S.chain] || CHAINS.robinhood; }
 
 const S={
-  connected:false, addr:null, surface:"swap",
-  height:10080n, vault:125000n*1000n, sOut:20000n*1000n,
-  loyalty:2800n*1000n, incident:4200n*1000n,
-  bal:{eth:12n*10n**18n, usdg:25000n*10n**6n, flwrs:0n, oil:0n, nvda:40n*10n**18n},
-  rows:[{id:"g1",kind:"planted",owner:"grove",units:12000n*1000n,h:8400n,acc:420n*1000n}],
-  fills:[{k:"mint",d:"Genesis grove · s_out = Σ live row units"}],
-  pick:"nvda", size:10000, pending:null, toast:null
+  chain:'robinhood',
+  t:0n, h:0n, vault:0n, supply:0n, inc:0n, pool:0n, idx:0n, pend:0n, w:0n, oil:0n,
+  cash:100000n*U, flwrs:0n, rows:[], led:[], hist:[], navHist:[], paidIn:0n,
+  asOf:Date.now(), tab:null, nextRow:1,
+  /* Fees the suite has generated, by leg, so the supply chain can be SHOWN
+     rather than asserted. Each is written only by a Rust-returned leg. */
+  feeRaw:0n, feeToVault:0n, feeToIncident:0n, feeToLoyalty:0n,
+  creatorCred:0n, treasuryCred:0n, payerCred:0n, referrerCred:0n, oilBurned:0n,
+  lev:{budget:2000, size:18000, rateBps:210, bandBps:500},
+  /* THE ONE DECLARED EXCEPTION — a toy counterparty, labelled wherever it shows.
+     No garden quantity is derived from it; it only produces a fee amount, and
+     that amount is split by Rust. */
+  amm:{a:500000n*U, bq:250000n*U, feeBps:30n},
+  /* The relay's capability matrix. `unknown` (absent) is NOT `refused` (0):
+     app/src/chia/capabilities.ts:67-80. Absent renders Unavailable, 0 renders
+     Blocked, and the two must never collapse into one word. */
+  relay:{ contribute:1, exit:1, drip:1, plant:1, claim:1, claim_attr:1,
+          'swap.dir0':1, 'swap.dir1':1, add_lp:1, remove_lp:1,
+          oil_advance:1, oil_melt:1, quit:1,
+          commit:0, clear_batch:0, 'perps.open':1, 'perps.close':1,
+          airlock_deposit:0, forge_create:0 } };
+
+/* ── The five-state evidence vocabulary, verbatim from app/src/ChiaApp.tsx:3246-3256.
+   There is no other path to the word "Executable" anywhere on this page.     */
+const GRADE_LEGEND = {
+  executable:'the build relay accepts this action against the live network right now.',
+  read:'verified chain state is reported; there is no action to execute.',
+  preview:'calculated locally in this tab; there is no write path.',
+  blocked:'the build path exists, refuses, and states why.',
+  unavailable:'nothing answered, so no claim is made either way.'
+};
+const GRADE_LABEL = {executable:'Executable', read:'Verified read', preview:'Preview',
+  blocked:'Blocked', unavailable:'Unavailable'};
+
+/* The reasons are the relay's own words and reach the surface UNMODIFIED. */
+const REFUSAL = {
+  commit:'the Launchpad contract is built and tested but has never been deployed on this chain — there is no address to build against',
+  clear_batch:'the Launchpad contract is built and tested but has never been deployed on this chain — there is no address to build against',
+  airlock_deposit:'the standing vault currys the OPERATOR key, so a browser deposit would be an irreversible donation with no reachable withdraw',
+  forge_create:'Forge has no deployed factory on this chain; the venue identity it would derive cannot be re-derived by anyone yet'
+};
+/* NO_CONTROL_WHILE_REFUSED — app/src/chia/writeControls.ts:99-109. These ids
+   get no button AT ALL, because a disabled button reads as "soon". */
+const NO_CONTROL_WHILE_REFUSED = ['airlock_deposit'];
+
+function verdict(id){
+  if(!(id in S.relay)) return {grade:'unavailable', reason:
+    'the build relay has not answered /api/capabilities for "'+id+'" — the page cannot claim an action is executable without asking the code that would have to build it'};
+  if(S.relay[id]===1) return {grade:'executable', reason:GRADE_LEGEND.executable};
+  return {grade:'blocked', reason: REFUSAL[id] || 'the build path exists and refused, and did not state a reason'};
+}
+const pill = (g,reason) => `<span class="pill p-${g}" title="${esc(reason||GRADE_LEGEND[g])}"><i></i>${GRADE_LABEL[g]}</span>`;
+const pillFor = id => { const v=verdict(id); return pill(v.grade, v.reason); };
+
+/* The four-part gated control: disabled, the reason VERBATIM in title, the
+   LABEL ITSELF changes, and a chip beside it carrying the same grade+reason.
+   docs/CODEREAD-frontend-surface-inventory-2026-09-15.md:924-930. */
+function ctl(id, label, cls){
+  const v = verdict(id), ok = v.grade==='executable';
+  if(!ok && NO_CONTROL_WHILE_REFUSED.includes(id))
+    return `<div class="nodraw"><b>No control drawn</b>${esc(v.reason)}. A disabled button would read as &ldquo;soon&rdquo;; this surface refuses to draw one.</div>`;
+  return `<button class="go ${cls||''}" ${ok?'':'disabled'} title="${esc(v.reason)}" data-a="${esc(id)}">`
+       + `${ok? esc(label) : GRADE_LABEL[v.grade]+' &middot; '+esc(label)}</button>`;
+}
+
+/* ── Derived views. Each is a call into Rust; none is arithmetic here. ────── */
+const navPx = () => { const v=R.navRedeem(U,Number(S.vault),S.supply); return v===null?0:N(v); };
+const ago = () => { const s=Math.max(0,Math.round((Date.now()-S.asOf)/1000));
+  return s<60? s+'s ago' : Math.floor(s/60)+'m ago'; };
+function log(m){ S.led.unshift([dy(S.t).toFixed(0)+'d',m]); if(S.led.length>50)S.led.pop(); }
+function snap(){
+  const worth = S.supply? R.navRedeem(S.flwrs+S.w, Number(S.vault), S.supply) : 0n;
+  S.hist.push(N(worth||0n)); S.navHist.push(navPx());
+  if(S.hist.length>200){S.hist.shift();S.navHist.shift();}
+  S.asOf=Date.now();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ACTIONS — each one is a call into Rust plus bookkeeping of balances.
+
+   LANGUAGE LAW, from the owner's own correction:
+     · You do not SELL $FLWRS and you never "cash out". You BURN $FLWRS and the
+       vault releases settled stables. garden_state_v3.clsp:382 is `s_out -=
+       units` — a burn — and :383-386 bind it to a real melt from MELT_PH, so
+       the ledger debit and the custody outflow are the same event in-puzzle.
+       There is no sale, no counterparty, no order book, no exit fee, no queue.
+     · You do not DEPOSIT in the sense of saving. You USE THE SUITE and are
+       CREDITED for the contribution as it converts through the economic supply
+       chain into the vault.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const A={
+  /* op1 — the PLAIN path. Still not "add money": it is value entering the
+     vault, and what comes back is a claim on the vault, not a balance. */
+  contribute(x){ if(x<=0n||x>S.cash) return;
+    const r=R.navMint(x,S.supply,Number(S.vault)); if(!r) return;
+    S.cash-=x; S.vault+=x; S.supply+=r.mint; S.flwrs+=r.mint; S.paidIn+=x;
+    log(`Contributed ${money(x)} &middot; credited ${tok(r.mint)} $FLWRS`); snap(); },
+
+  /* op3 EXIT — a BURN. `s_out -= units` (garden_state_v3.clsp:382), with the
+     melt asserted from MELT_PH for exactly -units (:386). The stables come OUT
+     OF THE VAULT; nobody buys the $FLWRS, because there is nothing to buy —
+     the units cease to exist. */
+  burnForStables(x){ if(x<=0n||x>S.flwrs||!S.supply) return;
+    const out=R.navRedeem(x,Number(S.vault),S.supply); if(out===null) return;
+    S.flwrs-=x; S.supply-=x; S.vault-=out; S.cash+=out;
+    S.paidIn = S.paidIn>out? S.paidIn-out : 0n;
+    log(`Burned ${tok(x)} $FLWRS &middot; vault released ${money(out)} in stables`); snap(); },
+
+  /* op2 DRIP — THE WATERFALL, and the provenance of 81%.
+     garden_loyalty_drip_fund_v3.clsp:28-31 draws the two hops:
+        fee --> 90% --> GARDEN_FUND_PH --(op2)--> vault 90% / incident 10%
+            \-- 10% --> RESERVE_VAULT_PH (loyalty)
+     so the vault receives 0.90 x 0.90 = 81% of the RAW fee. Both hops are
+     computed by Rust (loyalty_split then drip_split); the page never multiplies
+     the two, and never prints the product as a bare constant.
+     A FEE NEVER MINTS: s_out is untouched here (garden_state_v3.clsp do_drip). */
+  drip(raw){ if(raw<=0n) return null;
+    const {loyalty:toLoyalty, rest:toFund} = R.loyaltySplit(raw);   // hop 1, off the RAW fee
+    const [toVault, toIncident] = R.dripSplit(toFund);    // hop 2, on the remainder
+    S.vault+=toVault; S.inc+=toIncident; S.pool+=toLoyalty;
+    S.feeRaw+=raw; S.feeToVault+=toVault; S.feeToIncident+=toIncident; S.feeToLoyalty+=toLoyalty;
+    /* The deferred fold: a forfeit is never distributable in the unit that
+       created it. Pending C folds into the index only on the NEXT drip. */
+    if(S.pend>0n && S.w>0n){
+      const d=R.loyaltyIndexDelta(S.pend,S.w);
+      if(d!==null){ S.idx+=d; S.pend=0n; }
+    }
+    if(S.w>0n){ const d=R.loyaltyIndexDelta(toLoyalty,S.w); if(d!==null) S.idx+=d; }
+    return {raw, toFund, toLoyalty, toVault, toIncident}; },
+
+  /* op4 ATTRIB — plants FOUR ROWS AT ZERO MATURITY. It does NOT pay anybody.
+     garden_state_v3.clsp:458 is `s_out += minted` — the same mint site as op1 —
+     and the legs are PLANTED (:106-116 in the row layer), so a referrer receives
+     a POSITION at zero maturity, never a payout. */
+  attribute(x){ if(x<=0n||x>S.cash) return;
+    const r=R.navMint(x,S.supply,Number(S.vault)); if(!r) return;
+    const sh=R.attribShares(r.mint,false,false); if(!sh) return;
+    S.cash-=x; S.vault+=x; S.supply+=r.mint; S.paidIn+=x;
+    S.payerCred+=sh.payer; S.creatorCred+=sh.creator;
+    S.referrerCred+=sh.referrer; S.treasuryCred+=sh.treasury;
+    plantRow(sh.payer,'payer'); plantRow(sh.creator,'creator');
+    plantRow(sh.referrer,'referrer'); plantRow(sh.treasury,'treasury');
+    log(`Attribution on ${money(x)} &middot; planted 4 rows at zero maturity (${tok(r.mint)} $FLWRS)`);
+    snap(); },
+
+  /* A row is the unit of claim. MIN_ROW_UNITS dust REVERTS — it is never
+     rounded away, because rounding a claim away is how a claim disappears. */
+  plant(x){ if(x<=0n||x>S.flwrs) return;
+    if(x < C.MIN_ROW_UNITS){ log(`Refused: ${tok(x)} is below MIN_ROW_UNITS (${tok(C.MIN_ROW_UNITS)}) — dust reverts, it is never rounded away`); return; }
+    S.flwrs-=x; S.w+=x; plantRow(x,'you');
+    log(`Planted a row of ${tok(x)} $FLWRS &middot; maturity starts at zero`); snap(); },
+
+  /* Unstaking NEVER burns. `returned == unstake_units` is asserted in Rust
+     (garden.rs:351). Principal always comes back; only ACCRUED yield can be
+     forfeited, and the forfeit is DEFERRED into pending C. */
+  unstake(rowId, oilBps){
+    const row=S.rows.find(r=>r.id===rowId); if(!row) return;
+    const r=R.rowSettle(row.units,row.units,S.idx,row.snap,S.w,row.plantH,S.h,C.K,oilBps||0);
+    if(!r) return;
+    S.w-=row.units; S.flwrs+=r.returned; S.rows=S.rows.filter(z=>z.id!==rowId);
+    if(r.forfeit>0n) S.pend+=r.forfeit;      // DEFERRED — folds on the next drip
+    if(r.oil>0n) S.oil+=r.oil;
+    log(`Unstaked row #${rowId} &middot; principal ${tok(r.returned)} returned in full`
+      + (r.forfeit>0n? ` &middot; ${tok(r.forfeit)} accrued forfeited to stayers (deferred)`:'')
+      + (r.oil>0n? ` &middot; minted ${tok(r.oil)} $OIL`:''));
+    snap(); },
+
+  /* $OIL's only sink: burn it to ADVANCE a row's clock. phi-capped by Rust. */
+  advance(rowId, burn){
+    const row=S.rows.find(r=>r.id===rowId); if(!row||burn<=0n||burn>S.oil) return;
+    const st=R.rowSettle(row.units,0n,S.idx,row.snap,S.w,row.plantH,S.h,C.K,0);
+    if(!st) return;
+    const dh = S.h - row.plantH;
+    const r=R.oilAdvance(st.acc,dh,C.K,burn,C.OIL_PHI_MAX_BPS);
+    if(!r) return;
+    const spent = burn - r.unspent;
+    S.oil-=spent; S.oilBurned+=spent;
+    row.plantH = row.plantH > r.dh ? row.plantH - r.dh : 0n;   // the clock moved
+    log(`Burned ${tok(spent)} $OIL &middot; advanced row #${rowId} by ${blocksToWords(r.dh)}`
+      + (r.full?' &middot; row is now fully matured':''));
+    snap(); },
+};
+function plantRow(units,who){
+  S.rows.push({id:S.nextRow++, units, snap:S.idx, plantH:S.h, who});
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE POOLS — measured, not invented. Robinhood Chain, 2026-09-15.
+   sigma from 168 dense hourly bars (path_sigma); fee_apr from a 1-hour
+   on-chain swap replay. These are DATA. Every judgement about them is Rust's.
+   See docs/MEASURE-robinhood-pools-2026-09-15.md.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const POOLS = [
+  {n:'HIMS/USDG',    f:0.30, tvl:1189261, sig:0.65, fee:3.410},
+  {n:'CASHCAT/WETH', f:0.30, tvl:2176017, sig:2.84, fee:2.665},
+  {n:'NVDA/USDG',    f:0.05, tvl:7110315, sig:0.27, fee:0.944, rth:0.425, otn:0.231},
+  {n:'GOOGL/USDG',   f:0.05, tvl:1159908, sig:0.94, fee:0.889},
+  {n:'GME/USDG',     f:0.05, tvl:653576,  sig:0.51, fee:0.559},
+  {n:'SPY/WETH',     f:0.05, tvl:1741572, sig:0.18, fee:0.473},
+  {n:'SPCX/USDG',    f:0.05, tvl:3395765, sig:0.64, fee:0.509},
+  {n:'AAPL/USDG',    f:0.05, tvl:419119,  sig:0.30, fee:0.446},
+  {n:'MSFT/USDG',    f:0.30, tvl:850358,  sig:0.84, fee:0.239},
+  {n:'amc/USDG',     f:0.30, tvl:1915641, sig:1.22, fee:0.313},
+  {n:'QQQ/USDG',     f:0.05, tvl:1491305, sig:0.35, fee:0.091},
+  {n:'SGOV/USDG',    f:0.30, tvl:4771310, sig:1.06, fee:0.089},
+];
+const GAS = {units:400000, gwei:0.0659, nativeUsd:2479.27, perYear:365};
+const session = () => { const h=(dy(S.t)*24)%24; return (h>=9.5&&h<16)?'open':'closed'; };
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NAV — the order is EARNED, not declared. Sorted by evidence tier, with the
+   declaration index only as a tiebreak (app/src/chia/nav.ts:250-257). The tier
+   table (:228-230) ranks `preview` LAST, below `unavailable`, so a locally
+   computed model can never outrank a shipped surface in any relay state.
+   The bar physically re-orders itself as the chain's answers change.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TIER = {executable:0, read:1, blocked:2, unavailable:3, preview:4};
+const BUCKETS = [
+  {id:'garden',   label:'Garden',    caps:['contribute','exit','plant','claim','claim_attr','drip','quit']},
+  {id:'supply',   label:'Supply chain', caps:[], grade:'read'},
+  {id:'rows',     label:'Rows',      caps:['plant','claim','quit']},
+  {id:'oil',      label:'$OIL',      caps:['oil_advance','oil_melt']},
+  {id:'trade',    label:'Trade',     caps:['swap.dir0','swap.dir1']},
+  {id:'pools',    label:'Pools',     caps:['add_lp','remove_lp']},
+  {id:'labs',     label:'Labs',      caps:['perps.open','perps.close']},
+  {id:'launchpad',label:'Launchpad', caps:['commit','clear_batch']},
+  {id:'airlock',  label:'Airlock',   caps:['airlock_deposit']},
+  {id:'forge',    label:'Forge',     caps:['forge_create']},
+  {id:'portfolio',label:'Portfolio', caps:[], grade:'read'},
+  {id:'docs',     label:'Trust',     caps:[], grade:'read'},
+];
+/* A bucket's grade is the BEST grade among the controls it gates — asked of the
+   relay, never asserted by a table here. */
+function gradeBucket(bk){
+  if(bk.grade) return bk.grade;
+  if(!bk.caps.length) return 'read';
+  let best='unavailable';
+  for(const c of bk.caps){ const g=verdict(c).grade; if(TIER[g]<TIER[best]) best=g; }
+  return best;
+}
+function orderedBuckets(){
+  return BUCKETS.map((b,i)=>({...b, grade:gradeBucket(b), i}))
+    .sort((a,z)=> TIER[a.grade]-TIER[z.grade] || a.i-z.i);
+}
+
+/* Surface banner copy. NO string in this map may state what is or is not
+   executable — that is rendered live from the matrix.
+   app/src/ChiaApp.tsx:1546-1547. */
+const SURFACE = {
+  garden:{e:'Garden', t:'Contribute value, hold a claim you can always burn back',
+    d:'What you hold is a claim on the vault, not a balance in it. Burning $FLWRS destroys the units and the vault releases settled stables for them — there is no counterparty and nothing is sold.'},
+  supply:{e:'Supply chain', t:'How your activity becomes vault value',
+    d:'You are not depositing into a savings account. You use the suite, the suite charges a fee, the fee converts to the settlement stable, and the stable lands in the vault — which is what raises the value of every claim, including yours.'},
+  rows:{e:'Rows', t:'The unit of claim, and the clock it carries',
+    d:'Planting creates a row at zero maturity. Attribution plants four. A row matures along m(dh) = units x dh / (dh + K) — concave, asymptotic, and never complete.'},
+  oil:{e:'$OIL', t:'Burn it to advance a row’s clock',
+    d:'$OIL is minted only from real forfeiture and its melt is free and permissionless. It does not back the vault, it has no peg, and no issuance decision reads its price. Its only sink is advancing maturity.'},
+  trade:{e:'Trade', t:'Swap through the suite',
+    d:'Every swap charges a fee, and that fee is the top of the waterfall that ends in the vault. This surface is where a contribution begins. The numeraire is the selected chain\'s native; the split is always Rust.'},
+  pools:{e:'Pools', t:'Provide both legs, earn the swap fee',
+    d:'Liquidity is the other way to generate the fee that converts into vault value. The edge judgement on every pool below is computed in Rust.'},
+  labs:{e:'Labs', t:'Bounded leverage on a lattice credit position',
+    d:'There is no liquidation price here, because the position cannot be liquidated by price. What can end it is running out of budget for carry, which is stated as RUNWAY.'},
+  launchpad:{e:'Launchpad', t:'Commit, clear at one price, redeem the floor',
+    d:'A single bonded batch with a zero-slope floor and no creator fee on the clearing leg.'},
+  airlock:{e:'Airlock', t:'Opt-in custody vault',
+    d:'A custody boundary, quarantined from the trade and earn funnels by design.'},
+  forge:{e:'Forge', t:'Compose and deploy a market',
+    d:'Forge would take a pair, a fee and initial reserves, and deploy a venue whose identity anyone can re-derive from those parameters alone.'},
+  portfolio:{e:'Portfolio', t:'Everything you hold, in one place',
+    d:'Claims, rows, $OIL and what each is worth if settled right now.'},
+  docs:{e:'Trust', t:'The trust model, and how to verify each claim yourself',
+    d:'Every number on this page is computed by the same Rust that the contracts are differentially tested against. This surface shows the constants it loaded and the exports it used.'},
 };
 
-const NAV=[
-  {id:"trade",label:"Trade",home:"swap",tabs:[["swap","Swap"],["terminal","Terminal"],["limit","Limit"],["dca","DCA"]]},
-  {id:"garden",label:"Garden",home:"garden",tabs:[]},
-  {id:"pools",label:"Pools",home:"pools",tabs:[["pools","Provide"],["vinedresser","Vinedresser"]]},
-  {id:"explore",label:"Explore",home:"explore",tabs:[]},
-  {id:"portfolio",label:"Portfolio",home:"portfolio",tabs:[]},
-  {id:"launch",label:"Launchpad",home:"launch",tabs:[]},
-  {id:"labs",label:"Labs",home:"perps",tabs:[["perps","Perps"],["vol","Vol perps"]]},
-  {id:"docs",label:"Docs",home:"docs",tabs:[]},
-];
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE WATERFALL — objection #3. The 81% is REAL, and its provenance is drawn,
+   never asserted. Both hops come from Rust:
+      hop 1  loyalty_split(raw)   -> [toFund, toLoyalty]   (carve off the RAW fee)
+      hop 2  drip_split(toFund)   -> [toVault, toIncident] (90/10 on the remainder)
+   garden_loyalty_drip_fund_v3.clsp:28-31.
+   The page NEVER multiplies 0.90 x 0.90 and never prints a bare "81%": it
+   shows the two hops and lets the number follow from them. A number without
+   its derivation reads as invented.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function waterfallSvg(raw){
+  const {loyalty:toLoyalty, rest:toFund} = R.loyaltySplit(raw);
+  const [toVault, toIncident] = R.dripSplit(toFund);
+  const f = v => money(v);
+  return `<svg class="flow" viewBox="0 0 640 250" role="img"
+      aria-label="A fee of ${f(raw)} splits in two hops: first a loyalty carve off the raw fee, then the remainder splits between the vault and the incident fund.">
+    <text class="lbl" x="8" y="14">HOP 1 &mdash; THE CARVE, OFF THE RAW FEE</text>
+    <rect x="8" y="24" width="150" height="46" rx="8" fill="var(--surf2)" stroke="var(--line2)"/>
+    <text x="18" y="44" class="n">Raw fee</text><text x="18" y="60" class="big">${f(raw)}</text>
 
-function toast(t){S.toast=t; render(); setTimeout(()=>{S.toast=null;render()},3800)}
-function need(){if(!S.connected) throw Error("connect first")}
-function review(title, lines, run){S.pending={title,lines,run}; render()}
+    <path d="M158 40 H230 V34" stroke="var(--grow)" fill="none" stroke-width="1.5"/>
+    <path d="M158 54 H230 V96" stroke="var(--sun)" fill="none" stroke-width="1.5"/>
 
-function connect(){
-  S.connected=true; S.addr="0x7a12Garden4663a11cE00C80500F1e1d"; S.surface="garden";
-  toast("Local simulator · isolated ledger, no mainnet coins");
-}
-function mint(usdg6){
-  need(); const dep=usdg6/USDG_TO; const {cut,minted}=navMint(dep,S.sOut,S.vault);
-  S.vault+=dep; S.sOut+=minted; S.bal.usdg-=usdg6; S.bal.flwrs+=minted;
-  S.fills.unshift({k:"mint",d:"Claim minted "+minted+" mojo · float "+cut+" · s_out += minted"});
-}
-function burn(u){
-  need(); const rel=navRedeem(u,S.sOut,S.vault); S.vault-=rel; S.sOut-=u; S.bal.flwrs-=u; S.bal.usdg+=rel*USDG_TO;
-  S.fills.unshift({k:"burn",d:"$FLWRS burned — destroyed, not sold. Vault released "+rel+" mojo."});
-}
-function plant(u){
-  need(); if(u<MIN_ROW) throw Error("MIN_ROW_UNITS is 1 $FLWRS");
-  S.bal.flwrs-=u; S.rows.unshift({id:"r"+Date.now(),kind:"planted",owner:"you",units:u,h:S.height,acc:0n});
-  S.fills.unshift({k:"plant",d:"Planted "+u+" mojo at height "+S.height+". m(0)=0."});
-}
-function drip(usdg6){
-  const w=waterfall(usdg6/USDG_TO); S.vault+=w.vault; S.incident+=w.incident; S.loyalty+=w.loyalty;
-  S.fills.unshift({k:"drip",d:"Fee: loyalty "+w.loyalty+", vault "+w.vault+", incident "+w.incident+". s_out unchanged."});
-}
-function swap(amtWei){
-  need(); const p=POOLS[0]; const out=xyk(p.r0,p.r1,amtWei,p.fee);
-  S.bal.eth-=amtWei; S.bal.usdg+=out; drip((out*p.fee)/10000n);
-  S.fills.unshift({k:"swap",d:"ETH→USDG on "+p.v+". Fee dripped; s_out unchanged."});
-  return out;
-}
+    <rect x="230" y="12" width="164" height="46" rx="8" fill="var(--surf2)" stroke="var(--line2)"/>
+    <text x="240" y="30" class="lbl">GARDEN_FUND_PH</text><text x="240" y="48" class="n">${f(toFund)}</text>
 
-function h(s){return s.replace(/[&<>"]/g,c=>({"&":"&","<":"<",">":">","\"":"""}[c]))}
+    <rect x="230" y="84" width="164" height="46" rx="8" fill="var(--surf2)" stroke="var(--line2)"/>
+    <text x="240" y="102" class="lbl">RESERVE_VAULT_PH &middot; LOYALTY</text><text x="240" y="120" class="n">${f(toLoyalty)}</text>
 
-function renderNav(){
-  document.getElementById("nav").innerHTML=NAV.map(b=>{
-    const on=b.home===S.surface||(b.tabs||[]).some(t=>t[0]===S.surface);
-    return `<button type="button" class="${on?"on":""}" data-go="${b.home}"><i class="d"></i>${b.label}</button>`;
-  }).join("");
-  document.getElementById("wallet").textContent=S.connected?(S.addr.slice(0,6)+"…"+S.addr.slice(-4)):"Connect";
+    <text class="lbl" x="424" y="14">HOP 2 &mdash; THE DRIP, ON THE REMAINDER</text>
+    <path d="M394 35 H456 V34" stroke="var(--grow)" fill="none" stroke-width="1.5"/>
+    <path d="M394 35 H456 V96" stroke="var(--ink3)" fill="none" stroke-width="1.5"/>
+
+    <rect x="456" y="12" width="176" height="52" rx="8" fill="rgba(0,200,5,.08)" stroke="var(--grow)"/>
+    <text x="466" y="30" class="lbl">THE VAULT &middot; V</text><text x="466" y="52" class="big">${f(toVault)}</text>
+
+    <rect x="456" y="84" width="176" height="46" rx="8" fill="var(--surf2)" stroke="var(--line2)"/>
+    <text x="466" y="102" class="lbl">INCIDENT FUND</text><text x="466" y="120" class="n">${f(toIncident)}</text>
+
+    <text x="8" y="168" class="lbl">WHY THE VAULT DOES NOT RECEIVE 90%</text>
+    <text x="8" y="188" class="n">The carve comes off the RAW fee FIRST. The 90/10 drip then runs on what is LEFT,</text>
+    <text x="8" y="204" class="n">not on the original fee &mdash; so two 90% hops compose, and the vault receives</text>
+    <text x="8" y="220" class="big">${f(toVault)} of ${f(raw)}</text>
+    <text x="8" y="240" class="lbl">BOTH HOPS COMPUTED BY RUST &mdash; loyalty_split() THEN drip_split()</text>
+  </svg>`;
 }
 
-function sessionBar(){
-  const s=cashOpen(new Date());
-  return `<div class="session ${s.open?"open":""}"><b>${s.label}</b>${s.next}. Tokenized stocks refuse Garden-originated flow while the cash tape is closed.</div>`;
-}
-
-function banner(eye,title,detail){
-  return `<section class="banner"><span class="chip exec">Executable</span><div><span style="color:var(--muted);font-size:12px">${eye}</span><h1>${title}</h1><p>${detail}</p></div>
-  <div class="facts"><b>${Number(S.height).toLocaleString()}<small>ledger height</small></b><b>${POOLS.length}<small>witnessed pools</small></b><b>4663<small>chain id</small></b></div></section>`;
-}
-
-function tabsFor(){
-  const b=NAV.find(x=>x.home===S.surface||(x.tabs||[]).some(t=>t[0]===S.surface));
-  if(!b||!b.tabs.length) return "";
-  return `<div class="tabs">${b.tabs.map(t=>`<button type="button" class="${t[0]===S.surface?"on":""}" data-go="${t[0]}">${t[1]}</button>`).join("")}</div>`;
-}
-
-function viewSwap(){
-  const p=POOLS[0]; const amt=1n*10n**18n; const out=xyk(p.r0,p.r1,amt,p.fee);
-  return banner("Trade","Swap ETH, USDG and tokenized stocks","Pick an asset, see the output this tab computed itself from live pool reserves, then review the exact intent before your wallet signs it.")
-  +sessionBar()+tabsFor()+`
-  <div class="card" style="max-width:460px;margin:0 auto">
-    <div class="leg"><div class="lbl">You pay</div><div class="row"><input id="sw" value="1"><select disabled><option>ETH</option></select></div></div>
-    <div class="leg"><div class="lbl">You receive (quoted)</div><div class="row"><input disabled value="${fmt(out,6,2)}"><select disabled><option>USDG</option></select></div></div>
-    <p class="hint">Venue ${p.v} · ${Number(p.fee)/100}% · integer xyk. A fee never mints.</p>
-    <button class="go" id="doSwap" ${S.connected?"":"disabled"}>${S.connected?"Review swap":"Connect to review"}</button>
-  </div>
-  <div class="panel"><h3>Witnessed route</h3>${POOLS.map(x=>`<p class="hint"><b style="color:var(--pop)">${x.v}</b> — ${x.w}</p>`).join("")}</div>`;
-}
-function viewLimit(){return banner("Trade / exact price","Name your price","A limit states the exact amounts in and out — no slippage.")+tabsFor()+`<div class="card"><p>The build path exists in OfferLedger.sol and is undeployed. A form that cannot settle is not offered.</p><button class="go" disabled>Disabled — this control never signs</button></div>`}
-function viewDca(){return banner("Trade / on a schedule","Plan repeat buys, sign each one","Nothing runs unattended.")+tabsFor()+`<div class="card"><span class="chip block">Blocked</span><p>Unattended crank is not deployed on 4663. Every due step is signed by you.</p><button class="go" disabled>Disabled — this control never signs</button></div>`}
-function viewTerm(){return banner("Trade / terminal","Chart, depth and an order ticket","The same pools as Swap.")+tabsFor()+`<div class="panel"><p class="hint">Candles would be built only from confirmed reserve generations. Preview.</p></div>`+viewSwap().split(tabsFor())[1]}
-
-function viewGarden(){
-  const nav=fmtNav(S.vault,S.sOut);
-  return banner("Garden","Use the suite. Be credited with a redeemable claim.","A contribution mints $FLWRS you can always burn back for your share of the vault. Fees never mint.")
-  +`<div class="hero">
-    <div class="hs"><div class="k">NAV</div><div class="v pop">${nav}</div><div class="f">vault / s_out</div></div>
-    <div class="hs"><div class="k">Vault</div><div class="v">${fmtFlwrs(S.vault)}</div><div class="f">stable mojo</div></div>
-    <div class="hs"><div class="k">s_out</div><div class="v">${fmtFlwrs(S.sOut)}</div><div class="f">credits, not deposits</div></div>
-    <div class="hs"><div class="k">Your $FLWRS</div><div class="v">${fmtFlwrs(S.bal.flwrs)}</div><div class="f">${S.connected?"connected":"connect to mint"}</div></div>
-  </div>
-  <div class="grid2">
-    <div class="panel"><h3>Mint a claim</h3><p class="hint">USDG → vault. s_out += minted, not units. Float 500 bps after genesis.</p>
-      <div class="row"><input id="dep" value="1000"></div>
-      <button class="go" id="doMint" ${S.connected?"":"disabled"}>${S.connected?"Review mint":"Connect to review"}</button>
-    </div>
-    <div class="panel"><h3>Burn $FLWRS</h3><p class="hint">Destroyed, not sold. No counterparty.</p>
-      <div class="row"><input id="red" value="100"></div>
-      <button class="go" id="doBurn" ${S.connected?"":"disabled"}>Review burn</button>
-    </div>
-    <div class="panel"><h3>Plant a row</h3><p class="hint">m(Δh)=units·Δh/(Δh+K). m(0)=0. MIN_ROW=1 $FLWRS.</p>
-      <div class="row"><input id="pl" value="10"></div>
-      <button class="go" id="doPlant" ${S.connected?"":"disabled"}>Review plant</button>
-    </div>
-    <div class="panel"><h3>Drip a fee</h3><p class="hint">loyalty_split then drip_split. Never a bare 81%.</p>
-      <div class="row"><input id="dr" value="100"></div>
-      <button class="go" id="doDrip" ${S.connected?"":"disabled"}>Review drip</button>
-    </div>
-  </div>
-  <div class="panel"><h3>Rows</h3>
-    <table class="tbl"><thead><tr><th>Kind</th><th class="r">Units</th><th class="r">Age</th></tr></thead><tbody>
-    ${S.rows.map(r=>`<tr><td>${r.kind}</td><td class="r">${fmtFlwrs(r.units)}</td><td class="r">${S.height-r.h}h</td></tr>`).join("")}
-    </tbody></table>
-  </div>`;
-}
-
-function viewPools(){
-  return banner("Liquidity","Venues every quote is drawn from","9mm V2/V3/Infinity, Uniswap V3/V4 — witnessed, never wrapped.")
-  +tabsFor()+`<div class="panel"><h3>Witness, not wrap</h3><p>Garden observes feeGrowth. It does not fork their liquidity, wrap their NFTs, or compete for their bps. 9mm holder rev-share continues on 9mm.</p>
-  <button class="btn" data-go="vinedresser">Open Vinedresser</button></div>`
-  +POOLS.map(p=>`<div class="panel"><h3>${p.v} · ${p.pair}</h3><p class="hint">${p.w}</p>
-    <p>Fee ${Number(p.fee)/100}% · TVL $${p.tvl} · 24h $${p.vol}</p>
-    <button class="btn" disabled>Add liquidity — refused</button>
-    <button class="btn gold" disabled>Remove — refused</button>
-    <button class="btn" data-go="vinedresser">Rank it</button>
-  </div>`).join("");
-}
-
-function rank(dep, open){
-  return BOOK.map(b=>{
-    const sig=b.sess?(open?b.sess.o:b.sess.c):b.sig;
-    const f=b.tvl/(b.tvl+dep); const fee=b.fee*f; const lv=lvr(sig)*(b.native?f*f:1);
-    const net=fee-lv; const counsel=net<=0?"Rest":"Hold";
-    return {...b,sig,fee,lv,net,counsel};
-  }).sort((a,c)=>c.net-a.net);
-}
-
-function viewVine(){
-  const s=cashOpen(new Date());
-  const rows=rank(S.size,s.open);
-  const pick=rows.find(r=>r.id===S.pick)||rows[0];
-  const hold=rows.filter(r=>r.counsel==="Hold").length;
-  const rest=rows.filter(r=>r.counsel==="Rest").length;
-  return banner("Liquidity / Vinedresser","Rank every pool by what you keep","Net edge after LVR, session-aware σ, reflexive size. You sign. The NFT stays on the venue. No unattended vault.")
-  +tabsFor()+sessionBar()+`
-  <div class="hero">
-    <div class="hs"><div class="k">Hold</div><div class="v pop">${hold}</div><div class="f">net edge covers LVR</div></div>
-    <div class="hs"><div class="k">Rest</div><div class="v">${rest}</div><div class="f">leave until the edge returns</div></div>
-    <div class="hs"><div class="k">Your size</div><div class="v">$${S.size.toLocaleString()}</div><div class="f">equities: no f² damping</div></div>
-    <div class="hs"><div class="k">Custody</div><div class="v">none</div><div class="f">NFT stays on the venue</div></div>
-  </div>
-  <div class="panel"><h3>The Vinedresser</h3>
-    <p>net edge = fee − LVR, LVR = σ²/8, σ from the path. An estimate may inform. It may not authorize.</p>
-    <label class="hint">Size the deposit · USD<br><input id="sz" type="range" min="100" max="2000000" step="100" value="${S.size}" style="width:100%;accent-color:var(--pop)"></label>
-  </div>
-  <div class="panel"><h3>Measured book · 2026-09-15</h3>
-    <div style="overflow:auto"><table class="tbl"><thead><tr><th>Pair</th><th>Venue</th><th class="r">Fee</th><th class="r">LVR</th><th class="r">Net</th><th>Counsel</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr data-pick="${r.id}" class="${r.id===pick.id?"on":""}"><td>${r.p}</td><td>${r.v}</td><td class="r">${fmtApr(r.fee)}</td><td class="r">${fmtApr(r.lv)}</td><td class="r ${r.net>=0?"ok":"bad"}">${fmtApr(r.net)}</td><td><span class="mark ${r.counsel==="Hold"?"hold":"rest"}">${r.counsel}</span></td></tr>`).join("")}
-    </tbody></table></div>
-  </div>
-  <div class="panel"><h3>${pick.p} · ${pick.v}</h3>
-    <p class="hint">${pick.id==="sgov"?"The chain's only stable-stable pool, and the only net-negative. Rest is the product.":pick.sess?"Session split: cash-open σ 0.425 vs overnight 0.231 — 3.4× on LVR. Counsel uses the live regime.":"Measured OnChain / GT-DENSE. Path σ, never two endpoints."}</p>
-    <button class="go" id="doCounsel" ${S.connected?"":"disabled"}>${S.connected?"Review · "+pick.counsel:"Connect to review"}</button>
-  </div>
-  <div class="panel"><h3>9mm · witnessed, not yet dense</h3>
-    <p class="hint">Until a 168-bar path exists on the 9mm pool itself, the Vinedresser will rank the estimate and refuse to size.</p>
-    <table class="tbl"><thead><tr><th>Pair</th><th>Venue</th><th class="r">Est. fee APR</th><th>Counsel</th></tr></thead><tbody>
-    ${NINE.map(n=>`<tr><td>${n.p}</td><td>${n.v}</td><td class="r">${fmtApr(n.feeEst)}</td><td><span class="mark refuse">Refuse</span></td></tr>`).join("")}
-    </tbody></table>
-  </div>
-  <div class="panel"><span class="chip block">Blocked</span><h3>No unattended vault.</h3>
-    <p>A custody vault that holds the NFT and rebalances while you sleep is a different machine. The Vinedresser ranks and counsels. Positions stay in your wallet. 9mm does not change a contract.</p>
-  </div>`;
-}
-
-function viewExplore(){
-  return banner("Explore","Every venue, with its exact reserves","Pool ids and fee tiers as Robinhood Chain reports them.")
-  +`<div class="panel"><table class="tbl"><thead><tr><th>Venue</th><th>Pair</th><th class="r">Fee</th><th class="r">TVL</th></tr></thead><tbody>
-  ${POOLS.map(p=>`<tr><td>${p.v}</td><td>${p.pair}</td><td class="r">${Number(p.fee)/100}%</td><td class="r">$${p.tvl}</td></tr>`).join("")}
-  </tbody></table></div>`;
-}
-function viewPort(){
-  return banner("Your position","What you hold and where it came from","Claims, rows and fills in one ledger.")
-  +`<div class="hero">
-    <div class="hs"><div class="k">$FLWRS</div><div class="v pop">${fmtFlwrs(S.bal.flwrs)}</div><div class="f">${fmtNav(S.vault,S.sOut)}</div></div>
-    <div class="hs"><div class="k">USDG</div><div class="v">${fmt(S.bal.usdg,6,2)}</div><div class="f">settlement stable</div></div>
-    <div class="hs"><div class="k">ETH</div><div class="v">${fmt(S.bal.eth,18,4)}</div><div class="f">native on 4663</div></div>
-    <div class="hs"><div class="k">$OIL</div><div class="v">${fmt(S.bal.oil,3,2)}</div><div class="f">not backing · no peg</div></div>
-  </div>
-  <div class="panel"><h3>Activity</h3><table class="tbl"><tbody>${S.fills.slice(0,16).map(f=>`<tr><td>${f.k}</td><td>${h(f.d)}</td></tr>`).join("")}</tbody></table></div>`;
-}
-function viewLaunch(){return banner("Launchpad","Commit, clear at one price, redeem a real floor","Launchpad.sol is written and undeployed on 4663.")+`<div class="panel"><span class="chip block">Blocked</span><h3>There is nothing to commit to yet.</h3><p>A form that cannot settle is not shown. Disabled controls never sign.</p></div>`}
-function viewPerps(vol){
-  return banner("Labs",vol?"Realized-volatility payoff":"Leverage on a lattice credit position",vol?"Session-aware: NVDA sigma is 3.4× higher in the cash open.":"Runway occupies the liquidation-price slot. Positions die when carry is exhausted.")
-  +tabsFor()+`<div class="panel"><span class="chip block">Blocked</span>
-    <p><b>No liquidation price.</b> The column is removed, not blanked. Carry-default is unpullable.</p>
-    <p class="hint">Preview computed locally. The open path is not deployed.</p>
-    <button class="go" disabled>Disabled — this control never signs</button>
-  </div>`;
-}
-function viewDocs(){
-  return banner("Docs","The trust model, and how to check it yourself","Who you actually trust, what each module proves, and the words this protocol forbids.")
-  +`<div class="panel"><h3>Forbidden words</h3>
-    <p><b>sell / cash out</b> — the exit burns $FLWRS. There is no counterparty.</p>
-    <p><b>a bare 81%</b> — loyalty_split then drip_split. Print both hops.</p>
-    <p><b>liquidation price</b> — lattice credit has runway.</p>
-    <p><b>keeper / auto-compound</b> — nothing runs while you sleep. Counsel is signed.</p>
-    <p><b>JARVIS</b> — that was a decision engine in another repo. Here it is the Vinedresser.</p>
-  </div>
-  <div class="panel"><h3>How to check</h3>
-    <table class="tbl"><tbody>
-      <tr><td>Two mints, one burn</td><td>garden.rs nav_mint_v3 / nav_redeem</td></tr>
-      <tr><td>Fee never mints</td><td>drip writes vault only; s_out unchanged</td></tr>
-      <tr><td>m(Δh)=units·Δh/(Δh+K)</td><td>m(0)=0 · m(K)=half</td></tr>
-      <tr><td>net_edge = fee − σ²/8</td><td>path_sigma, never two endpoints</td></tr>
-      <tr><td>SGOV/USDG</td><td>only net-negative (−5.1%). Rest is the product.</td></tr>
-    </tbody></table>
-  </div>`;
-}
-
-function body(){
-  switch(S.surface){
-    case "swap": return viewSwap();
-    case "terminal": return viewTerm();
-    case "limit": return viewLimit();
-    case "dca": return viewDca();
-    case "garden": return viewGarden();
-    case "pools": return viewPools();
-    case "vinedresser": return viewVine();
-    case "explore": return viewExplore();
-    case "portfolio": return viewPort();
-    case "launch": return viewLaunch();
-    case "perps": return viewPerps(false);
-    case "vol": return viewPerps(true);
-    case "docs": return viewDocs();
-    default: return viewSwap();
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE MATURITY CURVE. The control IS the curve — a ring "would be malpractice"
+   (docs/DESIGN-frontend-mapping-2026-09-15.md:270-272). Position marker, a
+   half-maturity crosshair at dh=K, and a dashed fully-matured asymptote.
+   Colour law: GREY the future, never redden it (:295).
+   Every plotted y is m_apply() from Rust. The x axis is a screen coordinate.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function curveSvg(units, dh, k){
+  const W=520,H=190,PAD=34, span=Number(k)*4;
+  const pts=[];
+  for(let i=0;i<=60;i++){
+    const x=span*i/60;
+    const m=R.mApply(units,BigInt(Math.round(x)),k);
+    pts.push([PAD+(W-PAD-14)*(x/span), H-26-(H-52)*(Number(m)/Number(units))]);
   }
+  const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const cx=PAD+(W-PAD-14)*Math.min(1,Number(dh)/span);
+  const mNow=R.mApply(units,dh,k);
+  const cy=H-26-(H-52)*(Number(mNow)/Number(units));
+  const hx=PAD+(W-PAD-14)*(Number(k)/span);
+  const hm=R.mApply(units,k,k);
+  const hy=H-26-(H-52)*(Number(hm)/Number(units));
+  return `<svg viewBox="0 0 ${W} ${H}" class="flow" role="img"
+      aria-label="Maturity curve. The row is at ${pct(Number(mNow)/Number(units),1)} of its units.">
+    <line x1="${PAD}" y1="${H-26}" x2="${W-14}" y2="${H-26}" stroke="var(--line2)"/>
+    <line x1="${PAD}" y1="26" x2="${W-14}" y2="26" stroke="var(--ink3)" stroke-dasharray="4 4" opacity=".6"/>
+    <text x="${W-14}" y="20" text-anchor="end" class="lbl">FULLY MATURED &mdash; APPROACHED, NEVER REACHED</text>
+    <line x1="${hx}" y1="26" x2="${hx}" y2="${H-26}" stroke="var(--ink3)" stroke-dasharray="3 3" opacity=".55"/>
+    <text x="${hx+5}" y="${H-10}" class="lbl">dh = K &middot; HALF</text>
+    <path d="${d}" fill="none" stroke="var(--grow)" stroke-width="2"/>
+    <path d="${d}" fill="none" stroke="var(--ink3)" stroke-width="2" opacity=".35"
+      stroke-dasharray="1000" stroke-dashoffset="${-1000+1000*Math.min(1,Number(dh)/span)}"/>
+    <circle cx="${cx}" cy="${cy}" r="5" fill="var(--grow)"/>
+    <line x1="${hx-4}" y1="${hy}" x2="${hx+4}" y2="${hy}" stroke="var(--ink2)"/>
+    <text x="${PAD}" y="${H-10}" class="lbl">PLANTED</text>
+  </svg>`;
+}
+/* The slope, annotated IN WORDS (docs/DESIGN-frontend-mapping-2026-09-15.md:273-284).
+   The two maturity values are Rust's; this only chooses which sentence to show. */
+function slopeWords(units,dh,k){
+  const now=R.mApply(units,dh,k);
+  const week=R.mApply(units,dh+BigInt(Math.round(7*86400/BLOCK_SEC)),k);
+  const gain=week-now;
+  if(gain<=0n) return 'This row is so far along the curve that another week adds nothing you can see.';
+  return `Another week here matures a further ${tok(gain)} $FLWRS. The curve is concave: this is the fastest it will ever be again.`;
 }
 
-function modalHtml(){
-  if(!S.pending) return "";
-  const p=S.pending;
-  return `<div class="modalbg" id="mbg"><div class="modal">
-    <h3>Review · WYSIWYS</h3>
-    <p class="hint">${h(p.title)}</p>
-    ${p.lines.map(l=>`<div class="kv"><span>${h(l.k)}</span><b>${h(l.v)}</b></div>`).join("")}
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn" id="cancel">Cancel</button>
-      <button class="go" id="approve" style="margin:0;flex:1">Approve</button>
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE SUPPLY CHAIN — objection #2, drawn as the five hops it actually is.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function supplyChain(){
+  const nav = navPx();
+  const steps=[
+    {t:'You use the suite', d:'A swap, an LP position, a launch, a levered position. Activity, not a deposit.', v: S.feeRaw>0n? 'active':'—'},
+    {t:'The suite charges a fee', d:'Charged in the traded asset at the venue that earned it.', v: S.feeRaw>0n? money(S.feeRaw):'—'},
+    {t:'The fee converts to the settlement stable', d:'The vault is denominated in one stable ($USDG on EVM, BYC on Chia), so every fee must land in that unit.', v: S.feeRaw>0n? money(S.feeRaw):'—'},
+    {t:'It splits in two hops and lands in the vault', d:'The loyalty carve comes off the raw fee first; the remainder drips 90/10 to vault and incident. Both hops are Rust.', v: S.feeToVault>0n? money(S.feeToVault):'—'},
+    {t:'NAV rises, so your claim is worth more', d:'V went up and S did not: a fee NEVER mints. That is the whole mechanism by which a claim grows.', v: navFmt(nav)},
+  ];
+  return `<div class="chain">${steps.map((s,i)=>`
+    <div class="step ${s.v!=='—'?'on':''}">
+      <div class="n">${i+1}</div>
+      <div style="min-width:0"><div class="tt">${s.t}</div><div class="dd">${s.d}</div></div>
+      <div class="vv">${s.v}</div>
+    </div>`).join('')}</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TABS
+   ═══════════════════════════════════════════════════════════════════════════ */
+const V={};
+
+V.garden = () => {
+  const nav=navPx();
+  const worth = S.supply? R.navRedeem(S.flwrs,Number(S.vault),S.supply) : null;
+  return `
+  <div class="grid g2">
+    <div class="card">
+      <h2>Use the suite &mdash; be credited ${pillFor('contribute')}</h2>
+      <div class="cap">Value you put in goes to the vault and you are credited a claim on it. This is the
+        plain path; the suite path is on <b>Supply chain</b>, and it is the one that tells the story.</div>
+      <div class="attrs">
+        <span class="attr">claim, not a balance</span>
+        <span class="attr">${C? 'float '+Number(C.FLOAT_BPS)/100+'% to incumbents':''}</span>
+        <span class="attr">burnable at any time</span>
+      </div>
+      <div class="amt"><span>$</span><input id="dep" type="text" inputmode="decimal" value="10000" aria-label="Amount to contribute"></div>
+      <div class="quick">${[1000,5000,25000].map(v=>`<button data-set="dep" data-v="${v}">$${v.toLocaleString()}</button>`).join('')}
+        <button data-set="dep" data-v="max">Max</button></div>
+      <div id="depprev"></div>
+      ${ctl('contribute','Contribute &rarr; be credited')}
+      <div class="stamp">The ${C?Number(C.FLOAT_BPS)/100:0}% float is not a reserve and creates no token: it is a
+        NAV gift from the contributor to everyone already holding. Claims equal V exactly; no cushion is drawn.</div>
+    </div>
+
+    <div class="card">
+      <h2>Burn $FLWRS &rarr; receive stables ${pillFor('exit')}</h2>
+      <div class="cap">Burning destroys the units and the vault releases settled stables for them.
+        Nobody buys them &mdash; there is no counterparty, no order book, no exit fee and no queue.</div>
+      <div class="attrs">
+        <span class="attr">s_out &minus;= units</span>
+        <span class="attr">melt asserted in-puzzle</span>
+        <span class="attr">no counterparty</span>
+      </div>
+      <div class="amt"><span>&#8483;</span><input id="red" type="text" inputmode="decimal" value="0" aria-label="$FLWRS to burn"></div>
+      <div class="quick">${[25,50,100].map(v=>`<button data-set="red" data-v="p${v}">${v}%</button>`).join('')}</div>
+      <div id="redprev"></div>
+      ${ctl('exit','Burn &rarr; receive stables')}
+      <div class="stamp">
+        <span class="cite"><b>garden_state_v3.clsp:382</b> &mdash; <code>(- (s_out S) units)</code>, the only sink in the system.</span>
+        <span class="cite"><b>:386</b> &mdash; the melt is asserted from MELT_PH for exactly &minus;units, so the ledger debit and the custody outflow are one event.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>The vault</h2>
+      <div class="cap">NAV is V / S, derived and never stored.</div>
+      <div class="stats">
+        <div class="stat"><div class="l">Vault V</div><div class="v">${money(S.vault)}</div></div>
+        <div class="stat"><div class="l">Supply S</div><div class="v">${tok2(S.supply)}</div></div>
+        <div class="stat"><div class="l">NAV</div><div class="v pop">${navFmt(nav)}</div></div>
+        <div class="stat"><div class="l">Incident</div><div class="v">${money(S.inc)}</div></div>
+      </div>
+      <details class="disc"><summary>The supply law &mdash; two mints, one burn, and a fee that never mints</summary>
+        <div class="discbody"><div class="formula">MINT   op1 contribute   s_out += minted   garden_state_v3.clsp:257
+MINT   op4 attribution   s_out += minted   garden_state_v3.clsp:458
+BURN   op3 exit          s_out -= units    garden_state_v3.clsp:382
+NEVER  op2 drip          s_out unchanged   (fees raise V, never S)
+
+NAV = V / S, derived never stored.</div>
+        <div class="why"><b>minted, not units.</b> v3's central change: the mint is the amount
+        <i>after</i> the float cut, so <code>s_out</code> equals the sum of live row units exactly &mdash;
+        which is the invariant the terminal exit depends on.</div></div></details>
+    </div>
+
+    <div class="card">
+      <h2>Your claim</h2>
+      <div class="cap">What you hold, and what the vault would release for it right now.</div>
+      <div class="stats">
+        <div class="stat"><div class="l">$FLWRS held</div><div class="v">${tok2(S.flwrs)}</div></div>
+        <div class="stat"><div class="l">Planted</div><div class="v">${tok2(S.w)}</div></div>
+        <div class="stat"><div class="l">If burned now</div><div class="v pop">${worth===null?'&mdash;':money(worth)}</div></div>
+        <div class="stat"><div class="l">$OIL</div><div class="v">${tok2(S.oil)}</div></div>
+      </div>
+      <div class="info"><i>i</i><div>A terminal exit &mdash; burning the <b>last</b> units in existence &mdash; releases the
+        <b>whole</b> vault. There are no other holders left to strand, and the earlier behaviour that
+        withheld it bricked the last exiter and froze custody permanently.</div></div>
+    </div>
+  </div>`;
+};
+
+V.supply = () => {
+  const raw = S.feeRaw>0n? S.feeRaw : 10000n*U;   // a worked example until real fees exist
+  const live = S.feeRaw>0n;
+  return `
+  <div class="card">
+    <h2>Activity becomes vault value ${pill('read')}</h2>
+    <div class="cap">You are not adding money to an account. You are using the suite, and the fee your
+      activity generates converts through this chain into the vault &mdash; which is what makes every
+      claim, including yours, worth more.</div>
+    ${supplyChain()}
+  </div>
+
+  <div class="card">
+    <h2>The waterfall, both hops ${pill('read')}</h2>
+    <div class="cap">${live? 'Drawn on the fees this session has actually generated.'
+      : 'Drawn on a worked example of a '+money(raw)+' fee, because no fee has been generated in this session yet.'}
+      The vault's share is not a constant this page knows &mdash; it is what the two Rust splits leave behind.</div>
+    ${waterfallSvg(raw)}
+    <details class="disc"><summary>Where the two hops are written</summary>
+      <div class="discbody"><div class="formula">fee coin --> 90% --> GARDEN_FUND_PH --(op 2)--> vault 90% / incident 10%
+        \\--> 10% --> RESERVE_VAULT_PH (loyalty)</div>
+      <div class="why"><b>garden_loyalty_drip_fund_v3.clsp:28-31.</b> The carve is taken off the
+      <i>raw</i> fee, and only then does the 90/10 drip run on the remainder. Two 90% hops compose.
+      This page computes each hop with <code>loyalty_split()</code> and <code>drip_split()</code> and
+      never multiplies them together itself &mdash; a bare percentage with no derivation is exactly the
+      kind of number that reads as invented.</div></div></details>
+  </div>
+
+  <div class="card">
+    <h2>Generate a fee, and watch it land ${pillFor('drip')}</h2>
+    <div class="cap">The toy counterparty below stands in for a venue so a fee has a plausible source.
+      <b>It is the one declared exception to the no-JS-math rule</b> &mdash; and no garden quantity is
+      derived from it. The fee it produces enters the protocol only by being split in Rust.</div>
+    <div class="amt"><span>$</span><input id="fee" type="text" inputmode="decimal" value="10000" aria-label="Fee to generate"></div>
+    ${ctl('drip','Route a fee through the waterfall')}
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><div class="l">Fees routed</div><div class="v">${money(S.feeRaw)}</div></div>
+      <div class="stat"><div class="l">To vault</div><div class="v pop">${money(S.feeToVault)}</div></div>
+      <div class="stat"><div class="l">To incident</div><div class="v">${money(S.feeToIncident)}</div></div>
+      <div class="stat"><div class="l">To loyalty</div><div class="v">${money(S.feeToLoyalty)}</div></div>
+    </div>
+    <div class="stamp">A fee NEVER mints. <code>s_out</code> is untouched by op2 &mdash; V rises and S does not,
+      which is the entire reason a claim grows without anyone issuing anything.</div>
+  </div>
+
+  <div class="card">
+    <h2>Attribution plants rows &mdash; it does not pay ${pillFor('claim_attr')}</h2>
+    <div class="cap">op4 splits the mint 40/20/20/20 across payer, creator, referrer and treasury, and
+      <b>plants each share as a row at zero maturity</b>. A referrer receives a position, never a payout.</div>
+    <div class="amt"><span>$</span><input id="attr" type="text" inputmode="decimal" value="5000" aria-label="Attributed volume"></div>
+    <div id="attrprev"></div>
+    ${ctl('claim_attr','Attribute &rarr; plant 4 rows')}
+    <div class="stamp">The treasury leg absorbs every rounding remainder, so the four legs sum to the
+      mint exactly and no dust is created or lost.</div>
+  </div>`;
+};
+
+V.rows = () => {
+  const mine = S.rows;
+  return `
+  <div class="grid g2">
+    <div class="card">
+      <h2>Plant a row ${pillFor('plant')}</h2>
+      <div class="cap">A row is the unit of claim. It starts at zero maturity and matures along a
+        concave curve that is approached but never completed.</div>
+      <div class="amt"><span>&#8483;</span><input id="plant" type="text" inputmode="decimal" value="1000" aria-label="$FLWRS to plant"></div>
+      ${ctl('plant','Plant a row')}
+      <div class="stamp">Below <code>MIN_ROW_UNITS</code> (${C?tok(C.MIN_ROW_UNITS):'&mdash;'}) a plant
+        <b>reverts</b>. Dust is never rounded away, because rounding a claim away is how a claim disappears.</div>
+    </div>
+    <div class="card">
+      <h2>The maturity curve ${pill('read')}</h2>
+      <div class="cap">m(&Delta;h) = units &times; &Delta;h / (&Delta;h + K), with K = ${C?Number(C.K).toLocaleString():'&mdash;'} blocks
+        (${C?blocksToWords(C.K):'&mdash;'}). m(0) = 0, m(K) = half, and the asymptote is never reached.</div>
+      ${C? curveSvg(1000n*U, S.h>0n? S.h : C.K/2n, C.K) : ''}
+      <div class="why">${C? slopeWords(1000n*U, S.h>0n? S.h : C.K/2n, C.K):''}</div>
+      <div class="rails"><span>PLANTED</span><span>HALF AT dh = K</span><span>ASYMPTOTE</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Your rows ${pillFor('quit')}</h2>
+    <div class="cap">Unstaking <b>never burns</b>: principal is always returned in full. Only accrued
+      yield can be forfeited, and a forfeit is deferred &mdash; it is never distributable in the unit
+      that created it.</div>
+    ${mine.length===0? '<div class="empty">No rows planted yet. Plant one above, or let attribution plant four.</div>'
+    : mine.map(r=>{
+      const st=R.rowSettle(r.units,r.units,S.idx,r.snap,S.w,r.plantH,S.h,C.K,0);
+      const dh = S.h - r.plantH;
+      const m = R.mApply(r.units,dh,C.K);
+      const frac = Number(m)/Number(r.units);
+      return `<div class="rowcard">
+        <div class="rh"><div class="rt">Row #${r.id} &middot; ${tok(r.units)} $FLWRS</div>
+          <div class="rs">${r.who==='you'?'planted by you':'planted by attribution &middot; '+r.who}</div></div>
+        <div class="bar"><div style="width:${(frac*100).toFixed(1)}%"></div></div>
+        <div class="rs">${pct(frac,1)} matured &middot; ${blocksToWords(dh)} since planting</div>
+        ${st? `<div class="prev">
+          <div class="pl prin"><span>Principal returned</span><b>${tok(st.returned)} $FLWRS (100%)</b></div>
+          ${st.forfeit>0n? `<div class="pl forf"><span>Earned yield forfeited</span><b>${tok(st.forfeit)} $FLWRS</b></div>`:''}
+          ${st.kept>0n? `<div class="pl gain"><span>Earned yield kept</span><b>${tok(st.kept)} $FLWRS</b></div>`:''}
+          ${st.oil>0n? `<div class="pl"><span>$OIL minted from the forfeiture</span><b>${tok(st.oil)}</b></div>`:''}
+          ${st.warm? '<div class="pl"><span>Warm-up</span><b>still inside the warm-up window</b></div>':''}
+          ${st.sole? '<div class="pl"><span>Sole staker</span><b>nothing to forfeit to</b></div>':''}
+        </div>`:''}
+        <div class="trio">
+          <button class="go sec sm" data-unstake="${r.id}">Unstake</button>
+          <button class="go sec sm" data-advance="${r.id}">Advance with $OIL</button>
+        </div>
+      </div>`;
+    }).join('')}
+    <div class="info"><i>i</i><div>A forfeit stays <b>pending</b> and folds into the loyalty index only on the
+      <b>next</b> drip. Folding it immediately would let one actor split across addresses and exit
+      sequentially in a single block, each forfeit re-boosting an index their own later positions then
+      claim. The deferral closes a hole of roughly <b>65%</b> magnitude and is not to be reverted.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Two forfeits, and they are not the same thing ${pill('read')}</h2>
+    <div class="scroll"><table>
+      <tr><th></th><th>Redemption donation</th><th>Loyalty forfeit</th></tr>
+      <tr><td>Where</td><td>garden_state_v3.clsp:361-384</td><td>garden_loyalty_v4.clsp:235-238</td></tr>
+      <tr><td>Destination</td><td>stays in V</td><td>stays in P, added to pending C</td></tr>
+      <tr><td>Who benefits</td><td>all $FLWRS holders, staked or not</td><td>remaining stakers only</td></tr>
+      <tr><td>When</td><td>immediately</td><td>only after the next drip folds C into I</td></tr>
+    </table></div>
+  </div>`;
+};
+
+V.oil = () => `
+  <div class="grid g2">
+    <div class="card">
+      <h2>What $OIL is ${pill('read')}</h2>
+      <div class="cap">And, just as importantly, what it is not.</div>
+      <div class="stats">
+        <div class="stat"><div class="l">You hold</div><div class="v pop">${tok2(S.oil)}</div></div>
+        <div class="stat"><div class="l">Burned</div><div class="v">${tok2(S.oilBurned)}</div></div>
+        <div class="stat"><div class="l">Max mint</div><div class="v">${C?Number(C.OIL_MAX_BPS):'&mdash;'} bps</div></div>
+        <div class="stat"><div class="l">&phi; cap</div><div class="v">${C?Number(C.OIL_PHI_MAX_BPS):'&mdash;'} bps</div></div>
+      </div>
+      <div class="info warnbox"><i>!</i><div>$OIL does <b>not</b> back the vault, has <b>no peg</b>, and no
+        issuance decision anywhere in the system reads its price. It is minted only from real forfeiture,
+        capped at ${C?Number(C.OIL_MAX_BPS):'&mdash;'} bps, and the cap <b>fails closed</b> &mdash; both
+        ${C?Number(C.OIL_MAX_BPS)+1:''} and 0 are rejected. Its melt is free and permissionless
+        (<code>oil_tail.clsp:40</code>).</div></div>
+    </div>
+    <div class="card">
+      <h2>Mint from forfeiture ${pill('read')}</h2>
+      <div class="cap">The only mint path. Move the rate to see what a given forfeiture would mint.</div>
+      <label class="hl" for="oilbps">RATE &middot; <span id="oilbpsv" class="num"></span> BPS</label>
+      <input type="range" id="oilbps" min="1" max="${C?Number(C.OIL_MAX_BPS):3300}" value="1650">
+      <div id="oilprev"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Burn $OIL to advance a row ${pillFor('oil_advance')}</h2>
+    <div class="cap">$OIL's only sink. Burning it moves a row along its own maturity curve &mdash; the
+      curve visibly moves, and the amount it moves by is &phi;-capped in Rust.</div>
+    ${S.rows.length===0? '<div class="empty">Plant a row first &mdash; there is nothing to advance.</div>'
+      : `<div class="amt"><span>$OIL</span><input id="burn" type="text" inputmode="decimal" value="100" aria-label="$OIL to burn"></div>
+         <div id="advprev"></div>`}
+    <div class="stamp">The advance is applied to the row's clock, not to its units: no $FLWRS is created
+      by burning $OIL. What changes is <i>when</i> the row's accrued value is considered matured.</div>
+  </div>`;
+
+V.trade = () => {
+  const feeBps = Number(S.amm.feeBps);
+  return `
+  <div class="card">
+    <h2>Swap ${pillFor('swap.dir0')}</h2>
+    <div class="cap">Every swap charges ${(feeBps/100).toFixed(2)}%, and that fee is the top of the
+      waterfall that ends in the vault. This is where a contribution begins.</div>
+    <div class="info warnbox"><i>!</i><div>The pool behind this ticket is a <b>toy counterparty</b> &mdash; the one
+      declared exception to this page's rule that protocol arithmetic lives in Rust. It exists so a fee
+      has a plausible source. <b>No garden quantity is derived from it</b>: the fee it produces enters the
+      protocol only by being split by <code>loyalty_split()</code> and <code>drip_split()</code>.</div></div>
+    <div class="amt"><span>$</span><input id="swapin" type="text" inputmode="decimal" value="2500" aria-label="Swap size"></div>
+    <div id="swapprev"></div>
+    ${ctl('swap.dir0','Swap &rarr; generate a fee')}
+  </div>
+
+  <div class="card">
+    <h2>The measured book ${pill('read')}</h2>
+    <div class="cap">Robinhood Chain, 2026-09-15. &sigma; from 168 dense hourly bars; fee APR from a
+      one-hour on-chain swap replay. These rows are data; every judgement about them is Rust's.</div>
+    <div class="scroll"><table>
+      <tr><th>Pool</th><th>Fee</th><th>TVL</th><th>&sigma;</th><th>Fee APR</th><th>LVR</th><th>Net</th><th>Verdict</th></tr>
+      ${POOLS.map(p=>{
+        const e=R.edge(p.sig,p.fee,PROV.OnChain,0);
+        const d=R.decide(p.sig,p.fee,PROV.OnChain,0,0);
+        return `<tr><td>${p.n}</td><td>${p.f.toFixed(2)}%</td><td>${usd0(p.tvl)}</td>
+          <td>${p.sig.toFixed(2)}</td><td>${(p.fee*100).toFixed(1)}%</td>
+          <td>${(e.lvr*100).toFixed(1)}%</td>
+          <td class="${e.net>=0?'up':'dn'}">${(e.net*100).toFixed(1)}%</td>
+          <td>${ACTION[d]||'&mdash;'}</td></tr>`;
+      }).join('')}
+    </table></div>
+    <div class="stamp">&sigma;, LVR, net edge and the verdict word are all returned by
+      <code>edge_of()</code> and <code>decide()</code>. The page chooses no thresholds.</div>
+  </div>`;
+};
+
+V.pools = () => `
+  <div class="card">
+    <h2>Provide both legs, earn the swap fee ${pillFor('add_lp')}</h2>
+    <div class="cap">Liquidity is the other way to generate the fee that converts into vault value.</div>
+    <div class="amt"><span>$</span><input id="lp" type="text" inputmode="decimal" value="25000" aria-label="Position size"></div>
+    <div id="lpprev"></div>
+    <div class="trio">${ctl('add_lp','Add liquidity')}${ctl('remove_lp','Remove','sec')}</div>
+  </div>
+  <div class="card">
+    <h2>What a position would face ${pill('read')}</h2>
+    <div class="cap">Rebalance drag measured at the live gas price, and the edge that remains after it.</div>
+    <div class="scroll"><table>
+      <tr><th>Pool</th><th>&sigma;</th><th>Fee APR</th><th>Net edge</th><th>Drag</th><th>Actionable</th></tr>
+      ${POOLS.slice(0,6).map(p=>{
+        const e=R.edge(p.sig,p.fee,PROV.OnChain,0);
+        const dg=R.drag(GAS.units,GAS.gwei,GAS.nativeUsd,25000,GAS.perYear);
+        return `<tr><td>${p.n}</td><td>${p.sig.toFixed(2)}</td><td>${(p.fee*100).toFixed(1)}%</td>
+          <td class="${e.net>=0?'up':'dn'}">${(e.net*100).toFixed(1)}%</td>
+          <td>${dg===null?'&mdash;':(dg*100).toFixed(2)+'%'}</td>
+          <td>${e.actionable?'yes':'no'}</td></tr>`;
+      }).join('')}
+    </table></div>
+    <div class="stamp">Gas measured live: ${GAS.gwei} gwei, ${GAS.units.toLocaleString()} gas per rebalance,
+      daily. <code>rebalance_drag()</code> turns that into an annual drag.</div>
+  </div>`;
+
+V.labs = () => {
+  const L=S.lev;
+  const runway = (()=>{ try{ return R.runwaySlots(L.size,L.rateBps,L.budget); }catch(e){ return undefined; } })();
+  const carry = (()=>{ try{ return R.carryAmount(L.size,L.rateBps,C?Number(C.CARRY_PERIOD_SLOTS):1); }catch(e){ return null; } })();
+  return `
+  <div class="card">
+    <h2>Bounded leverage ${pillFor('perps.open')}</h2>
+    <div class="cap">There is no liquidation price on this surface, because the position cannot be
+      liquidated by price. What can end it is running out of budget for carry.</div>
+    <div class="hl">RUNWAY AT CURRENT BURN</div>
+    <div class="hv">${runway===undefined? '&mdash;' : runway===null? 'Never dies of carry'
+      : blocksToWords(runway)}</div>
+    <div class="hs">${runway===null? 'The budget covers the carry indefinitely at this rate.'
+      : 'This is the number that occupies the slot a competitor fills with a liquidation price.'}</div>
+    <div class="stats" style="margin-top:14px">
+      <div class="stat"><div class="l">Size</div><div class="v">${usd0(L.size)}</div></div>
+      <div class="stat"><div class="l">Budget</div><div class="v">${usd0(L.budget)}</div></div>
+      <div class="stat"><div class="l">Rate</div><div class="v">${(L.rateBps/100).toFixed(2)}%</div></div>
+      <div class="stat"><div class="l">Carry / period</div><div class="v">${carry===null?'&mdash;':usd0(Number(carry))}</div></div>
+    </div>
+    <label class="hl" for="levsize" style="margin-top:14px;display:block">SIZE &middot; <span id="levsizev" class="num"></span></label>
+    <input type="range" id="levsize" min="1000" max="60000" step="1000" value="${L.size}">
+    <label class="hl" for="levbud">BUDGET &middot; <span id="levbudv" class="num"></span></label>
+    <input type="range" id="levbud" min="200" max="12000" step="100" value="${L.budget}">
+    <div class="info"><i>i</i><div>This surface does not use the words <b>liquidation</b>, <b>margin ratio</b> or
+      <b>maintenance margin</b>, does not run a funding countdown, and draws no red line on a price chart.
+      Those words are all defined as distance-to-price-liquidation; borrowing them would import a
+      mechanic this system does not have.</div></div>
+  </div>`;
+};
+
+V.launchpad = () => `
+  <div class="card">
+    <h2>Commit, clear at one price, redeem the floor ${pillFor('commit')}</h2>
+    <div class="cap">A single bonded batch: one clearing price for everyone, a zero-slope floor, and no
+      creator fee on the clearing leg.</div>
+    <div class="amt"><span>$</span><input id="commit" type="text" inputmode="decimal" value="1000" aria-label="Commit amount"></div>
+    <div id="commitprev"></div>
+    <div class="trio">${ctl('commit','Commit to the batch')}${ctl('clear_batch','Clear the batch','sec')}</div>
+    <div class="stamp">The preview above is still computed &mdash; <code>batch_claim()</code> and
+      <code>batch_redeem()</code> are real exports &mdash; but no control here can execute, and the reason
+      the relay gave is carried verbatim on each one.</div>
+  </div>`;
+
+V.airlock = () => `
+  <div class="card">
+    <h2>Opt-in custody ${pillFor('airlock_deposit')}</h2>
+    <div class="cap">A custody boundary, quarantined from the trade and earn funnels by design.</div>
+    ${ctl('airlock_deposit','Deposit to the vault')}
+    <div class="stamp">This is the one place on the page where a refusal removes the control entirely
+      rather than disabling it. A disabled button reads as &ldquo;soon&rdquo;, and &ldquo;soon&rdquo; would be a
+      false promise about an irreversible donation.</div>
+  </div>`;
+
+V.forge = () => `
+  <div class="card">
+    <h2>Compose and deploy a market ${pillFor('forge_create')}</h2>
+    <div class="cap">Forge would take a pair, a fee and initial reserves, and deploy a venue whose
+      identity anyone can re-derive from those parameters alone.</div>
+    ${ctl('forge_create','Deploy a venue')}
+  </div>`;
+
+V.portfolio = () => {
+  const worth = S.supply? R.navRedeem(S.flwrs,Number(S.vault),S.supply) : null;
+  const rowsWorth = S.supply && S.w>0n? R.navRedeem(S.w,Number(S.vault),S.supply) : null;
+  return `
+  <div class="card">
+    <h2>Everything you hold ${pill('read')}</h2>
+    <div class="cap">Values are raw units at the current NAV. No fiat conversion is applied anywhere on
+      this page &mdash; mixing units under one divisor misstates value, and the wallet is the authority
+      on fiat display.</div>
+    <div class="scroll"><table>
+      <tr><th>Holding</th><th>Units</th><th>If settled now</th><th>Note</th></tr>
+      <tr><td>$FLWRS (liquid)</td><td>${tok(S.flwrs)}</td><td>${worth===null?'&mdash;':money(worth)}</td><td>burnable at any time</td></tr>
+      <tr><td>$FLWRS (planted)</td><td>${tok(S.w)}</td><td>${rowsWorth===null?'&mdash;':money(rowsWorth)}</td><td>principal always returned</td></tr>
+      <tr><td>$OIL</td><td>${tok(S.oil)}</td><td>&mdash;</td><td>no peg; not vault backing</td></tr>
+      <tr><td>Stables</td><td>${money(S.cash)}</td><td>${money(S.cash)}</td><td>settled</td></tr>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>Rows ${pill('read')}</h2>
+    ${S.rows.length===0? '<div class="empty">No rows.</div>' : `<div class="scroll"><table>
+      <tr><th>#</th><th>Units</th><th>Planted by</th><th>Matured</th></tr>
+      ${S.rows.map(r=>{
+        const m=R.mApply(r.units,S.h-r.plantH,C.K);
+        return `<tr><td>${r.id}</td><td>${tok(r.units)}</td><td>${r.who}</td>
+          <td>${pct(Number(m)/Number(r.units),1)}</td></tr>`;}).join('')}
+    </table></div>`}
+  </div>
+  <div class="card">
+    <h2>Activity ${pill('read')}</h2>
+    <div class="led">${S.led.length===0? '<div class="empty">Nothing yet.</div>'
+      : S.led.map(([t,m])=>`<div><span class="t">${t}</span><span class="m">${m}</span></div>`).join('')}</div>
+  </div>`;
+};
+
+V.docs = () => `
+  <div class="card">
+    <h2>Why you can check this page ${pill('read')}</h2>
+    <div class="cap">Every protocol number here is computed by <code>programs/exchange-core</code>,
+      compiled to wasm32 and inlined in this file. The same Rust emits the differential vectors the
+      contracts are tested against, so the page and the contracts are not two implementations that
+      agree &mdash; they are one implementation.</div>
+    <div class="formula">sim/verify-page-math.js lifts the wasm back OUT of this page
+and drives it against evm/differential/vectors.json.
+If a number here disagreed with the contract, that gate would fail.</div>
+  </div>
+  <div class="card">
+    <h2>One layout. Chain is the adapter. ${pill('read')}</h2>
+    <div class="cap">The dropdown does not select a second product. It selects the signer and the
+      chain-specific contracts. <code>programs/exchange-core</code> does not move.</div>
+    <div class="scroll"><table>
+      <tr><th>Slot</th><th>This chain</th></tr>
+      <tr><td>Layout / IA</td><td>The Garden · locked nav · WYSIWYS</td></tr>
+      <tr><td>Math</td><td>${esc(adapter().rust)}</td></tr>
+      <tr><td>Native / quote</td><td>${esc(adapter().native)} / ${esc(adapter().quote)}</td></tr>
+      <tr><td>Signer</td><td>${esc(adapter().signer)}</td></tr>
+      <tr><td>Enforcement</td><td>${esc(adapter().enforcement)}</td></tr>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>The constants this page loaded ${pill('read')}</h2>
+    <div class="cap">Read from <code>constants()</code> at boot. The page restates none of them.</div>
+    ${C? `<div class="scroll"><table>
+      <tr><th>Constant</th><th>Value</th><th>Meaning</th></tr>
+      <tr><td>K</td><td>${Number(C.K).toLocaleString()}</td><td>maturity half-life, blocks (${blocksToWords(C.K)})</td></tr>
+      <tr><td>WARMUP</td><td>${Number(C.WARM).toLocaleString()}</td><td>loyalty warm-up, blocks</td></tr>
+      <tr><td>FLOAT_BPS</td><td>${Number(C.FLOAT_BPS)}</td><td>NAV gift to incumbents; creates no token</td></tr>
+      <tr><td>DRIP_VAULT_BPS</td><td>${Number(C.DRIP_VAULT_BPS)}</td><td>hop 2: vault's share of the remainder</td></tr>
+      <tr><td>LOYALTY_FEE_BPS</td><td>${Number(C.LOYALTY_FEE_BPS)}</td><td>hop 1: carve off the raw fee</td></tr>
+      <tr><td>OIL_MINT_BPS_MAX</td><td>${Number(C.OIL_MAX_BPS)}</td><td>$OIL mint ceiling; fails closed</td></tr>
+      <tr><td>OIL_PHI_MAX_BPS</td><td>${Number(C.OIL_PHI_MAX_BPS)}</td><td>&phi; cap on a single advance</td></tr>
+      <tr><td>MIN_ROW_UNITS</td><td>${tok(C.MIN_ROW_UNITS)}</td><td>dust reverts, never rounds away</td></tr>
+      <tr><td>GENESIS</td><td>${Number(C.GENESIS).toLocaleString()}</td><td>the $5 anchor &mdash; the only human-chosen number in the economy</td></tr>
+      <tr><td>ATTRIB_PAYER_BPS</td><td>${Number(C.ATTRIB_PAYER_BPS)}</td><td>the payer leg of 40/20/20/20</td></tr>
+    </table></div>`:''}
+  </div>
+  <div class="card">
+    <h2>What this page will not say ${pill('read')}</h2>
+    <div class="cap">Framings that are forbidden, and the reason each one is.</div>
+    <div class="scroll"><table>
+      <tr><th>Never</th><th>Because</th></tr>
+      <tr><td>&ldquo;sell $FLWRS&rdquo; / &ldquo;cash out&rdquo;</td><td>there is no counterparty; the units are burned and the vault releases stables</td></tr>
+      <tr><td>&ldquo;deposit&rdquo; framed as saving</td><td>you use the suite and are credited for a contribution; it is not an account</td></tr>
+      <tr><td>a bare &ldquo;81%&rdquo;</td><td>a number without its derivation reads as invented; the two hops are always shown</td></tr>
+      <tr><td>attribution &ldquo;paid&rdquo;</td><td>op4 plants rows at zero maturity; a referrer gets a position, not a payout</td></tr>
+      <tr><td>riskless / can&rsquo;t-lose / guaranteed peg</td><td>none of those are true of anything here</td></tr>
+      <tr><td>APY or APR quotes</td><td>the yield is not a rate; it is a share of what the vault actually received</td></tr>
+      <tr><td>&ldquo;audited&rdquo; / &ldquo;battle-tested&rdquo;</td><td>no external review has happened</td></tr>
+      <tr><td>&ldquo;liquidation&rdquo; on Labs</td><td>the position cannot be liquidated by price; RUNWAY is the honest number</td></tr>
+    </table></div>
+  </div>`;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HERO — share price, 6 decimals, ABSOLUTE daily delta (never a percentage),
+   and no hidden loss buffer: it is exactly V/S, marked down immediately.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function renderHero(){
+  const nav=navPx();
+  const prev=S.navHist.length>1? S.navHist[S.navHist.length-2] : nav;
+  const d=nav-prev;
+  const worth = S.supply? R.navRedeem(S.flwrs+S.w,Number(S.vault),S.supply) : null;
+  document.getElementById('hero').innerHTML=`<div class="hero"><div class="herorow">
+    <div>
+      <div class="hl">SHARE PRICE &middot; V / S</div>
+      <div class="hv">${navFmt(nav)}</div>
+      <div class="hs ${d>=0?'up':'dn'}">${d>=0?'+':'&minus;'}$${Math.abs(d).toFixed(6)} today</div>
+      <div class="foot">Always exactly the vault divided by the supply. There is no smoothing and no
+        loss buffer &mdash; a loss is marked down here immediately and visibly.</div>
+    </div>
+    <div>
+      <div class="holdrow" style="margin:0;padding:0;border:0">
+        <div class="hold"><div class="k">${money(S.vault)}</div><div class="l">Vault V</div></div>
+        <div class="hold"><div class="k">${tok2(S.supply)}</div><div class="l">Supply S</div></div>
+        <div class="hold"><div class="k">${worth===null?'&mdash;':money(worth)}</div><div class="l">Your claim</div></div>
+        <div class="hold"><div class="k">${money(S.feeToVault)}</div><div class="l">Fees &rarr; vault</div></div>
+      </div>
     </div>
   </div></div>`;
 }
 
-function render(){
-  renderNav();
-  document.getElementById("main").innerHTML=body()+(S.toast?`<div class="toast">${h(S.toast)}</div>`:"")+modalHtml();
+function renderTabs(){
+  const bs=orderedBuckets();
+  document.getElementById('tabs').innerHTML = bs.map(b=>
+    `<button data-tab="${b.id}" aria-current="${S.tab===b.id}" title="${esc(GRADE_LABEL[b.grade]+' — '+GRADE_LEGEND[b.grade])}">
+      <i class="${b.grade}"></i>${b.label}</button>`).join('');
+}
+function renderLegend(){
+  document.getElementById('legend').innerHTML=`<div class="card" style="margin-top:14px">
+    <h2>The five states</h2>
+    <div class="cap">The nav above is ordered by these, best evidence first &mdash; not by a list this
+      page declares. As the relay's answers change, the order physically changes with them.</div>
+    <div class="scroll"><table>
+      ${Object.keys(GRADE_LEGEND).map(g=>`<tr><td>${pill(g)}</td><td style="white-space:normal">${GRADE_LEGEND[g]}</td></tr>`).join('')}
+    </table></div>
+    <div class="stamp">Disabled controls never sign. <code>preview</code> ranks last, below
+      <code>unavailable</code>, so a locally computed model can never outrank a shipped surface.</div>
+  </div>`;
 }
 
-document.body.addEventListener("click",e=>{
-  const t=e.target.closest("[data-go],[data-pick],#wallet,#doSwap,#doMint,#doBurn,#doPlant,#doDrip,#doCounsel,#approve,#cancel,#mbg");
-  if(!t) return;
-  if(t.id==="wallet"){ S.connected? (S.connected=false,S.addr=null,S.surface="swap") : connect(); render(); return; }
-  if(t.dataset.go){ S.surface=t.dataset.go; render(); return; }
-  if(t.dataset.pick){ S.pick=t.dataset.pick; render(); return; }
-  if(t.id==="cancel"||t.id==="mbg"){ if(t.id==="mbg"&&e.target.id!=="mbg")return; S.pending=null; render(); return; }
-  if(t.id==="approve"&&S.pending){ try{ S.pending.run(); S.pending=null; toast("confirmed on the local ledger"); }catch(err){ toast(String(err.message||err)); } render(); return; }
-  if(t.id==="doSwap"){
-    const p=POOLS[0]; const amt=1n*10n**18n; const out=xyk(p.r0,p.r1,amt,p.fee);
-    review("Swap ETH → USDG",[
-      {k:"You pay",v:"1.000000 ETH"},{k:"You receive (quoted)",v:fmt(out,6,2)+" USDG"},
-      {k:"Venue",v:p.v+" · "+(Number(p.fee)/100)+"%"},{k:"Garden fee path",v:"venue fee → USDG → loyalty then drip. s_out unchanged."}
-    ],()=>swap(amt)); return;
+function renderChain(){
+  const a=adapter();
+  const lbl=document.getElementById('chainlbl');
+  const btn=document.getElementById('chainbtn');
+  const pop=document.getElementById('chainpop');
+  if(lbl) lbl.textContent=a.label+' · '+a.net;
+  if(btn){ btn.textContent=a.short+' · '+a.net; btn.setAttribute('aria-expanded', pop&&!pop.hidden?'true':'false'); }
+  if(pop){
+    pop.innerHTML=`<b>Settlement chain</b>
+      <p>Same layout. Same <code>exchange-core</code> wasm. The dropdown selects the signer and the enforcement, not a second product. JavaScript formats; Rust decides.</p>
+      ${Object.values(CHAINS).map(c=>`
+        <button type="button" class="chain-opt ${c.id===a.id?'on':''}" data-chain="${c.id}" role="option" aria-selected="${c.id===a.id}">
+          <b>${c.label} · ${c.net}</b>
+          <small>${c.native} / ${c.quote} · ${c.signer}</small>
+          <small>${c.enforcement}</small>
+        </button>`).join('')}`;
   }
-  if(t.id==="doMint"){
-    const n=BigInt(Math.round((+document.getElementById("dep").value||0)*1e6));
-    review("Mint $FLWRS claim",[{k:"You pay",v:fmt(n,6,2)+" USDG"},{k:"Language",v:"credited, not deposited."}],()=>mint(n)); return;
-  }
-  if(t.id==="doBurn"){
-    const n=BigInt(Math.round((+document.getElementById("red").value||0)*1000));
-    review("Burn $FLWRS",[{k:"You burn",v:fmtFlwrs(n)+" $FLWRS"},{k:"Forbidden",v:"sell, sold, cash out"}],()=>burn(n)); return;
-  }
-  if(t.id==="doPlant"){
-    const n=BigInt(Math.round((+document.getElementById("pl").value||0)*1000));
-    review("Plant a row",[{k:"Units",v:fmtFlwrs(n)},{k:"m(0)",v:"0"}],()=>plant(n)); return;
-  }
-  if(t.id==="doDrip"){
-    const n=BigInt(Math.round((+document.getElementById("dr").value||0)*1e6));
-    review("Drip a fee",[{k:"Amount",v:fmt(n,6,2)+" USDG"},{k:"Path",v:"loyalty_split then drip_split"}],()=>drip(n)); return;
-  }
-  if(t.id==="doCounsel"){
-    const s=cashOpen(new Date()); const rows=rank(S.size,s.open); const pick=rows.find(r=>r.id===S.pick)||rows[0];
-    review("Vinedresser counsel · "+pick.p,[
-      {k:"Counsel",v:pick.counsel},{k:"Net after size",v:fmtApr(pick.net)},
-      {k:"Custody",v:"None. The position stays on the venue."},
-      {k:"9mm / venue fee",v:"Untouched. Their rev-share continues to their holders."}
-    ],()=>S.fills.unshift({k:"counsel",d:pick.counsel+" "+pick.p+" · net "+fmtApr(pick.net)+" after $"+S.size.toLocaleString()}));
+}
+
+function render(){
+  if(!S.tab) S.tab=orderedBuckets()[0].id;
+  renderHero(); renderTabs(); renderChain();
+  const sc=SURFACE[S.tab];
+  const a=adapter();
+  const banner = sc? `<div class="banner"><div class="eyebrow">${sc.e}</div><h2>${sc.t}</h2><p>${sc.d}</p>
+    <div class="bfacts"><span>Block <b>${Number(S.h).toLocaleString()}</b></span>
+      <span>Verified pools <b>${POOLS.length}</b></span>
+      <span>Rows planted <b>${S.rows.length}</b></span>
+      <span>Chain <b>${esc(a.short)} ${esc(a.net)}</b></span></div></div>` : '';
+  document.getElementById('view').innerHTML = banner + `<div class="grid">${(V[S.tab]||(()=>'<div class="card"><div class="empty">No surface.</div>'))()}</div>`;
+  renderLegend();
+  document.getElementById('clk').innerHTML=`<span class="dot ${session()}"></span>Block <b>${Number(S.h).toLocaleString()}</b>`;
+  document.getElementById('bal').innerHTML=`<b>${money(S.cash)}</b> ${esc(a.quote)}`;
+  refreshPreviews();
+}
+
+/* ── Previews. Each reads an input and asks Rust; none computes. ─────────── */
+const val = id => { const el=document.getElementById(id); if(!el) return 0n;
+  const n=parseFloat(el.value.replace(/[^0-9.]/g,'')); return isFinite(n)&&n>0? BigInt(Math.round(n*1e6)) : 0n; };
+function refreshPreviews(){
+  const dp=document.getElementById('depprev');
+  if(dp){ const x=val('dep'); const r=x>0n? R.navMint(x,S.supply,Number(S.vault)):null;
+    dp.innerHTML = r? `<div class="prev">
+      <div class="pl"><span>Value entering the vault</span><b>${money(x)}</b></div>
+      <div class="pl"><span>Float to incumbents</span><b>${tok(r.cut)} $FLWRS</b></div>
+      <div class="pl tot"><span>Credited to you</span><b>${tok(r.mint)} $FLWRS</b></div></div>`
+      : (x>0n? '<div class="prev"><div class="pl"><span>Refused</span><b>the contract would revert</b></div></div>':''); }
+
+  const rp=document.getElementById('redprev');
+  if(rp){ const x=val('red'); const out=x>0n&&S.supply? R.navRedeem(x,Number(S.vault),S.supply):null;
+    rp.innerHTML = out!==null&&x>0n? `<div class="prev">
+      <div class="pl"><span>$FLWRS burned &mdash; destroyed, not sold</span><b>${tok(x)}</b></div>
+      <div class="pl tot"><span>Stables released by the vault</span><b>${money(out)}</b></div></div>` : ''; }
+
+  const ap=document.getElementById('attrprev');
+  if(ap){ const x=val('attr'); const r=x>0n? R.navMint(x,S.supply,Number(S.vault)):null;
+    const sh=r? R.attribShares(r.mint,false,false):null;
+    ap.innerHTML = sh? `<div class="prev">
+      <div class="pl"><span>Payer &mdash; planted as a row</span><b>${tok(sh.payer)}</b></div>
+      <div class="pl"><span>Creator &mdash; planted as a row</span><b>${tok(sh.creator)}</b></div>
+      <div class="pl"><span>Referrer &mdash; planted as a row</span><b>${tok(sh.referrer)}</b></div>
+      <div class="pl"><span>Treasury &mdash; planted as a row</span><b>${tok(sh.treasury)}</b></div>
+      <div class="pl tot"><span>All four at zero maturity</span><b>${tok(r.mint)} $FLWRS</b></div></div>`:''; }
+
+  const op=document.getElementById('oilprev');
+  if(op){ const el=document.getElementById('oilbps'); const bps=el?Number(el.value):1650;
+    const sp=document.getElementById('oilbpsv'); if(sp) sp.textContent=bps;
+    const forf=1000n*U; const m=R.oilMint(forf,bps);
+    op.innerHTML=`<div class="prev">
+      <div class="pl"><span>Forfeiture</span><b>${tok(forf)} $FLWRS</b></div>
+      <div class="pl tot"><span>$OIL minted</span><b>${m===null?'refused':tok(m)}</b></div></div>`; }
+
+  const sp2=document.getElementById('swapprev');
+  if(sp2){ const x=val('swapin');
+    if(x>0n){ const feeRaw = x*S.amm.feeBps/10000n;   // TOY COUNTERPARTY — declared exception
+      const {loyalty:toLoy,rest:toFund}=R.loyaltySplit(feeRaw); const [toV,toI]=R.dripSplit(toFund);
+      sp2.innerHTML=`<div class="prev">
+        <div class="pl"><span>Swap size</span><b>${money(x)}</b></div>
+        <div class="pl"><span>Fee charged <i>(toy venue)</i></span><b>${money(feeRaw)}</b></div>
+        <div class="pl"><span>&rarr; loyalty carve (hop 1)</span><b>${money(toLoy)}</b></div>
+        <div class="pl"><span>&rarr; incident (hop 2)</span><b>${money(toI)}</b></div>
+        <div class="pl tot"><span>&rarr; the vault</span><b>${money(toV)}</b></div></div>`; } }
+
+  const lp=document.getElementById('lpprev');
+  if(lp){ const x=val('lp'); const p=POOLS[0];
+    const e=R.postDepositEdge(p.sig,p.fee,PROV.OnChain,0,p.tvl,Number(x)/1e6,false);
+    lp.innerHTML=`<div class="prev">
+      <div class="pl"><span>Pool</span><b>${p.n}</b></div>
+      <div class="pl"><span>LVR</span><b>${(e.lvr*100).toFixed(2)}%</b></div>
+      <div class="pl tot"><span>Net edge after your size</span><b class="${e.net>=0?'up':'dn'}">${(e.net*100).toFixed(2)}%</b></div></div>`; }
+
+  const cp=document.getElementById('commitprev');
+  if(cp){ const x=val('commit'); const c=x>0n? R.batchClaim(Number(x)/1e6,50000,250000):null;
+    cp.innerHTML = c===null? '' : `<div class="prev">
+      <div class="pl"><span>Your commitment</span><b>${money(x)}</b></div>
+      <div class="pl tot"><span>Tokens at the clearing price</span><b>${Number(c).toLocaleString()}</b></div></div>`; }
+
+  const advp=document.getElementById('advprev');
+  if(advp && S.rows.length){ const row=S.rows[0]; const burn=val('burn');
+    const st=R.rowSettle(row.units,0n,S.idx,row.snap,S.w,row.plantH,S.h,C.K,0);
+    const r=st&&burn>0n? R.oilAdvance(st.acc,S.h-row.plantH,C.K,burn,C.OIL_PHI_MAX_BPS):null;
+    advp.innerHTML = r? `<div class="prev">
+      <div class="pl"><span>Row</span><b>#${row.id}</b></div>
+      <div class="pl"><span>Matured before</span><b>${tok(r.before)}</b></div>
+      <div class="pl"><span>Clock advanced by</span><b>${blocksToWords(r.dh)}</b></div>
+      <div class="pl tot gain"><span>Matured after</span><b>${tok(r.after)}</b></div>
+      ${r.unspent>0n?`<div class="pl"><span>$OIL returned unspent (&phi; cap)</span><b>${tok(r.unspent)}</b></div>`:''}</div>`
+      : '<div class="prev"><div class="pl"><span>Enter an amount</span><b>&mdash;</b></div></div>'; }
+
+  const lsv=document.getElementById('levsizev'); if(lsv) lsv.textContent=usd0(S.lev.size);
+  const lbv=document.getElementById('levbudv'); if(lbv) lbv.textContent=usd0(S.lev.budget);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE GRADUATED CONSENT LADDER — calibrated to the LOSS, not to the action.
+   docs/DESIGN-frontend-mapping-2026-09-15.md:183-189:
+     0%   -> no gate at all
+     <5%  -> inline
+     >=5% -> a modal whose primary line is the ABSOLUTE forfeited amount
+     >=25%-> one checkbox with the live number interpolated into its label
+   "Type-to-confirm is overkill." The RATIO that selects the rung is computed
+   from two Rust-returned quantities; the page only chooses which rung to show.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function gateUnstake(rowId, onOk){
+  const row=S.rows.find(r=>r.id===rowId); if(!row) return;
+  const st=R.rowSettle(row.units,row.units,S.idx,row.snap,S.w,row.plantH,S.h,C.K,0);
+  if(!st){ onOk(); return; }
+  if(st.forfeit===0n){ onOk(); return; }                       // rung 0
+  /* NOT protocol arithmetic. Both operands are quantities Rust already decided
+     (st.forfeit and st.acc come straight out of row_settle), and the ratio is
+     never displayed and never signed — it only SELECTS WHICH RUNG OF THE
+     CONSENT LADDER TO SHOW. The amounts the user actually reads are the Rust
+     values printed verbatim below. Were this ratio wrong, the user would see a
+     lighter or heavier gate, never a wrong number. */
+  const total = st.acc>0n? st.acc : 1n;
+  const bp = Number(st.forfeit*10000n/total);                  // basis points of accrued lost
+  if(bp < 500){ onOk(); return; }                              // rung 1: inline, no modal
+  const heavy = bp >= 2500;                                    // rung 3 adds the checkbox
+  const g=document.getElementById('gate');
+  document.getElementById('gatebody').innerHTML=`
+    <h2>You would forfeit earned yield</h2>
+    <div class="hs">Your principal is not at risk &mdash; it is always returned in full.</div>
+    <div class="dlgbig">${tok(st.forfeit)} $FLWRS</div>
+    <div class="hs">of ${tok(st.acc)} earned, forfeited to the stakers who remain.</div>
+    <div class="prev">
+      <div class="pl prin"><span>Principal returned</span><b>${tok(st.returned)} $FLWRS (100%)</b></div>
+      <div class="pl forf"><span>Earned yield forfeited</span><b>${tok(st.forfeit)} $FLWRS</b></div>
+    </div>
+    ${heavy? `<label class="ack"><input type="checkbox" id="ackbox">
+      <span>I understand I am giving up <b>${tok(st.forfeit)} $FLWRS</b> of earned yield by unstaking now.</span></label>`:''}
+    <div class="trio">
+      <button class="go sec" id="gcancel">Keep the row</button>
+      <button class="go" id="gok" ${heavy?'disabled':''}>Unstake anyway</button>
+    </div>`;
+  g.showModal();
+  const ok=document.getElementById('gok');
+  const box=document.getElementById('ackbox');
+  if(box) box.onchange=()=>{ ok.disabled=!box.checked; };
+  document.getElementById('gcancel').onclick=()=>g.close();
+  ok.onclick=()=>{ g.close(); onOk(); };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EVENT WIRING. Listening, reading inputs, calling an action, re-rendering.
+   No protocol arithmetic lives below this line.
+   ═══════════════════════════════════════════════════════════════════════════ */
+document.addEventListener('click', ev => {
+  const chainBtn=ev.target.closest('#chainbtn');
+  const chainOpt=ev.target.closest('[data-chain]');
+  const pop=document.getElementById('chainpop');
+  if(chainBtn){
+    if(pop) pop.hidden=!pop.hidden;
+    renderChain();
     return;
   }
+  if(chainOpt){
+    S.chain=chainOpt.dataset.chain;
+    try{ localStorage.setItem('garden-host-chain', S.chain); }catch(_){}
+    if(pop) pop.hidden=true;
+    render();
+    return;
+  }
+  if(pop && !pop.hidden && !ev.target.closest('.chain')) pop.hidden=true;
+  const t=ev.target.closest('[data-tab],[data-a],[data-set],[data-unstake],[data-advance]');
+  if(!t) return;
+  if(t.dataset.tab){ S.tab=t.dataset.tab; render(); return; }
+  if(t.dataset.set){
+    const el=document.getElementById(t.dataset.set); if(!el) return;
+    const v=t.dataset.v;
+    if(v==='max') el.value=N(S.cash).toFixed(2);
+    /* NOT protocol arithmetic: this fills a TEXT INPUT with a percentage of a
+       balance the user already holds. It is the same act as the user typing the
+       number themselves, and whatever lands in the box is then priced by Rust
+       before anything happens to it. */
+    else if(v[0]==='p'){ const p=BigInt(v.slice(1)); el.value=N(S.flwrs*p/100n).toFixed(6); }
+    else el.value=v;
+    refreshPreviews(); return;
+  }
+  if(t.dataset.unstake){ gateUnstake(Number(t.dataset.unstake), ()=>{ A.unstake(Number(t.dataset.unstake),0); render(); }); return; }
+  if(t.dataset.advance){ S.tab='oil'; render(); return; }
+  const a=t.dataset.a; if(!a) return;
+  if(verdict(a).grade!=='executable') return;      // disabled controls never sign
+  switch(a){
+    case 'contribute': A.contribute(val('dep')); break;
+    case 'exit':       A.burnForStables(val('red')); break;
+    case 'plant':      A.plant(val('plant')); break;
+    case 'claim_attr': A.attribute(val('attr')); break;
+    case 'drip': {
+      const r=A.drip(val('fee'));
+      if(r) log(`Fee ${money(r.raw)} routed &middot; ${money(r.toVault)} reached the vault after two hops`);
+      break; }
+    case 'swap.dir0': {
+      const x=val('swapin'); if(x<=0n||x>S.cash) break;
+      const feeRaw=x*S.amm.feeBps/10000n;          // TOY COUNTERPARTY — declared exception
+      const r=A.drip(feeRaw);
+      if(r) log(`Swapped ${money(x)} &middot; fee ${money(feeRaw)} &middot; ${money(r.toVault)} to the vault`);
+      break; }
+    case 'add_lp': log('Liquidity added &middot; the position now earns the swap fee'); break;
+    case 'remove_lp': log('Liquidity removed'); break;
+    case 'perps.open': log('Position opened &middot; RUNWAY is the number that ends it'); break;
+    case 'perps.close': log('Position closed'); break;
+  }
+  render();
 });
-document.body.addEventListener("input",e=>{
-  if(e.target.id==="sz"){ S.size=+e.target.value; render(); }
+document.addEventListener('input', ev => {
+  const id=ev.target.id;
+  if(id==='levsize'){ S.lev.size=Number(ev.target.value); render(); return; }
+  if(id==='levbud'){ S.lev.budget=Number(ev.target.value); render(); return; }
+  refreshPreviews();
 });
-render();
-})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BOOT — instantiate the wasm, load the constants, seed a little history so
+   the curve and the hero have something honest to draw.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function bytes(b64){ const s=atob(b64), a=new Uint8Array(s.length);
+  for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a; }
+
+(async function boot(){
+  try { const c=localStorage.getItem('garden-host-chain'); if(c&&CHAINS[c]) S.chain=c; } catch(_){}
+  const mod = await WebAssembly.instantiate(bytes(WASM_B64), {});
+  X = mod.instance.exports;
+  MEM = new DataView(X.memory.buffer);
+  OUT = X.out_ptr();
+  C = R.consts();
+
+  /* Genesis, then a plausible run of activity — every number produced by Rust. */
+  S.h = C.K/2n;
+  A.contribute(10000n*U);
+  for(let i=0;i<6;i++) A.drip(2500n*U);
+  A.plant(1200n*U);
+  S.h += C.K/4n;
+  for(let i=0;i<4;i++) A.drip(1800n*U);
+  snap();
+  render();
+
+  /* The clock advances so the maturity curve and the ticking values move. */
+  setInterval(()=>{ S.h += 40n; S.t += 750n;
+    if(document.getElementById('view')) render(); }, 5000);
+})().catch(e => {
+  document.getElementById('view').innerHTML =
+    `<div class="card"><h2>The engine did not start</h2><div class="cap">${esc(e&&e.message||e)}</div>
+     <div class="stamp">This page refuses to render protocol numbers without the wasm that computes
+     them. There is no JavaScript fallback, because a fallback would be a second implementation and
+     the whole claim of this page is that there is only one.</div></div>`;
+});
 </script>
-</body>
-</html>
